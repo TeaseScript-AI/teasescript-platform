@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { types } from "node:util";
 import vm from "node:vm";
+import ts from "typescript";
 
 import {
   BridgeLostError,
@@ -498,27 +501,30 @@ test("no own property changes how the comparator compares a built-in object's ki
         const read = owner === undefined ? undefined : readNames.get(`${owner} ${String(key)}`);
         for (const [realm, make] of Object.entries(REALMS))
           for (const position of ["expected", "actual"]) {
-            const surface = `${name} ${String(key)} × ${position} × ${realm}`;
-            pending.add(surface);
+            const cell = `${name} ${String(key)} × ${position} × ${realm}`;
+            // Two pieces of evidence per cell: the slot's comparison, and the comparison with a primitive, whose
+            // difference is described.
+            for (const evidence of ["slot", "primitive"]) pending.add(`${cell} × ${evidence}`);
             if (read !== undefined) {
+              // A slot the comparator reads: its claiming shadows ran above, in this position and realm.
               readsOnSurface.add(read);
               for (const outcome of ["equal", "differs"])
-                assert.ok(generated.has(`${read} × ${position} × ${outcome} × ${realm}`), surface);
-              executed.add(surface);
-              continue;
+                assert.ok(generated.has(`${read} × ${position} × ${outcome} × ${realm}`), cell);
+              executed.add(`${cell} × slot`);
             }
-            for (const against of ["its clone", "a primitive"]) {
+            // Any key, a read one too, shadowed by an accessor that throws when read: compared with its clone (for a
+            // key that is no read) it stays equal, and compared with a primitive it still differs, without throwing.
+            for (const evidence of read === undefined ? ["slot", "primitive"] : ["primitive"]) {
               const sample = make(sampleSource(kind, name));
               const clone: object = structuredClone(sample);
               // The shadowed object is the sample on the expected side, or its clone on the actual side.
               const lied = position === "expected" ? sample : clone;
-              const expected = against === "a primitive" && position === "actual" ? 0 : sample;
-              const actual =
-                against === "a primitive" ? (position === "actual" ? clone : 0) : clone;
+              const expected = evidence === "primitive" && position === "actual" ? 0 : sample;
+              const actual = evidence === "primitive" ? (position === "actual" ? clone : 0) : clone;
               const descriptor = Object.getOwnPropertyDescriptor(lied, key);
               if (descriptor !== undefined && !descriptor.configurable) {
                 // An own slot of the instance, such as an array's `length`: no property can shadow it.
-                unshadowable.add(surface);
+                unshadowable.add(`${cell} × ${evidence}`);
                 continue;
               }
               Object.defineProperty(lied, key, {
@@ -527,14 +533,15 @@ test("no own property changes how the comparator compares a built-in object's ki
                 },
                 configurable: true,
               });
-              const outcome = against === "a primitive" ? "differs" : "equal";
-              assert.equal(verdict(actual, expected), outcome, `${surface} against ${against}`);
+              const outcome = evidence === "primitive" ? "differs" : "equal";
+              assert.equal(verdict(actual, expected), outcome, `${cell} × ${evidence}`);
+              executed.add(`${cell} × ${evidence}`);
             }
-            if (!unshadowable.has(surface)) executed.add(surface);
           }
       }
     }
-  // Every enumerated key, on each side and in each realm, ran its cases or is an own slot no property can shadow.
+  // Every enumerated key, on each side and in each realm, has both pieces of evidence, or is an own slot no property
+  // can shadow.
   for (const surface of pending)
     assert.ok(executed.has(surface) || unshadowable.has(surface), surface);
   assert.deepEqual(
@@ -544,6 +551,57 @@ test("no own property changes how the comparator compares a built-in object's ki
   );
   // And every slot the comparator reads lies on an admitted kind's surface.
   assert.deepEqual(readsOnSurface, new Set(Object.keys(INTRINSIC_READS)));
+});
+
+test("the comparator's diagnostic uses a compared value only by its type, kind and intrinsic view type", () => {
+  const path = resolve(process.cwd(), "tests/helpers/clone-graph.ts");
+  const source = ts.createSourceFile(
+    path,
+    readFileSync(path, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const functions = new Map<string, ts.FunctionDeclaration>();
+  for (const statement of source.statements)
+    if (ts.isFunctionDeclaration(statement) && statement.name)
+      functions.set(statement.name.text, statement);
+  const describe = functions.get("describe")!;
+  const parameter = describe.parameters[0]!.name.getText(source);
+  // Each use of the argument is one of these, so no property of an object is read, called or coerced in it.
+  const uses: string[] = [];
+  const allowed = (node: ts.Identifier): boolean => {
+    const parent = node.parent;
+    if (ts.isParameter(parent)) return true;
+    if (ts.isTypeOfExpression(parent)) return true;
+    if (
+      ts.isBinaryExpression(parent) &&
+      parent.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken &&
+      [parent.left, parent.right].some(
+        (side) => side.kind === ts.SyntaxKind.NullKeyword || side.getText(source) === "undefined",
+      )
+    )
+      return true;
+    if (!ts.isCallExpression(parent) || !ts.isIdentifier(parent.expression)) return false;
+    const callee = parent.expression.text;
+    if (callee === "primitiveText" || callee === "cloneKind") return parent.arguments[0] === node;
+    return (
+      callee === "intrinsic" &&
+      parent.arguments[1] === node &&
+      parent.arguments[0]?.getText(source) === '"typed array type"'
+    );
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && node.text === parameter) {
+      uses.push(node.parent.getText(source));
+      assert.ok(allowed(node), `describe uses its argument in \`${node.parent.getText(source)}\``);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(describe);
+  assert.ok(uses.length > 1, "describe's argument was found");
+  // `primitiveText` takes primitives only, so tsc refuses an object passed to it.
+  const primitive = functions.get("primitiveText")!.parameters[0]!.type!.getText(source);
+  assert.doesNotMatch(primitive, /\b(?:unknown|object|any)\b|[{[]/u, primitive);
 });
 
 test("what native clone refuses is refused at every depth it can read, also inside a Proxy", () => {

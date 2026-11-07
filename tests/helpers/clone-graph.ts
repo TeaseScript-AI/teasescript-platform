@@ -205,19 +205,36 @@ const KIND_NAMES: Readonly<Record<Exclude<CloneKind, "view">, string>> = {
   unsupported: "an object of a kind this does not compare",
 };
 
+/** A primitive as it reads in a difference: a string quoted, any other as `String` gives it. */
+function primitiveText(
+  value: string | number | bigint | boolean | symbol | undefined | null,
+): string {
+  return typeof value === "string" ? JSON.stringify(value) : String(value);
+}
+
 /**
- * How a compared value reads in a difference: a primitive as `String` gives it (a string quoted), a function or object
- * by its kind alone (`cloneKind`, a view by its type), so no property of the value is read or coerced. The only place
- * the comparator turns a compared value into text.
+ * How a compared value reads in a difference: a primitive by `primitiveText`, a function or object by its kind alone
+ * (`cloneKind`, a view by its intrinsic type), so no property of the value is read or coerced. The only place the
+ * comparator turns a compared value into text; `tests/player-engine-bridge-transport.test.ts` checks statically that
+ * its body uses its argument in no other way.
  */
 function describe(value: unknown, classes: readonly RecordClass[]): string {
-  if (typeof value === "function") return "a function";
-  if (typeof value === "string") return JSON.stringify(value);
-  if (typeof value !== "object" || value === null) return String(value);
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "bigint" ||
+    typeof value === "boolean" ||
+    typeof value === "symbol"
+  )
+    return primitiveText(value);
+  if (typeof value !== "object") return "a function";
   const kind = cloneKind(value, classes);
   if (kind !== "view") return KIND_NAMES[kind];
-  const type = viewSlots(value).type;
-  return `${/^[AEIOU]/u.test(type) ? "an" : "a"} ${type}`;
+  const type = intrinsic("typed array type", value);
+  const name = typeof type === "string" ? type : "DataView";
+  return `${/^[AEIOU]/u.test(name) ? "an" : "a"} ${name}`;
 }
 
 /** A class whose instances a test lists as records. */
