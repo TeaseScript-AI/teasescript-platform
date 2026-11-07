@@ -24,7 +24,7 @@ export const FORECASTS = [
 ];
 
 /** The citations whose count per file may only shrink. */
-export const COUNTED_CITATIONS = ["TABLE r4", "TABLE §"];
+const COUNTED_CITATIONS = ["TABLE r4", "TABLE §"];
 
 /** Each comment of a JavaScript or TypeScript text: its text and 1-based line. */
 function comments(fileName, text) {
@@ -49,7 +49,7 @@ function comments(fileName, text) {
 }
 
 /** The comments of a file: a `.vue` file's `<script>` blocks, each at its line; any other file whole. */
-export function fileComments(fileName, text) {
+function fileComments(fileName, text) {
   if (!fileName.endsWith(".vue")) return comments(fileName, text);
   const found = [];
   for (const match of text.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gu)) {
