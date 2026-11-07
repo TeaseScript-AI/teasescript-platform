@@ -81,6 +81,7 @@ const CONSTANT = [
   ...core("type-inference/core/program.ts", [
     "CoreProgram.effectNode",
     "CoreProgram.exprAt",
+    "CoreProgram.functionRegion",
     "CoreProgram.live",
     "CoreProgram.position",
     "CoreProgram.positionEnd",
@@ -130,7 +131,12 @@ const STEP = [
   ...core("type-inference/core/definitions.ts", ["keyBelow", "keyOf", "keyPath", "keyPlace"]),
   ...core("type-inference/core/exact-path.ts", ["withoutEmpty"]),
   ...core("type-inference/core/handlers.ts", ["HandlerIndex.afterSomeCreation"]),
-  ...core("type-inference/core/program.ts", ["CoreProgram.targetRoot", "propertyName"]),
+  // (a site's source text, kept as charged text at the call: `NarrowingRoutes.#text`)
+  ...core("type-inference/core/program.ts", [
+    "CoreProgram.targetRoot",
+    "CoreProgram.textAt",
+    "propertyName",
+  ]),
   ...core("type-inference/narrowing-shapes.ts", ["conditionShape"]),
 ];
 

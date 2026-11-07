@@ -934,18 +934,34 @@ const UNION_RULE_FIXES: ReadonlyMap<string, string> = new Map([
   ],
 ]);
 
+/** The union tests a record's N10 payloads name (`if x is T`), by record. */
+const ROUTE_TESTS: ReadonlyMap<string, readonly string[]> = new Map(
+  readFixture().map((record) => [
+    record.name,
+    record.expected.diagnostics.flatMap((d) =>
+      d.requiredCheck === undefined ? [] : d.requiredCheck.missingTests.filter((t) => / is /.test(t)),
+    ),
+  ]),
+);
+const routeTests = (record: string): readonly string[] => ROUTE_TESTS.get(record) ?? [];
+
 const INTENDED: readonly Intended[] = [
   {
     rule:
       "AD-1 (TABLE r4.52, r4.118 (1), #1073 PR 4): a written union's member the use does not take, brought by a route " +
-      "without a check, is the route rule's error, whose fix is the test the route lacks (`if x is T`), not the current " +
-      "checker's conversion of a value it took as definite",
-    matches: ({ message }) =>
-      /^'[^']+' can be [^.]+ here because of line \d+\. Check '[^']+' first, as in 'if [^']+ is [^']+'\.$/.test(
-        message,
-      ),
-    replacement: () => /Check '[^']+' first, as in 'if [^']+ is [^']+'\./,
-    count: 8,
+      "without a check, is the route rule's error, whose fix is the test the route lacks (`if x is T`, its record's " +
+      "N10 payload), not the current checker's conversion of a value it took as definite",
+    matches: (pair) => routeTests(pair.record).length > 0 && /^'[^']+' can be [^.]+ here because of line \d+\./.test(pair.message),
+    // (the test its record's payload names: as code, or in words of its type)
+    replacement: (pair) => {
+      const tests = routeTests(pair.record);
+      const kind = /^if .+ is (\w+)$/.exec(tests[0] ?? "")?.[1] ?? "(?!)";
+      return new RegExp(
+        tests.map((test) => `as in '${escaped(test)} \\{`).join("|") +
+          `|Check that '[^']+' is [^.']*\\(${kind}\\) first\\.`,
+      );
+    },
+    count: 10,
   },
   {
     rule:

@@ -124,8 +124,12 @@ function literalTag(program: CorePass["program"], value: PlaceId): ItemTag | nul
  * of external data, and not one another callable or a handler may store (X6, X7: a run the compiler does not prove,
  * V30 §13, "only where the compiler can prove the run").
  */
-function produces(items: readonly Item[], tag: ItemTag): boolean {
-  return items.some(
+function produces(work: WorkLedger, items: readonly Item[], tag: ItemTag): boolean {
+  work.charge("exactQueries");
+  return some(
+    work,
+    "exactQueries",
+    items,
     (item) =>
       item.tag === tag &&
       !((item.context === "call" && item.called !== true) || item.context === "handler") &&
@@ -141,6 +145,7 @@ function produces(items: readonly Item[], tag: ItemTag): boolean {
  * (`.first`, `.last`, `.random`).
  */
 function producerAt(expression: Expression, work: WorkLedger): boolean {
+  work.charge("exactQueries");
   const at = peel(expression, work);
   return (
     at.kind === "callExpression" ||
@@ -215,11 +220,11 @@ export class NarrowingRoutes {
     const expression = node.expression;
     if (!program.live(node)) return null;
     const path = stablePath(program, node.file, expression);
-    const last = path?.steps.at(-1);
+    const last = path === null ? undefined : path.steps[path.steps.length - 1];
     // (a selection, `.first`, `.last`, `.random`, is its own producer where it is read, as a call is)
     if (path === null || (last?.kind === "property" && selectsElement(last.name)))
       return (path !== null || producerAt(expression, program.work)) &&
-        !this.#testedAround(node, program.textAt(site)) &&
+        !this.#testedAround(node, this.#text(site)) &&
         (yield* this.#valueProduces(value, node, [], tag))
         ? site
         : null;
@@ -246,7 +251,7 @@ export class NarrowingRoutes {
     this.#work.charge("eventSteps");
     // a chain of copies: each query waits on its source's, the last first
     const waiting: { readonly memo: string; readonly found: Candidate }[] = [];
-    let memo = joinParts(key, node.id, tag, others.join("|"));
+    let memo = joinParts(key, node.id, tag, this.#othersText(others));
     let answer: Definition | null = null;
     for (const _ of steps(this.#work, "exactQueries", () => true)) {
       const known = this.#witnesses.get(memo);
@@ -321,7 +326,7 @@ export class NarrowingRoutes {
     const found = best as Candidate | null;
     if (found === null) return null;
     // (a store whose own statement holds the read takes effect after it, `n += 1`: it brings the read nothing)
-    const last = found.chain.at(-1)!;
+    const last = found.chain[found.chain.length - 1]!;
     const statement = last.index < 0 ? undefined : last.block.statements[last.index];
     if (statement !== undefined && statement.start <= at && at < statement.end) return null;
     const stored = found.def.value === undefined ? null : program.places[found.def.value]?.site;
@@ -382,11 +387,16 @@ export class NarrowingRoutes {
       value = property;
       below += 1;
     }
-    const left = rest.slice(below);
+    const left: string[] = [];
+    for (const _ of steps(program.work, "exactQueries", () => below < rest.length)) {
+      left.push(rest[below]!);
+      below += 1;
+    }
     program.work.charge("exactQueries", left.length);
     if (left.length === 0) {
       const literal = literalTag(program, value);
-      if (literal !== null) return literal === tag || others.includes(literal);
+      if (literal !== null)
+        return literal === tag || some(program.work, "exactQueries", others, (kind) => kind === literal);
       const c = program.opOf.get(value);
       // `a otherwise <literal>`: live, and selected where `a` is the literal `null` or its own `null` is certified at
       // that node
@@ -404,7 +414,8 @@ export class NarrowingRoutes {
     if (read !== null) return { key: read.key, tag, node: read.node };
     // any other producer, a whole copy below the copied path among them, by what its value holds there on some run,
     // neither stopped nor read under a failed test: one answer per read, never a route per field of each copy (W34)
-    for (const kind of each(program.work, "exactQueries", [tag, ...others]))
+    if (yield* this.#valueProduces(value, d.node, left, tag)) return true;
+    for (const kind of each(program.work, "exactQueries", others))
       if (yield* this.#valueProduces(value, d.node, left, kind)) return true;
     return false;
   }
@@ -440,13 +451,28 @@ export class NarrowingRoutes {
     return false;
   }
 
+  /** The source text at a site, kept as charged text. */
+  #text(site: SourceSite): string {
+    this.#work.charge("exactQueries");
+    keepText(this.#work, site.end - site.start);
+    return this.pass.program.textAt(site);
+  }
+
+  /** A memo key's part for a written union's other kinds, each charged. */
+  #othersText(others: readonly ItemTag[]): string {
+    this.#work.charge("exactQueries");
+    let text = "";
+    for (const kind of each(this.#work, "exactQueries", others)) text = joinParts(text, kind);
+    return text;
+  }
+
   /** Whether an expression is spelled `text` in its file. */
   #spelled(expression: Expression, file: number, text: string): boolean {
     this.#work.charge("exactQueries");
     const span = peel(expression, this.pass.program.work).span;
     keepText(this.#work, text.length);
     return span.end.offset - span.start.offset === text.length &&
-      this.pass.program.textAt({ file, start: span.start.offset, end: span.end.offset }) === text;
+      this.#text({ file, start: span.start.offset, end: span.end.offset }) === text;
   }
 
   /**
@@ -463,7 +489,7 @@ export class NarrowingRoutes {
   ): Work<boolean> {
     this.#work.charge("exactQueries");
     const program = this.pass.program;
-    if (path.length > 0) return produces(yield* this.pass.values.valueItems(value, node, path), tag);
+    if (path.length > 0) return produces(program.work, yield* this.pass.values.valueItems(value, node, path), tag);
     // (the fallbacks from the outermost in, down to the first left side that is none)
     const rights: PlaceId[] = [];
     let left = value;
@@ -478,14 +504,18 @@ export class NarrowingRoutes {
       kind: ItemTag,
       routes: NarrowingRoutes,
     ): Work<boolean> {
+      program.work.charge("exactQueries");
       const literal = literalTag(program, at);
       if (literal !== null) return literal === kind;
-      return produces(yield* routes.pass.values.valueItems(at, node, []), kind);
+      return produces(program.work, yield* routes.pass.values.valueItems(at, node, []), kind);
     };
     // from the innermost out: whether the value so far can be null, and whether it produced the kind
     let nullable = yield* holds(left, "null", this);
     let produced = tag !== "null" && (yield* holds(left, tag, this));
-    for (const right of each(program.work, "exactQueries", rights.reverse())) {
+    let index = rights.length;
+    for (const _ of steps(program.work, "exactQueries", () => index > 0)) {
+      index -= 1;
+      const right = rights[index]!;
       if (!nullable) break;
       if (tag !== "null" && !produced) produced = yield* holds(right, tag, this);
       nullable = yield* holds(right, "null", this);
@@ -891,7 +921,7 @@ export class NarrowingRoutes {
     others: readonly ItemTag[],
   ): Work<ReadonlyMap<TreeBlock, Candidates>> {
     this.#work.charge("indexSteps");
-    const memo = joinParts(key, tag, others.join("|"));
+    const memo = joinParts(key, tag, this.#othersText(others));
     const known = this.#candidates.get(memo);
     if (known !== undefined) return known;
     const layer = this.#testLayer(key, tag);
@@ -914,8 +944,10 @@ export class NarrowingRoutes {
     const program = this.pass.program;
     if (d.kind !== "whole" || d.weak || d.value === undefined) return false;
     const literal = literalTag(program, d.value);
-    if (literal !== null) return literal === tag || others.includes(literal);
-    for (const kind of each(program.work, "indexSteps", [tag, ...others]))
+    if (literal !== null)
+      return literal === tag || some(program.work, "indexSteps", others, (kind) => kind === literal);
+    if (yield* this.#valueProduces(d.value, d.node, [], tag)) return true;
+    for (const kind of each(program.work, "indexSteps", others))
       if (yield* this.#valueProduces(d.value, d.node, [], kind)) return true;
     return false;
   }
