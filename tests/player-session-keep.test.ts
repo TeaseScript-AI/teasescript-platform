@@ -1415,7 +1415,8 @@ function familyBrowser(route: "plain" | "captured" = "captured") {
   };
   // Other scripts' saved data, in this browser's local storage, as the saved-data host keeps them.
   const local = new MemoryLocalStorage();
-  const savedData = browserSavedData(local, new FakeMediaRepository(), undefined, {
+  const otherRepository = new FakeMediaRepository();
+  const savedData = browserSavedData(local, otherRepository, undefined, {
     holdLive: () => ({ granted: Promise.resolve("held"), release: () => {} }),
     whenIdle: async (_scope, work) => (await work(), true),
   });
@@ -1428,6 +1429,9 @@ function familyBrowser(route: "plain" | "captured" = "captured") {
     rawKept: kept,
     rawProvider: provider,
     repository,
+    // The stores as they are, past the recorder, for a check after the run: the page's photos and the other script's.
+    rawRepository: repository,
+    otherRepository,
     rooms,
     failing,
     state,
@@ -2037,12 +2041,14 @@ const savedDataScripts = (name: VariantName) =>
 
 /**
  * The saved data of a script as `bundleOf` imports it, complete: its score, and its photo under the reference the import
- * stored it with, a captured-media reference; or none at all for a script the import did not write, as the page and
- * the other script start with none (#1963 L5).
+ * stored it with, which must name a record in that script's media store (`media`, under its namespace) holding
+ * `bundleOf`'s bytes; or none at all for a script the import did not write, as the page and the other script start with
+ * none (#1963 L5).
  */
-function assertImported(
+async function assertImported(
   entries: readonly { readonly key: string; readonly value: unknown }[],
   written: boolean,
+  media: { readonly repository: FakeMediaRepository; readonly namespace: string },
   what: string,
 ) {
   // The fixture's provider adds its own read counter to each load (`familyBrowser`): no saved value of the script.
@@ -2053,6 +2059,14 @@ function assertImported(
   assert.ok(
     typeof photo === "string" && isWellFormedCapturedMediaReference(photo),
     `${what}: its photo's reference`,
+  );
+  const record = await media.repository.get(media.namespace, photo);
+  assert.ok(record !== null, `${what}: its photo is stored under ${photo}`);
+  assert.ok(record.data instanceof Blob, `${what}: its photo's bytes`);
+  assert.deepEqual(
+    new Uint8Array(await record.data.arrayBuffer()),
+    PNG,
+    `${what}: the stored photo is the imported one`,
   );
   assert.deepEqual(
     sorted,
@@ -2072,15 +2086,17 @@ async function assertWrites(name: VariantName, at: FamilyBrowser, ranToEnd: bool
   const scripts = savedDataScripts(name);
   if (scripts === null) return;
   const writes: readonly ImportedScript[] = scripts.writes;
-  assertImported(
+  await assertImported(
     await at.otherValues(OTHER_SCOPE),
     writes.includes("other"),
+    { repository: at.otherRepository, namespace: OTHER_SCOPE },
     "the other script's saved data",
   );
   if (!ranToEnd) return;
-  assertImported(
+  await assertImported(
     await at.rawProvider.load(),
     writes.includes("shown"),
+    { repository: at.rawRepository, namespace: SCOPE },
     "the shown script's saved data",
   );
 }
