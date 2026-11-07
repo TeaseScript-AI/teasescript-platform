@@ -6,19 +6,21 @@ import { run } from "node:test";
 import { shardFiles } from "./test-shards.mjs";
 
 // Measures what `tools/costly-test-files.mjs` records: each compiled test file's seconds, from its process's start to its
-// end, and the seconds of the checks CI's `check-2` job runs before its tests (`npm run check:pretest`). `--write`
-// rewrites `tools/costly-test-files.mjs`; `--raw FILE` keeps the measurement.
+// end, the seconds of the checks CI's `check-2` job runs before its tests (`npm run check:pretest`), and of the runtime
+// oracle comparison CI's `check-1` job runs after its tests (`npm run oracle:test`). `--write` rewrites
+// `tools/costly-test-files.mjs`; `--raw FILE` keeps the measurement.
 //
 // `--from-ci RUN ...` (with `gh`) takes them from CI's own runs of the suite, the machines the shards balance: each test
 // job keeps its files' seconds as an artifact for 7 days (`TEST_FILE_SECONDS`, `.github/workflows/ci.yml`), the jobs
-// API gives the pre-test step's seconds, and each file counts its median over the runs, at least three since CI's
-// runners vary. A run counts its last attempt (re-running a run removes its earlier attempts' artifacts).
+// API gives the seconds of the steps named "Check source before the tests" and "Compare with the runtime oracle" (a run
+// without either, passed, is refused, so a renamed or missing step fails loudly), and each file and step counts its
+// median over the runs, at least three since CI's runners vary. A run counts its last attempt (re-running a run removes its earlier attempts' artifacts).
 //
 // Without it, the build, the full suite in `npm test`'s order and concurrency, and then `check:pretest` (after the
 // suite, with the new seconds written: `test:verification` refuses weights that miss a type-core file) run here, for a
 // local look: in a built checkout, on four CPUs as CI's runners have (`taskset -c 0-3`), on a machine nothing else loads,
 // with a Node compile cache as in CI, a fresh one unless `NODE_COMPILE_CACHE` names one. Such seconds do not predict
-// CI's (#1719). A failed step or test leaves the module as it was.
+// CI's (#1719). The oracle comparison is not part of the suite, so the local path keeps the module's oracle seconds. A failed step or test leaves the module as it was.
 const usage =
   "Usage: node tools/measure-test-files.mjs [--write] [--raw FILE] [--from-ci RUN ...]\n";
 const argv = process.argv.slice(2);
@@ -67,18 +69,25 @@ const median = (values) => {
   return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 
-/** CI's runs: each run's files' seconds (both test jobs' artifacts), its pre-test step's seconds and its commit. */
+/** The seconds of the passed step named `name` in a run's `jobs`, or a refusal naming the run and the step. */
+function stepSeconds(runId, jobs, name) {
+  const step = jobs.flatMap((job) => job.steps ?? []).find((found) => found.name === name);
+  if (step?.conclusion !== "success") fail([`run ${runId} has no passed step "${name}"`]);
+  return (Date.parse(step.completed_at) - Date.parse(step.started_at)) / 1000;
+}
+
+/**
+ * CI's runs: each run's files' seconds (both test jobs' artifacts), its pre-test and oracle steps' seconds and its
+ * commit.
+ */
 function ciRuns(ids) {
   return ids.map((runId) => {
     // (a run's last attempt: re-running a run removes the artifacts of its earlier attempts)
     const where = `repos/{owner}/{repo}/actions/runs/${runId}`;
     const commit = gh("api", where, "-q", ".head_sha");
     const jobs = JSON.parse(gh("api", `${where}/jobs`, "-q", ".jobs"));
-    const step = jobs
-      .flatMap((job) => job.steps ?? [])
-      .find((found) => found.name === "Check source before the tests");
-    if (step?.conclusion !== "success") fail([`run ${runId} has no passed pre-test step`]);
-    const pretest = (Date.parse(step.completed_at) - Date.parse(step.started_at)) / 1000;
+    const pretest = stepSeconds(runId, jobs, "Check source before the tests");
+    const oracle = stepSeconds(runId, jobs, "Compare with the runtime oracle");
     const folder = mkdtempSync(join(tmpdir(), "measure-test-files-ci-"));
     gh("run", "download", runId, "--pattern", "test-file-seconds-*", "--dir", folder);
     const kept = readdirSync(folder).map((name) =>
@@ -89,7 +98,7 @@ function ciRuns(ids) {
     if (atOnce.size !== 1)
       fail([`run ${runId}'s test jobs ran ${[...atOnce].join(" and ")} files at once`]);
     const seconds = Object.assign({}, ...kept.map((found) => found.seconds));
-    return { run: runId, commit, pretest, filesAtOnce: [...atOnce][0], seconds };
+    return { run: runId, commit, pretest, oracle, filesAtOnce: [...atOnce][0], seconds };
   });
 }
 
@@ -111,6 +120,7 @@ if (fromCi !== null) {
     from: `CI runs ${runs.map((found) => `${found.run} (${found.commit.slice(0, 9)})`).join(", ")}`,
     filesAtOnce: [...atOnce][0],
     pretestSeconds: median(runs.map((found) => found.pretest)),
+    oracleSeconds: median(runs.map((found) => found.oracle)),
     fileSeconds: Object.fromEntries(
       suite.map((file) => [file, median(runs.flatMap((found) => found.seconds[file] ?? []))]),
     ),
@@ -148,6 +158,7 @@ if (fromCi !== null) {
     from: `a local run at ${commit.slice(0, 9)}, Node ${process.version}, ${availableParallelism()} CPUs`,
     filesAtOnce,
     pretestSeconds: null,
+    oracleSeconds: null,
     fileSeconds,
     testSeconds,
   };
@@ -180,6 +191,9 @@ export const otherTestSeconds = ${mean.toFixed(1)};
 /** The seconds of the checks CI's last test job runs before its tests (\`check:pretest\`). */
 export const pretestSeconds = ${Math.round(pretest)};
 
+/** The seconds of the runtime oracle comparison CI's first test job runs after its tests (\`oracle:test\`). */
+export const oracleSeconds = ${Math.round(measured.oracleSeconds)};
+
 /** The test files one CI test job runs at once: \`node --test\`'s default on CI's four CPUs. */
 export const testFilesAtOnce = ${measured.filesAtOnce};
 
@@ -200,6 +214,7 @@ try {
   if (measured.pretestSeconds === null) {
     // (the local path's pre-test checks, with the new seconds written beside the previous pre-test seconds)
     const before = Number(/pretestSeconds = (\d+)/.exec(previous ?? "")?.[1] ?? 0);
+    measured.oracleSeconds = Number(/oracleSeconds = (\d+)/.exec(previous ?? "")?.[1] ?? 0);
     if (write) writeFileSync(target, moduleText(before));
     measured.pretestSeconds = timed("npm", ["run", "check:pretest"]);
     if (measured.pretestSeconds === null) {
@@ -215,5 +230,6 @@ try {
 }
 process.stdout.write(
   `measure-test-files: ${sorted.length} files, ${sorted.reduce((sum, [, s]) => sum + s, 0).toFixed(0)} s summed, ` +
-    `pre-test checks ${measured.pretestSeconds.toFixed(0)} s, ${measured.filesAtOnce} files at once, from ${measured.from}\n`,
+    `pre-test checks ${measured.pretestSeconds.toFixed(0)} s, oracle ${measured.oracleSeconds.toFixed(0)} s, ` +
+    `${measured.filesAtOnce} files at once, from ${measured.from}\n`,
 );
