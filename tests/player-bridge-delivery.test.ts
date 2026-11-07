@@ -184,6 +184,16 @@ test("an undo that throws does not keep the others from running; a second abort 
   owner.close();
   owner.close();
   assert.deepEqual(undone, ["third", "first"]);
+  // An unknown event is refused, and leaves an open delivery as it was.
+  const open = deliveryOwner();
+  const kept = open.begin();
+  open.own(kept, () => undone.push("kept"));
+  const unknown: unknown = JSON.parse('{ "kind": "unknown" }');
+  // EVIDENCE: fixture: an event outside the closed set, as an untyped caller could send it.
+  const event = unknown as DeliveryEvent;
+  assert.throws(() => advanceDelivery(open, kept, event), DeliveryRefusedError);
+  open.rollback(kept);
+  assert.deepEqual(undone, ["third", "first", "kept"]);
   // An unknown owner admits nothing.
   assert.throws(() => advanceDelivery({ ...owner }, null, { kind: "begin" }), DeliveryRefusedError);
 });

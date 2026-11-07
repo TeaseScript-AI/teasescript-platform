@@ -113,6 +113,8 @@ export function advanceDelivery(
       undoAll(ended.flatMap((each) => each.undos));
       return null;
     }
+    default:
+      throw new DeliveryRefusedError("An unknown delivery event.");
   }
 }
 

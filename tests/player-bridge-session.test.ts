@@ -9,7 +9,7 @@ import { beginRecordingNow, heldPlan, heldRecording } from "../player/engine-bri
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import { startBridgeHost, type HostPort } from "../player/engine-bridge/worker-host.js";
-import { playerBridgeOps } from "../player/engine-bridge/player-ops.js";
+import { playerBridgeOps, playerOpsContext } from "../player/engine-bridge/player-ops.js";
 import { ForeignSessionError, PlayerBridge } from "../player/player-bridge.js";
 import {
   observePlayerRuntimeTime,
@@ -128,7 +128,8 @@ test("a synchronous op runs and replies before its post returns; an async one ma
     post: (message) => posted.push(message),
     listen: (listener) => void (deliver = listener),
   };
-  startBridgeHost(port, playerBridgeOps(), BUILD);
+  const context = playerOpsContext();
+  startBridgeHost(port, playerBridgeOps(context), BUILD, context.delivery);
   posted.length = 0;
   deliver({ v: 1, kind: "request", id: 1, session: null, basis: null, op: "teardown", args: null });
   assert.equal(posted.length, 1, "the synchronous op replied within its post");
@@ -151,6 +152,13 @@ test("a synchronous op runs and replies before its post returns; an async one ma
       typeof reply === "object" && reply !== null && "id" in reply ? reply.id : null,
     ),
     [1, 2, 3],
+  );
+  // The source prepared: the order held for a successful asynchronous op.
+  assert.deepEqual(
+    posted.map((reply) =>
+      typeof reply === "object" && reply !== null && "ok" in reply ? reply.ok : null,
+    ),
+    [true, true, true],
   );
 });
 
