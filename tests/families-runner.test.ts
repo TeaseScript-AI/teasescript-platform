@@ -461,6 +461,7 @@ test("the corpus runner records why an oracle left a run unanswered, and the sta
         artefacts.map((r: { group: string; runs: number }) => [r.group, r.runs]),
         [
           ["unanswered: questions", 4],
+          ["unanswered: read-depth", 0],
           ["unanswered: stopped", 4],
           ["unanswered: unknown", 0],
           ["unansweredAlike", 0],
