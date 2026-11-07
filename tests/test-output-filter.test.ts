@@ -176,6 +176,64 @@ test("filter refuses a path that matches no test file before Node runs any", () 
   ]);
   assert.equal(option.status, 0, option.stderr);
   assert.match(option.stdout, /ℹ pass 1/);
+
+  // A missing path counts after an option that takes no value, and after the first path, where Node reads every
+  // argument as a path (`tools/test-arguments.test.mjs` covers each option).
+  for (const argumentsIn of [
+    (directory: string) => [
+      "--test-only",
+      resolve(directory, "missing.test.mjs"),
+      resolve(directory, "passing.test.mjs"),
+    ],
+    (directory: string) => [
+      resolve(directory, "passing.test.mjs"),
+      "--test-name-pattern",
+      resolve(directory, "missing.test.mjs"),
+    ],
+  ]) {
+    const missing = runFixtures(fixtures, false, argumentsIn);
+    assert.equal(missing.status, 1, missing.stderr);
+    assert.match(missing.stderr, /no test file matches '.*missing\.test\.mjs'/);
+    assert.doesNotMatch(missing.stdout, /ℹ tests/);
+  }
+  // An option the filter does not know is refused, since it cannot tell whether the next argument is its value.
+  const unknown = runFixtures(fixtures, false, (directory) => [
+    "--test-unknown",
+    resolve(directory, "passing.test.mjs"),
+  ]);
+  assert.equal(unknown.status, 1, unknown.stderr);
+  assert.match(unknown.stderr, /'--test-unknown' is not an option it knows/);
+});
+
+test("the full suite's runner refuses a test runner option given to its Node instead of ignoring it", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  try {
+    const testFile = resolve(directory, "passing.test.mjs");
+    writeFileSync(testFile, 'import test from "node:test";\ntest("passing test", () => {});\n');
+    const runner = resolve(process.cwd(), "tools/run-test-files.mjs");
+    const environment = { ...process.env };
+    delete environment.NODE_TEST_CONTEXT;
+    for (const option of [["--test-concurrency=1"], ["--test-concurrency", "1"]]) {
+      const refused = spawnSync(process.execPath, [...option, runner, testFile], {
+        encoding: "utf8",
+        env: environment,
+      });
+      assert.equal(refused.status, 1, refused.stderr);
+      assert.match(
+        refused.stderr,
+        /runs \d+ files at once, as `node --test` does by default, and takes no test runner option/,
+      );
+      assert.doesNotMatch(refused.stdout, /ℹ tests/);
+    }
+    const runs = spawnSync(process.execPath, [runner, testFile], {
+      encoding: "utf8",
+      env: environment,
+    });
+    assert.equal(runs.status, 0, runs.stderr);
+    assert.match(runs.stdout, /ℹ pass 1/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("filter refuses a pattern whose only matches are in a node_modules folder, which Node leaves out", () => {

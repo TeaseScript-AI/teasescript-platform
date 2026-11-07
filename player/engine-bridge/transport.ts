@@ -50,8 +50,9 @@ const isWalked = (value: unknown): value is Node =>
 
 /**
  * Whether `root` nests deeper than `NATIVE_NESTING` levels through own enumerable keys, or holds a cycle. It walks
- * every object without classifying it, so it never counts fewer levels than native clone recurses through. Heights are
- * memoized per object, so a shared object is walked once; the longest chain bounds any traversal order.
+ * every object through those keys without classifying it, so through them it never counts fewer levels than native
+ * clone recurses through; what another kind of object holds (a `Map`'s entries) is not measured (see the header).
+ * Heights are memoized per object, so a shared object is walked once; the longest chain bounds any traversal order.
  */
 function nestsDeeper(root: unknown): boolean {
   if (!isWalked(root)) return false;

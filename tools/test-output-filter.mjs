@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { fstatSync, globSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { testPathArguments } from "./test-arguments.mjs";
 import { shardFiles, shardOption } from "./test-shards.mjs";
 
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
@@ -66,17 +67,16 @@ if (fullSuite) {
 // Node matches its path arguments as globs and reports one that matches nothing only when none matches, so a misspelled
 // path beside a valid one would let a focused run pass without running its test. Its runner globs with the same
 // `exclude`, which leaves out the `node_modules` folder in the working directory and any `node_modules` that a `**`
-// reaches, so the check uses it too. An argument right after an option without `=` may be that option's value, as in
-// `--test-concurrency 1`, so it is not checked.
-const unmatched = arguments_.filter((path, index) => {
-  const previous = arguments_[index - 1];
-  const optionValue = previous !== undefined && previous.startsWith("-") && !previous.includes("=");
-  return (
-    !path.startsWith("-") &&
-    !optionValue &&
-    globSync(path, { exclude: (name) => name === "node_modules" }).length === 0
-  );
-});
+// reaches, so the check uses it too. Which arguments are paths, `tools/test-arguments.mjs` decides.
+let paths = [];
+try {
+  paths = testPathArguments(arguments_);
+} catch (error) {
+  await refuse(`test-output-filter: ${error.message}.\n${usage}`);
+}
+const unmatched = paths.filter(
+  (path) => globSync(path, { exclude: (name) => name === "node_modules" }).length === 0,
+);
 if (unmatched.length > 0) {
   await refuse(
     unmatched.map((path) => `test-output-filter: no test file matches '${path}'.\n`).join(""),

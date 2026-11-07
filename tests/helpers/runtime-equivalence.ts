@@ -96,7 +96,11 @@ export interface RuntimeResumeEquivalenceResult {
   readonly finalSnapshot: RuntimeSnapshot;
 }
 
-/** `source` is one source, the `main.tease` of a single-file project, or the files of a project. */
+/**
+ * `source` is one source, the `main.tease` of a single-file project, or the files of a project. Its fresh snapshot uses
+ * zero-delay smart pacing (`createImmediatePacingRuntimeSnapshot`), so default reading-time waits are not covered;
+ * explicit `say` durations still apply.
+ */
 export function assertRuntimeResumeEquivalent(
   source: string | readonly ProjectSourceFile[],
   options: RuntimeResumeEquivalenceOptions = {},
