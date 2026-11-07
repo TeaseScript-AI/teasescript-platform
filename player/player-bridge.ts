@@ -8,7 +8,13 @@ import {
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import type { KeptRestore } from "./engine-bridge/ops/persistence.js";
 import type { StartOptions, StartRandom } from "./engine-bridge/ops/session.js";
-import type { CallViewReply, Introduction, Publication } from "./engine-bridge/session-protocol.js";
+import type {
+  CallViewReply,
+  Introduction,
+  Publication,
+  ReadOp,
+  ReadOps,
+} from "./engine-bridge/session-protocol.js";
 import type { PlayerSession } from "./runtime-view.js";
 import { SessionStore } from "./session-store.js";
 
@@ -64,13 +70,17 @@ export interface ServiceSection {
   /**
    * One op of the section's session from `basis`; resolves with its result once its publication is applied to the
    * session's store. It shows only while this session owns the UI (`publishOwned`), so recheck that after the await.
+   * `R` is the caller's unchecked assertion of the op's result.
    */
   send<R>(op: string, args: unknown, basis: number): Promise<R>;
 }
 
 /** A section of one session: requests that other requests of the session wait behind (`BridgeClient.section`). */
 export interface SessionSection {
-  /** Sends `op` from `basis`, the store's revision by default; resolves with its result once its publication applied. */
+  /**
+   * Sends `op` from `basis`, the store's revision by default; resolves with its result once its publication applied.
+   * `R` is the caller's unchecked assertion of the op's result.
+   */
   send<R = unknown>(
     op: string,
     args: unknown,
@@ -206,19 +216,19 @@ export class PlayerBridge {
    * Reads `session` in the host with the op `op` on the Worker itself, which names the session in its arguments, after
    * the session's earlier requests (`ops/persistence.ts`). It changes no publication, so its reply applies nothing.
    */
-  async read<R>(
+  async read<O extends ReadOp>(
     session: PlayerSession,
-    op: string,
-    args: Record<string, unknown> = {},
-  ): Promise<R> {
+    op: O,
+    ...[args]: ReadOps[O]["args"] extends Record<string, never> ? [] : [ReadOps[O]["args"]]
+  ): Promise<ReadOps[O]["result"]> {
     this.#own(session);
     const reply = await this.#client.request(
       op,
       { ...args, session: session.id },
       { after: session.id },
     );
-    // EVIDENCE: validation: the op's result comes from the same build as its caller expects it.
-    return reply.result as R;
+    // EVIDENCE: validation: the result comes from the same build, whose `ReadOps` names this op's result.
+    return reply.result as ReadOps[O]["result"];
   }
 
   /**
@@ -244,7 +254,10 @@ export class PlayerBridge {
     return this.open(reply.session!, reply.view as Introduction);
   }
 
-  /** Sends one op of `session` from its store's revision (or `basis`); resolves with its result once applied. */
+  /**
+   * Sends one op of `session` from its store's revision (or `basis`); resolves with its result once applied. `R` is the
+   * caller's unchecked assertion of the op's result: nothing binds it to `op` (unlike `read`'s `ReadOps`).
+   */
   async request<R = unknown>(
     session: PlayerSession,
     op: string,
