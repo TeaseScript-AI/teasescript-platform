@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { SerializableRuntimeValue } from "../../src/index.js";
 import { differentialRunOn } from "./runtime-differential.js";
 import { canonicalText } from "./runtime-state-comparison.js";
 import {
@@ -607,7 +608,8 @@ export type RecipeBuilder =
   | "cycleAt"
   | "holeAt"
   | "prototypeAt"
-  | "nonFiniteAt";
+  | "nonFiniteAt"
+  | "plain";
 
 /** A value to admit, built inside the root from these parameters, never sent as a value. */
 export interface Recipe {
@@ -618,6 +620,13 @@ export interface Recipe {
   readonly width?: number;
   /** `wideSet`'s duplicated position. */
   readonly duplicateAt?: number;
+  /** `plain`'s value as `canonicalText`: JSON data only, which the root parses. */
+  readonly text?: string;
+}
+
+/** A recipe of a value JSON carries exactly (`canonicalText` keeps `-0`). */
+export function plainRecipe(value: SerializableRuntimeValue): Recipe {
+  return { builder: "plain", text: canonicalText(value) };
 }
 
 /** The public route an external value enters by. */
