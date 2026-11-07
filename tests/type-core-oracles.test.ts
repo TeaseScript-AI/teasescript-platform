@@ -316,8 +316,7 @@ test("a question past the read-depth limit after a finished analysis leaves its 
 
 /** A family's sources at `sizes` (`shape` of the generator at `module`), with the generator's globals. */
 async function family(module: string, shape: string, sizes: readonly number[]) {
-  // EVIDENCE: a generator exports `shapes`, each a function of a size to a source or its files, and its `globals`
-  // (tests/families/README.md).
+  // EVIDENCE: each generator exports `shapes` (a size to a source or its files) and `globals` (tests/families/README.md).
   const generator = (await import(pathToFileURL(resolve(module)).href)) as {
     readonly shapes: Record<string, (size: number) => string | SourceFile[]>;
     readonly globals?: readonly string[];
