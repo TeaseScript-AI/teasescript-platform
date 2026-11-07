@@ -40,16 +40,16 @@ const NATIVE_READS = new Set(["get", "keys", "values", "pop"]);
 const KEY_WALK = "src/type-inference/core/contract/key-ids.ts:keyWalk";
 const KEY_WALK_PREFIX = "src/type-inference/core/contract/key-ids.ts:KeyWalk.prefix";
 const PATH_STEPS = "src/type-inference/core/contract/key-ids.ts:PathSteps";
-/** The iterable and generator types, whose element is their first type argument. */
-const ITERABLES = new Set([
-  "Iterable",
-  "IterableIterator",
-  "Iterator",
-  "IteratorObject",
-  "Generator",
-  "MapIterator",
-  "SetIterator",
-  "ArrayIterator",
+/** Gate 4's closed set of collection shapes, by lib name, with the position of the element's type argument. */
+const COLLECTIONS = new Map([
+  ["Array", 0],
+  ["ReadonlyArray", 0],
+  ["Map", 1],
+  ["Set", 0],
+  ["Generator", 0],
+  ["Iterable", 0],
+  // (the lib's own iterator of a `Map`: what `keys()` and `values()` give)
+  ["MapIterator", 0],
 ]);
 /** The demand and proof objects' callable properties, which the solver calls. */
 const DEMAND_CALLBACKS = new Set(["make", "signature"]);
@@ -110,39 +110,63 @@ export function objectsLanguage({
   /** Whether every value of a type is a primitive, `null` or `undefined`. */
   const primitiveOnly = (type) =>
     type.isUnion() ? type.types.every(primitiveOnly) : ["primitive", "none"].includes(kind(type));
-  /** The element type of a collection type (an array, a Set, a Map's values, an iterable), or `undefined`. */
-  const elementOf = (type) => {
-    if (checker.isArrayLikeType(type)) return checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-    const name = (type.getSymbol() ?? type.aliasSymbol)?.name;
-    // (the resolved reference's arguments, never an alias's: `S<T> = Generator<string | T>` is `Generator<string | T>`)
-    const args =
-      type.flags & ts.TypeFlags.Object && type.objectFlags & ts.ObjectFlags.Reference
-        ? checker.getTypeArguments(type)
-        : [];
-    if (name === "Set" || name === "ReadonlySet") return args[0];
-    if (name === "Map" || name === "ReadonlyMap" || name === "WeakMap") return args[1];
-    if (name !== undefined && ITERABLES.has(name)) return args[0];
-    return undefined;
-  };
   /**
-   * Whether a type is a collection whose element is a union of unlike kinds: a primitive beside an array or an object,
-   * or two array or object types (where a widening alias can carry another value in). One type beside `null` or
-   * `undefined` is one kind.
+   * Gate 4's view of a type: `{ elements }` for a collection of the closed set (`COLLECTIONS`, by its lib name, with
+   * the resolved reference's arguments, never an alias's; a union's collection members together), `null` for a value
+   * that is no collection, and `"unknown"` for any other shape that can be walked: an interface extending one, an
+   * intersection, a tuple, an unrecognised iterable, `any` or `unknown`.
    */
+  const shapeOf = (type) => {
+    if (type.isUnion()) {
+      const elements = [];
+      for (const part of type.types) {
+        if (kind(part) === "none") continue;
+        const shape = shapeOf(part);
+        if (shape === "unknown") return "unknown";
+        if (shape !== null) elements.push(...shape.elements);
+      }
+      return elements.length === 0 ? null : { elements };
+    }
+    if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return "unknown";
+    if (kind(type) === "primitive" || kind(type) === "none") return null;
+    if (type.isIntersection())
+      return type.types.some((part) => shapeOf(part) !== null) ? "unknown" : null;
+    const symbol = type.getSymbol();
+    const at = symbol === undefined ? undefined : COLLECTIONS.get(symbol.name);
+    const lib = symbol?.declarations?.some((d) => fileOf(d) === "lib") ?? false;
+    if (
+      at !== undefined &&
+      lib &&
+      type.flags & ts.TypeFlags.Object &&
+      type.objectFlags & ts.ObjectFlags.Reference &&
+      !checker.isTupleType(type)
+    ) {
+      const element = checker.getTypeArguments(type)[at];
+      return element === undefined
+        ? "unknown"
+        : { elements: element.isUnion() ? element.types : [element] };
+    }
+    const walkable =
+      checker.isArrayLikeType(type) ||
+      type
+        .getProperties()
+        .some((property) => String(property.escapedName).startsWith("__@iterator"));
+    return walkable ? "unknown" : null;
+  };
+  /** Whether a collection's elements are of unlike kinds: a primitive beside an array or an object, or two array or object types. */
+  const unlike = (elements) => {
+    const members = elements.filter((member) => kind(member) !== "none");
+    const kinds = members.map(kind);
+    const distinct = new Set(members);
+    return (
+      kinds.includes("unknown") ||
+      (distinct.size > 1 && (kinds.includes("array") || kinds.includes("object")))
+    );
+  };
+  /** Gate 4 on a binding, parameter or field: a collection of the closed set of like elements, or no collection. */
   const mixedElements = (type) => {
-    const parts = type.isUnion() ? type.types : [type];
-    return parts.some((part) => {
-      const element = elementOf(part);
-      if (element === undefined) return false;
-      const members = (element.isUnion() ? element.types : [element]).filter(
-        (member) => kind(member) !== "none",
-      );
-      const kinds = members.map(kind);
-      return (
-        kinds.includes("unknown") ||
-        (members.length > 1 && (kinds.includes("array") || kinds.includes("object")))
-      );
-    });
+    const shape = shapeOf(type);
+    return shape === "unknown" || (shape !== null && unlike(shape.elements));
   };
   const assignable = (a, b) =>
     typeof checker.isTypeAssignableTo === "function"
@@ -161,6 +185,7 @@ export function objectsLanguage({
     e.kind === ts.SyntaxKind.TrueKeyword ||
     e.kind === ts.SyntaxKind.FalseKeyword ||
     (ts.isPrefixUnaryExpression(e) &&
+      (e.operator === ts.SyntaxKind.MinusToken || e.operator === ts.SyntaxKind.PlusToken) &&
       (ts.isNumericLiteral(e.operand) || ts.isBigIntLiteral(e.operand))) ||
     (ts.isArrayLiteralExpression(e) && e.elements.length === 0) ||
     (ts.isNewExpression(e) && (e.arguments?.length ?? 0) === 0);
@@ -177,8 +202,20 @@ export function objectsLanguage({
       const at = declaration ?? exported.declarations?.[0];
       if (at === undefined) continue;
       const type = checker.getTypeOfSymbolAtLocation(target ?? exported, at);
-      if (type.getCallSignatures().length === 0 && type.getConstructSignatures().length === 0)
-        continue;
+      // (each constituent classified: a primitive or `null` is data, an object with no signature data, an object with a
+      // call or construct signature callable, anything else unclassifiable and so rejected as callable)
+      const callable = (type.isUnion() ? type.types : [type]).some(
+        (part) =>
+          (part.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 ||
+          part.getCallSignatures().length > 0 ||
+          part.getConstructSignatures().length > 0 ||
+          (part.isIntersection() &&
+            part.types.some(
+              (member) =>
+                member.getCallSignatures().length > 0 || member.getConstructSignatures().length > 0,
+            )),
+      );
+      if (!callable) continue;
       found.set(declaration ?? at, exported.declarations?.[0] ?? at);
     }
     return found;
@@ -386,17 +423,48 @@ export function objectsLanguage({
     );
   };
   /** Whether an expression is written: assigned, compounded, incremented or deleted. */
+  /**
+   * Whether an expression is written: read through parentheses, non-null and type assertions, and through the array
+   * and object literals of a destructuring, up to an assignment's target, an update's operand, a `delete`'s operand or
+   * a `for…in`/`for…of` initializer.
+   */
   const written = (e) => {
-    const p = e.parent;
-    return (
-      (ts.isBinaryExpression(p) &&
-        p.left === e &&
+    let at = e;
+    for (;;) {
+      const p = at.parent;
+      if (
+        ts.isParenthesizedExpression(p) ||
+        ts.isNonNullExpression(p) ||
+        ts.isAsExpression(p) ||
+        ts.isTypeAssertionExpression(p) ||
+        ts.isSatisfiesExpression(p) ||
+        ts.isSpreadElement(p) ||
+        ts.isSpreadAssignment(p) ||
+        ts.isArrayLiteralExpression(p) ||
+        ts.isObjectLiteralExpression(p) ||
+        (ts.isPropertyAssignment(p) && p.initializer === at) ||
+        ts.isShorthandPropertyAssignment(p)
+      ) {
+        // (a literal is a target only as a destructuring's whole: climb to it, and on)
+        at = p;
+        continue;
+      }
+      if (
+        ts.isBinaryExpression(p) &&
+        p.left === at &&
         p.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-        p.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ||
-      ((ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) &&
-        [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(p.operator)) ||
-      ts.isDeleteExpression(p)
-    );
+        p.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+      )
+        return true;
+      if (
+        (ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) &&
+        [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(p.operator)
+      )
+        return true;
+      if (ts.isDeleteExpression(p)) return true;
+      if ((ts.isForOfStatement(p) || ts.isForInStatement(p)) && p.initializer === at) return true;
+      return false;
+    }
   };
   const sortedArgument = (call) => {
     if (call.arguments.length > 3) return reject(call, "comparator", "sort comparator");
@@ -456,7 +524,10 @@ export function objectsLanguage({
   };
   /** Gate 4 where the file walks or writes a collection: its element kinds alike. */
   const mixedAt = (e) => {
-    if (mixedElements(checker.getTypeAtLocation(e)))
+    const shape = shapeOf(checker.getTypeAtLocation(e));
+    if (shape === null || shape === "unknown")
+      reject(e, "collection-shape", "walked or written collection but of the closed set of shapes");
+    else if (unlike(shape.elements))
       reject(e, "mixed-elements", "collection of mixed element kinds");
   };
   const helperContract = (call, helper) => {
@@ -685,9 +756,15 @@ export function objectsLanguage({
     // gate 4 on every binding, parameter and field (and, in `helperContract` and `checkCall`, on every collection the
     // file walks or writes); gate 5 on every value expression, `this` and `yield` included
     const value = valueExpression(node);
+    // (a binding by its name's type: a destructuring's elements each by their own names)
     if (
-      (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isPropertyDeclaration(node)) &&
-      mixedElements(checker.getTypeAtLocation(node))
+      (ts.isVariableDeclaration(node) ||
+        ts.isParameter(node) ||
+        ts.isPropertyDeclaration(node) ||
+        ts.isBindingElement(node)) &&
+      !ts.isObjectBindingPattern(node.name) &&
+      !ts.isArrayBindingPattern(node.name) &&
+      mixedElements(checker.getTypeAtLocation(node.name))
     )
       reject(node, "mixed-elements", "collection of mixed element kinds");
     if (value) {
@@ -703,10 +780,18 @@ export function objectsLanguage({
    */
   const valueExpression = (node) =>
     (ts.isExpression(node) || node.kind === ts.SyntaxKind.ThisKeyword) &&
+    // (a parenthesised expression is its content's value, checked there)
+    !ts.isParenthesizedExpression(node) &&
     !inType(node) &&
-    !(ts.isYieldExpression(node) && ts.isExpressionStatement(node.parent)) &&
+    !(ts.isYieldExpression(node) && discarded(node)) &&
     !ts.isOmittedExpression(node) &&
     valuePosition(node);
+  /** Whether an expression's value is discarded: a statement's whole, through parentheses. */
+  const discarded = (node) => {
+    let at = node;
+    while (ts.isParenthesizedExpression(at.parent)) at = at.parent;
+    return ts.isExpressionStatement(at.parent);
+  };
   /** Whether a node stands inside a type (a literal type's literal included). */
   const inType = (node) => {
     for (let at = node; at !== undefined; at = at.parent) if (ts.isTypeNode(at)) return true;
@@ -717,7 +802,14 @@ export function objectsLanguage({
       if (ts.isImportDeclaration(at) || ts.isExportDeclaration(at)) return false;
     const p = node.parent;
     if (p === undefined) return false;
-    if ("name" in p && p.name === node && !ts.isPropertyAccessExpression(p)) return false;
+    // (a declared name is no value; a shorthand property's name is its value's reference)
+    if (
+      "name" in p &&
+      p.name === node &&
+      !ts.isPropertyAccessExpression(p) &&
+      !ts.isShorthandPropertyAssignment(p)
+    )
+      return false;
     if (ts.isBindingElement(p) && p.propertyName === node) return false;
     if (ts.isPropertyAccessExpression(p) && p.name === node) return false;
     return true;
