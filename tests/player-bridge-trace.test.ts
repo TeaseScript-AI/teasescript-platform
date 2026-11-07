@@ -395,11 +395,21 @@ test("a view after a Player error stop is the stop line's, byte for byte", async
     );
     assert.equal(after, before, name);
     assert.notEqual(JSON.parse(after).status, null, `${name}: the stop line's trace shows`);
+    // The host refuses the session's own op (the client's request: the store's own refusal would hide a host that ran
+    // it), and the view stays the stop line's.
     await assert.rejects(
-      bridge.request(shown, "observeTime", { atMs: 2_000, media: [] }),
+      bridge.client.request(
+        "setDebugMode",
+        { on: true },
+        { session: shown.id, basis: shown.revision },
+      ),
       refusedAs("halted"),
       name,
     );
+    const later = JSON.stringify(
+      await bridge.read<DebugView>(shown, "debugView", { request: everything(1, null) }),
+    );
+    assert.equal(later, before, `${name}: nothing passed the stop line`);
   });
 });
 

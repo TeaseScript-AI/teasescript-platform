@@ -431,9 +431,15 @@ for (const sequence of SEQUENCE_NAMES) {
     const listeners: ((error: Client.BridgeLostError) => void)[] = [];
     bridge.client.onLoss = (listener) => void listeners.push(listener);
     const reports = context.mock.method(console, "error", () => {});
-    // A Player that ended before its bridge was ready observes no loss.
+    // A Player that ended before its bridge was ready observes no loss; one that ended after it was ready observes
+    // the loss, and ignores it.
     const gate = deferred<PlayerBridge>();
     const ended = mounted(context, gate.promise);
+    const before = mounted(context, Promise.resolve(bridge));
+    await before.player.bridge;
+    before.player.setDebugTracing(true);
+    await settle(bridge);
+    before.end();
     const { player } = mounted(context, Promise.resolve(bridge));
     await player.bridge;
     ended.end();
