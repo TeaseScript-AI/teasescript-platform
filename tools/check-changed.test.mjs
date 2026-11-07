@@ -16,11 +16,19 @@ const REPRESENTATIVES = {
   families: ["tests/families/copies/1313-astra-composite-cases.mjs", ["families"]],
   fixtures: ["tests/fixtures/type-core/cells.jsonl", ["typescript"]],
   documentation: ["docs/TESTING.md", []],
+  // root configuration files, each needing the projects whose checks read it
+  "root tsconfig": ["tsconfig.json", ["typescript", "oxlint-rules"]],
+  "knip config": ["knip.json", ["tools"]],
+  formatting: [".prettierrc.json", ["formatting"]],
+  "Prettier ignore file": [".prettierignore", ["formatting"]],
+  "design-lint": ["eslint.design.config.mjs", ["design-lint"]],
+  "oxlint config": [".oxlintrc.json", []],
   unknown: [".github/workflows/ci.yml", Object.keys(PROJECTS)],
+  "package manifest": ["package.json", Object.keys(PROJECTS)],
 };
 
 test(
-  "each changed path needs its project's checks, documentation none, and an unknown path every project's",
+  "each changed path needs its project's checks, documentation and oxlint's configuration none, and an unknown path every project's",
   { timeout: 30_000 },
   () => {
     // Every project has a representative, so a new project cannot go unchecked here.

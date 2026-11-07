@@ -11,7 +11,8 @@ import { dirname, join, resolve } from "node:path";
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else `origin/main`; the
 // changes are those since its merge-base with HEAD, committed or not, untracked files included. Always: `git diff
 // --check`, the format check of the changed files, oxlint and knip, each as CI runs it. Then each project a changed
-// path belongs to (`projectsFor`): its type check and tests. A changed path no project claims, other than
+// path belongs to (`projectsFor`): its type check and tests. A root configuration file belongs to the checks that read
+// it, and needs no project when only those that always run do. A changed path no project claims, other than
 // documentation, runs every project's checks.
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
@@ -30,7 +31,8 @@ export const PROJECTS = {
     claims: (path) =>
       (/^(?:src|tests|playground|player)\/.*\.(?:ts|mts|cts|tsx)$/u.test(path) &&
         !path.startsWith("player/vue/")) ||
-      path.startsWith("tests/fixtures/"),
+      path.startsWith("tests/fixtures/") ||
+      path === "tsconfig.json",
     checks: ["tsc"],
   },
   families: { claims: (path) => path.startsWith("tests/families/"), checks: ["test:families"] },
@@ -38,24 +40,42 @@ export const PROJECTS = {
     claims: (path) => path.startsWith("player/vue/"),
     checks: ["typecheck:player", "lint:design"],
   },
-  "oxlint-rules": { claims: (path) => path.startsWith("tools/oxlint/"), checks: ["test:lint"] },
+  // (`tools/oxlint/tsconfig.json`, which `test:lint` compiles the rules with, extends the root one)
+  "oxlint-rules": {
+    claims: (path) => path.startsWith("tools/oxlint/") || path === "tsconfig.json",
+    checks: ["test:lint"],
+  },
+  // (`tools/knip-entries.test.mjs` reads `knip.json`)
   tools: {
-    claims: (path) => /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path),
+    claims: (path) => /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path) || path === "knip.json",
     checks: ["test:verification"],
   },
+  // Prettier's configuration and ignore file change how every file formats, not only the changed ones.
+  formatting: {
+    claims: (path) => path === ".prettierrc.json" || path === ".prettierignore",
+    checks: ["format:check"],
+  },
+  "design-lint": {
+    claims: (path) => path === "eslint.design.config.mjs",
+    checks: ["lint:design", "test:lint:design"],
+  },
 };
+
+/** Root configuration files that only the checks run for every change read: oxlint's. */
+const READ_BY_ALWAYS_RUN_CHECKS = new Set([".oxlintrc.json"]);
 
 /** A path whose change no project's check covers, as CI checks none of it: documentation. */
 const isDocumentation = (path) => path.endsWith(".md") || path.startsWith("docs/");
 
 /**
- * The projects whose checks `paths` need. A path no project claims, documentation aside, needs every project: an
- * unknown kind of path is checked by everything, never by nothing.
+ * The projects whose checks `paths` need. A path no project claims, documentation and the configuration only the checks
+ * run for every change read aside, needs every project: an unknown kind of path is checked by everything, never by
+ * nothing.
  */
 export function projectsFor(paths) {
   const projects = new Set();
   for (const path of paths) {
-    if (isDocumentation(path)) continue;
+    if (isDocumentation(path) || READ_BY_ALWAYS_RUN_CHECKS.has(path)) continue;
     const claiming = Object.keys(PROJECTS).filter((name) => PROJECTS[name].claims(path));
     for (const name of claiming.length > 0 ? claiming : Object.keys(PROJECTS)) projects.add(name);
   }
