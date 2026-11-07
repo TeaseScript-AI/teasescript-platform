@@ -53,6 +53,7 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: fileURLToPath(new URL("../../dist/player-app", import.meta.url)),
     emptyOutDir: true,
+    target: "es2025",
     sourcemap: process.env.BUILD_SOURCEMAPS !== "0",
   },
 }));
