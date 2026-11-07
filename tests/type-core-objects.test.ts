@@ -352,8 +352,9 @@ test("a key's stores at the property are each charged as the query reads them (#
     const rows = ["let box={p:{a:1}}"];
     for (let i = 0; i < n; i++) rows.push(`box.p.a="bad${i}"`);
     rows.push('say "${box.p.a}"', "exit");
-    const [pass] = passesOf(rows.join("\n") + "\n", MODES[0]!, 30_000_000);
-    const { program, contract, solver } = pass!;
+    // (the last pass: the one whose lists hold the rejected stores as dead)
+    const pass = passesOf(rows.join("\n") + "\n", MODES[0]!, 30_000_000).at(-1)!;
+    const { program, contract, solver } = pass;
     const box = [...program.occurrenceOf.entries()].find(
       ([, b]) => program.places[b]?.label === "box",
     )![0];
