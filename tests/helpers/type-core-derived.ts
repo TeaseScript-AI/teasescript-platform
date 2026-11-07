@@ -1927,7 +1927,7 @@ export function derive(
                 (expression) =>
                   expression.kind === "callExpression" &&
                   expression.callee.kind === "propertyAccessExpression" &&
-                  site(unwrap(expression.callee.object)) === at,
+                  (site(unwrap(expression.callee.object)) === at || site(expression) === at),
               )
             : undefined;
         if (read === undefined && method?.kind === "callExpression")

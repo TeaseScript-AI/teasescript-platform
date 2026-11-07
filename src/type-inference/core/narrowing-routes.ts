@@ -29,6 +29,8 @@ import {
   peel,
   removes,
   stablePath,
+  testForms,
+  type NarrowingForm,
   type NarrowingIndex,
   type StablePath,
 } from "./narrowing.js";
@@ -118,6 +120,48 @@ function literalTag(program: CorePass["program"], value: PlaceId): ItemTag | nul
   return null;
 }
 
+/** How far a condition's part's truth or falsity guards: an offset, and whether to the arms (`#conditionFacts`). */
+interface Guarding {
+  readonly to: number;
+  /** Whether it reaches the statement's `then` arm or loop body (`then`), its `else` arm or way past (`else`). */
+  readonly arm: "then" | "else" | null;
+}
+
+/**
+ * A condition's test as a fact (`NarrowingRoutes.#conditionFacts`): the tested text, the form it proves, and where it
+ * guards: within the condition from the test's end up to `to`, and the `then` arm (or a loop's body) or the `else` arm
+ * (or the way past).
+ */
+interface ConditionFact {
+  readonly text: string;
+  readonly form: NarrowingForm;
+  readonly from: number;
+  readonly to: number;
+  readonly then: boolean;
+  readonly otherwise: boolean;
+}
+
+/** An `if`'s or a `while`'s condition's facts, in walk order and by tested text. */
+interface ConditionFacts {
+  readonly list: readonly ConditionFact[];
+  readonly byText: ReadonlyMap<string, readonly ConditionFact[]>;
+}
+
+/** A statement whose way past proves a form of a text (`#passings`): where it starts, and the form. */
+interface Passing {
+  readonly start: number;
+  readonly form: NarrowingForm;
+}
+
+/** The statements after which a block's code never runs on: a leaving `if`'s last statement. */
+const LEAVING: ReadonlySet<string> = new Set([
+  "exitStatement",
+  "returnStatement",
+  "breakStatement",
+  "continueStatement",
+  "gotoStatement",
+]);
+
 /**
  * Whether items hold `tag` as a value the use may receive (AD-1): made by a store or a call's result, or allowed by a
  * written type (V30 §13: `n + 1` with `n: integer?` is the error); not a stopped read's (`budget`), not one under a
@@ -177,17 +221,10 @@ export class NarrowingRoutes {
   readonly #properties = new Map<PlaceId, ReadonlyMap<string, PlaceId>>();
   /** The program's ledger. */
   readonly #work: WorkLedger;
-  /** Per block, its `while` loops by the texts their exits prove not null (`#loopExits`). */
-  readonly #exits = new Map<TreeBlock, ReadonlyMap<string, readonly number[]>>();
-  /** Per `if` or `while`, its condition's tests of the needed form (`#conditionTests`). */
-  readonly #conditions = new Map<
-    TreeStatement,
-    {
-      readonly holding: Map<string, number>;
-      readonly failing: Map<string, number>;
-      readonly failed: readonly string[];
-    } | null
-  >();
+  /** Per block, its `while` loops and leaving `if`s by the texts the way past each proves a form of (`#passings`). */
+  readonly #passed = new Map<TreeBlock, ReadonlyMap<string, readonly Passing[]>>();
+  /** Per `if` or `while`, its condition's tests as facts (`#conditionFacts`). */
+  readonly #conditions = new Map<TreeStatement, ConditionFacts | null>();
 
   public constructor(
     readonly pass: CorePass,
@@ -233,7 +270,7 @@ export class NarrowingRoutes {
     // (a selection, `.first`, `.last`, `.random`, is its own producer where it is read, as a call is)
     if (path === null || (last?.kind === "property" && selectsElement(last.name)))
       return (path !== null || producerAt(expression, program.work)) &&
-        !this.#testedAround(node, this.#text(site)) &&
+        !this.#testedAround(node, this.#text(site), tag) &&
         (yield* this.#valueProduces(value, node, [], tag))
         ? site
         : null;
@@ -245,50 +282,65 @@ export class NarrowingRoutes {
     // on that route the compiler cannot keep, the warning; Codex r1 F1 on #1937)
     if (
       writer === null ||
-      (tag === "null" && this.#exitTested(node, this.#text(site), writer.start))
+      this.#passedTested(node, this.#text(site), tag, writer.start)
     )
       return null;
     return writer;
   }
 
   /**
-   * Whether a `while` loop that stands before the read in one of the blocks holding it, after `from`, proves on its exit
-   * that the text `text` is not null (`while x == null`, a disjunct of an `or`). One binary search per block.
+   * Whether a statement that stands before the read in one of the blocks holding it, after `from`, proves on the way
+   * past it that the text `text` lacks `tag`: a `while` loop's exit, or an `if` whose `then` arm always leaves and that
+   * has no `else` (`if x == null { exit }`), each by its condition's falsity (`#conditionFacts`). One scan per block.
    */
-  #exitTested(node: FlowNode, text: string, from: number): boolean {
+  #passedTested(node: FlowNode, text: string, tag: ItemTag, from: number): boolean {
     this.#work.charge("exactQueries");
     const chain = this.#chainOf(node);
     if (chain === null) return false;
     for (const place of each(this.#work, "exactQueries", chain)) {
       if (place.index < 0) continue;
       const before = place.block.statements[place.index]!.start;
-      const starts = this.#loopExits(place.block, node.file).get(text);
-      if (starts === undefined) continue;
-      const at = lowerBound(this.#work, starts, from + 1);
-      if (at < starts.length && starts[at]! < before) return true;
+      const passed = this.#passings(place.block, node.file).get(text);
+      if (passed === undefined) continue;
+      if (
+        some(
+          this.#work,
+          "exactQueries",
+          passed,
+          (fact) => fact.start > from && fact.start < before && removes(fact.form, tag, this.#work),
+        )
+      )
+        return true;
     }
     return false;
   }
 
-  /** A block's `while` loops by the texts their exits prove not null, each list sorted by the loop's start. */
-  #loopExits(block: TreeBlock, file: number): ReadonlyMap<string, readonly number[]> {
+  /** A block's `while` loops and leaving `if`s by the texts the way past each proves a form of, with its start. */
+  #passings(block: TreeBlock, file: number): ReadonlyMap<string, readonly Passing[]> {
     this.#work.charge("exactQueries");
-    const known = this.#exits.get(block);
+    const known = this.#passed.get(block);
     if (known !== undefined) return known;
-    const made = new Map<string, number[]>();
+    const made = new Map<string, Passing[]>();
     for (const statement of each(this.#work, "exactQueries", block.statements)) {
-      if (statement.statement.kind !== "whileStatement") continue;
-      const tests = this.#conditionTests(statement, file);
-      if (tests === null) continue;
-      for (const text of each(this.#work, "exactQueries", tests.failed)) {
-        const list = made.get(text);
-        if (list === undefined) made.set(text, [statement.start]);
-        else list.push(statement.start);
-      }
+      const ast = statement.statement;
+      const leaving =
+        ast.kind === "ifStatement" &&
+        ast.elseBlock === null &&
+        LEAVING.has(ast.thenBlock.statements[ast.thenBlock.statements.length - 1]?.kind ?? "");
+      if (ast.kind !== "whileStatement" && !leaving) continue;
+      const facts = this.#conditionFacts(statement, file);
+      if (facts === null) continue;
+      for (const fact of each(this.#work, "exactQueries", facts.list))
+        if (fact.otherwise) {
+          const list = made.get(fact.text);
+          if (list === undefined) made.set(fact.text, [{ start: statement.start, form: fact.form }]);
+          else list.push({ start: statement.start, form: fact.form });
+        }
     }
-    this.#exits.set(block, made);
+    this.#passed.set(block, made);
     return made;
   }
+
 
   /**
    * N3 (iii): an exact definition D′ of `key` that certifies `tag` and reaches `node` without a check, or `null` when the
@@ -478,53 +530,51 @@ export class NarrowingRoutes {
   }
 
   /**
-   * Whether a check of the needed form of the text `text` stands on every route to `node`, so that a producer the use
+   * Whether a check that removes `tag` from the text `text` stands on every route to `node`, so that a producer the use
    * repeats is a check the compiler cannot keep (V30 §13, the `call` warning), never the route rule's error: a
-   * condition around the use whose arm holds it (`X != null` or a type test in the `then` arm or a loop's body, each
-   * conjunct of an `and`; `X == null` or a negated type test in the `else` arm, each disjunct of an `or`), or a conjunct
-   * of the use's own condition before it (`if f() != null and f() > 0`). Each condition's tests found once.
+   * condition around the use whose truth proves it where the use is in its `then` arm or a loop's body, or whose falsity
+   * proves it where the use is in its `else` arm; an earlier part of the use's own condition that guards it (`f() !=
+   * null and f() > 0`, `f() == null or f() > 0`); or a statement before it whose way past proves it (a leaving `if`, a
+   * `while` loop's exit). Each condition's facts found once (`#conditionFacts`).
    */
-  #testedAround(node: FlowNode, text: string): boolean {
+  #testedAround(node: FlowNode, text: string, tag: ItemTag): boolean {
     this.#work.charge("exactQueries");
     const program = this.pass.program;
     const chain = this.#chainOf(node);
     if (chain === null || node.span === null) return false;
     const use = node.span.start.offset;
+    const holds = (list: readonly ConditionFact[], test: (fact: ConditionFact) => boolean): boolean =>
+      some(program.work, "exactQueries", list, (fact) => test(fact) && removes(fact.form, tag, this.#work));
     for (const place of each(program.work, "exactQueries", chain)) {
       const owner = place.block.owner;
-      if (owner !== null && place.index >= 0) {
+      if (owner !== null) {
+        const facts = this.#conditionFacts(owner, node.file)?.byText.get(text);
         const arm = owner.arms[0] === place.block ? 0 : owner.arms[1] === place.block ? 1 : -1;
-        const tests = this.#conditionTests(owner, node.file);
-        if (tests !== null && arm === 0 && tests.holding.has(text)) return true;
+        if (facts !== undefined && arm === 0 && holds(facts, (fact) => fact.then)) return true;
         if (
-          tests !== null &&
+          facts !== undefined &&
           arm === 1 &&
           owner.statement.kind === "ifStatement" &&
-          tests.failing.has(text)
+          holds(facts, (fact) => fact.otherwise)
         )
           return true;
       }
-      // (the use's own statement: a conjunct of its condition before the use)
+      // (the use's own statement: an earlier part of its condition that guards it)
       const statement = place.index < 0 ? undefined : place.block.statements[place.index];
-      const own = statement === undefined ? null : this.#conditionTests(statement, node.file);
-      const before = own?.holding.get(text);
-      if (before !== undefined && before <= use) return true;
+      const own =
+        statement === undefined ? undefined : this.#conditionFacts(statement, node.file)?.byText.get(text);
+      if (own !== undefined && holds(own, (fact) => fact.from <= use && use < fact.to)) return true;
     }
-    return false;
+    return this.#passedTested(node, text, tag, -1);
   }
 
   /**
-   * An `if`'s or a `while`'s condition's tests of the needed form, by tested text with the end of its first test:
-   * those its condition holding proves (`holding`), and those its failing proves (`failing`), found once per statement.
+   * An `if`'s or a `while`'s condition's tests as facts (N1's forms, `testForms`), found once per statement by one walk
+   * of the condition: each test's form where it holds, guarding the rest of an `and` and, through every `and` above it,
+   * the `then` arm or the loop's body; its form where it fails, guarding the rest of an `or` and, through every `or`
+   * above it, the `else` arm or the way past; a `not` swaps the two.
    */
-  #conditionTests(
-    statement: TreeStatement,
-    file: number,
-  ): {
-    readonly holding: Map<string, number>;
-    readonly failing: Map<string, number>;
-    readonly failed: readonly string[];
-  } | null {
+  #conditionFacts(statement: TreeStatement, file: number): ConditionFacts | null {
     this.#work.charge("exactQueries");
     const known = this.#conditions.get(statement);
     if (known !== undefined) return known;
@@ -533,48 +583,59 @@ export class NarrowingRoutes {
       this.#conditions.set(statement, null);
       return null;
     }
-    const holding = new Map<string, number>();
-    const failing = new Map<string, number>();
-    const failed: string[] = [];
-    const add = (into: Map<string, number>, tested: Expression, end: number): void => {
+    const list: ConditionFact[] = [];
+    const byText = new Map<string, ConditionFact[]>();
+    const end = ast.condition.span.end.offset;
+    // (each node with how far its truth's and its falsity's facts guard, and whether to the arms)
+    const pending: {
+      readonly at: Expression;
+      readonly holding: Guarding | null;
+      readonly failing: Guarding | null;
+    }[] = [{ at: ast.condition, holding: { to: end, arm: "then" }, failing: { to: end, arm: "else" } }];
+    const add = (text: string, form: NarrowingForm, from: number, side: Guarding): void => {
       this.#work.charge("exactQueries");
-      const text = this.#text({
-        file,
-        start: tested.span.start.offset,
-        end: tested.span.end.offset,
-      });
-      if (into.has(text)) return;
-      into.set(text, end);
-      if (into === failing) failed.push(text);
+      const fact: ConditionFact = {
+        text,
+        form,
+        from,
+        to: side.to,
+        then: side.arm === "then",
+        otherwise: side.arm === "else",
+      };
+      list.push(fact);
+      const same = byText.get(text);
+      if (same === undefined) byText.set(text, [fact]);
+      else same.push(fact);
     };
-    // (the conjuncts of the condition hold where it holds, its disjuncts fail where it fails)
-    const walk = (
-      root: Expression,
-      into: Map<string, number>,
-      joined: string,
-      positive: boolean,
-    ): void => {
-      this.#work.charge("exactQueries");
-      const pending: Expression[] = [root];
-      for (const _ of steps(this.#work, "exactQueries", () => pending.length > 0)) {
-        const at = peel(pending.pop()!, this.#work);
-        const end = at.span.end.offset;
-        if (at.kind === "binaryExpression" && at.operator === joined)
-          pending.push(at.left, at.right);
-        else if (at.kind === "typeTestExpression") {
-          if (at.negated !== positive && at.type.kind !== "optionalType")
-            add(into, peel(at.value, this.#work), end);
-        } else if (at.kind === "binaryExpression" && at.operator === (positive ? "!=" : "==")) {
-          const left = peel(at.left, this.#work);
-          const right = peel(at.right, this.#work);
-          if (right.kind === "nullLiteral") add(into, left, end);
-          else if (left.kind === "nullLiteral") add(into, right, end);
-        }
+    for (const _ of steps(this.#work, "exactQueries", () => pending.length > 0)) {
+      const { at: raw, holding, failing } = pending.pop()!;
+      const at = peel(raw, this.#work);
+      const close = at.span.end.offset;
+      if (at.kind === "binaryExpression" && (at.operator === "and" || at.operator === "or")) {
+        const and = at.operator === "and";
+        const kept = and ? holding : failing;
+        const left: Guarding =
+          kept === null ? { to: close, arm: null } : { to: kept.to > close ? kept.to : close, arm: kept.arm };
+        pending.push(
+          and
+            ? { at: at.left, holding: left, failing: null }
+            : { at: at.left, holding: null, failing: left },
+          and ? { at: at.right, holding, failing: null } : { at: at.right, holding: null, failing },
+        );
+        continue;
       }
-    };
-    walk(ast.condition, holding, "and", true);
-    walk(ast.condition, failing, "or", false);
-    const made = { holding, failing, failed };
+      if (at.kind === "unaryExpression" && at.operator === "not") {
+        pending.push({ at: at.operand, holding: failing, failing: holding });
+        continue;
+      }
+      const forms = testForms(at, this.#work);
+      if (forms === null) continue;
+      const tested = peel(forms.tested, this.#work);
+      const text = this.#text({ file, start: tested.span.start.offset, end: tested.span.end.offset });
+      if (holding !== null) add(text, forms.holding, close, holding);
+      if (failing !== null) add(text, forms.failing, close, failing);
+    }
+    const made = { list, byText };
     this.#conditions.set(statement, made);
     return made;
   }

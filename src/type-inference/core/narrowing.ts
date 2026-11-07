@@ -453,6 +453,28 @@ function formOf(
 }
 
 /**
+ * A test's forms (N1, `testForm`): the expression it tests, the form its truth proves, and the form its falsity proves;
+ * `null` for an expression that is no test.
+ */
+export function testForms(
+  expression: Expression,
+  work: WorkLedger,
+): {
+  readonly tested: Expression;
+  readonly holding: NarrowingForm;
+  readonly failing: NarrowingForm;
+} | null {
+  work.charge("indexSteps");
+  const fact = testForm(expression, work);
+  if (fact === null) return null;
+  return {
+    tested: fact.tested,
+    holding: formOf(fact, work).form,
+    failing: formOf({ ...fact, holds: !fact.holds }, work).form,
+  };
+}
+
+/**
  * A test form (N1): a null test or a type test, or `not` before one (its complement), with the outcome its truth
  * takes; `is null` and `is not null` are the null tests. A chain of `not`s is walked, not recursed.
  */

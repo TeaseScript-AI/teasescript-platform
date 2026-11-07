@@ -3618,6 +3618,26 @@ test("the route rule's error stands where a run can bring the null unchecked, an
       'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != 2 { repeat f() {} }\nexit\n',
       true,
     ],
+    // (Codex r2 on #1937: a `not`, a later test of the same call, an `or`'s guard, a leaving guard, an optional type test
+    // of a union, and an `else` arm of a non-null test)
+    ['let n = 1\nif askBoolean "Clear?" { n = null }\nwhile not (n != null) { n = 1 }\nrepeat n {}\nexit\n', false],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null and f() > 0 and f() != null { say "y" }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null or f() > 0 { say "y" }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null { exit }\nrepeat f() {}\nexit\n',
+      false,
+    ],
+    ['function f: integer | string { return "s" }\nif f() is integer? { repeat f() {} }\nexit\n', false],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null { say "y" } else { repeat f() {} }\nexit\n',
+      true,
+    ],
     // (a called function's written union proves itself, r4.118 (1): Codex r1 F4)
     ['function f: integer | string { return "s" }\nrepeat f() {}\nexit\n', true],
     // (a parameter's default is selected only where some call omits the argument)
