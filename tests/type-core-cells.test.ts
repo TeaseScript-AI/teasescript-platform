@@ -688,7 +688,7 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "warning-runtime-check",
     "unknown unknown",
   ],
-  // (AD-1, TABLE r4.52: the parse's `null` default reaches the member by a route without a check, the route rule's
+  // (AD-1, #1073: the parse's `null` default reaches the member by a route without a check, the route rule's
   // error, as F15's `load` default does in the expectation set; the receiver's unknown keeps its warnings)
   [
     "F25 an unknown receiver's reverse",

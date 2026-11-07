@@ -449,7 +449,7 @@ export interface NotChecked {
  * with its rule's code, the rule, and the offending kinds (an error's every kind; a warning's explaining item's).
  */
 /**
- * N10's payload of the route rule's error (TABLE §13 N3, N10; AD-1, TABLE r4.52): the rule, the writer D′ whose value
+ * N10's payload of the route rule's error (N3, N10; AD-1, #1073): the rule, the writer D′ whose value
  * brings the offending kind to the use by a route without a check, and the tests that route lacks, in the order the
  * message offers them.
  */

@@ -2017,7 +2017,7 @@ test("N3 certifies every producer by what its value holds (AD-1), a certified `o
         "null",
         "rounds(true)",
       ],
-      // (AD-1, TABLE r4.52: a lookup's, a parse's and a void exit's `null` certify as a literal's does; a fallback never
+      // (AD-1, #1073: a lookup's, a parse's and a void exit's `null` certify as a literal's does; a fallback never
       // selected certifies nothing)
       ["dead fallback", ["let n = 1 otherwise null", REPEAT], REPEAT, 7, "null", "none"],
       [

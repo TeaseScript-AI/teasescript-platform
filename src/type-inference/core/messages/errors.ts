@@ -823,7 +823,7 @@ function listJoinFix(
 }
 
 /**
- * The route rule's error's first sentence (AD-1, TABLE r4.118 (3)), from N10's payload: the read, the offending kind,
+ * The route rule's error's first sentence (AD-1, #1073), from N10's payload: the read, the offending kind,
  * and the writer's line; its fix is the warning's it stands in for (`coreMessage`).
  */
 export function requiredSentence(

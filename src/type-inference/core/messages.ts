@@ -511,7 +511,7 @@ export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource
         source,
         diagnostic.site,
         diagnostic.expects,
-        // (its fix is the warning's, whose own reads its program performs where they stand, TABLE r4.168)
+        // (its fix is the warning's, whose own reads its program performs where they stand, #1296)
         { ...diagnosed, severity: "warning" },
       ),
     ]
