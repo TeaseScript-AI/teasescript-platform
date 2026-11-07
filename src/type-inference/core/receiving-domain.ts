@@ -52,8 +52,8 @@ export class ReceivingDomain {
   inherited = new Map<CanonicalKey, TypeTerm | null>();
   /**
    * #1901: per such path, whether the copy that decides it reads its written type at its own root (a scalar copy
-   * stored at the path) rather than below it (a collection's element). Written beside `inherited`; read only by the
-   * decider (`earliestDecider`'s `own`, in its scan and its groups' summary), which messages ask; no decision reads it.
+   * stored at the path) rather than below it (a collection's element). Written beside `inherited`; propagated by the
+   * inheritance pass and read by both decider paths for diagnostic descriptions. Decision outcomes do not consume it.
    */
   inheritedOwn = new Map<CanonicalKey, boolean>();
   /** The places and paths whose decisions wait on each other through copies, by cycle (`cut`): a union-find. */

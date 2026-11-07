@@ -409,7 +409,7 @@ export function literalElements(
         readonly written: boolean;
         readonly own: readonly ItemTag[];
         readonly d: Definition;
-        // (#1765: its layers at this path, `layersAt`'s, once asked; #1762: its dict layers too)
+        // (#1765: its layers at this path and its leaf, `layersAt`'s, once asked, #1901; #1762: its dict layers too)
         layers?: boolean[];
         dicts?: boolean[];
       }
@@ -441,17 +441,20 @@ export function literalElements(
       // `mayHoldNull`, Codex r6's B3, Astra r1's B2)
       // (the earliest element's walked once per path, whichever later element offends there: a wide earliest literal
       // is otherwise walked once per conflict, Codex r9's B1)
+      // (#1901, Astra r1 on #1908: the earliest element's walked one depth more too, its leaf by the same rule as the
+      // later element's: a copy's own level as it is read, narrowed, a layer below it by the copied term)
       const depths = intermediateDepths(path);
-      const layers = (of: Definition): boolean[] =>
-        layersAt(admission, of.value!, of.node, path, depths);
       const earliest = first.get(at)!;
-      earliest.layers ??= layers(earliest.d);
+      earliest.layers ??= layersAt(admission, earliest.d.value!, earliest.d.node, path, [
+        ...depths,
+        path.length,
+      ]);
       // (#1790: the later element's kinds its own, as on main, with the null it may hold at the leaf by #1765's rule, read
       // by the same walk one depth more: a value at its own level as it is read at its node (a narrowed copy holds none,
       // a typed host value may), a copy below its own level by its term, an `otherwise`'s fallback only where its
       // operand may be null. Codex r1–r4, Astra r1 on #1819; the null decides nothing, #1753)
       const later = layersAt(admission, d.value!, d.node, path, [...depths, path.length]);
-      const optional = mixedOptional(earliest.layers, later.slice(0, -1));
+      const optional = mixedOptional(earliest.layers.slice(0, -1), later.slice(0, -1));
       const own = [...new Set(deciding(admission.valueAt(d, path)).map((item) => item.tag))];
       const kinds = later.at(-1)! ? [...own, "null" as const] : own;
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
@@ -459,7 +462,12 @@ export function literalElements(
         cell,
         path,
         decided: first.get(at)!.tags,
-        earliest: first.get(at)!.own,
+        earliest:
+          earliest.written && path.length > 0
+            ? earliest.layers.at(-1)!
+              ? [...earliest.tags, "null"]
+              : earliest.tags
+            : earliest.own,
         kinds,
         atCopy: atCopy.has(at),
         ...(optional === undefined ? {} : { optional }),
