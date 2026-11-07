@@ -3602,17 +3602,30 @@ test("the route rule's error stands where a run can bring the null unchecked, an
     return analyseCore(request).diagnostics.some((d) => d.class === "compile-error");
   };
   for (const [source, error] of [
+    // (a written union's other kind the use does not take, made by a non-literal producer, certifies the route as the
+    // member does, r4.118 (1))
+    [
+      'let flagHost = askBoolean "f"\nlet d = dict{a: 1}\nlet value: boolean | string | null = d.get("x", default: null)\nif flagHost { value = "w" }\nsay d.get(value, default: 0)\nexit\n',
+      true,
+    ],
     // (a parameter's default is selected only where some call omits the argument)
     ["function use(n = null) { repeat n {} }\nuse(2)\nexit\n", false],
     ["function use(n = null) { repeat n {} }\nuse()\nuse(2)\nexit\n", true],
     // (a call's result is its own producer; a test of the same call around it is a check the compiler cannot keep)
-    ['function read { if askBoolean("v") { return null }\n return 2 }\nrepeat read() {}\nexit\n', true],
+    [
+      'function read { if askBoolean("v") { return null }\n return 2 }\nrepeat read() {}\nexit\n',
+      true,
+    ],
     [
       'function read { if askBoolean("v") { return null }\n return 2 }\nif read() != null { repeat read() {} }\nexit\n',
       false,
     ],
   ] as const)
-    assert.equal(inBothOrders(() => errs(source)), error, source);
+    assert.equal(
+      inBothOrders(() => errs(source)),
+      error,
+      source,
+    );
 });
 
 test("no production code selects the core: only tests reach the candidate entry", () => {

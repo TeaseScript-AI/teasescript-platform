@@ -171,8 +171,6 @@ export class NarrowingRoutes {
   readonly #candidates = new Map<string, ReadonlyMap<TreeBlock, Candidates>>();
   /** Per (key, node, offending kind): the witness found, or `null`. */
   readonly #witnesses = new Map<string, Definition | null>();
-  /** The parameters a call binds an argument to, by key (an omitted default's certificate, N3), made once. */
-  #arguments: ReadonlyMap<Key, number> | null = null;
   /** Per object literal: its properties' places by name, made on its first projection. */
   readonly #properties = new Map<PlaceId, ReadonlyMap<string, PlaceId>>();
   /** The program's ledger. */
@@ -345,8 +343,8 @@ export class NarrowingRoutes {
    * where its stored value produces the kind on some run, `false` where it does not, or the read whose own witness
    * certifies it (a scalar copy's source, a whole copy's source below the copied path, an `otherwise`'s left operand).
    * Every producer certifies by what its value holds (a literal, a default of any kind, a lookup, a parse, a
-   * conversion, a fallback): no producer is refused as such. A parameter's default certifies only where some call omits
-   * the argument (V30: an error only for a run that can happen).
+   * conversion, a fallback): no producer is refused as such. A parameter's default is in its read's items only where some
+   * call omits the argument (V30: an error only for a run that can happen).
    */
   *#certificate(
     found: Candidate,
@@ -364,7 +362,6 @@ export class NarrowingRoutes {
       d.weak ||
       d.value === undefined ||
       !CERTIFIED.has(d.how) ||
-      (d.how === "parameter default" && !this.#omitted(d)) ||
       !lists.certain(d)
     )
       return false;
@@ -525,31 +522,6 @@ export class NarrowingRoutes {
       nullable = yield* holds(right, "null", this);
     }
     return tag === "null" ? nullable : produced;
-  }
-
-  /** Whether some live call of a parameter's function omits its argument, so its default is selected (N3, AD-1). */
-  #omitted(d: Definition): boolean {
-    this.#work.charge("indexSteps");
-    const program = this.pass.program;
-    const region = d.fn === undefined ? undefined : program.functionRegion(d.fn);
-    if (region === undefined) return false;
-    let calls = 0;
-    for (const site of each(program.work, "indexSteps", region.sites))
-      if (program.live(site.callIn)) calls += 1;
-    return (this.#argued().get(d.key) ?? 0) < calls;
-  }
-
-  /** The number of arguments some call binds to each parameter's key: one walk of the transfers, made once per pass. */
-  #argued(): ReadonlyMap<Key, number> {
-    this.#work.charge("indexSteps");
-    if (this.#arguments !== null) return this.#arguments;
-    const { definitions, program } = this.pass;
-    const argued = new Map<Key, number>();
-    for (const d of each(program.work, "indexSteps", definitions.transferDefs))
-      if (d.how === "argument" && program.live(d.node))
-        argued.set(d.key, (argued.get(d.key) ?? 0) + 1);
-    this.#arguments = argued;
-    return argued;
   }
 
   /** A read of a stable path without element steps: its key and node. */
