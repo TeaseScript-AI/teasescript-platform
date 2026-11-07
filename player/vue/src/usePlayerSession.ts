@@ -1615,8 +1615,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       () => null,
       (error: unknown) => ({ error }),
     );
-    // This page's end of the import, while it owns the page: the saved values it stored, then Start.
-    const current = ownChosen
+    // This page's end of the import, while it owns the page: the saved values it stored, then Start. `ranToEnd` says
+    // whether that end ran whole, or, with no end of this page's, whether the page still owns the import.
+    const ranToEnd = ownChosen
       ? await owned(ctx, async () => {
           ctx.check();
           const stored = await readScriptStorage(operationStorage(ctx), ctx);
@@ -1632,7 +1633,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     releaseImporting();
     if (unexpected !== null) throw unexpected.error;
     // A stale import says nothing: the page moved on.
-    if (failed.length > 0 && current)
+    if (failed.length > 0 && ranToEnd)
       throw new StorageTransferError(
         `Not imported, and their saved data is unchanged: ${failed.join("; ")}. Any other chosen script was imported.`,
       );

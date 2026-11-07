@@ -27,7 +27,7 @@ export interface TransferTicket {
 const isTicket = (args: unknown): args is { readonly ticket: string } =>
   isRecord(args) && exactly(args, ["ticket"]) && typeof args.ticket === "string";
 
-/** The ticket's document, or none: a ticket released, or of a connection torn down since. */
+/** The session held under `ticket`; throws for a ticket released, or of a connection torn down since. */
 function ticketOf(context: PlayerOpsContext, ticket: string): TransferTicket {
   const held = context.transfers.get(ticket);
   if (held === undefined)
