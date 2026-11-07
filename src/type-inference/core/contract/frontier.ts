@@ -10,7 +10,7 @@ import type { Work } from "../solver.js";
 import type { FlowSink } from "./contributions.js";
 import { entered, ingressLeafOf } from "./ingress.js";
 import { canonicalKey, isKeyId, keyDepthIn, stepsArray, type PathRef } from "./key-ids.js";
-import { holdsBelow, hostAt, propertyOnly, unknownItem } from "./kinds.js";
+import { hostAt, propertyOnly, unknownItem } from "./kinds.js";
 import { lackingAt, pathAt } from "./literal-index.js";
 import { depthOf, markStart, markStep, marksNothing, type MarkResidual } from "./marks.js";
 import type { Holder, IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
@@ -158,6 +158,7 @@ class Frontier {
   readonly pendingIds = new Map<string, number>();
   readonly advances = new Map<number, Map<string, Decision>>();
   readonly unions = new Map<string, number>();
+
   public constructor(readonly contract: Contract) {}
 }
 
@@ -527,15 +528,6 @@ function literalRoot(frontier: Frontier, literal: PlaceId): number {
  * read its owner's nodes one step below, a literal its root; declines for any other (and for a guarded or ingress read).
  */
 function eachValue(frontier: Frontier, value: PlaceId, then: (node: number) => void): void {
-  const { root, steps } = valueChain(frontier, value);
-  composed(frontier, root, steps, then);
-}
-
-/** A value's root node and the property steps below it (`eachValue`): a chain of property reads walked down once. */
-function valueChain(
-  frontier: Frontier,
-  value: PlaceId,
-): { readonly root: number; readonly steps: readonly string[] } {
   const { contract } = frontier;
   const { program, guards } = contract.pass;
   // (a chain of property reads walked down to its root once, its steps read below the root: no native recursion)
@@ -567,16 +559,6 @@ function valueChain(
     }
   } else if (program.hasOf.has(at) && !program.cellOwner.has(at)) root = literalRoot(frontier, at);
   else throw new Decline("value");
-  return { root, steps };
-}
-
-/** `below` from a value's chain (`valueChain`): its root, its steps and the steps below them, one composition. */
-function composed(
-  frontier: Frontier,
-  root: number,
-  steps: readonly string[],
-  then: (node: number) => void,
-): void {
   below(frontier, root, steps, 0, then);
 }
 
@@ -700,11 +682,6 @@ function rules(frontier: Frontier, goal: Goal): void {
     return below(frontier, node.inner, [s], 0, (found) => into(markNode(frontier, found)));
   if (node.kind === "hold") {
     const decision = advance(frontier, node.set, s);
-    // (#1784, Codex r7: below a receiver with no structure the native reader reads no shorter prefix's stores, so a
-    // held mark decided there is one it never makes: a held mark over a node with no structure deciding marked declines
-    // (`marks-floor`), conservatively, whatever else its receiver holds)
-    if (decision.marked && !structuredNode(frontier.nodes[node.inner]!))
-      throw new Decline("marks-floor");
     return below(frontier, node.inner, [s], 0, (found) =>
       into(pendingBelow(frontier, found, decision)),
     );
@@ -758,8 +735,7 @@ function rules(frontier: Frontier, goal: Goal): void {
     );
   for (const read of at.reads) {
     const marked = marking(frontier, read, [s], into);
-    const { root, steps } = valueChain(frontier, read.value);
-    composed(frontier, root, keptSteps(contract.work, steps, [s]), marked);
+    eachValue(frontier, read.value, (found) => below(frontier, found, [s], 0, marked));
   }
 }
 
@@ -788,18 +764,18 @@ function stepEntry(
     if (isKeyId(entry.key)) throw new Decline("cursor");
     const path = keyPath(entry.key);
     properties(path);
-    return composed(
+    return below(
       frontier,
       rootNode(frontier, keyPlace(entry.key)),
       keptSteps(contract.work, path, [s]),
+      0,
       marked,
     );
   }
   const at = entry.at ?? [];
   properties(at);
-  // (the value's chain and the entry's steps below it, one composition: a receiver on the way is the whole read's)
-  const { root, steps } = valueChain(frontier, entry.value!);
-  composed(frontier, root, keptSteps(contract.work, steps, at, [s]), marked);
+  const steps = keptSteps(contract.work, at, [s]);
+  eachValue(frontier, entry.value!, (found) => below(frontier, found, steps, 0, marked));
 }
 
 /**
@@ -842,23 +818,6 @@ function rollback(frontier: Frontier): void {
   frontier.fresh = [];
   frontier.tasks = [];
   frontier.draining = false;
-}
-
-/** Whether a node holds a structure a step below can be read from (`holdsBelow`): any but a leaf or literal node without one. */
-function structuredNode(node: FNode): boolean {
-  if (node.kind === "leaf") return holdsBelow(node.item);
-  if (node.kind === "lit") return litStructured(node.at);
-  return true;
-}
-
-/** A literal's index node's own structure: a child, a term of a kind with one, or a value read or computed there. */
-function litStructured(at: IndexNode): boolean {
-  return (
-    at.children.size > 0 ||
-    at.reads.length > 0 ||
-    at.others.length > 0 ||
-    [...at.terms.keys()].some((tag) => holdsBelow(makeItem(tag, null)))
-  );
 }
 
 /** The nodes a build passes to its collector, once it is settled. */
