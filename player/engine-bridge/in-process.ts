@@ -9,7 +9,12 @@ import {
 import type { PlayerSession } from "../runtime-view.js";
 import { PlayerBridge } from "../player-bridge.js";
 import { openBridge, type ClientPort } from "./client.js";
-import { playerBridgeOps, playerOpsContext, type PlayerOpsContext } from "./player-ops.js";
+import {
+  alignTrace,
+  playerBridgeOps,
+  playerOpsContext,
+  type PlayerOpsContext,
+} from "./player-ops.js";
 import type { BuildIdentity } from "./protocol.js";
 import { beginRecordingAt, HeldSession, introduction, type StartOptions } from "./ops/session.js";
 import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
@@ -198,9 +203,12 @@ export function introduceNow(
         readonly extras?: Pick<PlayerRuntimeSessionOptions, "randomControl">;
         readonly recording: boolean;
       },
+  tracing?: boolean,
 ): PlayerSession {
   const backend = backendOf(bridge);
   const { context } = backend;
+  // The Player's tracing intent holds before the session begins, also while its `debugTracing` request still waits.
+  if (tracing !== undefined) alignTrace(context, tracing);
   const plan = (token: string): InstructionPlan => {
     const held = context.plans.get(token);
     if (held === undefined) throw new Error(`No plan '${token}' is held.`);

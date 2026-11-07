@@ -45,6 +45,8 @@ export function useDebugView(
         return;
       }
       if (asked === null || key === null) return;
+      // A shown view is of the shown publication only: a newer one shows nothing until its own view arrives.
+      if (view.value !== null && view.value.revision !== session.revision) view.value = null;
       // A plain copy: the view's state may be reactive, which the bridge does not carry.
       // EVIDENCE: invariant: `key` is `JSON.stringify` of a `DebugViewRequest`, which is plain JSON data.
       const plain = JSON.parse(key) as DebugViewRequest;

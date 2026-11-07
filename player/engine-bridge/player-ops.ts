@@ -10,7 +10,7 @@ import type { ScriptIdentity } from "../script-identity.js";
 import { planLockNeeds, playerRuntimeStageImages } from "../plan-metadata.js";
 import { DebugRecorder } from "../debug-recorder.js";
 import { MAIN_FILE_PATH } from "../../src/project-paths.js";
-import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
+import { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
 import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
 import { DebugCaches, debugOps } from "./ops/debug.js";
 import { inputOps } from "./ops/input.js";
@@ -138,6 +138,19 @@ export interface PlayerOpsContext {
   trace: RuntimeDebugContext | null;
   /** Counts the traces this connection made, so that a reply names the one it read. */
   traceId: number;
+}
+
+/**
+ * Makes the connection's value trace follow the Player's intent `on`: a new trace with no history, or none. An op that
+ * begins an epoch carries the intent, so it holds also while the Player's `debugTracing` request still waits in the
+ * connection's queue. Returns the trace's ID now, or `null`.
+ */
+export function alignTrace(context: PlayerOpsContext, on: boolean): number | null {
+  if (on !== (context.trace !== null)) {
+    context.trace = on ? new RuntimeDebugContext() : null;
+    if (on) context.traceId += 1;
+  }
+  return context.trace === null ? null : context.traceId;
 }
 
 export function playerOpsContext(): PlayerOpsContext {

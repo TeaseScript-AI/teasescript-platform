@@ -425,6 +425,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   );
   // Whether Debug is on, which the script reads as `debugMode`.
   let debugMode = false;
+  /** The Debug mode last asked of a session's host while its request is under way (`applyDebugMode`), or `null`. */
+  let debugModeAsked: { readonly lineage: object; readonly on: boolean } | null = null;
   // The script's debug room, or `null` without one, and whether it keeps a session.
   let debugRooms = options.debugRooms ?? memoryKeptRoomStore();
   const debugRoom = shallowRef<{ readonly session: boolean } | null>(null);
@@ -2186,18 +2188,27 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       inspecting.value ||
       stopped.value ||
       activation.value !== null ||
-      (current.state.status !== "running" && current.state.status !== "waiting") ||
-      current.state.debugMode === debugMode
+      (current.state.status !== "running" && current.state.status !== "waiting")
     )
       return;
+    // What the host will hold once the requests sent settle: the last one asked of this session, else what shows.
+    const held =
+      debugModeAsked?.lineage === current.lineage ? debugModeAsked.on : current.state.debugMode;
+    if (held === debugMode) return;
+    const on = debugMode;
+    const asked = { lineage: current.lineage, on };
+    debugModeAsked = asked;
     // In the host (`setDebugMode`); the session shows the change while it still owns the UI.
     void bridgeOf(current)
       .request<{ readonly kind: string }>(
         current,
         "setDebugMode",
-        { on: debugMode },
+        { on },
         { publish: (next) => void publishOwned(next) },
       )
+      .finally(() => {
+        if (debugModeAsked === asked) debugModeAsked = null;
+      })
       .then(
         (outcome) => {
           if (outcome.kind === "set" && session.value?.lineage === current.lineage)
@@ -2624,7 +2635,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         await host.request(restored, "beginRecording", null);
         owned();
         if (debugTracing.value)
-          void host.request(restored, "restartTrace", null).catch((error: unknown) => {
+          void host.request(restored, "restartTrace", { tracing: true }).catch((error: unknown) => {
             if (!endsQuietly(error) && !disposed && !stopped.value) reportHostError(error);
           });
         let continued: PlayerSession = host.latest(restored) ?? restored;
@@ -2735,22 +2746,29 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const host = requireBridge();
     // A factory, as the Start's options, records the click's capture through `temporalCapture()`, which `begin` binds.
     if (typeof create === "function")
-      return introduceNow(host, (made) =>
-        create({
-          ...recording,
-          recorder: made.recorder,
-          ...(made.debugTrace === null ? {} : { debugTrace: made.debugTrace }),
-        }),
+      return introduceNow(
+        host,
+        (made) =>
+          create({
+            ...recording,
+            recorder: made.recorder,
+            ...(made.debugTrace === null ? {} : { debugTrace: made.debugTrace }),
+          }),
+        debugTracing.value,
       );
     const startOptions = { ...create.options(), debugMode: recording.debugMode };
     const control = recording.randomControl;
     if (control === undefined) return host.start(create.plan, startOptions, true);
-    return introduceNow(host, {
-      plan: create.plan,
-      options: startOptions,
-      extras: { randomControl: control },
-      recording: true,
-    });
+    return introduceNow(
+      host,
+      {
+        plan: create.plan,
+        options: startOptions,
+        extras: { randomControl: control },
+        recording: true,
+      },
+      debugTracing.value,
+    );
   }
   /**
    * Starts the prepared session; an exception of the Player while it begins is reported, with what was recorded. A

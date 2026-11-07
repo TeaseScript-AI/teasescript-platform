@@ -1,8 +1,7 @@
 import { debugViewOf, type DebugTreeState, type DebugViewRequest } from "../../debug-view.js";
 import { setPlayerRuntimeDebugMode } from "../../runtime-adapter.js";
-import { RuntimeDebugContext } from "../../../src/runtime/debug/debug-trace.js";
 import { exactly, isRecord } from "../argument-checks.js";
-import type { PlayerOpsContext } from "../player-ops.js";
+import { alignTrace, type PlayerOpsContext } from "../player-ops.js";
 import type { BridgeOps } from "../worker-host.js";
 import { publishing, sessionOp } from "./session.js";
 
@@ -59,18 +58,17 @@ export function traceOps(context: PlayerOpsContext): BridgeOps {
       run: (args) => {
         // EVIDENCE: validation: checkArguments accepted `on` as a boolean.
         const { on } = args as { readonly on: boolean };
-        if (on !== (context.trace !== null)) {
-          context.trace = on ? new RuntimeDebugContext() : null;
-          if (on) context.traceId += 1;
-        }
-        return { result: { traceId: context.trace === null ? null : context.traceId } };
+        return { result: { traceId: alignTrace(context, on) } };
       },
     },
     // A new epoch of the connection's trace (`"restore"`), at a session whose recording began anew: Continue asks for it
-    // once it owns the UI, so a Continue a Start replaced or a stop interrupted leaves the trace as it was.
+    // once it owns the UI, so a Continue a Start replaced or a stop interrupted leaves the trace as it was. It carries
+    // the Player's intent (`tracing`), which the trace follows first (`alignTrace`).
     restartTrace: sessionOp(
-      (args) => args === null,
-      () => {
+      (args) => isRecord(args) && exactly(args, ["tracing"]) && typeof args.tracing === "boolean",
+      (_held, args) => {
+        // EVIDENCE: validation: checkArguments accepted `tracing` as a boolean.
+        alignTrace(context, (args as { readonly tracing: boolean }).tracing);
         context.trace?.reset("restore");
         return { result: null, view: null };
       },

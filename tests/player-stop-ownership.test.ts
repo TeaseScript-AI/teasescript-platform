@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
-import { effectScope, watch, type Ref } from "vue";
+import { effectScope, nextTick, watch, type Ref } from "vue";
 
 import type * as CompileProject from "../player/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
@@ -9,6 +9,7 @@ import type { StartOptions } from "../player/engine-bridge/ops/session.js";
 import { startBridgeHost, type HostSession } from "../player/engine-bridge/worker-host.js";
 import { BRIDGE_VERSION } from "../player/engine-bridge/protocol.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
+import type { DebugView, DebugViewRequest } from "../player/debug-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type {
   PlayerRuntimeSession,
@@ -45,6 +46,9 @@ interface StopHost {
     readonly session: { readonly transcriptEntries: readonly { readonly text: string }[] } | null;
   }>;
   setDebugTracing(on: boolean): void;
+  setDebugMode(enabled: boolean): void;
+  readonly traceId: Readonly<Ref<number | null>>;
+  debugView(request: DebugViewRequest): Promise<DebugView | null>;
   reportHostError(error: unknown): void;
   observe(): { readonly id: string } | null;
   update(next: PlayerSession): void;
@@ -59,6 +63,10 @@ let usePlayerSession: (options: {
   readonly capabilities?: { readonly camera: boolean };
 }) => StopHost;
 let facade: typeof InProcess;
+let useDebugView: (
+  player: StopHost,
+  request: () => DebugViewRequest | null,
+) => Readonly<Ref<DebugView | null>>;
 let compiler: typeof CompileProject;
 let adapter: typeof RuntimeAdapter;
 let view: typeof RuntimeView;
@@ -76,6 +84,9 @@ before(async () => {
   adapter = (await loadPlayerModule("player/runtime-adapter.ts")) as typeof adapter;
   // EVIDENCE: validation: the bundle's session view module, from the same module graph.
   view = (await loadPlayerModule("player/runtime-view.ts")) as typeof view;
+  const views = await loadPlayerModule("player/vue/src/useDebugView.ts");
+  // EVIDENCE: validation: Vite loaded the real source module; this is its composable.
+  useDebugView = views.useDebugView as typeof useDebugView;
 });
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
@@ -306,6 +317,85 @@ for (const ending of ["replaced", "stopped"] as const)
       );
     }
   });
+
+const pause = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+// L5i.3, Sol r1 R1: Debug mode turned on and off again while the first change waits for its reply ends off, as the
+// script then reads it.
+test("Debug mode turned on and off again before the host answered ends as last asked", async (context) => {
+  const { player } = await mount(context, 80);
+  player.prepare(
+    factory(
+      'let answer = askText "Ready?"\nsay "mode ${debugMode}", instant\nshowButton "Done"\nexit',
+    ),
+  );
+  await player.activate();
+  player.setDebugMode(true);
+  player.setDebugMode(false);
+  await pause(400);
+  assert.equal(player.session.value!.state.debugMode, false);
+  player.update(
+    facade.hatch(player.session.value!, (held) => adapter.submitPlayerRuntimeComposer(held, "yes")!)
+      .session,
+  );
+  assert.equal(player.session.value!.transcriptEntries.at(-1)?.text, "mode false");
+});
+
+// L5i.3, Sol r1 R2: tracing turned on while the connection's queue waits for a source to compile, then a Start in the
+// host at once: the Start traces from its first statement.
+test("a Start in the host while tracing waits behind a compile traces from its first statement", async (context) => {
+  const { player, bridge } = await mount(context, 80);
+  const preparing = bridge.client.request("prepare", {
+    source: { kind: "source", script: "exit" },
+  });
+  player.setDebugTracing(true);
+  player.prepare(factory('let mood = "calm"\nsay "${mood}", instant\nshowButton "Done"\nexit'));
+  await player.activate();
+  await preparing;
+  await pause(400);
+  const status = facade.heldTrace(bridge)!.status();
+  assert.deepEqual([status.origin, status.epoch], ["start", 1]);
+  assert.ok(status.records >= 2, String(status.records));
+  assert.equal(player.traceId.value, 1);
+});
+
+// L5i.3, Sol r1 R3: a view of an older publication does not stay shown once a newer one shows.
+test("a shown view of an older publication goes once a newer one shows, until its own view arrives", async (context) => {
+  const { player } = await mount(context, 80);
+  player.setDebugTracing(true);
+  await pause(160);
+  player.prepare(
+    factory(
+      'let mood = "calm"\nsay "${mood}", instant\nlet answer = askText "Ready?"\nsay "${answer}", instant\nshowButton "Done"\nexit',
+    ),
+  );
+  await player.activate();
+  const scope = effectScope();
+  context.after(() => scope.stop());
+  const shown = scope.run(() =>
+    useDebugView(player, () => ({
+      messages: { limit: 20, openNewest: true },
+      selected: null,
+      variables: null,
+      image: false,
+      trees: {},
+    })),
+  )!;
+  await pause(240);
+  const before = shown.value!.revision;
+  player.update(
+    facade.hatch(player.session.value!, (held) => adapter.submitPlayerRuntimeComposer(held, "yes")!)
+      .session,
+  );
+  const newer = player.session.value!.revision;
+  assert.ok(newer > before);
+  await nextTick();
+  assert.equal(shown.value, null, "nothing of the older publication shows");
+  await pause(240);
+  // Read through a call: the assertion above narrowed the property itself to null.
+  const current = () => shown.value;
+  assert.equal(current()?.revision, newer);
+});
 
 test("a session op still awaited does not delay the halt fence: a request behind it is refused", async () => {
   const replies: unknown[] = [];
