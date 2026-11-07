@@ -25,13 +25,20 @@ The repository currently has no browser-automation dependency and no external pr
 
 ## Normal and diagnostic verification
 
-`npm run check` runs formatting verification, lint, lint-rule/exception fixtures, Knip, and the build with compiled
-tests, preserving actionable failure information. `npm run format` applies the formatter policy;
+`npm run check` runs formatting verification, lint, lint-rule/exception fixtures, Knip, the doc links, and the build
+with compiled tests, preserving actionable failure information. `npm run format` applies the formatter policy;
 `npm run format:check` verifies it without writing. `npm run lint` applies the [type-evidence policy](LINTING.md);
 `npm run test:lint` type-checks and tests the maintained rule implementation; `npm run knip` checks the selected
-unused-code and dependency categories. `npm run lint:design` and `npm run test:lint:design`
-check the [Player design contracts](LINTING.md#player-design-lint) and their positive/negative fixtures;
-both are included in `npm run check`.
+unused-code and dependency categories. `npm run check:doc-links` checks the relative
+links and heading anchors in the repository's Markdown, parsed as CommonMark by `markdown-it`, with GitHub's slugs
+(`github-slugger`): each path exists in exactly its case, and each anchor is a heading's slug or a line of a code file;
+raw-HTML links and ids are refused. Links in source comments, and absolute URLs (this repository's included), are not
+checked. A broken link fails `check:pretest` wherever it sits, so its fix belongs to whoever moved the file or renamed
+the heading, also in a file they did not touch. `tools/repository-checks/doc-links.mjs` lists the forms, and records
+its two dependencies.
+`npm run lint:design` and `npm run test:lint:design` check the
+[Player design contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in
+`npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
 TypeScript compilation precedes UI work; compiled tests run only after all builds pass. Each command's output is
 printed together, including warnings. A failure stops the group and subsequent stages; SIGINT/SIGTERM also terminate
@@ -62,7 +69,7 @@ Its `playerProfile` has person fields, which `playerProfile.petNames` reads and 
 copies, only when `--player-profile profile.json` gives a JSON object of them, such as
 `{"firstName": "Alex", "petNames": ["puppy"]}`. The probe is a developer aid, not a test.
 `npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
-`node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, format, oxlint, knip, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash.
+`node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, format, oxlint, knip, the doc links, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash.
 `node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a tree hash only exists), and finds its unfilled placeholders (its header lists the rules); it never fetches.
 `node tools/ci-test-counts.mjs <run id>` prints a GitHub Actions run's node:test totals (tests, pass, fail, skipped) per job and step, read from `gh run view <run id> --log`, and their sum; `--log <file>` reads a saved log.
 

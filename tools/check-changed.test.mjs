@@ -13,6 +13,7 @@ const REPRESENTATIVES = {
   "player-vue": ["player/vue/src/PlayerApp.vue", ["player-vue"]],
   "oxlint-rules": ["tools/oxlint/run.mjs", ["oxlint-rules"]],
   tools: ["tools/test-shards.mjs", ["tools"]],
+  "repository checks": ["tools/repository-checks/doc-links.mjs", ["tools"]],
   families: ["tests/families/copies/1313-astra-composite-cases.mjs", ["families"]],
   fixtures: ["tests/fixtures/type-core/cells.jsonl", ["typescript"]],
   documentation: ["docs/TESTING.md", []],
