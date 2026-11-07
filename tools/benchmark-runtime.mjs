@@ -196,6 +196,18 @@ export function prepareTape(tape) {
   );
 }
 
+/**
+ * The session's other host operations, which no tape holds (`loadTape` takes only `receiptArity`'s): a guarded
+ * session refuses each at the call, before the session runs it.
+ */
+const untapedHostMethods = new Set([
+  "recordContinueCapture",
+  "applyExternalStorageEdit",
+  "setDebugMode",
+  "resumeRandomDraw",
+  "setRandomControl",
+]);
+
 /** A host call the session received that is not its tape's: thrown before the session runs it. */
 export class TapeMismatch extends Error {}
 
@@ -222,6 +234,14 @@ export function tapeGuards(expected, label) {
         return at;
       },
       fork: () => start(at),
+      refuse(method, args) {
+        const want = at === null ? undefined : expected[at];
+        const problem =
+          `${label}: host call ${at === null ? "?" : at + 1} is ${shown({ method, args })}, which no tape holds; ` +
+          `its tape entry ${want === undefined ? "none" : shown({ method: want.method, args: want.args })}`;
+        problems.push(problem);
+        throw new TapeMismatch(problem);
+      },
       receive(method, args, apply, time) {
         const arity = receiptArity[method];
         const data = method === "observeTime" ? [args[0], args[1] ?? []] : args.slice(0, arity);
@@ -290,14 +310,16 @@ export function tapeGuards(expected, label) {
 }
 
 /**
- * `session` with its host methods checked by `guard` at receipt (see `tapeGuards`), `time` timing only the session's
- * own work, and its forks checked by guards of their own, placed where it stood. Every other member is the session's.
+ * `session` with its host methods checked by `guard` at receipt (see `tapeGuards`), and those no tape holds refused,
+ * `time` timing only the session's own work, and its forks checked by guards of their own, placed where it stood.
+ * Every other member is the session's.
  */
 export function checkedHostSession(session, guard, time = (operation) => operation()) {
   return new Proxy(session, {
     get(target, name) {
       if (Object.hasOwn(receiptArity, name))
         return (...args) => guard.receive(name, args, (call) => target[name](...call), time);
+      if (untapedHostMethods.has(name)) return (...args) => guard.refuse(name, args);
       if (name === "fork")
         return (...args) => checkedHostSession(target.fork(...args), guard.fork(), time);
       const value = target[name];

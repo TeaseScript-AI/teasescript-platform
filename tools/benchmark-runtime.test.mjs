@@ -483,6 +483,7 @@ function receivingSession(questions = () => [], received = []) {
     observeTime: answer("observeTime"),
     reportMediaLoad: answer("reportMediaLoad"),
     pressPermanentButton: answer("pressPermanentButton"),
+    setDebugMode: answer("setDebugMode"),
     fork() {
       return receivingSession(questions, received);
     },
@@ -524,6 +525,8 @@ function dispatch(session, call) {
       return session.reportMediaLoad(call.mediaId, call.report);
     case "pressPermanentButton":
       return session.pressPermanentButton(call.buttonId);
+    case "setDebugMode":
+      return session.setDebugMode(call.enabled);
   }
 }
 
@@ -600,7 +603,17 @@ test("a fork's guard starts where its parent stood and moves on its own; a place
 // is its axis values, and a coverage check derived from the names proves every axis value and valid pair is held.
 const READBACK = {
   method: Object.keys(entries),
-  mismatch: ["method", "argument", "omitted", "repeated", "question", "unasked", "surplus"],
+  mismatch: [
+    "method",
+    "untaped",
+    "inserted",
+    "argument",
+    "omitted",
+    "repeated",
+    "question",
+    "unasked",
+    "surplus",
+  ],
   position: ["first", "middle", "last"],
 };
 const mediaMismatches = new Set(["question", "unasked", "surplus"]);
@@ -629,6 +642,8 @@ function readbackProblems({ method, mismatch, position }) {
         { ...entry, args: [{ changed: true }, ...entry.args.slice(1)] },
         call.capturedMedia,
       );
+    if (mismatch === "untaped") return { kind: "setDebugMode", enabled: false };
+    if (mismatch === "inserted") return [{ kind: "setDebugMode", enabled: false }, call];
     if (mismatch === "omitted") return [];
     if (mismatch === "repeated") return [call, call];
     return call;
