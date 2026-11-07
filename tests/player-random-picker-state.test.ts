@@ -44,12 +44,12 @@ const REPLACEMENTS = [
   "the same session's next draw",
   "the same draw again",
 ] as const;
-/** What kind of draw it is, by the statement that draws. */
+/** What kind of draw it is, by the statement that draws, binding `name`. */
 const KINDS = {
-  chance: "let x = chance(50)",
-  number: "let x = random()",
-  shuffle: 'let items = ["a", "b", "c"]\nitems.shuffle()',
-  list: 'let x = ["a", "b", "c"].random',
+  chance: (name: string) => `let ${name} = chance(50)`,
+  number: (name: string) => `let ${name} = random()`,
+  shuffle: (name: string) => `let ${name} = ["a", "b", "c"]\n${name}.shuffle()`,
+  list: (name: string) => `let ${name} = ["a", "b", "c"].random`,
 } as const;
 const KIND_NAMES = ["chance", "number", "shuffle", "list"] as const;
 /** What the player did in the picker before the replacement. */
@@ -102,13 +102,9 @@ function draws(statements: string, count: number): RandomDrawView[] {
 for (const { replacement, kind, state, name } of CASES)
   test(`the picker's state of a draw: ${name}`, async () => {
     // The picker's draw: the first of two of its kind in session `s1`.
-    const sequence = draws(
-      `${KINDS[kind]}
-${KINDS[kind]}`,
-      2,
-    );
+    const sequence = draws(`${KINDS[kind]("x")}\n${KINDS[kind]("y")}`, 2);
     const [first, next] = [sequence[0]!, sequence[1]!];
-    const elsewhere = draws(KINDS[kind], 1)[0]!;
+    const elsewhere = draws(KINDS[kind]("x"), 1)[0]!;
     const shown = { session: "s1", draw: first };
     const replaced =
       replacement === "another session, same ID"
