@@ -484,8 +484,8 @@ function afterCut(before: RuntimeSnapshot) {
   session = chosen!.session;
   return {
     outcomes: [recovered.outcome, chosen!.outcome],
-    // Every publication of the suffix: the recovered one, then the choice's.
-    states: [atRecovery, session.state],
+    // Every publication of the suffix: the recovered one, then the choice's, as publications carry them (L5f).
+    states: [atRecovery, session.state].map((state) => shownOf({ state, events: [] }).state),
     events: [...session.events],
     snapshot: playerRuntimeSnapshot(session),
   };
