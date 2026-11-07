@@ -47,7 +47,7 @@ analysis's allowance and stop after the one whose units pass the program's allow
 occurrence's answer, its element's and each property's; two a binding), where 640 bytes per cell returned pass
 their room in the heap (the process's V8 heap limit less 1.5 GiB, which the analysis's own heap with sharing off
 needs, #1603: at the default heap, `W19-sources`, `W24-alias-group`, `W24-exit` and `W24-varied` at k = 1,024 end as
-`memory` in all four modes, `sx-job` `1107173519e5cd`), or past the read-depth limit (#1837); the
+`memory` in all four modes, #1945), or past the read-depth limit (#1837); the
 nodes from there on stay unanswered (`publicationHashes`'s `unanswered`, #1499), after the bindings left where the
 admitted types stopped. A publication run's unit limit grants the same 64 per cell its tree's oracle reports so far
 (`questionWork`), so the oracle's stop comes first wherever a question reports its cells before the runner's limit; one
