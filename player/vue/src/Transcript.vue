@@ -234,7 +234,7 @@ function measureRenderedRows() {
 const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
   computed(() => {
     // Capture the supplied list so replacing fixtures retains the previous key mapping on prepend.
-    void props.revision; // The canonical adapter appends in place and publishes a revision.
+    void props.revision; // The session's store appends in place and raises the transcript revision.
     const entries = props.entries;
     return {
       count: entries.length - currentRemovedRows().length,

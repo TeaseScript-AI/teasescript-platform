@@ -33,8 +33,9 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
 - `PlayerApp.vue` composes the product Player from props and slots. It installs `usePlayerKeyboardFocus.ts`
   once, including for body-portaled controls; the [focus contract](../../../docs/ui/PLAYER-UI.md#input-growth-focus-and-keyboard-behavior)
   defines input modality and composer/Send focus.
-- `usePlayerSession.ts` hosts the canonical adapter session for presentation: starting a session remounts the
-  transcript and resets interaction-local state. Vue derives everything else from that session. Its
+- `usePlayerSession.ts` holds the shown `PlayerSession` publication for presentation; the engine's host owns the
+  canonical runtime state. Starting a session remounts the transcript and resets interaction-local state. Vue derives
+  everything else from that publication. Its
   `useRuntimeSceneClock.ts` maps browser time onto the session's scene time: it observes time at the next runtime
   deadline, before input (`RuntimeInteraction.vue` rejects input when the presented interaction changed), before a
   checkpoint capture, and on `visibilitychange`, `pagehide`, and `pageshow`; hidden pages keep running. A late

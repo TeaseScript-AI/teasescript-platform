@@ -18,7 +18,7 @@ import type {
 } from "../../src/runtime/random/random-control.js";
 import { decideDraw, RandomHistory, type RandomNext } from "../random-decisions.js";
 import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
-import { DebugCaches, debugOps } from "./ops/debug.js";
+import { SourceViewCaches, sourceViewOps } from "./ops/source-views.js";
 import { inputOps } from "./ops/input.js";
 import { mediaOps } from "./ops/media.js";
 import { persistenceOps, type PlanTextSlot } from "./ops/persistence.js";
@@ -136,8 +136,8 @@ export interface PlayerOpsContext {
   readonly recorder: DebugRecorder;
   /** The source files of each plan this Worker compiled, by the plan's token: what Debug's source views show. */
   readonly sources: Map<string, readonly { readonly path: string; readonly source: string }[]>;
-  /** Debug's source caches; `teardown` clears them with the plans. */
-  readonly debug: DebugCaches;
+  /** The source-view ops' caches; `teardown` clears them with the plans. */
+  readonly sourceViews: SourceViewCaches;
   /**
    * Debug's value trace on this connection while Debug runs, else `null` (`debugTracing`): every session the host holds
    * runs with it, from its next operation on.
@@ -299,7 +299,7 @@ export function playerOpsContext(): PlayerOpsContext {
     },
     recorder: new DebugRecorder(),
     sources: new Map(),
-    debug: new DebugCaches(),
+    sourceViews: new SourceViewCaches(),
     trace: null,
     traceId: 0,
     traceIntent: 0,
@@ -337,7 +337,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
         ? { kind: "invalid", errors: loaded.validation.errors }
         : { kind: "unreadable", message: loaded.message };
   };
-  /** A source's result, after the compiler loads: the only op the host awaits. */
+  /** A source's result, after the compiler loads. */
   const compile = async (script: string | PlayerProject): Promise<PrepareResult> => {
     const [{ compilePlayerProject }, { scriptIdentity }] = await Promise.all([
       import("../compile-project.js"),
@@ -390,7 +390,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
       run: (_args, sessions) => {
         plans.clear();
         context.sources.clear();
-        context.debug.clear();
+        context.sourceViews.clear();
         for (const slot of context.planTexts.values())
           if (slot.timer !== null) clearTimeout(slot.timer);
         context.planTexts.clear();
@@ -399,7 +399,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
       },
     },
     ...sessionOps(context),
-    ...debugOps(context),
+    ...sourceViewOps(context),
     ...inputOps(context),
     ...mediaOps(context),
     ...resourceOps(context),

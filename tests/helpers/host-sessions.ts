@@ -1,5 +1,7 @@
+import type { Hatched } from "../../player/engine-bridge/in-process.js";
 import type { PlayerBridge } from "../../player/player-bridge.js";
 import type { PlayerRuntimeSession } from "../../player/runtime-adapter.js";
+import type { PlayerSession } from "../../player/runtime-view.js";
 import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
 import { loadPlayerModule } from "./player-modules.js";
 
@@ -12,13 +14,21 @@ import { loadPlayerModule } from "./player-modules.js";
 /** What an adapter function returns: a session, an outcome, a snapshot, its JSON, or nothing. */
 type AdapterResult = object | string | number | boolean | null | undefined | void;
 
-/** A session a composable's host holds, as these tests see it: they type the host's sessions as the adapter's. */
-type HostSession = PlayerRuntimeSession;
-
 type Hatch = (
-  session: HostSession,
+  session: PlayerSession,
   op: (held: PlayerRuntimeSession) => AdapterResult,
 ) => AdapterResult;
+
+/**
+ * An adapter function `op` that also takes a session a composable's host holds (`PlayerSession`): given an adapter
+ * session, it returns what `op` does; given the host's, the same with the host's session in place of the adapter's
+ * (`Hatched`), as the facade returns it.
+ */
+export interface OnHost<A extends unknown[], R extends AdapterResult> {
+  (session: PlayerRuntimeSession, ...rest: A): R;
+  (session: PlayerSession, ...rest: A): Hatched<R>;
+  (session: PlayerRuntimeSession | PlayerSession, ...rest: A): R | Hatched<R>;
+}
 
 let hatch: Hatch | null = null;
 let heldTrace: ((bridge: PlayerBridge) => RuntimeDebugContext | null) | null = null;
@@ -41,27 +51,35 @@ export function hostTrace(bridge: PlayerBridge): RuntimeDebugContext | null {
 }
 
 /** Whether `value` is a session a composable's host holds (a `PlayerSession`), not an adapter session. */
-function isHostSession(value: unknown): boolean {
+function isHostSession(value: unknown): value is PlayerSession {
   return typeof value === "object" && value !== null && "planToken" in value && "lineage" in value;
 }
 
-/**
- * `op`, which also takes a session a composable's host holds: its call then runs on the host's session, and its result
- * has the host's session in place of the adapter's, as the facade returns it.
- */
+/** `op`, which also takes a session a composable's host holds: its call then runs on the host's session (`OnHost`). */
 export function onHost<A extends unknown[], R extends AdapterResult>(
   op: (session: PlayerRuntimeSession, ...rest: A) => R,
-): (session: PlayerRuntimeSession, ...rest: A) => R {
-  return (session, ...rest) => {
+): OnHost<A, R> {
+  const call = (session: PlayerRuntimeSession | PlayerSession, ...rest: A): R | Hatched<R> => {
     if (!isHostSession(session)) return op(session, ...rest);
     if (hatch === null) throw new Error("Call loadHostFacade() in before().");
     // EVIDENCE: validation: the facade returns `op`'s result with the host's session in place of the adapter's.
-    return hatch(session, (held) => op(held, ...rest)) as R;
+    return hatch(session, (held) => op(held, ...rest)) as Hatched<R>;
   };
+  // EVIDENCE: validation: `call` returns `op`'s result for an adapter session and the facade's for the host's.
+  return call as OnHost<A, R>;
 }
 
+/** `module`'s functions that take a session first, as `onHost` gives them; anything else as it is. */
+export type OnHostAll<M> = {
+  readonly [K in keyof M]: M[K] extends (session: PlayerRuntimeSession, ...rest: infer A) => infer R
+    ? R extends AdapterResult
+      ? OnHost<A, R>
+      : M[K]
+    : M[K];
+};
+
 /** `module` with each of its functions as `onHost` gives it; its classes and other values stay as they are. */
-export function onHostAll<M extends Record<string, unknown>>(module: M): M {
+export function onHostAll<M extends Record<string, unknown>>(module: M): OnHostAll<M> {
   const wrapped = Object.fromEntries(
     Object.entries(module).map(([name, value]) => {
       if (typeof value !== "function" || /^[A-Z]/u.test(name)) return [name, value];
@@ -70,6 +88,6 @@ export function onHostAll<M extends Record<string, unknown>>(module: M): M {
       return [name, onHost(op)];
     }),
   );
-  // EVIDENCE: validation: the same keys as `module`, each function wrapped with its own signature.
-  return wrapped as M;
+  // EVIDENCE: validation: the same keys as `module`, each function wrapped as `onHost` types it.
+  return wrapped as OnHostAll<M>;
 }

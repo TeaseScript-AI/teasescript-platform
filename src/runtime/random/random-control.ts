@@ -56,8 +56,10 @@ export type RandomNatural =
 /** A draw as a host sees it. */
 export interface RandomDrawView {
   /**
-   * The generator state before the draw. Each draw takes at least one generator step, so no two draws of one execution
-   * path share it; a restored or forked session meets the same draw with the same ID.
+   * The generator state before the draw, which an answer to the pending draw must match. It is no identity of a draw:
+   * a restored or forked session meets the same draw with the same ID, sessions from the same seed meet the same IDs,
+   * and one path long enough to cycle the generator meets an ID again. A host telling draws apart adds the session and
+   * the site.
    */
   readonly drawId: number;
   /** The site, `path:line:column` of the draw in its file, counted from 1. */

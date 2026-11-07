@@ -168,7 +168,8 @@ const MEDIA_SAMPLE_MS = 100;
 export interface PlayerSessionOptions {
   /**
    * The engine's host; the in-process backend by default, until the L5 series activates the Worker. One live Player per
-   * bridge, which a later Player may reuse once that one ended; while another holds it, this Player never becomes ready.
+   * bridge, which a later Player may reuse after the previous Player scope is disposed; while another holds it, this
+   * Player never becomes ready.
    */
   bridge?: Promise<PlayerBridge>;
   /**
@@ -253,8 +254,8 @@ export type PlayerSessionStart =
   | {
       /** The host's token for the plan. */
       readonly plan: string;
-      /** The Start's data options, read at activation. */
-      readonly options: () => StartOptions;
+      /** The Start's data options, read at activation; Player Debug supplies `debugMode` (`setDebugMode`). */
+      readonly options: () => Omit<StartOptions, "debugMode">;
     }
   | ((recording: {
       readonly recorder: DebugRecorder;
@@ -263,8 +264,8 @@ export type PlayerSessionStart =
       readonly randomControl?: RandomControlOptions;
     }) => PlayerRuntimeSession);
 
-// Presentation lifecycle around the canonical runtime session. The adapter session stays the only
-// Player state; this host records which session is shown, when presentation must reset, maps
+// Presentation lifecycle around the shown session. It holds the shown `PlayerSession` publication; the engine's host
+// owns the canonical runtime state. This host records which session is shown, when presentation must reset, maps
 // browser time onto the session's scene time, and plays the session's media on browser elements.
 export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const resolvePackageAsset = options.resolveAsset ?? (() => null);
