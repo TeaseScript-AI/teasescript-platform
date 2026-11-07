@@ -1,0 +1,517 @@
+import assert from "node:assert/strict";
+import { effectScope, nextTick, watch, type Ref } from "vue";
+
+import type { BridgeResult, SectionSend } from "../../player/engine-bridge/client.js";
+import type { Publication } from "../../player/engine-bridge/session-protocol.js";
+import type { PlayerBridge, PublishHook } from "../../player/player-bridge.js";
+import {
+  answeredByPlayerInput,
+  observePlayerRuntimeTime,
+  playerRuntimeSnapshot,
+  restorePlayerRuntimeSessionAt,
+  selectPlayerRuntimeChoice,
+  type PlayerRuntimeSession,
+} from "../../player/runtime-adapter.js";
+import type { DebugAnswerInput } from "../../player/debug-export.js";
+import type { MediaProgressReport } from "../../src/playback.js";
+import type { PlayerSession } from "../../player/runtime-view.js";
+import type { ScriptStorageProvider } from "../../player/script-storage.js";
+import { compareStructures, renderPath } from "./runtime-state-comparison.js";
+
+/*
+ * The shared replay harness (#1919; docs/TESTING.md "Replay through the bridge"): a complete, cursor-based trace of the
+ * publications a session's store applies after a quiescent cut; an independent oracle of the same trace, the adapter
+ * restored at the cut and given the live run's requests after it, whatever sent them; and a live host, the real
+ * composable, that observes every publication and settles before the next, with its effects sampled after each step and
+ * every judgment made while it lives.
+ */
+
+/**
+ * The fields a publication may carry, and whether the trace compares each. A publication with another field, or
+ * without one of these, fails the trace: a new field (such as L5h.3's `historyPoint`) is declared here, compared or not.
+ * `instructions` and `callView` are L5f's, with no source independent of the host; the trace does not compare them.
+ */
+const PUBLICATION_FIELDS: Readonly<Record<keyof Publication, "compared" | "not compared">> = {
+  revision: "compared",
+  state: "compared",
+  from: "compared",
+  eventsThrough: "compared",
+  events: "compared",
+  instructions: "not compared",
+  callView: "not compared",
+};
+
+/** One publication after the cut, by value, its revision and cursors relative to the publication before the cut. */
+export interface TraceEntry {
+  /** Whether the store applied it; every publication after a cut must be applied. */
+  readonly applied: boolean;
+  readonly revision: number;
+  readonly from: number;
+  readonly through: number;
+  readonly events: readonly unknown[];
+  readonly state: unknown;
+}
+
+/** A tap on one session's store: the publications it applied from the cut, and the fields it did not expect. */
+export interface PublicationTap {
+  readonly entries: readonly TraceEntry[];
+  /** Each publication's fields that `PUBLICATION_FIELDS` does not declare, or declares and it lacked. */
+  readonly undeclared: readonly string[];
+  /** Removes the tap; the store applies as before. */
+  stop(): void;
+}
+
+/** What the tap reads of a session's publication: its revision and the events its store holds. */
+export interface TappedSession {
+  readonly revision: number;
+  readonly events: readonly unknown[];
+}
+
+/** What the tap needs of a bridge: the test build's `PlayerBridge`, or the Player bundle's, the same class. */
+export interface TappedBridge<S extends TappedSession> {
+  store(session: S): { apply(view: Publication | null, publish?: PublishHook): boolean } | null;
+  latest(session: S): S | null;
+}
+
+/**
+ * Taps the store of `session`, from its latest publication on (the cut): every publication it is given is recorded by
+ * value, relative to that publication's revision and event cursor, whether or not it applies. Both producers reach the
+ * store here: replies, and the in-process backend's facade.
+ */
+export function tapPublications<S extends TappedSession>(
+  bridge: TappedBridge<NoInfer<S>>,
+  session: S,
+): PublicationTap {
+  const store = bridge.store(session);
+  const cut = bridge.latest(session);
+  assert.ok(store !== null && cut !== null, "the session is held");
+  const r0 = cut.revision;
+  const c0 = cut.events.length;
+  const entries: TraceEntry[] = [];
+  const undeclared: string[] = [];
+  const apply = store.apply.bind(store);
+  const declared = Object.keys(PUBLICATION_FIELDS);
+  store.apply = (view, publish) => {
+    if (view !== null) {
+      const keys = Object.keys(view);
+      for (const key of keys) if (!declared.includes(key)) undeclared.push(`unexpected '${key}'`);
+      for (const key of declared) if (!keys.includes(key)) undeclared.push(`missing '${key}'`);
+    }
+    const applied = apply(view, publish);
+    if (view !== null)
+      entries.push({
+        applied,
+        revision: view.revision - r0,
+        from: view.from - c0,
+        through: view.eventsThrough - c0,
+        events: structuredClone(view.events),
+        state: structuredClone(view.state),
+      });
+    return applied;
+  };
+  return {
+    entries,
+    undeclared,
+    stop: () => {
+      Reflect.deleteProperty(store, "apply");
+    },
+  };
+}
+
+/** One request a bridge's client sent, by value, and how it ended. */
+export interface LoggedRequest {
+  readonly session: string | null;
+  readonly op: string;
+  readonly args: unknown;
+  /** Its reply's result; a refusal by the bridge (which changed nothing) or what the op threw; `null` while in flight. */
+  ended:
+    | { readonly ok: true; readonly result: unknown }
+    | { readonly ok: false; readonly name: string; readonly refused: boolean }
+    | null;
+}
+
+/**
+ * The requests a bridge's client sends, of every producer (the test's steps and the composable's own work): their log,
+ * in the order sent, which per session is the order the host applies them, and how many are in flight.
+ */
+export interface RequestTracker {
+  readonly log: readonly LoggedRequest[];
+  inFlight(): number;
+  /** Ends the count; the client sends as before. */
+  stop(): void;
+}
+
+/** Logs and counts `bridge`'s requests, signals and section sends from now on. */
+export function trackRequests(bridge: Pick<PlayerBridge, "client">): RequestTracker {
+  const client = bridge.client;
+  const { request, signal, section } = client;
+  const log: LoggedRequest[] = [];
+  let open = 0;
+  const counted = (
+    session: string | null,
+    op: string,
+    args: unknown,
+    send: () => Promise<BridgeResult>,
+  ): Promise<BridgeResult> => {
+    const entry: LoggedRequest = { session, op, args: structuredClone(args), ended: null };
+    log.push(entry);
+    open += 1;
+    return send().then(
+      (reply) => {
+        open -= 1;
+        entry.ended = { ok: true, result: structuredClone(reply.result) };
+        return reply;
+      },
+      (error: unknown) => {
+        open -= 1;
+        entry.ended = {
+          ok: false,
+          name: error instanceof Error ? error.name : String(error),
+          refused: error instanceof Error && "kind" in error && error.kind === "bridge",
+        };
+        throw error;
+      },
+    );
+  };
+  client.request = (op, args, options) =>
+    counted(options?.session ?? null, op, args, () => request.call(client, op, args, options));
+  client.signal = (op, args, session, onReply) =>
+    counted(session, op, args, () => signal.call(client, op, args, session, onReply));
+  const sectionOf = section.bind(client);
+  client.section = <T>(id: string, body: (send: SectionSend) => Promise<T>): Promise<T> =>
+    sectionOf<T>(id, (send) =>
+      body((op, args, basis, onReply) =>
+        counted(id, op, args, () => send(op, args, basis, onReply)),
+      ),
+    );
+  return {
+    log,
+    inFlight: () => open,
+    stop: () => {
+      client.request = request;
+      client.signal = signal;
+      client.section = section;
+    },
+  };
+}
+
+/**
+ * Waits until `session` is quiescent, as the oracle's cut assumes: no request of the bridge in flight, every reply in
+ * transit delivered, and the latest publication unchanged across one more `settle()` (the composable idle).
+ */
+export async function quiesce(
+  bridge: PlayerBridge,
+  session: PlayerSession,
+  tracker: RequestTracker,
+  settle: () => Promise<void>,
+): Promise<void> {
+  for (let turn = 0; turn < 200; turn += 1) {
+    bridge.deliverInTransit?.(session.id);
+    const revision = bridge.latest(session)?.revision;
+    await settle();
+    if (tracker.inFlight() === 0 && bridge.latest(session)?.revision === revision) return;
+  }
+  assert.fail("the session did not settle before the cut");
+}
+
+/** One step the test takes after the cut: its request over the bridge, from the shown session. */
+export interface ReplayStep {
+  readonly name: string;
+  request(shown: PlayerSession): { readonly op: string; readonly args: unknown };
+}
+
+/**
+ * The adapter's call for each op a live run sends after the cut, as the host's op makes it from the same arguments
+ * (`ops/session.ts`, `ops/input.ts`). An op without an entry fails the oracle: it is added here.
+ */
+const ADAPTER_OPS: Readonly<
+  Record<
+    string,
+    (
+      session: PlayerRuntimeSession,
+      args: Record<string, unknown>,
+    ) => { readonly session: PlayerRuntimeSession; readonly outcome: unknown } | null
+  >
+> = {
+  observeTime: (session, args) => {
+    // EVIDENCE: validation: the host accepted `atMs` as a scene time (`ops/session.ts`).
+    const atMs = args["atMs"] as number;
+    // EVIDENCE: validation: the host accepted `media` as media progress reports (`ops/session.ts`).
+    const media = args["media"] as readonly MediaProgressReport[];
+    return observePlayerRuntimeTime(session, atMs, media);
+  },
+  selectChoice: (session, args) => {
+    // EVIDENCE: validation: the host accepted `optionId` as a string and `input` as an answer input (`ops/input.ts`).
+    const optionId = args["optionId"] as string;
+    // EVIDENCE: validation: as above.
+    const input = (args["input"] ?? null) as DebugAnswerInput | null;
+    const select = (current: PlayerRuntimeSession) => selectPlayerRuntimeChoice(current, optionId);
+    return input === null
+      ? select(session)
+      : answeredByPlayerInput(session, input, () => select(session));
+  },
+};
+
+/**
+ * The oracle of a trace: `restored`, the adapter's session restored at the publication before the cut, given the live
+ * run's requests of the session after the cut, in order, whatever sent them (`requests`, from `trackRequests`). A
+ * request the bridge refused changed nothing and is skipped; one whose op threw must throw the same on the adapter and
+ * leaves its session as it was. Each request that changes the session is one publication, as the host publishes it
+ * (`ops/session.ts` `publishing`): its state without the active calls, and the events after the last one's, relative to
+ * the restored session. Each result must be the adapter's.
+ */
+export function adapterReplay(
+  restored: PlayerRuntimeSession,
+  requests: readonly LoggedRequest[],
+): { readonly entries: readonly TraceEntry[]; readonly last: PlayerRuntimeSession } {
+  const r0 = restored.revision;
+  const e0 = restored.events.length;
+  let session = restored;
+  let cursor = e0;
+  const entries: TraceEntry[] = [];
+  for (const [index, request] of requests.entries()) {
+    const ended = request.ended;
+    assert.ok(ended !== null, `request ${index} (${request.op}) after the cut had not ended`);
+    if (!ended.ok && ended.refused) continue;
+    const call = ADAPTER_OPS[request.op];
+    assert.ok(
+      call !== undefined,
+      `the oracle has no adapter call for '${request.op}': add it to ADAPTER_OPS in tests/helpers/replay-harness.ts`,
+    );
+    // EVIDENCE: validation: every op the Player sends takes an object of arguments.
+    const args = request.args as Record<string, unknown>;
+    if (!ended.ok) {
+      // On a copy of the session, which the throw leaves unusable; the bridge recovers at the publication before it.
+      const copy = restorePlayerRuntimeSessionAt(
+        session.plan,
+        JSON.stringify(playerRuntimeSnapshot(session)),
+        [],
+      );
+      assert.throws(
+        () => call(copy, args),
+        (error: unknown) => error instanceof Error && error.name === ended.name,
+        `request ${index} (${request.op}) threw ${ended.name} over the bridge`,
+      );
+      continue;
+    }
+    const made = call(session, args);
+    assert.ok(made !== null, `request ${index} (${request.op}) has no effect on the adapter`);
+    assert.deepEqual(
+      ended.result,
+      structuredClone(made.outcome),
+      `request ${index} (${request.op}): its result differs from the adapter's`,
+    );
+    const next = made.session;
+    if (next === session) continue;
+    const { calls: _calls, ...state } = next.state;
+    entries.push({
+      applied: true,
+      revision: next.revision - r0,
+      from: cursor - e0,
+      through: next.events.length - e0,
+      events: structuredClone(next.events.slice(cursor)),
+      state: structuredClone(state),
+    });
+    cursor = next.events.length;
+    session = next;
+  }
+  return { entries, last: session };
+}
+
+/**
+ * Judges a tapped trace against its oracle: every field declared, every publication applied, cursors contiguous from
+ * the cut, and the same publications, by value, in the same number. A mismatch names its entry and its first path.
+ */
+export function assertTrace(tap: PublicationTap, oracle: readonly TraceEntry[]): void {
+  assert.deepEqual(
+    tap.undeclared,
+    [],
+    `A publication's fields differ from those declared in tests/helpers/replay-harness.ts (PUBLICATION_FIELDS): ${[...new Set(tap.undeclared)].join(", ")}. Declare the field there, and whether the trace compares it.`,
+  );
+  const entries = tap.entries;
+  entries.forEach((entry, index) => {
+    assert.equal(entry.applied, true, `publication ${index} after the cut was not applied`);
+    assert.equal(
+      entry.from,
+      index === 0 ? 0 : entries[index - 1]!.through,
+      `publication ${index}: its cursor does not continue`,
+    );
+    assert.equal(
+      entry.events.length,
+      entry.through - entry.from,
+      `publication ${index}: its events do not fill its cursor range`,
+    );
+  });
+  assert.equal(
+    entries.length,
+    oracle.length,
+    `${entries.length} publications after the cut, the oracle's ${oracle.length}`,
+  );
+  oracle.forEach((expected, index) => {
+    const comparison = compareStructures(expected, entries[index]);
+    const first = comparison.mismatches[0];
+    assert.ok(
+      comparison.equal,
+      first === undefined
+        ? `publication ${index} differs`
+        : `publication ${index} differs at ${renderPath(first.path)}: oracle ${first.oracle}, bridge ${first.candidate}`,
+    );
+  });
+}
+
+/** What the live host's composable is, from the Player bundle (`loadPlayerModule`). */
+export interface LiveHostModules {
+  readonly usePlayerSession: (options: {
+    readonly bridge: Promise<PlayerBridge>;
+    readonly debugHistorySpill: () => Promise<null>;
+    readonly resolveAsset: (path: string) => string | null;
+    readonly scriptStorage: ScriptStorageProvider;
+  }) => LiveComposable;
+}
+
+/** The composable's host API the harness drives. */
+export interface LiveComposable {
+  readonly session: Readonly<Ref<PlayerSession | null>>;
+  readonly bridge: Promise<PlayerBridge>;
+  loadScriptStorage(): Promise<void>;
+  prepareRestore(restored: PlayerRuntimeSession): void;
+  activate(): Promise<void>;
+  update(next: PlayerSession): void;
+}
+
+/** The composable's main-side effects: storage writes, media elements and their starts, capture answers. */
+export interface HostEffects {
+  readonly writes: number;
+  readonly elements: number;
+  readonly plays: number;
+  readonly captures: number;
+}
+
+/** A composable that lives while `body` runs, and what the harness gives `body` of it. */
+export interface LiveHost {
+  readonly player: LiveComposable;
+  /** The bridge the composable runs on, its in-process backend. */
+  readonly bridge: PlayerBridge;
+  /** Hands `next` to the composable in the tick its store applies it: the publish hook of a step's request. */
+  readonly show: PublishHook;
+  /** Lets the composable's watchers and the work they start run, before the next step. */
+  settle(): Promise<void>;
+  /** The effects so far. */
+  effects(): HostEffects;
+  /** Every revision the composable showed, in order, from the start. */
+  readonly observed: readonly number[];
+  /** The media elements the composable made. */
+  readonly elements: readonly (EventTarget & { src: string })[];
+  /** Runs a judgment, only while the composable lives. */
+  judge<T>(judgment: () => T): T;
+}
+
+/**
+ * Runs `body` with a live composable on the in-process backend `bridge`: its storage writes, media elements, plays and
+ * capture answers counted, the scene clock standing still, and a fake `Audio` that keeps `paused` as a real element does
+ * (a play leaves it playing), so that a publication it observes again does not look like a medium to start again. Every
+ * judgment runs inside `body`; the composable stops, and the globals are restored, only after it.
+ */
+export async function withLiveHost<T>(
+  modules: LiveHostModules,
+  bridge: PlayerBridge,
+  body: (host: LiveHost) => Promise<T>,
+): Promise<T> {
+  const counts = { writes: 0, elements: 0, plays: 0, captures: 0 };
+  const elements: (EventTarget & { src: string })[] = [];
+  const surface = {
+    document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
+    window: new EventTarget(),
+    Audio: class extends EventTarget {
+      src = "";
+      preload = "";
+      volume = 1;
+      duration = 9;
+      paused = true;
+      ended = false;
+      currentTime = 0;
+      constructor() {
+        super();
+        counts.elements++;
+        elements.push(this);
+      }
+      play = async () => {
+        counts.plays++;
+        this.paused = false;
+      };
+      pause() {
+        this.paused = true;
+      }
+      load() {}
+      removeAttribute() {}
+    },
+  };
+  const previous = Object.keys(surface).map(
+    (name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const,
+  );
+  for (const [name, value] of Object.entries(surface))
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+  const now = performance.now;
+  // The scene clock stands still: only the steps move time.
+  performance.now = () => 0;
+  const section = bridge.client.section;
+  bridge.client.section = (id, run) =>
+    section(id, (send) =>
+      run((op, ...rest) => {
+        if (op === "answerCapture") counts.captures++;
+        return send(op, ...rest);
+      }),
+    );
+  const scope = effectScope();
+  let alive = true;
+  try {
+    const player = scope.run(() =>
+      modules.usePlayerSession({
+        bridge: Promise.resolve(bridge),
+        debugHistorySpill: async () => null,
+        resolveAsset: (path: string) => `https://fixture/${path}`,
+        scriptStorage: {
+          scope: "replay",
+          load: async () => [],
+          write: async () => void counts.writes++,
+          replace: async () => {},
+          clear: async () => {},
+        },
+      }),
+    )!;
+    const observed: number[] = [];
+    scope.run(() =>
+      watch(
+        player.session,
+        (next) => {
+          if (next !== null) observed.push(next.revision);
+        },
+        { flush: "sync" },
+      ),
+    );
+    return await body({
+      player,
+      bridge,
+      show: (next) => player.update(next),
+      settle: async () => {
+        await nextTick();
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      },
+      effects: () => ({ ...counts }),
+      observed,
+      elements,
+      judge: (judgment) => {
+        assert.ok(alive, "a judgment runs only while the live host lives");
+        return judgment();
+      },
+    });
+  } finally {
+    alive = false;
+    scope.stop();
+    bridge.client.section = section;
+    performance.now = now;
+    for (const [name, descriptor] of previous)
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+  }
+}

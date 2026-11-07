@@ -520,6 +520,28 @@ With `FUZZ_ACCEPTANCE=1` it also runs `tools/runtime-differential/acceptance.jso
 the candidate's closure digest. A runner that never answers, or fails before it opens its pipes, is bounded only by the
 job's deadline. A behaviour changed after the pin shows as a difference, which only a new seal removes.
 
+## Replay through the bridge
+
+`tests/helpers/replay-harness.ts` is the L5 gate's shared replay harness (#1919). `tests/player-bridge-recording.test.ts`
+uses it for the replay family: successful replay, frozen failure replay and live recovery, each in-process, in a Node
+Worker, and in the composable on its in-process engine. It has three parts:
+
+- **`tapPublications`:** the complete trace of the publications a session's store is given after a cut, by value, from
+  the cut's revision and event cursor. Every publication must apply, its cursors must continue, and it may carry only
+  the fields `PUBLICATION_FIELDS` declares. A new publication field is declared there, with whether the trace compares
+  it.
+- **`adapterReplay`:** the oracle, the adapter restored at the publication before the cut and given the live run's
+  requests after it (`trackRequests`), the test's steps and the composable's own observations alike, in the order the
+  host applied them. The trace is then compared exactly.
+- **`withLiveHost`:** the real composable. Each publication is handed to it in the tick its store applies it, and the
+  next step waits until it has settled. Its storage writes, media and capture answers are sampled after every step.
+  Every judgment runs while the composable lives.
+
+The cut and the run's end are quiescent (`quiesce`): no request in flight, every reply delivered, and nothing more
+published.
+
+A frozen failure matches no publication, so it is judged by its recorded successful prefix replayed.
+
 ## Implemented Phase 1 deterministic property harness
 
 The repository keeps one small deterministic campaign around the current public
