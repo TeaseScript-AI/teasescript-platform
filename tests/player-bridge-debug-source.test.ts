@@ -13,6 +13,7 @@ import { createSourceDebugSidecar, listRandomSites } from "../src/index.js";
 import { loadSourceDebugSidecar } from "../src/runtime/debug/source-sidecar.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
+import { PROJECT } from "./helpers/source-ops-project.js";
 
 /*
  * L5i.2: Debug's random-draw picker gets its code from the engine's Worker. `drawCode` makes the excerpt from the
@@ -23,22 +24,6 @@ import { inProcessBridge } from "./helpers/in-process-bridge.js";
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
 const WORKER = new URL("../player/engine-bridge/node-worker.js", import.meta.url);
 
-/** Two files, a draw in each, the second inside a function. */
-const PROJECT = {
-  files: [
-    {
-      path: "rooms/dice.tease",
-      source: [
-        "// Dice.",
-        "global function rollTwice {",
-        "    let first = randomInteger(1..=6)",
-        '    say "First: ${first}", instant',
-        "}",
-      ].join("\n"),
-    },
-    { path: "main.tease", source: 'let hit = chance(50)\nrollTwice()\nshowButton "Done"\nexit' },
-  ],
-};
 const OTHER = 'let coin = chance(25)\nshowButton "Other"\nexit';
 
 async function prepared(bridge: PlayerBridge, source: PrepareSource): Promise<string> {
@@ -138,62 +123,61 @@ test("a published plan with no sources gives no code", async () => {
   assert.equal(reply.result, null);
 });
 
-test("after teardown nothing the source ops touched stays held: no plan, its sources or a debug file", () => {
-  const url = (path: string) => JSON.stringify(new URL(path, import.meta.url).href);
-  // In a child with a forced collection: a weak reference to each value stored under a plan token, wherever its cache
-  // is, and to each debug file the excerpt is made from, wherever it is kept.
-  const script = [
-    'import { registerHooks } from "node:module";',
-    "const held = [];",
-    "const keep = (kind, value) => held.push({ kind, ref: new WeakRef(value) });",
-    "const set = Map.prototype.set;",
-    "Map.prototype.set = function (key, value) {",
-    '  if (typeof key === "string" && /^p[0-9]+$/.test(key) && typeof value === "object" && value !== null) keep(key, value);',
-    "  return set.call(this, key, value);",
-    "};",
-    'globalThis.__keepFile = (file) => keep("file", file);',
-    `const drawModule = ${url("../player/random-draw-code.js")};`,
-    "registerHooks({ load(target, context, next) {",
-    "  const result = next(target, context);",
-    "  if (target !== drawModule) return result;",
-    '  const anchor = "export function fileCode(file) {";',
-    "  const source = String(result.source);",
-    '  if (!source.includes(anchor)) throw new Error("fileCode moved");',
-    '  return { ...result, source: source.replace(anchor, anchor + " globalThis.__keepFile(file);") };',
-    "} });",
-    `const { createInProcessBackend } = await import(${url("../player/engine-bridge/in-process.js")});`,
-    "const { client } = createInProcessBackend({ commit: null, dirty: null, mode: null, appVersion: null });",
-    `const project = ${JSON.stringify(PROJECT)};`,
-    'const source = (await client.request("prepare", { source: { kind: "source", script: project } })).result;',
-    `const text = ${JSON.stringify(serializeValidatedRuntimeJson(compilePlayerProject(PROJECT).plan!))};`,
-    'const restored = (await client.request("prepare", { source: { kind: "plan", text } })).result;',
-    "for (const { plan } of [source, restored]) {",
-    '  const { randomSites } = (await client.request("planMetadata", { plan })).result;',
-    "  for (const site of randomSites)",
-    '    if ((await client.request("drawCode", { plan, path: site.path, site })).result === null) throw new Error("no code");',
-    "}",
-    'await client.request("codeLines", { texts: ["true"], first: 1 });',
-    'await client.request("teardown", null);',
-    "for (let round = 0; round < 8; round += 1) {",
-    "  await new Promise((resolve) => setImmediate(resolve));",
-    "  globalThis.gc();",
-    "}",
-    "const kinds = (list) => list.map(({ kind }) => kind);",
-    "process.stdout.write(JSON.stringify({ touched: kinds(held), retained: kinds(held.filter(({ ref }) => ref.deref() !== undefined)) }));",
-    "client.terminate();",
-  ].join("\n");
-  const child = spawnSync(process.execPath, ["--expose-gc", "--input-type=module", "-e", script], {
-    encoding: "utf8",
-    cwd: fileURLToPath(new URL(".", import.meta.url)),
-  });
+/*
+ * Session data held beyond teardown, as an invariant over a generated family: every route a plan's code comes by, and
+ * every point a `drawCode` can complete at, against a teardown. Nothing the ops stored under a plan token, nor any
+ * object reachable from it or a debug file an excerpt was made from, stays held after it, wherever it was kept.
+ */
+const AXES = {
+  route: ["source", "restored"],
+  completion: ["settled", "duringSidecar", "duringRenderer"],
+} as const;
+const CASES = AXES.route.flatMap((route) =>
+  AXES.completion.map((completion) => `${route}/${completion}`),
+);
+
+test("after teardown nothing the source ops touched stays held, however a request completes", () => {
+  const child = spawnSync(
+    process.execPath,
+    [
+      "--expose-gc",
+      fileURLToPath(new URL("./helpers/source-ops-lifecycle.js", import.meta.url)),
+      JSON.stringify(CASES),
+    ],
+    { encoding: "utf8" },
+  );
   assert.equal(child.status, 0, child.stderr);
-  // EVIDENCE: fixture: the child script writes the JSON of what it touched and what stayed held.
-  const { touched, retained } = JSON.parse(child.stdout) as {
+  // EVIDENCE: fixture: the child writes one report per case it was given.
+  const reports = JSON.parse(child.stdout) as readonly {
+    readonly name: string;
+    readonly late: "none" | "code" | "no code";
     readonly touched: readonly string[];
     readonly retained: readonly string[];
-  };
-  // Both plans, the compiled one's sources, and the debug files the excerpts were made from were seen.
-  assert.ok(touched.includes("p1") && touched.includes("p2"), touched.join());
-  assert.ok(touched.filter((kind) => kind === "file").length >= 2, touched.join());
-  assert.deepEqual(retained, []);
+    readonly context: number;
+  }[];
+  // Coverage, from the names the child reports: every axis value, and every pair of them.
+  const names = reports.map(({ name }) => name.split("/"));
+  for (const [axis, values] of Object.values(AXES).entries())
+    for (const value of values)
+      assert.ok(
+        names.some((name) => name[axis] === value),
+        value,
+      );
+  for (const route of AXES.route)
+    for (const completion of AXES.completion)
+      assert.ok(
+        names.some(([r, c]) => r === route && c === completion),
+        `${route}/${completion}`,
+      );
+  for (const report of reports) {
+    assert.deepEqual(
+      report.touched,
+      ["file", "plan or sidecar", "sources", "text"],
+      `${report.name} watches what the ops keep`,
+    );
+    assert.deepEqual(report.retained, [], `${report.name} keeps nothing past teardown`);
+    assert.equal(report.context, 0);
+    // A request torn down under it answers no code.
+    assert.equal(report.late, report.name.endsWith("/settled") ? "none" : "no code", report.name);
+  }
 });
