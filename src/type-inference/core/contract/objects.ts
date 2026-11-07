@@ -58,9 +58,9 @@ export function objectsAt(
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
     proves: true,
-    // #1668: K, the objects query's own run names provenance, never the read's items
     make: () => {
       contract.work.charge("objectSteps");
+      // #1668: K, the objects query's own run names provenance, never the read's items
       return valueObjects(contract, value, rest);
     },
   };
@@ -77,9 +77,9 @@ export function keyObjects(contract: Contract, asked: Key): ProofDemand<ObjectsP
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
     proves: true,
-    // #1668: K, the objects query's own run names provenance, never the read's items
     make: () => {
       contract.work.charge("objectSteps");
+      // #1668: K, the objects query's own run names provenance, never the read's items
       return keyObjectsMade(contract, key);
     },
   };
