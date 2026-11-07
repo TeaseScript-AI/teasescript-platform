@@ -1083,4 +1083,10 @@ export const CASES = [
       "import { type WorkLedger as R12Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\ninterface Iterable<T> extends Generator<T>{}\nfunction* source(work:R12Work):Iterable<string>{work.charge('objectSteps');yield 'x';}\nexport function f(work:R12Work):number{work.charge('objectSteps');let n=0;for(const item of each(work,'objectSteps',source(work)))n+=item.length;return n;}\n",
     expect: ["collection-shape"],
   },
+  {
+    name: "r13/parenthesisedLiteral",
+    source:
+      "import { type WorkLedger } from '../budget.js';\nexport function f(work: WorkLedger): number { work.charge('objectSteps'); const value: string | number = (1); return typeof value === 'number' ? value : 0; }\n",
+    expect: ["widening"],
+  },
 ];
