@@ -2246,17 +2246,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const plan = scriptPlan;
     const storage = scriptStorage;
     const releaseImporting = holdImporting();
-    // The import is a preparation of its own: a Continue or Start still being prepared would offer what it replaces.
-    // It owns that preparation, in this room and plan tenure; once either moves on, it issues nothing more.
+    // A session of this script in progress ends first; Debug's rewind could restore this script's earlier saved data
+    // over the import, so its history ends.
+    if (sessionInProgress.value || inspecting.value) endSession();
+    rewindRetirements.value++;
+    // The import is then a preparation of its own: a Continue or Start still being prepared would offer what it
+    // replaces. It owns that preparation, in this room and plan tenure; once either moves on, it issues nothing more.
     const owner = ++preparation;
     const ctx = persistenceOwnership(owner);
     let failure: string | null = null;
     try {
       await owned(async () => {
         try {
-          if (sessionInProgress.value || inspecting.value) endSession();
-          // Debug's rewind could restore this script's earlier saved data over the import, so its history ends.
-          rewindRetirements.value++;
           // A session being kept is kept before the import replaces it.
           while (keeping !== null) await keeping;
           ctx.check();
