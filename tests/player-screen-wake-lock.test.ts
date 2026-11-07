@@ -22,8 +22,11 @@ interface WakeLockHost {
   activate(): Promise<void>;
   toStartPage(): Promise<void>;
   reportHostError(error: unknown): void;
-  setRandomControl(control: RuntimeAdapter.PlayerRuntimeSessionOptions["randomControl"]): void;
-  resolveRandomDraw(drawId: number, outcome: "natural"): RandomDrawResolutionOutcome | null;
+  setRandomControl(control: { readonly sites: readonly [] } | null): void;
+  resolveRandomDraw(
+    drawId: number,
+    outcome: "natural",
+  ): Promise<RandomDrawResolutionOutcome | null>;
 }
 let usePlayerSession: (options: { capabilities: { camera: boolean } }) => WakeLockHost;
 let useDevelopmentTime: (
@@ -248,7 +251,7 @@ test("a random draw Debug pauses at keeps the lock, also in the first statement"
   const { host } = mountPlayer(context);
   // Debug's Choose outcomes: the session pauses at every draw until it is decided. Paused in its first statement, the
   // session has not completed one yet.
-  host.setRandomControl({});
+  host.setRandomControl({ sites: [] });
   host.prepare((options) =>
     runtime.createPlayerRuntimeSession("let roll = randomInteger(1..=6)\nexit", options),
   );
@@ -257,7 +260,7 @@ test("a random draw Debug pauses at keeps the lock, also in the first statement"
   const draw = host.randomDraw.value;
   assert.ok(draw);
   assert.deepEqual([browser.requests(), browser.held()], [1, 1]);
-  assert.ok(host.resolveRandomDraw(draw.drawId, "natural"));
+  assert.ok(await host.resolveRandomDraw(draw.drawId, "natural"));
   await settle();
   assert.equal(status(host), "halted");
   assert.equal(browser.held(), 0);

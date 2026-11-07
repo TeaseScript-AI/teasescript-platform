@@ -58,9 +58,8 @@ interface StopHost {
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   resolveAsset(path: string): string | null;
-  setRandomControl(
-    control: { readonly filter: { readonly kinds: readonly string[] } } | null,
-  ): void;
+  setRandomControl(control: { readonly sites: readonly [] } | null): void;
+  resolveRandomDraw(drawId: number, outcome: "natural"): Promise<{ readonly kind: string } | null>;
   readonly inputSection: unknown;
 }
 let usePlayerSession: (options: {
@@ -774,6 +773,17 @@ test("a debug export offers a photo only the replay saves, also after a Player e
   );
 });
 
+/**
+ * Choose outcomes pauses at every draw: a repeating timer's first, at its creation (a `duration` draw), comes before the
+ * repeat these tests pause at, and goes on naturally here.
+ */
+async function naturalCreationDraw(host: StopHost) {
+  const created = host.session.value?.state.randomDraw;
+  assert.ok(created, "the timer's creation draw waits");
+  assert.equal(created.kind, "duration");
+  assert.equal((await host.resolveRandomDraw(created.drawId, "natural"))?.kind, "resolved");
+}
+
 // A photo the session never took is released when Debug's rewind leaves its session, also while a random draw holds
 // that session; the photo it took stays for the state that holds it, Back and Return included (#1882).
 for (const atDraw of [false, true])
@@ -782,7 +792,7 @@ for (const atDraw of [false, true])
     encoding.started = 0;
     const host = mount(context, () => usePlayerSession({ capabilities: { camera: true } }));
     const rewind = mount(context, () => useDebugRewind(host));
-    if (atDraw) host.setRandomControl({ filter: { kinds: ["timerRepeat"] } });
+    if (atDraw) host.setRandomControl({ sites: [] });
     host.prepare(({ recorder }) =>
       runtime.createPlayerRuntimeSession(
         [
@@ -816,6 +826,7 @@ for (const atDraw of [false, true])
     const pressed = runtime.activatePlayerRuntimeButton(host.session.value!);
     assert.ok(pressed);
     host.update(pressed.session);
+    if (atDraw) await naturalCreationDraw(host);
     await until(() => encoding.started === 2, "the second photo was not encoded");
     if (atDraw) {
       // The timer repeats, and Debug's random control pauses the session at its next duration's draw.
@@ -857,7 +868,7 @@ test("a photo held back at a random draw the capture's observation reaches is re
   let now = 0;
   context.mock.method(performance, "now", () => now);
   const host = mount(context, () => usePlayerSession({ capabilities: { camera: true } }));
-  host.setRandomControl({ filter: { kinds: ["timerRepeat"] } });
+  host.setRandomControl({ sites: [] });
   host.prepare(({ recorder }) =>
     runtime.createPlayerRuntimeSession(
       [
@@ -891,6 +902,7 @@ test("a photo held back at a random draw the capture's observation reaches is re
   const pressed = runtime.activatePlayerRuntimeButton(host.session.value!);
   assert.ok(pressed);
   host.update(pressed.session);
+  await naturalCreationDraw(host);
   await until(() => encoding.started === 2, "the second photo was not encoded");
   assert.equal(host.session.value!.state.randomDraw, null);
   // Three seconds pass while the photo is encoded; the capture's own observation then reaches the timer's draw.

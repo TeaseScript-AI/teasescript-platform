@@ -20,7 +20,8 @@ import {
   type CodeLine,
   type DrawCode,
 } from "./randomDrawPresentation";
-import { outcomeKey, type DebugRandomNext, type DebugRandomTried } from "./useDebugRandom";
+import { outcomeKey } from "../../random-outcomes.js";
+import type { DebugRandomNext, DebugRandomTried } from "./useDebugRandom";
 
 // The random draw picker (DEBUGGER.md "Random draws"): the session is paused at a draw, shown in its file's code. A
 // click on an outcome resumes with it, a typed value or a new order with its Use button, Least tried with the outcome

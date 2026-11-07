@@ -135,6 +135,7 @@ export const WORKER_MODULES: readonly string[] = [
   "player/compile-project.ts",
   "player/debug-recorder.ts",
   "player/debug-view.ts",
+  "player/random-decisions.ts",
   "player/engine-bridge/in-process.ts",
 ];
 
@@ -331,18 +332,6 @@ export const RATCHET: readonly RatchetEntry[] = [
     importer: "player/vue/src/usePlayerSession.ts",
     target: "player/engine-bridge/in-process.ts",
     name: "introduceNow",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "resumePlayerRuntimeRandomDraw",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "setPlayerRuntimeRandomControl",
     family: "L5i",
   },
   {

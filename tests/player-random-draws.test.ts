@@ -4,6 +4,8 @@ import { effectScope, type Ref } from "vue";
 
 import {
   advancePlayerRuntimeTime,
+  createPlayerRuntimeRestorePoint,
+  restorePlayerRuntimeSession,
   resumePlayerRuntimeRandomDraw,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
@@ -52,13 +54,22 @@ interface RandomHost {
   activate(): Promise<void>;
   start(next: PlayerRuntimeSession, paused?: boolean): void;
   prepareInput(): true | Promise<boolean>;
+  prepareRestore(restored: PlayerRuntimeSession): void;
+  randomTried(
+    site: string,
+  ): Promise<{
+    readonly history: readonly string[];
+    readonly first: number;
+    readonly counts: readonly (readonly [string, number])[];
+    readonly revision: number;
+  } | null>;
 }
 interface DebugRandom {
   readonly enabled: Ref<boolean>;
   readonly draw: Readonly<Ref<RandomDrawView | null>>;
   setNext(site: string, next: "ask" | "random" | "untried"): void;
-  resolve(outcome: RandomOutcome | "natural"): boolean;
-  resolveLeastTried(): boolean;
+  resolve(outcome: RandomOutcome | "natural"): Promise<boolean>;
+  resolveLeastTried(): Promise<boolean>;
   readonly sites: Readonly<Ref<ReadonlyMap<string, RandomSite>>>;
   readonly code: Readonly<Ref<{ readonly lines: readonly CodeLine[] } | null>>;
   readonly historyLines: Readonly<Ref<readonly CodeLine[]>>;
@@ -222,6 +233,13 @@ async function mount(context: TestContext, plan: InstructionPlan) {
   return mounted;
 }
 
+/** What `site` took, as the host's history of the shown session's Player gives it. */
+async function triedOf(host: RandomHost, site: string) {
+  const view = await host.randomTried(site);
+  assert.ok(view !== null, "the shown session's Player holds the history");
+  return { history: view.history, first: view.first, counts: new Map(view.counts) };
+}
+
 const said = (host: RandomHost) =>
   host.session.value?.transcriptEntries.map((entry) => entry.text) ?? [];
 
@@ -248,13 +266,13 @@ test("with Choose outcomes on, a session pauses at each draw and goes on with th
   assert.equal(playerRuntimeAwaitsHost(paused.state), true);
   assert.equal(advancePlayerRuntimeTime(paused, 60_000), paused);
 
-  assert.equal(random.resolve({ kind: "number", value: 6 }), true);
+  assert.equal(await random.resolve({ kind: "number", value: 6 }), true);
   assert.deepEqual(said(host), ["Roll: 6"]);
   assert.equal(random.draw.value?.site, hitSite);
-  assert.equal(random.resolve("natural"), true);
+  assert.equal(await random.resolve("natural"), true);
   assert.equal(random.draw.value, null);
   assert.equal(said(host).length, 2);
-  assert.deepEqual(random.tried(rollSite!).history, ["6"]);
+  assert.deepEqual((await triedOf(host, rollSite!)).history, ["6"]);
 });
 
 test("Next time decides a site's later draws without asking: Random naturally, Prefer untried the least taken", async (context) => {
@@ -268,13 +286,13 @@ test("Next time decides a site's later draws without asking: Random naturally, P
   await host.activate();
   await settle(context);
   assert.equal(random.draw.value, null, "no draw asked");
-  const untried = random.tried(hitSite!);
+  const untried = await triedOf(host, hitSite!);
   // Each of the two outcomes is taken once before either is taken again.
   assert.equal(untried.history.length, 4);
   assert.notEqual(untried.history[0], untried.history[1]);
   assert.notEqual(untried.history[2], untried.history[3]);
   assert.deepEqual([...untried.counts.values()].sort(), [2, 2]);
-  assert.equal(random.tried(pickSite!).history.length, 4);
+  assert.equal((await triedOf(host, pickSite!)).history.length, 4);
 });
 
 test("Least tried resolves a paused draw with the outcome its site took least, the natural one on a tie", async (context) => {
@@ -285,10 +303,10 @@ test("Least tried resolves a paused draw with the outcome its site took least, t
   await host.activate();
   await settle(context);
   const first = random.draw.value!;
-  assert.equal(random.resolveLeastTried(), true);
+  assert.equal(await random.resolveLeastTried(), true);
   assert.ok(first.natural.kind === "boolean");
   assert.deepEqual(said(host), [`Hit: ${first.natural.value}`]);
-  assert.equal(random.resolveLeastTried(), true);
+  assert.equal(await random.resolveLeastTried(), true);
   const [taken, then] = said(host);
   assert.notEqual(taken, then, "the second takes the outcome not taken yet");
 });
@@ -301,17 +319,23 @@ test("a picker answer counts before the draws it lets run, so they decide from i
   await host.activate();
   await settle(context);
   const site = random.draw.value!.site;
-  // An answer the engine refuses counts nothing, and the draw still waits.
-  assert.equal(random.resolve({ kind: "number", value: 123 }), false);
-  const before = random.tried(site);
+  const unseen = JSON.stringify(await host.randomTried(site));
+  await settle(context);
+  const shown = random.tried(site);
+  // An answer the engine refuses counts nothing, and the draw still waits: the host's history, revision included, is
+  // as before, also for a site that took nothing yet.
+  assert.equal(await random.resolve({ kind: "number", value: 123 }), false);
+  await settle(context);
+  assert.equal(JSON.stringify(await host.randomTried(site)), unseen);
+  const before = await triedOf(host, site);
   assert.deepEqual(before.history, []);
   assert.equal(before.counts.size, 0);
   // Until the history changes, the picker gets the same object, so it does not render all its outcomes again.
-  assert.equal(random.tried(site), before);
+  assert.equal(random.tried(site), shown);
   random.setNext(site, "untried");
-  assert.equal(random.resolve({ kind: "boolean", value: false }), true);
+  assert.equal(await random.resolve({ kind: "boolean", value: false }), true);
   assert.deepEqual(said(host), ["false", "true"], "the next draw takes the outcome not taken yet");
-  assert.deepEqual(random.tried(site).history, ["false", "true"], "in the order taken");
+  assert.deepEqual((await triedOf(host, site)).history, ["false", "true"], "in the order taken");
 });
 
 test("a restored state waits at its draw for the picker only once input adopts it", async (context) => {
@@ -328,7 +352,7 @@ test("a restored state waits at its draw for the picker only once input adopts i
   assert.equal(asked(), null);
   assert.equal(await host.prepareInput(), true);
   assert.equal(asked(), atDraw.state.randomDraw!.drawId);
-  assert.equal(random.resolve({ kind: "boolean", value: true }), true);
+  assert.equal(await random.resolve({ kind: "boolean", value: true }), true);
   assert.deepEqual(said(host), ["Hit: true"]);
   // Adopted after Choose outcomes was turned off, it goes on naturally.
   host.start(host.session.value!, true);
@@ -338,6 +362,66 @@ test("a restored state waits at its draw for the picker only once input adopts i
   assert.equal(await host.prepareInput(), true);
   assert.equal(host.session.value?.state.randomDraw, null);
   assert.equal(said(host).length, 2);
+});
+
+// L5i.4, Sol plan P5: Continue's boundary stays as before. A restored session goes on from the draw it was kept at
+// naturally, and the rest of that run without Debug's control; only then does the session take it.
+test("a Continue at the first of two draws finishes both naturally, then takes Debug's control", async (context) => {
+  const plan = compiled(
+    'let a = chance(50)\nlet b = chance(50)\nsay "${a} ${b}", instant\nshowButton "Next"\nexit',
+  );
+  const { host, random } = await mount(context, plan);
+  const [site] = listRandomSites(plan).map((each) => each.id);
+  // Kept at its first draw, as a session the adapter's own control paused there.
+  const kept = createPlayerRuntimeSession(plan, { randomControl: {} });
+  assert.notEqual(kept.state.randomDraw, null);
+  host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(kept)));
+  await host.activate();
+  await settle(context);
+  assert.equal(random.draw.value, null, "no draw waits: both went on naturally");
+  assert.equal(said(host).length, 1);
+  // Adopted after: the host's history is the session's Player's to read.
+  assert.notEqual(await host.randomTried(site!), null);
+});
+
+// L5i.4: the history is the host's while the Debug features run. Choose outcomes off and on keeps it; their end forgets it.
+test("a site's history lasts through Choose outcomes off and on, and goes when the Debug features end", async (context) => {
+  const plan = compiled(
+    'for turn in 1..=3 {\n    let hit = chance(50)\n    say "${hit}", instant\n}\nshowButton "Next"\nexit',
+  );
+  stubBrowser(context);
+  const hostScope = effectScope();
+  const host = hostScope.run(() =>
+    usePlayerSession({
+      scriptStorage: savedData(),
+      keptSessions: memoryKeptSessionStore(),
+      debugRooms: memoryKeptRoomStore(),
+      room: "debug",
+    }),
+  )!;
+  context.after(() => hostScope.stop());
+  const featureScope = effectScope();
+  const random = featureScope.run(() => useDebugRandom(host))!;
+  await host.loadScriptStorage();
+  await host.prepareScript(plan, (recording) =>
+    createPlayerRuntimeSession(plan, { ...recording, ...host.scriptStorageOptions() }),
+  );
+  random.enabled.value = true;
+  await settle(context);
+  await host.activate();
+  await settle(context);
+  const [site] = listRandomSites(plan).map((each) => each.id);
+  assert.equal(await random.resolve("natural"), true);
+  assert.equal((await triedOf(host, site!)).history.length, 1);
+  random.enabled.value = false;
+  await settle(context);
+  random.enabled.value = true;
+  await settle(context);
+  // Off, the draws went on naturally, unrecorded; the outcome taken before stays.
+  assert.equal((await triedOf(host, site!)).history.length, 1, "kept through off and on");
+  featureScope.stop();
+  await settle(context);
+  assert.equal((await triedOf(host, site!)).history.length, 0, "forgotten with the Debug features");
 });
 
 test("turning Choose outcomes off goes on from a paused draw with its natural outcome", async (context) => {
@@ -365,7 +449,7 @@ test("a site keeps its latest outcomes for the picker, numbered from its first d
   random.setNext(site!, "random");
   await host.activate();
   await settle(context);
-  const tried = random.tried(site!);
+  const tried = await triedOf(host, site!);
   assert.equal(tried.history.length, 1000);
   assert.equal(tried.first, 6);
   assert.equal(
@@ -651,7 +735,7 @@ test("the picker's sites and code come from the Worker, which compiled the sourc
   assert.ok(random.sites.value.has(first.site), "the sites come from the plan's metadata");
   assert.equal(held.length, 1);
   // Resolved before its code arrived: that code, for the draw before, never shows.
-  assert.ok(random.resolve("natural"));
+  assert.ok(await random.resolve("natural"));
   await settle(context);
   const second = random.draw.value;
   assert.ok(second !== null && second.drawId !== first.drawId);
@@ -694,7 +778,7 @@ test("a site's earlier outcomes never show at another site's draw, even before i
   await settle(context);
   // The first turn: each site's first draw, so each site has one earlier outcome after it.
   for (let step = 0; step < 2; step += 1) {
-    assert.ok(random.resolve("natural"));
+    assert.ok(await random.resolve("natural"));
     await settle(context);
   }
   const roll = random.draw.value;
@@ -705,7 +789,7 @@ test("a site's earlier outcomes never show at another site's draw, even before i
     "the integer site's outcome shows at its second draw",
   );
   holding = true;
-  assert.ok(random.resolve("natural"));
+  assert.ok(await random.resolve("natural"));
   await settle(context);
   const hit = random.draw.value;
   assert.ok(hit !== null && hit.site !== roll.site);

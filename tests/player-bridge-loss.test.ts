@@ -92,6 +92,26 @@ const turns = async (count: number) => {
   for (let turn = 0; turn < count; turn++) await new Promise((resolve) => setTimeout(resolve, 5));
 };
 
+/**
+ * Holds the replies the in-process host schedules `delayMs` after a request, until the returned release: what is posted
+ * meanwhile is in flight however long the test's own turns take, as on a loaded machine they may take longer.
+ */
+function holdReplies(context: TestContext, delayMs: number): () => void {
+  const timeout = globalThis.setTimeout;
+  const held: (() => void)[] = [];
+  const hold = (callback: () => void, ms?: number) => {
+    if (ms !== delayMs) return timeout(callback, ms);
+    held.push(callback);
+    return timeout(() => {}, 0);
+  };
+  // EVIDENCE: invariant: `hold` keeps `setTimeout`'s call shape for the callbacks these tests and the host schedule.
+  const scheduled = context.mock.method(globalThis, "setTimeout", hold as typeof setTimeout);
+  return () => {
+    scheduled.mock.restore();
+    for (const callback of held.splice(0)) timeout(callback, 0);
+  };
+}
+
 // The services, through the same section host as their own tests, on a host whose replies take 50 ms.
 
 /** A service's host around `session`: its section, and the op it sends, with a loss at the post of `lossAt`. */
@@ -378,10 +398,12 @@ for (const [consumer, run] of [
     const { player, lose, hostErrors } = await mount(context, 50);
     let result: PlayerSession | symbol | string | null = "pending";
     const unhandled = await unhandledDuring(async () => {
+      const release = holdReplies(context, 50);
       const pending = run(player);
-      // Posted, its reply 50 ms away.
+      // Posted; its reply is held until after the loss, so it is in flight then.
       await turns(2);
       lose();
+      release();
       result = await pending;
     });
     assert.deepEqual(unhandled, []);

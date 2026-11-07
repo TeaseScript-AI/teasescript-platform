@@ -62,7 +62,7 @@ function answerOp<A>(
     (held, args) => {
       // EVIDENCE: validation: checkArguments accepted these arguments before run.
       const { actionId, answer: given, held: media } = args as AnswerArguments<A>;
-      held.catchUp = null;
+      held.endCatchUp();
       const result = answer(
         held.current,
         actionId,

@@ -2,6 +2,7 @@ import type { LanguageTokenClass, RandomDrawView, RandomOutcome } from "../../..
 import { checkedOutcome } from "../../../src/runtime/random/random-kinds.js";
 import { randomDrawAlternatives } from "../../../src/runtime/random/random-alternatives.js";
 import { runtimeDebugPreview } from "../../../src/runtime/debug/debug-preview.js";
+import { numberText as text, randomOutcomeLabel } from "../../random-outcomes.js";
 
 /**
  * How the random draw picker (DEBUGGER.md "Random draws") offers a draw's outcomes: a button for each when the draw has
@@ -83,32 +84,6 @@ function rank(outcome: RandomOutcome): number {
       return outcome.index;
     case "order":
       return 0;
-  }
-}
-
-/** A number as the picker shows it: a whole number in full, any other to six significant digits. */
-function text(value: number): string {
-  return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(6)));
-}
-
-/** An outcome of `draw` as the picker shows it: the value it gives, a candidate's value, or a shuffle's new order. */
-export function randomOutcomeLabel(draw: RandomDrawView, outcome: RandomOutcome): string {
-  const { support } = draw;
-  switch (outcome.kind) {
-    case "boolean":
-      return String(outcome.value);
-    case "number":
-      return text(outcome.value);
-    case "index": {
-      const candidates =
-        support.kind === "candidates" || support.kind === "weighted" ? support.candidates : [];
-      const candidate = candidates[outcome.index];
-      return candidate === undefined ? `#${outcome.index}` : runtimeDebugPreview(candidate).text;
-    }
-    case "order": {
-      const items = support.kind === "order" ? support.items : [];
-      return `[${outcome.order.map((index) => (items[index] === undefined ? `#${index}` : runtimeDebugPreview(items[index]).text)).join(", ")}]`;
-    }
   }
 }
 

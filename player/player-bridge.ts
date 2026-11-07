@@ -7,7 +7,7 @@ import {
 } from "./engine-bridge/client.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import type { KeptRestore } from "./engine-bridge/ops/persistence.js";
-import type { StartOptions } from "./engine-bridge/ops/session.js";
+import type { StartOptions, StartRandom } from "./engine-bridge/ops/session.js";
 import type { CallViewReply, Introduction, Publication } from "./engine-bridge/session-protocol.js";
 import type { PlayerSession } from "./runtime-view.js";
 import { SessionStore } from "./session-store.js";
@@ -95,18 +95,34 @@ export class PlayerBridge {
   get traced(): boolean {
     return this.#tracingIntents > 0;
   }
+  #randomIntents = 0;
+  /**
+   * The next serial of a random control change on this connection (`RandomIntent`), counted as tracing changes are
+   * (`nextTracingIntent`).
+   */
+  nextRandomIntent(): number {
+    this.#randomIntents += 1;
+    return this.#randomIntents;
+  }
   #player: symbol | null = null;
+  #owners = 0;
+  #owner = 0;
 
   /**
-   * Takes the bridge for the live Player that `player` names (`PlayerSessionOptions.bridge`): one live Player per bridge, as the
-   * connection's one trace serves one Debug. Throws while another Player holds it.
+   * Takes the bridge for the live Player that `player` names (`PlayerSessionOptions.bridge`): one live Player per
+   * bridge, as the connection's one trace serves one Debug. Returns the Player's generation on this bridge, which its
+   * random control carries as its owner (`RandomIntent.owner`). Throws while another Player holds it.
    */
-  claim(player: symbol): void {
-    if (this.#player !== null && this.#player !== player)
+  claim(player: symbol): number {
+    if (this.#player === player) return this.#owner;
+    if (this.#player !== null)
       throw new Error(
         "One live Player per engine bridge: this bridge already serves a Player. Reuse it once that Player ended.",
       );
     this.#player = player;
+    this.#owners += 1;
+    this.#owner = this.#owners;
+    return this.#owner;
   }
   /** Gives the bridge up for the next Player, when `player` holds it. */
   unclaim(player: symbol): void {
@@ -146,8 +162,18 @@ export class PlayerBridge {
   }
 
   /** Starts a session of the held plan `plan`; resolves with its first publication. */
-  async start(plan: string, options: StartOptions, recording: boolean): Promise<PlayerSession> {
-    const reply = await this.#client.request("start", { plan, options, recording });
+  async start(
+    plan: string,
+    options: StartOptions,
+    recording: boolean,
+    random?: StartRandom,
+  ): Promise<PlayerSession> {
+    const reply = await this.#client.request("start", {
+      plan,
+      options,
+      recording,
+      ...(random === undefined ? {} : { random }),
+    });
     // EVIDENCE: validation: `start` replies from the same build with the new session and its introduction.
     return this.open(reply.session!, reply.view as Introduction);
   }

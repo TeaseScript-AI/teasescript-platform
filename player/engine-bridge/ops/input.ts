@@ -60,7 +60,7 @@ function answered(held: HeldSession, result: Answer): OpOutcome {
     held.keep(next);
     return { result: result.outcome, view: null };
   }
-  held.catchUp = null;
+  held.endCatchUp();
   const view = held.publish(next);
   return { result: result.outcome, eventsThrough: view.eventsThrough, view };
 }

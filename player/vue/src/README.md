@@ -81,8 +81,10 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   composes the Debug panel: `usePlayerDebug.ts` owns the Debug menu and Debug switches, the countdown line that
   `RuntimeInteraction.vue` shows, and the scopes of `useDebugLog.ts`, of the time controls that
   `useDevelopmentTime.ts` drives through the session host's `publishJump`, and of `useDebugRewind.ts`, which restores
-  states through the host's `rewind`, and of `useDebugRandom.ts`, which decides random draws through the host's
-  `setRandomControl` and `resolveRandomDraw`; `DebugPanel.vue` and `DebugStatus.vue` present them. While a draw waits,
+  states through the host's `rewind`, and of `useDebugRandom.ts`, which sends Debug's random settings to the engine's
+  host (`setRandomControl`, `forgetRandomHistory`), where `player/random-decisions.ts` decides draws and keeps each
+  site's history, and resolves a waiting draw there (`resolveRandomDraw`, `randomTried`); `DebugPanel.vue` and
+  `DebugStatus.vue` present them. While a draw waits,
   `RandomDrawPicker.vue` asks for its outcome from what `randomDrawPresentation.ts` derives, showing the code in the
   shared `CodeBlock.vue` under a `PathBreadcrumb.vue`, and `useRandomDrawGuard.ts` keeps the rest of the page from
   acting meanwhile. In the chat,

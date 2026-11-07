@@ -13,15 +13,17 @@ import type {
 } from "../player/runtime-adapter.js";
 import type { PlayerSession } from "../player/runtime-view.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
+import { listRandomSites } from "../src/playback.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
 /*
- * L5i.3, the trace-ordering family (Sol r1 R2, r2 R2.1, r3 R2.2, r4 R2.3) over the Player's lifetime. The connection's
- * value trace follows the newest tracing intent a live Player sent; a setting made before the host is reachable waits
- * as the Player's, and only its latest goes, once the host is reachable and while the Player lives. One live Player per
- * bridge; a later one reuses it. The host's side of the rule, every carrier in every delivery order, is
- * `player-trace-intent.test.ts`'s.
+ * L5i.3, the trace-ordering family (Sol r1 R2, r2 R2.1, r3 R2.2, r4 R2.3) over the Player's lifetime, and L5i.4's random
+ * control under the same rule (Sol plan P8). The connection's value trace, and its random control, follow the newest
+ * intent a live Player sent; a setting made before the host is reachable waits as the Player's, and only its latest
+ * goes, once the host is reachable and while the Player lives. One live Player per bridge; a later one reuses it. The
+ * host's side of the tracing rule, every carrier in every delivery order, is `player-trace-intent.test.ts`'s; random
+ * control's is `player-random-control.test.ts`'s.
  */
 
 interface TracingPlayer {
@@ -32,6 +34,9 @@ interface TracingPlayer {
   prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
   activate(): Promise<void>;
   setDebugTracing(on: boolean): void;
+  setRandomControl(
+    control: { readonly sites: readonly (readonly [string, "random" | "untried"])[] } | null,
+  ): void;
   debugView(request: DebugViewRequest): Promise<DebugView | null>;
 }
 let usePlayerSession: (options: {
@@ -41,6 +46,9 @@ let usePlayerSession: (options: {
 let facade: typeof InProcess;
 let compiler: typeof CompileProject;
 let BridgeLostError: typeof Client.BridgeLostError;
+// The random fixture's sites: the first draw goes on by itself and is recorded; the second asks, so the session pauses.
+let hitSite = "";
+let rollSite = "";
 
 const restore: (() => void)[] = [];
 before(async () => {
@@ -55,6 +63,10 @@ before(async () => {
   const client = await loadPlayerModule("player/engine-bridge/client.ts");
   // EVIDENCE: validation: the bundle's client module, whose loss error the client's listeners receive.
   BridgeLostError = client.BridgeLostError as typeof BridgeLostError;
+  const sites = listRandomSites(compiler.compilePlayerProject(RANDOM_SCRIPT).plan!);
+  const ofKind = (kind: string) =>
+    sites.find((site) => site.kinds.some((each) => each === kind))?.id ?? "";
+  [hitSite, rollSite] = [ofKind("chance"), ofKind("randomInteger")];
   // A browser surface with event targets and silent audio.
   const surface = {
     document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
@@ -84,6 +96,9 @@ const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
 // A declaration, an interpolated message and an input: the source the trace records from its first statement.
 const SCRIPT = 'let mood = "calm"\nsay "${mood} now", instant\nlet answer = askText "Ready?"\nexit';
 const OBSOLETE = 'say "obsolete", instant\nlet answer = askText "Old?"\nexit';
+// The same, with two draws after the message: the Start decides the first and pauses at the second under control.
+const RANDOM_SCRIPT =
+  'let mood = "calm"\nsay "${mood} now", instant\nlet hit = chance(50)\nlet roll = randomInteger(1..=6)\nlet answer = askText "Ready?"\nexit';
 const RECENT: DebugViewRequest = {
   messages: { limit: 20, openNewest: false },
   selected: null,
@@ -125,10 +140,14 @@ const LIFECYCLES = [
   "issued/replaced",
   "issued/handover",
 ] as const;
+/** What the Player changes: Debug's value trace, or its random control (Choose outcomes). */
+const SETTING_NAMES = ["tracing", "random"] as const;
+type SettingName = (typeof SETTING_NAMES)[number];
 type History = (typeof HISTORY_NAMES)[number];
 type Sequence = (typeof SEQUENCE_NAMES)[number];
 type Lifecycle = (typeof LIFECYCLES)[number];
 interface Case {
+  readonly setting: SettingName;
   readonly history: History;
   readonly sequence: Sequence;
   readonly start: number;
@@ -137,29 +156,37 @@ interface Case {
 }
 
 const places = (sequence: Sequence) => [...Array(SEQUENCES[sequence].length + 1).keys()];
-const CASES: readonly Case[] = HISTORY_NAMES.flatMap((history) =>
-  SEQUENCE_NAMES.flatMap((sequence) =>
-    places(sequence).flatMap((start) =>
-      LIFECYCLES.map((lifecycle) => ({
-        history,
-        sequence,
-        start,
-        lifecycle,
-        name: `${history}; ${sequence}, Start at ${start}; ${lifecycle}`,
-      })),
+const CASES: readonly Case[] = SETTING_NAMES.flatMap((setting) =>
+  HISTORY_NAMES.flatMap((history) =>
+    SEQUENCE_NAMES.flatMap((sequence) =>
+      places(sequence).flatMap((start) =>
+        LIFECYCLES.map((lifecycle) => ({
+          setting,
+          history,
+          sequence,
+          start,
+          lifecycle,
+          name: `${setting}: ${history}; ${sequence}, Start at ${start}; ${lifecycle}`,
+        })),
+      ),
     ),
   ),
 );
 /** The cases each sibling of the family was found by, as the family names them. */
-const WITNESSES: Readonly<Record<string, string>> = {
-  "fresh; on, Start at 1; ready/live": "R2",
-  "fresh; on-off-on, Start at 3; ready/live": "R2.1",
-  "ended on-off-on; on, Start at 1; ready/live": "R2.2",
-  "fresh; on, Start at 0; waiting/dispose": "R2.3",
-  "ended off; on-off-on, Start at 3; waiting/handover": "R2.3",
-};
+const WITNESSES: Readonly<Record<string, string>> = Object.fromEntries(
+  SETTING_NAMES.flatMap((setting) =>
+    [
+      ["fresh; on, Start at 1; ready/live", "R2"],
+      ["fresh; on-off-on, Start at 3; ready/live", "R2.1"],
+      ["ended on-off-on; on, Start at 1; ready/live", "R2.2"],
+      ["fresh; on, Start at 0; waiting/dispose", "R2.3"],
+      ["ended off; on-off-on, Start at 3; waiting/handover", "R2.3"],
+    ].map(([name, sibling]): [string, string] => [`${setting}: ${name!}`, sibling!]),
+  ),
+);
 
 const coordinates = (each: Case): Coordinates => ({
+  setting: each.setting,
   history: each.history,
   sequence: each.sequence,
   start: String(each.start),
@@ -167,6 +194,7 @@ const coordinates = (each: Case): Coordinates => ({
 });
 /** The feasible cases, enumerated apart from `CASES`: a Start's place is at most the sequence's length. */
 const FEASIBLE = product({
+  setting: [...SETTING_NAMES],
   history: [...HISTORY_NAMES],
   sequence: [...SEQUENCE_NAMES],
   start: ["0", "1", "2", "3"],
@@ -181,7 +209,7 @@ test("the lifecycle cases are each feasible case once, named by their axes", () 
   assert.equal(new Set(CASES.map((each) => each.name)).size, CASES.length, "names are unique");
   const observed = CASES.map(coordinates);
   assert.deepEqual(coverageGaps(FEASIBLE, observed, { tuples: true }), []);
-  assert.equal(CASES.length, 4 * (1 + 2 + 3 + 4) * 7);
+  assert.equal(CASES.length, 2 * 4 * (1 + 2 + 3 + 4) * 7);
   for (const name of Object.keys(WITNESSES))
     assert.ok(
       CASES.some((each) => each.name === name),
@@ -197,8 +225,20 @@ test("the lifecycle cases are each feasible case once, named by their axes", () 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
 /** Settles the connection: its queue holds nothing before a request sent now, and the replies' continuations ran. */
+// The sessions the test's Players showed, by ID: their turns hold work sent `after` them, as random intents are.
+const shownSessions = new Map<string, PlayerSession>();
+
+/**
+ * Settles the connection: its queue, and each shown session's turn, hold nothing before a request sent now, twice, as
+ * work that settles may send more; and the replies' continuations ran.
+ */
 async function settle(bridge: PlayerBridge) {
-  await bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
+  for (let round = 0; round < 2; round += 1) {
+    await bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
+    for (const session of shownSessions.values())
+      if (session.connection === bridge)
+        await bridge.read(session, "randomTried", { site: hitSite }).catch(() => null);
+  }
   await turn();
 }
 
@@ -229,9 +269,17 @@ function mounted(context: TestContext, bridge: Promise<PlayerBridge>) {
       },
       { flush: "sync" },
     );
+    watch(
+      () => made.session.value,
+      (shown) => void (shown !== null && shownSessions.set(shown.id, shown)),
+      { flush: "sync" },
+    );
     return made;
   })!;
-  context.after(() => scope.stop());
+  context.after(() => {
+    scope.stop();
+    shownSessions.clear();
+  });
   return { player, end: () => scope.stop() };
 }
 
@@ -239,72 +287,177 @@ function mounted(context: TestContext, bridge: Promise<PlayerBridge>) {
 const namedNoStaleTrace = (context: TestContext, name: string) =>
   assert.deepEqual(staleNames.get(context) ?? [], [], `${name}: no older reply names a trace`);
 
-/** A host whose replies take a millisecond, with the count of the tracing serials minted on it. */
-function backend(context: TestContext) {
+/** The Starts a test's factories began, in order: whose, their script, and the trace and random control each began with. */
+type Starts = {
+  readonly by: TracingPlayer;
+  readonly script: string;
+  readonly trace: RuntimeDebugContext | null;
+  readonly controlled: boolean;
+}[];
+const starting =
+  (starts: Starts, by: TracingPlayer, script: string) =>
+  (recording: PlayerRuntimeSessionOptions): PlayerRuntimeSession => {
+    starts.push({
+      by,
+      script,
+      trace: recording.debugTrace ?? null,
+      controlled: recording.randomControl !== undefined,
+    });
+    return compiler.createPlayerRuntimeSession(script, { ...recording, wallClockMs: 0 });
+  };
+
+/** The host's state of a setting, as a next Player's ended predecessor must leave it. */
+type Snapshot =
+  | {
+      readonly trace: RuntimeDebugContext | null;
+      readonly status: ReturnType<RuntimeDebugContext["status"]> | null;
+    }
+  | { readonly owner: number; readonly on: boolean; readonly revision: number };
+
+/** What the case's Player changes, and how the family reads it. */
+interface Setting {
+  /** The fixture the Starts run. */
+  readonly script: string;
+  /** The serial counter its intents take (`PlayerBridge`). */
+  readonly mint: "nextTracingIntent" | "nextRandomIntent";
+  set(player: TracingPlayer, on: boolean): void;
+  /** Whether a Start began with the setting on, as its factory saw it. */
+  began(start: Starts[number]): boolean;
+  /** How many serials a waiting Player's readiness takes: the latest change, or a used bridge's alignment. */
+  readyMints(changes: readonly boolean[], history: History): number;
+  /** What a next Player's ended predecessor must leave unchanged once its bridge became ready. */
+  snapshot(bridge: PlayerBridge): Snapshot;
+  /** The oracle once settled, for the live Player `owner` (`null` for none) and its Starts. */
+  holds(
+    name: string,
+    bridge: PlayerBridge,
+    owner: { readonly player: TracingPlayer; readonly asked: boolean } | null,
+    last: Starts[number] | null,
+    starts: Starts,
+  ): Promise<void>;
+}
+
+/** The Player shows its own Start only. */
+function showsItsStart(name: string, player: TracingPlayer) {
+  const shown = player.session.value!.transcriptEntries.map((entry) => entry.text);
+  assert.ok(shown.includes("calm now"), `${name}: its Start shows`);
+  assert.ok(!shown.includes("obsolete"), `${name}: a replaced Start shows nothing`);
+}
+
+const SETTINGS: Readonly<Record<SettingName, Setting>> = {
+  tracing: {
+    script: SCRIPT,
+    mint: "nextTracingIntent",
+    set: (player, on) => player.setDebugTracing(on),
+    began: (start) => start.trace !== null,
+    // A bridge no Player traced on needs no setting until one changes.
+    readyMints: (changes, history) => (changes.length > 0 || history !== "fresh" ? 1 : 0),
+    snapshot: (bridge) => {
+      const trace = facade.heldTrace(bridge);
+      return { trace, status: trace?.status() ?? null };
+    },
+    /**
+     * The host traces as its live Player last asked, the Player names the host's trace, and a Start that began with the
+     * trace that stays keeps its history.
+     */
+    holds: async (name, bridge, owner, last) => {
+      const want = owner?.asked ?? false;
+      const trace = facade.heldTrace(bridge);
+      assert.equal(trace !== null, want, `${name}: the host traces as its live Player asked last`);
+      if (owner === null) return;
+      const { player } = owner;
+      assert.equal(player.debugTracing.value, want, `${name}: the Player shows what it asked`);
+      const view = await player.debugView(RECENT);
+      assert.equal(player.traceId.value, want ? view!.traceId : null, `${name}: names the trace`);
+      showsItsStart(name, player);
+      const kept = last?.trace ?? null;
+      if (want && kept !== null) {
+        assert.equal(trace, kept, `${name}: the trace its Start began with stays`);
+        const status = trace!.status();
+        assert.equal(status.origin, "start", name);
+        assert.ok(status.records >= 2, `${name}: ${status.records} records`);
+        assert.ok(
+          (view!.messages?.count ?? 0) >= 1,
+          `${name}: recent chat holds the Start's message`,
+        );
+      }
+    },
+  },
+  random: {
+    script: RANDOM_SCRIPT,
+    mint: "nextRandomIntent",
+    set: (player, on) => player.setRandomControl(on ? { sites: [[hitSite, "random"]] } : null),
+    began: (start) => start.controlled,
+    // A next Player's history and control are its own from its first intent: no alignment.
+    readyMints: (changes) => (changes.length > 0 ? 1 : 0),
+    snapshot: (bridge) => {
+      const random = facade.heldRandom(bridge);
+      return {
+        owner: random.owner,
+        on: random.control !== null,
+        revision: random.history.revision,
+      };
+    },
+    /**
+     * The host's control is on as its live Player last asked; a Start that began under it decided the first draw and
+     * waits at the second; the history holds the live Player's own decided draws only.
+     */
+    holds: async (name, bridge, owner, last, starts) => {
+      const want = owner?.asked ?? false;
+      const random = facade.heldRandom(bridge);
+      if (owner === null) {
+        assert.equal(random.control, null, `${name}: an ended Player's control ended with it`);
+        return;
+      }
+      const { player } = owner;
+      // Control is the live Player's only while the host's random state is its own (`ownedRandom`).
+      const shownNow = player.session.value!;
+      const owned = (await bridge.read(shownNow, "randomTried", { site: hitSite })) !== null;
+      assert.equal(owned && random.control !== null, want, `${name}: control as it asked last`);
+      showsItsStart(name, player);
+      if (want && last !== null && last.controlled)
+        assert.equal(player.session.value!.state.randomDraw?.site, rollSite, `${name}: it waits`);
+      const decided = starts.filter(
+        (start) => start.by === player && start.controlled && start.script === RANDOM_SCRIPT,
+      ).length;
+      assert.equal(
+        random.history.tried(hitSite).history.length,
+        decided,
+        `${name}: the history holds the live Player's own draws only`,
+      );
+    },
+  },
+};
+
+/** A host whose replies take a millisecond, with the count of the setting's serials minted on it. */
+function backend(context: TestContext, setting: Setting) {
   const bridge = facade.createInProcessBackend(BUILD, { delayMs: 1 });
   context.after(() => bridge.client.terminate());
-  const minted = context.mock.method(bridge, "nextTracingIntent");
+  const minted = context.mock.method(bridge, setting.mint);
   return { bridge, minted: () => minted.mock.callCount() };
 }
 
 /** The Player before this one on the connection, as `history` says: its changes reach the host, then it ends. */
-async function lived(context: TestContext, bridge: PlayerBridge, history: History) {
+async function lived(
+  context: TestContext,
+  bridge: PlayerBridge,
+  history: History,
+  setting: Setting,
+) {
   const changes = HISTORIES[history];
   if (changes.length === 0) return;
   const { player, end } = mounted(context, Promise.resolve(bridge));
   await player.bridge;
-  for (const on of changes) player.setDebugTracing(on);
+  for (const on of changes) setting.set(player, on);
   await settle(bridge);
   end();
 }
 
-/** The Starts a test's factories began, in order: their script, and the trace each began with. */
-type Starts = { readonly script: string; readonly trace: RuntimeDebugContext | null }[];
-const starting =
-  (starts: Starts, script: string) =>
-  (recording: PlayerRuntimeSessionOptions): PlayerRuntimeSession => {
-    starts.push({ script, trace: recording.debugTrace ?? null });
-    return compiler.createPlayerRuntimeSession(script, { ...recording, wallClockMs: 0 });
-  };
-
-/**
- * The oracle, once settled: the host traces as its live Player (`owner`, `null` for none) last asked, the Player names
- * the host's trace, it shows its own Start only, and a Start that began with the trace that stays keeps its history.
- */
-async function holds(
-  name: string,
-  bridge: PlayerBridge,
-  owner: { readonly player: TracingPlayer; readonly asked: boolean } | null,
-  kept: RuntimeDebugContext | null,
-) {
-  const want = owner?.asked ?? false;
-  const trace = facade.heldTrace(bridge);
-  assert.equal(trace !== null, want, `${name}: the host traces as its live Player asked last`);
-  if (owner === null) return;
-  const { player } = owner;
-  assert.equal(player.debugTracing.value, want, `${name}: the Player shows what it asked`);
-  const view = await player.debugView(RECENT);
-  assert.equal(
-    player.traceId.value,
-    want ? view!.traceId : null,
-    `${name}: names the host's trace`,
-  );
-  const shown = player.session.value!.transcriptEntries.map((entry) => entry.text);
-  assert.ok(shown.includes("calm now"), `${name}: its Start shows`);
-  assert.ok(!shown.includes("obsolete"), `${name}: a replaced Start shows nothing`);
-  if (want && kept !== null) {
-    assert.equal(trace, kept, `${name}: the trace its Start began with stays`);
-    const status = trace!.status();
-    assert.equal(status.origin, "start", name);
-    assert.ok(status.records >= 2, `${name}: ${status.records} records`);
-    assert.ok((view!.messages?.count ?? 0) >= 1, `${name}: recent chat holds the Start's message`);
-  }
-}
-
-/** Plays one case, and checks every Start's trace as it began, and the oracle once settled. */
+/** Plays one case, and checks every Start's setting as it began, and the oracle once settled. */
 async function play(context: TestContext, each: Case) {
-  const { bridge, minted } = backend(context);
-  await lived(context, bridge, each.history);
+  const setting = SETTINGS[each.setting];
+  const { bridge, minted } = backend(context, setting);
+  await lived(context, bridge, each.history, setting);
   const { lifecycle } = each;
   const waiting = lifecycle.startsWith("waiting");
   const handover = lifecycle.endsWith("handover");
@@ -319,25 +472,26 @@ async function play(context: TestContext, each: Case) {
         bridge.client.request("prepare", { source: { kind: "source", script: "exit" } }),
       );
   if (!waiting) await current.player.bridge;
-  // The Starts expected, each with whether it begins traced: as the Player's latest change sent then, while its bridge
-  // is ready; else once ready, as its latest change; an ended or replaced Player's waiting Start never begins.
+  // The Starts expected, each with whether it begins with the setting on: as the Player's latest change sent then,
+  // while its bridge is ready; else once ready, as its latest change; an ended or replaced Player's waiting Start never
+  // begins.
   const starts: Starts = [];
-  const expected: { script: string; traced: boolean }[] = [];
+  const expected: { script: string; on: boolean }[] = [];
   const activations: Promise<void>[] = [];
-  const start = (script: string, traced: boolean) => {
-    current.player.prepare(starting(starts, script));
+  const start = (script: string, on: boolean) => {
+    current.player.prepare(starting(starts, current.player, script));
     activations.push(current.player.activate());
-    if (!waiting) expected.push({ script, traced });
+    if (!waiting) expected.push({ script, on });
   };
-  const first = replaced ? OBSOLETE : SCRIPT;
+  const first = replaced ? OBSOLETE : setting.script;
   changes.forEach((on, index) => {
     if (index === each.start) start(first, changes[index - 1] ?? false);
-    current.player.setDebugTracing(on);
+    setting.set(current.player, on);
   });
   if (each.start === changes.length) start(first, asked);
-  if (replaced) start(SCRIPT, asked);
+  if (replaced) start(setting.script, asked);
   if (waiting && (lifecycle === "waiting/live" || replaced))
-    expected.push({ script: SCRIPT, traced: asked });
+    expected.push({ script: setting.script, on: asked });
   let owner: { readonly player: TracingPlayer; readonly asked: boolean } | null = {
     player: current.player,
     asked,
@@ -350,32 +504,30 @@ async function play(context: TestContext, each: Case) {
   if (handover) {
     const next = mounted(context, Promise.resolve(bridge));
     await next.player.bridge;
-    next.player.setDebugTracing(!asked);
-    next.player.prepare(starting(starts, SCRIPT));
-    expected.push({ script: SCRIPT, traced: !asked });
+    setting.set(next.player, !asked);
+    next.player.prepare(starting(starts, next.player, setting.script));
+    expected.push({ script: setting.script, on: !asked });
     handedOver = next.player.activate();
     activations.push(handedOver);
     owner = { player: next.player, asked: !asked };
   }
   // The Player's bridge becomes ready, after what a next one did has settled.
-  let before: { trace: RuntimeDebugContext | null; status: unknown } | null = null;
+  let before: { readonly value: Snapshot } | null = null;
   const mintedBefore = minted();
   if (waiting) {
     if (handedOver !== null) {
       // The ended Player's Start still waits for its bridge.
       await handedOver;
       await settle(bridge);
-      const trace = facade.heldTrace(bridge);
-      before = { trace, status: trace?.status() ?? null };
+      before = { value: setting.snapshot(bridge) };
     }
     const ready = minted();
     gate.resolve(bridge);
     await current.player.bridge;
     if (owner?.player === current.player)
-      // A bridge no Player traced on needs no setting until one changes.
       assert.equal(
         minted() - ready,
-        changes.length > 0 || each.history !== "fresh" ? 1 : 0,
+        setting.readyMints(changes, each.history),
         `${each.name}: only the latest setting goes, once`,
       );
   }
@@ -385,133 +537,153 @@ async function play(context: TestContext, each: Case) {
   if (lifecycle === "waiting/dispose" || lifecycle === "waiting/handover")
     assert.equal(minted(), mintedBefore, `${each.name}: a Player that ended sends nothing`);
   assert.deepEqual(
-    starts.map(({ script, trace }) => ({ script, traced: trace !== null })),
+    starts.map((each) => ({ script: each.script, on: setting.began(each) })),
     expected,
-    `${each.name}: each Start begins with the trace its Player's newest intent says`,
+    `${each.name}: each Start begins as its Player's newest intent says`,
   );
-  if (before !== null) {
-    const trace = facade.heldTrace(bridge);
-    assert.equal(
-      trace,
-      before.trace,
-      `${each.name}: the ended Player's work leaves the next one's trace`,
+  if (before !== null)
+    assert.deepEqual(
+      setting.snapshot(bridge),
+      before.value,
+      `${each.name}: the ended Player's work leaves the next one's state`,
     );
-    assert.deepEqual(trace?.status() ?? null, before.status, each.name);
-  }
-  // The last Start keeps its trace when no change came after it.
+  // The last Start keeps what it began with when no change came after it.
   const last = starts.at(-1);
   const afterChanges = waiting || handover || replaced || each.start === changes.length;
-  await holds(each.name, bridge, owner, afterChanges && last !== undefined ? last.trace : null);
+  await setting.holds(
+    each.name,
+    bridge,
+    owner,
+    afterChanges && last !== undefined ? last : null,
+    starts,
+  );
   namedNoStaleTrace(context, each.name);
 }
 
 for (const each of CASES) {
   const witness = WITNESSES[each.name];
-  test(`tracing over the Player's lifetime: ${each.name}${witness === undefined ? "" : ` (${witness})`}`, (context) =>
+  test(`over the Player's lifetime: ${each.name}${witness === undefined ? "" : ` (${witness})`}`, (context) =>
     play(context, each));
 }
 
 // The ends of a connection: a bridge that never became ready, and one lost after it was.
-for (const sequence of SEQUENCE_NAMES) {
-  test(`tracing on a bridge that never becomes ready: ${sequence}`, async (context) => {
-    const gate = deferred<PlayerBridge>();
-    const { player } = mounted(context, gate.promise);
-    const changes = SEQUENCES[sequence];
-    for (const on of changes) player.setDebugTracing(on);
-    gate.reject(new Error("No engine host."));
-    await assert.rejects(player.bridge, /No engine host/u);
-    player.setDebugTracing(!(changes.at(-1) ?? false));
-    await turn();
-    assert.equal(player.traceId.value, null, sequence);
-  });
+for (const name of SETTING_NAMES)
+  for (const sequence of SEQUENCE_NAMES) {
+    const setting = SETTINGS[name];
+    test(`${name} on a bridge that never becomes ready: ${sequence}`, async (context) => {
+      const gate = deferred<PlayerBridge>();
+      const { player } = mounted(context, gate.promise);
+      const changes = SEQUENCES[sequence];
+      for (const on of changes) setting.set(player, on);
+      gate.reject(new Error("No engine host."));
+      await assert.rejects(player.bridge, /No engine host/u);
+      setting.set(player, !(changes.at(-1) ?? false));
+      await turn();
+      assert.equal(player.traceId.value, null, sequence);
+    });
 
-  test(`tracing on a bridge lost after it was ready: ${sequence}`, async (context) => {
-    const { bridge, minted } = backend(context);
-    // The client's loss, as a real loss: its listeners hear a `BridgeLostError`.
-    const listeners: ((error: Client.BridgeLostError) => void)[] = [];
-    bridge.client.onLoss = (listener) => void listeners.push(listener);
-    const reports = context.mock.method(console, "error", () => {});
-    // A Player that ended before its bridge was ready observes no loss; one that ended after it was ready observes
-    // the loss, and ignores it.
-    const gate = deferred<PlayerBridge>();
-    const ended = mounted(context, gate.promise);
-    const before = mounted(context, Promise.resolve(bridge));
-    await before.player.bridge;
-    before.player.setDebugTracing(true);
-    await settle(bridge);
-    before.end();
-    const { player } = mounted(context, Promise.resolve(bridge));
-    await player.bridge;
-    ended.end();
-    gate.resolve(bridge);
-    await ended.player.bridge;
-    const changes = SEQUENCES[sequence];
-    for (const on of changes) player.setDebugTracing(on);
-    await settle(bridge);
-    assert.equal(player.traceId.value !== null, changes.at(-1) ?? false, sequence);
-    bridge.client.terminate();
-    for (const listener of listeners)
-      listener(new BridgeLostError("The engine Worker failed: injected."));
-    assert.equal(player.traceId.value, null, `${sequence}: the trace went with the host`);
-    const sent = minted();
-    player.setDebugTracing(!(changes.at(-1) ?? false));
-    for (let index = 0; index < 3; index += 1) await turn();
-    assert.equal(player.traceId.value, null, `${sequence}: a lost host names no trace`);
-    assert.ok(minted() - sent <= 1, `${sequence}: no retry`);
-    const hostErrors = reports.mock.calls.filter(
-      (call) => call.arguments[0] === "[player] host error",
-    );
-    assert.equal(hostErrors.length, 1, `${sequence}: only the live Player reports the loss`);
-  });
-}
+    test(`${name} on a bridge lost after it was ready: ${sequence}`, async (context) => {
+      const { bridge, minted } = backend(context, setting);
+      // The client's loss, as a real loss: its listeners hear a `BridgeLostError`.
+      const listeners: ((error: Client.BridgeLostError) => void)[] = [];
+      bridge.client.onLoss = (listener) => void listeners.push(listener);
+      const reports = context.mock.method(console, "error", () => {});
+      // A Player that ended before its bridge was ready observes no loss; one that ended after it was ready observes
+      // the loss, and ignores it.
+      const gate = deferred<PlayerBridge>();
+      const ended = mounted(context, gate.promise);
+      const before = mounted(context, Promise.resolve(bridge));
+      await before.player.bridge;
+      setting.set(before.player, true);
+      await settle(bridge);
+      before.end();
+      const { player } = mounted(context, Promise.resolve(bridge));
+      await player.bridge;
+      ended.end();
+      gate.resolve(bridge);
+      await ended.player.bridge;
+      const changes = SEQUENCES[sequence];
+      for (const on of changes) setting.set(player, on);
+      await settle(bridge);
+      if (name === "tracing")
+        assert.equal(player.traceId.value !== null, changes.at(-1) ?? false, sequence);
+      bridge.client.terminate();
+      for (const listener of listeners)
+        listener(new BridgeLostError("The engine Worker failed: injected."));
+      assert.equal(player.traceId.value, null, `${sequence}: the trace went with the host`);
+      const sent = minted();
+      setting.set(player, !(changes.at(-1) ?? false));
+      for (let index = 0; index < 3; index += 1) await turn();
+      assert.equal(player.traceId.value, null, `${sequence}: a lost host names no trace`);
+      assert.ok(minted() - sent <= 1, `${sequence}: no retry`);
+      const hostErrors = reports.mock.calls.filter(
+        (call) => call.arguments[0] === "[player] host error",
+      );
+      assert.equal(hostErrors.length, 1, `${sequence}: only the live Player reports the loss`);
+    });
+  }
 
 // One live Player per bridge: a second one is refused before it sends anything, and a later one reuses the bridge.
-for (const history of HISTORY_NAMES)
-  for (const sequence of SEQUENCE_NAMES)
-    for (const order of ["refused while live", "ready after another"] as const)
-      test(`one live Player per bridge: ${history}; ${sequence}; ${order}`, async (context) => {
-        const name = `${history}; ${sequence}; ${order}`;
-        const { bridge, minted } = backend(context);
-        await lived(context, bridge, history);
-        const changes = SEQUENCES[sequence];
-        const asked = changes.at(-1) ?? false;
-        const starts: Starts = [];
-        if (order === "refused while live") {
-          const live = mounted(context, Promise.resolve(bridge));
-          await live.player.bridge;
-          for (const on of changes) live.player.setDebugTracing(on);
-          live.player.prepare(starting(starts, SCRIPT));
-          await live.player.activate();
-          await settle(bridge);
-          const sent = minted();
-          const second = mounted(context, Promise.resolve(bridge));
-          await assert.rejects(second.player.bridge, ONE_PLAYER);
-          second.player.setDebugTracing(!asked);
-          second.end();
-          await settle(bridge);
-          assert.equal(minted(), sent, `${name}: the refused Player sends nothing`);
-          await holds(name, bridge, { player: live.player, asked }, starts.at(-1)!.trace);
-          // Once the live Player ended, a next one takes the bridge.
-          live.end();
-          const next = mounted(context, Promise.resolve(bridge));
-          await next.player.bridge;
-          await settle(bridge);
-          assert.equal(facade.heldTrace(bridge), null, `${name}: the ended Player's trace went`);
-        } else {
-          const gate = deferred<PlayerBridge>();
-          const late = mounted(context, gate.promise);
-          for (const on of changes) late.player.setDebugTracing(on);
-          const live = mounted(context, Promise.resolve(bridge));
-          await live.player.bridge;
-          live.player.setDebugTracing(!asked);
-          live.player.prepare(starting(starts, SCRIPT));
-          await live.player.activate();
-          await settle(bridge);
-          const sent = minted();
-          gate.resolve(bridge);
-          await assert.rejects(late.player.bridge, ONE_PLAYER);
-          await settle(bridge);
-          assert.equal(minted(), sent, `${name}: the refused Player sends nothing`);
-          await holds(name, bridge, { player: live.player, asked: !asked }, starts.at(-1)!.trace);
-        }
-      });
+for (const settingName of SETTING_NAMES)
+  for (const history of HISTORY_NAMES)
+    for (const sequence of SEQUENCE_NAMES)
+      for (const order of ["refused while live", "ready after another"] as const)
+        test(`one live Player per bridge, ${settingName}: ${history}; ${sequence}; ${order}`, async (context) => {
+          const setting = SETTINGS[settingName];
+          const name = `${settingName}: ${history}; ${sequence}; ${order}`;
+          const { bridge, minted } = backend(context, setting);
+          await lived(context, bridge, history, setting);
+          const changes = SEQUENCES[sequence];
+          const asked = changes.at(-1) ?? false;
+          const starts: Starts = [];
+          if (order === "refused while live") {
+            const live = mounted(context, Promise.resolve(bridge));
+            await live.player.bridge;
+            for (const on of changes) setting.set(live.player, on);
+            live.player.prepare(starting(starts, live.player, setting.script));
+            await live.player.activate();
+            await settle(bridge);
+            const sent = minted();
+            const second = mounted(context, Promise.resolve(bridge));
+            await assert.rejects(second.player.bridge, ONE_PLAYER);
+            setting.set(second.player, !asked);
+            second.end();
+            await settle(bridge);
+            assert.equal(minted(), sent, `${name}: the refused Player sends nothing`);
+            await setting.holds(
+              name,
+              bridge,
+              { player: live.player, asked },
+              starts.at(-1)!,
+              starts,
+            );
+            // Once the live Player ended, a next one takes the bridge.
+            live.end();
+            const next = mounted(context, Promise.resolve(bridge));
+            await next.player.bridge;
+            await settle(bridge);
+            await setting.holds(name, bridge, null, null, starts);
+          } else {
+            const gate = deferred<PlayerBridge>();
+            const late = mounted(context, gate.promise);
+            for (const on of changes) setting.set(late.player, on);
+            const live = mounted(context, Promise.resolve(bridge));
+            await live.player.bridge;
+            setting.set(live.player, !asked);
+            live.player.prepare(starting(starts, live.player, setting.script));
+            await live.player.activate();
+            await settle(bridge);
+            const sent = minted();
+            gate.resolve(bridge);
+            await assert.rejects(late.player.bridge, ONE_PLAYER);
+            await settle(bridge);
+            assert.equal(minted(), sent, `${name}: the refused Player sends nothing`);
+            await setting.holds(
+              name,
+              bridge,
+              { player: live.player, asked: !asked },
+              starts.at(-1)!,
+              starts,
+            );
+          }
+        });
