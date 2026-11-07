@@ -147,20 +147,20 @@ interface ConditionFacts {
   readonly byText: ReadonlyMap<string, readonly ConditionFact[]>;
 }
 
-/** A statement whose way past proves a form of a text (`#passings`): where it starts, and the form. */
-interface Passing {
-  readonly start: number;
-  readonly form: NarrowingForm;
+/**
+ * A text's tests of one offending kind (`NarrowingRoutes.#tests`): the arms a condition's test of the needed form
+ * guards from their start, and the test layer they close.
+ */
+interface TextTests {
+  readonly entered: Set<TreeBlock>;
+  readonly layer: Layer;
 }
 
-/** The statements after which a block's code never runs on: a leaving `if`'s last statement. */
-const LEAVING: ReadonlySet<string> = new Set([
-  "exitStatement",
-  "returnStatement",
-  "breakStatement",
-  "continueStatement",
-  "gotoStatement",
-]);
+/** A condition's own guards of a text and kind (`#ownGuarded`): their starts sorted, and the furthest end by each. */
+interface OwnGuards {
+  readonly from: readonly number[];
+  readonly reach: readonly number[];
+}
 
 /**
  * Whether items hold `tag` as a value the use may receive (AD-1): made by a store or a call's result, or allowed by a
@@ -221,8 +221,12 @@ export class NarrowingRoutes {
   readonly #properties = new Map<PlaceId, ReadonlyMap<string, PlaceId>>();
   /** The program's ledger. */
   readonly #work: WorkLedger;
-  /** Per block, its `while` loops and leaving `if`s by the texts the way past each proves a form of (`#passings`). */
-  readonly #passed = new Map<TreeBlock, ReadonlyMap<string, readonly Passing[]>>();
+  /** Per tested text, the `if`s and `while`s whose conditions test it (`#testing`), made on the first query. */
+  #tested: Map<string, TreeStatement[]> | null = null;
+  /** Per (text, offending kind), its tests (`#tests`). */
+  readonly #textTests = new Map<string, TextTests>();
+  /** Per `if` or `while`, its condition's own guards by (text, offending kind) (`#ownGuarded`). */
+  readonly #own = new Map<TreeStatement, Map<string, OwnGuards>>();
   /** Per `if` or `while`, its condition's tests as facts (`#conditionFacts`). */
   readonly #conditions = new Map<TreeStatement, ConditionFacts | null>();
 
@@ -278,69 +282,166 @@ export class NarrowingRoutes {
       return null;
     const d = yield* this.witness(pathKey(path, program.work), tag, node, others);
     const writer = d?.value === undefined ? null : (program.places[d.value]?.site ?? null);
-    // (a `while` between the writer and the use whose exit proves the needed form, `while n == null { … }`: the check
-    // on that route the compiler cannot keep, the warning; Codex r1 F1 on #1937)
-    if (
-      writer === null ||
-      this.#passedTested(node, this.#text(site), tag, writer.start)
-    )
+    // (a statement between the writer and the use every route past which passed a test of the needed form, `while n ==
+    // null { … }`: the check on that route the compiler cannot keep, the warning; Codex r1 F1 on #1937)
+    if (writer === null || this.#passedTested(node, this.#text(site), tag, writer.start))
       return null;
     return writer;
   }
 
   /**
-   * Whether a statement that stands before the read in one of the blocks holding it, after `from`, proves on the way
-   * past it that the text `text` lacks `tag`: a `while` loop's exit, or an `if` whose `then` arm always leaves and that
-   * has no `else` (`if x == null { exit }`), each by its condition's falsity (`#conditionFacts`). One scan per block.
+   * Whether a statement before the read in one of the blocks holding it, starting after `from`, is one every route past
+   * which passed a test that removes `tag` from the text `text`: a statement of the text's test layer (`#tests`), two
+   * binary searches per block.
    */
   #passedTested(node: FlowNode, text: string, tag: ItemTag, from: number): boolean {
     this.#work.charge("exactQueries");
     const chain = this.#chainOf(node);
     if (chain === null) return false;
+    const closed = this.#tests(text, tag).layer.closed;
     for (const place of each(this.#work, "exactQueries", chain)) {
-      if (place.index < 0) continue;
-      const before = place.block.statements[place.index]!.start;
-      const passed = this.#passings(place.block, node.file).get(text);
-      if (passed === undefined) continue;
+      const own = place.index < 0 ? undefined : closed.get(place.block.id);
       if (
-        some(
-          this.#work,
-          "exactQueries",
-          passed,
-          (fact) => fact.start > from && fact.start < before && removes(fact.form, tag, this.#work),
-        )
+        own !== undefined &&
+        countIn(this.#work, own, this.#firstAfter(place.block, from), place.index) > 0
       )
         return true;
     }
     return false;
   }
 
-  /** A block's `while` loops and leaving `if`s by the texts the way past each proves a form of, with its start. */
-  #passings(block: TreeBlock, file: number): ReadonlyMap<string, readonly Passing[]> {
+  /** The index of a block's first statement that starts after `from`: a binary search, each comparison charged. */
+  #firstAfter(block: TreeBlock, from: number): number {
     this.#work.charge("exactQueries");
-    const known = this.#passed.get(block);
-    if (known !== undefined) return known;
-    const made = new Map<string, Passing[]>();
-    for (const statement of each(this.#work, "exactQueries", block.statements)) {
-      const ast = statement.statement;
-      const leaving =
-        ast.kind === "ifStatement" &&
-        ast.elseBlock === null &&
-        LEAVING.has(ast.thenBlock.statements[ast.thenBlock.statements.length - 1]?.kind ?? "");
-      if (ast.kind !== "whileStatement" && !leaving) continue;
-      const facts = this.#conditionFacts(statement, file);
-      if (facts === null) continue;
-      for (const fact of each(this.#work, "exactQueries", facts.list))
-        if (fact.otherwise) {
-          const list = made.get(fact.text);
-          if (list === undefined) made.set(fact.text, [{ start: statement.start, form: fact.form }]);
-          else list.push({ start: statement.start, form: fact.form });
-        }
+    let low = 0;
+    let high = block.statements.length;
+    for (const _ of steps(this.#work, "exactQueries", () => low < high)) {
+      const middle = (low + high) >> 1;
+      if (block.statements[middle]!.start <= from) low = middle + 1;
+      else high = middle;
     }
-    this.#passed.set(block, made);
+    return low;
+  }
+
+  /**
+   * A text's tests of one offending kind, built once: the arms a condition's test of the needed form guards from their
+   * start (an `if`'s `then` arm by its truth, its `else` arm by its falsity, a loop's body by its truth), and over the
+   * shared layer the test layer they close (`#build`): an `if` whose every live arm such a test guards or the shared
+   * layer closes (`if f() == null { exit }`, `if f() != null { … } else { exit }`), a `while` no `break` leaves whose exit's falsity
+   * proves it, and every compound statement those close.
+   */
+  #tests(text: string, tag: ItemTag): TextTests {
+    this.#work.charge("indexSteps");
+    const memo = joinParts(text, tag);
+    const known = this.#textTests.get(memo);
+    if (known !== undefined) return known;
+    const work = this.#work;
+    const entered = new Set<TreeBlock>();
+    const passed: TreeStatement[] = [];
+    const statements = this.#testing().get(text) ?? [];
+    for (const statement of each(work, "indexSteps", statements)) {
+      const facts = this.#conditionFacts(statement)?.byText.get(text) ?? [];
+      const loop = statement.statement.kind === "whileStatement";
+      if (some(work, "indexSteps", facts, (fact) => fact.then && removes(fact.form, tag, work)))
+        entered.add(statement.arms[0]!);
+      if (
+        some(work, "indexSteps", facts, (fact) => fact.otherwise && removes(fact.form, tag, work))
+      ) {
+        if (!loop) entered.add(statement.arms[1]!);
+        else if (!this.#broken(statement)) passed.push(statement);
+      }
+    }
+    // (a loop's body a test guards does not close the loop: its way past is the exit's)
+    const layer = this.#build(
+      null,
+      false,
+      statements,
+      (arm) => {
+        work.charge("indexSteps");
+        return entered.has(arm) && arm.owner?.statement.kind === "ifStatement";
+      },
+      passed,
+    );
+    const made = { entered, layer };
+    keepText(work, memo.length);
+    this.#textTests.set(memo, made);
     return made;
   }
 
+  /** Whether a live `break` leaves a loop: a way past it its header's test does not guard. */
+  #broken(statement: TreeStatement): boolean {
+    this.#work.charge("indexSteps");
+    const program = this.pass.program;
+    const exit = statement.loop?.exit;
+    return (
+      exit === undefined ||
+      some(
+        this.#work,
+        "indexSteps",
+        exit.predecessors,
+        (before) =>
+          program.live(before) &&
+          !program.flow.isDeadEdge(before, exit) &&
+          before.statement?.kind === "breakStatement",
+      )
+    );
+  }
+
+  /** Per tested text, the `if`s and `while`s whose conditions test it: one walk of the tree on the first query. */
+  #testing(): ReadonlyMap<string, readonly TreeStatement[]> {
+    this.#work.charge("indexSteps");
+    if (this.#tested !== null) return this.#tested;
+    const work = this.#work;
+    const made = new Map<string, TreeStatement[]>();
+    for (const block of each(work, "indexSteps", this.tree.blocks))
+      for (const statement of each(work, "indexSteps", block.statements)) {
+        const facts = this.#conditionFacts(statement);
+        if (facts === null) continue;
+        for (const [text] of each(work, "indexSteps", facts.byText)) {
+          const list = made.get(text);
+          if (list === undefined) made.set(text, [statement]);
+          else list.push(statement);
+        }
+      }
+    this.#tested = made;
+    return made;
+  }
+
+  /**
+   * Whether an earlier part of an `if`'s or a `while`'s own condition guards the use at offset `use` with a test that
+   * removes `tag` from the text `text` (`f() != null and f() > 0`): per statement and (text, kind), the guarding facts'
+   * starts sorted with the furthest end among each prefix, built once, then one binary search.
+   */
+  #ownGuarded(statement: TreeStatement, text: string, tag: ItemTag, use: number): boolean {
+    this.#work.charge("exactQueries");
+    const work = this.#work;
+    const facts = this.#conditionFacts(statement)?.byText.get(text);
+    if (facts === undefined) return false;
+    const memo = joinParts(text, tag);
+    let per = this.#own.get(statement);
+    if (per === undefined) this.#own.set(statement, (per = new Map()));
+    let guards = per.get(memo);
+    if (guards === undefined) {
+      const kept: ConditionFact[] = [];
+      for (const fact of each(work, "exactQueries", facts))
+        if (removes(fact.form, tag, work)) kept.push(fact);
+      sorted(work, "exactQueries", kept, (a, b) => a.from - b.from);
+      const from: number[] = [];
+      const reach: number[] = [];
+      let far = -1;
+      for (const fact of each(work, "exactQueries", kept)) {
+        if (fact.to > far) far = fact.to;
+        from.push(fact.from);
+        reach.push(far);
+      }
+      guards = { from, reach };
+      keepText(work, memo.length);
+      per.set(memo, guards);
+    }
+    // (the last guard that starts at or before the use)
+    const at = lowerBound(work, guards.from, use + 1) - 1;
+    return at >= 0 && guards.reach[at]! > use;
+  }
 
   /**
    * N3 (iii): an exact definition D′ of `key` that certifies `tag` and reaches `node` without a check, or `null` when the
@@ -531,39 +632,20 @@ export class NarrowingRoutes {
 
   /**
    * Whether a check that removes `tag` from the text `text` stands on every route to `node`, so that a producer the use
-   * repeats is a check the compiler cannot keep (V30 §13, the `call` warning), never the route rule's error: a
-   * condition around the use whose truth proves it where the use is in its `then` arm or a loop's body, or whose falsity
-   * proves it where the use is in its `else` arm; an earlier part of the use's own condition that guards it (`f() !=
-   * null and f() > 0`, `f() == null or f() > 0`); or a statement before it whose way past proves it (a leaving `if`, a
-   * `while` loop's exit). Each condition's facts found once (`#conditionFacts`).
+   * repeats is a check the compiler cannot keep (V30 §13, the `call` warning), never the route rule's error: an arm
+   * holding the use that a test guards from its start (`#tests`), an earlier part of the use's own condition that guards
+   * it (`#ownGuarded`), or a statement before it every route past which passed a test (`#passedTested`).
    */
   #testedAround(node: FlowNode, text: string, tag: ItemTag): boolean {
     this.#work.charge("exactQueries");
-    const program = this.pass.program;
     const chain = this.#chainOf(node);
     if (chain === null || node.span === null) return false;
     const use = node.span.start.offset;
-    const holds = (list: readonly ConditionFact[], test: (fact: ConditionFact) => boolean): boolean =>
-      some(program.work, "exactQueries", list, (fact) => test(fact) && removes(fact.form, tag, this.#work));
-    for (const place of each(program.work, "exactQueries", chain)) {
-      const owner = place.block.owner;
-      if (owner !== null) {
-        const facts = this.#conditionFacts(owner, node.file)?.byText.get(text);
-        const arm = owner.arms[0] === place.block ? 0 : owner.arms[1] === place.block ? 1 : -1;
-        if (facts !== undefined && arm === 0 && holds(facts, (fact) => fact.then)) return true;
-        if (
-          facts !== undefined &&
-          arm === 1 &&
-          owner.statement.kind === "ifStatement" &&
-          holds(facts, (fact) => fact.otherwise)
-        )
-          return true;
-      }
-      // (the use's own statement: an earlier part of its condition that guards it)
+    const entered = this.#tests(text, tag).entered;
+    for (const place of each(this.#work, "exactQueries", chain)) {
+      if (entered.has(place.block)) return true;
       const statement = place.index < 0 ? undefined : place.block.statements[place.index];
-      const own =
-        statement === undefined ? undefined : this.#conditionFacts(statement, node.file)?.byText.get(text);
-      if (own !== undefined && holds(own, (fact) => fact.from <= use && use < fact.to)) return true;
+      if (statement !== undefined && this.#ownGuarded(statement, text, tag, use)) return true;
     }
     return this.#passedTested(node, text, tag, -1);
   }
@@ -574,7 +656,7 @@ export class NarrowingRoutes {
    * the `then` arm or the loop's body; its form where it fails, guarding the rest of an `or` and, through every `or`
    * above it, the `else` arm or the way past; a `not` swaps the two.
    */
-  #conditionFacts(statement: TreeStatement, file: number): ConditionFacts | null {
+  #conditionFacts(statement: TreeStatement): ConditionFacts | null {
     this.#work.charge("exactQueries");
     const known = this.#conditions.get(statement);
     if (known !== undefined) return known;
@@ -591,7 +673,9 @@ export class NarrowingRoutes {
       readonly at: Expression;
       readonly holding: Guarding | null;
       readonly failing: Guarding | null;
-    }[] = [{ at: ast.condition, holding: { to: end, arm: "then" }, failing: { to: end, arm: "else" } }];
+    }[] = [
+      { at: ast.condition, holding: { to: end, arm: "then" }, failing: { to: end, arm: "else" } },
+    ];
     const add = (text: string, form: NarrowingForm, from: number, side: Guarding): void => {
       this.#work.charge("exactQueries");
       const fact: ConditionFact = {
@@ -615,7 +699,9 @@ export class NarrowingRoutes {
         const and = at.operator === "and";
         const kept = and ? holding : failing;
         const left: Guarding =
-          kept === null ? { to: close, arm: null } : { to: kept.to > close ? kept.to : close, arm: kept.arm };
+          kept === null
+            ? { to: close, arm: null }
+            : { to: kept.to > close ? kept.to : close, arm: kept.arm };
         pending.push(
           and
             ? { at: at.left, holding: left, failing: null }
@@ -631,7 +717,11 @@ export class NarrowingRoutes {
       const forms = testForms(at, this.#work);
       if (forms === null) continue;
       const tested = peel(forms.tested, this.#work);
-      const text = this.#text({ file, start: tested.span.start.offset, end: tested.span.end.offset });
+      const text = this.#text({
+        file: statement.file,
+        start: tested.span.start.offset,
+        end: tested.span.end.offset,
+      });
       if (holding !== null) add(text, forms.holding, close, holding);
       if (failing !== null) add(text, forms.failing, close, failing);
     }
@@ -969,7 +1059,7 @@ export class NarrowingRoutes {
 
   /**
    * A layer over `parent`: the `seeds` (kills) closed, or with `starts`, the seeds' arms that start with a narrowing of
-   * the needed form counted closed; then every compound statement whose live arms are all closed, by the shared layer,
+   * the needed form counted closed, and the `marked` statements closed; then every compound statement whose live arms are all closed, by the shared layer,
    * a layer below or this one, found from the arms that close, each arm counted once in one layer.
    */
   #build(
@@ -977,6 +1067,7 @@ export class NarrowingRoutes {
     calls: boolean,
     seeds: readonly TreeStatement[],
     starts: ((arm: TreeBlock) => boolean) | null,
+    marked: readonly TreeStatement[] = [],
   ): Layer {
     this.#work.charge("indexSteps");
     const work = this.#work;
@@ -1038,6 +1129,10 @@ export class NarrowingRoutes {
     for (const seed of each(work, "indexSteps", seeds)) {
       if (starts === null) mark(seed);
       else for (const arm of each(work, "indexSteps", seed.arms)) if (starts(arm)) close(arm);
+      for (const _ of steps(work, "indexSteps", () => pending.length > 0)) check(pending.pop()!);
+    }
+    for (const statement of each(work, "indexSteps", marked)) {
+      mark(statement);
       for (const _ of steps(work, "indexSteps", () => pending.length > 0)) check(pending.pop()!);
     }
     const closed = new Map<number, number[]>();

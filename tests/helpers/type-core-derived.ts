@@ -1920,7 +1920,7 @@ export function derive(
         native("member", site(store.target));
       } else {
         const read = readAt(check);
-        // (a method's receiver that may be null, `xs[0].sort()`: the runtime's own check of the call's receiver)
+        // (a method's receiver that may be null, `xs[0].sort()`: the runtime's own check of the call's receiver, at the call)
         const method =
           read === undefined
             ? all.find(
@@ -1930,8 +1930,7 @@ export function derive(
                   (site(unwrap(expression.callee.object)) === at || site(expression) === at),
               )
             : undefined;
-        if (read === undefined && method?.kind === "callExpression")
-          native("member", site(method.callee));
+        if (read === undefined && method?.kind === "callExpression") native("member", site(method));
         else if (read === undefined)
           throw new Underivable(`a member obligation at ${at} without a member`);
         else native("member", site(read));
