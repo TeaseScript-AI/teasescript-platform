@@ -124,7 +124,9 @@ if (fromCi !== null) {
   const fileSeconds = {};
   const testSeconds = {};
   const failed = [];
-  for await (const event of run({ files: paths, concurrency: true, isolation: "process" })) {
+  // `node --test`'s default concurrency, which the full suite's runner (`run-test-files.mjs`) also uses and records.
+  const filesAtOnce = Math.max(availableParallelism() - 1, 1);
+  for await (const event of run({ files: paths, concurrency: filesAtOnce, isolation: "process" })) {
     if (event.data?.nesting !== 0 || event.data.file === undefined) continue;
     const file = event.data.file.slice(event.data.file.lastIndexOf("/") + 1);
     if (event.type === "test:fail") failed.push(`${file}: ${event.data.name}`);
@@ -144,7 +146,7 @@ if (fromCi !== null) {
   measured = {
     source: "",
     from: `a local run at ${commit.slice(0, 9)}, Node ${process.version}, ${availableParallelism()} CPUs`,
-    filesAtOnce: availableParallelism() - 1,
+    filesAtOnce,
     pretestSeconds: null,
     fileSeconds,
     testSeconds,
