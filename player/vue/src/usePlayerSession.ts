@@ -31,7 +31,6 @@ import { FileStoreService } from "../../stored-files.js";
 import { LockService, type LockDialog, type LockDialogInput } from "../../lock-service.js";
 import type { LockServices } from "../../encryption/lock.js";
 import {
-  createPlayerRuntimeRestorePoint,
   playerRuntimeSnapshot,
   playerRuntimeSnapshotJson,
   playerRuntimeSnapshotOrNull,
@@ -62,6 +61,7 @@ import {
   holdPlan,
   introduceNow,
 } from "../../engine-bridge/in-process.js";
+import type { CheckpointCapture } from "../../engine-bridge/ops/persistence.js";
 import type { StartOptions } from "../../engine-bridge/ops/session.js";
 import {
   bridgeOf,
@@ -1965,7 +1965,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if ("unavailable" in found) throw new StorageTransferError(found.unavailable);
     let restorePoint: PlayerRuntimeRestorePoint;
     try {
-      restorePoint = hatch(found.session, (current) => createPlayerRuntimeRestorePoint(current));
+      // The checkpoint as the host holds it now, after the session's earlier requests, with the events it goes with.
+      const capture = await bridgeOf(found.session).read<CheckpointCapture>(
+        found.session,
+        "captureCheckpoint",
+      );
+      restorePoint = Object.freeze({
+        checkpointJson: capture.checkpointJson,
+        events: Object.freeze(found.session.events.slice(0, capture.eventsThrough)),
+      });
     } catch {
       throw new StorageTransferError(
         "This browser cannot keep the session as it is now, so it cannot be exported. Play on and try again later.",
