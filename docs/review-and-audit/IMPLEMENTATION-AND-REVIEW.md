@@ -147,10 +147,10 @@ turns came from the code itself:
 - names that differ by a letter, such as a file and its plural.
 
 A comment says what the code does now, so it stays true whatever merges later. It never forecasts later work: no
-"until #N" or "until" a package or stage, no "once #N", no "will be replaced" or "replaces this", no "TODO(#N)". A known
-temporary state is stated as a fact, and its plan lives in its issue. A reference to an accepted record (an issue, a
-TABLE revision or section, a stage, a past pull request) is a citation and is allowed; what it says about the code must
-still be true now.
+"until #N" or "until" a package or stage, no "once #N", no "will be replaced" or "replaces this", and no TODO in any
+form. A known temporary state is stated as a fact, and its plan lives in its issue. A reference to an accepted record
+(an issue, a TABLE revision or section, a completed stage, a merged pull request) is a citation and is allowed; what it
+says about the code must still be true now.
 
 When something misleads you, or would mislead the next builder:
 
@@ -215,11 +215,12 @@ Fix what you can at its source, and report it even when fixed: the counts show w
 
 A step you repeat by hand becomes a script, shared with everyone who would repeat it.
 
-- **A repository tool:** in `tools/`, with tests and a header that states its contract. A script becomes one from the
+- **A repository tool:** in `tools/`, with a header that states its contract; a new repository tool comes with tests. A script becomes one from the
   moment a rule, a brief template or a READY requirement names its output. It is promoted before that rule takes
   effect, so no rule depends on an unowned helper.
 - **Until then, a shared helper** in the coordinators' repository. It carries a one-line header (purpose, side, date,
-  inputs), so that a friction line can name it. Its friction is fixed only when fixing costs less than the friction.
+  inputs), so that a friction line can name it. Its friction is fixed only when fixing costs less than the friction. A
+  brief that relies on a helper names its path. A blind brief gets a copy outside the coordinators' repository.
 - **Tools of the agent environment** belong to that environment's documentation.
 
 ## Self-review and assigned review
