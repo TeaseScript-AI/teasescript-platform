@@ -602,17 +602,18 @@ function sessionMethods(text: string): Map<string, boolean> {
 
 // Clarity audit part 2, item 1: session IDs restart per connection, so a handle of another bridge would select this
 // bridge's session of the same ID. Each method that takes a `PlayerSession` refuses one (`ForeignSessionError`).
-/** Each such method, called on bridge `a` with bridge `b`'s session. */
-const FOREIGN_CALLS: Record<string, (a: PlayerBridge, foreign: PlayerSession) => unknown> = {
-  store: (a, foreign) => a.store(foreign),
-  latest: (a, foreign) => a.latest(foreign),
-  read: (a, foreign) => a.read(foreign, "captureCheckpoint"),
-  request: (a, foreign) => a.request(foreign, "captureKeep", {}),
-  viewCalls: (a, foreign) => a.viewCalls(foreign, true),
-  section: (a, foreign) => a.section(foreign, async () => {}),
-  halt: (a, foreign) => a.halt(foreign),
-  frozen: (a, foreign) => a.frozen(foreign),
-  release: (a, foreign) => a.release(foreign),
+/** Each such method, called on bridge `a` with bridge `b`'s session, through an op that `a`'s own session would take. */
+const FOREIGN_CALLS: Record<string, (a: PlayerBridge, foreign: PlayerSession) => Promise<void>> = {
+  store: async (a, foreign) => void a.store(foreign),
+  latest: async (a, foreign) => void a.latest(foreign),
+  read: async (a, foreign) => void (await a.read(foreign, "captureCheckpoint")),
+  request: async (a, foreign) =>
+    void (await a.request(foreign, "observeTime", { atMs: 0, media: [] })),
+  viewCalls: async (a, foreign) => void (await a.viewCalls(foreign, true)),
+  section: async (a, foreign) => void (await a.section(foreign, async () => {})),
+  halt: async (a, foreign) => void (await a.halt(foreign)),
+  frozen: async (a, foreign) => void a.frozen(foreign),
+  release: async (a, foreign) => void a.release(foreign),
 };
 
 test("every PlayerBridge method that takes a PlayerSession checks it is the bridge's own", () => {
@@ -651,7 +652,7 @@ for (const [method, call] of Object.entries(FOREIGN_CALLS))
     const [own, foreign] = [await started(a, "A"), await started(b, "B")];
     assert.equal(own.id, foreign.id, "both hosts allocate the same ID");
     const [ownBefore, foreignBefore] = [a.latest(own), b.latest(foreign)];
-    await assert.rejects(async () => call(a, foreign), ForeignSessionError);
+    await assert.rejects(call(a, foreign), ForeignSessionError);
     // Neither session changed: the refusal selected nothing.
     assert.equal(a.latest(own), ownBefore);
     assert.equal(b.latest(foreign), foreignBefore);
