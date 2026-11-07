@@ -1073,16 +1073,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The persistence operations under way (`persistenceOwnership`), each revoked for good where it retires.
   const pendingOwnerships = new Set<PersistenceOwnership>();
   /** Ends every persistence operation the page's change of room, store, plan tenure, preparation or life retired. */
-  function revokeRetiredOperations() {
-    for (const ownership of pendingOwnerships) ownership.revoke();
+  function retireStaleOperations() {
+    for (const ownership of pendingOwnerships) ownership.retireIfStale();
   }
   /** A new preparation, which retires the ones before it. */
   function nextPreparation(): number {
     preparation += 1;
-    revokeRetiredOperations();
+    retireStaleOperations();
     return preparation;
   }
-  watch(room, revokeRetiredOperations, { flush: "sync" });
+  watch(room, retireStaleOperations, { flush: "sync" });
   // A Continue under way in the host, whose session no other activation may let run on; see `supersede`.
   let continuing: PlayerSession | null = null;
   // The Start or Continue still beginning over the bridge. A later activation begins only once it settled, so the
@@ -1843,7 +1843,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const settled = settle(planJsonLease, event);
     if (settled.lease.current !== planJsonLease.current) planTenure += 1;
     planJsonLease = settled.lease;
-    revokeRetiredOperations();
+    retireStaleOperations();
     for (const message of settled.messages) {
       const op = message.kind === "write" ? "preparePlanText" : "releasePlanText";
       void bridge?.client.request(op, { plan: message.plan }).catch(() => {});
@@ -2681,7 +2681,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       // Another tab created it meanwhile, or this browser cannot keep it: then it lives in this page.
       if ((await debugRooms.read(scope).catch(() => null)) === null) {
         debugRooms = memoryKeptRoomStore();
-        revokeRetiredOperations();
+        retireStaleOperations();
         copied = await debugRooms
           .create(scope, entries, photos)
           .then(all, () => debugRooms.create(scope, [], []).then(() => new Set<string>()));
