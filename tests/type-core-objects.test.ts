@@ -407,5 +407,31 @@ test("an objects query charges each writer it meets and each edge it reads, a se
     );
   };
   const [c, d] = [dense(4), dense(8)];
-  assert.ok(d >= c + 48, `${c}, ${d}`);
+  // (every edge charged, a seen one too: 17 against 65 edges at n = 4 and 8)
+  assert.ok(d >= c + 96, `${c}, ${d}`);
+});
+
+test("a declined objects query charges each entry it visits, and stops at the first decline (#1747, Codex r3)", () => {
+  // (n bindings read into one array beside a host value: the host's query declines, the rest is not read for it)
+  const units = [4, 64].map((n) => {
+    const rows = Array.from({ length: n }, (_, i) => `let b${i}={p${i}:1}`);
+    rows.push(
+      `let xs=[hostValue,${Array.from({ length: n }, (_, i) => `b${i}`).join(",")}]`,
+      "exit",
+    );
+    const pass = passesOf(rows.join("\n") + "\n", MODES[0]!, 30_000_000).at(-1)!;
+    const { program, contract, solver } = pass;
+    const array = [...program.hasOf.keys()].find((literal) =>
+      contract.literalIndex(literal).root.children.has("element"),
+    )!;
+    return inMode(MODES[0]!, () => {
+      solver.run(solver.proven(objectsAt(contract, array, ["element"])));
+      const before = program.work.total;
+      const { proof } = solver.run(solver.proven(objectsAt(contract, array, ["element", "zz"])));
+      assert.equal(proof?.complete, false);
+      return program.work.total - before;
+    });
+  });
+  // (it stops at the first decline: the work does not grow with the entries after it)
+  assert.ok(units[1]! <= units[0]! + 8, units.join(", "));
 });
