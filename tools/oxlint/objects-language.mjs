@@ -1,6 +1,6 @@
 import { ts } from "ts-morph";
 
-/**
+/*
  * The admitted language of `objects.ts` (#1747, #1921): the forms the file needs, each admitted
  * by its original declaration's identity, and every other form rejected. It guards the charging invariant against
  * ordinary edits of the file. It does not establish runtime provenance through carriers (stores, aliases, returns,
@@ -422,7 +422,6 @@ export function objectsLanguage({
       DEMAND_CALLBACKS.has(parent.name.text)
     );
   };
-  /** Whether an expression is written: assigned, compounded, incremented or deleted. */
   /**
    * Whether an expression is written: read through parentheses, non-null and type assertions, and through the array
    * and object literals of a destructuring, up to an assignment's target, an update's operand, a `delete`'s operand or
