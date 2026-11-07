@@ -526,6 +526,52 @@ dist/tests/runtime-differential.test.js`. `run.mjs --oracle [--manifest FILE]` r
 the candidate's closure digest. A runner that never answers, or fails before it opens its pipes, is bounded only by the
 job's deadline. A behaviour changed after the pin shows as a difference, which only a new seal removes.
 
+## Replay through the bridge
+
+`tests/helpers/replay-harness.ts` is the L5 gate's shared replay harness (#1919). `tests/player-bridge-recording.test.ts`
+uses it for the replay family: successful replay, frozen failure replay and live recovery, each in-process, in a Node
+Worker, and in the composable on its in-process engine. It has these parts:
+
+- **`tapPublications`:** the complete trace of the publications a session's store is given after a cut, by value, from
+  the cut's revision and event cursor, with what the store holds once it applied each: its state and every event since
+  the cut. Every publication must apply, its cursors must continue, and it may carry only the fields
+  `PUBLICATION_FIELDS` declares. A new publication field is declared there, with whether the trace compares it.
+- **`adapterReplay`:** the oracle, the adapter restored at the publication before the cut and given the live run's
+  requests after it (`trackRequests`), the test's steps and the composable's own observations alike, in the order the
+  host applied them. The trace is then compared exactly.
+- **`withLiveHost`:** the real composable. Each publication is handed to it in the tick its store applies it, and the
+  next step waits until it has settled. Every session it shows is recorded by value and must equal the oracle's, each
+  publication once, in order. Every judgment runs while the composable lives.
+- **`LiveHostEffects`** (`tests/helpers/live-host-effects.ts`): the host services the composable is given or makes are
+  recorded:
+  - script storage;
+  - kept sessions and debug rooms, and their media repositories;
+  - the captured-media store;
+  - media elements and object URLs;
+  - `document` and `window` listeners and dispatches;
+  - lock fetches.
+
+  A sample holds each service's state by value and the count of each of its mutating calls, counted before the call
+  runs. An element property set counts only when it changes the value. Each service's members are classified there,
+  and a new member fails until it is classified.
+
+- **The control run:** the same restore, cut and steps in the live composable, without the call that throws or the
+  recovery. Samples are taken at the cut, after the throw, after every step, and once more after the judgments. Each
+  must equal the control run's sample at the same point, so what the steps themselves do (the script's end releasing
+  its medium) is in both, and what recovery adds is a difference. The session's requests are checked through that last
+  sample: each must be an engine input, and none may come after the judged trace.
+- **Outside the claim:**
+  - listener identity: listener counts are compared, not which callback;
+  - property writes on `document` and `window`;
+  - the bridge client's lifecycle registrations (`onLoss`);
+  - the capture host's device internals: the fixture's camera is unsupported, and a control shows no device probe
+    after the cut.
+
+The cut and the run's end are quiescent (`quiesce`): no request in flight, every reply delivered, and nothing more
+published.
+
+A frozen failure matches no publication, so it is judged by its recorded successful prefix replayed.
+
 ## Implemented Phase 1 deterministic property harness
 
 The repository keeps one small deterministic campaign around the current public
