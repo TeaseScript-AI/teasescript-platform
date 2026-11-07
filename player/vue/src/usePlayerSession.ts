@@ -5,7 +5,7 @@ import { planLockNeeds } from "../../plan-metadata.js";
 import {
   CapturedMediaNotStoredError,
   CapturedMediaStore,
-  insertOrConfirm,
+  insertOrAcceptExisting,
   isCapturedMediaReference,
   isWellFormedCapturedMediaReference,
   type CapturedMediaRecord,
@@ -1946,7 +1946,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         // The photos no save stored go with the session, a photo already kept as it is; a stored one stays stored
         // while the session uses it (`capturedMediaStorage`).
         for (const photo of capturedMedia.sessionRecords(references)) {
-          await insertOrConfirm(store.media, photo);
+          await insertOrAcceptExisting(store.media, photo);
           ctx.check();
         }
       }
