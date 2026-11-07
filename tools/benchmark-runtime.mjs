@@ -262,9 +262,9 @@ const cpuUs = (start) => {
  * Runs a case to its end and records every cut. A case drives `stepToEvent` with the research allowance, or, with
  * `budget: "product"`, `run` without a budget, as the Player does, so the product default applies at each scene time
  * (a `run` cut). Without a tape it observes each wait's deadline (an `observe` cut). With a tape, every host call is the
- * tape's next entry, `observeTime` too (a `host` cut, which also has the call's outcome); the tape must be used up
- * exactly when the session stops waiting, and each entry it marks as a unit must complete; `observed.tapeProblems`
- * says otherwise. With `restore`, the session is replaced at every cut by one restored from its checkpoint's JSON
+ * tape's next entry, `observeTime` too (a `host` cut, which also has the call's outcome and its digest); the tape must
+ * be used up exactly when the session stops waiting, and each entry it marks as a unit must complete;
+ * `observed.tapeProblems` says otherwise. With `restore`, the session is replaced at every cut by one restored from its checkpoint's JSON
  * text, which must export the same snapshot. With `timed`, the record also has `cpuUs`, the CPU of the drive,
  * `observeTime` and tape calls alone, and `setupCpuUs`, that of the session's creation; the cut records are made
  * outside those segments, so a timed run is checked like any other. `observed` holds what the manifest's statements
@@ -309,7 +309,12 @@ export function recordCase(
       events: result.events.length,
       eventsDigest: eventsDigest(result.events),
       stateDigest: stateDigest(snapshot),
-      ...(kind === "host" ? { outcome: result.outcome?.kind ?? null } : {}),
+      ...(kind === "host"
+        ? {
+            outcome: result.outcome?.kind ?? null,
+            outcomeDigest: sha256(canonicalJson(result.outcome ?? null)),
+          }
+        : {}),
     };
     cuts.push(record);
     if (restore) {
@@ -388,6 +393,7 @@ const cutFields = [
   "eventsDigest",
   "stateDigest",
   "outcome",
+  "outcomeDigest",
 ];
 const show = (value) => (typeof value === "string" ? value : JSON.stringify(value));
 

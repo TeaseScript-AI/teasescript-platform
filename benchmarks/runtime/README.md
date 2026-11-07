@@ -27,8 +27,9 @@ implementations, a probe's expected output.
   `restoreEachCut`.
 - `baseline.json`: per case, its source hash (and tape hash), its instructions, its texts and every cut (each
   `stepToEvent`, `run`, `observeTime` or tape call return): instructions so far, status, RNG state, number and digest of
-  the events, the digest of the snapshot without its `format` and `version`, and a tape call's outcome. The counts are a
-  regression oracle of the current runtime and compiler, not a performance requirement.
+  the events, the digest of the snapshot without its `format` and `version`, and a tape call's outcome, its kind and the
+  digest of all of it. The counts are a regression oracle of the current runtime and compiler, not a performance
+  requirement.
 
 ## Driving a case
 
