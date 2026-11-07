@@ -215,9 +215,9 @@ Fix what you can at its source, and report it even when fixed: the counts show w
 
 A step you repeat by hand becomes a script, shared with everyone who would repeat it.
 
-- **A repository tool:** in `tools/`, with a header that states its contract; a new repository tool comes with tests. A script becomes one from the
-  moment a rule, a brief template or a READY requirement names its output. It is promoted before that rule takes
-  effect, so no rule depends on an unowned helper.
+- **A repository tool:** in `tools/`, with a header that states its contract; a new repository tool comes with tests.
+  A script becomes one from the moment a rule, a brief template or a READY requirement names its output. It is
+  promoted before that rule takes effect, so no rule depends on an unowned helper.
 - **Until then, a shared helper** in the coordinators' repository. It carries a one-line header (purpose, side, date,
   inputs), so that a friction line can name it. Its friction is fixed only when fixing costs less than the friction. A
   brief that relies on a helper names its path. A blind brief gets a copy outside the coordinators' repository.
