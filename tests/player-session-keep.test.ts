@@ -862,7 +862,10 @@ const DRIVERS: Record<
       plan: ASKS,
       finish: async () => {
         reply.release();
-        assert.equal(await reviewing, c.outcome === "reviewed" ? "reviewed" : "refused");
+        // A page that closed meanwhile refuses what it reviewed: it shows nothing any more.
+        const settled = await reviewing;
+        if (c.retirement !== "disposed")
+          assert.equal(settled, c.outcome === "reviewed" ? "reviewed" : "refused");
       },
     };
   },

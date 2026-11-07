@@ -108,7 +108,7 @@ export const UNOPERATED = {
  * What an operation's ownership holds on to besides its room and kept store (`persistenceOwnership` in the composable):
  * a preparation of its own, which every later preparation retires, or the page's plan tenure alone.
  */
-export const OWNERSHIPS = ["preparation", "tenure"] as const;
+const OWNERSHIPS = ["preparation", "tenure"] as const;
 export type Ownership = (typeof OWNERSHIPS)[number];
 /**
  * The ownerships each operation takes; the source check (`player-persistence-operations-source.test.ts`) reads them from
@@ -480,27 +480,27 @@ export const UNHELD_AWAITS = {
  * Every method of the stores the family records, as a read, a write, or a store within: an interface that gains a
  * method fails to type until it is classified here, and the recorder records each call by this class.
  */
-export const KEPT_METHODS = {
+const KEPT_METHODS = {
   session: "read",
   publish: "write",
   discard: "write",
   media: "store",
 } as const satisfies Record<keyof KeptSessionStore, MethodClass>;
-export const ROOM_METHODS = {
+const ROOM_METHODS = {
   ...KEPT_METHODS,
   read: "read",
   create: "write",
   values: "store",
   discardSession: "write",
 } as const satisfies Record<keyof KeptRoomStore, MethodClass>;
-export const PROVIDER_METHODS = {
+const PROVIDER_METHODS = {
   scope: "field",
   load: "read",
   write: "write",
   replace: "write",
   clear: "write",
 } as const satisfies Record<keyof ScriptStorageProvider, MethodClass>;
-export const REPOSITORY_METHODS = {
+const REPOSITORY_METHODS = {
   get: "read",
   add: "write",
   delete: "write",
