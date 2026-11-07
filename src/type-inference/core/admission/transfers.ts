@@ -1316,8 +1316,8 @@ export function* writtenDecider(
     if (!asksType(admission, f.group, entry, rest === at.length)) continue;
     let term: TypeTerm | null;
     // (whether the copy reads its written type at its own level: a written copy's where no step of the asked path is
-    // left below it, an inheriting copy's as the inheritance pass recorded it (`inheritedInto`'s `own`); a call's result never
-    // is a copy read as an occurrence, #1901)
+    // left below it, an inheriting copy's as the inheritance pass recorded it (`inheritedInto`'s `own`); a call's
+    // result never is a copy read as an occurrence, #1901)
     let own = false;
     if (entry.call === true) {
       const key = contract.resultKey(entry.task.value);

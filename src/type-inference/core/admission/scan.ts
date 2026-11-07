@@ -279,7 +279,8 @@ export function* earliestDecider(
   let joinedNull = false;
   const self = admission;
   // (whether the last copy `termOf` answered reads its written type at its own level: a written copy's where no step of
-  // the asked path is left below it, an inheriting copy's as the inheritance pass recorded it, `inheritedInto`'s `own`, #1901)
+  // the asked path is left below it, an inheriting copy's as the inheritance pass recorded it, `inheritedInto`'s `own`,
+  // #1901)
   let ownLevel = false;
   function* termOf(stop: Stop, length: number): Inheriting<TypeTerm | null> {
     // (at the path's end itself a carried copy decides only where it surely is the value there: each literal it was
