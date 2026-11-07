@@ -139,10 +139,7 @@ export const WORKER_MODULES: readonly string[] = [
   "player/engine-bridge/in-process.ts",
 ];
 
-/** Main-realm modules whose imports the inventory does not judge; it lists none. */
-export const EXEMPT_UNTIL_ACTIVATION: readonly string[] = [];
-
-/** A main-realm import of a value from Worker-side code, and the family that removes it. */
+/** A main-realm import of a value from Worker-side code, and the bridge family it belongs to. */
 export interface RatchetEntry {
   readonly importer: string;
   readonly target: string;
