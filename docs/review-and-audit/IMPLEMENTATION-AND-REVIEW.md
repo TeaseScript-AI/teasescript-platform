@@ -120,7 +120,10 @@ boundary, is built so that its completeness follows from the construction, befor
 
 - One function in one place decides the rule, and every caller uses it.
 - Anything that function has not proved gets a conservative default: an unknown kind fails or is treated as unsafe. It
-  is never silently skipped or passed.
+  is never silently skipped or passed. The default under-offers and never over-offers: it may refuse what the rule
+  could admit until a row admits it, and it never admits what the function has not proved.
+- The rule is written as the closed set of forms it admits, never as a list of forms it rejects: a reject-list fails
+  open on every form it did not name, and each unnamed form becomes a sibling.
 - A generated test family covers the rule's axes (for example sites × forms × kinds, in both orders), with a check
   that every combination is covered.
 
