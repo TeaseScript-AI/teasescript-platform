@@ -86,7 +86,7 @@ test("a charge that stops the analysis stops each helper's body, read, copy, joi
     effects += 1;
     return item;
   };
-  const runs: readonly (readonly [string, () => unknown])[] = [
+  const runs: readonly (readonly [string, () => void])[] = [
     [
       "each",
       () => {
