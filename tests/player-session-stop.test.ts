@@ -12,6 +12,7 @@ import {
 import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
 import type { DebugRecorder, DebugRecording } from "../player/debug-recorder.js";
 import type * as CompileProject from "../player/compile-project.js";
+import type * as InProcess from "../player/engine-bridge/in-process.js";
 import type * as RuntimeAdapter from "../player/runtime-adapter.js";
 import type * as RuntimeView from "../player/runtime-view.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
@@ -318,6 +319,60 @@ test("a session a Player error stopped shows its calls without a demand, which a
   demand.release();
   await settle();
   assert.equal(asked, 0);
+});
+
+test("a save that settles while the stop waits for its acknowledgement is not issued again when the stop shows", async (context) => {
+  stubBrowser(context);
+  const module = await loadPlayerModule("player/engine-bridge/in-process.ts");
+  // EVIDENCE: validation: Vite loaded the real source module; this is its backend factory.
+  const make = module["createInProcessBackend"] as typeof InProcess.createInProcessBackend;
+  const bridge = make(
+    { commit: null, dirty: null, mode: null, appVersion: null },
+    { delayMs: 200 },
+  );
+  context.after(() => bridge.client.terminate());
+  let finishWrite!: () => void;
+  let writes = 0;
+  const options = {
+    bridge: Promise.resolve(bridge),
+    capabilities: { camera: false },
+    scriptStorage: {
+      scope: "review",
+      load: async () => [],
+      replace: async () => {},
+      clear: async () => {},
+      write: () => {
+        writes += 1;
+        return new Promise<void>((resolve) => {
+          finishWrite = resolve;
+        });
+      },
+    },
+  };
+  const host = mount(context, () => usePlayerSession(options));
+  await host.loadScriptStorage();
+  host.prepare(() =>
+    runtime.createPlayerRuntimeSession('save 1 as "count"\nsay "after", instant\nexit', {
+      persistentScriptStorage: true,
+    }),
+  );
+  await host.activate();
+  assert.equal(writes, 1);
+  const before = published(host.session.value);
+  // The Worker cannot flush replies early. Reproduce its acknowledgement timing on the delayed test backend.
+  bridge.deliverInTransit = null;
+  host.reportHostError(new TypeError("A component failed."));
+  assert.equal(host.stopped.value, true);
+  assert.equal(bridge.frozen(before), false);
+  finishWrite();
+  await settle(40);
+  assert.equal(writes, 1);
+  await settle(250);
+  assert.equal(bridge.frozen(before), true);
+  const after = published(host.session.value);
+  assert.equal(after.revision, before.revision);
+  assert.deepEqual(after.state, before.state);
+  assert.equal(writes, 1, "the stop's final publication repeats no provider write");
 });
 
 test("input admitted just before a Player error does not run after it", async (context) => {

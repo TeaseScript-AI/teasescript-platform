@@ -91,6 +91,21 @@ export function viewed(session: PlayerSession) {
     hatch(session, (held) => {
       // The host's latest publication is the store's: the same revision.
       assert.equal(held.revision, session.revision);
+      // Each fact is its plan instruction's: its file, line and kind, a `wait` giving its command.
+      for (const [index, fact] of Object.entries(session.instructions)) {
+        const instruction = held.plan.instructions[Number(index)];
+        assert.deepEqual(
+          fact,
+          instruction === undefined
+            ? { path: instructionSourcePath(held.plan, Number(index)), line: 0, kind: "end" }
+            : {
+                path: instructionSourcePath(held.plan, Number(index)),
+                line: instruction.span.sl + 1,
+                kind: instruction.kind === "wait" ? instruction.command : instruction.kind,
+              },
+          `instruction ${index}`,
+        );
+      }
       assert.deepEqual(result.countdown, planDebugCountdown(held));
       if (session.callView !== null) {
         assert.deepEqual(session.callView.calls, held.state.calls);

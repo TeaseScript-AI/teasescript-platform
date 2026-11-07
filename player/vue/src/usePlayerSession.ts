@@ -341,11 +341,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const host = bridgeOf(target);
     const acknowledged = host.halt(target);
     const commit = () => {
-      endHalting(stop);
-      if (disposed || stop !== activationToken) return;
+      if (disposed || stop !== activationToken) return endHalting(stop);
+      // The final publication shows, then the stop; the halt holds the session stopped until then, so nothing reacting
+      // to that publication (the stop's call view, also of an unchanged state) sees it running for a moment.
       const final = host.latest(target);
       if (final !== null) session.value = final;
       hostError.value ??= name;
+      endHalting(stop);
     };
     if (host.frozen(target)) return commit();
     haltUntil(stop);
