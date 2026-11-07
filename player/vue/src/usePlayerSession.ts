@@ -1243,14 +1243,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * them again (`activate`).
    */
   async function loadScriptStorage(): Promise<void> {
-    applyScriptStorage(await readScriptStorage());
+    applyScriptStorage(await readScriptStorage(scriptStorage));
   }
   /**
    * The stored values read freshly, with the references among them the media store had stored, or `null` when storage
    * could not be read; `undefined` without storage. It changes nothing on the page: `applyScriptStorage` does. For the
-   * persistence operation `owner`, every call it makes is admitted; a refused one rejects with `StaleOperation`.
+   * persistence operation `owner`, `values` are its own (`operationStorage`) and every call is admitted; a refused one
+   * rejects with `StaleOperation`.
    */
   async function readScriptStorage(
+    values: ScriptStorageProvider | undefined,
     owner?: PersistenceOwnership,
   ): Promise<
     | {
@@ -1260,9 +1262,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     | null
     | undefined
   > {
-    if (!scriptStorage) return undefined;
+    if (values === undefined) return undefined;
     try {
-      const entries = await (owner === undefined ? scriptStorage : operationStorage(owner)).load();
+      const entries = await values.load();
       const storedFiles = await capturedMedia
         .storedReferences(storedValueReferences(entries), owner)
         .catch(rejectedUnlessStale(new Set<string>()));
@@ -2131,8 +2133,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (keptScope === null) return {};
     await storageRoute;
     ctx.check();
-    const store = keptStore();
-    const bound = ctx.kept(store);
+    // The normal room's photos come back as session media; the debug room reads its own like its saved ones.
+    const normalRoom = keptStore() === keptSessions;
+    const bound = ctx.kept(keptStore());
     const stored = await bound.session(keptScope).catch(rejectedUnlessStale(null));
     ctx.check();
     const found = stored === null ? null : keptSession(stored);
@@ -2187,9 +2190,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       bridgeOf(session).release(session);
       throw new StaleOperation();
     };
-    // The debug room reads its photos like its saved ones; a normal session's come back as session media.
     const media: (readonly [string, StoredCapturedMedia | null])[] = [];
-    if (store === keptSessions)
+    if (normalRoom)
       for (const reference of capturedMediaReferencesIn(found.snapshotJson, found.events)) {
         media.push([
           reference,
@@ -2441,7 +2443,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         );
         // The import's own preparation, while it owns the page: the saved values it stored, and its Start or Continue.
         ctx.check();
-        const stored = await readScriptStorage(ctx);
+        const stored = await readScriptStorage(operationStorage(ctx), ctx);
         ctx.commit(() => applyScriptStorage(stored));
         if (!(await prepareKept(owner, ctx))) throw new StaleOperation();
         if (unexpected !== null) throw unexpected.error;
