@@ -76,23 +76,54 @@ export function recordedMedia(queries = []) {
   };
 }
 
-/** The host calls a tape may hold, each with the session method it calls, as the Player's debug export names them. */
-const tapeCalls = {
-  completeAction: (session, [request], queries) => {
-    const media = recordedMedia(queries);
-    const result = session.completeAction(request, { capturedMedia: media });
-    if (media.unasked() > 0)
-      throw new Error(`${media.unasked()} recorded media answers were not asked for`);
-    return result;
-  },
-  updateInteraction: (session, [request]) => session.updateInteraction(request),
-  observeTime: (session, [nowMs, mediaReports = []]) => session.observeTime(nowMs, mediaReports),
-  reportMediaLoad: (session, [mediaId, report]) => session.reportMediaLoad(mediaId, report),
-  pressPermanentButton: (session, [buttonId]) => session.pressPermanentButton(buttonId),
-};
+/**
+ * A tape entry as the host call it makes: `{ kind, ... }` with the arguments named, as 0b.1's differential harness
+ * takes it; `capturedMedia` is the media store a `completeAction` answers from. The runner applies the same calls.
+ */
+export function tapeHostCall(entry, capturedMedia) {
+  const [first, second] = entry.args;
+  switch (entry.kind) {
+    case "completeAction":
+      return { kind: "completeAction", request: first, capturedMedia };
+    case "updateInteraction":
+      return { kind: "updateInteraction", request: first };
+    case "observeTime":
+      return { kind: "observeTime", nowMs: first, reports: second ?? [] };
+    case "reportMediaLoad":
+      return { kind: "reportMediaLoad", mediaId: first, report: second };
+    case "pressPermanentButton":
+      return { kind: "pressPermanentButton", buttonId: first };
+  }
+  throw new Error(`no host call ${entry.kind}`);
+}
+
+/** Makes a host call on `session`. */
+function applyHostCall(session, call) {
+  switch (call.kind) {
+    case "completeAction":
+      return session.completeAction(call.request, { capturedMedia: call.capturedMedia });
+    case "updateInteraction":
+      return session.updateInteraction(call.request);
+    case "observeTime":
+      return session.observeTime(call.nowMs, call.reports);
+    case "reportMediaLoad":
+      return session.reportMediaLoad(call.mediaId, call.report);
+    case "pressPermanentButton":
+      return session.pressPermanentButton(call.buttonId);
+  }
+  throw new Error(`no host call ${call.kind}`);
+}
+
+const tapeKinds = new Set([
+  "completeAction",
+  "updateInteraction",
+  "observeTime",
+  "reportMediaLoad",
+  "pressPermanentButton",
+]);
 
 /**
- * A tape's entries, checked: each `{ kind, args, admissionQueries?, unit? }` names a host call of `tapeCalls`, its
+ * A tape's entries, checked: each `{ kind, args, admissionQueries?, unit? }` names a host call of `tapeHostCall`, its
  * arguments and, for a `completeAction`, the media store's answers to it (`{ reference, kind, result }`), and
  * `unit: true` marks the call that completes one useful unit. A tape is input only; what the calls give is the
  * baseline's.
@@ -103,7 +134,7 @@ export function loadTape(text, label) {
   tape.forEach((entry, index) => {
     const keys = Object.keys(entry ?? {});
     if (
-      !Object.hasOwn(tapeCalls, entry?.kind) ||
+      !tapeKinds.has(entry?.kind) ||
       !Array.isArray(entry.args) ||
       keys.some((key) => !["kind", "args", "admissionQueries", "unit"].includes(key)) ||
       (entry.unit !== undefined && entry.unit !== true) ||
@@ -117,9 +148,52 @@ export function loadTape(text, label) {
   return tape;
 }
 
-/** Calls a tape entry's host operation on `session`. */
-export const applyTapeEntry = (session, entry) =>
-  tapeCalls[entry.kind](session, entry.args, entry.admissionQueries);
+/**
+ * One run of a tape: the one owner of its rule, for the runner and the differential test alike. `next` gives the entry
+ * the waiting session gets, or `null` when the tape is used up, a problem then; `call` makes an entry its host call, with
+ * a media store that answers from the entry's recorded answers in order; `settled` checks that a unit completed; `end`
+ * checks that the tape is used up and gives the problems. Each call's recorded media answers must all be asked for by
+ * the next entry or the end.
+ */
+export function tapeRun(tape, label) {
+  let position = 0;
+  let media = null;
+  const problems = [];
+  const asked = () => {
+    if (media !== null && media.reader.unasked() > 0)
+      problems.push(
+        `${label}: tape entry ${media.at}: ${media.reader.unasked()} recorded media answers were not asked for`,
+      );
+    media = null;
+  };
+  return {
+    next(where = "") {
+      asked();
+      if (position === tape.length) {
+        problems.push(`${label}: the tape is used up while the session waits${where}`);
+        return null;
+      }
+      return tape[position++];
+    },
+    call(entry) {
+      const reader = recordedMedia(entry.admissionQueries);
+      media = { reader, at: position };
+      return tapeHostCall(entry, reader);
+    },
+    settled(entry, outcome) {
+      if (entry.unit && outcome !== "completed")
+        problems.push(`${label}: tape entry ${position}, a unit, gave ${outcome}, not completed`);
+    },
+    end(status) {
+      asked();
+      if (position < tape.length)
+        problems.push(
+          `${label}: the session ${status} with ${tape.length - position} tape entries left`,
+        );
+      return problems;
+    },
+  };
+}
 
 /** The manifest's cases, each with its source text and hash; `select` picks by name, `all` adds the on-demand ones. */
 export function loadCases(directory = benchmarkDirectory, { all = false, select = null } = {}) {
@@ -217,13 +291,12 @@ export function recordCase(
   const cuts = [];
   const said = [];
   const restoreProblems = [];
-  const tapeProblems = [];
   const product = testCase.budget === "product";
   const drive = product
     ? () => session.run()
     : () => session.stepToEvent({ instructionBudget: budget });
   const tape = testCase.tape ?? null;
-  let position = 0;
+  const tapeOwner = tape ? tapeRun(tape, testCase.name) : null;
   const cut = (kind, result) => {
     instructions += result.instructionsExecuted;
     for (const event of result.events) if (event.kind === "say") said.push(event.text);
@@ -250,14 +323,14 @@ export function recordCase(
     return snapshot;
   };
   // Texts the manifest states by digest are kept by digest, so a long one stays out of the baseline.
-  const finish = (failure) => ({
+  const finish = (failure, status) => ({
     name: testCase.name,
     sourceSha256: testCase.sourceSha256,
     ...(tape ? { tapeSha256: testCase.tapeSha256 } : {}),
     instructions,
     ...(testCase.saidSha256 === undefined ? { said } : { saidSha256: sha256(canonicalJson(said)) }),
     cuts,
-    observed: { failure, tapeProblems },
+    observed: { failure, tapeProblems: tapeOwner ? tapeOwner.end(status) : [] },
     ...(restore ? { restoreProblems } : {}),
     ...(timed ? { cpuUs: cpu, setupCpuUs } : {}),
   });
@@ -281,27 +354,16 @@ export function recordCase(
       }
     }
     if (snapshot.status !== "waiting") {
-      if (tape && position < tape.length)
-        tapeProblems.push(
-          `${testCase.name}: the session ${snapshot.status} with ${tape.length - position} tape entries left`,
-        );
-      return finish(snapshot.failure?.code ?? null);
+      return finish(snapshot.failure?.code ?? null, snapshot.status);
     }
-    if (tape) {
-      if (position === tape.length) {
-        tapeProblems.push(
-          `${testCase.name}: the tape is used up while the session waits at cut ${cuts.length}`,
-        );
-        return finish(null);
-      }
-      const entry = tape[position++];
-      const answered = time(() => applyTapeEntry(session, entry));
+    if (tapeOwner) {
+      const entry = tapeOwner.next(` at cut ${cuts.length}`);
+      if (entry === null) return finish(null, snapshot.status);
+      const call = tapeOwner.call(entry);
+      const answered = time(() => applyHostCall(session, call));
       const after = cut("host", answered);
       if (after.status === "waiting" && !session.view().runnable) waiting = after;
-      if (entry.unit && answered.outcome?.kind !== "completed")
-        tapeProblems.push(
-          `${testCase.name}: tape entry ${position}, a unit, gave ${answered.outcome?.kind}, not completed`,
-        );
+      tapeOwner.settled(entry, answered.outcome?.kind);
       continue;
     }
     const deadline = snapshot.foregroundAction?.deadlineMs;

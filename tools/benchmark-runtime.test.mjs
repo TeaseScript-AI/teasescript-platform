@@ -8,7 +8,6 @@ import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   UsageError,
-  applyTapeEntry,
   canonicalJson,
   formatBaseline,
   loadTape,
@@ -16,6 +15,7 @@ import {
   sha256,
   stateDigest,
   summarizeCpu,
+  tapeRun,
 } from "./benchmark-runtime.mjs";
 import * as references from "../benchmarks/runtime/references.mjs";
 
@@ -458,25 +458,26 @@ test('budget: "product" drives run without a budget, and a stated failure must h
 });
 
 test("a tape's media store answers are given in their recorded order, and all of them", () => {
-  const session = {
-    completeAction: (_request, { capturedMedia }) =>
-      capturedMedia.holds("r1", "file") && capturedMedia.holds("r2", "image"),
-  };
   const entry = (admissionQueries) => ({ kind: "completeAction", args: [{}], admissionQueries });
   const both = [
     { reference: "r1", kind: "file", result: true },
     { reference: "r2", kind: "image", result: true },
   ];
-  assert.equal(applyTapeEntry(session, entry(both)), true);
-  assert.throws(
-    () => applyTapeEntry(session, entry([...both].reverse())),
-    /did not record .* file r1/,
+  const ask = (call) =>
+    call.capturedMedia.holds("r1", "file") && call.capturedMedia.holds("r2", "image");
+  const run = tapeRun([entry(both)], "tape");
+  assert.equal(ask(run.call(run.next())), true);
+  assert.deepEqual(run.end("halted"), []);
+  const reversed = tapeRun([entry([...both].reverse())], "tape");
+  assert.throws(() => ask(reversed.call(reversed.next())), /did not record .* file r1/);
+  const surplus = tapeRun(
+    [entry([...both, { reference: "r3", kind: "file", result: true }])],
+    "tape",
   );
-  assert.throws(
-    () =>
-      applyTapeEntry(session, entry([...both, { reference: "r3", kind: "file", result: true }])),
-    /1 recorded media answers were not asked for/,
-  );
+  ask(surplus.call(surplus.next()));
+  assert.deepEqual(surplus.end("halted"), [
+    "tape: tape entry 1: 1 recorded media answers were not asked for",
+  ]);
 });
 
 test("malformed tapes, and a tape whose units differ from the manifest's, are usage errors", async (t) => {

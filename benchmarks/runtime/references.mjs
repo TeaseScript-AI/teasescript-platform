@@ -32,15 +32,15 @@ export function textTail(chunks) {
   ];
 }
 
-/** `collection-tail-10000`: the list, its changed and sorted copy, the binary searches and the rotation. */
-export function collectionTail(size) {
+/** `collection-tail-10000`: the list, its changed and sorted copy, `targets` binary searches and the rotation. */
+export function collectionTail(size, targets = 200) {
   const items = Array.from({ length: size }, (_, i) => (i * 7919) % 10007);
   const copy = [...items];
   for (let k = 0; k < size; k += 10) copy[k] += 1;
   copy.sort((a, b) => a - b);
   let found = 0;
   let probes = 0;
-  for (let target = 0; target < 200; target++) {
+  for (let target = 0; target < targets; target++) {
     const wanted = target * 50;
     let lo = 0;
     let hi = copy.length;
