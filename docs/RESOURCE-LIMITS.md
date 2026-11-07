@@ -216,6 +216,15 @@ behavior. The configured listener port remains the only current playground tooli
 
 ## Updating this registry
 
+An entry's status is one of the closed list in
+[ADR 0019 "Evidence statuses"](decisions/0019-resource-limit-governance.md#evidence-statuses), which decides each:
+`proven` (the current value, predicate, accepted domain, or formula is justified for its declared category, measurement
+definition, boundary, and input class); `provisional` (the local guard satisfies decision 7, but broader capacity or
+product evidence or policy remains incomplete, and the entry records that gap); `suspicious` (evidence gives a concrete
+reason not to trust the current bound); `obsolete` (the limit or mechanism no longer protects a reachable current
+boundary, has been replaced, or remains only as dead compatibility residue). An unresolved decision is no status: the
+governing-authority field records it as its unresolved-decision marker.
+
 Update this file when implementation, evidence, or an Owner policy decision changes an entry. Historical roundness,
 another boundary's number, and empirical first-failure points do not justify retention. When temporary compatibility is
 the selected POC reason, record that policy and its mandatory reassessment trigger explicitly rather than presenting the
