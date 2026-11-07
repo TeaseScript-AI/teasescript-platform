@@ -55,12 +55,12 @@ type Answer = { readonly session: PlayerRuntimeSession; readonly outcome: unknow
 function answered(held: HeldSession, result: Answer): OpOutcome {
   if (result === null) return { result: null, view: null };
   const next = result.session;
-  if (next === held.current) return { result: result.outcome, view: null };
+  if (next === held.sessionForOperation()) return { result: result.outcome, view: null };
   if (next.revision === held.revision) {
     held.keep(next);
     return { result: result.outcome, view: null };
   }
-  held.catchUp = null;
+  held.endCatchUp();
   const view = held.publish(next);
   return { result: result.outcome, eventsThrough: view.eventsThrough, view };
 }
@@ -90,9 +90,9 @@ function interactionOp(
         readonly input?: DebugAnswerInput | null;
       };
       const { actionId } = checked;
-      if (activePlayerRuntimeInteraction(held.current.state)?.actionId !== actionId)
+      if (activePlayerRuntimeInteraction(held.sessionForOperation().state)?.actionId !== actionId)
         return { result: { kind: "staleAction", actionId }, view: null };
-      const session = held.current;
+      const session = held.sessionForOperation();
       const input = checked.input ?? null;
       return answered(
         held,
@@ -188,7 +188,10 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
       (held, args) => {
         // EVIDENCE: validation: checkArguments accepted `buttonId` as a number.
         const { buttonId } = args as { readonly buttonId: number };
-        return answered(held, pressPlayerRuntimePermanentButton(held.current, buttonId));
+        return answered(
+          held,
+          pressPlayerRuntimePermanentButton(held.sessionForOperation(), buttonId),
+        );
       },
       false,
     ),
@@ -204,7 +207,10 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
           readonly actionId: number;
           readonly stored: boolean;
         };
-        return answered(held, completePlayerRuntimeStorageWrite(held.current, actionId, stored));
+        return answered(
+          held,
+          completePlayerRuntimeStorageWrite(held.sessionForOperation(), actionId, stored),
+        );
       },
       false,
     ),
@@ -218,7 +224,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
       (held, args) => {
         // EVIDENCE: validation: checkArguments accepted the shape; the engine validates the value.
         const edit = args as { readonly key: string; readonly value: SerializableRuntimeValue };
-        return answered(held, applyPlayerRuntimeStorageEdit(held.current, edit));
+        return answered(held, applyPlayerRuntimeStorageEdit(held.sessionForOperation(), edit));
       },
       false,
     ),

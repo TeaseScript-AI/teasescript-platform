@@ -32,8 +32,6 @@ import {
   playerRuntimeSnapshot,
   playerRuntimeSnapshotJson,
   playerRuntimeSnapshotOrNull,
-  resumePlayerRuntimeRandomDraw,
-  setPlayerRuntimeRandomControl,
   type PlayerRuntimeRestorePoint,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
@@ -55,8 +53,14 @@ import {
   introduceNow,
 } from "../../engine-bridge/in-process.js";
 import type { StartOptions } from "../../engine-bridge/ops/session.js";
-import type { TracingIntent } from "../../engine-bridge/player-ops.js";
+import type { RandomIntent, TracingIntent } from "../../engine-bridge/player-ops.js";
 import type { CheckpointCapture, KeepCapture } from "../../engine-bridge/ops/persistence.js";
+import type {
+  DrawResolution,
+  RandomTriedView,
+  ResolveDrawResult,
+} from "../../engine-bridge/ops/random.js";
+import type { RandomNext } from "../../random-decisions.js";
 import {
   StaleOperation,
   persistenceOwnership as ownershipOf,
@@ -71,6 +75,7 @@ import {
 import {
   bridgeOf,
   endsQuietly,
+  refusalCode,
   type PlayerBridge,
   type ServiceSection,
   type SessionSection,
@@ -140,8 +145,6 @@ import type {
   InterpreterEvent,
   MediaReportOutcome,
   RandomControlOptions,
-  RandomDrawResolutionOutcome,
-  RandomOutcome,
   RuntimeScriptStorageEntrySnapshot,
   SerializableRuntimeValue,
   TemporalContext,
@@ -282,16 +285,19 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // or one another Player holds, is the `bridge` promise's failure, which its own callers handle.
   const bridgeReady = (options.bridge ?? Promise.resolve(bridge!)).then((ready) => {
     if (disposed) return ready;
-    ready.claim(claim);
+    randomOwner = ready.claim(claim);
     bridge = ready;
     ready.client.onLoss(bridgeLost);
-    // An injected bridge another Player traced on; this one could send nothing to it before now.
-    if (options.bridge !== undefined && ready.traced) pendingTracing = true;
+    // An injected bridge with a tracing serial allocated: only an earlier Player can have allocated it, as this one could
+    // send nothing to the bridge before now.
+    if (options.bridge !== undefined && ready.hasAllocatedTracingIntent) pendingTracing = true;
     flushTracing(ready);
+    flushRandom(ready, null);
     return ready;
   });
   bridgeReady.catch(() => {
     pendingTracing = false;
+    pendingRandom = false;
   });
   // The recording up to a Player error, kept for a debug export until the next Start, when Debug's rewind begins the
   // recorder anew at a restored state.
@@ -375,8 +381,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function bridgeLost(error: Error) {
     if (disposed) return;
-    // The host's trace went with it.
+    // The host's trace and random control went with it.
     pendingTracing = false;
+    pendingRandom = false;
     traceId.value = null;
     reportHostError(error);
   }
@@ -618,8 +625,77 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // transcript, Stage, and recording stay for the error dialog and a debug export, until the next Start.
   const stopped = computed(() => hostError.value !== null || halting.value);
   const held = computed(() => inspecting.value || drawPending.value || stopped.value);
-  // Which random draws Debug decides or pauses at; every session of the Player gets it.
-  let randomControl: RandomControlOptions | null = null;
+  // Debug's random control (DEBUGGER.md "Random draws"), as the host holds it for this Player (`randomOwner`, from its claim
+  // of the bridge): which sites go on by themselves while Choose outcomes is on, or `null` while it is off. As tracing,
+  // a change before the host is reachable waits as the Player's (`pendingRandom`), and only its latest goes, while the
+  // Player lives; every intent carries the serial of the newest reset of the history it asked for (`resetAt`).
+  // A private bridge is this Player's from the start: a Start may begin before the readiness callback ran.
+  let randomOwner: number | null = bridge?.claim(claim) ?? null;
+  let desiredRandom: { readonly sites: readonly (readonly [string, RandomNext])[] } | null = null;
+  let resetRequested = false;
+  let pendingRandom = false;
+  let lastRandom: RandomIntent | undefined;
+  // The host's history's revision, from its latest reply: what `randomTried` reads again for.
+  const randomRevision = ref(0);
+  /**
+   * Sends the pending random intent, while this Player lives, after the earlier requests of `ahead` (the shown session),
+   * so that session's next op runs with it. It gives no session this Player's control: only `adoptRandom` does.
+   */
+  function flushRandom(host: PlayerBridge, ahead: PlayerSession | null) {
+    if (!pendingRandom || disposed || randomOwner === null) return;
+    pendingRandom = false;
+    const intent = host.nextRandomIntent();
+    lastRandom = Object.freeze({
+      owner: randomOwner,
+      control: desiredRandom,
+      resetAt: resetRequested ? intent : (lastRandom?.resetAt ?? 0),
+      intent,
+    });
+    resetRequested = false;
+    sendRandomRequest(
+      host,
+      "randomControl",
+      { intent: lastRandom },
+      ahead === null ? {} : { after: ahead.id },
+    );
+  }
+  /** Sends a random op on the Worker itself; its reply gives the history's revision. */
+  function sendRandomRequest(
+    host: PlayerBridge,
+    op: "randomControl" | "adoptRandom",
+    args: Record<string, unknown>,
+    options: { readonly after?: string },
+  ) {
+    host.client.request(op, args, options).then(
+      (reply) => {
+        // EVIDENCE: validation: the random ops reply from the same build with the history's revision.
+        const { revision } = reply.result as { readonly revision: number };
+        if (!disposed) randomRevision.value = revision;
+      },
+      (error: unknown) => {
+        if (!endsQuietly(error) && !disposed) reportHostError(error);
+      },
+    );
+  }
+  /**
+   * Adopts `next`: gives it this Player's random control from its next op on. Only the invariant's points call it:
+   * `showSession` without inspection, input adopting an inspected state, Continue after its kept draw went on. A Start's
+   * session is already its Player's from the `start` that made it.
+   */
+  function adoptRandom(next: PlayerSession) {
+    if (lastRandom === undefined || disposed) return;
+    sendRandomRequest(
+      bridgeOf(next),
+      "adoptRandom",
+      { session: next.id, intent: lastRandom },
+      { after: next.id },
+    );
+  }
+  /** What a Start carries: this Player, whose session it is, and its newest random intent. */
+  const startRandom = () =>
+    randomOwner === null
+      ? undefined
+      : { owner: randomOwner, ...(lastRandom === undefined ? {} : { intent: lastRandom }) };
   // The session as other parts of the Player service it: none while a restored state is inspected or a draw is paused.
   const servicedSession = computed(() => (held.value ? null : session.value));
   // A new session remounts the transcript and resets interaction-local state.
@@ -738,7 +814,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session,
     () => device.sample(),
     held,
-    () => !debugTracing.value && randomControl === null,
+    () => !debugTracing.value && desiredRandom === null,
     publishOwned,
   );
   // Input and the work that continues it take their session from here when they run: a session a Player error stopped
@@ -1040,6 +1116,24 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     pendingTracing = false;
     if (lastIssued?.on && bridge !== null) issueTracing(bridge, false).catch(() => {});
     lastIssued = undefined;
+    // Its random control ends with it too, with its history.
+    pendingRandom = false;
+    if (
+      lastRandom !== undefined &&
+      bridge !== null &&
+      (lastRandom.control !== null || lastRandom.resetAt !== lastRandom.intent)
+    ) {
+      const intent = bridge.nextRandomIntent();
+      const shown = session.value;
+      bridge.client
+        .request(
+          "randomControl",
+          { intent: { owner: lastRandom.owner, control: null, resetAt: intent, intent } },
+          shown === null ? {} : { after: shown.id },
+        )
+        .catch(() => {});
+    }
+    lastRandom = undefined;
     bridge?.unclaim(claim);
     disposed = true;
     supersede();
@@ -1577,14 +1671,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session.value = null;
   }
 
-  // Starts or restores a session; its scene time continues from the persisted observation, so a
-  // gap while no Player ran is not consumed. A state Debug's rewind restored is published `paused` for inspection.
-  function start(next: PlayerSession, paused = false) {
+  // Shows a session a Start began or a restore brought, as the Player's from now on; its scene time continues from the
+  // persisted observation, so a gap while no Player ran is not consumed. `inspecting`: a state Debug's rewind restored,
+  // shown for inspection, which takes input, Debug's random control and the clock only once input adopts it.
+  function showSession(
+    next: PlayerSession,
+    { inspecting: forInspection }: { readonly inspecting: boolean } = { inspecting: false },
+  ) {
     // A failed write concerns the run it happened in.
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
     reportedMedia = new Set();
     debugEdits.value = null;
-    inspecting.value = paused;
+    inspecting.value = forInspection;
     rewound.value = null;
     device.reset();
     loads.clear();
@@ -1592,15 +1690,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     generation.value++;
     interactionReset.value++;
     jumpedRevision.value = -1;
-    applyRandomControl(next);
+    // An inspected state takes Debug's random control only once input adopts it (`adoptInspected` below).
+    if (!forInspection) adoptRandom(next);
     session.value = next;
     clock.rebase();
-    if (!paused) {
+    if (!forInspection) {
       applyDebugMode();
       settleUncontrolledDraw();
     }
     // The session that runs is the one a reload continues in its room.
-    if (!paused) keepSessionLater();
+    if (!forInspection) keepSessionLater();
   }
   // Publishes the result of a completed runtime action. Input to an inspected state is evaluated only once
   // `prepareInput` adopted it, so a result for the inspected state itself is never published.
@@ -2345,46 +2444,74 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       );
   }
   /**
-   * Gives every session from now on Debug's random control, or none. Without one, a draw the session is paused at goes
-   * on naturally.
+   * Gives this Player's sessions Debug's random control from their next op on: the sites set to go on by themselves,
+   * or `null` for none. Without one, a draw the session is paused at goes on naturally.
    */
-  function setRandomControl(control: RandomControlOptions | null) {
+  function setRandomControl(
+    control: { readonly sites: readonly (readonly [string, RandomNext])[] } | null,
+  ) {
+    if (disposed) return;
     // A catch-up under way finishes first, as one observation, with the draws it started with.
     const current = clock.settle();
-    randomControl = control;
-    if (current === null) return;
-    applyRandomControl(current);
-    if (control === null && current.state.randomDraw !== null)
-      resolveRandomDraw(current.state.randomDraw.drawId, "natural");
+    // Off while nothing is on and no reset is asked: the host has nothing to change.
+    const changed = control !== null || desiredRandom !== null || resetRequested;
+    desiredRandom = control;
+    if (changed) pendingRandom = true;
+    if (bridge !== null) flushRandom(bridge, current);
+    if (control === null && current?.state.randomDraw != null)
+      void resolveRandomDraw(current.state.randomDraw.drawId, "natural");
   }
-  function applyRandomControl(current: PlayerSession) {
-    if (current.state.status === "halted" || current.state.status === "failed") return;
-    hatch(current, (held) => setPlayerRuntimeRandomControl(held, randomControl));
+  /** Ends Debug's random control and forgets what each site took, as when the Debug features end. */
+  function forgetRandomHistory() {
+    // A history needs forgetting only once the host may hold one.
+    if (lastRandom !== undefined || pendingRandom) resetRequested = true;
+    setRandomControl(null);
   }
   // A session that runs again while paused at a draw nobody decides any more, such as a restored state adopted after
   // Debug's control ended, goes on naturally.
   function settleUncontrolledDraw() {
     const draw = session.value?.state.randomDraw;
-    if (randomControl === null && draw != null) resolveRandomDraw(draw.drawId, "natural");
+    if (desiredRandom === null && draw != null) void resolveRandomDraw(draw.drawId, "natural");
   }
   /**
-   * Resolves the random draw the session is paused at, naturally or with a chosen outcome; the session's clock goes on
-   * from the time it paused at. `null` when the session is not paused at that draw.
+   * Resolves the random draw the session is paused at, naturally, with a chosen outcome, or with its site's least-tried
+   * one, in the host; with `record`, the outcome goes into the site's history. The session's clock goes on from the
+   * time it paused at. `null` when the session is not paused at that draw or no longer owns the UI.
    */
   function resolveRandomDraw(
     drawId: number,
-    outcome: "natural" | RandomOutcome,
-  ): RandomDrawResolutionOutcome | null {
-    // Paused at the draw, the session observes no time; a stopped session gives none.
-    const current = observeForInput();
-    if (current === null || inspecting.value || current.state.randomDraw?.drawId !== drawId)
+    outcome: DrawResolution,
+    record = false,
+  ): Promise<ResolveDrawResult["outcome"] | null> {
+    if (inspecting.value) return Promise.resolve(null);
+    // Which reset the record belongs to, as it was asked: one asked for since enters nothing.
+    const recorded = record ? { resetAt: lastRandom?.resetAt ?? 0 } : null;
+    return ownedSection(session.value, "observeInput", async (section, owned, observe) => {
+      // Paused at the draw, the session observes no time; a stopped session gives none.
+      const current = await observe();
+      if (current === null || inspecting.value || current.state.randomDraw?.drawId !== drawId)
+        return null;
+      const result = await section.send<ResolveDrawResult>("resolveDraw", {
+        drawId,
+        outcome,
+        record: recorded,
+      });
+      if (!disposed) randomRevision.value = result.revision;
+      if (!owned() || publishOwned(section.session) === null) return null;
+      clock.rebase();
+      return result.outcome;
+    }).catch((error: unknown) => {
+      if (!endsQuietly(error) && refusalCode(error) === null && !disposed) reportHostError(error);
       return null;
-    const result = hatch(current, (current) =>
-      resumePlayerRuntimeRandomDraw(current, { drawId, outcome }),
-    );
-    session.value = result.session;
-    clock.rebase();
-    return result.outcome;
+    });
+  }
+  /** What `site` took, for the picker, from the host's history of the shown session's Player; `null` without one. */
+  function randomTried(site: string): Promise<RandomTriedView> {
+    const shown = session.value;
+    if (shown === null) return Promise.resolve(null);
+    return bridgeOf(shown)
+      .read<RandomTriedView>(shown, "randomTried", { site })
+      .catch(() => null);
   }
   /** Whether the shown session runs or waits. */
   const sessionLive = computed(
@@ -2559,9 +2686,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const next =
       typeof create === "object" && "session" in create
         ? create.session()
-        : startedSession(create, { debugMode });
+        : startedSession(create, { debugMode }, "restore");
     if (next instanceof Promise) throw new Error("A rewound state is a factory's session.");
-    start(next, state.paused);
+    showSession(next, { inspecting: state.paused });
     rewoundGeneration = generation.value;
     debugEdits.value = state.marks.editedWhileDebugging;
     rewound.value = state.marks.rewoundWhileDebugging;
@@ -2629,6 +2756,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     inspecting.value = false;
     clock.rebase();
     applyDebugMode();
+    if (session.value !== null) adoptRandom(session.value);
     settleUncontrolledDraw();
     return true;
   }
@@ -2673,8 +2801,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     camera.release();
     activation.value = {
       kind: "start",
-      begin: () =>
-        startedSession(create, { debugMode, ...(randomControl === null ? {} : { randomControl }) }),
+      begin: () => startedSession(create, { debugMode }, "start"),
       ...(outdated === undefined ? {} : { outdated }),
     };
     prepareActivation("start");
@@ -2741,6 +2868,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       begin: async () => {
         const host = bridgeOf(restored);
         continuing = restored;
+        // A restored session runs without Debug's random control until its kept draw went on naturally, as before: one
+        // a Start or an adoption gave this Player's control first gives it up (`adoptRandom` below takes it again).
+        if (lastRandom !== undefined)
+          void host.client
+            .request("releaseRandom", { session: restored.id }, { after: restored.id })
+            .catch(() => {});
         // Only the activation that began it goes on after each reply: a replaced one touches no trace or recorder.
         const owner = activationToken;
         const owned = () => {
@@ -2769,18 +2902,24 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         let continued: PlayerSession = host.latest(restored) ?? restored;
         // A session kept while paused at a random draw goes on with its natural outcome first: until then, the engine
         // takes no other input.
+        // It runs without Debug's random control until then, as before, and adopts it after (`adoptRandom` below).
         const draw = continued.state.randomDraw;
-        if (draw !== null)
-          continued = hatch(continued, (held) =>
-            resumePlayerRuntimeRandomDraw(held, { drawId: draw.drawId, outcome: "natural" }),
-          ).session;
+        if (draw !== null) {
+          await host.request(continued, "resolveDraw", {
+            drawId: draw.drawId,
+            outcome: "natural",
+            record: null,
+          });
+          owned();
+          continued = host.latest(continued) ?? continued;
+        }
         // The script reads whether Debug is on now.
         if (continued.state.debugMode !== debugMode) {
           await host.request(continued, "setDebugMode", { on: debugMode });
           owned();
           continued = host.latest(continued) ?? continued;
         }
-        applyRandomControl(continued);
+        adoptRandom(continued);
         if (!("capture" in taken)) throw taken.error;
         await host.request(continued, "continue", { capture: taken.capture });
         owned();
@@ -2864,13 +3003,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     return bridge;
   }
   /**
-   * The session `create` starts: over the bridge (`start`) for a held plan without Debug's random control, which cannot
-   * cross yet; otherwise in the host, before its first run (`introduceNow`). Either runs with the host's value trace.
+   * The session `create` makes: a held plan over the bridge (`start`), a transitional factory in the host before its
+   * first run (`introduceNow`). Either runs with the host's value trace. Only a Start (`kind`) carries its Player's
+   * random ownership; a restore takes it at its adoption.
    */
   function startedSession(
     create: PlayerSessionStart,
-    recording: { readonly debugMode: boolean; readonly randomControl?: RandomControlOptions },
+    recording: { readonly debugMode: boolean },
+    /** What `create` makes: a Start's fresh session, or a restore (Debug's rewind), which takes no Start ownership. */
+    kind: "start" | "restore",
   ): PlayerSession | Promise<PlayerSession> {
+    const random = kind === "start" ? startRandom() : undefined;
     const host = requireBridge();
     // A factory, as the Start's options, records the click's capture through `temporalCapture()`, which `begin` binds.
     if (typeof create === "function")
@@ -2881,22 +3024,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             ...recording,
             recorder: made.recorder,
             ...(made.debugTrace === null ? {} : { debugTrace: made.debugTrace }),
+            ...(made.randomControl === null ? {} : { randomControl: made.randomControl }),
           }),
         tracingIntent(),
+        random,
       );
     const startOptions = { ...create.options(), debugMode: recording.debugMode };
-    const control = recording.randomControl;
-    if (control === undefined) return host.start(create.plan, startOptions, true);
-    return introduceNow(
-      host,
-      {
-        plan: create.plan,
-        options: startOptions,
-        extras: { randomControl: control },
-        recording: true,
-      },
-      tracingIntent(),
-    );
+    return host.start(create.plan, startOptions, true, random);
   }
   /**
    * Starts the prepared session; an exception of the Player while it begins is reported, with what was recorded. A
@@ -2943,7 +3077,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   function started(pending: Activation, next: PlayerSession) {
     if (continuing?.id === next.id) continuing = null;
-    start(next);
+    showSession(next);
     // A new session replaces the one kept before.
     if (pending.kind === "start") {
       kept = { plan: false, count: 0, last: null };
@@ -2969,6 +3103,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     jumpedRevision: computed(() => jumpedRevision.value),
     setDebugMode,
     setRandomControl,
+    forgetRandomHistory,
+    randomTried,
+    randomRevision: computed(() => randomRevision.value),
     /**
      * The random draw the session is paused at, or `null`; a restored state Debug's rewind shows waits at its draw only
      * once input adopts it.
@@ -3237,7 +3374,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** A section of the shown session for input (`runtime-input.ts`). */
     inputSection,
     publishJump,
-    start,
+    showSession,
     update,
     prepareInput,
     /** Debug's rewind (DEBUGGER.md "Rewind"): how the session host shows the states it restores. */

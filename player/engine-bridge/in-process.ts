@@ -17,8 +17,16 @@ import {
   type TracingIntent,
 } from "./player-ops.js";
 import type { BuildIdentity } from "./protocol.js";
-import { beginRecordingAt, HeldSession, introduction, type StartOptions } from "./ops/session.js";
+import {
+  beginRecordingAt,
+  HeldSession,
+  introduction,
+  startRandom,
+  type StartOptions,
+  type StartRandom,
+} from "./ops/session.js";
 import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
+import type { RandomControlOptions } from "../../src/runtime/random/random-control.js";
 import { decodeMessage } from "./transport.js";
 import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host.js";
 
@@ -142,16 +150,16 @@ export function hatch<R>(
   const held = heldOf(backend, session);
   const store = backend.bridge.store(session)!;
   const adopt = (next: PlayerRuntimeSession): PlayerSession => {
-    if (next === held.current) return store.session;
+    if (next === held.sessionForOperation()) return store.session;
     // A session that only attached a trace or recorder keeps its revision: nothing is published.
     if (next.revision === held.revision) held.keep(next);
     else {
-      held.catchUp = null;
+      held.endCatchUp();
       store.apply(held.publish(next));
     }
     return store.session;
   };
-  const result = op(held.current);
+  const result = op(held.sessionForOperation());
   if (isAdapterSession(result)) {
     // EVIDENCE: validation: `isAdapterSession` checked the result, which `Hatched` maps to the store's session.
     return adopt(result) as Hatched<R>;
@@ -183,6 +191,8 @@ export interface HostFactoryInput {
   readonly recorder: PlayerRuntimeSessionOptions["recorder"] & object;
   /** Debug's value trace on the connection, which the session runs with, or `null` while Debug does not run. */
   readonly debugTrace: RuntimeDebugContext | null;
+  /** The random control a Start's session runs with from its first statement (`StartRandom`), or `null`. */
+  readonly randomControl: RandomControlOptions | null;
   /** The plan the host holds under `token`. */
   plan(token: string): InstructionPlan;
 }
@@ -191,25 +201,22 @@ export interface HostFactoryInput {
  * **Facade.** Registers the session `make` creates in the host, under a new bridge session, and returns its first
  * publication. `make` is a transitional factory: a Start with Debug's trace or random control, a restore, a transfer,
  * DevelopmentPreview's Start. A session that brought a plan of its own gets a new plan token. `{ plan, options }`
- * starts a held plan instead, with `extras` (random control) attached before its first run. Either runs with the
- * connection's value trace.
+ * starts a held plan instead. Either runs with the connection's value trace; a Start (`random`) also with its Player's
+ * random control. A restore begins without ownership, until an explicit adoption (`adoptRandom`).
  */
 export function introduceNow(
   bridge: PlayerBridge,
   make:
     | ((host: HostFactoryInput) => PlayerRuntimeSession)
-    | {
-        readonly plan: string;
-        readonly options: StartOptions;
-        readonly extras?: Pick<PlayerRuntimeSessionOptions, "randomControl">;
-        readonly recording: boolean;
-      },
+    | { readonly plan: string; readonly options: StartOptions; readonly recording: boolean },
   tracing?: TracingIntent,
+  random?: StartRandom,
 ): PlayerSession {
   const backend = backendOf(bridge);
   const { context } = backend;
-  // The Player's newest tracing intent holds before the session begins, also while its `debugTracing` request waits.
+  // The Player's newest tracing and random intents hold before the session begins, also while their requests wait.
   if (tracing !== undefined) alignTrace(context, tracing);
+  const control = startRandom(context, random);
   const plan = (token: string): InstructionPlan => {
     const held = context.plans.get(token);
     if (held === undefined) throw new Error(`No plan '${token}' is held.`);
@@ -217,16 +224,28 @@ export function introduceNow(
   };
   const created =
     typeof make === "function"
-      ? make({ recorder: context.recorder, debugTrace: context.trace, plan })
+      ? make({
+          recorder: context.recorder,
+          debugTrace: context.trace,
+          randomControl: control,
+          plan,
+        })
       : createPlayerRuntimeSession(plan(make.plan), {
           ...make.options,
-          ...make.extras,
           ...(make.recording ? { recorder: context.recorder } : {}),
           ...(context.trace === null ? {} : { debugTrace: context.trace }),
+          ...(control === null ? {} : { randomControl: control }),
         });
   const known = [...context.plans].find(([, held]) => held === created.plan)?.[0];
   const token = known ?? context.hold(created.plan);
-  const held = new HeldSession(created, token, context);
+  // A factory may not have installed the control it was given; its first read attaches it in any case.
+  const held = new HeldSession(
+    created,
+    token,
+    context,
+    random?.owner ?? null,
+    typeof make === "function" ? null : control,
+  );
   const id = backend.sessions.add(held);
   return bridge.open(id, introduction(held, context, known === undefined));
 }
@@ -239,6 +258,11 @@ export function beginRecordingNow(session: PlayerSession): void {
   const backend = backendOf(session.connection);
   beginRecordingAt(heldOf(backend, session), backend.context);
   backend.context.trace?.reset("restore");
+}
+
+/** **Facade, for tests.** The connection's random state, as its host holds it. */
+export function heldRandom(bridge: PlayerBridge): PlayerOpsContext["random"] {
+  return backendOf(bridge).context.random;
 }
 
 /** **Facade, for tests.** The connection's value trace, as its host holds it, or `null` while Debug does not run. */

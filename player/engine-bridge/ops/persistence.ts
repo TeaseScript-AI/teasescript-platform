@@ -172,7 +172,7 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
           return { result };
         }
         const planJson = plan === null ? null : planText(plan);
-        const current = held.current;
+        const current = held.sessionForOperation();
         let snapshotJson: string;
         try {
           snapshotJson = playerRuntimeSnapshotJson(current);
@@ -198,7 +198,7 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
       run: (args, sessions) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
         const held = heldSession(sessions, (args as { readonly session: string }).session);
-        const current = held.current;
+        const current = held.sessionForOperation();
         const result: CheckpointCapture = {
           revision: current.revision,
           eventsThrough: held.delivered,

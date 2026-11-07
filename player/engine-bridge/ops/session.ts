@@ -12,6 +12,7 @@ import {
   createPlayerRuntimeSession,
   dropPlayerRuntimeCatchUp,
   observePlayerRuntimeTime,
+  setPlayerRuntimeRandomControl,
   skipPlayerRuntimePacing,
   stepPlayerRuntimeCatchUp,
   stepPlayerRuntimeTime,
@@ -23,7 +24,16 @@ import { playerRuntimePacingGate } from "../../runtime-view.js";
 import { isValidEpochMilliseconds } from "../../../src/temporal.js";
 import { everyItem, exactly, isRecord, isStringArray, isTime } from "../argument-checks.js";
 import { instructionFacts } from "../instruction-facts.js";
-import { planMetadata, type PlanMetadata, type PlayerOpsContext } from "../player-ops.js";
+import type { RandomControlOptions } from "../../../src/runtime/random/random-control.js";
+import {
+  alignRandom,
+  isRandomIntent,
+  ownedRandom,
+  planMetadata,
+  type PlanMetadata,
+  type PlayerOpsContext,
+  type RandomIntent,
+} from "../player-ops.js";
 import type { CallViewReply, Introduction, Publication } from "../session-protocol.js";
 import type { BridgeOp, BridgeOps, HostSession, OpOutcome } from "../worker-host.js";
 
@@ -34,30 +44,92 @@ import type { BridgeOp, BridgeOps, HostSession, OpOutcome } from "../worker-host
 export class HeldSession implements HostSession {
   #current: PlayerRuntimeSession;
   #delivered = 0;
-  readonly #connection: Pick<PlayerOpsContext, "trace">;
-  /** The late observation being caught up on a copy of the runner, or `null`. */
-  catchUp: PlayerRuntimeCatchUp | null = null;
+  readonly #connection: PlayerOpsContext;
+  /** The late observation being caught up on a copy of the runner, or `null`; see `endCatchUp`. */
+  #catchUp: PlayerRuntimeCatchUp | null = null;
+  /**
+   * The Player whose random control the session runs with (`RandomState.owner`): the one that started it, or that
+   * adopted it (`adoptRandom`); `null` for a session nobody holds, as a restore until its adoption, or a Continue's
+   * session it released (`releaseRandom`) until its kept draw went on.
+   */
+  #owner: number | null;
+  /** The random control the session's engine runs with now. */
+  #control: RandomControlOptions | null;
   /** Whether the main side views the session's calls (`viewCalls`): its publications then carry the call view. */
   viewingCalls = false;
 
   constructor(
     session: PlayerRuntimeSession,
     readonly planToken: string,
-    connection: Pick<PlayerOpsContext, "trace">,
+    connection: PlayerOpsContext,
+    owner: number | null = null,
+    control: RandomControlOptions | null = null,
   ) {
     this.#current = session;
     this.#connection = connection;
+    this.#owner = owner;
+    this.#control = control;
   }
 
   /**
-   * The session at its latest publication, with the connection's value trace: a trace turned on or off since reaches
-   * the session here, before the next operation reads it, as a keep that publishes nothing.
+   * The session at its latest publication, made ready for an operation: the connection's value trace and its owner's
+   * random control reach it here, a change since applied as a keep that publishes nothing. A changed control ends a
+   * catch-up in flight first, so no draw runs with the control a newer intent replaced. Every op that runs the session
+   * calls this; only `adoptCatchUp` adopts a copy, from `publication`, which changes nothing.
    */
-  get current(): PlayerRuntimeSession {
+  sessionForOperation(): PlayerRuntimeSession {
     const trace = this.#connection.trace;
     if (this.#current.debugTrace !== trace)
       this.#current = withPlayerRuntimeDebugTrace(this.#current, trace);
+    // A session nobody holds runs with none; one of a Player that ended keeps its own, which decides nothing.
+    const owned = ownedRandom(this.#connection, this.#owner);
+    const control = owned !== null ? owned.control : this.#owner === null ? null : this.#control;
+    const { status } = this.#current.state;
+    if (control !== this.#control && status !== "halted" && status !== "failed") {
+      const catchUp = this.endCatchUp();
+      if (catchUp !== null) dropPlayerRuntimeCatchUp(catchUp);
+      setPlayerRuntimeRandomControl(this.#current, control);
+      this.#control = control;
+    }
     return this.#current;
+  }
+
+  /** The session at its latest publication as it is, changing nothing: for adopting a catch-up only. */
+  get publication(): PlayerRuntimeSession {
+    return this.#current;
+  }
+
+  /** The Player whose random control the session runs with, or `null`. */
+  get owner(): number | null {
+    return this.#owner;
+  }
+
+  /**
+   * Gives the session `owner`'s random control from its next operation on, as Start and Continue do; `null` gives up
+   * any, as a Continue's restored session does until its kept draw went on naturally.
+   */
+  adopt(owner: number | null): void {
+    this.#owner = owner;
+  }
+
+  /** The catch-up in flight, or `null`. */
+  get catchUp(): PlayerRuntimeCatchUp | null {
+    return this.#catchUp;
+  }
+
+  /** Begins `catchUp`; one in flight must have ended first (`endCatchUp`). */
+  beginCatchUp(catchUp: PlayerRuntimeCatchUp): void {
+    this.#catchUp = catchUp;
+  }
+
+  /**
+   * Ends the catch-up in flight and returns it, or `null`: the only way one ends, which every op that ends or replaces
+   * one calls before it calls `sessionForOperation`.
+   */
+  endCatchUp(): PlayerRuntimeCatchUp | null {
+    const catchUp = this.#catchUp;
+    this.#catchUp = null;
+    return catchUp;
   }
 
   get revision(): number {
@@ -126,7 +198,7 @@ export class HeldSession implements HostSession {
   /** The session's first publication, from cursor 0, with its fixed fields; nothing was handed out before it. */
   introduce(metadata: PlanMetadata | null): Introduction {
     this.#delivered = 0;
-    const publication = this.publish(this.current);
+    const publication = this.publish(this.sessionForOperation());
     return Object.freeze({
       ...publication,
       from: 0,
@@ -201,7 +273,7 @@ export function publishing(
   next: PlayerRuntimeSession,
   result: unknown,
 ): OpOutcome {
-  if (next === held.current) return { result, view: null };
+  if (next === held.sessionForOperation()) return { result, view: null };
   const view = held.publish(next);
   return { result, eventsThrough: view.eventsThrough, view };
 }
@@ -238,8 +310,8 @@ const observeTime = sessionOp(
       readonly atMs: number;
       readonly media: readonly MediaProgressReport[];
     };
-    held.catchUp = null;
-    const result = observePlayerRuntimeTime(held.current, atMs, media);
+    held.endCatchUp();
+    const result = observePlayerRuntimeTime(held.sessionForOperation(), atMs, media);
     return publishing(held, result.session, result.outcome);
   },
 );
@@ -250,27 +322,33 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
       session: "none",
       checkArguments: (args) =>
         isRecord(args) &&
-        exactly(args, ["plan", "options", "recording"]) &&
+        exactly(args, ["plan", "options", "recording"], ["random"]) &&
         typeof args.plan === "string" &&
         isStartOptions(args.options) &&
-        typeof args.recording === "boolean",
+        typeof args.recording === "boolean" &&
+        (args.random === undefined || isStartRandom(args.random)),
       run: (args, sessions) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { plan, options, recording } = args as {
+        const { plan, options, recording, random } = args as {
           readonly plan: string;
           readonly options: StartOptions;
           readonly recording: boolean;
+          readonly random?: StartRandom;
         };
         const instructions = context.plans.get(plan);
         if (instructions === undefined) throw new Error(`No plan '${plan}' is held.`);
+        const control = startRandom(context, random);
         const held = new HeldSession(
           createPlayerRuntimeSession(instructions, {
             ...options,
             ...(recording ? { recorder: context.recorder } : {}),
             ...(context.trace === null ? {} : { debugTrace: context.trace }),
+            ...(control === null ? {} : { randomControl: control }),
           }),
           plan,
           context,
+          random?.owner ?? null,
+          control,
         );
         const id = sessions.add(held);
         const view = held.introduce(null);
@@ -293,7 +371,7 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
             readonly temporalContext: TemporalContext;
           };
         };
-        const result = continuePlayerRuntimeSession(held.current, capture);
+        const result = continuePlayerRuntimeSession(held.sessionForOperation(), capture);
         return publishing(held, result.session, result.outcome);
       },
     ),
@@ -305,9 +383,9 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
       (held, args) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
         const { targetMs } = args as { readonly targetMs: number };
-        held.catchUp = null;
-        const next = stepPlayerRuntimeTime(held.current, targetMs);
-        return publishing(held, next, { moved: next !== held.current });
+        held.endCatchUp();
+        const next = stepPlayerRuntimeTime(held.sessionForOperation(), targetMs);
+        return publishing(held, next, { moved: next !== held.sessionForOperation() });
       },
     ),
     beginCatchUp: sessionOp(
@@ -315,8 +393,9 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
       (held, args) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
         const { targetMs } = args as { readonly targetMs: number };
-        if (held.catchUp !== null) dropPlayerRuntimeCatchUp(held.catchUp);
-        held.catchUp = beginPlayerRuntimeCatchUp(held.current, targetMs);
+        const replaced = held.endCatchUp();
+        if (replaced !== null) dropPlayerRuntimeCatchUp(replaced);
+        held.beginCatchUp(beginPlayerRuntimeCatchUp(held.sessionForOperation(), targetMs));
         return { result: null, view: null };
       },
     ),
@@ -330,7 +409,7 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
         // A duration on the host's own clock: after each step the catch-up goes on while it lasts.
         const until = performance.now() + budgetMs;
         const step = stepPlayerRuntimeCatchUp(catchUp, () => performance.now() < until);
-        if (step === "dropped") held.catchUp = null;
+        if (step === "dropped") held.endCatchUp();
         return { result: step, view: null };
       },
       false,
@@ -338,20 +417,22 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
     adoptCatchUp: sessionOp(
       (args) => args === null,
       (held) => {
-        const catchUp = held.catchUp;
-        held.catchUp = null;
-        const adopted = catchUp === null ? null : adoptPlayerRuntimeCatchUp(held.current, catchUp);
-        return adopted === null
-          ? { result: { adopted: false }, view: null }
-          : publishing(held, adopted, { adopted: true });
+        // The copy ran with the control it began with: it is adopted on the publication as it is, and published before
+        // anything calls `sessionForOperation`, which attaches a control changed since.
+        const catchUp = held.endCatchUp();
+        const adopted =
+          catchUp === null ? null : adoptPlayerRuntimeCatchUp(held.publication, catchUp);
+        if (adopted === null) return { result: { adopted: false }, view: null };
+        const view = held.publish(adopted);
+        return { result: { adopted: true }, eventsThrough: view.eventsThrough, view };
       },
       false,
     ),
     dropCatchUp: sessionOp(
       (args) => args === null,
       (held) => {
-        if (held.catchUp !== null) dropPlayerRuntimeCatchUp(held.catchUp);
-        held.catchUp = null;
+        const dropped = held.endCatchUp();
+        if (dropped !== null) dropPlayerRuntimeCatchUp(dropped);
         return { result: null, view: null };
       },
       false,
@@ -362,10 +443,10 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
         const { actionId } = args as { readonly actionId: number };
         // The gate the caller saw: input never targets another action.
-        if (playerRuntimePacingGate(held.current)?.actionId !== actionId)
+        if (playerRuntimePacingGate(held.sessionForOperation())?.actionId !== actionId)
           return { result: null, view: null };
-        held.catchUp = null;
-        const result = skipPlayerRuntimePacing(held.current);
+        held.endCatchUp();
+        const result = skipPlayerRuntimePacing(held.sessionForOperation());
         return result === null
           ? { result: null, view: null }
           : publishing(held, result.session, result.outcome);
@@ -395,9 +476,37 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
   };
 }
 
+/**
+ * The random part of work that begins a session: the Player that starts it, whose session it is from its first
+ * statement, and its newest random intent, which the host aligns to first (Sol r1 R2 of L5i.3, for random control).
+ */
+export interface StartRandom {
+  readonly owner: number;
+  readonly intent?: RandomIntent;
+}
+
+const isStartRandom = (value: unknown): value is StartRandom =>
+  isRecord(value) &&
+  exactly(value, ["owner"], ["intent"]) &&
+  typeof value.owner === "number" &&
+  Number.isSafeInteger(value.owner) &&
+  value.owner >= 1 &&
+  (value.intent === undefined ||
+    (isRandomIntent(value.intent) && value.intent.owner === value.owner));
+
+/** Aligns to a Start's random intent; the control its owner's session starts with, or `null`. */
+export function startRandom(
+  context: PlayerOpsContext,
+  random: StartRandom | undefined,
+): RandomControlOptions | null {
+  if (random === undefined) return null;
+  if (random.intent !== undefined) alignRandom(context, random.intent);
+  return ownedRandom(context, random.owner)?.control ?? null;
+}
+
 /** Begins the connection's recording at `held` as it stands, as Continue and Debug's Return do. */
 export function beginRecordingAt(held: HeldSession, context: PlayerOpsContext): void {
-  const attached = Object.freeze({ ...held.current, recorder: context.recorder });
+  const attached = Object.freeze({ ...held.sessionForOperation(), recorder: context.recorder });
   beginPlayerRuntimeRecording(attached, context.recorder);
   held.keep(attached);
 }

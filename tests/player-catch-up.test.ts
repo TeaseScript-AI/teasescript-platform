@@ -18,7 +18,6 @@ import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { pendingPlayerRuntimeStorageWrite } from "../player/runtime-view.js";
 import type { DebugRecorder, DebugRecording } from "../player/debug-recorder.js";
 import { rebuildRecordedSession } from "../player/debug-export.js";
-import type { RandomControlOptions } from "../src/index.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
 
@@ -111,8 +110,8 @@ interface SessionHost {
   observe(): PlayerRuntimeSession | null;
   update(next: PlayerRuntimeSession): void;
   setDebugTracing(on: boolean): void;
-  setRandomControl(control: RandomControlOptions | null): void;
-  resolveRandomDraw(drawId: number, outcome: "natural"): void;
+  setRandomControl(control: { readonly sites: readonly [] } | null): void;
+  resolveRandomDraw(drawId: number, outcome: "natural"): Promise<{ readonly kind: string } | null>;
   debugRecording(): DebugRecording | null;
 }
 let usePlayerSession: () => SessionHost;
@@ -133,7 +132,11 @@ before(async () => {
  * them; a catch-up goes on in tasks of its own. `late` moves the clock on as a page in the background would and lets
  * the page show again.
  */
-async function mount(context: TestContext, source: string, randomControl?: RandomControlOptions) {
+async function mount(
+  context: TestContext,
+  source: string,
+  randomControl?: { readonly sites: readonly [] },
+) {
   // Event targets are the only browser surface these scripts use, with the silent audio elements Start primes.
   const surface = {
     document: new EventTarget(),
@@ -310,7 +313,7 @@ test("while Debug decides random draws, a late observation pauses at the draw wi
   const { host, late } = await mount(
     context,
     'wait 1 s\nlet r = randomInteger(1..=6)\nwait 1 s\nsay "rolled", instant\nlet e = showButton "Done"\nexit',
-    {},
+    { sites: [] },
   );
   late(10_000);
   // One observation over the bridge, which publishes once its reply arrives.
@@ -319,7 +322,7 @@ test("while Debug decides random draws, a late observation pauses at the draw wi
   assert.notEqual(paused.state.randomDraw, null);
   assert.equal(paused.state.currentSessionTimeMs, 1_000);
   assert.ok(paused.state.observedSessionTimeMs >= 10_000);
-  host.resolveRandomDraw(paused.state.randomDraw!.drawId, "natural");
+  await host.resolveRandomDraw(paused.state.randomDraw!.drawId, "natural");
   await caughtUp(host, 1_000);
   assert.deepEqual(
     host.session.value!.transcriptEntries.map((entry) => entry.text),
@@ -334,15 +337,9 @@ test("turning Debug's random draws on during a catch-up finishes it first with n
   );
   late(1_000);
   assert.ok(host.session.value!.state.observedSessionTimeMs < 1_000, "a catch-up is under way");
-  let decided = 0;
-  host.setRandomControl({
-    decide: () => {
-      decided += 1;
-      return { kind: "suspend" };
-    },
-  });
+  // Choose outcomes with every site asking: a draw the catch-up made under the control would pause.
+  host.setRandomControl({ sites: [] });
   assert.ok(host.session.value!.state.observedSessionTimeMs >= 1_000);
   assert.equal(host.session.value!.state.randomDraw, null);
-  assert.equal(decided, 0);
   replays(host);
 });
