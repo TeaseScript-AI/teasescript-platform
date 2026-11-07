@@ -475,9 +475,24 @@ and the plan links them. Before a pull request exists, these rounds write only t
 A design round is due when a family reaches its fourth sibling finding (a count of siblings of one mechanism, not of
 rounds, so it is not a fixed review count), or when an invariant chosen under [Review convergence](#review-convergence)
 has gained a clause in each round. The coordinator starts it. The round reviewer designs a construction with the whole
-family as the bar and writes a design report in the coordinators' repository. The builder writes a new plan from the
-report, linking it rather than copying it, and the coordinator accepts the plan. The code review rounds then restart at
-round 1 on the new construction; the pull request's earlier rounds stay visible.
+family as the bar and writes a design report in the coordinators' repository. The report first answers whether one
+structure in the mechanism can close the class, or whether the mechanism is blind to it, as a static check is to runtime
+provenance. The builder writes a new plan from the report, linking it rather than copying it, and the coordinator
+accepts the plan. The code review rounds then restart at round 1 on the new construction; the pull request's earlier
+rounds stay visible.
+
+When the report finds the mechanism blind, a second design round on the rewritten plan is the last. After it, the claim
+narrows to what the mechanism proves, and the plan and the pull-request body name the residual class and the guard
+that does prove the invariant.
+
+A scope cut splits its residual:
+
+- a part that another mechanism can guard is filed as that mechanism's item, and it is not `spare capacity`, because
+  supported behavior stays unguarded until that guard exists;
+- a part that no supported path reaches is closed with its reason and evidence, to the bar of a proven limit in
+  [ADR 0019](decisions/0019-resource-limit-governance.md) when it concerns production behavior.
+
+Only a residual that cannot bite stays in the backlog.
 
 ### Evidence
 
