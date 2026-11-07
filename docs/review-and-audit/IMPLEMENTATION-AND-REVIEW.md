@@ -140,9 +140,18 @@ turns came from the code itself:
 - a check that covered less than its name said, such as a guard that checked only on entry, a wait that covered one of
   two queues, or a fake that counted one of three write methods;
 - documentation that still described an earlier design, architecture or language version;
+- a comment that forecast later work ("until #N", "which replaces this"), and was wrong as soon as that work merged or
+  changed;
 - two mechanisms for one job, or state with no single obvious owner;
 - a tool flag or default that silently overrides what the caller set;
 - names that differ by a letter, such as a file and its plural.
+
+A comment says what the code does now, so it stays true whatever merges later. It never forecasts later work: no
+"until #N" or "until" a package or stage, no "once #N", no "will be replaced" or "replaces this", and no TODO in any
+form. A known temporary state is stated as a fact, and its plan lives in its issue. A reference to an accepted record
+in the repository (an issue, a merged pull request, an ADR, a section of a repository document) is a citation and is
+allowed; what it says about the code must still be true now. A reference to a document outside the repository is no
+citation, because a reviewer cannot read it.
 
 When something misleads you, or would mislead the next builder:
 
@@ -204,6 +213,16 @@ them: builders, reviewers, researchers and coordinators.
   missing, report it at once instead of building the workaround silently.
 
 Fix what you can at its source, and report it even when fixed: the counts show where the next fix pays.
+
+A step you repeat by hand becomes a script, shared with everyone who would repeat it.
+
+- **A repository tool:** in `tools/`, with a header that states its contract; a new repository tool comes with tests.
+  A script becomes one from the moment a rule, a brief template or a READY requirement names its output. It is
+  promoted before that rule takes effect, so no rule depends on an unowned helper.
+- **Until then, a shared helper** in the coordinators' repository. It carries a one-line header (purpose, side, date,
+  inputs), so that a friction line can name it. Its friction is fixed only when fixing costs less than the friction. A
+  brief that relies on a helper names its path. A blind brief gets a copy outside the coordinators' repository.
+- **Tools of the agent environment** belong to that environment's documentation.
 
 ## Self-review and assigned review
 
