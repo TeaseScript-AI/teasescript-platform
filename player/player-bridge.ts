@@ -44,6 +44,17 @@ export function endsQuietly(error: unknown): boolean {
 }
 
 /**
+ * What a bridge throws when it is given a session handle of another bridge: session IDs restart per connection, so the
+ * handle's ID would select one of this bridge's sessions instead. A string ID is always this connection's own.
+ */
+export class ForeignSessionError extends Error {
+  constructor() {
+    super("This Player session belongs to another engine bridge.");
+    this.name = "ForeignSessionError";
+  }
+}
+
+/**
  * What a service's chain gets in its section of the published session (`section` of the service hosts): an
  * observation inside the section, as `observeForInput` makes one, and the section's requests.
  */
@@ -154,15 +165,24 @@ export class PlayerBridge {
     return store.session;
   }
 
-  /** The store of `session`, or `null` once it was released. */
+  /**
+   * `session`, when it is this bridge's; throws `ForeignSessionError` for another bridge's. Every method that takes a
+   * `PlayerSession` checks it here first.
+   */
+  #own(session: PlayerSession): PlayerSession {
+    if (session.connection !== this) throw new ForeignSessionError();
+    return session;
+  }
+
+  /** The store of `session`, or `null` once it was released. A string is an ID on this connection. */
   store(session: PlayerSession | string): SessionStore | null {
-    const id = typeof session === "string" ? session : session.id;
+    const id = typeof session === "string" ? session : this.#own(session).id;
     return this.#stores.get(id)?.deref() ?? null;
   }
 
   /** The store's latest publication of `session`, or `null` once it was released. */
   latest(session: PlayerSession): PlayerSession | null {
-    return this.store(session)?.session ?? null;
+    return this.store(this.#own(session))?.session ?? null;
   }
 
   /** Starts a session of the held plan `plan`; resolves with its first publication. */
@@ -191,6 +211,7 @@ export class PlayerBridge {
     op: string,
     args: Record<string, unknown> = {},
   ): Promise<R> {
+    this.#own(session);
     const reply = await this.#client.request(
       op,
       { ...args, session: session.id },
@@ -230,6 +251,7 @@ export class PlayerBridge {
     args: unknown,
     options: { readonly basis?: number; readonly publish?: PublishHook } = {},
   ): Promise<R> {
+    this.#own(session);
     return this.#send(
       session.id,
       (onReply) =>
@@ -248,6 +270,7 @@ export class PlayerBridge {
    * later reply applies; resolves with that merged session, or `null` when the store holds another revision by then.
    */
   async viewCalls(session: PlayerSession, on: boolean): Promise<PlayerSession | null> {
+    this.#own(session);
     let merged: PlayerSession | null = null;
     await this.#send(
       session.id,
@@ -273,6 +296,7 @@ export class PlayerBridge {
 
   /** Runs `body` as one exclusive section of `session`; see `SessionSection`. */
   section<T>(session: PlayerSession, body: (section: SessionSection) => Promise<T>): Promise<T> {
+    this.#own(session);
     return this.#client.section(session.id, (send: SectionSend) => {
       const bridge = this;
       return body({
@@ -326,7 +350,7 @@ export class PlayerBridge {
    * Resolves once frozen: at once in-process, a round trip later with a Worker.
    */
   halt(session: PlayerSession): Promise<void> {
-    const store = this.store(session);
+    const store = this.store(this.#own(session));
     if (store === null || store.halted) return Promise.resolve();
     store.stopping();
     const acknowledged = this.#client
@@ -346,12 +370,12 @@ export class PlayerBridge {
 
   /** Whether `session`'s store froze at a stop, as it does at once in-process. */
   frozen(session: PlayerSession): boolean {
-    return this.store(session)?.halted ?? true;
+    return this.store(this.#own(session))?.halted ?? true;
   }
 
   /** Releases `session` in the host now; its store goes with it. */
   release(session: PlayerSession): void {
-    const store = this.store(session);
+    const store = this.store(this.#own(session));
     if (store === null) return;
     this.#collected.unregister(store);
     this.#stores.delete(session.id);

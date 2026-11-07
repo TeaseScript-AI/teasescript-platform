@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import ts from "typescript";
 
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
@@ -8,7 +10,7 @@ import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import { startBridgeHost, type HostPort } from "../player/engine-bridge/worker-host.js";
 import { playerBridgeOps } from "../player/engine-bridge/player-ops.js";
-import { PlayerBridge } from "../player/player-bridge.js";
+import { ForeignSessionError, PlayerBridge } from "../player/player-bridge.js";
 import {
   observePlayerRuntimeTime,
   playerRuntimeSnapshot,
@@ -561,4 +563,98 @@ for (const delayMs of [0, 50])
     const line = stopLine(bridge, session);
     assert.deepEqual(line.shown, line.host, "the UI shows what the host ran");
     assert.equal(line.shown[1], 1_000);
+  });
+
+/**
+ * The `PlayerBridge` methods in `text` that take a `PlayerSession` (`#own` aside), each with whether it checks that
+ * parameter with `this.#own(...)`.
+ */
+function sessionMethods(text: string): Map<string, boolean> {
+  const file = ts.createSourceFile("player-bridge.ts", text, ts.ScriptTarget.Latest, true);
+  const mentionsSession = (node: ts.Node): boolean =>
+    (ts.isTypeReferenceNode(node) && node.typeName.getText(file) === "PlayerSession") ||
+    ts.forEachChild(node, mentionsSession) === true;
+  const methods = new Map<string, boolean>();
+  for (const statement of file.statements) {
+    if (!ts.isClassDeclaration(statement) || statement.name?.text !== "PlayerBridge") continue;
+    for (const member of statement.members) {
+      if (!ts.isMethodDeclaration(member) || member.body === undefined) continue;
+      const name = member.name.getText(file);
+      const parameter = member.parameters.find(
+        (each) => each.type !== undefined && mentionsSession(each.type),
+      );
+      if (name === "#own" || parameter === undefined) continue;
+      let checked = false;
+      member.body.forEachChild(function visit(node) {
+        if (
+          ts.isCallExpression(node) &&
+          node.expression.getText(file) === "this.#own" &&
+          node.arguments[0]?.getText(file) === parameter.name.getText(file)
+        )
+          checked = true;
+        node.forEachChild(visit);
+      });
+      methods.set(name, checked);
+    }
+  }
+  return methods;
+}
+
+// Clarity audit part 2, item 1: session IDs restart per connection, so a handle of another bridge would select this
+// bridge's session of the same ID. Each method that takes a `PlayerSession` refuses one (`ForeignSessionError`).
+/** Each such method, called on bridge `a` with bridge `b`'s session. */
+const FOREIGN_CALLS: Record<string, (a: PlayerBridge, foreign: PlayerSession) => unknown> = {
+  store: (a, foreign) => a.store(foreign),
+  latest: (a, foreign) => a.latest(foreign),
+  read: (a, foreign) => a.read(foreign, "captureCheckpoint"),
+  request: (a, foreign) => a.request(foreign, "captureKeep", {}),
+  viewCalls: (a, foreign) => a.viewCalls(foreign, true),
+  section: (a, foreign) => a.section(foreign, async () => {}),
+  halt: (a, foreign) => a.halt(foreign),
+  frozen: (a, foreign) => a.frozen(foreign),
+  release: (a, foreign) => a.release(foreign),
+};
+
+test("every PlayerBridge method that takes a PlayerSession checks it is the bridge's own", () => {
+  const text = readFileSync(new URL("../../player/player-bridge.ts", import.meta.url), "utf8");
+  const methods = sessionMethods(text);
+  assert.deepEqual(
+    [...methods].filter(([, checked]) => !checked).map(([name]) => name),
+    [],
+    "a method takes a PlayerSession without `this.#own`",
+  );
+  // The family below calls each of them.
+  assert.deepEqual([...methods.keys()].sort(), Object.keys(FOREIGN_CALLS).sort());
+  // The inventory fails a method that lacks the check, and finds a new method.
+  const unchecked = sessionMethods(
+    text.replace("    this.#own(session);\n    const reply", "    const reply"),
+  );
+  assert.equal(unchecked.get("read"), false);
+  const added = sessionMethods(
+    text.replace(
+      "  #own(session: PlayerSession)",
+      "  added(other: PlayerSession | null): void {}\n  #own(session: PlayerSession)",
+    ),
+  );
+  assert.equal(added.get("added"), false);
+});
+
+for (const [method, call] of Object.entries(FOREIGN_CALLS))
+  test(`a session of another bridge with the same ID is refused: ${method}`, async () => {
+    const [a, b] = [await inProcessBridge(), await inProcessBridge()];
+    const started = async (bridge: PlayerBridge, label: string) =>
+      bridge.start(
+        await prepared(bridge, `say "${label}", instant\nwait 10 s\nexit`),
+        { wallClockMs: 0, temporalContext: TEMPORAL },
+        false,
+      );
+    const [own, foreign] = [await started(a, "A"), await started(b, "B")];
+    assert.equal(own.id, foreign.id, "both hosts allocate the same ID");
+    const [ownBefore, foreignBefore] = [a.latest(own), b.latest(foreign)];
+    await assert.rejects(async () => call(a, foreign), ForeignSessionError);
+    // Neither session changed: the refusal selected nothing.
+    assert.equal(a.latest(own), ownBefore);
+    assert.equal(b.latest(foreign), foreignBefore);
+    assert.equal(a.frozen(own), false);
+    assert.equal(b.frozen(foreign), false);
   });
