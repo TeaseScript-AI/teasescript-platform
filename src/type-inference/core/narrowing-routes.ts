@@ -119,10 +119,9 @@ function literalTag(program: CorePass["program"], value: PlaceId): ItemTag | nul
 
 /**
  * Whether items hold `tag` as a value the use may receive (AD-1): made by a store or a call's result, or allowed by a
- * written type (V30 §13: `n + 1` with `n: integer?` is the error); not a stopped read's (`budget`), not one read under
- * a test whose fact failed (a check on every route the compiler cannot keep warns, V30 §13), not a kind a test proved
- * of external data, and not one another callable or a handler may store (X6, X7: a run the compiler does not prove,
- * V30 §13, "only where the compiler can prove the run").
+ * written type (V30 §13: `n + 1` with `n: integer?` is the error); not a stopped read's (`budget`), not one under a
+ * test's guard mark (§3.2), not a kind a test proved of external data, and not one another callable or a handler may
+ * store (X6, X7: a run the compiler does not prove, V30 §13, "only where the compiler can prove the run").
  */
 function produces(work: WorkLedger, items: readonly Item[], tag: ItemTag): boolean {
   work.charge("exactQueries");
@@ -135,7 +134,6 @@ function produces(work: WorkLedger, items: readonly Item[], tag: ItemTag): boole
       !((item.context === "call" && item.called !== true) || item.context === "handler") &&
       (item.reasons & REASON.budget) === 0 &&
       item.guarded !== true &&
-      item.tested !== true &&
       item.fromExternal !== true,
   );
 }

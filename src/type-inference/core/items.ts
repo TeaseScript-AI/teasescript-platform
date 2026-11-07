@@ -98,11 +98,6 @@ export interface Item {
    * the guard mark does.
    */
   readonly fromExternal?: true;
-  /**
-   * Read where a test of its path was written but its fact failed (N2's failing event): a check on every route that the
-   * compiler cannot keep, which warns and is never the route rule's error (V30 §13, U5).
-   */
-  readonly tested?: true;
   /** The unknown operand, by `fanIdentity`, whose operator rows this item is one of (§4 r4.14). */
   readonly fan?: string;
   /**
