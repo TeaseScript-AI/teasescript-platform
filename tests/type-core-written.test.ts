@@ -1383,8 +1383,8 @@ test("a cycle of copies inherits the same written types whichever of its places 
       assert.deepEqual(inheritedIn(source, order), first, `${order.join(" > ")}\n${source}`);
     return first;
   };
-  // (u copies v and x, v copies u, x copies v: one cycle, each copy in it cut; v keeps its own later written copy. Before
-  // #1931, asking u first kept v's type while u still waited on the cycle, and x then copied it)
+  // (u copies v and x, v copies u, x copies v: one cycle, each copy in it cut; v keeps its own later written copy, and
+  // x copies none of it whichever place is asked first, u too: #1931)
   const ring = (stores: string) =>
     `let w: number = 1\nlet u = hostValue\nlet v = hostValue\nlet x = hostValue\n${stores}\nsay u\nsay v\nsay x\nexit\n`;
   for (const stores of ["x = v\nv = u\nu = v\nu = x\nv = w", "x = v\nu = v\nu = x\nv = u\nv = w"])
