@@ -192,14 +192,14 @@ const connections: { readonly context: WeakKey; readonly ops: unknown }[] = [];
 
 /** The piece `kind` of what the ops made for `token` on `context`. */
 async function pieceOf(context: PlayerOpsContext, token: string, kind: string): Promise<Piece> {
-  const sidecar = context.debug.sidecars.get(token)!;
+  const sidecar = context.sourceViews.sidecars.get(token)!;
   switch (kind) {
     case "sidecarText":
-      return (await context.debug.texts.get(token))!;
+      return (await context.sourceViews.texts.get(token))!;
     case "sidecarFile":
       return sidecar.files[0]!;
     case "renderedLines":
-      return context.debug.latestFile!.lines;
+      return context.sourceViews.latestFile!.lines;
     case "plan":
       return context.plans.get(token)!;
     case "sourceElement":

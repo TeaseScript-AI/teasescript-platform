@@ -12,13 +12,14 @@ import type { BridgeOps } from "../worker-host.js";
 
 /**
  * The ops of family L5i (the L5 series) for Debug's source views: the code of a random draw's file, and earlier outcomes
- * as code. Both are made here, in the Worker, from the source it compiled, so the Player's page holds no parser.
+ * as code. Both are made here, in the Worker, from the source it compiled, so the Player's page holds no parser. Debug's
+ * trace and its script Debug mode are the trace ops' (`ops/trace.ts`).
  */
 /**
- * What Debug's source ops keep between requests: every one of the connection's, owned by its ops context, which clears
+ * What the source-view ops keep between requests: every one of the connection's, owned by its ops context, which clears
  * them on `teardown`. Nothing else holds a plan, its sources or its debug files.
  */
-export class DebugCaches {
+export class SourceViewCaches {
   /** The sidecar text made from each compiled plan's sources, by token; `null` for one it could not make. */
   readonly texts = new Map<string, Promise<string | null>>();
   /** The sidecar bound to each plan Debug asked about, by token, once found. */
@@ -33,8 +34,8 @@ export class DebugCaches {
   }
 }
 
-export function debugOps(context: PlayerOpsContext): BridgeOps {
-  const caches = context.debug;
+export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
+  const caches = context.sourceViews;
   const textOf = (token: string): Promise<string | null> | null => {
     const files = context.sources.get(token);
     const plan = context.plans.get(token);

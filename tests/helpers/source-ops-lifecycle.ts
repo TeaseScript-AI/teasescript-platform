@@ -37,11 +37,12 @@ Object.assign(globalThis, {
     await current.released;
   },
 });
-const debugOps = new URL("../../player/engine-bridge/ops/debug.js", import.meta.url).href;
+const sourceViewOps = new URL("../../player/engine-bridge/ops/source-views.js", import.meta.url)
+  .href;
 registerHooks({
   load(url, context, next) {
     const result = next(url, context);
-    if (url !== debugOps) return result;
+    if (url !== sourceViewOps) return result;
     let source = String(result.source);
     for (const [point, anchor] of Object.entries(POINTS)) {
       if (!source.includes(anchor)) throw new Error(`The lifecycle anchor moved: ${anchor}`);
