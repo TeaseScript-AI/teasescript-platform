@@ -367,3 +367,43 @@ test("a key's stores at the property are each charged as the query reads them (#
   });
   assert.ok(units[1]! > units[0]! + 16, units.join(", "));
 });
+
+test("an objects query charges each writer it meets and each edge it reads, a seen one too (#1747, Codex r2)", () => {
+  const work = (
+    source: string,
+    value: (pass: CorePass) => number,
+    rest: readonly string[],
+  ): number => {
+    const pass = passesOf(source, MODES[0]!, 30_000_000).at(-1)!;
+    const { program, contract, solver } = pass;
+    return inMode(MODES[0]!, () => {
+      solver.run(absentWriterAt(contract, value(pass), rest, "zz"));
+      const before = program.work.total;
+      solver.run(absentWriterAt(contract, value(pass), rest, "zz"));
+      return program.work.total - before;
+    });
+  };
+  // (n objects nested 0 … n deep: n F11 writers met along `element.p…`)
+  const nested = (n: number): number => {
+    const objects = Array.from({ length: n + 1 }, (_, d) => "{p:".repeat(d) + "{}" + "}".repeat(d));
+    return work(`let xs=[${objects.join(",")}]\nexit\n`, () => 1, [
+      "element",
+      ...Array(n).fill("p"),
+    ]);
+  };
+  const [a, b] = [nested(4), nested(16)];
+  assert.ok(b >= a + 12, `${a}, ${b}`);
+  // (n bindings each copied into every other: n² edges among n nodes)
+  const dense = (n: number): number => {
+    const rows = Array.from({ length: n }, (_, i) => `let b${i}={}`);
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) rows.push(`b${i}=b${j}`);
+    rows.push('say "${b0.zz}"', "exit");
+    return work(
+      rows.join("\n") + "\n",
+      (pass) => Math.max(...[...pass.program.occurrenceOf.keys()]),
+      [],
+    );
+  };
+  const [c, d] = [dense(4), dense(8)];
+  assert.ok(d >= c + 48, `${c}, ${d}`);
+});
