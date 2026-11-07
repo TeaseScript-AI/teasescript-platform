@@ -139,7 +139,9 @@ interface ConditionFact {
   readonly form: NarrowingForm;
   readonly from: number;
   readonly to: number;
-  readonly then: boolean;
+  /** It guards the `then` arm or a loop's body (the condition's truth). */
+  readonly holding: boolean;
+  /** It guards the `else` arm or the way past (the condition's falsity). */
   readonly otherwise: boolean;
 }
 
@@ -394,7 +396,7 @@ export class NarrowingRoutes {
         facts,
         (fact) => fact.otherwise && removes(fact.form, tag, work),
       );
-      if (some(work, "indexSteps", facts, (fact) => fact.then && removes(fact.form, tag, work)))
+      if (some(work, "indexSteps", facts, (fact) => fact.holding && removes(fact.form, tag, work)))
         entered.add(statement.arms[0]!);
       if (statement.statement.kind === "ifStatement") {
         if (failing) entered.add(statement.arms[1]!);
@@ -872,7 +874,7 @@ export class NarrowingRoutes {
         form,
         from,
         to: side.to,
-        then: side.arm === "then",
+        holding: side.arm === "then",
         otherwise: side.arm === "else",
       };
       list.push(fact);
