@@ -36,6 +36,12 @@ export interface CoreFile extends TypeAnalysisFile {
 
 export interface CoreAnalysisRequest extends TypeAnalysisRequest {
   readonly files: readonly CoreFile[];
+  /**
+   * The candidate route's alone (`backend.ts`): hears of the site where a settled pass's capture reached the slice's
+   * depth (`captureContracts`), the program established outside the slice there, and ends the analysis by throwing.
+   * Every other client passes none and gets the whole analysis.
+   */
+  readonly leftSlice?: (site: SourceSite) => never;
 }
 
 /** A projection of an owner value into a place (`project`): its step as the core names it, and its node. */
@@ -197,6 +203,8 @@ export class CoreProgram {
   readonly globals: ReadonlySet<string>;
   /** The request's built-in names: none a fix may declare (`Answers.keptName`). */
   readonly builtins: ReadonlySet<string>;
+  /** The request's `leftSlice`, the candidate route's alone. */
+  readonly leftSlice: ((site: SourceSite) => never) | undefined;
   /** The deepest nesting of the programs' blocks. */
   readonly nesting: number;
   /** The outermost blocks nested past the nesting limit, by file and start: their code is checked when it runs. */
@@ -235,6 +243,7 @@ export class CoreProgram {
     this.files = request.files;
     this.globals = new Set(request.options.globals ?? []);
     this.builtins = new Set(request.options.builtins ?? []);
+    this.leftSlice = request.leftSlice;
     this.graph = collectGraph(request);
     this.flow = buildFlowGraph(request.files);
     this.dom = dominators(this.flow);
