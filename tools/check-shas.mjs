@@ -1,14 +1,18 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
-// Checks that the commit SHAs a report or pull-request body names exist, before it is sent:
+// Checks that the commit SHAs a report or pull-request body names exist and are on a remote, before it is sent:
 //
 //   node tools/check-shas.mjs [--repo <path>]... [<file>]     (the text from <file>, else from standard input)
 //
 // A SHA-shaped token is 7 to 40 lowercase hex characters, bounded by no letter, digit or `_`. Each is resolved with
 // `git rev-parse --verify --quiet <token>^{commit}` in each `--repo` (default: the current repository) and reported as
 // resolved (in which repository, to which full SHA), ambiguous (a short token several commits share), or unresolved.
-// An unresolved token may be a commit not fetched yet: the message says to fetch it; this tool never fetches.
+// A resolved commit must also be on a remote, as a reader outside this clone needs it: a remote-tracking ref of a
+// repository that resolves it must contain it (`git for-each-ref --contains` over `refs/remotes`), else it is local
+// only, such as a head from before a rebase. A repository without remote-tracking refs is named once, and its tokens
+// are not checked for that. An unresolved token may be a commit not fetched yet: the message says to fetch it; this
+// tool never fetches.
 // Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too. Every run that completes ends
 // with one line counting the tokens by result and the placeholders, so no output means it did not run.
 //
@@ -20,7 +24,8 @@ import { existsSync, readFileSync } from "node:fs";
 // - shorter than 40 and inside a URL or a path, except after `/commit/`, `/commits/`, `/tree/` or `/blob/`: a file's
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
 //
-// Exit status: 0 when every token that must be a commit resolved and no placeholder is left, 1 otherwise, 2 when it
+// Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder is left, 1 otherwise,
+// 2 when it
 // cannot run (bad arguments, an unreadable file, or a `--repo` that is no git repository).
 
 /** The unfilled placeholders a report can carry, case-insensitive. */
@@ -119,18 +124,62 @@ function main() {
   const text = readFileSync(files.length === 1 ? files[0] : 0, "utf8");
 
   let failed = false;
-  const counts = { resolved: 0, ambiguous: 0, unresolved: 0, skipped: 0 };
+  const counts = { resolved: 0, ambiguous: 0, unresolved: 0, local: 0, skipped: 0 };
+  // Whether each repository has remote-tracking refs, named once when it has none.
+  const remoteRefs = new Map();
+  const hasRemoteRefs = (repository) => {
+    if (!remoteRefs.has(repository)) {
+      const refs = spawnSync(
+        "git",
+        ["-C", repository, "for-each-ref", "--count=1", "refs/remotes"],
+        { encoding: "utf8" },
+      ).stdout.trim();
+      remoteRefs.set(repository, refs !== "");
+      if (refs === "")
+        process.stdout.write(
+          `check-shas: no remote refs in ${repository}: reachability not checked\n`,
+        );
+    }
+    return remoteRefs.get(repository);
+  };
+  // Whether a remote-tracking ref of `repository` contains `sha`, or `null` when it has none to ask.
+  const onRemote = (sha, repository) =>
+    hasRemoteRefs(repository)
+      ? spawnSync(
+          "git",
+          ["-C", repository, "for-each-ref", "--count=1", "--contains", sha, "refs/remotes"],
+          { encoding: "utf8" },
+        ).stdout.trim() !== ""
+      : null;
   for (const [token, why] of tokensOf(text)) {
     const answers = repositories.map((repository) => ({
       repository,
       answer: resolve(token, repository),
     }));
-    const resolved = answers.find(({ answer }) => answer?.sha);
+    // A repository that has it on a remote, or cannot tell, before one that has it only locally.
+    const found = answers
+      .filter(({ answer }) => answer?.sha)
+      .map((entry) => ({ ...entry, remote: onRemote(entry.answer.sha, entry.repository) }));
+    const resolved = found.find(({ remote }) => remote !== false);
+    const local = resolved ? undefined : found[0];
     const ambiguous = answers.find(({ answer }) => answer?.ambiguous);
     counts[
-      resolved ? "resolved" : ambiguous ? "ambiguous" : why !== null ? "skipped" : "unresolved"
+      resolved
+        ? "resolved"
+        : local
+          ? "local"
+          : ambiguous
+            ? "ambiguous"
+            : why !== null
+              ? "skipped"
+              : "unresolved"
     ] += 1;
-    if (resolved)
+    if (local) {
+      failed = true;
+      process.stdout.write(
+        `local only  ${token}  ${local.answer.sha} in ${local.repository}, on no remote ref: push it, or cite one that is on origin\n`,
+      );
+    } else if (resolved)
       process.stdout.write(
         `resolved    ${token}  ${resolved.answer.sha} in ${resolved.repository}\n`,
       );
@@ -154,7 +203,7 @@ function main() {
   const tokens = Object.values(counts).reduce((sum, n) => sum + n, 0);
   process.stdout.write(
     `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.ambiguous} ambiguous, ` +
-      `${counts.unresolved} unresolved, ${counts.skipped} skipped (ids, words, paths); ` +
+      `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths); ` +
       `${placeholders.length} placeholders\n`,
   );
   process.exitCode = failed ? 1 : 0;
