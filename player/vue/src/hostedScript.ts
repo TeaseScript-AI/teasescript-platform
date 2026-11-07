@@ -5,6 +5,7 @@ import type { RuntimePlayerProfileInput } from "../../../src/runtime/host-data/p
 import type { ScriptFailure } from "./ScriptProblems.vue";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { MAIN_FILE_PATH } from "../../../src/project-paths.js";
+import { endsQuietly } from "../../player-bridge.js";
 import type { ScriptIdentity } from "../../script-identity.js";
 
 export type { ScriptIdentity };
@@ -38,8 +39,8 @@ export function prepareHostedScript(
 } {
   const failure = shallowRef<ScriptFailure | null>(null);
   const identity = shallowRef<ScriptIdentity>({ title: null, author: null });
-  void Promise.all([host.load(), player.loadScriptStorage(), player.bridge]).then(
-    async ([{ project }, , bridge]) => {
+  void Promise.all([host.load(), player.loadScriptStorage(), player.bridge])
+    .then(async ([{ project }, , bridge]) => {
       const prepared = await bridge.client.request("prepare", {
         source: { kind: "source", script: project },
       });
@@ -64,31 +65,38 @@ export function prepareHostedScript(
         };
         return;
       }
-      void player.prepareScript(
-        compilation.plan,
-        {
-          plan: compilation.plan,
-          options: () => ({
-            ...player.scriptStorageOptions(),
-            // Captured at Start: the session keeps this zone, presentation, and clock until a Continue.
-            ...player.temporalCapture(),
-            ...(host.playerProfile === undefined ? {} : { playerProfile: host.playerProfile }),
-          }),
-        },
-        new Map(
-          typeof project === "string"
-            ? [[MAIN_FILE_PATH, project]]
-            : project.files.map((file) => [file.path, file.source]),
-        ),
-      );
-    },
-    (error: unknown) => {
+      player
+        .prepareScript(
+          compilation.plan,
+          {
+            plan: compilation.plan,
+            options: () => ({
+              ...player.scriptStorageOptions(),
+              // Captured at Start: the session keeps this zone, presentation, and clock until a Continue.
+              ...player.temporalCapture(),
+              ...(host.playerProfile === undefined ? {} : { playerProfile: host.playerProfile }),
+            }),
+          },
+          new Map(
+            typeof project === "string"
+              ? [[MAIN_FILE_PATH, project]]
+              : project.files.map((file) => [file.path, file.source]),
+          ),
+        )
+        .catch((error: unknown) => {
+          // Preparing the start page is the Player's own work: its exception is the Player error stop, once.
+          if (!endsQuietly(error)) player.reportHostError(error);
+        });
+    })
+    // The package, its host or its preparation failed: it cannot be opened. A Worker lost meanwhile is the Player's error
+    // stop instead, which `bridgeLost` reports.
+    .catch((error: unknown) => {
+      if (endsQuietly(error)) return;
       failure.value = {
         title: "This package cannot be opened",
         summary: error instanceof Error ? error.message : String(error),
         problems: [],
       };
-    },
-  );
+    });
   return { failure, identity };
 }

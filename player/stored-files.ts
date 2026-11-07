@@ -4,7 +4,7 @@ import { answerRecord, dropAnswer, sendAnswer, type AnswerRecord } from "./answe
 import type { CapturedMediaStore } from "./captured-media.js";
 import type { PlayerDiagnostic } from "./session-camera.js";
 import { heldMedia } from "./engine-bridge/held-media.js";
-import { refusalCode, type ServiceSection } from "./player-bridge.js";
+import { endsQuietly, refusalCode, type ServiceSection } from "./player-bridge.js";
 import type { PlayerFileStoreAnswer } from "./runtime-adapter.js";
 import { activePlayerRuntimeFileStore, type PlayerSession } from "./runtime-view.js";
 
@@ -153,10 +153,10 @@ export class FileStoreService {
       );
     } catch (error) {
       // A refusal changed nothing: a basis another op replaced keeps this answer for the next service, a released
-      // session needs none, and a Player error stop already dropped it.
+      // session needs none, and a Player error stop, or the Worker's loss, already dropped it.
       const refused = refusalCode(error);
       if (refused === "session") this.#settled(key);
-      else if (refused !== "basis" && refused !== "halted") throw error;
+      else if (refused !== "basis" && !endsQuietly(error)) throw error;
     } finally {
       this.#servicing = false;
       // A retry, or the next file store of the same or a replacing session.

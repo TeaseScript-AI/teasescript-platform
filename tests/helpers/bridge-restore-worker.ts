@@ -5,15 +5,35 @@ import { isBuildIdentity } from "../../player/engine-bridge/protocol.js";
 import { parentHostPort } from "../../player/engine-bridge/node-port.js";
 import { playerBridgeOps, playerOpsContext } from "../../player/engine-bridge/player-ops.js";
 import { startBridgeHost } from "../../player/engine-bridge/worker-host.js";
+import { plainRecording } from "./plain-recording.js";
+import { DebugRecorder } from "../../player/debug-recorder.js";
 import { restorePlayerRuntimeSessionAt } from "../../player/runtime-adapter.js";
 
 /*
- * The Player's engine Worker, as `node-worker.ts` runs it, plus one test op: `restoreForTest` restores a snapshot of a
+ * The Player's engine Worker, as `node-worker.ts` runs it, plus two test ops. `restoreForTest` restores a snapshot of a
  * held plan with the real adapter and introduces it as a session in this realm, as `introduceNow` does in-process. No
  * production op restores yet (that is L5h); tests that restore a pending state through the Worker use this entry.
+ * `recordingForTest` gives the connection recorder's recording as plain data, without its plan, as no production op does
+ * yet (L5h builds the capture).
  */
 const unknownBuild = { commit: null, dirty: null, mode: null, appVersion: null };
-const context = playerOpsContext();
+// Test settings from the parent's environment, as it was when the Worker started: a recorder that keeps smaller calls,
+// and a realm in which a snapshot holding a list longer than this cannot be exported (as V8 cannot enumerate the keys
+// of a very long list, which a list of this size stands for).
+const argumentBytes = Number(process.env.RECORDER_ARGUMENT_BYTES ?? Number.NaN);
+const unexportableOver = Number(process.env.UNEXPORTABLE_LIST_OVER ?? Number.NaN);
+if (Number.isFinite(unexportableOver)) {
+  const ownKeys = Reflect.ownKeys;
+  Reflect.ownKeys = (target) => {
+    if (Array.isArray(target) && target.length > unexportableOver)
+      throw new RangeError("Too many properties to enumerate");
+    return ownKeys(target);
+  };
+}
+const context = {
+  ...playerOpsContext(),
+  ...(Number.isFinite(argumentBytes) ? { recorder: new DebugRecorder({ argumentBytes }) } : {}),
+};
 startBridgeHost(
   parentHostPort(),
   {
@@ -41,6 +61,11 @@ startBridgeHost(
         const view = introduction(held, context, false);
         return { result: null, session: id, eventsThrough: view.eventsThrough, view };
       },
+    },
+    recordingForTest: {
+      session: "none",
+      checkArguments: (args) => args === null,
+      run: () => ({ result: plainRecording(context.recorder.recording()) }),
     },
   },
   isBuildIdentity(workerData?.build) ? workerData.build : unknownBuild,

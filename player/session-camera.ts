@@ -11,7 +11,7 @@ import type {
   CaptureTrack,
 } from "./capture-device.js";
 import { heldMedia } from "./engine-bridge/held-media.js";
-import { refusalCode, type ServiceSection } from "./player-bridge.js";
+import { endsQuietly, refusalCode, type ServiceSection } from "./player-bridge.js";
 import type { PlayerCaptureAnswer } from "./runtime-adapter.js";
 import { activePlayerRuntimeCapture, type PlayerSession } from "./runtime-view.js";
 
@@ -420,10 +420,10 @@ export class CaptureService {
       );
     } catch (error) {
       // A refusal changed nothing: a basis another op replaced keeps this answer for the next service, a released
-      // session needs none, and a Player error stop already dropped it.
+      // session needs none, and a Player error stop, or the Worker's loss, already dropped it.
       const refused = refusalCode(error);
       if (refused === "session") this.#settled(key);
-      else if (refused !== "basis" && refused !== "halted") throw error;
+      else if (refused !== "basis" && !endsQuietly(error)) throw error;
     } finally {
       this.#servicing = false;
       // A retry, or the next capture of the same or a replacing session.

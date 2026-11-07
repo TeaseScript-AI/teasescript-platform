@@ -65,6 +65,7 @@ import {
 import type { StartOptions } from "../../engine-bridge/ops/session.js";
 import {
   bridgeOf,
+  endsQuietly,
   type PlayerBridge,
   type ServiceSection,
   type SessionSection,
@@ -271,8 +272,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     bridge = ready;
     return ready;
   });
-  // Registered once, when the host is reachable; see `bridgeLost`.
-  void bridgeReady.then((ready) => ready.client.onLoss(bridgeLost));
+  // Registered once, when the host is reachable; see `bridgeLost`. A host that never became reachable is the `bridge`
+  // promise's failure, which its own callers handle.
+  bridgeReady.then(
+    (ready) => ready.client.onLoss(bridgeLost),
+    () => {},
+  );
   // The recording up to a Player error, kept for a debug export until the next Start, when Debug's rewind begins the
   // recorder anew at a restored state.
   let failureRecording: DebugRecording | null = null;
@@ -592,9 +597,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         });
       } catch (error) {
         // Refusals changed nothing. A basis another op since replaced (the observation's) leaves the rest for the retry
-        // its publication makes; a stopped session takes nothing more, and the stop clears the queue. Any other error is
+        // its publication makes; a stopped session, or a lost Worker, takes nothing more, and the stop clears the queue. Any other error is
         // the Player's error stop, as a report's throw through the facade was, unless the session no longer owns the UI.
-        if (isHalted(error) || (error instanceof BridgeRequestError && error.code === "basis"))
+        if (endsQuietly(error) || (error instanceof BridgeRequestError && error.code === "basis"))
           return;
         if (!disposed && !stopped.value && session.value?.lineage === current.lineage)
           reportHostError(error);
@@ -651,9 +656,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const current = clock.observe();
     return stopped.value ? null : current;
   };
-  /** A refusal of the host for a stopped session (`halted`), which changed nothing. */
-  const isHalted = (error: unknown) =>
-    error instanceof BridgeRequestError && error.kind === "bridge" && error.code === "halted";
   /**
    * A section of `current`, which runs `body` while `current` owns the UI, as `publishOwned` decides it, with an
    * observation inside it as `observeForInput` makes one: the clock's now and media samples, observed over the bridge
@@ -685,8 +687,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             media: device.sample(),
           });
         } catch (error) {
-          // Refused as stopped, it changed nothing: the session no longer owns the UI.
-          if (isHalted(error)) return null;
+          // Refused as stopped, or lost with the Worker: the session no longer owns the UI.
+          if (endsQuietly(error)) return null;
           throw error;
         }
         if (!owned()) return null;
@@ -720,7 +722,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           try {
             return await section.send(op, args, { publish: (next) => void publishOwned(next) });
           } catch (error) {
-            if (isHalted(error)) return RETIRED;
+            if (endsQuietly(error)) return RETIRED;
             throw error;
           }
         },

@@ -9,7 +9,7 @@ import type { LockServices, ReadLock } from "./encryption/lock.js";
 import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey, type PublicKey } from "../src/public-keys.js";
 import { answerRecord, dropAnswer, sendAnswer, type AnswerRecord } from "./answer-media.js";
 import { heldMedia } from "./engine-bridge/held-media.js";
-import { refusalCode, type ServiceSection } from "./player-bridge.js";
+import { endsQuietly, refusalCode, type ServiceSection } from "./player-bridge.js";
 import type { PlayerLockAnswer } from "./runtime-adapter.js";
 import { activePlayerRuntimeLock, type PlayerSession } from "./runtime-view.js";
 import type { PlayerDiagnostic } from "./session-camera.js";
@@ -248,10 +248,10 @@ export class LockService {
       await this.#host.section((section) => this.#deliver(section, record, action, answer));
     } catch (error) {
       // A refusal changed nothing: a basis another op replaced keeps this answer for the next service, a released
-      // session needs none, and a Player error stop already dropped it.
+      // session needs none, and a Player error stop, or the Worker's loss, already dropped it.
       const refused = refusalCode(error);
       if (refused === "session") this.#settled(key);
-      else if (refused !== "basis" && refused !== "halted") throw error;
+      else if (refused !== "basis" && !endsQuietly(error)) throw error;
     } finally {
       this.#servicing = false;
       // A retry, or the next step of the same or a replacing session.
