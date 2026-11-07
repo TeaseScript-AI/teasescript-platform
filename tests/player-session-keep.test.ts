@@ -1096,6 +1096,7 @@ for (const producer of Object.keys(SUSPENSIONS) as Producer[])
         const token = await held(operation.host, operation.plan);
         await moveOn(operation, move);
         const mark = gates.writes.length;
+        const publishedAtMark = at.published.length;
         await operation.finish();
         for (let turn = 0; turn < 4; turn++) await tasks();
         const after = gates.writes.slice(mark);
@@ -1119,7 +1120,7 @@ for (const producer of Object.keys(SUSPENSIONS) as Producer[])
             assert.equal(bridge.store(restored), null, "the stale restore's session was released");
         } else
           assert.ok(
-            after.includes("publish"),
+            at.published.length > publishedAtMark,
             `the ${producer} the move left current did not save`,
           );
       });
