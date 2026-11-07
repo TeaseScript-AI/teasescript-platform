@@ -1,7 +1,6 @@
 import {
   CHECKPOINT_FORMAT,
   CHECKPOINT_VERSION,
-  completeAction,
   createFreshRuntimeSession,
   deserializeRuntimeSession,
   restoreRuntimeSession,
@@ -18,7 +17,6 @@ import {
   type MediaProgressReport,
   type MediaReportOutcome,
   type StageProjection,
-  type PendingActionOperationResult,
   type PermanentButtonPressOutcome,
   type PermanentButtonProjection,
   type PresentationSettings,
@@ -748,15 +746,6 @@ export function answerPlayerRuntimeLock(
     session: applyOperation(session, operation, "completed"),
     outcome: operation.outcome,
   });
-}
-
-export function completePlayerRuntimeAction(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
-  action: RuntimeInteractionActionSnapshot | RuntimeChatPacingGateActionSnapshot,
-  payload: Record<string, unknown>,
-): PendingActionOperationResult<ActionCompletionOutcome> {
-  return completeAction(plan, snapshot, actionRequest(action, payload));
 }
 
 function actionRequest(

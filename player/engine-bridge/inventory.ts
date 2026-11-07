@@ -362,7 +362,6 @@ export const ADAPTER_EXPORTS: Readonly<
   answerPlayerRuntimeCapture: { kind: "op", family: "L5e" },
   answerPlayerRuntimeFileStore: { kind: "op", family: "L5e" },
   answerPlayerRuntimeLock: { kind: "op", family: "L5e" },
-  completePlayerRuntimeAction: { kind: "op", family: "L5c" },
   submitPlayerRuntimeComposer: { kind: "op", family: "L5c" },
   answerPlayerRuntimeImage: { kind: "op", family: "L5c" },
   stepPlayerRuntimeFormField: { kind: "op", family: "L5c" },
