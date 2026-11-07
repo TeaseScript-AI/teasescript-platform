@@ -121,7 +121,7 @@ function required(
     tests = [`if ${text} != null`, "otherwise"];
   } else {
     // (a union holding a reference: its members are the runtime's, F19a, never the route rule's)
-    const members = writtenMembers(walk, value);
+    const members = writtenMembers(walk, value, kind !== "written-target");
     if (
       members === null ||
       !members.includes(item.tag) ||
@@ -160,10 +160,15 @@ function required(
 }
 
 /**
- * The members of the written union a read's variable declares, at the variable itself, or a called function's written
- * result (r4.118 (1): the written domain proves itself at every consumer), or `null`.
+ * The members of the written union a read's variable declares, at the variable itself, or, where `results`, a called
+ * function's written result used where it stands (r4.118 (1): the written domain proves itself; a store's is C1's
+ * copy rule), or `null`.
  */
-function writtenMembers(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
+function writtenMembers(
+  walk: Consumers,
+  value: PlaceId,
+  results: boolean,
+): readonly ItemTag[] | null {
   const { program } = walk.pass;
   const at = program.places[value]?.site ?? null;
   const node = at === null ? null : program.exprAt(at);
@@ -176,7 +181,7 @@ function writtenMembers(walk: Consumers, value: PlaceId): readonly ItemTag[] | n
       ? path.steps.length > 0
         ? null
         : writtenOf(program.place(path.root).kind)
-      : c?.kind === "call" && "fn" in c
+      : results && c?.kind === "call" && "fn" in c
         ? writtenOf(program.place(program.functionOf(c.fn).result).kind)
         : null;
   if (written?.kind !== "union") return null;
