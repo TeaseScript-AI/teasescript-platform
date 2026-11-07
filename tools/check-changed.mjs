@@ -19,11 +19,14 @@ import { dirname, join } from "node:path";
 /** The projects a changed path can belong to, each with the npm scripts or commands that check it. */
 export const PROJECTS = {
   typescript: {
+    // (and the tests' fixture data, which only the tests read: CI runs them)
     claims: (path) =>
-      /^(?:src|tests|playground|player)\/.*\.(?:ts|mts|cts|tsx)$/u.test(path) &&
-      !path.startsWith("player/vue/"),
+      (/^(?:src|tests|playground|player)\/.*\.(?:ts|mts|cts|tsx)$/u.test(path) &&
+        !path.startsWith("player/vue/")) ||
+      path.startsWith("tests/fixtures/"),
     checks: ["tsc"],
   },
+  families: { claims: (path) => path.startsWith("tests/families/"), checks: ["test:families"] },
   "player-vue": {
     claims: (path) => path.startsWith("player/vue/"),
     checks: ["typecheck:player", "lint:design"],
