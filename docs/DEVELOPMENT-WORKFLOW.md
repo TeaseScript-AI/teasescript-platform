@@ -560,9 +560,8 @@ READY contains:
   complete;
 - every review round so far, as a link to its comment, with its verdict;
 - departures from the accepted plan;
-- confusing code or structure met, one line each, with what was done (fixed here, or the issue), as in
-  [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead) and
-  [Code structure](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-structure);
+- friction met, one line each with its class and what was done (fixed here, the issue, or the proposed rule), as in
+  [Report what cost a wrong turn](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#report-what-cost-a-wrong-turn);
 - on the full route, what the final review should cover.
 
 After any repair, the builder sends READY again at the new head.

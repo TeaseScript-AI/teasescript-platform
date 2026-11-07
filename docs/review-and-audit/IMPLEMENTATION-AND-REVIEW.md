@@ -151,8 +151,7 @@ When something misleads you, or would mislead the next builder:
 - Fix it in the current pull request when it is small and in code the change touches. Otherwise file an issue that
   names the misleading thing, what it suggests, what it does, and where it led someone wrong. When the fix crosses
   files another open pull request changes, file the issue and say so in READY rather than widening this one.
-- Report it in your next regular message (the plan, READY, a question or a review round), one line each, with what
-  you did. A separate message is only for one that blocks you or affects other work.
+- Report it as [friction](#report-what-cost-a-wrong-turn), class `misleading code`.
 
 ### Code structure
 
@@ -183,9 +182,24 @@ Moving or splitting files is its own pull request on the light route. It changes
 is byte-identical where the build allows it. The coordinator schedules it between packages, so that no open pull
 request's hunks collide. A feature pull request never moves files another open pull request changes.
 
-Report a structure concern as you report confusing code: one line in your next regular message, with what you did.
-Each pull request can be reasonable while the whole drifts, so the coordinator also checks the whole
-([`ORCHESTRATION.md`](../ORCHESTRATION.md#structure)).
+Report a structure concern as [friction](#report-what-cost-a-wrong-turn), class `structure`. Each pull request can be
+reasonable while the whole drifts, so the coordinator also checks the whole
+([`ORCHESTRATION.md`](../ORCHESTRATION.md#structure-and-friction)).
+
+### Report what cost a wrong turn
+
+Some problems have no owner until they cost someone a wrong turn: misleading code, a tool whose default overrides its
+caller, a run that could not change the result, a status nobody sourced. Everyone who works on the repository reports
+them: builders, reviewers, researchers and coordinators.
+
+- **What:** anything that cost you a wrong turn, a wasted run or a question nobody owned, or would cost the next agent
+  one.
+- **How:** one line in your next regular message (the plan, READY, a question, a review round or a report): its class
+  from [`FRICTION.md`](../FRICTION.md), what happened, and what you did: fixed here, the issue you filed, or the rule
+  you propose. A line that fits no class is tagged `other` with a proposed class name.
+- **At once** instead, in its own message, for a line that blocks you or keeps wasting compute.
+
+Fix what you can at its source, and report it even when fixed: the counts show where the next fix pays.
 
 ## Self-review and assigned review
 
@@ -267,7 +281,8 @@ Non-authoritative memory aid; mark `N/A` only after considering the item.
 - [ ] Code, tests, documentation, workflows, and integrations form one result.
 - [ ] Language rules reused from their one home; analyses that predict runtime behavior derive it from
   the plan or shared helpers and are tested against the runtime.
-- [ ] Nothing the change adds or touches misleads; confusing code met on the way is fixed or filed.
+- [ ] Nothing the change adds or touches misleads; friction met on the way is fixed or filed, and reported with its
+  class.
 - [ ] New code sits in the module and folder its owner names; each structure signal is answered.
 - [ ] Supported behavior and failures proved through real paths.
 - [ ] Tests and oracles are sound and worth their run time; negative probes used when warranted.
