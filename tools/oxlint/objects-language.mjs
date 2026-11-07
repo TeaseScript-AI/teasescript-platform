@@ -1,7 +1,7 @@
 import { ts } from "ts-morph";
 
 /**
- * The admitted language of `objects.ts` (#1747, the lint-resolution HEAD 0 v3): the forms the file needs, each admitted
+ * The admitted language of `objects.ts` (#1747, #1921): the forms the file needs, each admitted
  * by its original declaration's identity, and every other form rejected. It guards the charging invariant against
  * ordinary edits of the file. It does not establish runtime provenance through carriers (stores, aliases, returns,
  * caller-supplied subclasses): that is a reviewed boundary, and the invariant's runtime evidence (its mutants, the
