@@ -359,38 +359,76 @@ test("a Start in the host while tracing waits behind a compile traces from its f
   assert.equal(player.traceId.value, 1);
 });
 
-// L5i.3, Sol r2 R2.1: the composable's tracing changes, queued behind a compile, with a Start in the host after any
-// of them. Generated from two axes, the toggle sequence and the Start's place in it; after every reply settles, the
-// trace is as the newest change says, a Start after it keeps its history, and the composable names the host's trace.
+// L5i.3, Sol r2 R2.1 and r3 R2.2: the invariant of the trace's one writer. Over three axes, the connection's history
+// (a Player before this one on the same connection, ended with its tracing on, off, or never changed), this Player's
+// tracing changes queued behind a compile, and the place of a Start in the host among them: after every reply settles,
+// the host's trace is as this Player's newest change says, a Start after it keeps its history, and the composable names
+// the host's trace. The serials come from the connection, and a Player that ends turns its tracing off.
 const TOGGLES = { on: [true], "on-off": [true, false], "on-off-on": [true, false, true] } as const;
 const TOGGLE_NAMES = ["on", "on-off", "on-off-on"] as const;
-const TOGGLE_CASES = TOGGLE_NAMES.flatMap((sequence) =>
-  [...Array(TOGGLES[sequence].length + 1).keys()].map((startAfter) => ({
-    sequence,
-    startAfter,
-    name: `${sequence}, Start after ${startAfter}`,
-  })),
+const HISTORIES = {
+  fresh: null,
+  "ended on": [true],
+  "ended off": [true, false],
+  "ended on-off-on": [true, false, true],
+} as const;
+const HISTORY_NAMES = ["fresh", "ended on", "ended off", "ended on-off-on"] as const;
+const TOGGLE_CASES = HISTORY_NAMES.flatMap((history) =>
+  TOGGLE_NAMES.flatMap((sequence) =>
+    [...Array(TOGGLES[sequence].length + 1).keys()].map((startAfter) => ({
+      history,
+      sequence,
+      startAfter,
+      name: `${history}; ${sequence}, Start after ${startAfter}`,
+    })),
+  ),
 );
-test("the tracing cases cover every sequence and every place of the Start", () => {
-  for (const sequence of TOGGLE_NAMES)
-    for (let place = 0; place <= TOGGLES[sequence].length; place += 1)
-      assert.ok(TOGGLE_CASES.some((each) => each.name === `${sequence}, Start after ${place}`));
+test("the tracing cases cover every pair of history, sequence and the Start's place", () => {
+  for (const history of HISTORY_NAMES)
+    for (const sequence of TOGGLE_NAMES)
+      for (let place = 0; place <= TOGGLES[sequence].length; place += 1)
+        assert.ok(
+          TOGGLE_CASES.some(
+            (each) => each.name === `${history}; ${sequence}, Start after ${place}`,
+          ),
+        );
+  assert.equal(TOGGLE_CASES.length, 4 * (2 + 3 + 4));
 });
-for (const { sequence, startAfter, name } of TOGGLE_CASES)
+for (const { history, sequence, startAfter, name } of TOGGLE_CASES)
   test(`tracing changes behind a compile, with a Start in the host: ${name}`, async (context) => {
-    const { player, bridge } = await mount(context, 80);
+    const mounted = await mount(context, 80);
+    const { bridge } = mounted;
+    let player = mounted.player;
+    const before = HISTORIES[history];
+    if (before !== null) {
+      // A Player before this one, on the same connection, which ends with its tracing as the history says.
+      for (const on of before) player.setDebugTracing(on);
+      await pause(300);
+      mounted.scope.stop();
+      const scope = effectScope();
+      context.after(() => scope.stop());
+      player = scope.run(() =>
+        usePlayerSession({ bridge: Promise.resolve(bridge), debugHistorySpill: async () => null }),
+      )!;
+      await player.bridge;
+      await pause(300);
+      assert.equal(facade.heldTrace(bridge), null, `${name}: the Player before left no trace`);
+    }
+    const current = player;
     const preparing = bridge.client.request("prepare", {
       source: { kind: "source", script: "exit" },
     });
     const toggles = TOGGLES[sequence];
     let started: Promise<void> | null = null;
     const start = () => {
-      player.prepare(factory('let mood = "calm"\nsay "${mood}", instant\nshowButton "Done"\nexit'));
-      started = player.activate();
+      current.prepare(
+        factory('let mood = "calm"\nsay "${mood}", instant\nshowButton "Done"\nexit'),
+      );
+      started = current.activate();
     };
     toggles.forEach((on, index) => {
       if (index === startAfter) start();
-      player.setDebugTracing(on);
+      current.setDebugTracing(on);
     });
     if (startAfter === toggles.length) start();
     await started;
@@ -399,7 +437,7 @@ for (const { sequence, startAfter, name } of TOGGLE_CASES)
     const newest = toggles.at(-1)!;
     const trace = facade.heldTrace(bridge);
     assert.equal(trace !== null, newest, `${name}: on as asked last`);
-    const view = await player.debugView({
+    const view = await current.debugView({
       messages: { limit: 20, openNewest: false },
       selected: null,
       variables: null,
@@ -407,7 +445,7 @@ for (const { sequence, startAfter, name } of TOGGLE_CASES)
       trees: {},
     });
     assert.equal(
-      player.traceId.value,
+      current.traceId.value,
       newest ? view!.traceId : null,
       `${name}: the composable names the host's trace`,
     );

@@ -366,12 +366,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // the host answered.
   const debugTracing = ref(false);
   const traceId = shallowRef<number | null>(null);
-  // Counts the Player's tracing changes on this connection: each change's serial, which every op that sets the host's
-  // trace carries (`TracingIntent`), so the host applies only the newest, whichever channel brings it first.
+  // Counts this Player's tracing changes, so a reply of an older one sets no `traceId`.
   let tracingToggles = 0;
-  /** The Player's newest tracing intent, or `undefined` before any change (the host's trace is then off). */
+  // The serial of this Player's newest tracing change, from its connection (`nextTracingIntent`), which every op that
+  // sets the host's trace carries (`TracingIntent`): the host applies only the newest, whichever channel brings it.
+  let lastIntent: number | undefined;
+  /** This Player's newest tracing intent, or `undefined` before any change: the host's trace is then off. */
   const tracingIntent = () =>
-    tracingToggles === 0 ? undefined : { on: debugTracing.value, intent: tracingToggles };
+    lastIntent === undefined ? undefined : { on: debugTracing.value, intent: lastIntent };
+  /** Asks the host for tracing `on`, with the connection's next serial. */
+  function askTracing(host: PlayerBridge, on: boolean) {
+    const intent = host.nextTracingIntent();
+    lastIntent = intent;
+    return host.client.request("debugTracing", { on, intent });
+  }
   /**
    * A view of Debug's value trace for the shown session, made in the host (`debugView`, `debug-view.ts`): the reply
    * names the revision and trace it shows, which its caller compares with what shows when it arrives. `null` without a
@@ -1110,6 +1118,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   let disposed = false;
   tryOnScopeDispose(() => {
     disposed = true;
+    // The trace was this Player's: it ends with it, as when the trace lived in the page, and a Player that uses the
+    // connection next begins with it off. A connection already lost takes nothing.
+    if (debugTracing.value && bridge !== null) askTracing(bridge, false).catch(() => {});
     supersede();
     dropPreparedPlanJson();
     unsavedPlanJson = null;
@@ -3031,7 +3042,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       traceId.value = null;
       const toggle = ++tracingToggles;
       const ask = (host: PlayerBridge) =>
-        host.client.request("debugTracing", { on, intent: toggle }).then((reply) => {
+        askTracing(host, on).then((reply) => {
           // EVIDENCE: validation: `debugTracing` replies from the same build with the trace it holds now.
           const now = (reply.result as { readonly traceId: number | null }).traceId;
           if (toggle === tracingToggles && !disposed) traceId.value = now;

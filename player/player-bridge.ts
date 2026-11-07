@@ -79,6 +79,16 @@ export class PlayerBridge {
    * once the Player keeps no publication of its session, and the host then releases the session.
    */
   readonly #stores = new Map<string, WeakRef<SessionStore>>();
+  #tracingIntents = 0;
+
+  /**
+   * The next serial of a tracing change on this connection (`TracingIntent`), which the host compares with the newest it
+   * applied. The connection owns the count, so it rises across the Players that use the connection, one after another.
+   */
+  nextTracingIntent(): number {
+    this.#tracingIntents += 1;
+    return this.#tracingIntents;
+  }
   readonly #collected = new FinalizationRegistry<string>((id) => {
     if (this.#stores.get(id)?.deref() !== undefined) return;
     this.#stores.delete(id);
