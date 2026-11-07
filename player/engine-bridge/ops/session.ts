@@ -80,8 +80,9 @@ export class HeldSession implements HostSession {
     const trace = this.#connection.trace;
     if (this.#current.debugTrace !== trace)
       this.#current = withPlayerRuntimeDebugTrace(this.#current, trace);
+    // A session nobody holds runs with none; one of a Player that ended keeps its own, which decides nothing.
     const owned = ownedRandom(this.#connection, this.#owner);
-    const control = owned === null ? this.#control : owned.control;
+    const control = owned !== null ? owned.control : this.#owner === null ? null : this.#control;
     const { status } = this.#current.state;
     if (control !== this.#control && status !== "halted" && status !== "failed") {
       const catchUp = this.endCatchUp();
@@ -102,8 +103,11 @@ export class HeldSession implements HostSession {
     return this.#owner;
   }
 
-  /** Gives the session `owner`'s random control from its next operation on, as Start and Continue do. */
-  adopt(owner: number): void {
+  /**
+   * Gives the session `owner`'s random control from its next operation on, as Start and Continue do; `null` gives up
+   * any, as a Continue's restored session does until its kept draw went on naturally.
+   */
+  adopt(owner: number | null): void {
     this.#owner = owner;
   }
 

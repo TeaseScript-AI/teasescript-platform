@@ -220,14 +220,25 @@ test("a refused resolution leaves the history exactly as before, for a site with
       [rollSite, { kind: "number", value: 123 }],
       [hitSite, { kind: "number", value: 123 }],
     ];
-    for (const [site, outcome] of refusals) {
+    // Malformed outcomes too (Sol r1 C1): one the engine refuses, or one whose shape makes the op fail.
+    // EVIDENCE: fixture: deliberately malformed outcomes, which the bridge carries as plain records.
+    const malformed = JSON.parse(
+      '[{"kind":"number"},{"kind":"index"},{"kind":"boolean","value":"yes"},{"kind":"order","order":[9]},{"kind":"unknown"}]',
+    ) as RandomOutcome[];
+    for (const [site, refusal] of refusals) {
       // At the roll, then (after taking the roll) at the second hit.
       const before = JSON.stringify(await tried(bridge, session, site));
       const draw = shown(bridge, session).state.randomDraw!;
       assert.equal(draw.site, site, name);
-      const refused = await resolve(bridge, session, draw.drawId, outcome);
-      assert.notEqual(refused.outcome.kind, "resolved", name);
-      assert.equal(JSON.stringify(await tried(bridge, session, site)), before, `${name}: ${site}`);
+      for (const outcome of [refusal, ...malformed]) {
+        const refused = await resolve(bridge, session, draw.drawId, outcome).catch(() => null);
+        assert.notEqual(refused?.outcome.kind, "resolved", `${name}: ${JSON.stringify(outcome)}`);
+        assert.equal(
+          JSON.stringify(await tried(bridge, session, site)),
+          before,
+          `${name}: ${site}, ${JSON.stringify(outcome)}`,
+        );
+      }
       await resolve(bridge, session, draw.drawId, "natural");
     }
   });
@@ -478,6 +489,56 @@ test("every session op is classified, and only adoptCatchUp reads a session past
         if (/\w\.publication\b/u.test(line)) readers.push(`${dir}${file}: ${line.trim()}`);
   assert.equal(readers.length, 1, readers.join("\n"));
   assert.match(readers[0]!, /adoptPlayerRuntimeCatchUp\(held\.publication/u);
+});
+
+// The caller inventory of Continue's boundary (Sol plan P5, code r1 C3): every call that introduces or restores a
+// session on the main side, each classified. Only a Start carries its Player's random ownership (`startRandom()`); a
+// restore takes it at its adoption. An unclassified call fails, so a new way in is classified before it ships.
+const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string, string])[]>> = {
+  "player/vue/src/usePlayerSession.ts": [
+    ["prepareRestore(found.session, found.marks)", "restore: a kept session"],
+    ['startedSession(create, { debugMode }, "restore")', "restore: Debug's rewind"],
+    ["begin: () => startedSession(create, { debugMode })", "start: Start"],
+    ["introduceNow(requireBridge(), () => given)", "restore: a raw restore"],
+    ["return introduceNow(", "by kind: `startedSession`'s factory, with `random`"],
+    [
+      "return host.start(create.plan, startOptions, true, random)",
+      "by kind: `startedSession`'s held plan",
+    ],
+  ],
+  "player/vue/src/useDebugRewind.ts": [
+    ["rewind.publish(", "restore: Debug's rewind (`publishRewound`)"],
+    ["rewind.publish(", "restore: Debug's Return (`publishRewound`)"],
+  ],
+};
+
+test("every main-side introduction of a session is classified as a Start or a restore", () => {
+  const callee =
+    /\b(startedSession|introduceNow|prepareRestore|publishRewound|host\.start|rewind\.publish)\(/u;
+  const definition = /function (startedSession|prepareRestore|publishRewound)\(/u;
+  for (const [file, classified] of Object.entries(SESSION_INTRODUCTIONS)) {
+    const calls = readFileSync(new URL(`../../${file}`, import.meta.url), "utf8")
+      .split("\n")
+      .filter((line) => callee.test(line) && !definition.test(line));
+    assert.equal(
+      calls.length,
+      classified.length,
+      `${file}: ${calls.map((line) => line.trim()).join(" / ")}`,
+    );
+    const left = [...calls];
+    for (const [anchor, kind] of classified) {
+      const at = left.findIndex((line) => line.includes(anchor));
+      assert.notEqual(at, -1, `${file}: ${kind} at ${anchor}`);
+      left.splice(at, 1);
+    }
+  }
+  // `startedSession` carries `startRandom()` for a Start only.
+  const composable = readFileSync(
+    new URL("../../player/vue/src/usePlayerSession.ts", import.meta.url),
+    "utf8",
+  );
+  assert.equal(composable.match(/startRandom\(\)/gu)?.length, 1);
+  assert.match(composable, /const random = kind === "start" \? startRandom\(\) : undefined;/u);
 });
 
 test("malformed random arguments are refused before anything runs", async () => {

@@ -5,6 +5,7 @@ import { effectScope, type Ref } from "vue";
 import {
   advancePlayerRuntimeTime,
   createPlayerRuntimeRestorePoint,
+  playerRuntimeSnapshotJson,
   restorePlayerRuntimeSession,
   resumePlayerRuntimeRandomDraw,
   type PlayerRuntimeSession,
@@ -12,7 +13,7 @@ import {
 } from "../player/runtime-adapter.js";
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
-import { playerRuntimeAwaitsHost } from "../player/runtime-view.js";
+import { playerRuntimeAwaitsHost, type PlayerSession } from "../player/runtime-view.js";
 import { memoryKeptRoomStore, memoryKeptSessionStore } from "../player/kept-sessions.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
@@ -52,9 +53,24 @@ interface RandomHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   activate(): Promise<void>;
-  start(next: PlayerRuntimeSession, paused?: boolean): void;
+  start(next: PlayerRuntimeSession | PlayerSession, paused?: boolean): void;
   prepareInput(): true | Promise<boolean>;
-  prepareRestore(restored: PlayerRuntimeSession): void;
+  prepareRestore(restored: PlayerRuntimeSession | PlayerSession): void;
+  readonly rewind: {
+    publish(
+      create: (recording: {
+        readonly recorder: DebugRecorder;
+        readonly debugTrace?: unknown;
+      }) => PlayerRuntimeSession,
+      state: {
+        readonly paused: boolean;
+        readonly marks: {
+          readonly editedWhileDebugging: null;
+          readonly rewoundWhileDebugging: null;
+        };
+      },
+    ): void;
+  };
   randomTried(
     site: string,
   ): Promise<{
@@ -364,24 +380,112 @@ test("a restored state waits at its draw for the picker only once input adopts i
   assert.equal(said(host).length, 2);
 });
 
-// L5i.4, Sol plan P5: Continue's boundary stays as before. A restored session goes on from the draw it was kept at
-// naturally, and the rest of that run without Debug's control; only then does the session take it.
-test("a Continue at the first of two draws finishes both naturally, then takes Debug's control", async (context) => {
-  const plan = compiled(
-    'let a = chance(50)\nlet b = chance(50)\nsay "${a} ${b}", instant\nshowButton "Next"\nexit',
-  );
+// L5i.4, Sol plan P5 and code r1 C3, the invariant of Continue's boundary: a session takes Debug's random control only
+// from a fresh Start or an explicit adoption, never from a restore, an inspection, or a Continue before its kept draw
+// went on naturally. Over every way a restore reaches the Player, with Choose outcomes on and the state kept at the first
+// of two draws: an inspected one is no Player's; Continue finishes both draws naturally, then takes the control; input
+// that adopts an inspected one takes it, and the picker asks at its draw.
+const RESTORE_PATHS = [
+  "a raw restore, Continue",
+  "a kept restore, Continue",
+  "a rewound state, Continue",
+  "a rewound state, input adopts it",
+  "a Start's own session, Continue",
+] as const;
+const TWO_DRAWS =
+  'let a = chance(50)\nlet b = chance(50)\nsay "${a} ${b}", instant\nshowButton "Next"\nexit';
+for (const path of RESTORE_PATHS)
+  test(`Continue's boundary: ${path}`, async (context) => {
+    const plan = compiled(TWO_DRAWS);
+    const { host, random } = await mount(context, plan);
+    const bridge = await host.bridge;
+    const [site = ""] = listRandomSites(plan).map((each) => each.id);
+    // Kept at its first draw, as a session the adapter's own control paused there.
+    const kept = createPlayerRuntimeSession(plan, { randomControl: {} });
+    const keptDraw = kept.state.randomDraw!.drawId;
+    if (path === "a raw restore, Continue")
+      host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(kept)));
+    else if (path === "a kept restore, Continue") {
+      const token = await preparedPlan(host.bridge, plan);
+      await bridge.client.request("preparePlanText", { plan: token });
+      // EVIDENCE: validation: `planText` replies from the same build with the held plan's canonical JSON.
+      const json = (await bridge.client.request("planText", { plan: token })).result as string;
+      const restored = await bridge.restoreKept(
+        token,
+        json,
+        playerRuntimeSnapshotJson(kept),
+        kept.events,
+      );
+      assert.ok(typeof restored === "object", "the kept session restores");
+      host.prepareRestore(restored);
+    } else if (path === "a Start's own session, Continue") {
+      await host.activate();
+      await settle(context);
+      assert.notEqual(random.draw.value, null, "the Start waits at its first draw");
+      host.prepareRestore(host.session.value!);
+    } else {
+      const point = createPlayerRuntimeRestorePoint(kept);
+      host.rewind.publish(({ recorder }) => restorePlayerRuntimeSession(point, recorder), {
+        paused: true,
+        marks: { editedWhileDebugging: null, rewoundWhileDebugging: null },
+      });
+      await settle(context);
+      assert.equal(
+        await host.randomTried(site),
+        null,
+        `${path}: an inspected state is no Player's`,
+      );
+      if (path === "a rewound state, input adopts it") {
+        assert.equal(await host.prepareInput(), true);
+        await settle(context);
+        assert.equal(random.draw.value?.drawId, keptDraw, `${path}: the picker asks at its draw`);
+        assert.notEqual(await host.randomTried(site), null, `${path}: adopted`);
+        return;
+      }
+      host.prepareRestore(host.session.value!);
+    }
+    await host.activate();
+    await settle(context);
+    assert.equal(random.draw.value, null, `${path}: no draw waits: both went on naturally`);
+    assert.equal(said(host).length, 1, `${path}: the run after the kept draw finished`);
+    assert.notEqual(await host.randomTried(site), null, `${path}: then it takes the control`);
+  });
+
+// Sol code r1 C2: draw IDs repeat across sessions, so the picker's history is of the shown session's draw.
+test("the picker reads a replacement session's history, also at a draw with the same ID", async (context) => {
+  const plan = compiled('showButton "Waiting"\nexit');
   const { host, random } = await mount(context, plan);
-  const [site] = listRandomSites(plan).map((each) => each.id);
-  // Kept at its first draw, as a session the adapter's own control paused there.
-  const kept = createPlayerRuntimeSession(plan, { randomControl: {} });
-  assert.notEqual(kept.state.randomDraw, null);
-  host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(kept)));
-  await host.activate();
+  const bridge = await host.bridge;
+  const prepare = async (source: string) => {
+    const reply = await bridge.client.request("prepare", {
+      source: { kind: "source", script: source },
+    });
+    // EVIDENCE: validation: `prepare` replies from the same build with its result.
+    return (reply.result as { readonly plan: string }).plan;
+  };
+  const a = await prepare('let first = chance(50)\nshowButton "Done"\nexit');
+  const b = await prepare('let second = chance(50)\nshowButton "Done"\nexit');
+  // The second plan's site took an outcome before.
+  const seed = await bridge.start(b, {}, false, { owner: 1 });
+  await bridge.request(seed, "resolveDraw", {
+    drawId: seed.state.randomDraw!.drawId,
+    outcome: "natural",
+    record: { resetAt: 0 },
+  });
+  const first = await bridge.start(a, {}, false, { owner: 1 });
+  const second = await bridge.start(b, {}, false, { owner: 1 });
+  assert.equal(first.state.randomDraw!.drawId, second.state.randomDraw!.drawId);
+  host.start(first);
   await settle(context);
-  assert.equal(random.draw.value, null, "no draw waits: both went on naturally");
-  assert.equal(said(host).length, 1);
-  // Adopted after: the host's history is the session's Player's to read.
-  assert.notEqual(await host.randomTried(site!), null);
+  host.start(second);
+  await settle(context);
+  const site = second.state.randomDraw!.site;
+  const actual = await host.randomTried(site);
+  assert.deepEqual(
+    random.tried(site).history,
+    actual!.history,
+    "the replacement's site's history shows",
+  );
 });
 
 // L5i.4: the history is the host's while the Debug features run. Choose outcomes off and on keeps it; their end forgets it.
@@ -403,7 +507,7 @@ test("a site's history lasts through Choose outcomes off and on, and goes when t
   const featureScope = effectScope();
   const random = featureScope.run(() => useDebugRandom(host))!;
   await host.loadScriptStorage();
-  await host.prepareScript(plan, (recording) =>
+  await host.prepareScript(await preparedPlan(host.bridge, plan), (recording) =>
     createPlayerRuntimeSession(plan, { ...recording, ...host.scriptStorageOptions() }),
   );
   random.enabled.value = true;

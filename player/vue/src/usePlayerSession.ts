@@ -1667,7 +1667,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     generation.value++;
     interactionReset.value++;
     jumpedRevision.value = -1;
-    adoptRandom(next);
+    // An inspected state takes Debug's random control only once input adopts it (`adoptInspected` below).
+    if (!paused) adoptRandom(next);
     session.value = next;
     clock.rebase();
     if (!paused) {
@@ -2662,7 +2663,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const next =
       typeof create === "object" && "session" in create
         ? create.session()
-        : startedSession(create, { debugMode });
+        : startedSession(create, { debugMode }, "restore");
     if (next instanceof Promise) throw new Error("A rewound state is a factory's session.");
     start(next, state.paused);
     rewoundGeneration = generation.value;
@@ -2732,6 +2733,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     inspecting.value = false;
     clock.rebase();
     applyDebugMode();
+    if (session.value !== null) adoptRandom(session.value);
     settleUncontrolledDraw();
     return true;
   }
@@ -2843,6 +2845,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       begin: async () => {
         const host = bridgeOf(restored);
         continuing = restored;
+        // A restored session runs without Debug's random control until its kept draw went on naturally, as before: one
+        // a Start or an adoption gave this Player's control first gives it up (`adoptRandom` below takes it again).
+        if (lastRandom !== undefined)
+          void host.client
+            .request(
+              "randomControl",
+              { session: restored.id, release: true },
+              { after: restored.id },
+            )
+            .catch(() => {});
         // Only the activation that began it goes on after each reply: a replaced one touches no trace or recorder.
         const owner = activationToken;
         const owned = () => {
@@ -2978,7 +2990,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function startedSession(
     create: PlayerSessionStart,
     recording: { readonly debugMode: boolean },
+    /** A restore, as Debug's rewind publishes one, takes no Start ownership of Debug's random control. */
+    kind: "start" | "restore" = "start",
   ): PlayerSession | Promise<PlayerSession> {
+    const random = kind === "start" ? startRandom() : undefined;
     const host = requireBridge();
     // A factory, as the Start's options, records the click's capture through `temporalCapture()`, which `begin` binds.
     if (typeof create === "function")
@@ -2992,10 +3007,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             ...(made.randomControl === null ? {} : { randomControl: made.randomControl }),
           }),
         tracingIntent(),
-        startRandom(),
+        random,
       );
     const startOptions = { ...create.options(), debugMode: recording.debugMode };
-    return host.start(create.plan, startOptions, true, startRandom());
+    return host.start(create.plan, startOptions, true, random);
   }
   /**
    * Starts the prepared session; an exception of the Player while it begins is reported, with what was recorded. A

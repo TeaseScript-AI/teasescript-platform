@@ -2,6 +2,7 @@ import type {
   RandomDrawResolutionOutcome,
   RandomOutcome,
 } from "../../../src/runtime/random/random-control.js";
+import { checkedOutcome } from "../../../src/runtime/random/random-kinds.js";
 import { resumePlayerRuntimeRandomDraw } from "../../runtime-adapter.js";
 import type { RandomTried } from "../../random-decisions.js";
 import { exactly, isRecord } from "../argument-checks.js";
@@ -41,23 +42,29 @@ const isResolution = (value: unknown): value is DrawResolution =>
 export function randomOps(context: PlayerOpsContext): BridgeOps {
   return {
     // The Player's random intent, on the Worker itself (`after` the session it names): the host aligns to it, and with
-    // `session` it gives that session the intent's owner's control from its next op on, as Start and Continue do.
+    // `session` it gives that session the intent's owner's control from its next op on, as Start and Continue do. With
+    // `release` instead, the session gives up any Player's control from its next op on, as a Continue's restored
+    // session does until its kept draw went on naturally.
     randomControl: {
       session: "none",
       checkArguments: (args) =>
         isRecord(args) &&
-        exactly(args, ["intent"], ["session"]) &&
-        isRandomIntent(args.intent) &&
-        (args.session === undefined || typeof args.session === "string"),
+        (exactly(args, ["intent"], ["session"])
+          ? isRandomIntent(args.intent) &&
+            (args.session === undefined || typeof args.session === "string")
+          : exactly(args, ["session", "release"]) &&
+            typeof args.session === "string" &&
+            args.release === true),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted the intent and the session's ID.
-        const { intent, session } = args as {
-          readonly intent: RandomIntent;
+        // EVIDENCE: validation: checkArguments accepted an intent with a session's ID, or a session's release.
+        const { intent, session, release } = args as {
+          readonly intent?: RandomIntent;
           readonly session?: string;
+          readonly release?: true;
         };
-        alignRandom(context, intent);
+        if (intent !== undefined) alignRandom(context, intent);
         const held = session === undefined ? undefined : sessions.get(session);
-        if (held instanceof HeldSession) held.adopt(intent.owner);
+        if (held instanceof HeldSession) held.adopt(release === true ? null : intent!.owner);
         return { result: { revision: context.random.history.revision } };
       },
     },
@@ -92,15 +99,23 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
           const least = owned!.history.leastTried(draw);
           resolved = least === null || least === draw.natural ? "natural" : least;
         }
-        const taken = draw === null ? null : resolved === "natural" ? draw.natural : resolved;
+        // Only an outcome the draw takes is recorded, as the engine's own check decides it; anything else goes to the
+        // engine unrecorded, which refuses it. A record is whole or nothing (`RandomHistory.record`).
+        const taken =
+          draw === null || draw.drawId !== drawId
+            ? null
+            : resolved === "natural"
+              ? draw.natural.kind === "failure"
+                ? null
+                : draw.natural
+              : checkedOutcome(draw.support, resolved);
         const undo =
           record !== null &&
           owned !== null &&
           record.resetAt === owned.forgotAt &&
           draw !== null &&
-          draw.drawId === drawId &&
           taken !== null &&
-          taken.kind !== "failure"
+          typeof taken !== "string"
             ? owned.history.record(draw, taken)
             : null;
         let result;

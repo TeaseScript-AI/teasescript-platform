@@ -41,15 +41,17 @@ export class RandomHistory {
    * revision and without a site this record made; it is for a record nothing changed after, as a refused resolution.
    */
   record(draw: RandomDrawView, outcome: RandomOutcome): () => void {
+    // Whole or nothing: what can throw is computed before anything changes.
+    const key = outcomeKey(outcome);
+    const label = randomOutcomeLabel(draw, outcome);
     const revision = this.#revision;
     let site = this.#sites.get(draw.site);
     const made = site === undefined;
     if (site === undefined)
       this.#sites.set(draw.site, (site = { counts: new Map(), labels: [], dropped: 0 }));
     const taken = site;
-    const key = outcomeKey(outcome);
     taken.counts.set(key, (taken.counts.get(key) ?? 0) + 1);
-    taken.labels.push(randomOutcomeLabel(draw, outcome));
+    taken.labels.push(label);
     const dropped = taken.labels.length > KEPT_OUTCOMES ? taken.labels.shift() : undefined;
     if (dropped !== undefined) taken.dropped += 1;
     this.#revision += 1;

@@ -3,6 +3,7 @@ import { tryOnScopeDispose } from "@vueuse/core";
 import type { PlanMetadata } from "../../engine-bridge/player-ops.js";
 import type { RandomOutcome, RandomSite } from "../../../src/index.js";
 import type { CodeLine, DrawCode } from "./randomDrawPresentation";
+import type { PlayerSession } from "../../runtime-view.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 /** What a site does when it draws next: ask in the picker, go on naturally, or take its least-taken outcome. */
@@ -79,21 +80,40 @@ export function useDebugRandom(player: PlayerSessionHost) {
     { immediate: true },
   );
   // What the draw's site took, as the host's history gave it: read again when another draw shows or the history changed.
-  // A draw is the same while its ID is, also when a publication shows it again. Only the reply to the latest read shows,
-  // and only while its draw does; another draw shows nothing until its own.
+  // A draw is the same while its session, site and ID are, also when a publication shows it again; draw IDs repeat
+  // across sessions. Only the reply to the latest read shows, and only while its draw does; another draw shows nothing
+  // until its own.
   const tried = shallowRef<{ readonly site: string; readonly tried: DebugRandomTried } | null>(
     null,
   );
+  const sameDraw = (
+    one: { readonly drawId: number; readonly site: string } | null,
+    other: { readonly drawId: number; readonly site: string } | null,
+    oneLineage: PlayerSession["lineage"] | null,
+    otherLineage: PlayerSession["lineage"] | null,
+  ) =>
+    one !== null &&
+    other !== null &&
+    one.drawId === other.drawId &&
+    one.site === other.site &&
+    oneLineage === otherLineage;
   let reads = 0;
   watch(
-    [() => draw.value?.drawId ?? null, player.randomRevision],
-    ([drawId], previous) => {
-      if (drawId !== previous?.[0]) tried.value = null;
+    [
+      () => draw.value?.drawId ?? null,
+      () => draw.value?.site ?? null,
+      () => player.session.value?.lineage ?? null,
+      player.randomRevision,
+    ],
+    ([drawId, site, lineage], previous) => {
+      if (drawId !== previous?.[0] || site !== previous?.[1] || lineage !== previous?.[2])
+        tried.value = null;
       const read = ++reads;
       const current = draw.value;
       if (current === null) return;
       void player.randomTried(current.site).then((view) => {
-        if (read !== reads || draw.value?.drawId !== current.drawId) return;
+        const shownLineage = player.session.value?.lineage ?? null;
+        if (read !== reads || !sameDraw(draw.value, current, shownLineage, lineage)) return;
         tried.value =
           view === null
             ? null
