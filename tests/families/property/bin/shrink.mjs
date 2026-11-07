@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import { readJson, writeJson } from "../lib/json.mjs";
+import { writeJson } from "../lib/json.mjs";
 import { verifyBuild } from "../lib/build.mjs";
 import { loadCompiler } from "../adapters/compiler.mjs";
 import { shrink } from "../lib/shrink.mjs";

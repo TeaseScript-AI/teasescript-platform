@@ -47,4 +47,5 @@ Reconfirm the remote PR head before any head-sensitive GitHub action or handoff.
 
 Use the normal authenticated GitHub handoff permitted by the assigned task and universal workflow. For an
 implementation change, keep its pull-request description aligned with scope, verification, documentation
-impact, deferred work, and risks. Do not merge or close issues without the required authorization.
+impact, deferred work, and risks. Do not merge or close issues without the required authorization; for merges, see
+[Merge](../DEVELOPMENT-WORKFLOW.md#merge).

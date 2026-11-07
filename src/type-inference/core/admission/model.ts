@@ -233,6 +233,8 @@ export interface Waiting {
   readonly steps: Inheriting<{
     readonly copied: TypeTerm | null;
     readonly nullable: boolean;
+    /** Whether the deciding copy reads its written type at its own root (`Admission.inheritedOwn`, #1901). */
+    readonly own?: boolean;
   } | null> | null;
   /** Its cycle of decisions when it stopped (`cycleOf`): a scan whose cycle grew meanwhile is taken again. */
   cycle: string;

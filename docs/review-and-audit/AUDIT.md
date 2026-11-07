@@ -95,7 +95,8 @@ Passing aggregate tests does not prove an unexamined requirement.
 Apply KISS to the complete result. Every retained layer of complexity—file, function,
 abstraction, dependency, compatibility layer, schema, helper, check, workflow step, or
 documentation section—must be justified by a current requirement, real boundary, or demonstrated
-maintenance need.
+maintenance need. A file or folder that gives one owner its own place is justified by that ownership: a split
+along an owner's seam lowers complexity, it does not add it.
 
 Apply pragmatic YAGNI to hypothetical future consumers. Use DRY where it reduces total
 complexity, but keep clear local repetition where abstraction would conflict with KISS. Check

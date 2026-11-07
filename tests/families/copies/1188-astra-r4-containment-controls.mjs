@@ -50,7 +50,7 @@ const generated = (() => {
         ];
         first = "damaged.first";
         if (wrapper) {
-          intro.push(...["let box={value:damaged.first}", "let relay=box"]);
+          intro.push("let box={value:damaged.first}", "let relay=box");
           first = "relay.value";
         }
         pair = order ? `${first},peer` : `peer,${first}`;

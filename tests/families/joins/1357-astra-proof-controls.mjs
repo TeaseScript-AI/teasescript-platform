@@ -1,7 +1,7 @@
 // node-key-order, disjoint-leaf-groups and related fixed cases; #1357, Astra review, round unrecorded
 // (R/astra-m4-i1357-review-evidence/vps/proof-controls.mjs).
 export const cases = (() => {
-  const { shapes: shapes, controls: controls } = (() => {
+  const { shapes, controls } = (() => {
     const many = (n, f, sep = "\n") => Array.from({ length: n }, (_, i) => f(i)).join(sep);
     const program = (...s) => s.join("\n") + "\nexit\n";
     const chain = (n, last) => `[0] + ${many(n, (i) => `[${i + 1}]`, " + ")} + [${last}]`;

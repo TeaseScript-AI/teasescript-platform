@@ -498,6 +498,17 @@ test("the candidate route's decline and the capture's skip read one syntax rule"
       'let a = {f: [[1]]}\nlet b = a\nif hostValue < null {say "x"}\nb.f = hostValue\nexit\n',
       false,
     ],
+    // (a default written as `null`, and a member of a literal that is no object, are outside by their shape; an object
+    // literal's member, an index and a method stay inside)
+    [
+      'let a = {f: [[1]]}\nlet b = a\nlet v = load("k", default: (null))\nb.f = hostValue\nexit\n',
+      false,
+    ],
+    ["let a = {f: [[1]]}\nlet b = a\nsay [1].first\nb.f = hostValue\nexit\n", false],
+    ['let a = {f: [[1]]}\nlet b = a\nsay ("ab").length\nb.f = hostValue\nexit\n', false],
+    ["let a = {f: [[1]]}\nlet b = a\nsay {g: 1}.g\nb.f = hostValue\nexit\n", true],
+    ["let a = {f: [[1]]}\nlet b = a\nsay [1][0]\nb.f = hostValue\nexit\n", true],
+    ['let a = {f: [[1]]}\nlet b = a\nsay ["a"].join(",")\nb.f = hostValue\nexit\n', true],
     ['let a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nsay "${hostOther}"\nexit\n', false],
     ["let n = 1\nn += hostOther\nlet a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nexit\n", false],
   ];
@@ -551,7 +562,8 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   // publication units in place of the 4 units of the walk it replaces), 295 fewer since #1251 makes no narrowing index for
   // it, 7 more since #1073 PR 2's consumers look up a descendant demand's narrowing, 38 more since #1822 finds a read signature's
   // prefixes by its charged trie walk (`rdWalk`), 48 more since #1790 asks whether the mixed error's later element may
-  // hold null at its leaf (`c=[a,b][0]`: #1765's walk one depth more). A regression oracle of this construction. In the first mode alone in CI: each mode walks one cyclic contract of about 23 million
+  // hold null at its leaf (`c=[a,b][0]`: #1765's walk one depth more), 6 fewer since #1901 reads a copy's own level from
+  // its decider, no longer asking its parent layer's term, and the earliest written element's leaf from that decider. A regression oracle of this construction. In the first mode alone in CI: each mode walks one cyclic contract of about 23 million
   // units, seconds; every mode is #1606's queue evidence)
   const source =
     'let typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nb.q=a\nc=[a,b][0]\nc=a\nlet out={p:c}\nexit\n';
@@ -560,7 +572,7 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   assert.equal(budget.exhausted, null);
   assert.equal(budget.stoppedIn, null);
   assert.deepEqual(contracts, []);
-  assert.equal(budget.total, 22_962_579);
+  assert.equal(budget.total, 22_962_573);
 });
 
 test("each analysis's captured contracts are its own final pass's", () => {
