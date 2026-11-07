@@ -23,7 +23,12 @@ import {
 import { VALUE_KINDS } from "../../../value-kinds.js";
 import { propertyName } from "../program.js";
 import type { ItemTag } from "../items.js";
-import type { DiagnosticRule, RequiredCheck, SiteExpectation, WrittenTypeError } from "../result.js";
+import type {
+  DiagnosticRule,
+  RequiredCheck,
+  SiteExpectation,
+  WrittenTypeError,
+} from "../result.js";
 import type { MessageSource } from "./site.js";
 import {
   argumentFixOf,

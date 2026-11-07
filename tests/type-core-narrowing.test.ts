@@ -713,7 +713,9 @@ test("N2's events: a mutator, a helper holding one, a block holding one, never a
         7,
         // (a reordering invalidates the element read, `member`; an add or a removal stores the key, `branch`: #1073
         // PR 4's U5, as the fixture's `invalidation/*/changed` records name them)
-        ["reverse()", "sort()", "shuffle()"].includes(call) ? "non-null: member" : "non-null: branch",
+        ["reverse()", "sort()", "shuffle()"].includes(call)
+          ? "non-null: member"
+          : "non-null: branch",
       ]),
       [
         "helper",
