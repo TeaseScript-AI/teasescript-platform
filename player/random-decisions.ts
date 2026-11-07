@@ -12,7 +12,7 @@ import { outcomeKey, randomOutcomeLabel } from "./random-outcomes.js";
 export type RandomNext = "random" | "untried";
 
 /** How many outcomes of a site the history keeps for the picker's Earlier outcomes; diagnostic tuning, not a limit. */
-export const KEPT_OUTCOMES = 1000;
+const KEPT_OUTCOMES = 1000;
 
 /** What a site took: its latest outcomes, oldest first, numbered from `first`; and how often it took each, by key. */
 export interface RandomTried {
