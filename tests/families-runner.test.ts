@@ -4133,11 +4133,11 @@ test("a publication run's unit limit grants its oracle's units per cell its ques
       `export const cases = ${JSON.stringify(["granted", "past", "stops"].map((name) => [name, name]))};\n` +
         'export const checks = ["publication", "stops"];\n',
     );
-    const stalled = (tree: string) => {
-      const work = join(directory, `${basename(tree)}.work.jsonl`);
+    const stalled = (base: string, head = base) => {
+      const work = join(directory, `${basename(base)}-${basename(head)}.work.jsonl`);
       const ran = spawnSync(
         process.execPath,
-        [runner, folder, tree, tree, "--allowances", "natural", "--work", work],
+        [runner, folder, base, head, "--allowances", "natural", "--work", work],
         { encoding: "utf8" },
       );
       const lines = readFileSync(work, "utf8")
@@ -4153,7 +4153,13 @@ test("a publication run's unit limit grants its oracle's units per cell its ques
     // (the grant: `granted` ends; `past` passes it, `stops` is no publication run)
     assert.deepEqual(stalled(built("reports", true)), [1, ["past", "stops"]]);
     // (no cells reported, no grant)
-    assert.deepEqual(stalled(built("silent", false)), [1, ["granted", "past", "stops"]]);
+    const silent = built("silent", false);
+    assert.deepEqual(stalled(silent), [1, ["granted", "past", "stops"]]);
+    // (each tree's own report: the base's cells grant the head nothing)
+    assert.deepEqual(stalled(join(directory, "reports"), silent), [
+      1,
+      ["granted", "past", "stops"],
+    ]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

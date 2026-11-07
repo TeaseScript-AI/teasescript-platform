@@ -47,7 +47,8 @@ analysis's allowance and stop after the one whose units pass the program's allow
 occurrence's answer, its element's and each property's; two a binding), or past the read-depth limit (#1837); the
 nodes from there on stay unanswered (`publicationHashes`'s `unanswered`, #1499), after the bindings left where the
 admitted types stopped. A publication run's unit limit grants the same 64 per cell its tree's oracle reports so far
-(`questionWork`), so the oracle's stop comes first. A run with any on either tree agrees only where both trees left
+(`questionWork`), so the oracle's stop comes first wherever a question reports its cells before the runner's limit; one
+question's own cost is the runner's to bound. A run with any on either tree agrees only where both trees left
 the same count unanswered and published the same parts up to them (#1592): the bound is the same on both trees, so
 what it leaves unanswered is too. Such a run is counted apart (`unansweredAlike`); any other is neither agreement nor an
 exception: the runner writes it to `--out` and counts it apart (`unanswered`). Each such run records why on each tree

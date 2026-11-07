@@ -116,8 +116,9 @@ const hash = (text) => createHash("sha256").update(text).digest("hex");
  * (`unanswered`): the tree's `publicationHashes`, which hashes each part as it is made and never holds the whole, as
  * this library writes it or as a library before `unanswered` did (its parts alone), or an older library's
  * `publication` split into the same parts, with the count its fifth element holds where it has one; `null` when the
- * files do not parse or resolve. Why the oracle left nodes unanswered (`unansweredBy`: `questions` or `stopped`, with
- * the first node left) is the library's where it gives one, else `unknown` (#1837's runner artefacts).
+ * files do not parse or resolve. Why the oracle left nodes unanswered (`unansweredBy`: `questions`, `read-depth` or
+ * `stopped`, with the first node left or the binding where its answers' questions stopped) is the library's where it
+ * gives one, else `unknown` (#1837's runner artefacts).
  */
 function partHashes(oracle, files, mode, globals) {
   if (typeof oracle.publicationHashes === "function") {

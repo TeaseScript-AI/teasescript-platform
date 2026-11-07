@@ -259,6 +259,56 @@ test("the published answers' own questions stop under the same bound, never answ
   });
 });
 
+test("the bound credits each cell returned: one unit a cell answers what no credit stops, and at K a cell the least allowance answering all lies K or more below what the questions spent (#1837, Codex r1)", () => {
+  const properties = Array.from({ length: 64 }, (_, index) => `p${index}: ${index}`).join(", ");
+  for (const source of [SMALL[0]!, `let o = {${properties}}\nsay "\${o.p0}"\nexit\n`]) {
+    const files = main(source);
+    const full = publicationParts(files, MODES[0]!, GLOBALS);
+    assert.ok(full !== null && full.unanswered === 0);
+    const { units, cells } = questionWork();
+    const at = (allowance: number, perCell: number) =>
+      withQuestionBound(allowance, perCell, () => publicationParts(files, MODES[0]!, GLOBALS)!);
+    // (from the first binding's two cells on, one unit a cell lifts the bound past what they spent)
+    assert.ok(at(units - 1, 0).unanswered > 0);
+    assert.deepEqual(at(units - 1, 1), full);
+    // (at K a cell, the least allowance that answers it all, by bisection, and one unit less stops)
+    const answered = (allowance: number) => at(allowance, QUESTION_UNITS_PER_CELL).unanswered === 0;
+    let [low, high] = [-QUESTION_UNITS_PER_CELL * cells - 1, units];
+    assert.ok(!answered(low) && answered(high));
+    while (high - low > 1) {
+      const middle = Math.floor((low + high) / 2);
+      if (answered(middle)) high = middle;
+      else low = middle;
+    }
+    assert.deepEqual(at(high, QUESTION_UNITS_PER_CELL), full);
+    const stopped = at(high - 1, QUESTION_UNITS_PER_CELL);
+    assert.equal(stopped.unansweredBy?.reason, "questions");
+    // (the credit counts: K a cell answers below what the questions spent by at least K)
+    assert.ok(high <= units - QUESTION_UNITS_PER_CELL, `${high} against ${units}`);
+  }
+});
+
+test("a stop the oracle's own questions would make is never published: at the analysis's own total, the record is the compiler's (#1837, Codex r1)", () => {
+  // (main asked the admitted types on the analysis's ledger: its first charge passed the allowance, and the publication
+  // was asked again on the stopped analysis, with a stop warning the compiler never gives)
+  const files = main("let count = 1\nexit\n");
+  const request = coreRequest(files, GLOBALS);
+  assert.ok(request !== null);
+  const total = analyseCore(request).budget.total;
+  const full = publicationParts(files, MODES[0]!, GLOBALS);
+  assert.ok(full !== null);
+  const parts = withTestAllowance(total, () => publicationParts(files, MODES[0]!, GLOBALS));
+  assert.ok(parts !== null);
+  assert.equal(
+    withTestAllowance(total, () => analyseCore(request).budget.exhausted),
+    null,
+  );
+  assert.deepEqual(
+    [parts.answers, parts.record, parts.route, parts.unanswered],
+    [full.answers, full.record, full.route, 0],
+  );
+});
+
 test("an analysis its own budget stopped is answered whole within its questions' bound, so no node is left unanswered and none is stopped (#1837)", () => {
   const files = main(SMALL[0]!);
   const request = coreRequest(files, GLOBALS);

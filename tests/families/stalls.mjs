@@ -685,7 +685,7 @@ for (const [area, row] of rows) {
   for (const key of Object.keys(total)) total[key] += row[key];
 }
 // the runner artefacts (#1837): each run a tree's oracle left unanswered, by why (`run.mjs`'s `unansweredBy`:
-// `questions`, `stopped`, else `unknown`) or left alike, with its runs, sources and first witness; they stay apart from
+// `questions`, `read-depth`, `stopped`, else `unknown`; its witness the node, or the binding, left) or left alike, with its runs, sources and first witness; they stay apart from
 // agreement as before, so that no round classifies them again
 const GROUPS = [
   "unanswered: questions",
