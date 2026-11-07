@@ -350,13 +350,14 @@ export function fixed(): string {
   work.charge("objectSteps");
   return keyOf(1, []);
 }
-export function below(input: readonly string[]): string {
+export function below(): string {
   work.charge("objectSteps");
-  return keyBelow("1|", input);
+  return keyBelow("1|", []);
 }
 `,
     { "src/type-inference/core/definitions.ts": DEFINITIONS },
   );
-  // (the spread, the array join, the array key and the narrowing modules' call; nothing in the scalar or literal ones)
+  // (the spread, the array join, the array key, and a narrowing modules' call even with a literal array; nothing in the
+  // scalar join or the literal key)
   assert.deepEqual(lines, [7, 11, 19, 27]);
 });
