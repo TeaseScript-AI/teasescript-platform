@@ -1,4 +1,5 @@
-import { classifyTokens } from "../src/index.js";
+import { classifyTokens, parse, type ParseResult } from "../src/index.js";
+import { isNativeStackExhaustion } from "../src/compiler.js";
 import type { RandomSite } from "../src/playback.js";
 import type { SourceDebugFile, SourceDebugSpan } from "../src/runtime/debug/source-sidecar.js";
 import {
@@ -77,13 +78,26 @@ export function drawCode(code: FileCode, site: RandomSite): DrawCode | null {
 export function outcomeLines(outcomes: readonly string[], first = 1): readonly CodeLine[] {
   return outcomes.map((outcome, index) => {
     const text = outcome.replace(/\r?\n/g, " ");
-    const tokens = classifyTokens(text).map(({ kind, span }) => ({
+    const tokens = classifyTokens(text, parseOutcome(text)).map(({ kind, span }) => ({
       kind,
       start: span.start.offset,
       end: span.end.offset,
     }));
     return { ...renderLines(text, [0], tokens, 1, 1)[0]!, number: first + index };
   });
+}
+
+/**
+ * The parse an outcome is classified by: its own, not the editor's cached last parse, which would keep a session's
+ * outcome past its connection's teardown. As the editor's, none when parsing exhausted the call stack.
+ */
+function parseOutcome(text: string): ParseResult {
+  try {
+    return parse(text);
+  } catch (error) {
+    if (!isNativeStackExhaustion(error)) throw error;
+    return parse("");
+  }
 }
 
 /** The offset where each line starts. */

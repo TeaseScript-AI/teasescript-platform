@@ -186,6 +186,22 @@ an intentional implementation change legitimately changes it.
 Type-core tests compare analyses through the projections in `tests/helpers/type-core-oracles.ts`: the diagnostics'
 identity a stop keeps, what a program publishes in the four modes (both orders, sharing on and off), and which
 decisions stop and when. A test that needs another projection adds it there instead of keeping a private copy.
+
+What stays held after a teardown is checked through `tests/helpers/retention-witness.ts`. Its guarantee: after
+teardown, no original object the connection reached survives, and no string holding a case's marker survives. Its child
+(`retention-child.ts`) runs cases whose fixture carries the case's marker on every line, and keeps each connection and
+its ops until the end. After the teardown:
+
+- no string in the child's heap snapshot, read whole or, for a slice, as any part of its parent, may hold a marker;
+- a torn-down connection reaches no more objects than a fresh one;
+- nothing the connection reached before stays alive elsewhere.
+
+`tests/retention-witness.test.ts` holds its positive controls: each holder kind found on a path through its own edge,
+and each string representation with the marker cut at every position. Its limits, named in the helper: copies of
+marker-free data; marker-free objects in private fields, closure environments, `WeakMap` entries or promise results;
+bytes the connection never held; and unmarked returned scalars. A route that keeps bytes brings its own evidence of
+their lifetime.
+
 `tests/families/` holds the generators that reviewers and builders used as evidence, each module the sources of one
 recorded evidence run, with their runner and module contract (`tests/families/README.md`). Their runs are outside CI:
 before a type-core review round, the builder runs the affected areas against the base and head builds and reports the
