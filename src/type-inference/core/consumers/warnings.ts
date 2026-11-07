@@ -109,6 +109,8 @@ function required(
   if (value === undefined || at === null) return false;
   const text = program.textAt(at);
   let tests: readonly string[];
+  // (a written union's other kinds the use does not take, null among them: each certifies the route, r4.118 (1))
+  let others: readonly ItemTag[] = [];
   if (item.tag === "null") {
     // (a null owes its null-check, or at a store its destination's check: C1's and C10's)
     if (
@@ -118,19 +120,22 @@ function required(
       return false;
     tests = [`if ${text} != null`, "otherwise"];
   } else {
-    // (a reference's members are the runtime's, F19a: never the route rule's)
-    const members = REFERENCE.has(item.tag) ? null : writtenMembers(walk, value);
-    if (members === null || !members.includes(item.tag)) return false;
+    // (a union holding a reference: its members are the runtime's, F19a, never the route rule's)
+    const members = writtenMembers(walk, value);
+    if (
+      members === null ||
+      !members.includes(item.tag) ||
+      members.some((tag) => REFERENCE.has(tag))
+    )
+      return false;
     const taken = members.filter((tag) => fits.some((fit) => fit.tag === tag));
     if (taken.length === 0) return false;
     tests = [`if ${text} is ${taken.join(" | ")}`];
+    others = members.filter((tag) => tag !== item.tag && !taken.includes(tag));
   }
   program.work.charge("checks");
-  // (a member of the written union that no store makes, only the declaration allows: its declaration certifies it)
   const writer = walk.solve(
-    walk.pass.guards
-      .narrowings(walk.pass)
-      .routes.required(value, item.tag, item.tag !== "null" && item.writer === null),
+    walk.pass.guards.narrowings(walk.pass).routes.required(value, item.tag, others),
   );
   if (writer === null) return false;
   const diagnostic: CoreDiagnostic = {

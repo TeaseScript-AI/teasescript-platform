@@ -695,13 +695,13 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "F25 an unknown receiver's reverse",
     'let raw = fromJson("\\"abc\\"", default: null, files: false)\nlet text: string = raw.reverse()',
     "compile-error",
-    "unknown - unknown",
+    "- - unknown",
   ],
   [
     "F7 an unknown receiver's remove",
     'let raw = fromJson("{}", default: null, files: false)\nlet text: string = raw.remove("key")',
     "compile-error",
-    "unknown unknown - unknown",
+    "- unknown - unknown",
   ],
   // X7, H1, G1(b) (r4.25; Astra B4): a dead call registers no handler; a live one before the read does
   [
