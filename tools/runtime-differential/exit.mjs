@@ -1,18 +1,37 @@
-// The differential CLI's one exit decision (docs/TESTING.md "Differential harness"), over every report of a run: 2 when
-// any side failed in the harness (`harness-failure`, `serializer-failure`), else 1 when any pair is a `discrepancy` or
-// a `mapping-failure`, else 0. A pair not compared for another reason, such as `unsupported-route`, is not a failure.
+// The differential CLI's one exit decision (docs/TESTING.md "Differential harness"), over every report of a run, by what
+// each verdict means:
+// - 0: identity (`equivalent`); not compared because the route is unsupported; or censored, both sides equal up to the
+//   step limit, which is a sampling bound, not a failure;
+// - 1: a decided difference: a `discrepancy`, a `mapping-failure`, or one build rejecting the input at compile or
+//   admission while the other does not;
+// - 2: a harness or serializer failure, or a verdict the decision does not know.
+// 2 wins over 1, and 1 over 0.
 
-const HARNESS = new Set(["harness-failure", "serializer-failure"]);
+const SAME = new Set(["unsupported-route", "censored"]);
+const DIFFERENT = new Set(["compile-rejected", "admission-rejected"]);
 
 /** The exit status of a run whose reports are `reports`. */
 export function exitStatus(reports) {
   let status = 0;
   for (const report of reports) {
-    if (report.verdict.kind === "not-compared" && HARNESS.has(report.verdict.because)) return 2;
-    if (report.verdict.kind === "discrepancy" || report.verdict.kind === "mapping-failure")
-      status = 1;
+    const kind = report?.verdict?.kind;
+    const because = kind === "not-compared" ? report.verdict.because : undefined;
+    if (kind === "equivalent" || SAME.has(because)) continue;
+    if (kind === "discrepancy" || kind === "mapping-failure" || DIFFERENT.has(because)) status = 1;
+    else return 2;
   }
   return status;
+}
+
+/** How many reports of each verdict, `not-compared` ones by their reason, for the run's summary. */
+export function verdictCounts(reports) {
+  const counts = {};
+  for (const report of reports) {
+    const kind = report?.verdict?.kind;
+    const key = kind === "not-compared" ? `not-compared:${report.verdict.because}` : String(kind);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
 }
 
 /** `text` as a whole number of at least `least`, or a usage error naming `flag`. */

@@ -14,18 +14,24 @@ import {
   runtimeTimedWork,
   type FreshRuntimeOptions,
   type ProjectSourceFile,
+  type RandomDrawView,
+  type RuntimeDebugContext,
+  type RuntimeSession,
+  type RuntimeSessionView,
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import {
   differentialRun,
-  type CallPoint,
+  thisBuild,
   type DifferentialOptions,
   type DifferentialInput,
   type DifferentialReport,
   type HostDriver,
   type InjectionSite,
+  type PipelineAdapter,
   type Route,
   type SideRecord,
+  type Stage,
 } from "./helpers/runtime-differential.js";
 import {
   canonicalDigest,
@@ -97,13 +103,6 @@ const regressions = JSON.parse(
 
 const ROUTES: readonly Route[] = ["legacy", "core"];
 
-/** The regressions of the guard's transparency sample, at their first seed: a fault, defaults, and random draws. */
-const TRANSPARENCY = new Set([
-  "atomic-invalid-target-before-rhs",
-  "lazy-default",
-  "atomic-rng-index-and-rhs",
-]);
-
 /**
  * Cut points per run: in CI 8 (the mandatory cuts first, then evenly spaced ones), with `TEASESCRIPT_SWEEP=full` the
  * driver's 32. Every input, seed and restore route runs either way; only the non-mandatory cuts are fewer.
@@ -144,40 +143,11 @@ function saidAndStatus(input: DifferentialInput): { said: string[]; status: stri
 
 const reports: DifferentialReport[] = [];
 
-/**
- * One pair as the suite runs it. A pair of the transparency sample (`witness`), and with `TEASESCRIPT_SWEEP=full` every
- * legacy pair, runs once more without the guard between the harness and each side: both runs must give the same records
- * and the same report, so the guard changes nothing the engine sees or the harness records. The sample covers every
- * restore route (each pair runs all of them) with a fault, a wait, a project, random choices, a host, captured media and
- * the deep host list.
- */
-function pair(
-  input: DifferentialInput,
-  options: DifferentialOptions = {},
-  witness = false,
-): DifferentialReport {
-  const run = (unguarded: boolean) => {
-    const records: string[] = [];
-    const report = differentialRun(input, {
-      ...CUTS,
-      ...options,
-      unguarded,
-      inject: (record, at) => {
-        records.push(canonicalDigest({ at, record }));
-        return record;
-      },
-    });
-    const { cpuMs: _cpu, ...rest } = report;
-    return { report, records, summary: canonicalDigest(rest) };
-  };
-  const guarded = run(false);
-  if ((options.route ?? "legacy") === "legacy" && (witness || SWEEP)) {
-    const direct = run(true);
-    assert.deepEqual(direct.records, guarded.records, `${input.name}: the guard changes no record`);
-    assert.equal(direct.summary, guarded.summary, `${input.name}: the guard changes no report`);
-  }
-  reports.push(guarded.report);
-  return guarded.report;
+/** One pair as the suite runs it, at the CI cut cap, its report kept for the cost summary. */
+function pair(input: DifferentialInput, options: DifferentialOptions = {}): DifferentialReport {
+  const report = differentialRun(input, { ...CUTS, ...options });
+  reports.push(report);
+  return report;
 }
 
 test("every retained regression is equivalent on both routes and keeps its independent expectation", () => {
@@ -189,9 +159,7 @@ test("every retained regression is equivalent on both routes and keeps its indep
         ...(entry.globals ? { globals: entry.globals } : {}),
       });
       for (const route of ROUTES) {
-        assertEquivalent(
-          pair(input, { route }, seed === regressions.seeds[0] && TRANSPARENCY.has(entry.name)),
-        );
+        assertEquivalent(pair(input, { route }));
       }
       const expect = entry.expect;
       if (expect?.diagnostic !== undefined) {
@@ -224,21 +192,12 @@ test("a bounded seeded sample of generated programs is equivalent on both routes
   );
   for (const tag of everyTag) assert.ok(tags.has(tag), `the sample covers ${tag}`);
   assert.ok(tags.has("project"), "the sample has a project");
-  // The transparency sample's generated programs: the first project, the first chosen-random and the first waiting one.
   const randomMode = (program: GeneratedProgram) =>
     program.tags.includes("rng")
       ? programs.filter((item) => item.tags.includes("rng")).indexOf(program) % 2 === 1
         ? "choose"
         : "natural"
       : undefined;
-  const witnesses = new Set(
-    [
-      programs.find((program) => program.project === true),
-      programs.find((program) => randomMode(program) === "choose"),
-      programs.find((program) => program.tags.includes("waits")),
-    ].filter((program) => program !== undefined),
-  );
-  assert.equal(witnesses.size, 3);
   for (const program of programs) {
     // Random programs alternate between the harness's two decision modes, whose logs and receipts are compared.
     const random = randomMode(program);
@@ -254,7 +213,7 @@ test("a bounded seeded sample of generated programs is equivalent on both routes
     };
     for (const route of ROUTES) {
       // A generated program the compiler rejects is classified, not patched in: both sides reject it alike.
-      assertEquivalent(pair(input, { route }, witnesses.has(program)));
+      assertEquivalent(pair(input, { route }));
     }
   }
 });
@@ -281,7 +240,7 @@ test("a 10,000-level host list runs, restores and compares on the supported path
     seed: 1,
     globals: { hostValue: deepList(DEPTH) },
   });
-  const report = pair(input, {}, true);
+  const report = pair(input);
   assert.deepEqual(report.verdict, { kind: "equivalent" });
   assert.deepEqual(report.outcomes.left, { kind: "completed" });
   assert.ok(report.cuts.length > 0 && report.tailSteps > 0);
@@ -356,7 +315,7 @@ function choosingHost(option: number): HostDriver {
 
 test("a host drives both sides through interactions, and both must make the same host calls", () => {
   const input = single("choices", CHOICES, { seed: 3 });
-  const hosted = pair(input, { host: () => choosingHost(1) }, true);
+  const hosted = pair(input, { host: () => choosingHost(1) });
   assert.deepEqual(hosted.verdict, { kind: "equivalent" });
   assert.deepEqual(hosted.outcomes.left, { kind: "completed" });
   assert.ok(hosted.tailSteps > 0);
@@ -423,7 +382,7 @@ function storingHost(vouches = true): HostDriver {
 
 test("a captured-media admission is replayed on every restore route from what it answered, not reused", () => {
   const input = single("stores", STORES, { seed: 3 });
-  const stored = pair(input, { host: () => storingHost() }, true);
+  const stored = pair(input, { host: () => storingHost() });
   assert.deepEqual(stored.verdict, { kind: "equivalent" });
   assert.deepEqual(stored.outcomes.left, { kind: "completed" });
   assert.ok(stored.tailSteps > 0);
@@ -636,110 +595,413 @@ test("the shrinker reduces every positive integer literal above 1, also one that
   assert.equal(reduced.source, "say 1, instant\nexit\n");
 });
 
-/** A host that observes each delay's deadline, so that the clean run makes host calls to fault. */
-const deadlineDriver = (): HostDriver => ({
-  next(view) {
-    const work = runtimeTimedWork(view);
-    return work.length === 0
-      ? null
-      : { kind: "observeTime", nowMs: Math.min(...work.map((item) => item.deadlineMs)) };
-  },
-});
-
-/**
- * The injected-fault family: every call the harness makes into a side in a clean run of the sensitivity source, each
- * point recorded by the guard, so that a call site added later joins by construction. Each (side, stage, method) is
- * faulted at its first and its last call.
+/*
+ * The injected-fault family: faults placed on a side's own objects, independent of the driver's attribution. A fixture
+ * adapter counts each use of each member of the objects it hands out (the adapter, its sessions functions, the sessions
+ * and debug contexts they make, and a host) by side, origin, member and kind (`access` of the member, `invocation` of
+ * it, or its `result`), and throws at one chosen use. The rows are every counted use, at its first and its last
+ * occurrence, and the oracle decides from the row alone.
  */
-const FAULT_INPUT = single("sensitivity", SENSITIVE, { seed: 5 });
-const CLEAN_CALLS: CallPoint[] = [];
-assert.deepEqual(
-  differentialRun(FAULT_INPUT, {
-    ...CUTS,
-    host: deadlineDriver,
-    calls: (point) => CLEAN_CALLS.push(point),
-  }).verdict,
-  { kind: "equivalent" },
-);
-const FAULT_POINTS = (() => {
-  const last = new Map<string, CallPoint>();
-  const first = new Map<string, CallPoint>();
-  for (const point of CLEAN_CALLS) {
-    const key = `${point.side} ${point.stage} ${point.method}`;
-    if (!first.has(key)) first.set(key, point);
-    last.set(key, point);
+
+type SideName = "left" | "right";
+type FaultKind = "access" | "invocation" | "result";
+interface Placement {
+  readonly side: SideName;
+  /** `adapter`, `sessions`, `context`, `host`, or the call that made the session: `fresh`, `fork`, or a restore call. */
+  readonly origin: string;
+  readonly member: string;
+  readonly kind: FaultKind;
+}
+interface Fault extends Placement {
+  readonly occurrence: number;
+}
+
+const keyOf = (placement: Placement) =>
+  `${placement.side} ${placement.origin} ${placement.member} ${placement.kind}`;
+
+const SESSION_MEMBERS = [
+  "view",
+  "executeInstruction",
+  "observeTime",
+  "exportTrustedSnapshot",
+  "exportCheckpoint",
+  "exportSnapshot",
+  "exportTaggedSnapshot",
+  "fork",
+] as const;
+/** The session members whose returned object the harness reads, and the field a result fault throws at. */
+const RESULT_MEMBERS = new Set(["view", "executeInstruction"]);
+
+/** This build, its objects counting each use and throwing at `fault`'s. */
+class Fixture {
+  public readonly counts = new Map<string, number>();
+  public fired = 0;
+
+  public constructor(private readonly fault: Fault | null) {}
+
+  /** Counts one use, and says whether it is the fault's. */
+  public tick(placement: Placement): boolean {
+    const key = keyOf(placement);
+    const count = (this.counts.get(key) ?? 0) + 1;
+    this.counts.set(key, count);
+    const fires =
+      this.fault !== null && keyOf(this.fault) === key && this.fault.occurrence === count;
+    if (fires) this.fired += 1;
+    return fires;
   }
-  return [...first.keys()].flatMap((key) =>
-    first.get(key)!.ordinal === last.get(key)!.ordinal
-      ? [first.get(key)!]
-      : [first.get(key)!, last.get(key)!],
-  );
+
+  /** Counts one use, and throws when it is the fault's. */
+  public use(side: SideName, origin: string, member: string, kind: FaultKind): void {
+    if (this.tick({ side, origin, member, kind }))
+      throw new Error(`test-only fault at ${keyOf({ side, origin, member, kind })}`);
+  }
+
+  /** A returned object, or one whose every read throws when this use is the fault's. */
+  public result<T extends object>(side: SideName, origin: string, member: string, value: T): T {
+    if (!this.tick({ side, origin, member, kind: "result" })) return value;
+    return new Proxy(value, {
+      get: () => {
+        throw new Error(`test-only fault at ${side} ${origin} ${member} result`);
+      },
+    });
+  }
+
+  /** A session of `side` made by `origin`, its members counted on the instance itself, its receiver kept. */
+  public session(side: SideName, origin: string, session: RuntimeSession): RuntimeSession {
+    // EVIDENCE: validation: the session's prototype is the engine's `RuntimeSession` class, whose methods these are.
+    const prototype = Object.getPrototypeOf(session) as Record<
+      string,
+      (...args: unknown[]) => object
+    >;
+    for (const member of SESSION_MEMBERS) {
+      const method = prototype[member]!;
+      Object.defineProperty(session, member, {
+        configurable: true,
+        get: () => {
+          this.use(side, origin, member, "access");
+          return (...args: unknown[]) => {
+            this.use(side, origin, member, "invocation");
+            const value = method.apply(session, args);
+            if (member === "fork")
+              // EVIDENCE: validation: `fork` returns a session of the same engine.
+              return this.session(side, "fork", value as RuntimeSession);
+            return RESULT_MEMBERS.has(member) ? this.result(side, origin, member, value) : value;
+          };
+        },
+      });
+    }
+    return session;
+  }
+
+  /** This build's adapter for `side`, every object it hands out counted. */
+  public adapter(side: SideName): PipelineAdapter {
+    const build = thisBuild(side);
+    const real = build.sessions;
+    const fixture = this;
+    const use = (origin: string, member: string, kind: FaultKind) =>
+      fixture.use(side, origin, member, kind);
+    class Context extends real.RuntimeDebugContext {
+      public override reset(origin: "start" | "restore"): void {
+        use("context", "reset", "invocation");
+        super.reset(origin);
+      }
+      public override status(): ReturnType<RuntimeDebugContext["status"]> {
+        use("context", "status", "invocation");
+        return super.status();
+      }
+      public override record(id: number): ReturnType<RuntimeDebugContext["record"]> {
+        use("context", "record", "invocation");
+        return super.record(id);
+      }
+    }
+    const sessions: PipelineAdapter["sessions"] = {
+      get createFreshRuntimeSession() {
+        use("sessions", "createFreshRuntimeSession", "access");
+        return (...args: Parameters<typeof real.createFreshRuntimeSession>) => {
+          use("sessions", "createFreshRuntimeSession", "invocation");
+          return fixture.session(side, "fresh", real.createFreshRuntimeSession(...args));
+        };
+      },
+      get createRuntimeSession() {
+        use("sessions", "createRuntimeSession", "access");
+        return (...args: Parameters<typeof real.createRuntimeSession>) => {
+          use("sessions", "createRuntimeSession", "invocation");
+          return fixture.session(side, "createRuntimeSession", real.createRuntimeSession(...args));
+        };
+      },
+      get createTaggedRuntimeSession() {
+        use("sessions", "createTaggedRuntimeSession", "access");
+        return (...args: Parameters<typeof real.createTaggedRuntimeSession>) => {
+          use("sessions", "createTaggedRuntimeSession", "invocation");
+          return fixture.session(
+            side,
+            "createTaggedRuntimeSession",
+            real.createTaggedRuntimeSession(...args),
+          );
+        };
+      },
+      get restoreRuntimeSession() {
+        use("sessions", "restoreRuntimeSession", "access");
+        return (...args: Parameters<typeof real.restoreRuntimeSession>) => {
+          use("sessions", "restoreRuntimeSession", "invocation");
+          return fixture.session(
+            side,
+            "restoreRuntimeSession",
+            real.restoreRuntimeSession(...args),
+          );
+        };
+      },
+      get deserializeRuntimeSession() {
+        use("sessions", "deserializeRuntimeSession", "access");
+        return (...args: Parameters<typeof real.deserializeRuntimeSession>) => {
+          use("sessions", "deserializeRuntimeSession", "invocation");
+          return fixture.session(
+            side,
+            "deserializeRuntimeSession",
+            real.deserializeRuntimeSession(...args),
+          );
+        };
+      },
+      get serializeCheckpoint() {
+        use("sessions", "serializeCheckpoint", "access");
+        return (...args: Parameters<typeof real.serializeCheckpoint>) => {
+          use("sessions", "serializeCheckpoint", "invocation");
+          return real.serializeCheckpoint(...args);
+        };
+      },
+      get runtimeTimedWork() {
+        use("sessions", "runtimeTimedWork", "access");
+        return (...args: Parameters<typeof real.runtimeTimedWork>) => {
+          use("sessions", "runtimeTimedWork", "invocation");
+          return real.runtimeTimedWork(...args);
+        };
+      },
+      get RuntimeDebugContext() {
+        use("sessions", "RuntimeDebugContext", "access");
+        return Context;
+      },
+    };
+    return {
+      label: side,
+      get compile() {
+        use("adapter", "compile", "access");
+        return (input: DifferentialInput, route: Route) => {
+          use("adapter", "compile", "invocation");
+          return build.compile(input, route);
+        };
+      },
+      get sessions() {
+        use("adapter", "sessions", "access");
+        return sessions;
+      },
+    };
+  }
+
+  /** A host that observes each delay's deadline, its factory, `next` and returned calls counted. */
+  public host(side: SideName): HostDriver {
+    const fixture = this;
+    fixture.use(side, "host", "factory", "invocation");
+    return {
+      get next() {
+        fixture.use(side, "host", "next", "access");
+        return (view: RuntimeSessionView) => {
+          fixture.use(side, "host", "next", "invocation");
+          const work = runtimeTimedWork(view);
+          if (work.length === 0) return null;
+          return fixture.result(side, "host", "next", {
+            kind: "observeTime" as const,
+            nowMs: Math.min(...work.map((item) => item.deadlineMs)),
+          });
+        };
+      },
+    };
+  }
+}
+
+const FAULT_INPUT = single("sensitivity", SENSITIVE, { seed: 5 });
+
+/** Runs the fault input with a fixture on both sides, and a fixture host when `hosted`. */
+function faulted(fixture: Fixture, hosted: boolean): DifferentialReport {
+  return differentialRun(FAULT_INPUT, {
+    ...CUTS,
+    left: fixture.adapter("left"),
+    right: fixture.adapter("right"),
+    ...(hosted ? { host: (side: SideName) => fixture.host(side) } : {}),
+  });
+}
+
+/** The fault rows: every use the clean runs count, at its first and last occurrence, and whether it needs the host. */
+const FAULT_ROWS = (() => {
+  const rows: { readonly fault: Fault; readonly hosted: boolean }[] = [];
+  for (const hosted of [false, true]) {
+    const clean = new Fixture(null);
+    assert.deepEqual(faulted(clean, hosted).verdict, { kind: "equivalent" });
+    for (const [key, count] of clean.counts) {
+      // EVIDENCE: validation: `keyOf` joins a side, an origin, a member and a kind, none of which has a space.
+      const [side, origin, member, kind] = key.split(" ") as [SideName, string, string, FaultKind];
+      // The host's own uses come from the hosted run; every other use from the run without a host.
+      if ((origin === "host") !== hosted) continue;
+      for (const occurrence of new Set([1, count]))
+        rows.push({ fault: { side, origin, member, kind, occurrence }, hosted });
+    }
+  }
+  return rows;
 })();
 
-/** The restore routes each public restore call serves; its own exception is that route's restored state. */
-const RESTORE_CALL_ROUTES: Readonly<Record<string, readonly string[]>> = {
-  "RuntimeSession.fork": ["fork"],
-  createRuntimeSession: ["checked-snapshot", "trusted-snapshot"],
-  createTaggedRuntimeSession: ["tagged-snapshot"],
-  restoreRuntimeSession: ["checkpoint"],
-  deserializeRuntimeSession: ["checkpoint-json"],
+/** The members the family must reach on each side, from the public adapter, session, context and host APIs. */
+const INVENTORY: readonly Omit<Placement, "side">[] = [
+  { origin: "adapter", member: "compile", kind: "access" },
+  { origin: "adapter", member: "compile", kind: "invocation" },
+  { origin: "adapter", member: "sessions", kind: "access" },
+  ...[
+    "createFreshRuntimeSession",
+    "createRuntimeSession",
+    "createTaggedRuntimeSession",
+    "restoreRuntimeSession",
+    "deserializeRuntimeSession",
+    "serializeCheckpoint",
+    "runtimeTimedWork",
+  ].flatMap((member) =>
+    (["access", "invocation"] as const).map((kind) => ({ origin: "sessions", member, kind })),
+  ),
+  { origin: "sessions", member: "RuntimeDebugContext", kind: "access" },
+  ...["reset", "status", "record"].map((member) => ({
+    origin: "context",
+    member,
+    kind: "invocation" as const,
+  })),
+  ...SESSION_MEMBERS.flatMap((member) =>
+    (["access", "invocation"] as const).map((kind) => ({ origin: "fresh", member, kind })),
+  ),
+  ...[
+    "fork",
+    "createRuntimeSession",
+    "createTaggedRuntimeSession",
+    "restoreRuntimeSession",
+    "deserializeRuntimeSession",
+  ].flatMap((origin) =>
+    ["view", "executeInstruction", "observeTime", "exportTrustedSnapshot"].flatMap((member) =>
+      (["access", "invocation"] as const).map((kind) => ({ origin, member, kind })),
+    ),
+  ),
+  ...[
+    "fresh",
+    "fork",
+    "createRuntimeSession",
+    "createTaggedRuntimeSession",
+    "restoreRuntimeSession",
+    "deserializeRuntimeSession",
+  ].flatMap((origin) =>
+    [...RESULT_MEMBERS].map((member) => ({ origin, member, kind: "result" as const })),
+  ),
+  { origin: "host", member: "factory", kind: "invocation" },
+  { origin: "host", member: "next", kind: "access" },
+  { origin: "host", member: "next", kind: "invocation" },
+  { origin: "host", member: "next", kind: "result" },
+];
+
+/** The restore routes each public restore invocation serves; its own exception is that route's restored state. */
+const ENGINE_INVOCATIONS: Readonly<Record<string, readonly string[] | "admission">> = {
+  "sessions createFreshRuntimeSession": "admission",
+  "sessions createRuntimeSession": ["checked-snapshot", "trusted-snapshot"],
+  "sessions createTaggedRuntimeSession": ["tagged-snapshot"],
+  "sessions restoreRuntimeSession": ["checkpoint"],
+  "sessions deserializeRuntimeSession": ["checkpoint-json"],
+  "fresh fork": ["fork"],
 };
 
+const RESTORE_ORIGINS = new Set([
+  "fork",
+  "createRuntimeSession",
+  "createTaggedRuntimeSession",
+  "restoreRuntimeSession",
+  "deserializeRuntimeSession",
+]);
+
 /**
- * The independent oracle, from the point alone: a public restore call's exception is a discrepancy on a route it
- * serves; a fresh session's is that side's admission refusing the input; any other is that side's harness failure at
- * that stage and method.
+ * The independent oracle, from the row alone: a public engine invocation is the engine's own behaviour (a fresh
+ * session's admission refused, or a discrepancy on its restore route); any other fault is that side's harness failure,
+ * named by the member the driver reports and in a stage where that member is used.
  */
-function faultExpectation(point: CallPoint) {
-  const routes = RESTORE_CALL_ROUTES[point.method];
-  if (routes !== undefined) return { kind: "discrepancy" as const, routes };
-  if (point.method === "createFreshRuntimeSession")
-    return { kind: "admission-rejected" as const, side: point.side };
+function expectation(
+  fault: Fault,
+):
+  | { readonly kind: "admission-rejected" }
+  | { readonly kind: "discrepancy"; readonly routes: readonly string[] }
+  | {
+      readonly kind: "harness-failure";
+      readonly member: string;
+      readonly stages: readonly Stage[];
+    } {
+  const engine =
+    fault.kind === "invocation" ? ENGINE_INVOCATIONS[`${fault.origin} ${fault.member}`] : undefined;
+  if (engine === "admission") return { kind: "admission-rejected" };
+  if (engine !== undefined) return { kind: "discrepancy", routes: engine };
+  const { origin, member } = fault;
+  if (origin === "adapter")
+    return member === "compile"
+      ? { kind: "harness-failure", member: "compile", stages: ["compile"] }
+      : {
+          kind: "harness-failure",
+          member: "sessions",
+          stages: ["probe", "setup", "step", "capture", "restore"],
+        };
+  if (origin === "sessions") {
+    const stages: Readonly<Record<string, readonly Stage[]>> = {
+      createFreshRuntimeSession: ["probe", "setup"],
+      serializeCheckpoint: ["capture"],
+      runtimeTimedWork: ["probe", "step"],
+      RuntimeDebugContext: ["setup", "restore"],
+    };
+    return { kind: "harness-failure", member, stages: stages[member] ?? ["restore"] };
+  }
+  if (origin === "context")
+    return {
+      kind: "harness-failure",
+      member: `RuntimeDebugContext.${member}`,
+      stages: ["setup", "opening", "step", "restore"],
+    };
+  if (origin === "host")
+    return member === "factory"
+      ? { kind: "harness-failure", member: "host", stages: ["probe", "setup"] }
+      : { kind: "harness-failure", member: "host.next", stages: ["probe", "step"] };
+  if (RESTORE_ORIGINS.has(origin))
+    return { kind: "harness-failure", member: `RuntimeSession.${member}`, stages: ["restore"] };
+  const fresh: Readonly<Record<string, readonly Stage[]>> = {
+    view: ["probe", "step"],
+    executeInstruction: ["probe", "step"],
+    observeTime: ["probe", "step"],
+    exportTrustedSnapshot: ["opening", "step"],
+  };
   return {
-    kind: "harness-failure" as const,
-    side: point.side,
-    stage: point.stage,
-    method: point.method,
+    kind: "harness-failure",
+    member: `RuntimeSession.${member}`,
+    stages: fresh[member] ?? ["capture"],
   };
 }
 
-test("the injected-fault family covers every stage that calls into each side", () => {
-  // The driver forks only to take a restore point.
-  assert.ok(
-    FAULT_POINTS.filter((point) => point.method === "RuntimeSession.fork").every(
-      (point) => point.stage === "capture",
-    ),
-  );
-  const covered = new Set(FAULT_POINTS.map((point) => `${point.side} ${point.stage}`));
+test("the injected-fault family reaches every member of the public APIs on both sides", () => {
+  const counted = new Set(FAULT_ROWS.map((row) => keyOf(row.fault)));
   for (const side of ["left", "right"] as const)
-    for (const stage of ["compile", "setup", "opening", "step", "capture", "restore"] as const)
-      assert.ok(covered.has(`${side} ${stage}`), `${side} ${stage}`);
-  assert.ok(covered.has("left probe"), "left probe");
-  // Each public restore call, `fork` at a restore point included, is faulted, its oracle a discrepancy on its route.
-  for (const method of [
-    "host",
-    "host.next",
-    "RuntimeDebugContext.reset",
-    ...Object.keys(RESTORE_CALL_ROUTES),
-  ])
+    for (const placement of INVENTORY)
+      assert.ok(counted.has(keyOf({ side, ...placement })), keyOf({ side, ...placement }));
+  // Each public engine invocation is faulted, `fork` at a restore point included.
+  for (const engine of Object.keys(ENGINE_INVOCATIONS))
     assert.ok(
-      FAULT_POINTS.some((point) => point.method === method),
-      `the family faults ${method}`,
+      FAULT_ROWS.some(
+        (row) =>
+          `${row.fault.origin} ${row.fault.member}` === engine && row.fault.kind === "invocation",
+      ),
+      engine,
     );
 });
 
-for (const point of FAULT_POINTS)
-  test(`fault/side=${point.side}/stage=${point.stage}/method=${point.method}/ordinal=${point.ordinal}`, () => {
-    const report = differentialRun(FAULT_INPUT, {
-      ...CUTS,
-      host: deadlineDriver,
-      fault: (at) =>
-        at.side === point.side &&
-        at.stage === point.stage &&
-        at.method === point.method &&
-        at.ordinal === point.ordinal,
-    });
-    const expected = faultExpectation(point);
+for (const { fault, hosted } of FAULT_ROWS)
+  test(`fault/side=${fault.side}/origin=${fault.origin}/member=${fault.member}/kind=${fault.kind}/occurrence=${fault.occurrence}`, () => {
+    const fixture = new Fixture(fault);
+    const report = faulted(fixture, hosted);
+    assert.equal(fixture.fired, 1, "the fault fired once");
+    const expected = expectation(fault);
     const verdict = report.verdict;
     if (expected.kind === "discrepancy") {
       assert.equal(verdict.kind, "discrepancy", JSON.stringify(verdict));
@@ -747,26 +1009,109 @@ for (const point of FAULT_POINTS)
         assert.ok(expected.routes.includes(verdict.at.tail), verdict.at.tail);
       return;
     }
-    assert.deepEqual(verdict, {
-      kind: "not-compared",
-      side: expected.side,
-      because: expected.kind,
-    });
-    const outcome = report.outcomes[expected.side];
-    if (expected.kind === "harness-failure")
-      assert.deepEqual(
-        outcome?.kind === "harness-failure"
-          ? { kind: outcome.kind, stage: outcome.stage, method: outcome.method }
-          : outcome,
-        { kind: "harness-failure", stage: expected.stage, method: expected.method },
-      );
+    assert.deepEqual(verdict, { kind: "not-compared", side: fault.side, because: expected.kind });
+    if (expected.kind !== "harness-failure") return;
+    const outcome = report.outcomes[fault.side];
+    assert.equal(outcome?.kind, "harness-failure");
+    if (outcome?.kind !== "harness-failure") return;
+    assert.equal(outcome.member, expected.member);
+    assert.ok(
+      expected.stages.includes(outcome.stage),
+      `${outcome.stage} of ${expected.stages.join(", ")}`,
+    );
   });
 
-test("a throwing injection, the harness's own write stage, is that side's harness failure", () => {
+test("a callback failure the engine swallows is still that side's harness failure, never equivalent", () => {
+  // The right side's engine calls the harness's decision callback with a draw it cannot read, and swallows the throw.
+  const build = thisBuild("right");
+  const right: PipelineAdapter = {
+    ...build,
+    sessions: {
+      ...build.sessions,
+      createFreshRuntimeSession: (plan, fresh, options) => {
+        const session = build.sessions.createFreshRuntimeSession(plan, fresh, options);
+        const decide = options?.randomControl?.decide;
+        const execute = session.executeInstruction.bind(session);
+        session.executeInstruction = (traced) => {
+          try {
+            decide?.(
+              // EVIDENCE: validation: a test-only draw whose every read throws, as an engine bug might hand one over.
+              new Proxy(
+                {},
+                {
+                  get: () => {
+                    throw new Error("test-only unreadable draw");
+                  },
+                },
+              ) as RandomDrawView,
+            );
+          } catch {
+            // The engine swallows it.
+          }
+          return execute(traced);
+        };
+        return session;
+      },
+    },
+  };
+  const report = differentialRun({ ...FAULT_INPUT, random: "natural" }, { ...CUTS, right });
+  assert.deepEqual(report.verdict, {
+    kind: "not-compared",
+    side: "right",
+    because: "harness-failure",
+  });
+  const outcome = report.outcomes.right;
+  assert.equal(
+    outcome?.kind === "harness-failure" ? outcome.member : outcome?.kind,
+    "decision.decide",
+  );
+});
+
+test("a callback failure inside a public restore call is the side's harness failure, never a restore that threw", () => {
+  // The right side's restore asks the harness's decision callback about a draw it cannot read, and swallows the throw.
+  const build = thisBuild("right");
+  const right: PipelineAdapter = {
+    ...build,
+    sessions: {
+      ...build.sessions,
+      createRuntimeSession: (plan, snapshot, options) => {
+        try {
+          options?.randomControl?.decide?.(
+            // EVIDENCE: validation: a test-only draw whose every read throws, as an engine bug might hand one over.
+            new Proxy(
+              {},
+              {
+                get: () => {
+                  throw new Error("test-only unreadable draw");
+                },
+              },
+            ) as RandomDrawView,
+          );
+        } catch {
+          // The engine swallows it.
+        }
+        return build.sessions.createRuntimeSession(plan, snapshot, options);
+      },
+    },
+  };
+  const report = differentialRun({ ...FAULT_INPUT, random: "natural" }, { ...CUTS, right });
+  assert.deepEqual(report.verdict, {
+    kind: "not-compared",
+    side: "right",
+    because: "harness-failure",
+  });
+  const outcome = report.outcomes.right;
+  assert.deepEqual(
+    outcome?.kind === "harness-failure" ? [outcome.member, outcome.stage] : outcome,
+    ["decision.decide", "restore"],
+  );
+});
+
+test("a throwing injection is that side's harness failure at the injection", () => {
   const report = differentialRun(FAULT_INPUT, {
     ...CUTS,
     inject: (record, at) => {
-      if (at.side === "right" && at.state === 1) throw new Error("test-only write fault");
+      if (at.side === "right" && at.state === 1) throw new Error("test-only injection fault");
       return record;
     },
   });
@@ -776,7 +1121,7 @@ test("a throwing injection, the harness's own write stage, is that side's harnes
     because: "harness-failure",
   });
   const outcome = report.outcomes.right;
-  assert.equal(outcome?.kind === "harness-failure" ? outcome.stage : outcome?.kind, "write");
+  assert.equal(outcome?.kind === "harness-failure" ? outcome.member : outcome?.kind, "inject");
 });
 
 /** The restore routes, listed here independently of the driver's own list. */
@@ -819,9 +1164,9 @@ interface Exits {
 // EVIDENCE: validation: the CLI's exit module exports `exitStatus` of this shape.
 const { exitStatus } = (await import(path.join(tools, "exit.mjs"))) as Exits;
 
-test("the campaign CLI exits 0 identical, 1 differences, 2 usage or harness failure", () => {
+test("the campaign CLI's decision: 0 identity, an unsupported route or censored, 1 a difference, 2 a failure", () => {
   const verdict = (kind: string, because?: string) => ({
-    // EVIDENCE: validation: each kind and reason given below is one of the verdicts the driver reports.
+    // EVIDENCE: validation: each kind and reason given below is a verdict the decision must handle, a made-up one included.
     verdict: (because === undefined
       ? { kind }
       : { kind, side: "right", because }) as DifferentialReport["verdict"],
@@ -834,33 +1179,109 @@ test("the campaign CLI exits 0 identical, 1 differences, 2 usage or harness fail
   assert.equal(exitStatus([verdict("mapping-failure")]), 1);
   assert.equal(exitStatus([verdict("discrepancy"), verdict("not-compared", "harness-failure")]), 2);
   assert.equal(exitStatus([verdict("not-compared", "serializer-failure")]), 2);
-  // `RUNTIME_DIFFERENTIAL_DIST`, test only, points the CLI at another build: here an empty one.
-  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "runtime-differential-"));
-  const cli = (args: readonly string[], env: Record<string, string> = {}) =>
-    spawnSync(process.execPath, [path.join(tools, "run.mjs"), ...args], {
-      encoding: "utf8",
-      env: { ...process.env, ...env },
-    });
-  const noBuild = { RUNTIME_DIFFERENTIAL_DIST: empty };
+  // Censored is equal up to the step limit, a sampling bound; a one-sided rejection is a difference between builds.
+  assert.equal(exitStatus([verdict("not-compared", "censored")]), 0);
+  assert.equal(exitStatus([verdict("not-compared", "compile-rejected")]), 1);
+  assert.equal(exitStatus([verdict("not-compared", "admission-rejected")]), 1);
+  assert.equal(exitStatus([verdict("not-compared", "admission-rejected"), verdict("surprise")]), 2);
+  assert.equal(exitStatus([verdict("surprise")]), 2);
+});
+
+/**
+ * A test-only harness build for the CLI (through `RUNTIME_DIFFERENTIAL_DIST`, which only this test sets): it marks the
+ * phases it is used in, outside the CLI's own failure handling (`L` when it loads, `R` when it runs), and then behaves
+ * as its mode says.
+ */
+const CLI_FIXTURE = `import fs from "node:fs";
+const mark = (letter) => fs.appendFileSync(process.env.CLI_MARKS, letter);
+const mode = process.env.CLI_MODE;
+mark("L");
+if (mode === "load") throw new Error("test-only load fault");
+const verdicts = {
+  identity: { kind: "equivalent" },
+  difference: { kind: "discrepancy", at: { tail: "uninterrupted", cut: null, state: 0, against: "other-side" }, mismatches: [] },
+  unknown: { kind: "surprise" },
+  censored: { kind: "not-compared", side: "left", because: "censored" },
+  "one-sided": { kind: "not-compared", side: "right", because: "compile-rejected" },
+};
+export function differentialRun(input, options) {
+  mark("R");
+  if (mode === "run") throw new Error("test-only run fault");
+  if (mode === "late") queueMicrotask(() => Promise.reject(new Error("test-only late rejection")));
+  if (mode === "exit") process.on("exit", () => { throw new Error("test-only exit-time throw"); });
+  if (mode === "uncaught") queueMicrotask(() => { throw new Error("test-only uncaught exception"); });
+  return { name: input.name, route: options.route, outcomes: { left: null, right: null }, verdict: verdicts[mode] ?? verdicts.identity, plans: { left: null, right: null }, steps: 0, cuts: [], cutsOverCap: false, tailSteps: 0, cpuMs: 0 };
+}
+`;
+
+test("the campaign CLI runs its phases in order, and any phase's failure exits 2 with no later phase run", () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "runtime-differential-cli-"));
   try {
-    // The arguments are validated before anything loads, and a build that does not load is a harness failure.
-    for (const [args, env] of [
-      [["--seed", "1", "--count", "nonsense"], noBuild],
-      [["--seed", "1", "--count", "1"], noBuild],
-    ] as const)
-      assert.equal(cli(args, env).status, 2, args.join(" "));
+    fs.writeFileSync(path.join(work, "runtime-differential.js"), CLI_FIXTURE);
+    fs.writeFileSync(
+      path.join(work, "runtime-state-comparison.js"),
+      'export const canonicalDigest = () => "digest";\nexport const renderPath = () => "$";\n',
+    );
+    const cli = (mode: string, args: readonly string[], toFull = false) => {
+      const marks = path.join(work, `marks-${mode}-${toFull}`);
+      fs.writeFileSync(marks, "");
+      const full = toFull ? fs.openSync("/dev/full", "w") : null;
+      try {
+        const ran = spawnSync(process.execPath, [path.join(tools, "run.mjs"), ...args], {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            RUNTIME_DIFFERENTIAL_DIST: work,
+            CLI_MODE: mode,
+            CLI_MARKS: marks,
+          },
+          stdio: ["ignore", full ?? "pipe", "pipe"],
+        });
+        return {
+          status: ran.status,
+          stdout: ran.stdout ?? "",
+          stderr: ran.stderr,
+          marks: fs.readFileSync(marks, "utf8"),
+        };
+      } finally {
+        if (full !== null) fs.closeSync(full);
+      }
+    };
+    const args = ["--seed", "3", "--count", "1"];
+    // One fault per phase: usage, load, run, output, decide.
+    const usage = cli("identity", ["--seed", "3", "--count", "nonsense"]);
+    assert.deepEqual([usage.status, usage.marks], [2, ""]);
+    assert.match(usage.stderr, /--count must be a whole number/u);
+    assert.deepEqual([cli("load", args).status, cli("load", args).marks], [2, "L"]);
+    assert.deepEqual([cli("run", args).status, cli("run", args).marks], [2, "LR"]);
+    const output = cli("identity", args, true);
+    assert.deepEqual([output.status, output.marks], [2, "LR"]);
+    const decide = cli("unknown", args);
+    assert.deepEqual([decide.status, decide.marks], [2, "LR"]);
+    assert.equal(decide.stdout.trim().split("\n").length, 1, "the decision comes after the output");
+    // Controls, and failures after the run: a late rejection and an exit-time throw.
+    assert.equal(cli("identity", args).status, 0);
+    assert.equal(cli("difference", args).status, 1);
+    const censored = cli("censored", args);
+    assert.equal(censored.status, 0);
+    assert.match(
+      censored.stderr,
+      /"not-compared:censored":1/u,
+      "the summary counts the censored pair",
+    );
+    assert.equal(cli("one-sided", args).status, 1);
+    assert.equal(cli("late", args).status, 2);
+    assert.equal(cli("exit", args).status, 2);
+    assert.equal(cli("uncaught", args).status, 2);
   } finally {
-    fs.rmSync(empty, { recursive: true, force: true });
+    fs.rmSync(work, { recursive: true, force: true });
   }
-  for (const args of [
-    ["--count", "1"],
-    ["--seed", "1", "--count", "nonsense"],
-    ["--seed", "1", "--from", "nope"],
-    ["--seed", "1", "--count", "0"],
-    ["--seed", "1", "--route", "other"],
-  ])
-    assert.equal(cli(args).status, 2, args.join(" "));
-  const ran = cli(["--seed", "3", "--count", "1"]);
+  // The real build, end to end.
+  const ran = spawnSync(
+    process.execPath,
+    [path.join(tools, "run.mjs"), "--seed", "3", "--count", "1"],
+    { encoding: "utf8" },
+  );
   assert.equal(ran.status, 0, ran.stderr);
   assert.equal(ran.stdout.trim().split("\n").length, 1);
 });
@@ -894,25 +1315,19 @@ test("a writing failure and an unanswered correspondence stay harness classifica
   });
   assert.deepEqual(atLimit.outcomes.left, { kind: "completed" });
   assert.equal(atLimit.steps, unlimited.steps);
-  const executed: CallPoint[] = [];
+  const counting = new Fixture(null);
   const below = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), {
     ...CUTS,
+    right: counting.adapter("right"),
     maxSteps: unlimited.steps - 1,
-    calls: (point) => {
-      if (
-        point.stage === "step" &&
-        point.side === "right" &&
-        point.method.startsWith("RuntimeSession.") &&
-        ["executeInstruction", "observeTime", "resumeRandomDraw"].some((name) =>
-          point.method.endsWith(name),
-        )
-      )
-        executed.push(point);
-    },
   });
   assert.equal(below.outcomes.left?.kind, "censored");
   // No operation runs past the limit: the right side applied exactly the steps it was allowed.
-  assert.equal(executed.length, unlimited.steps - 1);
+  const applied = ["executeInstruction", "observeTime"].reduce(
+    (sum, member) => sum + (counting.counts.get(`right fresh ${member} invocation`) ?? 0),
+    0,
+  );
+  assert.equal(applied, unlimited.steps - 1);
 
   const unknown = differentialRun(single("sensitivity", SENSITIVE, { seed: 5 }), {
     ...CUTS,

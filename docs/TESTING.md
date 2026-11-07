@@ -473,6 +473,13 @@ verdict:
 - a correspondence that cannot map a position is `mapping-failure`;
 - a core refusal is `unsupported-route`, counted rather than failed.
 
+No exception gives a false `equivalent` or a `discrepancy`. Any exception the driver did not raise itself becomes a
+side's `harness-failure` (or `serializer-failure`), naming the stage and the member the driver was operating on. Only
+the engine's own public calls are engine behaviour: a fresh session refusing the input, and a restore that threw. The
+attribution is best effort for synchronous adapters (#1923). The campaign CLI exits once its output has been written: 0
+for identity, an unsupported route, or a pair censored at the step limit; 1 for a decided difference, a one-sided
+rejection included; 2 for a harness failure or an unknown verdict.
+
 `tests/runtime-differential.test.ts` runs this build against itself over the regressions in
 `tools/runtime-differential/regressions/` (with their independent expectations) and a seeded sample covering every
 generator tag. It also runs a 10,000-level host list and the sensitivity controls, each a `discrepancy` at its own

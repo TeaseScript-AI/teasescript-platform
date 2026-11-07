@@ -2,15 +2,46 @@
 //   node tools/runtime-differential/run.mjs --seed S --count N [--from I] [--route legacy|core] [--shrink]
 // runs generated programs (seed, index from I to I + N - 1) through this build against itself and writes one JSON line
 // per program: seed, index, runtime seed, input and plan digests, the verdict, its first mismatch path, and with
-// `--shrink` the reduced repro of a discrepancy and its signature. It runs in ordered phases (usage, load, run, decide);
-// any phase's failure exits 2, before or instead of a decision. The decision is `exit.mjs`'s: 0 identical,
-// 1 differences, 2 a harness failure.
+// `--shrink` the reduced repro of a discrepancy and its signature.
+//
+// It runs in ordered phases: usage, load, run, output, decide. Terminal handlers, installed before anything that can
+// fail, turn any failure in a phase, any output-stream error, any uncaught exception or unhandled rejection, and SIGPIPE
+// into exit 2. The decision (`exit.mjs`: 0 identity, an unsupported route, or censored at the step limit; 1 a decided
+// difference, a one-sided rejection included; 2 a harness failure or an unknown verdict) is made only once stdout has
+// finished, and only then does the process exit with it. A summary of the verdicts, censored ones counted, goes to
+// standard error.
+// The accepted residual: a module in this process that calls `process.exit(1)` or sets `process.exitCode` itself
+// bypasses the decision. The engine never does; a fatal abort exits 134.
 
 import { parseArgs } from "node:util";
 
-import { exitStatus, wholeNumber } from "./exit.mjs";
+import { exitStatus, verdictCounts, wholeNumber } from "./exit.mjs";
 import { generate } from "./generate.mjs";
 import { shrink } from "./shrink.mjs";
+
+/** Ends the process with 2, once, writing a fixed diagnostic if it can. */
+function fail(what) {
+  try {
+    process.stderr.write(`runtime differential: ${what}\n`);
+  } catch {
+    // The diagnostic is best effort; the exit status decides.
+  }
+  process.exit(2);
+}
+
+const describe = (error) => {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    return "an exception whose text cannot be read";
+  }
+};
+
+process.on("uncaughtException", (error) => fail(`uncaught: ${describe(error)}`));
+process.on("unhandledRejection", (error) => fail(`unhandled rejection: ${describe(error)}`));
+process.on("SIGPIPE", () => fail("SIGPIPE"));
+process.stdout.on("error", (error) => fail(`standard output: ${describe(error)}`));
+process.stderr.on("error", () => process.exit(2));
 
 /** The arguments, validated before anything else loads or runs. */
 function usage(argv) {
@@ -55,7 +86,7 @@ const input = (program) => ({
   fresh: { seed: program.runtimeSeed, ...(program.globals ? { globals: program.globals } : {}) },
 });
 
-/** Runs the campaign, writing one line per program; returns its reports. */
+/** Runs the campaign: its reports, and the lines it will write. */
 function run({ seed, first, count, route, shrink: shrinking }, harness) {
   const { differentialRun, canonicalDigest, renderPath } = harness;
   /** A verdict's signature: its kind, the route, and its first mismatch path with indices generalized. */
@@ -70,6 +101,7 @@ function run({ seed, first, count, route, shrink: shrinking }, harness) {
     return `${verdict.kind}:${report.route}:${path}`;
   };
   const reports = [];
+  const lines = [];
   for (let index = first; index < first + count; index += 1) {
     const program = generate(seed, index);
     const report = differentialRun(input(program), { route });
@@ -107,16 +139,34 @@ function run({ seed, first, count, route, shrink: shrinking }, harness) {
       });
       line.reduced = { ...reduced, signature: wanted };
     }
-    process.stdout.write(`${JSON.stringify(line)}\n`);
+    lines.push(`${JSON.stringify(line)}\n`);
   }
-  return reports;
+  return { reports, lines };
 }
 
-try {
+/** Writes `lines` with backpressure, each write's callback awaited, then ends stdout and awaits `finish`. */
+async function output(lines) {
+  const stdout = process.stdout;
+  for (const line of lines)
+    await new Promise((resolve, reject) => {
+      stdout.write(line, (error) => (error ? reject(error) : resolve()));
+    });
+  await new Promise((resolve, reject) => {
+    stdout.once("error", reject);
+    stdout.end(resolve);
+  });
+}
+
+async function main() {
   const options = usage(process.argv.slice(2));
   const harness = await load();
-  process.exitCode = exitStatus(run(options, harness));
-} catch (error) {
-  process.stderr.write(`runtime differential: ${error?.message ?? error}\n`);
-  process.exitCode = 2;
+  const { reports, lines } = run(options, harness);
+  await output(lines);
+  process.stderr.write(`${JSON.stringify({ summary: verdictCounts(reports) })}\n`);
+  return exitStatus(reports);
 }
+
+main().then(
+  (status) => process.exit(status),
+  (error) => fail(describe(error)),
+);
