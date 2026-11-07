@@ -169,7 +169,6 @@ const OBJECTS_OUTSIDE = new Set([
   ...core("type-inference/core/budget.ts", ["WorkLedger.charge", "joinParts", "keptArray"]),
   ...core("type-inference/core/contract.ts", [
     "Contract.work",
-    "Contract.keyStopped",
     "Contract.keep",
     "Contract.keepText",
   ]),
@@ -185,9 +184,11 @@ const OBJECTS_OUTSIDE = new Set([
   ...core("type-inference/core/method-categories.ts", ["measuresLength", "selectsElement"]),
   ...core("type-inference/core/contract/literal-index.ts", ["nodeAt", "pathAt"]),
   ...core("type-inference/core/contract/key-ids.ts", ["isPathSteps", "restRef", "stepsRest"]),
-  // Solver, index and receiver boundaries, charged as they build, and the inherited key and type bridges.
+  // Solver, index and receiver boundaries, charged as they build, and the inherited key and type bridges, among them
+  // `Contract.keyStopped`, which scans the stopped paths: reviewed inherited dependencies, not fixed work.
   ...core("type-inference/core/solver.ts", ["Solver.proven"]),
   ...core("type-inference/core/contract.ts", [
+    "Contract.keyStopped",
     "Contract.literalIndex",
     "Contract.valueReceiver",
     "Contract.prefixStores",
