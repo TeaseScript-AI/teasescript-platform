@@ -321,36 +321,6 @@ export const RATCHET: readonly RatchetEntry[] = [
     family: "L5i",
   },
   {
-    importer: "player/vue/src/randomDrawPresentation.ts",
-    target: "src/index.ts",
-    name: "classifyTokens",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/randomDrawPresentation.ts",
-    target: "src/index.ts",
-    name: "parse",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/randomDrawPresentation.ts",
-    target: "src/index.ts",
-    name: "sourceEnclosingSpans",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/useDebugRandom.ts",
-    target: "player/engine-bridge/in-process.ts",
-    name: "heldPlan",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/useDebugRandom.ts",
-    target: "src/index.ts",
-    name: "listRandomSites",
-    family: "L5i",
-  },
-  {
     importer: "player/vue/src/useDebugRewind.ts",
     target: "player/engine-bridge/in-process.ts",
     name: "beginRecordingNow",

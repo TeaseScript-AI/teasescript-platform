@@ -16,9 +16,9 @@ import CodeBlock from "./CodeBlock.vue";
 import PathBreadcrumb from "./PathBreadcrumb.vue";
 import {
   CONTEXT_ROWS,
-  outcomeLines,
   randomDrawChoices,
-  randomDrawCode,
+  type CodeLine,
+  type DrawCode,
 } from "./randomDrawPresentation";
 import { outcomeKey, type DebugRandomNext, type DebugRandomTried } from "./useDebugRandom";
 
@@ -32,8 +32,10 @@ const props = defineProps<{
   draw: RandomDrawView;
   /** The draw's site in the plan, or `null` when the plan does not list it. */
   site: RandomSite | null;
-  /** The source text of the draw's file, or `null` when the host did not supply it. */
-  source: string | null;
+  /** The code of the draw's file with the draw marked, or `null` when the host did not supply its source. */
+  code: DrawCode | null;
+  /** The site's earlier outcomes as code, numbered as `tried` gives them. */
+  history: readonly CodeLine[];
   /** The package's name, the breadcrumb's first part, or `null`. */
   root: string | null;
   /** What the site took before; see `DebugRandomTried`. */
@@ -43,7 +45,7 @@ const next = defineModel<DebugRandomNext>("next", { required: true });
 const emit = defineEmits<{ resolve: [outcome: RandomOutcome | "natural"]; untried: [] }>();
 
 // The site's earlier outcomes, numbered from its first draw, the newest at the bottom, in view when it opens.
-const history = computed(() => outcomeLines(props.tried.history, props.tried.first));
+const history = computed(() => props.history);
 const historyRows = ref(Math.min(4, Math.max(1, props.tried.history.length)));
 
 const choices = computed(() => randomDrawChoices(props.draw));
@@ -52,9 +54,7 @@ const outcomeClass = cn(
   buttonVariants({ variant: "outline" }),
   "h-auto min-h-11 min-w-11 max-w-full whitespace-normal break-words text-start",
 );
-const code = computed(() =>
-  props.source === null || props.site === null ? null : randomDrawCode(props.source, props.site),
-);
+const code = computed(() => (props.site === null ? null : props.code));
 // The whole file, showing the draw's line in the middle of 7 lines, or the range Show whole fits from its top.
 const sourceRows = ref(CONTEXT_ROWS);
 const expanded = ref(false);
