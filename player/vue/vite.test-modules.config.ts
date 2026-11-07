@@ -20,6 +20,7 @@ const modules = [
   "player/vue/src/transcriptPresentation.ts",
   "player/vue/src/useDebugRandom.ts",
   "player/vue/src/useRandomDrawPickerState.ts",
+  "player/vue/src/useRuntimeSceneClock.ts",
   "player/vue/src/useDebugRewind.ts",
   "player/vue/src/useDebugView.ts",
   "player/vue/src/useDevelopmentTime.ts",

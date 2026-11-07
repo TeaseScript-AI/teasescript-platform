@@ -5,10 +5,15 @@ import { pathToFileURL } from "node:url";
 
 /*
  * L5i.5, R3: the census of session work (`tools/session-work-census.mjs`). The tool derives the sending boundary from
- * the code and walks references back from it; this file holds what the walk must find, classified at each entry point
- * by what the session must have observed before its work (orchestrator 2's rulings on plan r3). Forwarders stay
+ * the code and walks references back from it; this file holds what the walk finds, classified at each entry point by
+ * what the session must have observed before its work (orchestrator 2's rulings on plan r3). Forwarders stay
  * unclassified: a forwarder reached from two entry points carries each one's policy. An entry point, escape or
  * boundary member the tables do not hold fails, and so does a row nothing matches.
+ *
+ * What it claims: the entry points the clock's literal oracle drives (`player-clock-work.test.ts`, the five `ClockWork`
+ * rows' entry points and development time's skip and auto-skip) are found and classified. The walk does not see
+ * senders through a structural interface (`InputSectionHost`: `draftInput`, `runInput`) or callers in `.vue` files
+ * (#1983).
  */
 
 interface Found {
