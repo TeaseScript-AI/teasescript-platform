@@ -2045,8 +2045,10 @@ function assertImported(
   written: boolean,
   what: string,
 ) {
-  if (!written) return assert.deepEqual(entries, [], what);
-  const sorted = [...entries].sort((one, other) => (one.key < other.key ? -1 : 1));
+  // The fixture's provider adds its own read counter to each load (`familyBrowser`): no saved value of the script.
+  const values = entries.filter((entry) => entry.key !== "read");
+  if (!written) return assert.deepEqual(values, [], what);
+  const sorted = [...values].sort((one, other) => (one.key < other.key ? -1 : 1));
   const photo = sorted[0]?.value;
   assert.ok(
     typeof photo === "string" && isWellFormedCapturedMediaReference(photo),
