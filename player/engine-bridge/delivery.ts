@@ -73,7 +73,7 @@ function undoAll(undos: readonly (() => void)[], report: (error: unknown) => voi
 }
 
 /** Where an undo's failure goes by default: the host's console, as a host error (there is no client to tell). */
-export function reportUndoFailure(error: unknown): void {
+function reportUndoFailure(error: unknown): void {
   console.error("[engine host] an allocation could not be undone", error);
 }
 

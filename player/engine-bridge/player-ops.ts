@@ -18,12 +18,7 @@ import type {
 } from "../../src/runtime/random/random-control.js";
 import { decideDraw, RandomHistory, type RandomNext } from "../random-decisions.js";
 import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
-import {
-  type Delivery,
-  type DeliveryOwner,
-  deliveryOwner,
-  OwnedMap,
-} from "./delivery.js";
+import { type Delivery, type DeliveryOwner, deliveryOwner, OwnedMap } from "./delivery.js";
 import { SourceViewCaches, sourceViewOps } from "./ops/source-views.js";
 import { historyOps } from "./ops/history.js";
 import { inputOps } from "./ops/input.js";
