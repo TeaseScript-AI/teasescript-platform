@@ -10,8 +10,6 @@ import type {
   SyntaxEvidence,
   TypeTerm,
 } from "../../src/type-inference/graph.js";
-import { operationRelations } from "../../src/type-inference/adapters/index.js";
-import { registryView } from "../../src/type-inference/registry-view.js";
 
 /**
  * The request the compiler would make for these files, after name checking; `null` when they do not parse or
@@ -45,7 +43,6 @@ export function request(
       },
       speakers: new Map(names.flatMap((result) => [...result.speakers])),
     },
-    services: { valueKinds: registryView(), operations: operationRelations() },
   };
 }
 

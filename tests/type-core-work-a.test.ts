@@ -1237,10 +1237,6 @@ test("read chains and mixed-source adds grow no faster than measured", () => {
 });
 
 /**
- * A value's identity names its inputs by their own identities (TABLE §8, round 12 B4): a chain of 32 `otherwise`s, each
- * of the one before twice, is a source of 32 lines, never an identity of 2^32 characters.
- */
-/**
  * A search the ledger does not see (round 13 B2, round 14 H1): over a literal of k records of distinct fields, the
  * analysis's `indexOf` searches inspect entries in proportion to k, never k² (each identity's first element is found in
  * one pass). The count wraps the built-in for this analysis only.
@@ -1264,6 +1260,10 @@ test("a literal of 4,096 distinct records is searched in linear time", () => {
   assert.ok(inspected <= 64 * k, `${inspected} entries inspected`);
 });
 
+/**
+ * A value's identity names its inputs by their own identities (TABLE §8, round 12 B4): a chain of 32 `otherwise`s, each
+ * of the one before twice, is a source of 32 lines, never an identity of 2^32 characters.
+ */
 test("a chain of carriers over shared inputs is identified in linear space", () => {
   const levels = Array.from(
     { length: 32 },
@@ -1462,14 +1462,6 @@ test("a place replaced by objects of distinct properties takes work that grows w
 });
 
 /**
- * #1605: a value copied through a chain of wrappers, a store at its long key or the key's element checked: the check's
- * contract at each level of the stored value (its element, its element's element) stands one step below its parent's
- * position (`positions.ts`), never every wrapper's whole path again, so the work the store checks charge after the
- * analysis (`storeContracts`; every unit, apart work too, as the issue measured it), in total and by each counter of
- * at least 200 units, grows with the chain at k = 16 → 32 in every mode (3.38 to 3.76 per doubling on `3d052bf43`).
- * The series to k = 128 and the analysis beside a long key without copies are the PR's evidence, outside CI.
- */
-/**
  * The work the store checks charge after a family's analysis (`storeContracts`), every unit by counter (apart work
  * too, as #1605 measured it) with the analysis's syntax nodes, in a mode; and the analysis's charged total.
  */
@@ -1548,7 +1540,9 @@ test("a long copied key's store check grows with its copy chain in every mode (#
  * element levels through every wrapper (10,329 and 8,632), its check 1,101 and 889; the store at a property of its
  * element's 12,448 and 10,225, its check 2,353 and 1,880. Since #1221 the analyses charge the event searches by
  * comparison (8,257 / 7,346, 8,971 / 8,098 and 10,707 / 9,617 (10,709 reversed) before), and since #1251 they make no
- * narrowing index for these programs without a test (8,257 / 7,344, 8,963 / 8,088 and 10,690 / 9,598 before).
+ * narrowing index for these programs without a test (8,257 / 7,344, 8,963 / 8,088 and 10,690 / 9,598 before), and since
+ * #1822 a read signature's prefixes come from its charged trie walk (`rdWalk`: 7,986 / 7,073, 8,689 / 7,814 and
+ * 10,411 / 9,319 (10,413 reversed) before).
  */
 test("a long copied key's store check charges its positions' work, in every mode (#1605)", () => {
   const measured = COPY_CHAIN_FAMILIES.map((family) => {
@@ -1562,22 +1556,22 @@ test("a long copied key's store check charges its positions' work, in every mode
   });
   assert.deepEqual(measured, [
     [
-      [7986, 60],
-      [7073, 60],
-      [7986, 60],
-      [7073, 60],
+      [7995, 60],
+      [7081, 60],
+      [7995, 60],
+      [7081, 60],
     ],
     [
-      [8689, 274],
-      [7814, 236],
-      [8689, 274],
-      [7814, 236],
+      [8698, 274],
+      [7822, 236],
+      [8698, 274],
+      [7822, 236],
     ],
     [
-      [10411, 64],
-      [9319, 64],
-      [10413, 64],
-      [9319, 64],
+      [10420, 64],
+      [9327, 64],
+      [10422, 64],
+      [9327, 64],
     ],
   ]);
 });

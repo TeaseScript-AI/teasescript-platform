@@ -20,19 +20,27 @@ const CORE = new URL("../../src/type-inference/core/", import.meta.url);
 
 /** The core's names for a path, its steps or its text, by which the scan knows a spread of one. */
 const PATH_NAMES = new Set([
-  ...["at", "path", "paths", "rest", "below", "before", "after", "strip", "steps", "prefix", "key"],
-  ...[
-    "projection",
-    "shift",
-    "along",
-    "collection",
-    "within",
-    "base",
-    "full",
-    "source",
-    "label",
-    "stand",
-  ],
+  "at",
+  "path",
+  "paths",
+  "rest",
+  "below",
+  "before",
+  "after",
+  "strip",
+  "steps",
+  "prefix",
+  "key",
+  "projection",
+  "shift",
+  "along",
+  "collection",
+  "within",
+  "base",
+  "full",
+  "source",
+  "label",
+  "stand",
 ]);
 
 /** The forms of a construction found per line, by name. */
@@ -145,7 +153,11 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a receiver and its property as the code a fallback's warning names, made for its sentence",
   ],
-  "messages/site.ts valueAt spread": [
+  "messages/site.ts givenByCall spread": [
+    1,
+    "a storing method's receiver's steps and one member, made once per file for a landing's search, as the statements' targets are",
+  ],
+  "messages/site.ts descend spread": [
     1,
     "the way from a variable to a warned value, made once for a fix after the analysis and dropped",
   ],

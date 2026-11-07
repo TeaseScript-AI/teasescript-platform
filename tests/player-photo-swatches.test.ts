@@ -40,15 +40,17 @@ test("the photo colours and swatches are node-vibrant's, and a swatch it would i
 });
 
 test("pixels are counted per colour cell, without mostly transparent and almost white ones", () => {
-  const pixels = new Uint8ClampedArray([
-    // Counted: opaque enough, and not white in every channel.
-    ...[200, 40, 40, 125],
-    ...[207, 47, 47, 255],
-    ...[250, 251, 251, 255],
-    // Skipped: mostly transparent, and almost white.
-    ...[200, 40, 40, 124],
-    ...[251, 251, 251, 255],
-  ]);
+  const pixels = new Uint8ClampedArray(
+    [
+      // Counted: opaque enough, and not white in every channel.
+      [200, 40, 40, 125],
+      [207, 47, 47, 255],
+      [250, 251, 251, 255],
+      // Skipped: mostly transparent, and almost white.
+      [200, 40, 40, 124],
+      [251, 251, 251, 255],
+    ].flat(),
+  );
   const counts = colourHistogram(pixels);
   const cell = (red: number, green: number, blue: number) =>
     ((red >> 3) << 10) | ((green >> 3) << 5) | (blue >> 3);

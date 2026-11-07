@@ -101,7 +101,7 @@ export const FAMILIES = {
     ).join("\n"),
   "cyclic-defaults": (k) =>
     `let a = 1\nlet b = 1\n` +
-    Array.from({ length: k }, (_, i) => `b = [a].get(0, default: b)\nb = b / 2`).join("\n"),
+    Array.from({ length: k }, (_, _i) => `b = [a].get(0, default: b)\nb = b / 2`).join("\n"),
 };
 
 // round 2's width and length families (Astra r2), possibilities and written defaults (checkpoint 3)
@@ -427,24 +427,24 @@ Object.assign(FAMILIES, {
     "let v0 = hostValue\n" +
     lines6(k, (i) => `let v${i + 1} = v${i} / 4`) +
     "\nlet xs = []\n" +
-    lines6(k, (i) => `xs.add(v${k})`) +
+    lines6(k, (_i) => `xs.add(v${k})`) +
     '\nxs.add("s")',
   "r6-warning-copies": (k) =>
     "let v0 = hostValue / 4\n" +
     lines6(k, (i) => `let v${i + 1} = v${i}`) +
     "\nlet xs = []\n" +
-    lines6(k, (i) => `xs.add(v${k})`) +
+    lines6(k, (_i) => `xs.add(v${k})`) +
     '\nxs.add("s")',
   "r6-warning-calls": (k) =>
     lines6(k, (i) => `function f${i} { return ${i === 0 ? "hostValue / 4" : `f${i - 1}()`} }`) +
     "\nlet xs = []\n" +
-    lines6(k, (i) => `xs.add(f${k - 1}())`) +
+    lines6(k, (_i) => `xs.add(f${k - 1}())`) +
     '\nxs.add("s")',
   "r6-warning-literal-parts": (k) =>
     "let v0 = {p: hostValue / 4}\n" +
     lines6(k, (i) => `let v${i + 1} = {p: v${i}.p}`) +
     "\nlet xs = []\n" +
-    lines6(k, (i) => `xs.add(v${k}.p)`) +
+    lines6(k, (_i) => `xs.add(v${k}.p)`) +
     '\nxs.add("s")',
   "r6-warning-distinct-fields": (k) =>
     `let raw = {${fields6(k, () => null)}}\n` +
@@ -472,7 +472,7 @@ Object.assign(FAMILIES, {
     "let r = askChoice " + list6(k, (i) => `{text: "Choice ${i}", value: ${i}}`),
   "r6-replacements-known": (k) =>
     "let state = {score: 1, divisor: 4}\n" +
-    lines6(k, (i) => `state = {score: state.score / state.divisor, divisor: 4}`),
+    lines6(k, (_i) => `state = {score: state.score / state.divisor, divisor: 4}`),
   "r6-replacements-own": (k) =>
     lines6(
       k,

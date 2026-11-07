@@ -86,6 +86,31 @@ test("full-output mode preserves passing test lines", () => {
   assert.match(result.stdout, /✔ visible passing test/);
 });
 
+test("TEST_FULL_OUTPUT=1 gives full output, and the tests it runs do not inherit it", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  const environment: NodeJS.ProcessEnv = { ...process.env, TEST_FULL_OUTPUT: "1" };
+  delete environment.NODE_TEST_CONTEXT;
+  // (a test that runs the filter itself, as this file does, would otherwise get full output where it expects compact)
+  const fixture = resolve(directory, "inherits.test.mjs");
+  writeFileSync(
+    fixture,
+    `import assert from "node:assert/strict";
+     import test from "node:test";
+     test("visible passing test", () => assert.equal(process.env.TEST_FULL_OUTPUT, undefined));`,
+  );
+  try {
+    const result = spawnSync(process.execPath, [filterPath, fixture], {
+      encoding: "utf8",
+      env: environment,
+    });
+
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /✔ visible passing test/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("filter preserves failures, stacks, the summary, and the exit code", () => {
   const result = runFixtures({
     "mixed.test.mjs": `
@@ -264,6 +289,42 @@ test(
       assert.doesNotMatch(stderr, /Error/);
     } finally {
       if (filter.exitCode === null && filter.signalCode === null) process.kill(-group, "SIGKILL");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "the full suite's runner stops without an error when its output has no reader before the signal",
+  { skip: process.platform === "win32" },
+  async () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+    const environment = { ...process.env };
+    delete environment.NODE_TEST_CONTEXT;
+    const ended = resolve(directory, "ended");
+    const file = resolve(directory, "ending.test.js");
+    // Ctrl+C ends the filter and a file's process at once, and the runner can report that file before it handles the
+    // signal itself. Here the file's process ends only after the runner's output has lost its reader, and no signal
+    // comes at all.
+    writeFileSync(
+      file,
+      `setInterval(() => require("node:fs").existsSync(${JSON.stringify(ended)}) && process.exit(1), 10);`,
+    );
+    const runner = spawn(
+      process.execPath,
+      [resolve(process.cwd(), "tools/run-test-files.mjs"), file],
+      { env: environment, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    runner.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+    const closed = once(runner, "close", { signal: AbortSignal.timeout(30_000) });
+    try {
+      runner.stdout.destroy();
+      writeFileSync(ended, "");
+      assert.deepEqual(await closed, [1, null]);
+      assert.doesNotMatch(stderr, /Error/);
+    } finally {
+      if (runner.exitCode === null && runner.signalCode === null) runner.kill("SIGKILL");
       rmSync(directory, { recursive: true, force: true });
     }
   },

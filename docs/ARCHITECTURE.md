@@ -114,9 +114,10 @@ snapshot for comparing two analyses of the same sources.
   - The consumer (`coreCheckResult`, `core/consumer.ts`) walks the source with those answers and makes the
     `TypeCheckResult` that lowering consumes.
 
-  Other O4 foundations include the built-in result relations (`adapters/`), the registry view (`registry-view.ts`)
-  and the interned type table (`solver/types.ts`). The condition-shape recognizer
+  Other O4 foundations include the built-in result relations (`adapters/`, whose operand types the core reads) and
+  the interned type table (`solver/types.ts`). The condition-shape recognizer
   (`narrowing-shapes.ts`) is shared: the visitor's branch rules and the core read the same classification.
+
 - **The switch:** one change makes the constraint backend the compiler's backend in place of the legacy backend, and
   a later stage removes the legacy backend. Until the switch, the compiler's type behavior is the legacy backend's. The
   switch needs the [shadow gate](TESTING.md#the-switchs-shadow-gate) green.
@@ -142,9 +143,11 @@ prepared-reference invariants and control-flow targets, with function ranges and
 prepared-say dataflow, interaction-result handoffs, and label positions in `instruction-stream-analyses/`. The small
 private capture and validation support files, `capture-support.ts` and `validation-support.ts`, hold only helpers
 shared across those owners.
-`src/compiler/compile-program.ts` owns compilation orchestration, while `src/compiler/lowering/compiler.ts` owns the
-stateful lowering pass: its statement and expression dispatch, temporaries, and function compilation. The families it
-hands constructs to, such as asks and other interactions, say, background actions, calls, and branches and loops, are
+`src/compiler.ts` owns source-compilation orchestration: parsing, validation and backend sequencing.
+`src/compiler/compile-program.ts` assembles the multi-file lowered instruction plan, and
+`src/compiler/lowering/compiler.ts` owns the stateful lowering pass: its statement and expression dispatch,
+temporaries, and function compilation. The families it hands constructs to, such as asks and other interactions, say,
+background actions, calls, and branches and loops, are
 modules beside it in `src/compiler/lowering/`.
 `src/static-evaluation.ts` owns what the compiler knows of values: the constants the source writes, which semantic
 validation, lowering, and the checks of written values read, and `KnownValues`, the values every run gives an
@@ -183,8 +186,7 @@ The technical playground workspace controller lives at `playground/workspace/con
 runtime-to-Player translation and shared action lookup/completion seam lives at `player/runtime-adapter.ts`. The Player
 implementation is under `player/vue/src/`, using the accepted Vue/Tailwind/shadcn-vue/Reka foundation and
 TanStack Vue Virtual for transcript windowing and scroll anchoring. It presents supported interactions and pacing from
-canonical runtime state and events; browser-native CSS owns geometry. The Vue/toolchain boundary is accepted in ADR
-0020. See [`player/README.md`](../player/README.md) for implementation seams, local inspection and the
+canonical runtime state and events; browser-native CSS owns geometry. The Vue/toolchain boundary is accepted in ADR 0020. See [`player/README.md`](../player/README.md) for implementation seams, local inspection and the
 development-preview boundary. Presentation fixtures do not define an engine/Player protocol or the production
 cross-origin host contract.
 

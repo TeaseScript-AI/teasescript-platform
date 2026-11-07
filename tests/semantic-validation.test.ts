@@ -119,9 +119,10 @@ test("rejects core and injected builtin identifiers in ordinary value positions"
   for (const [label, template] of cases) {
     for (const builtin of ["random", "customBuiltin"] as const) {
       const source = template.replace("BUILTIN", builtin);
-      const result = compileSource(source, {
-        ...(builtin === "customBuiltin" ? { builtins: [builtin] } : {}),
-      });
+      const result = compileSource(
+        source,
+        builtin === "customBuiltin" ? { builtins: [builtin] } : {},
+      );
       const start = source.indexOf(builtin);
 
       assert.deepEqual(result.parserDiagnostics, [], `${label}: ${source}`);

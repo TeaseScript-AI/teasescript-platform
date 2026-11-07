@@ -11,6 +11,7 @@ import {
   markResidual,
   markStep,
   marksAt,
+  markPrefixVisits,
   markStates,
 } from "../src/type-inference/core/contract/marks.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
@@ -22,7 +23,11 @@ import {
 } from "../src/type-inference/core/contract/frontier.js";
 import { stepsOf } from "../src/type-inference/core/contract/literal-index.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { withTestDemandAllowance, WorkLedger } from "../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+  WorkLedger,
+} from "../src/type-inference/core/budget.js";
 import { inMode, MODES, publication, settledAnswers } from "./helpers/type-core-oracles.js";
 import { marked } from "../src/type-inference/core/guards.js";
 import { itemScope } from "./helpers/type-core-items.js";
@@ -93,6 +98,7 @@ function analysed(source: string, mode = MODES[0]!, oracle: "native" | number | 
     const invariants = passes.map((pass) => pushedInvariant(pass.contract));
     // (the automaton's size as the analysis left it, before the truth checks compile every holder)
     const states = passes.map((pass) => markStates(pass.contract));
+    const prefixVisits = passes.map((pass) => markPrefixVisits(pass.contract));
     const truth = passes.map((pass) => markTruth(pass.contract));
     return {
       answers,
@@ -101,6 +107,7 @@ function analysed(source: string, mode = MODES[0]!, oracle: "native" | number | 
       invariants,
       truth,
       states,
+      prefixVisits,
       settled: passes.map(settledAnswers),
     };
   } finally {
@@ -511,40 +518,44 @@ function heldRing(n: number, d: number, m: number, closed: boolean): string {
 
 test("a ring's held marks are one pending set per goal and base node, its automaton answering as the holders' marks do, in four modes (#1784)", () => {
   // (a sample of the family the queue runs whole: one doubling of the ring, the depth and the marked copies)
+  const rows: [number, number, number, boolean][] = [];
   for (const n of [3, 6])
     for (const d of [2, 4])
-      for (const m of [1, n - 1])
-        for (const closed of [false, true]) {
-          const source = heldRing(n, d, m, closed);
-          const files = [{ path: "main.tease", source }];
-          // (native exact where it ends; where it does not, below the read's whole path and eight more)
-          const horizon = closed ? d + 8 : null;
-          for (const mode of MODES) {
-            const pushed = analysed(source, mode);
-            const label = `n ${n}, d ${d}, m ${m}, closed ${closed}, ${JSON.stringify(mode)}`;
-            assert.equal(pushed.answers.budget.exhausted, null, label);
-            for (const { violations, largest } of pushed.invariants) {
-              assert.deepEqual(violations, [], label);
-              // (the marks still pending at a node: one per marked copy, whatever the depth)
-              assert.ok(largest <= m, `${label}: ${largest}`);
-            }
-            // (the pending states accept what the holders' marks mark, on every real holder's paths)
-            for (const truth of pushed.truth) assert.deepEqual(truth.differences, [], label);
-            const native = analysed(source, mode, horizon ?? "native");
-            // (where the native reader ends, every pushed slot is its read of the same path, marks included)
-            if (!closed) samePushedSlots(pushed, native, source);
-            assert.ok(
-              pushed.answers.budget.total <= native.answers.budget.total,
-              `${label}: ${pushed.answers.budget.total} > ${native.answers.budget.total}`,
-            );
-            const published = publication(files, mode, GLOBALS);
-            assert.equal(
-              published,
-              withoutPushedReads(() => publication(files, mode, GLOBALS), horizon),
-              label,
-            );
-          }
-        }
+      for (const m of [1, n - 1]) for (const closed of [false, true]) rows.push([n, d, m, closed]);
+  // (#2005: an open ring of 24 whose 23 marked copies share one marking path: its holder's prefix made once)
+  rows.push([24, 8, 23, false]);
+  for (const [n, d, m, closed] of rows) {
+    const source = heldRing(n, d, m, closed);
+    const files = [{ path: "main.tease", source }];
+    // (native exact where it ends; where it does not, below the read's whole path and eight more)
+    const horizon = closed ? d + 8 : null;
+    for (const mode of MODES) {
+      const pushed = analysed(source, mode);
+      const label = `n ${n}, d ${d}, m ${m}, closed ${closed}, ${JSON.stringify(mode)}`;
+      assert.equal(pushed.answers.budget.exhausted, null, label);
+      for (const { violations, largest } of pushed.invariants) {
+        assert.deepEqual(violations, [], label);
+        // (the marks still pending at a node: one per marked copy, whatever the depth)
+        assert.ok(largest <= m, `${label}: ${largest}`);
+      }
+      // (the pending states accept what the holders' marks mark, on every real holder's paths)
+      for (const truth of pushed.truth) assert.deepEqual(truth.differences, [], label);
+      const native = analysed(source, mode, horizon ?? "native");
+      // (where the native reader ends, every pushed slot is its read of the same path, marks included)
+      if (!closed) samePushedSlots(pushed, native, source);
+      // (#2005: an open ring's receiver scopes cost at most ×1.0105 native's work; a closed one's none)
+      assert.ok(
+        pushed.answers.budget.total <= native.answers.budget.total * (closed ? 1 : 1.0105),
+        `${label}: ${pushed.answers.budget.total} > ${native.answers.budget.total}`,
+      );
+      const published = publication(files, mode, GLOBALS);
+      assert.equal(
+        published,
+        withoutPushedReads(() => publication(files, mode, GLOBALS), horizon),
+        label,
+      );
+    }
+  }
 });
 
 test("a ring read through a marked copy reaches its check, and its leaves are read marked, in four modes (#1784)", () => {
@@ -941,4 +952,231 @@ test("a closed ring's dead histories are not kept to an unrelated tested depth: 
     });
     assert.deepEqual(sizes[0], sizes[1], JSON.stringify(mode));
   }
+});
+
+test("two pending sets that meet at one node are held as their union, in four modes (#1784, Codex r6 on R8b)", () => {
+  // (one holder pending at `q` for `a`, another for `q.b`: a goal reaches one base node with both sets, so only their
+  // union marks both reads below it)
+  const source =
+    [
+      "let p0={a:0,b:0}",
+      "let p1={a:0,b:0}",
+      "let p2={a:0,b:0}",
+      "p2.q=p0",
+      "if p0.q.a is integer { p1=p0 }",
+      "if p0.q.q.b is integer { p1=p0 }",
+      "p2=p1",
+      "p2=p2.q",
+      'say "${p2.q.a} ${p2.q.q.b}"',
+      "exit",
+    ].join("\n") + "\n";
+  for (const mode of MODES) {
+    const pushed = analysed(source, mode);
+    const label = JSON.stringify(mode);
+    // (its raw slot below `p2.q.q` floors as native's does, #2005: the floor test below)
+    assert.ok(pushed.facts.reads > 0, label);
+    for (const { violations } of pushed.invariants) assert.deepEqual(violations, [], label);
+    for (const truth of pushed.truth) assert.deepEqual(truth.differences, [], label);
+    const files = [{ path: "main.tease", source }];
+    assert.equal(
+      publication(files, mode, GLOBALS),
+      withoutPushedReads(() => publication(files, mode, GLOBALS)),
+      label,
+    );
+  }
+});
+
+/** Codex r7's family: a ring copying `p2.<step>` into `p2`, the copy into `p1` of `p0` held under tests below it. */
+function floorRing(step: string, nested: boolean, depth: number, marked: boolean): string {
+  const leaf = "{a:0,b:0}";
+  const literal = nested ? `{${step}:${leaf}}` : leaf;
+  return (
+    [
+      `let p0=${literal}`,
+      `let p1=${leaf}`,
+      `let p2=${leaf}`,
+      `p2.${step}=p0`,
+      ...(marked
+        ? [
+            `if p0.${step}.a is integer { p1=p0 }`,
+            `if p0.${Array(depth).fill(step).join(".")}.b is integer { p1=p0 }`,
+          ]
+        : ["p1=p0"]),
+      "p2=p1",
+      `p2=p2.${step}`,
+      `say "\${p2.b} \${p2.${step}.a} \${p2.${step}.${step}.b}"`,
+      "exit",
+    ].join("\n") + "\n"
+  );
+}
+
+test("below a receiver with no structure the pushed read floors as native does: every settled answer and pushed slot equal, in four modes (#2005, #1859 Codex r7)", () => {
+  // (native reads no shorter prefix's stores below a receiver holding no record or collection, `receiverWalk`; a
+  // pending mark reached under such a receiver dies there, an accepted one survives)
+  for (const step of ["q", "r"])
+    for (const nested of [false, true])
+      for (const depth of [1, 2, 3])
+        for (const marked of [true, false]) {
+          const source = floorRing(step, nested, depth, marked);
+          for (const mode of MODES) {
+            const label = `${JSON.stringify(mode)}\n${source}`;
+            const pushed = analysed(source, mode);
+            const native = analysed(source, mode, "native");
+            pushed.settled.forEach((answers, pass) => {
+              for (const [key, items] of answers) {
+                const other = native.settled[pass]?.get(key);
+                if (key.startsWith("pr|") || other === undefined) continue;
+                assert.equal(items, other, `${key}: ${label}`);
+              }
+            });
+            samePushedSlots(pushed, native, source);
+            for (const { violations } of pushed.invariants) assert.deepEqual(violations, [], label);
+            const files = [{ path: "main.tease", source }];
+            assert.equal(
+              publication(files, mode, GLOBALS),
+              withoutPushedReads(() => publication(files, mode, GLOBALS)),
+              label,
+            );
+          }
+        }
+});
+
+/** #2005's controls: a ring whose receiver has a scalar sibling `g` (tested at `g` or `g.h`), and a key entry under a test. */
+function floorControls(): { readonly source: string; readonly horizon: number | null }[] {
+  const out: { readonly source: string; readonly horizon: number | null }[] = [];
+  for (const leaf of ["{g:0}", "{g:{h:0}}"])
+    for (const closed of [false, true]) {
+      const tested = leaf.includes("h:") ? "g.h" : "g";
+      const rows = [
+        `let p0=${leaf}`,
+        "let p1={g:1}",
+        "let p2={g:2}",
+        "p2.q=p0",
+        "p2=p1",
+        `if p0.${tested} is integer { p1=p0 }`,
+        ...(closed ? ["p0=p2"] : []),
+        "p2=p2.q",
+        'say "${p2.q.q.g}"',
+        "exit",
+      ];
+      out.push({ source: rows.join("\n") + "\n", horizon: closed ? 10 : null });
+    }
+  for (const condition of ["p0.q.b is integer", "p0.q is object"]) {
+    const rows = [
+      "let p0={a:0}",
+      "let p2={a:1}",
+      "p2.q=p0.q",
+      `if ${condition} { p2.q=p0.q }`,
+      "p2=p2.q",
+      'say "${p2.q.b}"',
+      "exit",
+    ];
+    out.push({ source: rows.join("\n") + "\n", horizon: null });
+  }
+  // (a structural sibling two steps deep, read below it and one step past it, where a floor's pending mark would
+  // mark; and Codex r7's witness read one step past an already marked leaf, which a floor carries marked)
+  const sibling = [
+    "let p0={g:{h:0}}",
+    "let p1={g:1}",
+    "let p2={g:2}",
+    "p2.q=p0",
+    "p2=p1",
+    "if p0.g.h is integer { p1=p0 }",
+    "p2=p2.q",
+  ];
+  for (const read of ["p2.q.q.g.h", "p2.q.q.g.h.z"])
+    out.push({
+      source: [...sibling, `say "\${${read}}"`, "exit"].join("\n") + "\n",
+      horizon: null,
+    });
+  out.push({
+    source:
+      [
+        "let p0={a:0,b:0}",
+        "let p1={a:0,b:0}",
+        "let p2={a:0,b:0}",
+        "p2.q=p0",
+        "if p0.q.a is integer { p1=p0 }",
+        "if p0.q.q.b is integer { p1=p0 }",
+        "p2=p1",
+        "p2=p2.q",
+        'say "${p2.q.a.z} ${p2.q.q.b}"',
+        "exit",
+      ].join("\n") + "\n",
+    horizon: null,
+  });
+  return out;
+}
+
+test("a receiver with a scalar sibling, a structural sibling, an already marked leaf and a key entry under a test, read as native reads them, in four modes (#2005)", () => {
+  // (one record sibling keeps a receiver structured; a scalar or `null` alone floors it; within a bounded allowance,
+  // so a rule that loses the floor exhausts instead of running on)
+  for (const { source, horizon } of floorControls())
+    for (const mode of MODES) {
+      const label = `${JSON.stringify(mode)}\n${source}`;
+      const pushed = withTestAllowance(1_000_000, () => analysed(source, mode));
+      assert.equal(pushed.answers.budget.exhausted, null, label);
+      for (const { violations } of pushed.invariants) assert.deepEqual(violations, [], label);
+      const native = withTestAllowance(1_000_000, () =>
+        analysed(source, mode, horizon ?? "native"),
+      );
+      assert.equal(native.answers.budget.exhausted, null, label);
+      // (every settled answer both hold, where native ends; every pushed slot its native read)
+      if (horizon === null) {
+        pushed.settled.forEach((answers, pass) => {
+          for (const [key, items] of answers) {
+            const other = native.settled[pass]?.get(key);
+            if (key.startsWith("pr|") || other === undefined) continue;
+            assert.equal(items, other, `${key}: ${label}`);
+          }
+        });
+        samePushedSlots(pushed, native, source);
+      }
+      const files = [{ path: "main.tease", source }];
+      assert.equal(
+        publication(files, mode, GLOBALS),
+        withoutPushedReads(() => publication(files, mode, GLOBALS), horizon),
+        label,
+      );
+    }
+});
+
+/** Astra r2 B3's family: `x` copied `copies` times under a conjunction of `tests` tests of its properties, then marked. */
+function guardedCopies(tests: number, copies: number): string {
+  const literal = `{${Array.from({ length: tests }, (_, i) => `a${i}:0`).join(",")}}`;
+  const condition = Array.from({ length: tests }, (_, i) => `x.a${i} is integer`).join(" and ");
+  return (
+    [
+      `let x=${literal}`,
+      `x=${literal}`,
+      "let saved=x",
+      `if ${condition} {`,
+      ...Array.from({ length: copies }, (_, i) => `let save${i}=x`),
+      "}",
+      "let p0=x",
+      `let p1=${literal}`,
+      `let p2=${literal}`,
+      "p2.q=p0",
+      "p2=p1",
+      "p1=p0",
+      "p2=p2.q",
+      'say "${p2.q.a0}"',
+      "exit",
+    ].join("\n") + "\n"
+  );
+}
+
+test("a holder's compilation visits each guarded prefix of reads its tests guard alike once, however many such reads (Astra r2 B3)", () => {
+  const visits = (tests: number, copies: number): number => {
+    const { prefixVisits, invariants } = analysed(guardedCopies(tests, copies));
+    for (const { violations } of invariants)
+      assert.deepEqual(violations, [], `${tests} tests, ${copies} copies`);
+    return prefixVisits.reduce((sum, at) => sum + at, 0);
+  };
+  // (the copies under one conjunction ask one answer: the visits do not grow with them)
+  const one = visits(16, 1);
+  assert.ok(one > 0, String(one));
+  for (const copies of [4, 16]) assert.equal(visits(16, copies), one, `16 tests, ${copies} copies`);
+  // (and grow with the tests as the distinct prefixes do: linearly)
+  assert.equal(visits(32, 32), 2 * visits(16, 16));
 });

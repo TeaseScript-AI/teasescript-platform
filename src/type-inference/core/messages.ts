@@ -1,5 +1,7 @@
 import type {
   Block,
+  CallExpression,
+  FunctionDeclaration,
   FunctionParameter,
   GlobalStatement,
   LetStatement,
@@ -25,7 +27,10 @@ import type {
 import {
   type Charge,
   type Given,
+  argumentsOf,
+  type Arguments,
   givenBy,
+  givenByCall,
   guards,
   holds,
   inTarget,
@@ -237,8 +242,63 @@ export function messageSource(
     if (units > 0) charge?.(units);
     return value;
   };
+  // the values calls give their functions' parameters and storing methods their receivers, each file's gathered once,
+  // by the functions the project declares once (#1763)
+  // (the declarations, the arguments and `argumentsOf`'s sort and stack are shared setup work, made once per file
+  // whatever is asked and uncharged, as the statements' values above are (r4.349); each landing's search is charged)
+  // (a call names its own file's function of that name, else the project's `global function`; a name declared twice
+  // there names none, Codex r1 on #1817)
+  let functions:
+    | {
+        byFile: Map<string, FunctionDeclaration | null>[];
+        global: Map<string, FunctionDeclaration | null>;
+      }
+    | undefined;
+  const calls = new Map<number, Arguments>();
+  const callsOf = (file: number): Arguments => {
+    if (functions === undefined) {
+      const byFile: Map<string, FunctionDeclaration | null>[] = [];
+      const declared = { byFile, global: new Map<string, FunctionDeclaration | null>() };
+      const add = (
+        map: Map<string, FunctionDeclaration | null>,
+        declaration: FunctionDeclaration,
+      ): void => {
+        const name = declaration.name.name;
+        map.set(name, map.has(name) ? null : declaration);
+      };
+      for (let at = 0; at < sources.length; at += 1) {
+        const own = new Map<string, FunctionDeclaration | null>();
+        declared.byFile.push(own);
+        someNode(programOf(at), (node) => {
+          if (node.kind === "functionDeclaration") {
+            // EVIDENCE: invariant: a parser-owned node whose kind is `functionDeclaration` is one.
+            const declaration = node as FunctionDeclaration;
+            add(own, declaration);
+            if (declaration.global) add(declared.global, declaration);
+          }
+          return false;
+        });
+      }
+      functions = declared;
+    }
+    let found = calls.get(file);
+    if (found === undefined) {
+      const { byFile, global } = functions;
+      const resolve = (name: string): FunctionDeclaration | null =>
+        byFile[file]!.has(name) ? byFile[file]!.get(name)! : (global.get(name) ?? null);
+      const list: Given[] = [];
+      someNode(programOf(file), (node) => {
+        if (node.kind === "callExpression")
+          // EVIDENCE: invariant: a parser-owned node whose kind is `callExpression` is one.
+          givenByCall(node as CallExpression, resolve, list);
+        return false;
+      });
+      calls.set(file, (found = argumentsOf(list)));
+    }
+    return found;
+  };
   const landing = (site: SourceSite): Landing | null =>
-    metered((count) => landingOf(givensOf(site.file), site, count));
+    metered((count) => landingOf(givensOf(site.file), site, count, callsOf(site.file)));
   // (the kept variable's name: the analysis's, chosen once and charged as its question, else surveyed here once, uncharged)
   const surveyed = new Map<string, string>();
   const freeName =

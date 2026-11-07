@@ -11,7 +11,7 @@ import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { everyAnswer } from "./helpers/type-core-oracles.js";
 
-/**
+/*
  * The core's published answers per occurrence, projection and property (the port plan's S3 note §1), which the kept
  * adapters will read: a statement that stores answers for its place, a read below a binding names its route and its
  * place, a projection of a value that is no place has none, and a value's properties come from every source the

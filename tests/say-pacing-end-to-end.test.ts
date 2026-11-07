@@ -17,7 +17,7 @@ test("multiple reading times preserve identities, replay, and checkpoint equival
   const compiled = plan(
     [
       'say "one"',
-      'say \"two ${["alpha", "beta"]}\"',
+      'say "two ${["alpha", "beta"]}"',
       'say "${["three", "three-alt"]}"',
       'say "four"',
       "exit",

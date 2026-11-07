@@ -238,7 +238,7 @@ test("the copied and direct nested stores owe their checks at every mode's stop"
  * the unmarked function result (her M2), a checked argument and return, an `add`, a list join, a compound assignment and
  * an interpolation. The candidate route declines them, and the analysis is main's: no receiving obligation, no
  * completion, and every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221
- * and no narrowing index made for a program without a test since #1251 (a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
+ * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1–6 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
  * then 64's).
  */
 const frozen = `let a = {f: [[1]]}\nlet b = a\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\nb.f = hostValue`;
@@ -259,23 +259,25 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
   [
     "a checked return",
     `${chain(4)}\nfunction give: integer[] {\n  let maybe = null\n  if hostValue { maybe = [1] }\n  return maybe\n}\nlet got = give()`,
-    [5090, 5528, 5090, 5255, 6983, 6350, 6875, 6077],
+    [5090, 5528, 5090, 5255, 6984, 6350, 6875, 6077],
   ],
   ["an add", "let b = [[1]]\nb.add(hostValue)", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],
+  // (18 units more at demand 64 since #1828: the mixed join's sentence walks each operand to its leaf and reads its
+  // occurrence there, its decider asked once with `decidedAt`'s, Codex r2 on #1899)
   [
     "a list join",
     `${frozen}\nlet xs = [1]\nlet ys = ["s"]\nb.f = [xs + ys]`,
-    [20040, 21248, 19818, 21009, 32897, 34365, 32052, 33430],
+    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],
   ],
   [
     "a compound assignment",
     `${frozen}\nlet n = 1\nn += 1`,
-    [18994, 19136, 18864, 19006, 20720, 22180, 20460, 21814],
+    [18994, 19136, 18864, 19006, 20720, 22181, 20460, 21814],
   ],
   [
     "an interpolation",
     `${frozen}\nsay "n \${b.f}"`,
-    [19238, 19354, 19108, 19224, 20963, 22389, 20703, 22030],
+    [19238, 19354, 19108, 19224, 20963, 22390, 20703, 22030],
   ],
 ];
 

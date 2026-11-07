@@ -3536,6 +3536,63 @@ function sourcesUnder(directory: string): string[] {
   });
 }
 
+test("a known value under a test reads the branch's narrowing, and a long copy chain's value is still found iteratively (#1073 PR 2 phase 2)", () => {
+  // (a dead branch is no static error: the narrowing admits no kind of the value there; a live one keeps it)
+  for (const [source, plans] of [
+    ["let n = 1.5\nif n is integer { repeat n {} }\nexit\n", true],
+    ["let n = 1\nif n == null { repeat n {} }\nexit\n", true],
+    ["let n = 1.5\nif n is number { repeat n {} }\nexit\n", false],
+    ["let n = 1.5\nlet m = n\nif m is integer { repeat m {} }\nexit\n", true],
+    // (an operand's read too, Codex r2 on #1884: the copy inside the fallback never runs with 1.5)
+    [
+      'let n = 1.5\nlet m = n\nif m is integer { repeat (m otherwise 0) { say "BODY" } }\nsay "AFTER"\nexit\n',
+      true,
+    ],
+  ] as const)
+    assert.equal(inBothOrders(() => candidate(source)).plan !== null, plans, source);
+  // (Codex r1 on #1884: the filter applies after the evaluator's own iterative walk, so 8,192 copies take no native frame
+  // each, and the known count still plans and runs)
+  const chain =
+    Array.from({ length: 8192 }, (_, i) => `let n${i} = ${i === 0 ? "1" : `n${i - 1}`}`).join(
+      "\n",
+    ) + '\nrepeat n8191 { say "AFTER" }\nexit\n';
+  // (a stopped read says nothing of its kinds, `unknown`: its known value stands, and so does its static error)
+  for (const allowance of [1, 4])
+    assert.ok(
+      withTestAllowance(allowance, () => candidate("let n = 1.5\nrepeat n {}\nexit\n"))
+        .diagnostics.map((diagnostic) => diagnostic.code)
+        .includes("TSV011"),
+      `stopped at ${allowance}`,
+    );
+  const compiled = inBothOrders(() => candidate(chain));
+  assert.notEqual(compiled.plan, null);
+  assert.deepEqual(
+    compiled.diagnostics.map((diagnostic) => diagnostic.code),
+    [],
+  );
+});
+
+test("the route ends at the refusal its capture establishes, at the store whose contract leaves the slice's depth, and a deep program still plans (#1073)", () => {
+  // (graph/251 of the corpus behind a store whose contract the capture finds first: the capture's second request leaves
+  // the slice's depth at the store `a=b`, where the route now refuses, about 28 million units in, before the walk; the
+  // lowering would have refused at `let b=foreign`'s read after the whole analysis, about 58 million. In the first mode
+  // alone in CI: every mode is the PR's queue evidence)
+  const source =
+    'let n:integer=1\nn=hostValue\nlet typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nif hostValue is integer {a=b}\nb=a\nb=a\nlet out={p:c}\nexit\n';
+  assert.throws(
+    () => candidate(source),
+    (error) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === "a value whose structure the slice does not follow" &&
+      error.site.start === source.indexOf("a=b}") + 2,
+  );
+  // (no refusal at a work count: Sol's deep control, 169 syntax nodes, plans at about 1.4 million units, far past any
+  // proportional cap of its size, in every mode: in reverse order with its stop's warning)
+  const deep = `if hostValue is integer {}\nlet typed:integer${"[]".repeat(128)}=hostValue\nlet out=typed\n${"out=typed\n".repeat(8)}out=hostValue\nexit\n`;
+  for (const mode of MODES)
+    assert.notEqual(inMode(mode, () => candidate(deep)).plan, null, JSON.stringify(mode));
+});
+
 test("no production code selects the core: only tests reach the candidate entry", () => {
   const root = process.cwd();
   for (const directory of ["src", "playground", "player", "tools"])

@@ -18,9 +18,10 @@ import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
 /*
  * The coarse core as a type analysis backend (the port plan's S5): complete for a stated slice of the language and
  * reached only through the test-only candidate compile route (`compileSourceWithBackend` in `src/compiler.ts`), never
- * by a production compile. A program outside the slice throws `CandidateOutsideSlice` at its first construct outside
- * it, before or after the analysis: a test-time signal, never a diagnostic, since no author can reach the route; the
- * slice grows step by step until the consumer is complete (S9b).
+ * by a production compile. A program outside the slice throws `CandidateOutsideSlice` at the first refusal the route
+ * establishes, before, during or after the analysis (its syntax's first construct outside the slice, the capture's
+ * depth exit, then the answers' first, below): a test-time signal, never a diagnostic, since no author can reach the
+ * route; the slice grows step by step until the consumer is complete (S9b).
  *
  * The slice: `let` with or without a written type (a named type, `T?` and `T[]` of them; no written union, whose
  * required checks come with narrowing, S10), assignment of a variable or of a property, `if` and `else`, `repeat` with
@@ -36,11 +37,15 @@ import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
  * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
  * Rejected after the analysis: any other consumer's diagnostic, a warning about a possible `null` (narrowing's required
  * check, S10), a property read of a value that may be no object, a value `say` may not show, an argument of another
- * kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested `SLICE_DEPTH` deep. A
- * stop of the analysis is no exclusion: the program compiles with the stop's warning and its checks at runtime (D4 a′).
+ * kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested `SLICE_DEPTH` deep.
+ * Refused during it: a value whose structure the slice does not follow, at the store whose capture established it
+ * (`leftSlice`), the analysis ended there; nothing is refused at a stop or a work count. A stop compiles with its
+ * warning and its checks at runtime (D4 a′), but where admission settled and a store's required check is not carried by
+ * the published plan, the program is declined: "a store whose check was lost at the budget" (#1526 decision 2,
+ * condition 1, `consumer.ts` `lostCheck`).
  */
 
-/** Test-only: a program outside the candidate's slice, at its first construct outside it (see above). */
+/** Test-only: a program outside the candidate's slice, at the first refusal the route establishes (see above). */
 export class CandidateOutsideSlice extends Error {
   public constructor(
     /** The project path of the construct's file. */
@@ -70,8 +75,17 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
       core.files.map((file) => file.program),
       request.onFile,
     );
+    // (the route ends at the first refusal the analysis establishes, the capture's depth exit, at its request's site:
+    // never at unfinished work, a stop or a work count)
+    const leftSlice = (site: SourceSite): never => {
+      throw outsideSlice(core, {
+        file: site.file,
+        span: index.spanAt(site),
+        what: "a value whose structure the slice does not follow",
+      });
+    };
     // (the questions after the analysis spend the same allowance: `asked`)
-    return asked(analyseCore(core), (answers) => outcomeOf(answers, index, core));
+    return asked(analyseCore({ ...core, leftSlice }), (answers) => outcomeOf(answers, index, core));
   },
 };
 

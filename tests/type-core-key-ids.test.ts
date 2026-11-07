@@ -1079,7 +1079,7 @@ const COPYING_READS = [
     `let seed: integer = 1\nlet tag = "t"\nlet items: integer[] = [1]\nlet root = {f: seed${fields}}\nlet a0 = {q: root}\n${reads}\nexit\n`,
 );
 
-test("a record's steps leave it as an array only at the listed sites, each a charged copy (\`toArray\`), over the wrappers, the member chains to 16 levels and the family's copying reads in every mode", () => {
+test("a record's steps leave it as an array only at the listed sites, each a charged copy (`toArray`), over the wrappers, the member chains to 16 levels and the family's copying reads in every mode", () => {
   const sources = [
     ...[2, 4, 8, 16].flatMap((depth) => VARIANTS.map((variant) => wrapped(depth, variant))),
     ...[8, 16].flatMap((n) => [memberChain(n, false), memberChain(n, true)]),
@@ -1094,7 +1094,7 @@ test("a record's steps leave it as an array only at the listed sites, each a cha
   );
 });
 
-test("the early selector alone (\`withTextKeys\`, criterion 3's seam): every family's keys their text, its shapes still found, its answers the cursors'", () => {
+test("the early selector alone (`withTextKeys`, criterion 3's seam): every family's keys their text, its shapes still found, its answers the cursors'", () => {
   const source = request(wrapped(4, "every-depth"));
   const bindings = new CoreProgram(source).places
     .filter(({ kind }) => kind.kind === "binding")

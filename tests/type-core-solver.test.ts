@@ -40,7 +40,7 @@ import { readFixture } from "./helpers/type-core-fixture.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
-/**
+/*
  * The determinism of the coarse core (ADR 0021 1.6; the port plan's S3 note §1): the answers depend on the program,
  * never on the order the analysis visits its consumers or discovers its demands. Every record of the expectation set
  * is analysed in four orders; every component of demands the set produces is solved again from each member as the
@@ -1339,4 +1339,39 @@ test("a stop at any unit keeps each proof only with its answer, finished, and ru
   }
   assert.ok(provisional > 0, "some stop falls while p and n hold provisional proofs");
   assert.ok(atSlot > 0, "some stop falls at a proof's slot");
+});
+
+test("a copy's value demand below its root is asked again in a fresh pass from its name and packet alone (#1857)", () => {
+  // (a copy carries its path as the arena's steps, so its demand is named by the path's id: `op|<result>|.<id>`)
+  for (const source of [
+    'let a = [1]\nlet b = ["bad"]\nlet xs = [a.take(1), b.take(1)]\nexit',
+    "let xs = [{p: 1}]\nlet ys = xs.take(1)\nlet n: integer = ys.p\nexit",
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }])!;
+    const pass = narrowingPass(request);
+    const copies = [...pass.program.opOf].filter(
+      ([, c]) => c.kind === "operation" && c.contract.family === "method",
+    );
+    assert.ok(copies.length > 0, source);
+    for (const [result] of copies)
+      pass.solver.run(pass.values.valueItems(result, null, ["element"]));
+    const keys = pass.solver
+      .demandWork()
+      .map((demand) => demand.key)
+      .filter((key) => key.startsWith("op|") && key.split("|")[2] !== "");
+    assert.ok(keys.length > 0, source);
+    for (const key of keys) {
+      const exported = exportNames(pass.contract, [key]);
+      const again = solveDemands(
+        request,
+        exported?.names ?? [key],
+        exported === null ? undefined : JSON.parse(JSON.stringify(exported.packet)),
+      )[0]!;
+      assert.deepEqual(
+        again.map((item) => item.tag),
+        pass.solver.answer(key)!.map((item) => item.tag),
+        `${source}: ${key}`,
+      );
+    }
+  }
 });

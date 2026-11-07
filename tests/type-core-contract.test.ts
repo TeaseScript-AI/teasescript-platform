@@ -51,7 +51,7 @@ import {
   publishedUpToOrder,
 } from "./helpers/type-core-oracles.js";
 
-/**
+/*
  * The contract's identity and mark controls (checkpoint 9, TABLE §8's contract row r4.15–r4.27): every path that
  * enters a source into the contract's indexes obtains its identity from one function, so k contributions of one source
  * are one entry on every path; the marks of §3.2 live in one holder per source and projection whose references
@@ -640,7 +640,8 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
     "let good = [1]\nlet host = hostValue\nlet a5 = good\nlet a4 = a5\nlet a3 = a4\nlet a1 = a3\nlet a0 = a1\n" +
       "if a1 != null {\n  a0 = a1\n}\na5 = a0\na1 = host\nexit\n",
     {
-      record: "6ac9cd3fc25be5c7",
+      // (its route plans since #1073 PR 2 phase 2 admits `!= null`: the record's route text, its analysis unchanged)
+      record: "79fc877582249c8a",
       upToOrder: "e56cd6479164593a",
       compact: [
         "warning-runtime-check",

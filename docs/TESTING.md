@@ -46,7 +46,8 @@ subdirectories, Vue typechecking emits nothing, and the clean-build regression u
 
 `npm run test:full-output` and `npm run check:full-output`
 are diagnostic reruns only when compact output is insufficient for a failure or
-specific investigation. Do not run a normal and full-output variant by default
+specific investigation. `npm run check:full-output` runs `npm run check`'s stages with `TEST_FULL_OUTPUT=1`, which
+gives every test run in them full output. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply
 distinct task-relevant evidence. To see what the checkout's compiler and
 runtime do with one source or a project, run
@@ -61,6 +62,9 @@ Its `playerProfile` has person fields, which `playerProfile.petNames` reads and 
 copies, only when `--player-profile profile.json` gives a JSON object of them, such as
 `{"firstName": "Alex", "petNames": ["puppy"]}`. The probe is a developer aid, not a test.
 `npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
+`node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, format, oxlint, knip, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash.
+`node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a tree hash only exists), and finds its unfilled placeholders (its header lists the rules); it never fetches.
+`node tools/ci-test-counts.mjs <run id>` prints a GitHub Actions run's node:test totals (tests, pass, fail, skipped) per job and step, read from `gh run view <run id> --log`, and their sum; `--log <file>` reads a saved log.
 
 For a compiler change meant to preserve behaviour, such as a refactor,
 `node tools/compiler-differential.mjs --base <dist> --head <dist>` loads two builds (each a `dist/` from
@@ -130,16 +134,20 @@ For `corpus`, both commands also need `CASES_JSON=<cases.json>` before `node`, a
 `env -u NODE_OPTIONS` keeps the queue's heap flag from overriding each route's `--memory`. `--demands 16` is the
 completion control: nothing stops at the natural allowance on current `main`, so only a demand-allowance run reaches
 a receiving completion. The gate table also counts, as information only, the control's runs that left the slice by
-exclusion rule, every rule a row and a text no rule names apart. `--expect` makes a source without a result count as
+the class that names their text (`declined/lost check` or an exclusion rule), every such class a row and a text no class
+names apart. `--expect` makes a source without a result count as
 `unavailable`.
 
-Each class has one of three states:
+Each class has one of four states:
 
 - `pass`: agreement, or the legacy route's heap exhausted in its analysis while the core finished (legacy behaviour the
   switch resolves);
 - `attributed`: the difference has a known rule class (written copies, absent properties, ingress; the checks or plan
   a lowering reads; wording; a stop that only one sharing mode, or both differently, take), and the switch still owes
   each source its accepted expectation, a stop through the stop oracle's lost-check judgment;
+- `accepted (condition 1; condition 2 list)`: from taxonomy v5, `declined/lost check`, a program the core declines
+  where a stop lost a check it requires (#1781), at the natural allowance and at the control alike. #1526 decision 2's
+  condition 1 accepts it (the legacy compiles); condition 2 re-assesses every such case before the switch;
 - `open`: the gate is not green while such a row has a pair. These rows are every exclusion of the candidate slice,
   the surviving-check, integer-use and stop differences, failed runs other than the legacy heap, exceptions, results
   that are missing or rowless; in the sharing column, a difference where neither mode stops, a mode outside the slice
@@ -149,6 +157,22 @@ The verdict line is `gate: green` only when no row is `open`. A result the class
 class or two classes take, a result outside the manifests, or a source recorded twice with different results fails
 the run (`gate: failed`, exit 1). An exclusion text or a changed diagnostic code that no taxonomy version decides needs
 a new version with a witness before the gate can pass. `--gate` exits 1 unless the verdict is `green`.
+
+## Checks and corpora by component
+
+Each row defines that component's [evidence levels](DEVELOPMENT-WORKFLOW.md#evidence); each level includes the ones
+before it. An empty cell has no corpus yet.
+
+| Component | Level 1: checks | Level 2: before/after comparison | Level 3: extended set |
+| --- | --- | --- | --- |
+| Compiler | `npm run check`, plus the `tests/families/` areas the change touches, base against head (for the type core, at least the fixture and messages areas) | level 1 plus the families' set (the `tests/families` corpus in its four modes), base against head, classified; the growth bar always applies when the change touches `layersOf`, the walk, admission or the contract; for changes outside the type core, `tools/compiler-differential.mjs` ([Normal and diagnostic verification](#normal-and-diagnostic-verification)) | level 2 plus all areas and the held set with stops, classified; `TEASESCRIPT_SWEEP=full` ([Sampled sweeps](#sampled-sweeps)) for the legacy checker |
+| Runtime | `npm run check` | the [conformance corpus](#source-to-runtime-conformance-corpus) run at base and at head, outcomes compared; once the runtime differential harness exists (#1797), its campaign | |
+| Backend | none yet: its checks, compatibility documents, and area label come when the backend exists | | |
+| Website front end | none yet: its checks and area label come when the front end exists | | |
+| Player | `npm run check`; the [scoped visual check](#player-browser-and-visual-verification) after a visible UI change; [`npm run test:player:browser`](#local-browser-smoke-and-future-host-e2e-gate) for a change to `player/` or its fixture packages | `npm run test:player:browser` plus [`npm run test:player:preview`](#player-browser-and-visual-verification) | a real-device check |
+
+The compiler's shadow gate (`tests/families/shadow.mjs`) is a campaign run from the tree after merges and reported on
+the tracker issue; it is not a per-pull-request level.
 
 ## Test admission and consolidation
 
@@ -251,8 +275,10 @@ retained scratch directory with a screenshot and Playwright trace for the failin
 After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
 (computer use where available) and inspect the changed state plus its immediate responsive/interaction neighbors. This
 is a scoped visual check, not a full UI audit; it catches clipping, overlap, unreadable wrapping, misplaced popovers,
-and other failures that source assertions or DOM semantics do not prove. Use a real device when the behavior depends on
-mobile browser chrome, a software keyboard, safe areas, or input hardware that emulation cannot reproduce.
+and other failures that source assertions or DOM semantics do not prove. A timing defect's regression test uses
+deterministic delays or fakes, not a device. Use a real device only to judge feel, for the Player's level 3 evidence
+([Checks and corpora by component](#checks-and-corpora-by-component)), or when the behavior depends on mobile browser
+chrome, a software keyboard, safe areas, or input hardware that emulation cannot reproduce.
 
 ## Regression-test rule
 
@@ -777,6 +803,12 @@ These probes are diagnostic evidence, not capacity contracts. The largest passin
 accepted product or technical limit separately against its authoritative boundary. Do not require scale probes for
 every PR or create permanent benchmark infrastructure for a bounded question; use them when changed scalable code or
 inspection leaves a credible amplification, memory, representation, or native-failure risk unresolved.
+
+A full-route plan's [growth bar](DEVELOPMENT-WORKFLOW.md#evidence) compares head with base by this method: deterministic
+counters for both at doublings of the dimension at risk. The head/base ratio falls, or rises by less than a fraction
+the accepted plan states for that pull request, at each doubling rather than cumulatively. That fraction is an
+acceptance criterion of that pull request, not a project limit or capacity contract. Read each factor against the
+input's own growth: a factor near 4 per doubling of a linearly growing input is quadratic.
 
 ## Reproducibility requirements
 

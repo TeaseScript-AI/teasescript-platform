@@ -1,19 +1,20 @@
 import type { PlaceId, SourceSite } from "../../graph.js";
 import { concrete, fits, isExternal, isOpaque, requiredKind } from "../admission.js";
+import { family as oneFamily } from "../admission/kinds.js";
 import { joinParts, joinSteps, keepText } from "../budget.js";
 import type { Consumers } from "../consumers.js";
-import { typeTags } from "../contract.js";
+import { termAt, typeTags } from "../contract.js";
 import { labelBelow } from "../contract/labels.js";
 import { keyPlace } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import { kindsInItsOrder, STOPPED, type Item, type ItemTag } from "../items.js";
+import { kindsInItsOrder, makeItem, STOPPED, type Item, type ItemTag } from "../items.js";
 import type { ValueConstraint } from "../program.js";
 import { elementStep, offendingKinds, type DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
 import { heldHostData } from "./finishing.js";
 import { unsettledItem } from "./kinds.js";
-import { keyLabel, ownSpan, quietKinds, shownLabel } from "./names.js";
+import { keyLabel, ownSpan, quietKinds, shownLabel, writtenTermOf } from "./names.js";
 import { obligation, storeRoot, storeWarning, warnGroups } from "./warnings.js";
 import { type CanonicalKey } from "../contract/key-ids.js";
 
@@ -24,7 +25,8 @@ import { type CanonicalKey } from "../contract/key-ids.js";
  * numbers; a conversion's result; nested list, set and dict literals by their elements), or a load's or `fromJson`'s
  * written expected type's kinds at every depth (ADR 1.2, 7: a whole number fits a written number, a fraction never a
  * written integer, the owner's F3), or the value lands directly in a written place whose union holds both; a direct
- * value that is only `null` or unsettled imposes none. Both definite and incompatible: an error at the fallback, below
+ * value that is only `null` or unsettled imposes none. Where the direct value's kinds are unknown, or it has a written
+ * type, its domain's family stands for them (`domainFamily`, r4.150). Both definite and incompatible: an error at the fallback, below
  * it at the innermost offending element (r4.35); possible: a warning with its `copy-type`; an unknown the fallback may
  * hold: a warning against those kinds, its host data meeting its boundary.
  */
@@ -35,6 +37,7 @@ export function fallbackFits(
   directAt: (rest: readonly string[]) => readonly Item[],
   value: PlaceId,
   written = false,
+  domainAt: ((rest: readonly string[], unknown: boolean) => Domain | null) | null = null,
 ): void {
   // nested list, set and dict literals by their elements, one depth after another; the target: the fallback's own
   // key path at the depth, a dict's value its `entry` (§10.5)
@@ -44,7 +47,17 @@ export function fallbackFits(
   let label = keyLabel(walk, value);
   for (
     let rest: readonly string[] = [];
-    fallbackFitsAt(walk, c, node, directAt, value, rest, written, shownLabel(walk, label));
+    fallbackFitsAt(
+      walk,
+      c,
+      node,
+      directAt,
+      domainAt,
+      value,
+      rest,
+      written,
+      shownLabel(walk, label),
+    );
     rest = joinSteps(rest, ["element"])
   ) {
     program.work.charge("checks");
@@ -57,12 +70,45 @@ export function fallbackFits(
   }
 }
 
+/** A value's domain at a path (`domainFamily`): its kinds, and whether the value has a written type there. */
+export interface Domain {
+  readonly kinds: readonly ItemTag[];
+  readonly written: boolean;
+}
+
+/**
+ * C10's requirement from a domain (r4.150): the kinds the domain of a direct value at `rest` gives its fallback, the
+ * join of its non-null members' families, `null` contributing none: what the value retains, its contract's kinds
+ * (`quietKinds`: a written variable's, parameter's or call result's type, a copy's of one); `written` where the value
+ * has a written type there (`writtenTermOf`). An `otherwise` chain's contract is its operands' joined at the path, once
+ * per value and path: a link that holds none there (a `null` read's element) contributes nothing to it, an unknown makes
+ * it unknown. `null` where it gives none: no written or retained type (an unknown read keeps its runtime check), none,
+ * two families or more (the receiving union decides), or only `null`. One charged step.
+ */
+export function domainFamily(
+  walk: Consumers,
+  value: PlaceId,
+  rest: readonly string[],
+  unknown: boolean,
+): Domain | null {
+  // (asked only where it can stand for the value: a read of unknown kinds, or a value with a written type there; a
+  // known unwritten value, an operator's or a join's, asks nothing, so a chain of them stays linear, #1310)
+  const term = writtenTermOf(walk, value);
+  const written = term !== null && termAt(term, rest) !== null;
+  if (!written && !unknown) return null;
+  walk.pass.program.work.charge("checks");
+  const kinds = quietKinds(walk, value, rest);
+  // (its `null` contributes no family: C10 reads a direct value's concrete kinds)
+  return kinds === null || !oneFamily(kinds) ? null : { kinds, written };
+}
+
 /** C10 at one path of the fallback, its label there made by `label`: whether its elements are checked too. */
 function fallbackFitsAt(
   walk: Consumers,
   c: ValueConstraint,
   node: FlowNode,
   directAt: (rest: readonly string[]) => readonly Item[],
+  domainAt: ((rest: readonly string[], unknown: boolean) => Domain | null) | null,
   value: PlaceId,
   rest: readonly string[],
   written: boolean,
@@ -71,7 +117,21 @@ function fallbackFitsAt(
   const { program, contract, definitions } = walk.pass;
   const site = program.places[value]?.site;
   if (site === null || site === undefined || !("result" in c)) return false;
-  const direct = directAt(rest);
+  const read = directAt(rest);
+  // r4.150: the direct value's domain stands for the whole value, definite (its ingress is checked against it, C9),
+  // where its own kinds are unknown, or where a written type gives it; never for a stopped read (r4.100) nor one proved
+  // only `null` (r4.106)
+  const domain =
+    domainAt === null ||
+    read.length === 0 ||
+    read.some(unsettledItem) ||
+    read.every((item) => item.tag === "null")
+      ? null
+      : domainAt(
+          rest,
+          read.some((item) => item.tag === "unknown"),
+        );
+  const direct = domain === null ? read : domain.kinds.map((tag) => makeItem(tag));
   const into = contract.landsIn(c.result, rest);
   // (the declaration the value lands in directly, where a written type is)
   const root =

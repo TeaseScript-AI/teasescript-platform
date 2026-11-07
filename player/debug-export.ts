@@ -221,7 +221,7 @@ export class DebugExportError extends Error {
   }
 }
 
-export const DEBUG_EXPORT_FORMAT = "teasescript-debug-export";
+const DEBUG_EXPORT_FORMAT = "teasescript-debug-export";
 // 2: adds the `applyExternalStorageEdit` call. 3: adds the `updateInteraction` call. 4: adds a call's chosen random
 // outcomes and paused draw, and the `resumeRandomDraw` call. 5: adds the `setDebugMode` call. 6: adds how the player
 // gave an answer.

@@ -62,16 +62,22 @@ import {
   readlinkSync,
   readSync,
   renameSync,
-  rmdirSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { generatorsOf, placeOf } from "./sources.mjs";
+import { generatorFolders, generatorsOf, holdsGenerators, placeOf } from "./sources.mjs";
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
+
+/**
+ * The count of shards an area is planned in where a baseline first plans it (#1826): `copies` at 64, for a 60-minute wall
+ * on the slowest worker; every other area at 16. A baseline whose MANIFEST records another count keeps it.
+ */
+const SHARDS = new Map([["copies", 64]]);
+const shardsOf = (area) => SHARDS.get(area) ?? 16;
 
 /**
  * The runner's defaults, at which a baseline is stored (#1647): a run (a source's mode and check on one tree) stalls
@@ -81,13 +87,6 @@ const hash = (text) => createHash("sha256").update(text).digest("hex");
  * first two where they are given (`baseline.sh compute` passes its seed PLAN's); the PLAN records them, so a store at
  * other limits than its baseline's is refused. The derivation of `units` and `timeout` is the runner README's.
  */
-/**
- * The count of shards an area is planned in where a baseline first plans it (#1826): `copies` at 64, for a 60-minute wall
- * on the slowest worker; every other area at 16. A baseline whose MANIFEST records another count keeps it.
- */
-const SHARDS = new Map([["copies", 64]]);
-const shardsOf = (area) => SHARDS.get(area) ?? 16;
-
 export const DEFAULTS = {
   units: Math.trunc(Number(process.env.FAMILIES_UNITS)) || 4,
   timeout: Number(process.env.FAMILIES_TIMEOUT) || (process.env.CI === "true" ? 60 : 1800),
@@ -722,11 +721,6 @@ function claimed(file) {
   return true;
 }
 
-/**
- * The area `area` of the baseline `top` planned as `plan`: recorded in the MANIFEST (`area <name> <shards> <PLAN hash>`)
- * before its folder and PLAN are made, which a writer interrupted in between leaves to the next. The PLAN's hash and
- * each shard's hash of places, or why it is refused: another plan recorded, or the baseline's state.
- */
 /** `area` where it is an area's name (one plain path component), else this throws before any filesystem call. */
 function areaName(area) {
   if (typeof area !== "string" || !/^[^/]+$/.test(area) || [".", ".."].includes(area))
@@ -734,11 +728,16 @@ function areaName(area) {
   return area;
 }
 
+/**
+ * The area `area` of the baseline `top` planned as `plan`: recorded in the MANIFEST (`area <name> <shards> <PLAN hash>`)
+ * before its folder and PLAN are made, which a writer interrupted in between leaves to the next. The PLAN's hash and
+ * each shard's hash of places, or why it is refused: another plan recorded, or the baseline's state.
+ */
 export async function planned(baseline, area, plan, first = false) {
   const top = pathOf(baseline, "baseline");
   areaName(area);
   const id = hash(plan);
-  const { shards, places } = parsePlan(plan);
+  const { shards, places: _places } = parsePlan(plan);
   const outcome = await gate(baseline, (text) => {
     const record = recorded(text).get(area);
     // (a writer that plans an area of the table first, `first`, plans it in the table's count; an adopted seed's PLAN
@@ -913,15 +912,12 @@ export function storedRuns(folder) {
 
 /** A built tree's areas: the folders of tests/families/ with generators, and tools/corpus/fixture/. */
 function areasOf(tree) {
-  const families = path.join(tree, "tests", "families");
+  // (the families' areas as the check finds them, then the corpus fixture, an area outside `tests/families`)
+  const fixture = path.join(tree, "tools", "corpus", "fixture");
   return [
-    ...(existsSync(families) ? readdirSync(families, { withFileTypes: true }) : [])
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(families, entry.name)),
-    path.join(tree, "tools", "corpus", "fixture"),
-  ].filter(
-    (folder) => existsSync(folder) && readdirSync(folder).some((name) => name.endsWith(".mjs")),
-  );
+    ...generatorFolders(path.join(tree, "tests", "families")),
+    ...(holdsGenerators(fixture) ? [fixture] : []),
+  ];
 }
 
 /** Each area's state in the baseline of `tree` (see above), one JSON line each, then the baseline's; the exit status. */

@@ -1,6 +1,7 @@
-// A generator's sources as the runner (`run.mjs`) runs them and the check (`check.mjs`) compares them.
+// A generator's sources as the runner (`run.mjs`) runs them and the check (`check.mjs`) compares them, and the folders
+// that hold generators, as the check and the baselines (`baselines.mjs`) find them.
 import { createHash } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -48,6 +49,20 @@ export function setKey(keys) {
 /** A source's place in a baseline: its generator, its name and its key, so that an edited source is a new one. */
 export const placeOf = (generator, source) =>
   JSON.stringify([generator, source.name, sourceKey(source)]);
+
+/** Whether `folder` holds a generator: a `.mjs` file. A folder of data only holds none. */
+export const holdsGenerators = (folder) =>
+  existsSync(folder) && readdirSync(folder).some((name) => name.endsWith(".mjs"));
+
+/**
+ * The runner's areas under `families` (a tree's `tests/families`): each subfolder that holds a generator, in the order
+ * the folder lists them. Every `.mjs` file in such a folder is a generator (`generatorsOf`), so a utility stays outside
+ * them (#1786, #1865).
+ */
+export const generatorFolders = (families) =>
+  (existsSync(families) ? readdirSync(families, { withFileTypes: true }) : [])
+    .filter((entry) => entry.isDirectory() && holdsGenerators(path.join(families, entry.name)))
+    .map((entry) => path.join(families, entry.name));
 
 /** An area folder's generators, in name order, each with its checks and every source (`sourcesOf`). */
 export async function generatorsOf(folder, sizes) {

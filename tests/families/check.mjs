@@ -8,20 +8,15 @@
 import { readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { setKey, sourceKey, sourcesOf } from "./sources.mjs";
+import { generatorFolders, setKey, sourceKey, sourcesOf } from "./sources.mjs";
 
 const args = process.argv.slice(2);
 const list = args.includes("--list");
 const areas = args.filter((arg) => arg !== "--list");
 const root = path.dirname(fileURLToPath(import.meta.url));
-// (every folder here that holds a module, as the runner's baselines take its areas: `baselines.mjs`'s `areasOf`)
-const AREAS = readdirSync(root, { withFileTypes: true })
-  .filter(
-    (entry) =>
-      entry.isDirectory() &&
-      readdirSync(path.join(root, entry.name)).some((name) => name.endsWith(".mjs")),
-  )
-  .map((entry) => entry.name)
+// (the runner's areas, as the baselines take them: `sources.mjs`'s `generatorFolders`)
+const AREAS = generatorFolders(root)
+  .map((folder) => path.basename(folder))
   .sort();
 const total = { generators: 0, sources: 0, repeated: 0, dropped: 0, differ: 0 };
 for (const area of areas.length > 0 ? areas : AREAS) {

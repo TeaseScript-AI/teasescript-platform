@@ -25,6 +25,7 @@ import { keyLabel } from "./consumers/names.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
 import { Closure, type ClosureCounts } from "./admission/closure.js";
 import type { ReceivingObligation, ReceivingResult } from "./admission/receiving.js";
+import { ReceivingDomain } from "./receiving-domain.js";
 import {
   compareDemandNames,
   exportNames,
@@ -33,6 +34,7 @@ import {
   type CanonicalKey,
 } from "./contract/key-ids.js";
 import { labelText } from "./contract/labels.js";
+import { keyObjects, objectsAt } from "./contract/objects.js";
 import { replayLayer } from "./contract/prefix-index.js";
 import { selectLanes } from "./contract/lanes.js";
 import {
@@ -90,7 +92,7 @@ import {
   type WorkPlace,
   type WrittenTypeError,
 } from "./result.js";
-import { Solver, type DemandWork, type Work } from "./solver.js";
+import { Solver, type DemandWork, type Proof, type ProofDemand, type Work } from "./solver.js";
 import { narrowingKey, Values } from "./values.js";
 import { keptVariableName } from "./messages.js";
 import { writtenTypeErrors } from "./written.js";
@@ -128,6 +130,8 @@ export interface CorePass {
   readonly contract: Contract;
   readonly values: Values;
   readonly solver: Solver;
+  /** A4's receiving domain state (`ReceivingDomain`, TABLE r4.375): one per pass, made empty with its parts. */
+  readonly receivingDomain: ReceivingDomain;
   /** The receiving closure of a completion pass (#1526 phase C, `Consumers.#completeFor`), absent in any other pass. */
   readonly closure?: Closure | null;
 }
@@ -155,6 +159,7 @@ function createPass(
     handlers: HandlerIndex;
     guards: GuardIndex;
     solver: Solver;
+    receivingDomain: ReceivingDomain;
     closure: Closure | null;
   } = {
     program,
@@ -168,6 +173,7 @@ function createPass(
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
     solver: new Solver(program.scope),
+    receivingDomain: new ReceivingDomain(),
     // (#1526 phase C: a completion pass keeps its cells for the receiving closure from its start, the completion lease)
     closure: completion ? new Closure(program.work) : null,
   };
@@ -519,6 +525,25 @@ export interface Answers {
    * stops the analysis.
    */
   completed<T>(again: () => T): T | null;
+  /**
+   * The obligations a published plan's gate reads (#1526 decision 2, condition 1, `lostCheck`): the receiving registry
+   * where a receiving completion ran (`receiving`, its results); after a stop of the analysis, where none runs, or a
+   * completion past its allowance before it found them, once admission settled, the registry's obligations without
+   * results, found as finishing work counted apart (`Consumers.stopObligations`); none elsewhere. `null` where the
+   * obligations are unknown: a stop after admission settled with no seed to find them from, never read as none.
+   */
+  gated():
+    | readonly {
+        readonly obligation: ReceivingObligation;
+        readonly result: ReceivingResult | null;
+      }[]
+    | null;
+  /**
+   * `callback` as finishing work counted apart (`WorkLedger.apart`), in the budget's `apart` and never its total: the
+   * settled pass's publication asked once more where the receiving completion kept no result, so its gate reads the
+   * registry (#1526 decision 2, condition 1, `asked`).
+   */
+  apart<T>(callback: () => T): T;
   at(node: FlowNode): OccurrenceAnswer | null;
   /**
    * The place and path a statement that stores stores into, as `at` reads them there (its node's first live store, else
@@ -769,19 +794,32 @@ export function solveDemands(
     // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store); a key's
     // contract by its key in this pass's identity (a wrapper's family's its cursor's)
     const [kind, ...parts] = key.split("|");
+    // (a value demand whose path came back as text is named by its path's id where its steps are a record's, as a
+    // copy's are, #1857)
+    const byId = (path: string): string => `.${pass.contract.pathIdOf(splitPath(path))}`;
     const answer =
       pass.solver.answer(key) ??
       (kind === "c" || kind === "rc"
         ? pass.solver.answer(joinParts(kind, pass.contract.canonicalKey(parts.join("|"))))
-        : undefined);
+        : kind === "op" && parts[1] && !parts[1].startsWith(".")
+          ? pass.solver.answer(joinParts("op", parts[0]!, byId(parts[1])))
+          : kind === "lit" && parts[1] && !parts[1].startsWith(".")
+            ? pass.solver.answer(joinParts("lit", parts[0]!, byId(parts[1]), parts[2] ?? "-"))
+            : undefined);
     if (answer === undefined) throw new Error(`The demand '${key}' did not finish.`);
     return answer;
   });
 }
 
+/** A proof demand asked for its answer alone (`demandWork`). */
+function* asked(demand: ProofDemand<Proof>): Work<readonly Item[]> {
+  return yield demand;
+}
+
 /**
- * The computation that demands `key` (`protoLayer|`, `c|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`, `lit|`, `op|`,
- * `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write them).
+ * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`,
+ * `lit|`, `op|`, `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write
+ * them).
  */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   const [kind, ...parts] = key.split("|");
@@ -792,6 +830,11 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
       return replayLayer(contract, parts);
     case "c":
       return contract.contractOf(parts.join("|"));
+    // (#1747's objects queries, by their value and path or their key)
+    case "ob":
+      return asked(objectsAt(contract, Number(parts[0]), splitPath(parts[1] ?? "")));
+    case "obk":
+      return asked(keyObjects(contract, parts.join("|")));
     case "s": {
       const rest = splitPath(parts[2] ?? "");
       return contract.subAt(joinParts(parts[0]!, parts[1] ?? ""), rest);
@@ -1702,6 +1745,28 @@ class CoreAnswers implements Answers {
     for (const item of bySite(ranked))
       if (!order.has(item.obligation)) order.set(item.obligation, order.size);
     return order;
+  }
+
+  public gated(): Answers["receiving"] | null {
+    // (the registry once a receiving completion made it, in its questions asked again too; where it is empty after a
+    // stop of the analysis, where none runs, or after a completion past its allowance before it found its obligations,
+    // the obligations are found again apart; elsewhere the completion runs after the first questions, `asked`)
+    if (this.receiving.length > 0) return this.receiving;
+    const capped = (this.#consumers.completion?.counts.capped ?? 0) > 0;
+    if (this.budget.exhausted === null && !capped) return [];
+    const found = this.apart(() => this.#consumers.stopObligations());
+    // (no seed: unknown where admission settled, which saves one before anything of it can stop; none where it did not,
+    // an unsettled stop, option (a))
+    if (found === null) return this.budget.settled ? null : [];
+    return found.map((obligation) => ({ obligation, result: null }));
+  }
+
+  public apart<T>(callback: () => T): T {
+    try {
+      return this.#pass.program.work.apart(callback);
+    } finally {
+      this.#counted();
+    }
   }
 
   public completed<T>(again: () => T): T | null {

@@ -7,6 +7,7 @@ import {
   asked,
   coreCheckResult,
   coreFacts,
+  OutsideContract,
   SliceIndex,
 } from "../../src/type-inference/core/consumer.js";
 import { withoutRecords } from "../../src/type-inference/core/consumers.js";
@@ -51,7 +52,8 @@ function contents(value: unknown): string {
 /**
  * The compiler's run of a request (`asked` with `coreCheckResult` and `coreFacts`, as the backend asks after its own
  * slice check) in a mode under a demand allowance, at a work allowance (`undefined`: the natural one), with its
- * receiving completion (#1526 phase C) or without it (phase B's): the stop as the answers it asked last report it.
+ * receiving completion (#1526 phase C) or without it (phase B's): the stop as the answers it asked last report it, its
+ * result the compiled one or the decline.
  */
 export function completionRun(
   request: CoreAnalysisRequest,
@@ -64,20 +66,30 @@ export function completionRun(
   const compile = (): CompletionRun => {
     const answers = analyseCore(request);
     let last: Answers = answers;
-    const result = asked(answers, (each) => {
-      last = each;
-      return {
-        checked: coreCheckResult(each, index, request),
-        facts: coreFacts(each, index, request),
-      };
-    });
+    // (a program declined where a required check is lost at a stop, #1526 decision 2: the decline is its result)
+    const result = ((): string => {
+      try {
+        return contents(
+          asked(answers, (each) => {
+            last = each;
+            return {
+              checked: coreCheckResult(each, index, request),
+              facts: coreFacts(each, index, request),
+            };
+          }),
+        );
+      } catch (error) {
+        if (!(error instanceof OutsideContract)) throw error;
+        return contents({ declined: error.what });
+      }
+    })();
     return {
       exhausted: last.budget.exhausted,
       stoppedIn: last.budget.stoppedIn,
       total: last.budget.total,
       completed: last.budget.closure !== null,
       units: last.budget.closure?.units ?? 0,
-      result: contents(result),
+      result,
     };
   };
   const omitted = (): CompletionRun =>

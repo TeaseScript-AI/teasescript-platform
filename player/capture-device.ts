@@ -1,7 +1,7 @@
 import { RgbaImage } from "./rgba-image.js";
 import type { CapturedMediaEntry, CapturedMediaStore } from "./captured-media.js";
 
-/**
+/*
  * Player-owned camera and microphone capture. The Player owns every physical browser stream; what reaches the runtime
  * is serializable, such as session media references. Pixel copies and samplers are for local computation and never
  * belong in runtime state. Browser APIs stay behind `CaptureHost`, so lifecycle, cleanup and failure handling are

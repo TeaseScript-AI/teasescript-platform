@@ -453,7 +453,7 @@ test("pacing creation provenance rejects an impossible function owner", () => {
 test("smart pacing uses the final visible text and captured settings", () => {
   const cases = [
     {
-      source: 'let name = "Ada"\nsay \"Hi ${name}\"\nexit',
+      source: 'let name = "Ada"\nsay "Hi ${name}"\nexit',
       options: {},
       text: "Hi Ada",
       deadlineMs: 2_100,
