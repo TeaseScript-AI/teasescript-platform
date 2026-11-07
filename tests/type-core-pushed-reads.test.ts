@@ -942,3 +942,34 @@ test("a closed ring's dead histories are not kept to an unrelated tested depth: 
     assert.deepEqual(sizes[0], sizes[1], JSON.stringify(mode));
   }
 });
+
+test("two pending sets that meet at one node are held as their union, in four modes (#1784, Codex r6 on R8b)", () => {
+  // (one holder pending at `q` for `a`, another for `q.b`: a goal reaches one base node with both sets, so only their
+  // union marks both reads below it)
+  const source =
+    [
+      "let p0={a:0,b:0}",
+      "let p1={a:0,b:0}",
+      "let p2={a:0,b:0}",
+      "p2.q=p0",
+      "if p0.q.a is integer { p1=p0 }",
+      "if p0.q.q.b is integer { p1=p0 }",
+      "p2=p1",
+      "p2=p2.q",
+      'say "${p2.q.a} ${p2.q.q.b}"',
+      "exit",
+    ].join("\n") + "\n";
+  for (const mode of MODES) {
+    const pushed = analysed(source, mode);
+    const label = JSON.stringify(mode);
+    assert.ok(pushed.facts.reads > 0 && pushed.facts.declines.size === 0, label);
+    for (const { violations } of pushed.invariants) assert.deepEqual(violations, [], label);
+    for (const truth of pushed.truth) assert.deepEqual(truth.differences, [], label);
+    const files = [{ path: "main.tease", source }];
+    assert.equal(
+      publication(files, mode, GLOBALS),
+      withoutPushedReads(() => publication(files, mode, GLOBALS)),
+      label,
+    );
+  }
+});
