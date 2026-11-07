@@ -409,7 +409,7 @@ function shadow(value: object, owner: object, key: string | symbol, claim: unkno
   Object.defineProperty(value, key, { value: method ? () => claim : claim, configurable: true });
 }
 
-test("no own property changes how the comparator compares a built-in object's kind and contents, in either realm", () => {
+test("no own property of a built-in object's prototype surface, `constructor` aside, changes how the comparator compares it, in either realm", () => {
   const verdict = (actual: unknown, expected: unknown) => {
     try {
       return cloneGraphDifference(actual, expected, RECORD_CLASSES) === null ? "equal" : "differs";
@@ -474,7 +474,7 @@ test("no own property changes how the comparator compares a built-in object's ki
       `${predicate} holds for a walked sample`,
     );
 
-  // Each own key of each surface (`constructor` aside), on each side, in both realms. A key the comparator reads must
+  // Each own key of each surface, on each side, in both realms. `constructor` is outside the axis by design (#1967). A key the comparator reads must
   // have run all its cases above. Any other key gets an accessor that throws when read: the comparator never reads it,
   // so a sample still equals its clone, and against a primitive it still differs, without throwing.
   const readNames = new Map(
@@ -553,7 +553,7 @@ test("no own property changes how the comparator compares a built-in object's ki
   assert.deepEqual(readsOnSurface, new Set(Object.keys(INTRINSIC_READS)));
 });
 
-test("the comparator's diagnostic uses a compared value only by its type, kind and intrinsic view type", () => {
+test("the comparator's diagnostic uses its `value` binding only by type, kind and intrinsic view type, and no `arguments`", () => {
   const path = resolve(process.cwd(), "tests/helpers/clone-graph.ts");
   const source = ts.createSourceFile(
     path,
@@ -567,7 +567,8 @@ test("the comparator's diagnostic uses a compared value only by its type, kind a
       functions.set(statement.name.text, statement);
   const describe = functions.get("describe")!;
   const parameter = describe.parameters[0]!.name.getText(source);
-  // Each use of the argument is one of these, so no property of an object is read, called or coerced in it.
+  // Each use of the `value` binding is one of these forms, and the body does not use `arguments`. This is a check of
+  // the binding's uses, not of data flow: an indirect read through another binding is outside it (#1967).
   const uses: string[] = [];
   const allowed = (node: ts.Identifier): boolean => {
     const parent = node.parent;
@@ -591,6 +592,7 @@ test("the comparator's diagnostic uses a compared value only by its type, kind a
     );
   };
   const visit = (node: ts.Node): void => {
+    assert.ok(!(ts.isIdentifier(node) && node.text === "arguments"), "describe uses `arguments`");
     if (ts.isIdentifier(node) && node.text === parameter) {
       uses.push(node.parent.getText(source));
       assert.ok(allowed(node), `describe uses its argument in \`${node.parent.getText(source)}\``);

@@ -72,9 +72,10 @@ const OWNERS = {
 } as const;
 
 /**
- * Every slot of a built-in object the comparator reads: its owner prototype and the key of the getter or method there
+ * Every slot of a built-in object the comparator compares: its owner prototype and the key of the getter or method there
  * that reads it. Each is read through that getter or method (`intrinsic`), never as a property of the object, so an own
- * property cannot shadow it. `tests/player-engine-bridge-transport.test.ts` shadows each on both sides.
+ * property cannot shadow it. `tests/player-engine-bridge-transport.test.ts` shadows each on both sides, and every other
+ * own key of the admitted kinds' prototype chains but `constructor`.
  */
 export const INTRINSIC_READS = {
   "typed array type": { owner: "TypedArray", key: Symbol.toStringTag },
@@ -214,9 +215,9 @@ function primitiveText(
 
 /**
  * How a compared value reads in a difference: a primitive by `primitiveText`, a function or object by its kind alone
- * (`cloneKind`, a view by its intrinsic type), so no property of the value is read or coerced. The only place the
- * comparator turns a compared value into text; `tests/player-engine-bridge-transport.test.ts` checks statically that
- * its body uses its argument in no other way.
+ * (`cloneKind`, a view by its intrinsic type), never coerced. The only place the comparator turns a compared value into
+ * text. `tests/player-engine-bridge-transport.test.ts` checks statically that its body uses its `value` binding only in
+ * these forms, and does not use `arguments`; that is not a data-flow proof (#1967).
  */
 function describe(value: unknown, classes: readonly RecordClass[]): string {
   if (
@@ -254,8 +255,9 @@ export interface CloneGraphOptions {
  * How `actual`, a value that crossed a structured-clone port, differs from `expected` under structured-clone semantics,
  * or `null` when it does not. Iterative, so values of any depth compare: `assert.deepEqual` recurses and overflows.
  *
- * Each object of either side is classified by `cloneKind`, and both sides must be of one kind. A built-in object's
- * contents are read through its intrinsic getters and methods (`INTRINSIC_READS`), so no own property can change them:
+ * Kinds come from `util.types` (`cloneKind`), and both sides must be of one kind. The slots of a built-in object it
+ * compares are read through intrinsic getters and methods (`INTRINSIC_READS`), and a difference describes a compared
+ * value without coercing it (`describe`):
  * - a primitive compares with `Object.is`; a function, which native clone refuses, fails;
  * - a `Date` compares by its time value, a `RegExp` by its source and flags;
  * - a typed array or `DataView` compares by its type, offset and length, and its fixed-length `ArrayBuffer` as an object
