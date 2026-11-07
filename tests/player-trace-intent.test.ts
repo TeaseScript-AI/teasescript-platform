@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
-import type { DebugView, DebugViewRequest } from "../player/debug-view.js";
+import type { DebugViewRequest } from "../player/debug-view.js";
 import { connectBridge } from "../player/engine-bridge/client.js";
 import { heldTrace, introduceNow } from "../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
@@ -160,7 +160,7 @@ async function play(bridge: PlayerBridge, each: Case) {
   }
   // The trace as the newest intent says.
   const newest = intents.length - 1;
-  const view = await bridge.read<DebugView>(held, "debugView", { request: recent });
+  const view = await bridge.read(held, "debugView", { request: recent });
   assert.equal(
     view.status !== null,
     intents[newest]!.on,

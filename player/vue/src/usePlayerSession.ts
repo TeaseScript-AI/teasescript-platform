@@ -53,7 +53,7 @@ import {
 } from "../../engine-bridge/in-process.js";
 import type { StartOptions } from "../../engine-bridge/ops/session.js";
 import type { RandomIntent, TracingIntent } from "../../engine-bridge/player-ops.js";
-import type { CheckpointCapture, KeepCapture } from "../../engine-bridge/ops/persistence.js";
+import type { KeepCapture } from "../../engine-bridge/ops/persistence.js";
 import type {
   DrawResolution,
   RandomTriedView,
@@ -434,7 +434,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const current = session.value;
     if (current === null || !debugTracing.value) return Promise.resolve(null);
     return bridgeOf(current)
-      .read<DebugView>(current, "debugView", { request })
+      .read(current, "debugView", { request })
       .then(
         (view) => (session.value?.lineage === current.lineage ? view : null),
         (error: unknown) => {
@@ -1898,7 +1898,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     let capture: KeepCapture;
     try {
       capture = await ctx.admit(() =>
-        bridgeOf(current).read<KeepCapture>(current, "captureKeep", {
+        bridgeOf(current).read(current, "captureKeep", {
           plan: withPlan ? current.planToken : null,
         }),
       );
@@ -2218,10 +2218,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if ("unavailable" in found) throw new StorageTransferError(found.unavailable);
     let restorePoint: PlayerRuntimeRestorePoint;
     try {
-      const capture = await bridgeOf(found.session).read<CheckpointCapture>(
-        found.session,
-        "captureCheckpoint",
-      );
+      const capture = await bridgeOf(found.session).read(found.session, "captureCheckpoint");
       restorePoint = Object.freeze({
         checkpointJson: capture.checkpointJson,
         events: Object.freeze(found.session.events.slice(0, capture.eventsThrough)),
@@ -2604,7 +2601,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const shown = session.value;
     if (shown === null) return Promise.resolve(null);
     return bridgeOf(shown)
-      .read<RandomTriedView>(shown, "randomTried", { site })
+      .read(shown, "randomTried", { site })
       .catch(() => null);
   }
   /** Whether the shown session runs or waits. */

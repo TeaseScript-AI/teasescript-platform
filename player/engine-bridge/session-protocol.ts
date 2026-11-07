@@ -2,6 +2,9 @@ import type { InterpreterEvent } from "../../src/runtime/events.js";
 import type { RuntimeSessionCall } from "../../src/runtime/session.js";
 import type { InstructionFacts } from "./instruction-facts.js";
 import type { PlanMetadata } from "./player-ops.js";
+import type { DebugView, DebugViewRequest } from "../debug-view.js";
+import type { CheckpointCapture, KeepCapture } from "./ops/persistence.js";
+import type { RandomTriedView } from "./ops/random.js";
 import type { PlayerRuntimeState } from "../runtime-adapter.js";
 
 /*
@@ -57,3 +60,35 @@ export interface Introduction extends Publication {
   /** The first event sequence the session's own runs emitted; the events before it are restored history. */
   readonly liveEventSequence: number;
 }
+
+/**
+ * The host's session-free reads (`PlayerBridge.read`), each op with its arguments and its result: a read of an op this
+ * map lacks, or with other arguments, does not compile. The arguments are checked again by the host at run time; the
+ * result is the same build's, so it is not checked when it arrives.
+ */
+export interface ReadOps {
+  readonly debugView: {
+    readonly args: { readonly request: DebugViewRequest };
+    readonly result: DebugView;
+  };
+  readonly captureKeep: {
+    readonly args: { readonly plan: string | null };
+    readonly result: KeepCapture;
+  };
+  readonly captureCheckpoint: {
+    readonly args: Record<string, never>;
+    readonly result: CheckpointCapture;
+  };
+  readonly randomTried: {
+    readonly args: { readonly site: string };
+    readonly result: RandomTriedView;
+  };
+}
+export type ReadOp = keyof ReadOps;
+/** The read ops by name, at run time: exactly the keys of `ReadOps`. */
+export const READ_OPS = {
+  debugView: true,
+  captureKeep: true,
+  captureCheckpoint: true,
+  randomTried: true,
+} as const satisfies Record<ReadOp, true>;

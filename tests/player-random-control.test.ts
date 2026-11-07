@@ -6,7 +6,7 @@ import { compilePlayerProject } from "../player/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { heldRandom, introduceNow } from "../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
-import type { RandomTriedView, ResolveDrawResult } from "../player/engine-bridge/ops/random.js";
+import type { ResolveDrawResult } from "../player/engine-bridge/ops/random.js";
 import { HeldSession } from "../player/engine-bridge/ops/session.js";
 import {
   alignRandom,
@@ -104,7 +104,7 @@ const resolve = (
 ) => bridge.request<ResolveDrawResult>(session, "resolveDraw", { drawId, outcome, record });
 
 const tried = (bridge: PlayerBridge, session: PlayerSession, site: string) =>
-  bridge.read<RandomTriedView>(session, "randomTried", { site });
+  bridge.read(session, "randomTried", { site });
 
 const shown = (bridge: PlayerBridge, session: PlayerSession) => bridge.latest(session)!;
 const said = (session: { readonly transcriptEntries: readonly { readonly text: string }[] }) =>
@@ -192,10 +192,7 @@ test("the host's control decides, pauses, refuses and records as the adapter's o
         name,
       );
     }
-    const capture = await bridge.read<{ readonly checkpointJson: string }>(
-      session,
-      "captureCheckpoint",
-    );
+    const capture = await bridge.read(session, "captureCheckpoint");
     assert.equal(
       capture.checkpointJson,
       createPlayerRuntimeRestorePoint(mirror.session).checkpointJson,
