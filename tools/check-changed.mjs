@@ -10,9 +10,9 @@ import { dirname, join, resolve } from "node:path";
 //
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else `origin/main`; the
 // changes are those since its merge-base with HEAD, committed or not, untracked files included. Always: `git diff
-// --check`, the format check of the changed files, oxlint and knip, each as CI runs it. Then each project a changed
-// path belongs to (`projectsFor`): its type check and tests. A changed path no project claims, other than
-// documentation, runs every project's checks.
+// --check`, the format check of the changed files, oxlint, knip and the doc links, each as CI runs it. Then each
+// project a changed path belongs to (`projectsFor`): its type check and tests. A changed path no project claims, other
+// than documentation, runs every project's checks.
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
 // detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
@@ -40,12 +40,13 @@ export const PROJECTS = {
   },
   "oxlint-rules": { claims: (path) => path.startsWith("tools/oxlint/"), checks: ["test:lint"] },
   tools: {
-    claims: (path) => /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path),
+    claims: (path) =>
+      /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path) || path.startsWith("tools/repository-checks/"),
     checks: ["test:verification"],
   },
 };
 
-/** A path whose change no project's check covers, as CI checks none of it: documentation. */
+/** A path no project claims: documentation, whose links the always-run doc-link check covers. */
 const isDocumentation = (path) => path.endsWith(".md") || path.startsWith("docs/");
 
 /**
@@ -258,6 +259,7 @@ async function check(cleanups) {
       : []),
     run("oxlint", process.execPath, ["tools/oxlint/run.mjs"]),
     run("knip", process.execPath, ["node_modules/knip/bin/knip.js"]),
+    run("doc links", process.execPath, ["tools/repository-checks/doc-links.mjs"]),
   ];
   for (const project of projects)
     for (const check of PROJECTS[project].checks)
