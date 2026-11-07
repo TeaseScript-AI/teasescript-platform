@@ -318,6 +318,13 @@ if (process.argv[2] === "--child") {
       used.allowance[earlier],
     ]);
     running = { seq, run: index, tree, mode, check, since: Date.now(), before };
+    // (a fresh exception first: V8 keeps the last one thrown, whose unformatted stack holds its frames' receivers, so one
+    // caught inside the run before would keep that run's whole analysis reachable during this one, #1837)
+    try {
+      throw new Error("families-runner: a fresh exception before each run");
+    } catch {
+      // (only the throw matters)
+    }
     spent = 0;
     allowance = null;
     limit = Infinity;
@@ -518,7 +525,8 @@ if (process.argv[2] === "--child") {
         }),
       ],
       {
-        execArgv: [`--max-old-space-size=${memory}`],
+        // (`--expose-gc`: the oracle's memory room collects once where the heap in use passes its reserve, #1837)
+        execArgv: [`--max-old-space-size=${memory}`, "--expose-gc"],
         serialization: "advanced",
         stdio: ["ignore", "ignore", "pipe", "ipc"],
       },

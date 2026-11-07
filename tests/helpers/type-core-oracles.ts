@@ -333,13 +333,44 @@ export const QUESTION_BYTES_PER_CELL = 640;
  */
 const QUESTION_HEAP_RESERVE = 1_536 * 2 ** 20;
 
+/** Beside the questions, what V8 needs to collect where a run starts with more live than the reserve: 512 MiB. */
+const QUESTION_HEAP_HEADROOM = 512 * 2 ** 20;
+
 /**
- * The questions' room in the heap: this process's V8 heap limit (fixed by its `--max-old-space-size`, as the families
- * runner sets it) less the reserve, or a test's (`withQuestionMemory`).
+ * The questions' room in the heap, taken as they start: this process's V8 heap limit (fixed by its
+ * `--max-old-space-size`, as the families runner sets it) less the reserve, so that a stop lands at the same cell on
+ * every run. Only where the heap in use passes the reserve and the process can collect (`--expose-gc`, as the runner's
+ * child has it) is the live heap after a collection taken: where that too passes the reserve, something before the run
+ * still holds its heap, and the room is what is left beside it, less the headroom, so that the run ends as `memory`
+ * instead of in V8's abort. Or a test's (`withQuestionMemory`).
  */
 let questionRoom: number | null = null;
-const heapRoom = (): number =>
-  questionRoom ?? getHeapStatistics().heap_size_limit - QUESTION_HEAP_RESERVE;
+function heapRoom(): number {
+  if (questionRoom !== null) return questionRoom;
+  const { heap_size_limit: limit, used_heap_size: used } = getHeapStatistics();
+  // EVIDENCE: `globalThis.gc` exists only under `--expose-gc`, so its type is unknown here and is checked below.
+  const collect = (globalThis as { readonly gc?: unknown }).gc;
+  if (used <= QUESTION_HEAP_RESERVE || typeof collect !== "function")
+    return limit - QUESTION_HEAP_RESERVE;
+  collect();
+  const live = getHeapStatistics().used_heap_size;
+  return live <= QUESTION_HEAP_RESERVE
+    ? limit - QUESTION_HEAP_RESERVE
+    : limit - live - QUESTION_HEAP_HEADROOM;
+}
+
+/**
+ * Releases what V8 keeps of the last exception thrown: until its stack is formatted, an error holds its frames and their
+ * receivers, so one thrown and caught inside an analysis keeps the whole analysis reachable after it returns (1.1 GB
+ * at `W19-sources` k = 1,024 with sharing off), until another exception replaces it (#1837).
+ */
+function releaseLastException(): void {
+  try {
+    throw new Error("released");
+  } catch {
+    // (only the throw matters: it replaces V8's record of the last exception)
+  }
+}
 
 /** Test-only: `run` with the oracle's questions given `room` bytes of heap. */
 export function withQuestionMemory<T>(room: number, run: () => T): T {
@@ -402,6 +433,8 @@ class QuestionsStopped extends Error {
 class Questions {
   #units = 0;
   #cells = 0;
+  /** The questions' room in the heap, taken at the first question (`heapRoom`). */
+  #room: number | null = null;
 
   public constructor() {
     questionsSoFar = { units: 0, cells: 0 };
@@ -425,7 +458,8 @@ class Questions {
     const allowance = questionBound.allowance ?? answers.budget.allowance;
     if (this.#units > allowance + questionBound.perCell * this.#cells)
       throw new QuestionsStopped("questions");
-    if (QUESTION_BYTES_PER_CELL * this.#cells > heapRoom()) throw new QuestionsStopped("memory");
+    this.#room ??= heapRoom();
+    if (QUESTION_BYTES_PER_CELL * this.#cells > this.#room) throw new QuestionsStopped("memory");
     return answer;
   }
 }
@@ -807,6 +841,7 @@ function publishedElements<Occurrence>(
     // (the analysis's parts first, its answers dropped when they end; then the route's compile, so that the two
     // analyses' heaps are never held at once: with sharing off each can take a gigabyte, #1603)
     const analysed = analysedElements(request, bindings, each);
+    releaseLastException();
     return { ...analysed, route: JSON.stringify(publishedRoute(files, globals).text) };
   });
 }
