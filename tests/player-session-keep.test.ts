@@ -19,6 +19,7 @@ import {
   MOVES,
   PRODUCERS,
   SUSPENSIONS,
+  UNHELD_AWAITS,
   caseName,
   stale,
   type Move,
@@ -1126,7 +1127,10 @@ for (const producer of Object.keys(SUSPENSIONS) as Producer[])
       });
     }
 
-test("continuation ownership holds every declared suspension of every producer", () => {
+test("continuation ownership holds every declared suspension, and names each await it does not hold", () => {
+  const heldPoints = new Set<string>(Object.values(SUSPENSIONS).flat());
+  for (const unheld of Object.keys(UNHELD_AWAITS))
+    assert.ok(!heldPoints.has(unheld), `${unheld} is both held and named unheld`);
   // EVIDENCE: invariant: the keys of `SUSPENSIONS`, which are the producers.
   for (const producer of Object.keys(SUSPENSIONS) as Producer[])
     assert.deepEqual(Object.keys(HELD[producer]).sort(), [...SUSPENSIONS[producer]].sort());
