@@ -979,8 +979,15 @@ interface RecordedCall {
   readonly by: string | undefined;
   readonly write: boolean;
   settled: "resolved" | "rejected" | null;
-  /** For a publication of a kept session, where its events begin: 0 for a first save. */
+  /** The scope a kept-store or room call names, or the namespace of a photo it stores. */
+  readonly scope?: string;
+  /** For a publication of a kept session: where its events begin (0 for a first save), and its state. */
   readonly eventsFrom?: number;
+  readonly snapshotJson?: string;
+  /** For a photo stored: its reference. */
+  readonly reference?: string;
+  /** For the host's capture of a session to keep: the state it gave, once it replied. */
+  capture?: { readonly snapshotJson: string; readonly eventsThrough: number };
 }
 
 /** The contexts a call of these runs may have: the operation's, the move's, or none for the page's lifecycle. */
@@ -997,32 +1004,58 @@ function unowned(calls: readonly RecordedCall[]): string[] {
 }
 
 /**
- * Where the kept-store writes `writes`, made in one context, are not the keeps of a session: in each store, a room's
- * creation first, then keeps one after another, each a discard, its photos and a first save, or its photos and a later
- * save. A write besides, such as a discard after the last save, is one no keep made.
+ * The move's kept-store and room writes no keep of the session it started accounts for. The ledger is the host's own
+ * replies to the move's captures: each save must consume one, with its state, in the scope, its events beginning at 0
+ * right after a discard and within the capture otherwise; a discard comes only before a first save, a photo only of a
+ * captured state, and a room's creation once. A write besides fails, whatever it stores.
  */
-function strayKeepWrites(writes: readonly RecordedCall[]): string[] {
+function unledgered(calls: readonly RecordedCall[]): string[] {
   const stray: string[] = [];
+  const entries = calls.flatMap((made, index) =>
+    made.by === MOVE && made.capture !== undefined ? [{ index, ...made.capture, used: false }] : [],
+  );
   for (const store of ["kept.", "rooms."]) {
     let discarded = false;
-    let first = true;
-    for (const made of writes.filter((write) => write.name.startsWith(store))) {
+    let created = false;
+    calls.forEach((made, index) => {
+      if (made.by !== MOVE || !made.write || !made.name.startsWith(store)) return;
       const method = made.name.slice(store.length);
-      // A room's creation comes first; a keep's photos come anywhere within it.
-      const opening = method === "create" && first;
-      first = false;
-      if (opening || method === "media.add") continue;
-      if (method === "discard" || method === "discardSession") {
-        if (discarded) stray.push(`${made.name}, a second discard`);
+      const where = `${made.name} (call ${index})`;
+      if (made.scope !== SCOPE) stray.push(`${where} in scope ${made.scope}`);
+      else if (method === "media.add") {
+        const reference = made.reference ?? "";
+        if (
+          !entries.some(
+            (entry) => !entry.used && entry.index < index && entry.snapshotJson.includes(reference),
+          )
+        )
+          stray.push(`${where}: a photo no capture shows`);
+      } else if (method === "create") {
+        if (created) stray.push(`${where}: a second room`);
+        created = true;
+      } else if (method === "discard" || method === "discardSession") {
+        if (discarded) stray.push(`${where}: a second discard`);
         discarded = true;
       } else if (method === "publish") {
-        if ((made.eventsFrom === 0) !== discarded)
-          stray.push(
-            `${made.name} from ${made.eventsFrom}, ${discarded ? "after" : "without"} a discard`,
-          );
+        const entry = entries.find(
+          (candidate) =>
+            !candidate.used &&
+            candidate.index < index &&
+            candidate.snapshotJson === made.snapshotJson,
+        );
+        if (entry === undefined)
+          stray.push(`${where}: no capture of the move's session gives its state`);
+        else {
+          entry.used = true;
+          const from = made.eventsFrom ?? -1;
+          if ((from === 0) !== discarded || from > entry.eventsThrough)
+            stray.push(
+              `${where}: its events from ${from}, ${discarded ? "after" : "without"} a discard`,
+            );
+        }
         discarded = false;
-      } else stray.push(`${made.name}, no keep's write`);
-    }
+      } else stray.push(`${where}: no keep's write`);
+    });
     if (discarded) stray.push(`${store}discard, no save after it`);
   }
   return stray;
@@ -1066,18 +1099,30 @@ function recorder(context: TestContext, at: FamilyBrowser) {
     return gate;
   };
   const record = (name: string, write: boolean, args: readonly unknown[] = []): RecordedCall => {
-    const update: unknown = name.endsWith(".publish") ? args[1] : undefined;
+    const [first, second] = args;
+    const media = name.includes(".media.");
+    const photo =
+      media && typeof first === "object" && first !== null && "reference" in first ? first : null;
+    const update =
+      name.endsWith(".publish") && typeof second === "object" && second !== null ? second : null;
     const made: RecordedCall = {
       name,
       destination: name.slice(0, name.lastIndexOf(".")),
       by: contexts.getStore(),
       write,
       settled: null,
-      ...(typeof update === "object" &&
-      update !== null &&
-      "eventsFrom" in update &&
-      typeof update.eventsFrom === "number"
+      ...(typeof first === "string" && !media ? { scope: first } : {}),
+      ...(photo !== null && "namespace" in photo && typeof photo.namespace === "string"
+        ? { scope: photo.namespace }
+        : {}),
+      ...(photo !== null && typeof photo.reference === "string"
+        ? { reference: photo.reference }
+        : {}),
+      ...(update !== null && "eventsFrom" in update && typeof update.eventsFrom === "number"
         ? { eventsFrom: update.eventsFrom }
+        : {}),
+      ...(update !== null && "snapshotJson" in update && typeof update.snapshotJson === "string"
+        ? { snapshotJson: update.snapshotJson }
         : {}),
     };
     calls.push(made);
@@ -1149,6 +1194,28 @@ function recorder(context: TestContext, at: FamilyBrowser) {
             ? Promise.reject(new Error("The request failed."))
             : request(...args),
         );
+        // The move's own captures: the ledger its saves consume.
+        if (args[0] === "captureKeep" && by === MOVE)
+          reply.then(
+            (result) => {
+              const capture: unknown = result.result;
+              if (
+                typeof capture === "object" &&
+                capture !== null &&
+                "kind" in capture &&
+                capture.kind === "captured" &&
+                "snapshotJson" in capture &&
+                typeof capture.snapshotJson === "string" &&
+                "eventsThrough" in capture &&
+                typeof capture.eventsThrough === "number"
+              )
+                made.capture = {
+                  snapshotJson: capture.snapshotJson,
+                  eventsThrough: capture.eventsThrough,
+                };
+            },
+            () => {},
+          );
         if (args[0] === "restoreKept" && by === OPERATION)
           reply.then(
             (result) => {
@@ -1255,7 +1322,8 @@ function familyBrowser(route: "plain" | "captured" = "captured") {
       throw new DOMException("The storage is full.", "QuotaExceededError");
     return discardSession(scope);
   };
-  return { ...base, provider, kept, repository, rooms, failing, state };
+  // The kept store as it is, beside the recorder's: a control reads it without a call of its own.
+  return { ...base, provider, kept, rawKept: kept, repository, rooms, failing, state };
 }
 type FamilyBrowser = ReturnType<typeof familyBrowser>;
 
@@ -1723,12 +1791,8 @@ async function ownershipRun(
       [],
       "the move wrote what it does not make itself",
     );
-    // And its kept-store writes are the keeps of the session it started, one after another, nothing besides.
-    assert.deepEqual(
-      strayKeepWrites(since.filter((made) => made.by === MOVE && made.write)),
-      [],
-      "the move's kept-store writes are not its keeps",
-    );
+    // And each of its kept-store writes is one of the keeps of the session it started, by the host's own captures.
+    assert.deepEqual(unledgered(since), [], "the move's kept-store writes are not its keeps");
   }
   const late = own(recorded.calls.slice(callsAtMark));
   if (!retires) {
@@ -1820,58 +1884,77 @@ for (const name of Object.keys(VARIANTS) as VariantName[]) {
     }
 }
 
-// The checks' own controls: a discard of the moved-on page's kept session, made once the run settled, fails the row
-// whatever context it carries; the unchanged row passes.
-for (const label of [MOVE, "foreign", OPERATION, undefined])
+// The checks' own controls, on one row (a stale restore, its page moved to another plan, whose Start runs and keeps
+// itself). Once the run settled, each control writes the moved-on page's kept session in a context, with nothing else:
+// its setup reads the store as it is, past the recorder. Each must fail the row for its own reason; the same control
+// without its write passes.
+const CONTROL_POINT = { index: 3, name: "kept.media.get", skip: 0 };
+const control = (context: TestContext, write?: (at: FamilyBrowser) => Promise<void>) =>
+  ownershipRun(
+    context,
+    "restoreKept captured sessionPhoto",
+    CONTROL_POINT,
+    "otherPlan",
+    async (at) => {
+      assert.ok((await at.rawKept.session(SCOPE)) !== null, "the moved-on session is kept");
+      await write?.(at);
+    },
+  );
+const failsFor = (pattern: RegExp) => (error: unknown) =>
+  error instanceof assert.AssertionError && pattern.test(error.message);
+test("continuation ownership's checks: a control without its write passes", async (context) => {
+  await control(context);
+});
+for (const [label, reason] of [
+  [MOVE, /the move's kept-store writes are not its keeps/],
+  ["foreign", /a call no context owns/],
+  [OPERATION, /made calls after the move/],
+  [undefined, /a call no context owns/],
+] as const)
   test(`continuation ownership's checks catch a stray discard in context ${label ?? "none"}`, async (context) => {
-    const point = { index: 3, name: "kept.media.get", skip: 0 };
     await assert.rejects(
-      ownershipRun(context, "restoreKept captured sessionPhoto", point, "otherPlan", async (at) => {
-        assert.ok((await at.kept.session(SCOPE)) !== null, "the moved-on session is kept");
-        await (label === undefined
+      control(context, (at) =>
+        label === undefined
           ? at.kept.discard(SCOPE)
-          : contexts.run(label, () => at.kept.discard(SCOPE)));
-      }),
-      assert.AssertionError,
+          : contexts.run(label, () => at.kept.discard(SCOPE)),
+      ),
+      failsFor(reason),
     );
   });
-test("continuation ownership's checks of a move's keeps", () => {
-  const write = (name: string, eventsFrom?: number): RecordedCall => ({
-    name,
-    destination: name.slice(0, name.lastIndexOf(".")),
-    by: MOVE,
+/** The page's first kept state, an earlier one than the moved-on session's, published in the move's context. */
+async function republish(at: FamilyBrowser, scope: string, from: "later" | "first") {
+  const earlier = at.published[0]!;
+  const count = (await at.rawKept.session(SCOPE))?.events.length ?? 0;
+  await contexts.run(MOVE, async () => {
+    if (from === "first") await at.kept.discard(scope);
+    await at.kept.publish(
+      scope,
+      from === "first"
+        ? earlier
+        : { ...earlier, planJson: null, eventsFrom: count, events: [], eventsJson: [] },
+    );
+  });
+}
+for (const [what, scope, from] of [
+  ["a later save of an earlier state", SCOPE, "later"],
+  ["a whole keep of an earlier state", SCOPE, "first"],
+  ["a whole keep in another scope", "development-package:other", "first"],
+] as const)
+  test(`continuation ownership's checks catch ${what} in the move's context`, async (context) => {
+    await assert.rejects(
+      control(context, (at) => republish(at, scope, from)),
+      failsFor(/the move's kept-store writes are not its keeps/),
+    );
+  });
+test("continuation ownership's checks: a call of an unknown context is no one's", () => {
+  const made: RecordedCall = {
+    name: "kept.discard",
+    destination: "kept",
+    by: "foreign",
     write: true,
     settled: "resolved",
-    ...(eventsFrom === undefined ? {} : { eventsFrom }),
-  });
-  const keep = [write("kept.discard"), write("kept.media.add"), write("kept.publish", 0)];
-  assert.deepEqual(strayKeepWrites([...keep, write("kept.publish", 3)]), []);
-  assert.deepEqual(
-    strayKeepWrites([
-      write("rooms.create"),
-      write("rooms.discardSession"),
-      write("rooms.publish", 0),
-    ]),
-    [],
-  );
-  assert.notDeepEqual(
-    strayKeepWrites([...keep, write("kept.discard")]),
-    [],
-    "a discard after the save",
-  );
-  assert.notDeepEqual(
-    strayKeepWrites([write("kept.publish", 0)]),
-    [],
-    "a first save without a discard",
-  );
-  assert.notDeepEqual(
-    strayKeepWrites([write("kept.discard"), write("kept.publish", 2)]),
-    [],
-    "a later save after one",
-  );
-  assert.deepEqual(unowned([{ ...write("kept.discard"), by: "foreign" }]), [
-    "foreign:kept.discard",
-  ]);
+  };
+  assert.deepEqual(unowned([made]), ["foreign:kept.discard"]);
 });
 
 // An import queued behind saved-values work issued before it, and retired while it waits: when the queue reaches it,
