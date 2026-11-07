@@ -7,11 +7,11 @@ classes a line is tagged with and the owner of each. An owner is a role or a fil
 
 | Class | What it is, with an example | Owner |
 | --- | --- | --- |
-| misleading code | A name, type, comment or document that promises more than the code does, or something other ([Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead)). | The owning module, fixed at the source. |
+| misleading code | A name, type, comment or document that promises more than the code does, or something other than what it does ([Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead)). | The owning module, fixed at the source. |
 | structure | Code outside the module or folder its owner names, or a structure signal left unanswered ([Code structure](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-structure)). | The coordinator, for the whole. |
 | tool contract | A tool, flag or default that silently does something other than what its caller set: a test runner's child-heap flag overriding `NODE_OPTIONS` and the job's memory bound. | Whoever changes the tool. Its header or README is the contract. |
 | wasted compute | A run that could not change the result: hundreds of jobs each rebuilding the same tree, a check asking for more memory than any worker has, a retry with a setting that changes nothing. | Whoever submits the run. The queue's own behavior belongs to the agent environment's documentation. |
-| author-facing wording | A diagnostic or a sentence in the documentation that tells the author nothing: "because of line 2", pointing at the use itself. | [`DIAGNOSTICS.md`](DIAGNOSTICS.md) and the rule's one home. |
+| author-facing wording | A diagnostic or a sentence in the documentation that tells the author nothing: "because of line 2", pointing at the use itself. | [`TEASESCRIPT-REFERENCE.md`](TEASESCRIPT-REFERENCE.md) for the sentences authors read about the language, [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for the diagnostic forms. |
 | test weaker than its name | A test or oracle that checks less than its title says. | The test's file, under [`TESTING.md`](TESTING.md). |
 | unsourced status | A status with no source, or with a stale one: "CI running" for a pull request whose CI never started because it conflicted; a local ref fetched without `+`. | Whoever states it. A status names its run, job or SHA. |
 | harness delivery and wake | A message, wake or turn end that did not arrive, or that ran empty: reports sent as a turn's final message that never reached the coordinator. | The agent environment's documentation. |
@@ -29,5 +29,6 @@ with its owner.
 When lines keep returning to one subject, such as a tool, a document or a process, its owner gives it a one-page
 contract if it has none. The contract states what the subject does, its defaults, and what it overrides or refuses.
 
-A filed line becomes an issue with the `friction` label and the first line `Friction class: <class>`, so the open
-issues per class are the backlog. A line fixed in place needs no issue: its report is its record.
+A filed line becomes an issue with the `friction` label and the first line `Friction class: <class>`. The open backlog
+per class is the open `friction` issues grouped by that first line. A line fixed in place needs no issue: its report is
+its record.
