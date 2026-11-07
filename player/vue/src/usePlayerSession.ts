@@ -366,7 +366,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // the host answered.
   const debugTracing = ref(false);
   const traceId = shallowRef<number | null>(null);
+  // Counts the Player's tracing changes on this connection: each change's serial, which every op that sets the host's
+  // trace carries (`TracingIntent`), so the host applies only the newest, whichever channel brings it first.
   let tracingToggles = 0;
+  /** The Player's newest tracing intent, or `undefined` before any change (the host's trace is then off). */
+  const tracingIntent = () =>
+    tracingToggles === 0 ? undefined : { on: debugTracing.value, intent: tracingToggles };
   /**
    * A view of Debug's value trace for the shown session, made in the host (`debugView`, `debug-view.ts`): the reply
    * names the revision and trace it shows, which its caller compares with what shows when it arrives. `null` without a
@@ -2635,9 +2640,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         await host.request(restored, "beginRecording", null);
         owned();
         if (debugTracing.value)
-          void host.request(restored, "restartTrace", { tracing: true }).catch((error: unknown) => {
-            if (!endsQuietly(error) && !disposed && !stopped.value) reportHostError(error);
-          });
+          void host
+            .request(restored, "restartTrace", { tracing: tracingIntent() })
+            .catch((error: unknown) => {
+              if (!endsQuietly(error) && !disposed && !stopped.value) reportHostError(error);
+            });
         let continued: PlayerSession = host.latest(restored) ?? restored;
         // A session kept while paused at a random draw goes on with its natural outcome first: until then, the engine
         // takes no other input.
@@ -2754,7 +2761,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             recorder: made.recorder,
             ...(made.debugTrace === null ? {} : { debugTrace: made.debugTrace }),
           }),
-        debugTracing.value,
+        tracingIntent(),
       );
     const startOptions = { ...create.options(), debugMode: recording.debugMode };
     const control = recording.randomControl;
@@ -2767,7 +2774,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         extras: { randomControl: control },
         recording: true,
       },
-      debugTracing.value,
+      tracingIntent(),
     );
   }
   /**
@@ -3024,7 +3031,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       traceId.value = null;
       const toggle = ++tracingToggles;
       const ask = (host: PlayerBridge) =>
-        host.client.request("debugTracing", { on }).then((reply) => {
+        host.client.request("debugTracing", { on, intent: toggle }).then((reply) => {
           // EVIDENCE: validation: `debugTracing` replies from the same build with the trace it holds now.
           const now = (reply.result as { readonly traceId: number | null }).traceId;
           if (toggle === tracingToggles && !disposed) traceId.value = now;

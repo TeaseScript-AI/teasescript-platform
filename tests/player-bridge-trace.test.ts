@@ -104,7 +104,7 @@ async function playTape(
   traced: boolean,
   check?: (session: PlayerSession, view: DebugView | null) => void,
 ) {
-  if (traced) await bridge.client.request("debugTracing", { on: true });
+  if (traced) await bridge.client.request("debugTracing", { on: true, intent: 1 });
   let session = await bridge.start(await prepared(bridge), START, false);
   const steps: unknown[] = [];
   const record = async (op: string) => {
@@ -279,7 +279,7 @@ test("a view opens the rows the player chose and shows more pages, and its copy 
 
 test("a stopped session is still viewed as its stop froze it, and other requests are refused", async () => {
   await onBoth(async (bridge, name) => {
-    await bridge.client.request("debugTracing", { on: true });
+    await bridge.client.request("debugTracing", { on: true, intent: 1 });
     const session = await bridge.start(await prepared(bridge), START, false);
     const before = await bridge.view<DebugView>(session, "debugView", {
       request: everything(0, null),
@@ -298,26 +298,35 @@ test("a stopped session is still viewed as its stop froze it, and other requests
 
 test("tracing off drops the trace, on makes a new one, and Debug mode is the script's to read", async () => {
   await onBoth(async (bridge, name) => {
-    const on = (await bridge.client.request("debugTracing", { on: true })).result;
+    const on = (await bridge.client.request("debugTracing", { on: true, intent: 1 })).result;
     assert.deepEqual(on, { traceId: 1 }, name);
-    // Asking again changes nothing.
-    assert.deepEqual((await bridge.client.request("debugTracing", { on: true })).result, on);
+    // Asking again changes nothing; an older intent neither.
+    assert.deepEqual(
+      (await bridge.client.request("debugTracing", { on: true, intent: 2 })).result,
+      on,
+    );
+    assert.deepEqual(
+      (await bridge.client.request("debugTracing", { on: false, intent: 1 })).result,
+      on,
+    );
     let session = await bridge.start(await prepared(bridge), START, false);
     assert.equal(
       (await bridge.view<DebugView>(session, "debugView", { request: everything(0, null) }))
         .traceId,
       1,
     );
-    assert.deepEqual((await bridge.client.request("debugTracing", { on: false })).result, {
-      traceId: null,
-    });
+    assert.deepEqual(
+      (await bridge.client.request("debugTracing", { on: false, intent: 3 })).result,
+      { traceId: null },
+    );
     assert.equal(
       (await bridge.view<DebugView>(session, "debugView", { request: everything(0, null) })).status,
       null,
     );
-    assert.deepEqual((await bridge.client.request("debugTracing", { on: true })).result, {
-      traceId: 2,
-    });
+    assert.deepEqual(
+      (await bridge.client.request("debugTracing", { on: true, intent: 4 })).result,
+      { traceId: 2 },
+    );
     const set = await bridge.request<{ readonly kind: string }>(session, "setDebugMode", {
       on: true,
     });
@@ -335,7 +344,15 @@ test("tracing off drops the trace, on makes a new one, and Debug mode is the scr
 test("malformed trace arguments are refused before anything runs", async () => {
   const bridge = await inProcessBridge();
   const session = await bridge.start(await prepared(bridge), START, false);
-  for (const args of [null, {}, { on: 1 }, { on: true, more: 1 }])
+  for (const args of [
+    null,
+    {},
+    { on: true },
+    { on: 1, intent: 1 },
+    { on: true, intent: 0 },
+    { on: true, intent: 1.5 },
+    { on: true, intent: 1, more: 1 },
+  ])
     await assert.rejects(bridge.client.request("debugTracing", args), refusedAs("arguments"));
   for (const args of [null, {}, { on: "yes" }])
     await assert.rejects(bridge.request(session, "setDebugMode", args), refusedAs("arguments"));

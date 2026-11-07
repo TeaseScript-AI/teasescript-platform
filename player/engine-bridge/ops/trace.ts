@@ -1,7 +1,12 @@
 import { debugViewOf, type DebugTreeState, type DebugViewRequest } from "../../debug-view.js";
 import { setPlayerRuntimeDebugMode } from "../../runtime-adapter.js";
 import { exactly, isRecord } from "../argument-checks.js";
-import { alignTrace, type PlayerOpsContext } from "../player-ops.js";
+import {
+  alignTrace,
+  isTracingIntent,
+  type PlayerOpsContext,
+  type TracingIntent,
+} from "../player-ops.js";
 import type { BridgeOps } from "../worker-host.js";
 import { publishing, sessionOp } from "./session.js";
 
@@ -49,27 +54,29 @@ function isViewRequest(value: unknown): value is DebugViewRequest {
 
 export function traceOps(context: PlayerOpsContext): BridgeOps {
   return {
-    // Turns the connection's value trace on, as a new trace with no history, or off, dropping it with its history. A
-    // session takes it at its next operation; the reply names the trace now (`traceId`), `null` without one.
+    // The Player's tracing intent through the connection's queue: on, as a new trace with no history, or off, dropping
+    // it with its history, unless a newer intent arrived first (`alignTrace`). A session takes the trace at its next
+    // operation; the reply names the trace now (`traceId`), `null` without one.
     debugTracing: {
       session: "none",
-      checkArguments: (args) =>
-        isRecord(args) && exactly(args, ["on"]) && typeof args.on === "boolean",
+      checkArguments: isTracingIntent,
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted `on` as a boolean.
-        const { on } = args as { readonly on: boolean };
-        return { result: { traceId: alignTrace(context, on) } };
+        // EVIDENCE: validation: checkArguments accepted a tracing intent.
+        const intent = args as TracingIntent;
+        return { result: { traceId: alignTrace(context, intent) } };
       },
     },
     // A new epoch of the connection's trace (`"restore"`), at a session whose recording began anew: Continue asks for it
     // once it owns the UI, so a Continue a Start replaced or a stop interrupted leaves the trace as it was. It carries
-    // the Player's intent (`tracing`), which the trace follows first (`alignTrace`).
+    // the Player's intent (`tracing`), which the trace follows first (`alignTrace`); one older than the newest applied
+    // came before a newer change and resets nothing, so it cannot clear a trace that change began.
     restartTrace: sessionOp(
-      (args) => isRecord(args) && exactly(args, ["tracing"]) && typeof args.tracing === "boolean",
+      (args) => isRecord(args) && exactly(args, ["tracing"]) && isTracingIntent(args.tracing),
       (_held, args) => {
-        // EVIDENCE: validation: checkArguments accepted `tracing` as a boolean.
-        alignTrace(context, (args as { readonly tracing: boolean }).tracing);
-        context.trace?.reset("restore");
+        // EVIDENCE: validation: checkArguments accepted `tracing` as a tracing intent.
+        const { tracing } = args as { readonly tracing: TracingIntent };
+        alignTrace(context, tracing);
+        if (tracing.intent === context.traceIntent) context.trace?.reset("restore");
         return { result: null, view: null };
       },
       false,

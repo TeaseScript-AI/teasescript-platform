@@ -138,17 +138,44 @@ export interface PlayerOpsContext {
   trace: RuntimeDebugContext | null;
   /** Counts the traces this connection made, so that a reply names the one it read. */
   traceId: number;
+  /** The serial of the newest tracing intent the host applied (`alignTrace`); `0` before any. */
+  traceIntent: number;
 }
 
 /**
- * Makes the connection's value trace follow the Player's intent `on`: a new trace with no history, or none. An op that
- * begins an epoch carries the intent, so it holds also while the Player's `debugTracing` request still waits in the
- * connection's queue. Returns the trace's ID now, or `null`.
+ * One tracing change of the Player: on or off, with its serial, which the Player counts up with each change. Every op
+ * that sets the connection's trace carries one, through whichever channel it arrives.
  */
-export function alignTrace(context: PlayerOpsContext, on: boolean): number | null {
-  if (on !== (context.trace !== null)) {
-    context.trace = on ? new RuntimeDebugContext() : null;
-    if (on) context.traceId += 1;
+export interface TracingIntent {
+  readonly on: boolean;
+  readonly intent: number;
+}
+
+/** Whether `value` is a `TracingIntent`. */
+export const isTracingIntent = (value: unknown): value is TracingIntent =>
+  isRecord(value) &&
+  exactly(value, ["on", "intent"]) &&
+  typeof value.on === "boolean" &&
+  typeof value.intent === "number" &&
+  Number.isSafeInteger(value.intent) &&
+  value.intent >= 1;
+
+/**
+ * Makes the connection's value trace follow the Player's newest tracing intent: a new trace with no history, or none.
+ * The intent arrives through the connection's queue (`debugTracing`) or with the work that begins an epoch (a Start in
+ * the host, Continue's `restartTrace`), in any order; one older than the newest applied does nothing, so a change still
+ * queued never undoes a newer one. Returns the trace's ID now, or `null`.
+ */
+export function alignTrace(
+  context: PlayerOpsContext,
+  { on, intent }: TracingIntent,
+): number | null {
+  if (intent > context.traceIntent) {
+    context.traceIntent = intent;
+    if (on !== (context.trace !== null)) {
+      context.trace = on ? new RuntimeDebugContext() : null;
+      if (on) context.traceId += 1;
+    }
   }
   return context.trace === null ? null : context.traceId;
 }
@@ -168,6 +195,7 @@ export function playerOpsContext(): PlayerOpsContext {
     debug: new DebugCaches(),
     trace: null,
     traceId: 0,
+    traceIntent: 0,
   };
 }
 

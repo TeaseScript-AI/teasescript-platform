@@ -359,6 +359,69 @@ test("a Start in the host while tracing waits behind a compile traces from its f
   assert.equal(player.traceId.value, 1);
 });
 
+// L5i.3, Sol r2 R2.1: the composable's tracing changes, queued behind a compile, with a Start in the host after any
+// of them. Generated from two axes, the toggle sequence and the Start's place in it; after every reply settles, the
+// trace is as the newest change says, a Start after it keeps its history, and the composable names the host's trace.
+const TOGGLES = { on: [true], "on-off": [true, false], "on-off-on": [true, false, true] } as const;
+const TOGGLE_NAMES = ["on", "on-off", "on-off-on"] as const;
+const TOGGLE_CASES = TOGGLE_NAMES.flatMap((sequence) =>
+  [...Array(TOGGLES[sequence].length + 1).keys()].map((startAfter) => ({
+    sequence,
+    startAfter,
+    name: `${sequence}, Start after ${startAfter}`,
+  })),
+);
+test("the tracing cases cover every sequence and every place of the Start", () => {
+  for (const sequence of TOGGLE_NAMES)
+    for (let place = 0; place <= TOGGLES[sequence].length; place += 1)
+      assert.ok(TOGGLE_CASES.some((each) => each.name === `${sequence}, Start after ${place}`));
+});
+for (const { sequence, startAfter, name } of TOGGLE_CASES)
+  test(`tracing changes behind a compile, with a Start in the host: ${name}`, async (context) => {
+    const { player, bridge } = await mount(context, 80);
+    const preparing = bridge.client.request("prepare", {
+      source: { kind: "source", script: "exit" },
+    });
+    const toggles = TOGGLES[sequence];
+    let started: Promise<void> | null = null;
+    const start = () => {
+      player.prepare(factory('let mood = "calm"\nsay "${mood}", instant\nshowButton "Done"\nexit'));
+      started = player.activate();
+    };
+    toggles.forEach((on, index) => {
+      if (index === startAfter) start();
+      player.setDebugTracing(on);
+    });
+    if (startAfter === toggles.length) start();
+    await started;
+    await preparing;
+    await pause(600);
+    const newest = toggles.at(-1)!;
+    const trace = facade.heldTrace(bridge);
+    assert.equal(trace !== null, newest, `${name}: on as asked last`);
+    const view = await player.debugView({
+      messages: { limit: 20, openNewest: false },
+      selected: null,
+      variables: null,
+      image: false,
+      trees: {},
+    });
+    assert.equal(
+      player.traceId.value,
+      newest ? view!.traceId : null,
+      `${name}: the composable names the host's trace`,
+    );
+    if (newest && startAfter === toggles.length) {
+      // The Start came after the newest change: it traced from its first statement, and keeps it.
+      const status = trace!.status();
+      assert.deepEqual([status.origin, status.records >= 2], ["start", true], name);
+      assert.ok(
+        (view!.messages?.count ?? 0) >= 1,
+        `${name}: recent chat holds the Start's message`,
+      );
+    }
+  });
+
 // L5i.3, Sol r1 R3: a view of an older publication does not stay shown once a newer one shows.
 test("a shown view of an older publication goes once a newer one shows, until its own view arrives", async (context) => {
   const { player } = await mount(context, 80);
