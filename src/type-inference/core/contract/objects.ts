@@ -387,12 +387,14 @@ function* literalObjects(
       readGroupsAt(contract, node.reads, false),
     )) {
       // (a mixed class reads its other members where their answers differ: that depends on the property)
-      if (group.rest.length > 0 && group.mixed !== 0) out.complete = false;
-      for (const entry of each(program.work, "objectSteps", group.read)) {
-        if (!out.complete) return;
-        yield* out.from(objectsAt(contract, entry.value, belowSteps()));
+      if (group.rest.length > 0 && group.mixed !== 0) {
+        out.complete = false;
+        return;
       }
-      if (!out.complete) return;
+      for (const entry of each(program.work, "objectSteps", group.read)) {
+        yield* out.from(objectsAt(contract, entry.value, belowSteps()));
+        if (!out.complete) return;
+      }
     }
     const groups = othersAt(contract, node.others, false);
     for (const group of each(
@@ -405,10 +407,9 @@ function* literalObjects(
         return;
       }
       for (const entry of each(program.work, "objectSteps", group.read)) {
-        if (!out.complete) return;
         yield* out.from(objectsAt(contract, entry.value, belowSteps()));
+        if (!out.complete) return;
       }
-      if (!out.complete) return;
     }
     // a reference here answers an opaque member below it (F19a), beside any `missing`
     if (node.reference) {
