@@ -486,3 +486,53 @@ test("a covered objects query charges exactly the visits its proof graph holds, 
   }
   assert.ok(checked > 20, String(checked));
 });
+
+/**
+ * The iterator steps `callback` takes (arrays', maps' and sets' `next`), counted beside the work ledger: an
+ * instrumented visit count with no clock, the uncharged-work probe's measure.
+ */
+function iteratorSteps<T>(callback: () => T): { readonly result: T; readonly steps: number } {
+  const prototypes = [
+    [][Symbol.iterator](),
+    new Map()[Symbol.iterator](),
+    new Set()[Symbol.iterator](),
+  ].map((iterator) => Object.getPrototypeOf(iterator) as { next: (...args: unknown[]) => unknown });
+  const nexts = prototypes.map((prototype) => prototype.next);
+  let steps = 0;
+  prototypes.forEach((prototype, at) => {
+    const next = nexts[at]!;
+    prototype.next = function (this: unknown, ...args: unknown[]) {
+      steps += 1;
+      return next.apply(this, args);
+    };
+  });
+  try {
+    return { result: callback(), steps };
+  } finally {
+    prototypes.forEach((prototype, at) => (prototype.next = nexts[at]!));
+  }
+}
+
+test("an objects query's construction does no uncharged work that grows with its family: per ask, iterator steps less charged units stay bounded (#1747)", () => {
+  // (the construction's growth row: each family's members' queries built fresh at k and 4k; a fourth uncharged loop
+  // shows as the uncharged part per ask growing with k)
+  for (const shape of SHAPES) {
+    const perAsk = [8, 32].map((k) => {
+      const pass = passesOf(family(shape, k, true), MODES[0]!, 30_000_000).at(-1)!;
+      const { program, contract, solver } = pass;
+      const members = [...program.hasOf.keys()].filter((literal) =>
+        contract.literalIndex(literal).root.children.has(shape === "different-steps" ? "a" : "p"),
+      );
+      const rest = shape === "different-steps" ? ["a", "p"] : ["p"];
+      return inMode(MODES[0]!, () => {
+        const before = program.work.total;
+        const { steps } = iteratorSteps(() => {
+          for (const literal of members) solver.run(absentWriterAt(contract, literal, rest, "zz"));
+        });
+        const charged = program.work.total - before;
+        return Math.max(0, steps - charged) / members.length;
+      });
+    });
+    assert.ok(perAsk[1]! <= perAsk[0]! * 1.25 + 4, `${shape}: ${perAsk.join(", ")}`);
+  }
+});
