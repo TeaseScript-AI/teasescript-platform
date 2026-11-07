@@ -1373,7 +1373,8 @@ survives checkpoint and restore, and replays a repeated completion as `alreadySe
 image or a photo taken for the request as session media with the lifecycle of a `takePhoto()` photo; see
 [Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation) for its file and camera routes.
 
-The Player opens the session camera after Start when the trusted host grants the camera capability, answers each capture
+The Player opens the session camera from the activating Start or Continue click, before ordinary script execution, when
+the trusted host grants the camera capability; a camera failure does not stop the start. It answers each capture
 once from that open stream, and delivers the answer until the runtime settles it. Captured photos are session media; a
 save stores the photos its value references durably before the value is persisted
 (`player/captured-media-persistence.ts`); when that fails, the host acknowledges the `storageWrite` as `failed`, so the
