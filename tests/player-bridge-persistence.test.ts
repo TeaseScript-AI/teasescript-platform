@@ -15,7 +15,7 @@ import {
 import type { PlayerSession } from "../player/runtime-view.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
-import { malformedArguments } from "./helpers/argument-forms.js";
+import { formObligations, malformedArguments } from "./helpers/argument-forms.js";
 import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
@@ -318,7 +318,13 @@ test("captureStorage reads the shown state's saved values in the host, at its re
     assert.equal(capture.revision, shown.revision);
     // Malformed arguments, each form the op's one form gives, are refused before it runs.
     const refused: string[] = [];
-    for (const { id, args } of malformedArguments([{ required: { session: "string" } }]))
+    const forms = [{ required: { session: "string" } }] as const;
+    const malformed = malformedArguments(forms);
+    assert.deepEqual(
+      malformed.map(({ id }) => id),
+      formObligations(forms),
+    );
+    for (const { id, args } of malformed)
       await bridge.client.request("captureStorage", args).then(
         () => refused.push(`${id}: accepted`),
         (error: unknown) => {

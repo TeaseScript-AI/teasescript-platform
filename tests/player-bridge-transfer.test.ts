@@ -28,7 +28,11 @@ import {
 import { readPlayerTransferText, restoreSessionTransfer } from "../player/session-transfer-read.js";
 import { storageTransferFile, type StorageBundle } from "../player/storage-transfer.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
-import { malformedArguments, type ArgumentForm } from "./helpers/argument-forms.js";
+import {
+  formObligations,
+  malformedArguments,
+  type ArgumentForm,
+} from "./helpers/argument-forms.js";
 import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
@@ -743,12 +747,12 @@ test("the transfer family covers every op, outcome and refusal of the reader", a
       OUTCOMES[row.op].some((outcome) => outcome === row.outcome),
       `${row.op} declares ${row.outcome}`,
     );
-  // Every malformed argument the forms give runs, under its own id.
+  // Every malformed argument the forms' domains oblige runs, under its own id.
   // EVIDENCE: invariant: the keys of `ARGUMENTS`, declared literally above.
   for (const op of Object.keys(ARGUMENTS) as TransferOp[])
     assert.deepEqual(
       rows.filter((row) => row.op === op && row.outcome === "malformed").map(({ form }) => form),
-      malformedArguments(ARGUMENTS[op]).map(({ id }) => id),
+      formObligations(ARGUMENTS[op]),
       `${op}'s malformed forms`,
     );
   const messages = rows.flatMap(({ expected }) =>

@@ -4,6 +4,8 @@
  * family can check that each one it generated also ran.
  */
 
+import { product } from "./family-coverage.js";
+
 /** The classes of argument values, each with values of other classes, which no op accepts for it. */
 const WRONG_VALUES = {
   string: [1, null, true, {}, [], new Uint8Array([1])],
@@ -68,4 +70,27 @@ export function malformedArguments(forms: readonly ArgumentForm[]): MalformedArg
       );
   });
   return found;
+}
+
+/**
+ * The ids every malformed argument of `forms` must have, derived from the forms' domains alone (`product`), not from
+ * `malformedArguments`: a family checks the rows it ran against these, so an argument the generator leaves out fails.
+ */
+export function formObligations(forms: readonly ArgumentForm[]): string[] {
+  const ids = ["null", "a string", "a list"];
+  forms.forEach((form, index) => {
+    const name = `form ${index + 1}`;
+    ids.push(`${name} with an extra field`);
+    for (const { field } of product({ field: Object.keys(form.required) }))
+      ids.push(`${name} without ${field}`);
+    const classes: Readonly<Record<string, ValueClass>> = { ...form.required, ...form.optional };
+    for (const [field, kind] of Object.entries(classes))
+      for (const { at } of product({
+        at: WRONG_VALUES[kind].map((_value, position) => String(position + 1)),
+      }))
+        ids.push(`${name} with ${field} as wrong ${kind} ${at}`);
+    for (let other = index + 1; other < forms.length; other += 1)
+      ids.push(`forms ${index + 1} and ${other + 1} together`);
+  });
+  return ids;
 }
