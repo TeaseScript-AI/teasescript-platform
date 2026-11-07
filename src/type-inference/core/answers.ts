@@ -788,11 +788,18 @@ export function solveDemands(
     // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store); a key's
     // contract by its key in this pass's identity (a wrapper's family's its cursor's)
     const [kind, ...parts] = key.split("|");
+    // (a value demand whose path came back as text is named by its path's id where its steps are a record's, as a
+    // copy's are, #1857)
+    const byId = (path: string): string => `.${pass.contract.pathIdOf(splitPath(path))}`;
     const answer =
       pass.solver.answer(key) ??
       (kind === "c" || kind === "rc"
         ? pass.solver.answer(joinParts(kind, pass.contract.canonicalKey(parts.join("|"))))
-        : undefined);
+        : kind === "op" && parts[1] && !parts[1].startsWith(".")
+          ? pass.solver.answer(joinParts("op", parts[0]!, byId(parts[1])))
+          : kind === "lit" && parts[1] && !parts[1].startsWith(".")
+            ? pass.solver.answer(joinParts("lit", parts[0]!, byId(parts[1]), parts[2] ?? "-"))
+            : undefined);
     if (answer === undefined) throw new Error(`The demand '${key}' did not finish.`);
     return answer;
   });
