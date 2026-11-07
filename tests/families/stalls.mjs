@@ -689,11 +689,12 @@ for (const [area, row] of rows) {
 // agreement as before, so that no round classifies them again
 const GROUPS = [
   "unanswered: questions",
+  "unanswered: read-depth",
   "unanswered: stopped",
   "unanswered: unknown",
   "unansweredAlike",
 ];
-const ISSUES = { "unanswered: questions": "#1837" };
+const ISSUES = { "unanswered: questions": "#1941" };
 const artefacts = new Map(
   GROUPS.map((group) => [group, { runs: 0, sources: new Set(), witness: null }]),
 );
@@ -728,6 +729,7 @@ for (const [place, was] of replay) {
         mode: left.mode,
         check: left.check,
         node: tree?.node ?? null,
+        ...(tree?.binding === undefined ? {} : { binding: tree.binding }),
       };
       const text = (w) => `${w.area} ${w.generator}/${w.source} ${w.mode} ${w.check}`;
       if (row.witness === null || text(witness) < text(row.witness)) row.witness = witness;

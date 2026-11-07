@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   analyseCore,
@@ -27,8 +29,11 @@ import {
   publishedAnswers,
   publishedRoute,
   publishedUpToOrder,
+  QUESTION_UNITS_PER_CELL,
+  questionWork,
   stoppedRecord,
   stopSet,
+  withQuestionBound,
 } from "./helpers/type-core-oracles.js";
 
 /*
@@ -162,35 +167,36 @@ test("a publication is its parts joined, byte for byte as the whole was written 
   assert.equal(publication(main("let = 1\n"), MODES[0]!, GLOBALS), null);
 });
 
-test("the oracle's own stop leaves the occurrences from it on unanswered, apart from the parts (#1499)", () => {
+/** `files`' bindings (`publishedAnswers`' places). */
+const bindingsOf = (request: NonNullable<ReturnType<typeof coreRequest>>) =>
+  new CoreProgram(request).places
+    .filter(({ kind }) => kind.kind === "binding")
+    .map((place) => place.id);
+
+/** An occurrence answer's cells, as the oracle's questions count them: its own, its element's, each property's. */
+const cellsOf = (answer: unknown): number => {
+  const [, , , , , element, properties] = answer as unknown[];
+  return 1 + (element === null ? 0 : 1) + (properties === null ? 0 : (properties as unknown[]).length);
+};
+
+test("the oracle's own questions stop past their bound, leaving the occurrences from there on unanswered, apart from the parts (#1499, #1837)", () => {
   const files = main(SMALL[0]!);
   const request = coreRequest(files, GLOBALS);
   assert.ok(request !== null);
-  const total = analyseCore(request).budget.total;
   const full = publicationParts(files, MODES[0]!, GLOBALS);
   assert.ok(full !== null && full.unanswered === 0);
+  // (what its questions spent apart, and the cells they returned: two a binding and each occurrence's)
+  const { units, cells } = questionWork();
+  const answered = analyseCore(request);
+  assert.equal(answered.budget.exhausted, null);
+  const asked = inMode(MODES[0]!, () => occurrences(analyseCore(request), (items) => items));
+  assert.equal(cells, 2 * bindingsOf(request).length + asked.map(cellsOf).reduce((a, b) => a + b, 0));
+  assert.ok(units > 0);
+  // (with no units per cell, the least allowance that answers it all is exactly what they spent)
   const at = (allowance: number) =>
-    withTestAllowance(allowance, () => publicationParts(files, MODES[0]!, GLOBALS)!);
-  const answered = (allowance: number): boolean =>
-    JSON.stringify(at(allowance)) === JSON.stringify(full);
-  // (the least allowance that answers it all: every lower one stops a question past the analysis's own total)
-  let above = 1;
-  while (!answered(total + above)) {
-    above *= 2;
-    assert.ok(above < 2 ** 24, "some allowance answers it all");
-  }
-  let [low, high] = [total, total + above];
-  while (high - low > 1) {
-    const middle = Math.floor((low + high) / 2);
-    if (answered(middle)) high = middle;
-    else low = middle;
-  }
-  // (one unit less: the analysis, its answers and the route finish, and the occurrences' questions stop)
-  const stopped = at(high - 1);
-  assert.equal(
-    withTestAllowance(high - 1, () => analyseCore(request).budget.exhausted),
-    null,
-  );
+    withQuestionBound(allowance, 0, () => publicationParts(files, MODES[0]!, GLOBALS)!);
+  assert.deepEqual(at(units), full);
+  const stopped = at(units - 1);
   assert.deepEqual(
     [stopped.answers, stopped.record, stopped.route],
     [full.answers, full.record, full.route],
@@ -198,13 +204,13 @@ test("the oracle's own stop leaves the occurrences from it on unanswered, apart 
   assert.ok(stopped.unanswered > 0, "the occurrences' questions stop");
   assert.deepEqual(stopped.occurrences, full.occurrences.slice(0, stopped.occurrences.length));
   assert.ok(stopped.occurrences.length < full.occurrences.length, "an occurrence stays unanswered");
-  // (why, #1837: the analysis finished, so its later questions exhausted the allowance, from the first node left)
-  const nodes = withTestAllowance(high - 1, () => analyseCore(request).graph.nodes);
+  // (why: the analysis finished, so its questions passed their bound, from the first node left)
+  const nodes = analyseCore(request).graph.nodes;
   const first = nodes[nodes.length - stopped.unanswered]!.id;
   assert.deepEqual(stopped.unansweredBy, { reason: "questions", node: first });
   assert.equal(full.unansweredBy, undefined);
   // (the count and why stay apart from the hashes, and the joined text never equals one answered in full)
-  withTestAllowance(high - 1, () => {
+  withQuestionBound(units - 1, 0, () => {
     assert.deepEqual(publicationHashes(files, MODES[0]!, GLOBALS), {
       parts: [stopped.answers, stopped.record, ...stopped.occurrences, stopped.route].map(sha256),
       unanswered: stopped.unanswered,
@@ -215,15 +221,47 @@ test("the oracle's own stop leaves the occurrences from it on unanswered, apart 
       `[${stopped.answers},${stopped.record},[${stopped.occurrences.join(",")}],${stopped.route},{"unanswered":${stopped.unanswered}}]`,
     );
   });
+  // (at the natural bound, the program's allowance and 64 a cell, it is answered whole)
+  assert.ok(units <= answered.budget.allowance + QUESTION_UNITS_PER_CELL * cells);
 });
 
-test("an analysis its own budget stopped is answered whole, so no node is left unanswered and none is stopped (#1837)", () => {
+test("the published answers' own questions stop under the same bound, never answered again on a stopped analysis: every node is left after the bindings left (#1837)", () => {
+  const files = main(SMALL[0]!);
+  const request = coreRequest(files, GLOBALS);
+  assert.ok(request !== null);
+  const bindings = bindingsOf(request);
+  const full = publicationParts(files, MODES[0]!, GLOBALS);
+  assert.ok(full !== null);
+  // (the admitted types' questions alone, on their own meter)
+  inMode(MODES[0]!, () => publishedAnswers(analyseCore(request), bindings, request));
+  const { units, cells } = questionWork();
+  assert.ok(units > 0);
+  assert.equal(cells, 2 * bindings.length);
+  withQuestionBound(units - 1, 0, () => {
+    assert.throws(
+      () => inMode(MODES[0]!, () => publishedAnswers(analyseCore(request), bindings, request)),
+      { name: "AnswersStopped" },
+    );
+    const stopped = publicationParts(files, MODES[0]!, GLOBALS)!;
+    const nodes = analyseCore(request).graph.nodes.length;
+    assert.deepEqual(
+      [stopped.answers, stopped.record, stopped.occurrences, stopped.route],
+      ["null", "null", [], full.route],
+    );
+    assert.ok(stopped.unanswered > nodes, "a binding and every node are left");
+    const by = stopped.unansweredBy;
+    assert.ok(by !== undefined && "binding" in by && by.reason === "questions");
+    assert.equal(bindings[bindings.length - (stopped.unanswered - nodes)], by.binding);
+  });
+});
+
+test("an analysis its own budget stopped is answered whole within its questions' bound, so no node is left unanswered and none is stopped (#1837)", () => {
   const files = main(SMALL[0]!);
   const request = coreRequest(files, GLOBALS);
   assert.ok(request !== null);
   const total = analyseCore(request).budget.total;
   // (an allowance the analysis itself passes: its own budget stops it; the oracle then answers its stopped answers
-  // without asking again, so only its questions after a finished analysis leave nodes unanswered, as `questions`)
+  // without asking again, within its questions' bound)
   const allowance = Math.floor(total / 2);
   assert.notEqual(
     withTestAllowance(allowance, () => analyseCore(request).budget.exhausted),
@@ -242,22 +280,90 @@ test("an analysis that finished past the nesting limit leaves its later question
   assert.ok(request !== null);
   const analysis = analyseCore(request);
   assert.deepEqual([analysis.budget.exhausted, analysis.budget.stoppedIn], ["nesting", null]);
-  const full = withTestAllowance(1e12, () => publicationParts(files, MODES[0]!, GLOBALS));
+  const full = publicationParts(files, MODES[0]!, GLOBALS);
   assert.ok(full !== null && full.unanswered === 0);
-  // (the least allowance that answers it all, then one unit below it)
-  const answered = (n: number) =>
-    JSON.stringify(withTestAllowance(n, () => publicationParts(files, MODES[0]!, GLOBALS))) ===
-    JSON.stringify(full);
-  let [low, high] = [analysis.budget.total, analysis.budget.total * 2];
-  while (!answered(high)) high *= 2;
-  while (high - low > 1) {
-    const middle = Math.floor((low + high) / 2);
-    if (answered(middle)) high = middle;
-    else low = middle;
-  }
-  const parts = withTestAllowance(high - 1, () => publicationParts(files, MODES[0]!, GLOBALS));
+  const { units } = questionWork();
+  const parts = withQuestionBound(units - 1, 0, () =>
+    publicationParts(files, MODES[0]!, GLOBALS),
+  );
   assert.ok(parts !== null && parts.unanswered > 0);
   assert.equal(parts.unansweredBy?.reason, "questions");
+});
+
+test("a question past the read-depth limit after a finished analysis leaves its node unanswered as read-depth, never questions (#1837 ruling 3)", () => {
+  // (#1241's captured read, 1,024 indexes deep: the analysis finishes, and the occurrence's own question passes the
+  // limit in source order)
+  const files = main(`let v = hostValue\nsay v${"[0]".repeat(1_024)}\nexit\n`);
+  const request = coreRequest(files, GLOBALS);
+  assert.ok(request !== null);
+  const reasons = MODES.map((mode) => {
+    assert.equal(inMode(mode, () => analyseCore(request).budget.stoppedIn), null);
+    const parts = publicationParts(files, mode, GLOBALS);
+    assert.ok(parts !== null);
+    return parts.unanswered === 0 ? null : parts.unansweredBy?.reason;
+  });
+  assert.ok(reasons.includes("read-depth"), JSON.stringify(reasons));
+  assert.deepEqual(
+    reasons.filter((reason) => reason !== null && reason !== "read-depth"),
+    [],
+  );
+});
+
+/** A family's sources at `sizes` (`shape` of the generator at `module`), with the generator's globals. */
+async function family(module: string, shape: string, sizes: readonly number[]) {
+  const generator = (await import(pathToFileURL(resolve(module)).href)) as {
+    readonly shapes: Record<string, (size: number) => string | SourceFile[]>;
+    readonly globals?: readonly string[];
+  };
+  return sizes.map((size) => {
+    const made = generator.shapes[shape]!(size);
+    return {
+      files: typeof made === "string" ? main(made) : made,
+      globals: generator.globals ?? [],
+    };
+  });
+}
+
+/**
+ * The occurrences' questions' units per cell they return (`Questions`' measure), at the family's natural allowance in
+ * the first mode, each source answered whole.
+ */
+function perCell(sources: readonly { files: SourceFile[]; globals: readonly string[] }[]): number[] {
+  return sources.map(({ files, globals }) => {
+    const request = coreRequest(files, globals);
+    assert.ok(request !== null);
+    return inMode(MODES[0]!, () => {
+      const answers = analyseCore(request);
+      assert.equal(answers.budget.exhausted, null);
+      answers.apart(() => undefined);
+      const before = answers.budget.finishing;
+      const asked = answers.apart(() => occurrences(answers, (items) => items));
+      const cells = asked.map(cellsOf).reduce((a, b) => a + b, 0);
+      return (answers.budget.finishing - before) / cells;
+    });
+  });
+}
+
+/** Each step's relative rise of a series. */
+const rises = (series: readonly number[]) => series.slice(1).map((value, index) => value / series[index]! - 1);
+
+test("the oracle's questions cost per cell they return is flat on W24-varied, and on r3-root-copies and W32-own-test rises by a falling step, a log factor (#1837, #1941)", async () => {
+  const sizes = [16, 32, 64, 128];
+  const gates = "tests/families/copies/3a-spike14-gates.mjs";
+  const flat = perCell(await family(gates, "W24-varied", sizes));
+  for (const rise of rises(flat)) assert.ok(rise < 0.01, JSON.stringify(flat));
+  for (const [module, shape] of [
+    ["tests/families/copies/f1-astra-r3-field-families.mjs", "r3-root-copies"],
+    [gates, "W32-own-test"],
+  ] as const) {
+    const series = perCell(await family(module, shape, sizes));
+    const steps = rises(series);
+    // (each step's rise below the one before: no polynomial re-walk, #1941's binary searches over a key's definitions)
+    for (const [index, step] of steps.entries())
+      if (index > 0) assert.ok(step < steps[index - 1]!, `${shape}: ${JSON.stringify(series)}`);
+    // (within K at every size)
+    for (const cost of series) assert.ok(cost < QUESTION_UNITS_PER_CELL, `${shape}: ${JSON.stringify(series)}`);
+  }
 });
 
 test("jsonText writes plan data as JSON.stringify does, and also past the depth JSON.stringify reaches (#1503)", () => {

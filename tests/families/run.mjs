@@ -9,7 +9,8 @@
 // #1503) and, for a generator whose `checks` include "stops", which decisions stop and when (`stopSet`) at each demand
 // allowance. Each tree's own oracle library (`dist/tests/helpers/type-core-oracles.js`) analyses its sources, in a
 // child process: a run (a source's mode and check on one tree) whose charged units pass `--units` times its program's
-// allowance (`units`, the same on every machine, #1647), or a source that takes more than `--memory` MB of heap or ends
+// allowance (`units`, the same on every machine, #1647; a publication run's, also its oracle's units per cell for each
+// cell its own questions returned, #1837), or a source that takes more than `--memory` MB of heap or ends
 // the process (a fatal V8 error), is counted as stalled, with the reason, and the next source runs in a fresh process. A
 // run that takes longer than `--timeout` seconds, the safety net, does work no ledger charges: it is counted apart
 // (`uncharged`, named by its run, on stderr and in `--out`), never a stall, and the next source runs. A run
@@ -132,16 +133,41 @@ function partHashes(oracle, files, mode, globals) {
   });
 }
 
-/** A publication's hashes with why it left nodes unanswered: the oracle's reason, else `unknown` (no node named). */
+/** Why an oracle's questions stop (its `unansweredBy`'s reasons, #1837). */
+const REASONS = ["questions", "read-depth", "stopped"];
+
+/**
+ * A publication's hashes with why it left nodes unanswered: the oracle's reason with its first node left, or the
+ * binding where its answers' questions stopped, else `unknown` (no node named).
+ */
 function withReason(hashes) {
   if (hashes === null || !(hashes.unanswered > 0)) return hashes;
   const by = hashes.unansweredBy;
-  const known =
-    (by?.reason === "questions" || by?.reason === "stopped") && Number.isInteger(by.node);
+  const where = Number.isInteger(by?.node)
+    ? { node: by.node }
+    : Number.isInteger(by?.binding)
+      ? { binding: by.binding }
+      : null;
   return {
     ...hashes,
-    unansweredBy: known ? { reason: by.reason, node: by.node } : { reason: "unknown", node: null },
+    unansweredBy:
+      REASONS.includes(by?.reason) && where !== null
+        ? { reason: by.reason, ...where }
+        : { reason: "unknown", node: null },
   };
+}
+
+/**
+ * What a tree's oracle grants a publication run beyond its unit limit (#1837): its units per cell for each cell its
+ * own questions reported so far (`questionWork`), so that its questions' bound, not the runner's, ends them; nothing
+ * where it reports none.
+ */
+function questionGrant(oracle) {
+  const perCell = oracle.QUESTION_UNITS_PER_CELL;
+  const cells = typeof oracle.questionWork === "function" ? oracle.questionWork()?.cells : undefined;
+  return Number.isInteger(perCell) && perCell > 0 && Number.isInteger(cells) && cells > 0
+    ? perCell * cells
+    : 0;
 }
 
 /**
@@ -220,8 +246,8 @@ if (process.argv[2] === "--child") {
   /**
    * Every charge of each tree's work ledger (`WorkLedger.charge`), counted while a tree runs a run (#1564): its units
    * (`spent`, the analysis's, its finishing work's and the lowering's) and the largest allowance of a ledger it charged
-   * (`allowance`, its program's: max(30 M, 256 × nodes)). A run whose units pass `units` times that allowance stalls,
-   * the same on every machine (#1647): at the charge that passes it, the child writes the run and its units on stderr
+   * (`allowance`, its program's: max(30 M, 256 × nodes)). A run whose units pass `units` times that allowance (a
+   * publication run's, plus its oracle's grant, `questionGrant`) stalls, the same on every machine (#1647): at the charge that passes it, the child writes the run and its units on stderr
    * and ends (`OVER`). With `--work`, its progress record, the runner's file beside `--work`, holds the run going on: it
    * is written over as a tree starts a run, each `STEP` units and as the tree ends it, by a write that completes while an
    * analysis holds this process, so the runner reads the work a run had charged when it ended the process, less at most
@@ -266,7 +292,8 @@ if (process.argv[2] === "--child") {
         allowance = this.allowance;
         limit = multiple * allowance;
       }
-      if (spent > limit) over();
+      if (spent > limit && (running.check !== "publication" || spent > limit + questionGrant(trees[running.tree])))
+        over();
       if (spent >= next) {
         next = spent + STEP;
         write({ work: spent, allowance });
