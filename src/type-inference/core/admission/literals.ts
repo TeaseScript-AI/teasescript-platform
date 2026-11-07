@@ -923,8 +923,8 @@ export function joinElements(
     };
     // what an operand's elements are at a path, by `joinedDomain`: a written copy's type, a read's place's decision,
     // the earliest deciding value's kinds, else its own kinds of one family and no unknown (a type holding only `null`
-    // decides nothing, its `null` `nullAt`'s, never an empty domain no kind fits, but at a strict written destination:
-    // Astra r2's B1b on #1310)
+    // decides nothing, its `null` the sentence's walk's, never an empty domain no kind fits, but at a strict written
+    // destination: Astra r2's B1b on #1310)
     const decidedAt = (
       operand: PlaceId,
       node: FlowNode,
