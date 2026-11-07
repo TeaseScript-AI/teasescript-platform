@@ -2206,10 +2206,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     canClearScriptStorage,
     clearScriptStorage,
     /**
-     * The saved values as stored now, with the saved photos they reference, for an export; also during a session, whose
-     * saves count once they are stored. Rejects when storage cannot be read.
-     */
-    /**
      * The saved values as stored now, read freshly through the provider in issue order, for Debug's Storage tab; rejects
      * when storage cannot be read. `savedDataRevision` changes when this Player changed them.
      */

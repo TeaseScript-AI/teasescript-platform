@@ -699,7 +699,7 @@ test("a creating consumer's direct calls must be listed; every other form of a g
           `import * as probe from "${FRESH_TO_ADMISSION}/probe.js";\n` +
           text.replace(
             FRESH_START,
-            `${FRESH_START}${[...ROUTES, ...VALUES, ...TYPE_VALUE, ...WRITES.map((write) => [, write])].map(([, statement]) => `    ${statement}\n`).join("")}    ${SELF}.admission.probeOpaque();\n    void ${SELF}.admission.probeKnown;\n    probeOverloaded(${SELF}.admission);\n    runAliased(${SELF}.admission);\n    freshDecoy();\n    freshShared(${SELF});\n`,
+            `${FRESH_START}${[...ROUTES, ...VALUES, ...TYPE_VALUE, ...WRITES.map((write) => [null, write])].map(([, statement]) => `    ${statement}\n`).join("")}    ${SELF}.admission.probeOpaque();\n    void ${SELF}.admission.probeKnown;\n    probeOverloaded(${SELF}.admission);\n    runAliased(${SELF}.admission);\n    freshDecoy();\n    freshShared(${SELF});\n`,
           ) +
           // (an unrecognised decoy; a recognised one of a derivation's name)
           "\nfunction freshDecoy(): void {}\nfunction freshShared(walk: Consumers): void {\n  void walk;\n}\n" +

@@ -1048,20 +1048,6 @@ const W34_LINKS: readonly (readonly [string, (index: number) => string])[] = [
 ];
 
 /**
- * W34 (TABLE §13.3, r4.33–r4.38) as the reference model's round-10 generators write it (`fresh.py`, `fan-probe.py`,
- * `siblings.py`): a chain of k whole copies of a k-field record read at k fields of the last copy, plain, with a test
- * on the source before each copy (of one field, of the copy's own field, guarding a read), through an alias, nested a
- * level, tested after each copy, with a conditional store below each source (tested and not); and k sibling copies of
- * one record under tests of their own fields (one test, two nested, an unrelated test before the copy, one `and` chain
- * over all k fields). Review round 2's shapes beside them: chains after early exits on one field (read at the others,
- * and every copy read at it) and on each copy's own field, guarded sibling copies along a chain, k unrelated edited
- * records with one field name, k edited siblings of one copy, k copies of one record edited at k fields; round 3's:
- * one source defined k times, each definition copied after an early exit (on one field, on its own field) or with k
- * stores below the source, and k sources of two copied definitions each; round 4's: a source redefined from its own
- * copies under one test, k sources of five copied definitions each, a source tested at k paths and redefined k times
- * beside four more sources tested there. Every copy is resolved once and read once per field: k + k, never k × k.
- */
-/**
  * A record passed down k single-site functions, each passing its parameter on as `step` writes the call; the last reads
  * every field (review r5: k bindings and k fields, resolved per binding and per field, never per pair).
  */
@@ -1077,6 +1063,20 @@ const argumentChain = (k: number, step: (index: number) => string): string =>
     "use0(seed)",
   );
 
+/**
+ * W34 (TABLE §13.3, r4.33–r4.38) as the reference model's round-10 generators write it (`fresh.py`, `fan-probe.py`,
+ * `siblings.py`): a chain of k whole copies of a k-field record read at k fields of the last copy, plain, with a test
+ * on the source before each copy (of one field, of the copy's own field, guarding a read), through an alias, nested a
+ * level, tested after each copy, with a conditional store below each source (tested and not); and k sibling copies of
+ * one record under tests of their own fields (one test, two nested, an unrelated test before the copy, one `and` chain
+ * over all k fields). Review round 2's shapes beside them: chains after early exits on one field (read at the others,
+ * and every copy read at it) and on each copy's own field, guarded sibling copies along a chain, k unrelated edited
+ * records with one field name, k edited siblings of one copy, k copies of one record edited at k fields; round 3's:
+ * one source defined k times, each definition copied after an early exit (on one field, on its own field) or with k
+ * stores below the source, and k sources of two copied definitions each; round 4's: a source redefined from its own
+ * copies under one test, k sources of five copied definitions each, a source tested at k paths and redefined k times
+ * beside four more sources tested there. Every copy is resolved once and read once per field: k + k, never k × k.
+ */
 export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link]): WorkFamily => ({
   name: `W34-${variant}`,
   measures: "§13.3 W34: a copy chain resolved once per copy, projected per field",
@@ -2964,17 +2964,6 @@ export const HOT_CANDIDATE_FAMILIES: readonly WorkFamily[] = [
 ];
 
 /**
- * Admission (TABLE §5, §10.3's admission combinations; the port plan's §3.3, M4 S6): the decided type over an empty, a
- * populated and a later mutated snapshot, several destinations of one source with different decided types, a rejected
- * destination beside its intact source, external ingresses merged with an opaque source, A5's candidates under k whole
- * presets of a record, A2's scan past external stores, the width of a record's written copies, a literal's records and a
- * replacement's misfits, the boundary checks of a literal's external cells, and the structure named elements bring to
- * a literal (projections of one record's lists, literals of one record's copies, or of the values operations carry of
- * it, added to a list), k method results or conversions of one class beside an object in one literal (#1078), k
- * copies of one nested preset joined into one place, each storing its own property below one step (#1078), and k
- * selections or choices nested in literals of two (r4.93, G3 2c); each at size k, linear.
- */
-/**
  * G5 (5a, #1339): cycles of whole copies, each member read, whose every entry walked the cycle again: a cycle of k
  * whole copies of one object, each member but the first then given another object of the other type (one error per
  * member), and the same cycle with each member also copying the member two ahead, fed objects of k agreeing properties.
@@ -3157,6 +3146,17 @@ export const NESTED_OBJECT_SELECTIONS: readonly WorkFamily[] = (
   },
 }));
 
+/**
+ * Admission (TABLE §5, §10.3's admission combinations; the port plan's §3.3, M4 S6): the decided type over an empty, a
+ * populated and a later mutated snapshot, several destinations of one source with different decided types, a rejected
+ * destination beside its intact source, external ingresses merged with an opaque source, A5's candidates under k whole
+ * presets of a record, A2's scan past external stores, the width of a record's written copies, a literal's records and a
+ * replacement's misfits, the boundary checks of a literal's external cells, and the structure named elements bring to
+ * a literal (projections of one record's lists, literals of one record's copies, or of the values operations carry of
+ * it, added to a list), k method results or conversions of one class beside an object in one literal (#1078), k
+ * copies of one nested preset joined into one place, each storing its own property below one step (#1078), and k
+ * selections or choices nested in literals of two (r4.93, G3 2c); each at size k, linear.
+ */
 export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A2-empty-snapshot",
@@ -4216,7 +4216,7 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
   },
   ...(["choices", "gets"] as const).map((use) => ({
     name: `A8-same-source-chained-alias-${use}`,
-    measures: `S6c, A8: k aliases of one k-field record, each of the one before, as ${use === "choices" ? "options of one choice" : "\`get\` defaults in one literal"}, every field read`,
+    measures: `S6c, A8: k aliases of one k-field record, each of the one before, as ${use === "choices" ? "options of one choice" : "`get` defaults in one literal"}, every field read`,
     // 47,447 / 94,966 and 72,526 / 145,230 units at k = 64, 128 (2.0078, 2.0099; `main` 3.46, 3.64)
     program: (k: number) =>
       main(

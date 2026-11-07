@@ -26,9 +26,9 @@ export const cases = (() => {
     style,
     swapped,
     use,
-    wrap;
+    _wrap;
   cases = [];
-  function add(name, source, family, expect = null) {
+  function add(name, source, _family, _expect = null) {
     cases.push({ name: name, source: source + "\nexit\n" });
   }
   for ([style, setup, left, right, prop] of [
@@ -107,7 +107,8 @@ result=${b}`,
     }
   }
   for (depth of [0, 1, 3]) {
-    wrap = (x) => (false ? "{inside:" + x + "}" : x);
+    // oxlint-disable-next-line no-constant-condition -- EVIDENCE: fixture: the recorded run's generator, kept as it ran (its wrapping variant is off).
+    _wrap = (x) => (false ? "{inside:" + x + "}" : x);
     function object_(value) {
       let _;
       value = "{tone:" + value + "}";

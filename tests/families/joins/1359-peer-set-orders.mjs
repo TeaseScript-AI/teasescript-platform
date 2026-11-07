@@ -73,7 +73,7 @@ for (const kind of Object.keys(values))
     ].join("\n");
   };
 // peers whose roles read m aliases of one value, each peer in its own rotation: their other roles' writers differ
-// (`RoleSource.others`), compared once per set of their sequences
+// (the sources of their other roles), compared once per set of their sequences
 for (const form of ["rotated", "permuted", "subsets", "triples", "fixed"])
   shapes[`alias-${form}`] = (k) => {
     const m = peersOf(k);

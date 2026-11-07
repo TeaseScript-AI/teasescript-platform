@@ -20,7 +20,7 @@ function layered(n, kind = "point", depth = 2) {
     "let w={q:t,r:1}",
     "function make { return 2 }",
     `let plain={${fields(n, () => "3")}}`,
-    `let root={${fields(n, (i) => wrap(depth, leaf))},extra:{${fields(n, () => "1")}}}`,
+    `let root={${fields(n, (_i) => wrap(depth, leaf))},extra:{${fields(n, () => "1")}}}`,
     "let a=root",
     "let b=a",
     rows(n, (i) =>

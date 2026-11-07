@@ -380,7 +380,7 @@ const generated = (() => {
       ),
     "astra6-ten-deep-groups": (k) =>
       `let score = 0\n` +
-      rows(k, (i) => "if hostFlag {\n".repeat(10) + "score += 1\n" + "}\n".repeat(10)) +
+      rows(k, (_i) => "if hostFlag {\n".repeat(10) + "score += 1\n" + "}\n".repeat(10)) +
       `\nlet x: integer = score`,
     // round 6, Sol
     "sol6-labels-fallthrough": (k) =>

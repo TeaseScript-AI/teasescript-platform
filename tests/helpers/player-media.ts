@@ -20,7 +20,7 @@ class FakeElement implements MediaDeviceElement {
   paused = true;
   ended = false;
   refuse = false;
-  /** When set, `play()` waits for `resolvePlays()`. */
+  /** When set, `play()` waits until a test runs its resolver in `pendingPlays`. */
   deferPlays = false;
   readonly pendingPlays: Array<() => void> = [];
   /** When set, a seek's `seeked` event waits for `completeSeek()`, as a browser completes seeks asynchronously. */

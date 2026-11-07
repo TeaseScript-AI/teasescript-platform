@@ -264,8 +264,7 @@ test("the composition of an operand's parts visits only its smaller part, its sh
  * copies of a value of a type k levels deep walk the type about k² steps (each decided path still asks it from its
  * root: the per-path questions, a design round), never k³ (each copy and each label reading every level from the root,
  * 7.45 per doubling before). The walk is uncharged work (`writtenTypeSteps` counts it), gated at its measured doubling.
- */
-/**
+ *
  * Measured per pass (steps ÷ passes), as `c1Visits`'s bound divides by `rejectPasses`: at 64 levels `out`'s decision
  * crosses its allowance (its cost is depth × copies, G6 in #1319's design-round list), and the pass that restarts it
  * (TABLE r4.180, r4.183) walks the type again.

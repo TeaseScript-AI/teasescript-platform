@@ -2,7 +2,7 @@
 // evidence (R/astra-m4-i1249-review-r2-evidence/make-cases.py; R/astra-m4-i1249-review-r2-evidence/make-disjoint.py).
 const generated = (() => {
   let a,
-    at,
+    _at,
     b,
     bad,
     body,
@@ -106,7 +106,7 @@ let b = ${b}
                 : "") +
               close +
               "exit\n";
-            at = source.indexOf(body) + body.lastIndexOf(second);
+            _at = source.indexOf(body) + body.lastIndexOf(second);
             cases.push({ name: `${name}/${typ}/${shape}/${reverse}/${read}`, source: source });
           }
         }

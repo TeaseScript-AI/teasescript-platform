@@ -7,7 +7,12 @@ import { Consumers } from "../src/type-inference/core/consumers.js";
 import { indexPaths, stepsOf } from "../src/type-inference/core/contract/literal-index.js";
 import { exportNames, keyBelowIn } from "../src/type-inference/core/contract/key-ids.js";
 import { writtenOf } from "../src/type-inference/core/contract/terms.js";
-import { absentWriterAt, objectsAt } from "../src/type-inference/core/contract/objects.js";
+import {
+  absentWriterAt,
+  objectsAt,
+  selecting,
+} from "../src/type-inference/core/contract/objects.js";
+import { SELECTED_TEXT, SELECTED_VALUE } from "../src/type-inference/core/definitions.js";
 import { othersAt, readGroupsAt } from "../src/type-inference/core/contract/others.js";
 import {
   DemandExhausted,
@@ -30,7 +35,7 @@ import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
 const GLOBALS = ["hostValue", "hostInit", "hostOther"];
 
-/** #1736's families (Sol's `fresh-growth`): k calls of `read(x)`, each reading `x.p.f_i`, by the shape of `p`. */
+/** #1736's families (Sol's fresh-growth): k calls of a function reading property i of its argument's `p`, by the shape of `p`. */
 function family(shape: string, k: number, absent: boolean): string {
   const names = Array.from({ length: k }, (_, i) => `f${i}`);
   const object = absent ? "{}" : "shared";
@@ -406,7 +411,7 @@ test("an objects query charges each writer it meets and each edge it reads, a se
     rows.push('say "${b0.zz}"', "exit");
     return work(
       rows.join("\n") + "\n",
-      (pass) => Math.max(...[...pass.program.occurrenceOf.keys()]),
+      (pass) => Math.max(...pass.program.occurrenceOf.keys()),
       [],
     );
   };
@@ -565,6 +570,28 @@ test("a covered objects query charges exactly the visits its proof graph holds, 
   }
   // (asks on both paths: some empty, some not)
   assert.ok(checked.empty > 20 && checked.deeper > 0, JSON.stringify(checked));
+});
+
+test("a path's selection check charges its entry and each step it reads once, to the first selection (#1747, final review B1)", () => {
+  // (`some` debits each step it reads; nothing prepays the path's length, so a check stopping early pays for less)
+  const pass = passesOf("let xs={p:{}}\nexit\n", MODES[0]!, 30_000_000).at(-1)!;
+  const charged = (path: readonly string[]): number => {
+    const before = pass.program.work.counts().get("objectSteps") ?? 0;
+    selecting(pass.contract, path);
+    return (pass.program.work.counts().get("objectSteps") ?? 0) - before;
+  };
+  for (const n of [8, 16]) {
+    const plain = Array<string>(n).fill("p");
+    assert.equal(charged(plain), 1 + n, `${n} plain steps`);
+    for (const [at, selected] of [
+      [0, SELECTED_VALUE],
+      [3, SELECTED_TEXT],
+    ] as const) {
+      const path = plain.map((step, index) => (index === at ? selected : step));
+      assert.equal(charged(path), 1 + at + 1, `${n} steps, a selection at ${at}`);
+    }
+  }
+  assert.equal(charged([]), 1, "the empty path");
 });
 
 test("an objects query's construction copies no path suffix and reads each input step a constant number of times, however deep (#1747, charging round)", () => {

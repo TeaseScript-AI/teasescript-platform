@@ -1,0 +1,88 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import { citationCounts, FORECASTS, forecastsIn } from "./check-comment-forecasts.mjs";
+
+// A forecast of each form; the citations #1977 allows; and prose and counted references, which are no forecasts.
+const FORECAST_TEXTS = {
+  "until #N": "the cache stays until #1234 replaces it",
+  "until a package or stage": "the preload stays in the composable until L5i.7",
+  "once #N": "it moves once #42 merges",
+  "when or after #N lands or merges": "it goes when #1216 lands",
+  "will be replaced": "this path will be replaced",
+  "which replaces this": "decided before L5g, which replaces this",
+  TODO: "TODO(#7): read the clock",
+};
+const CITATIONS = [
+  "as #1234 decided",
+  "stage 3 joins the narrowing",
+  "PR 1900 moved it",
+  "as before #1216",
+  "after #1216 the order holds",
+  // (counted in comment-citations.json, not citations)
+  "r4.93's witnesses",
+  "TABLE § 3",
+  "Replaces this runner's next reply",
+  "loops until the queue is empty",
+  "runs once each page load",
+];
+// Where a comment can be: each wraps its text into a file of its kind.
+const PLACES = {
+  "line comment, .ts": ["a.ts", (text) => `const a = 1; // ${text}\n`],
+  "block comment, .ts": ["a.ts", (text) => `/** ${text} */\nconst a = 1;\n`],
+  // (broken at the space nearest the middle, so a form may span the two lines)
+  "block comment over two lines, .ts": [
+    "a.ts",
+    (text) => {
+      const at = text.lastIndexOf(" ", text.length >> 1) + 1 || text.length;
+      return `/*\n * ${text.slice(0, at)}\n * ${text.slice(at)}\n */\nconst a = 1;\n`;
+    },
+  ],
+  "line comment, .mjs": ["a.mjs", (text) => `export const a = 1; // ${text}\n`],
+  ".vue <script>": [
+    "a.vue",
+    (text) =>
+      `<template><p /></template>\n<script setup lang="ts">\n// ${text}\nconst a = 1;\n</script>\n`,
+  ],
+};
+
+test("each forecast form is found in every kind of comment, and no citation is", () => {
+  assert.deepEqual(Object.keys(FORECAST_TEXTS).sort(), FORECASTS.map(({ form }) => form).sort());
+  for (const [place, [file, wrap]] of Object.entries(PLACES)) {
+    for (const [form, text] of Object.entries(FORECAST_TEXTS)) {
+      const found = forecastsIn(file, wrap(text)).map((forecast) => forecast.form);
+      assert.ok(found.includes(form), `${form} in a ${place}: ${JSON.stringify(found)}`);
+    }
+    for (const text of CITATIONS)
+      assert.deepEqual(forecastsIn(file, wrap(text)), [], `"${text}" in a ${place}`);
+  }
+});
+
+test("a forecast in a string or in code is no comment", () => {
+  for (const text of Object.values(FORECAST_TEXTS))
+    assert.deepEqual(
+      forecastsIn(
+        "a.ts",
+        `export const note = ${JSON.stringify(text)};\nconst re = /until #1/u;\n`,
+      ),
+      [],
+    );
+});
+
+test("a vue file's forecast keeps its line in the file", () => {
+  const [forecast] = forecastsIn(
+    "a.vue",
+    `<template>\n  <p />\n</template>\n<script setup>\n\n// TODO: x\n</script>\n`,
+  );
+  assert.equal(forecast?.line, 6);
+});
+
+test("the counted citations are counted in comments only", () => {
+  assert.deepEqual(
+    citationCounts(
+      "a.ts",
+      `// TABLE r4.1 and TABLE r4.2, TABLE § 3\nconst s = "TABLE r4.9";\n/* TABLE § 4 */\n`,
+    ),
+    { "TABLE r4": 2, "TABLE §": 2 },
+  );
+});

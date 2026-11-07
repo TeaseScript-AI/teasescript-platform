@@ -5,6 +5,32 @@ validation. `.oxlintrc.json` is the executable rule/severity list; all selected 
 TypeScript and JavaScript source, tests, playground code, and tooling, including the vendored rules themselves.
 Dependency, build, coverage, and Git directories are excluded. `npm run check` includes lint and rule fixtures.
 
+## Correctness category
+
+Oxlint's `correctness` category is on. Two of its rules are off, because every site the code has is deliberate:
+`unicorn/no-new-array` (`new Array(n)` preallocates on purpose, and some tests build holey arrays; `Array.from` would
+change holes and cost) and `require-yield` (the type core's contract API requires a generator `*make()` that may return
+without yielding). `no-unused-vars` ignores names that start with `_`, as `tsc`'s unused checks do. The single
+`overrides` entry lists the files whose findings wait for another open pull request, or for the compiler's own cleanup;
+that list only shrinks, and each cleanup removes its files from it.
+
+## Comment forecasts
+
+`tools/oxlint/check-comment-forecasts.mjs` refuses a comment that forecasts later work, in the forms
+[Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead) lists (its
+`FORECASTS` table); a citation of a repository record passes. `TABLE r4` and `TABLE §` are no citations (TABLE is not in
+the repository): `comment-citations.json` holds each file's exact counts of them in comments, which may only fall.
+`comment-forecasts-allowed.json` lists the forecasts the check accepts, and each entry must still be found.
+
+## Comment declarations
+
+`tools/oxlint/check-comment-declarations.mjs` refuses a backticked name in a comment that names nothing the repository
+declares or reads: it proves only that the name exists somewhere, not that it names what the comment's site means.
+`comment-external-names.json` declares names no file can, each with its kind and source; that list may grow. It also
+refuses a `/**` docblock that does not stand directly on its declaration (a blank line, another block or comment between,
+or nothing after it); a file's opening header and a same-line cast are allowed. `comment-declarations-waiting.json`
+lists the findings that wait for another pull request or the compiler's cleanup, and only shrinks.
+
 ## Type evidence
 
 Keep precise contracts through ordinary code. Do not erase a known value into `any`, `unknown`, broad `object`, or an
