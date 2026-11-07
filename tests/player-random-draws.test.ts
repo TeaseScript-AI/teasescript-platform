@@ -23,6 +23,10 @@ import {
   type RuntimeScriptStorageEntrySnapshot,
 } from "../src/index.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import type { PlayerBridge } from "../player/player-bridge.js";
+import { drawCode, outcomeLines } from "../player/random-draw-code.js";
+import { loadSourceDebugSidecar } from "../src/runtime/debug/source-sidecar.js";
+import { createSourceDebugSidecar } from "../src/index.js";
 
 // Debug's random draws (DEBUGGER.md "Random draws") through the real Vue session host and engine: with Choose outcomes
 // on in the debug room, a session pauses at every draw and goes on with the outcome the picker gives; Next time and
@@ -31,13 +35,16 @@ import { loadPlayerModule } from "./helpers/player-modules.js";
 interface RandomHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly rooms: { readonly current: Readonly<Ref<"normal" | "debug">> };
+  readonly bridge: Promise<PlayerBridge>;
   prepareScript(
-    plan: InstructionPlan,
-    create: (recording: {
-      readonly recorder: DebugRecorder;
-      readonly debugMode: boolean;
-      readonly randomControl?: RandomControlOptions;
-    }) => PlayerRuntimeSession,
+    plan: InstructionPlan | string,
+    create:
+      | ((recording: {
+          readonly recorder: DebugRecorder;
+          readonly debugMode: boolean;
+          readonly randomControl?: RandomControlOptions;
+        }) => PlayerRuntimeSession)
+      | { readonly plan: string; readonly options: () => object },
   ): Promise<void>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
@@ -51,6 +58,9 @@ interface DebugRandom {
   setNext(site: string, next: "ask" | "random" | "untried"): void;
   resolve(outcome: RandomOutcome | "natural"): boolean;
   resolveLeastTried(): boolean;
+  readonly sites: Readonly<Ref<ReadonlyMap<string, RandomSite>>>;
+  readonly code: Readonly<Ref<{ readonly lines: readonly CodeLine[] } | null>>;
+  readonly historyLines: Readonly<Ref<readonly CodeLine[]>>;
   tried(site: string): {
     readonly history: readonly string[];
     readonly first: number;
@@ -66,6 +76,7 @@ interface CodeLine {
   }[];
 }
 interface Presentation {
+  /** The picker's code for `site` in `source`, made as the Worker makes it: from the plan's source debug sidecar. */
   randomDrawCode(
     source: string,
     site: RandomSite,
@@ -113,18 +124,22 @@ before(async () => {
   );
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof random.useDebugRandom, "function");
-  assert.equal(typeof shown.randomDrawCode, "function");
-  assert.equal(typeof shown.outcomeLines, "function");
   assert.equal(typeof shown.randomDrawChoices, "function");
   // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
   usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
   // EVIDENCE: validation: as above.
   useDebugRandom = random.useDebugRandom as typeof useDebugRandom;
   presentation = {
-    // EVIDENCE: validation: as above.
-    randomDrawCode: shown.randomDrawCode as Presentation["randomDrawCode"],
-    // EVIDENCE: validation: as above.
-    outcomeLines: shown.outcomeLines as Presentation["outcomeLines"],
+    randomDrawCode: (source, site) => {
+      const plan = compiled(source);
+      const load = loadSourceDebugSidecar(
+        createSourceDebugSidecar([{ path: "main.tease", source }], plan),
+        plan,
+      );
+      assert.equal(load.kind, "valid");
+      return load.kind === "valid" ? drawCode(load.sidecar.files[0]!, site) : null;
+    },
+    outcomeLines,
     // EVIDENCE: validation: as above.
     randomDrawChoices: shown.randomDrawChoices as Presentation["randomDrawChoices"],
   };
@@ -404,9 +419,6 @@ test("the picker's code is the whole file, its draw marked, with the range Show 
       .join(""),
     "chance(50)",
   );
-  // A problem the lexer reports leaves the other tokens their colours.
-  const broken = presentation.randomDrawCode(`${source}\n"unterminated`, site)!;
-  assert.deepEqual(broken.lines.slice(0, -1), code.lines);
   // Each draw marks only itself, also in a file drawn in before, and leaves the code shown for another draw as it was.
   const second = listRandomSites(plan)[1]!;
   const markedLines = (shown: { readonly lines: readonly CodeLine[] }) =>
@@ -609,4 +621,50 @@ test("a duration draw's field says no unit, as its number counts in the unit the
   assert.ok(repeating?.kind === "timerRepeat");
   const choices = presentation.randomDrawChoices(repeating);
   assert.ok(choices.kind === "number" && choices.hint === "Whole number from 1 through 100.");
+});
+
+test("the picker's sites and code come from the Worker, which compiled the source, and a late reply for a draw resolved meanwhile is not shown", async (context) => {
+  const source =
+    'for turn in 1..=3 {\n    let roll = randomInteger(1..=6)\n    say "Roll: ${roll}", instant\n}\nshowButton "Next"\nexit';
+  const { host, random } = await mount(context, compiled('showButton "Waiting"\nexit'));
+  const bridge = await host.bridge;
+  // A source host: the Worker compiles the script and keeps its sources.
+  const reply = await bridge.client.request("prepare", {
+    source: { kind: "source", script: source },
+  });
+  // EVIDENCE: validation: `prepare` replies from the same build with its result.
+  const token = (reply.result as { readonly plan: string }).plan;
+  // Hold the replies to `drawCode` until the test releases them.
+  const held: (() => void)[] = [];
+  const request = bridge.client.request;
+  bridge.client.request = (op, ...rest) => {
+    const answer = request(op, ...rest);
+    if (op !== "drawCode") return answer;
+    return new Promise((resolve, reject) => held.push(() => void answer.then(resolve, reject)));
+  };
+  await host.prepareScript(token, { plan: token, options: () => host.scriptStorageOptions() });
+  await host.activate();
+  await settle(context);
+  const first = random.draw.value;
+  assert.ok(first !== null, "the session pauses at the first draw");
+  assert.ok(random.sites.value.has(first.site), "the sites come from the plan's metadata");
+  assert.equal(held.length, 1);
+  // Resolved before its code arrived: that code, for the draw before, never shows.
+  assert.ok(random.resolve("natural"));
+  await settle(context);
+  const second = random.draw.value;
+  assert.ok(second !== null && second.drawId !== first.drawId);
+  held[0]!();
+  await settle(context);
+  assert.equal(random.code.value, null, "the first draw's code is not shown for the second");
+  held[1]!();
+  await settle(context);
+  const marked = random.code
+    .value!.lines.flatMap((line) => line.segments)
+    .filter((segment) => segment.mark)
+    .map((segment) => segment.text)
+    .join("");
+  assert.equal(marked, "randomInteger(1..=6)");
+  // The first draw's natural outcome is the site's history, as code.
+  assert.equal(random.historyLines.value.length, 1);
 });

@@ -9,7 +9,9 @@ import type { PlayerProject, PlayerScriptDiagnostic } from "../runtime-adapter.j
 import type { ScriptIdentity } from "../script-identity.js";
 import { planLockNeeds, playerRuntimeStageImages } from "../plan-metadata.js";
 import { DebugRecorder } from "../debug-recorder.js";
+import { MAIN_FILE_PATH } from "../../src/project-paths.js";
 import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
+import { debugOps } from "./ops/debug.js";
 import { inputOps } from "./ops/input.js";
 import { mediaOps } from "./ops/media.js";
 import { resourceOps } from "./ops/resources.js";
@@ -119,6 +121,8 @@ export interface PlayerOpsContext {
   hold(plan: InstructionPlan): string;
   /** Records the connection's sessions for a debug export; see `DebugRecorder`. */
   readonly recorder: DebugRecorder;
+  /** The source files of each plan this Worker compiled, by the plan's token: what Debug's source views show. */
+  readonly sources: Map<string, readonly { readonly path: string; readonly source: string }[]>;
 }
 
 export function playerOpsContext(): PlayerOpsContext {
@@ -132,6 +136,7 @@ export function playerOpsContext(): PlayerOpsContext {
       return token;
     },
     recorder: new DebugRecorder(),
+    sources: new Map(),
   };
 }
 
@@ -165,15 +170,20 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     ]);
     const compilation = compilePlayerProject(script);
     const identity = scriptIdentity(script);
-    return compilation.plan === null
-      ? { kind: "notCompiled", diagnostics: compilation.diagnostics, identity }
-      : {
-          kind: "prepared",
-          plan: hold(compilation.plan),
-          diagnostics: compilation.diagnostics,
-          identity,
-          metadata: planMetadata(compilation.plan),
-        };
+    if (compilation.plan === null)
+      return { kind: "notCompiled", diagnostics: compilation.diagnostics, identity };
+    const plan = hold(compilation.plan);
+    context.sources.set(
+      plan,
+      typeof script === "string" ? [{ path: MAIN_FILE_PATH, source: script }] : script.files,
+    );
+    return {
+      kind: "prepared",
+      plan,
+      diagnostics: compilation.diagnostics,
+      identity,
+      metadata: planMetadata(compilation.plan),
+    };
   };
   return {
     prepare: {
@@ -204,11 +214,13 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
       checkArguments: (args) => args === null,
       run: (_args, sessions) => {
         plans.clear();
+        context.sources.clear();
         sessions.clear();
         return { result: null };
       },
     },
     ...sessionOps(context),
+    ...debugOps(context),
     ...inputOps(context),
     ...mediaOps(context),
     ...resourceOps(context),

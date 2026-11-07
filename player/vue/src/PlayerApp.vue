@@ -186,7 +186,6 @@ const randomPicker = computed(() => {
     random,
     draw,
     site,
-    source: site === null ? null : props.player.scriptSource(site.path),
     // The breadcrumb starts at the package, by its name, else by the script's title.
     root: props.packageName || props.title || null,
   };
@@ -689,7 +688,8 @@ async function toggleFullscreen() {
             :key="randomPicker.draw.drawId"
             :draw="randomPicker.draw"
             :site="randomPicker.site"
-            :source="randomPicker.source"
+            :code="randomPicker.random.code.value"
+            :history="randomPicker.random.historyLines.value"
             :root="randomPicker.root"
             :next="randomPicker.random.next(randomPicker.draw.site)"
             :tried="randomPicker.random.tried(randomPicker.draw.site)"

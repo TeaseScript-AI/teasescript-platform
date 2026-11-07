@@ -1,0 +1,136 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { compilePlayerProject } from "../player/compile-project.js";
+import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
+import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
+import type { PrepareResult, PrepareSource } from "../player/engine-bridge/player-ops.js";
+import { PlayerBridge } from "../player/player-bridge.js";
+import { drawCode, outcomeLines } from "../player/random-draw-code.js";
+import { createSourceDebugSidecar, listRandomSites } from "../src/index.js";
+import { loadSourceDebugSidecar } from "../src/runtime/debug/source-sidecar.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
+import { inProcessBridge } from "./helpers/in-process-bridge.js";
+
+/*
+ * L5i.2: Debug's random-draw picker gets its code from the engine's Worker. `drawCode` makes the excerpt from the
+ * plan's source debug sidecar, which the Worker makes from the sources it compiled and reads back with L0's loader, so
+ * a plan it did not compile gets the excerpt only when the sidecar is bound to it; `codeLines` classifies outcomes.
+ */
+
+const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
+const WORKER = new URL("../player/engine-bridge/node-worker.js", import.meta.url);
+
+/** Two files, a draw in each, the second inside a function. */
+const PROJECT = {
+  files: [
+    {
+      path: "rooms/dice.tease",
+      source: [
+        "// Dice.",
+        "global function rollTwice {",
+        "    let first = randomInteger(1..=6)",
+        '    say "First: ${first}", instant',
+        "}",
+      ].join("\n"),
+    },
+    { path: "main.tease", source: 'let hit = chance(50)\nrollTwice()\nshowButton "Done"\nexit' },
+  ],
+};
+const OTHER = 'let coin = chance(25)\nshowButton "Other"\nexit';
+
+async function prepared(bridge: PlayerBridge, source: PrepareSource): Promise<string> {
+  const reply = await bridge.client.request("prepare", { source });
+  // EVIDENCE: validation: `prepare` replies from the same build with its result.
+  const result = reply.result as PrepareResult;
+  if (result.kind !== "prepared") throw new Error(`The script did not prepare: ${result.kind}`);
+  return result.plan;
+}
+const asPlanText = (script: string | typeof PROJECT): PrepareSource => ({
+  kind: "plan",
+  text: serializeValidatedRuntimeJson(compilePlayerProject(script).plan!),
+});
+
+/** The oracle: each site's excerpt made from the sidecar of the project's own compilation. */
+function oracle() {
+  const plan = compilePlayerProject(PROJECT).plan!;
+  const load = loadSourceDebugSidecar(createSourceDebugSidecar(PROJECT.files, plan), plan);
+  assert.equal(load.kind, "valid");
+  const files = load.kind === "valid" ? load.sidecar.files : [];
+  return listRandomSites(plan).map((site) => ({
+    site,
+    code: drawCode(
+      files.find((file) => file.path === site.path)!,
+      site,
+    ),
+  }));
+}
+
+/** What the ops answer on `bridge`, for a source plan, the same plan as text, another plan, and malformed arguments. */
+async function tape(bridge: PlayerBridge) {
+  const source = await prepared(bridge, { kind: "source", script: PROJECT });
+  const sameAsText = await prepared(bridge, asPlanText(PROJECT));
+  const other = await prepared(bridge, asPlanText(OTHER));
+  const sites = oracle().map(({ site }) => site);
+  const code = (plan: string, site: (typeof sites)[number]) =>
+    bridge.client
+      .request("drawCode", { plan, path: site.path, site })
+      .then((reply) => reply.result);
+  const steps = {
+    source: await Promise.all(sites.map((site) => code(source, site))),
+    // A restored session's plan: the same plan under another token, which the Worker did not compile.
+    sameAsText: await Promise.all(sites.map((site) => code(sameAsText, site))),
+    // Another plan: the sources the Worker holds are not its sources.
+    other: await code(other, listRandomSites(compilePlayerProject(OTHER).plan!)[0]!),
+    unknown: await code("p999", sites[0]!),
+    lines: (
+      await bridge.client.request("codeLines", { texts: ['["red", "blue"]', "true"], first: 4 })
+    ).result,
+  };
+  for (const args of [
+    { plan: source, path: "main.tease" },
+    { plan: source, path: "main.tease", site: { ...sites[0]!, line: 0 } },
+    { plan: 1, path: "main.tease", site: sites[0]! },
+  ])
+    await assert.rejects(
+      bridge.client.request("drawCode", args),
+      (error: unknown) => error instanceof BridgeRequestError && error.code === "arguments",
+    );
+  for (const args of [
+    { texts: [1], first: 1 },
+    { texts: ["x"], first: 1.5 },
+  ])
+    await assert.rejects(
+      bridge.client.request("codeLines", args),
+      (error: unknown) => error instanceof BridgeRequestError && error.code === "arguments",
+    );
+  return steps;
+}
+
+test("the draw's code comes from the sources the Worker compiled, the same in-process and in a Worker", async () => {
+  const expected = oracle();
+  const inProcess = await tape(await inProcessBridge());
+  assert.deepEqual(
+    inProcess.source,
+    expected.map(({ code }) => code),
+  );
+  // The sidecar is bound to the plan, not to its token: the same plan restored gets its code.
+  assert.deepEqual(inProcess.sameAsText, inProcess.source);
+  // Another plan's draw gets none from these sources, nor an unknown plan.
+  assert.deepEqual([inProcess.other, inProcess.unknown], [null, null]);
+  assert.deepEqual(inProcess.lines, outcomeLines(['["red", "blue"]', "true"], 4));
+  const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(WORKER, BUILD), BUILD));
+  try {
+    assert.deepEqual(await tape(worker), inProcess);
+  } finally {
+    worker.client.terminate();
+  }
+});
+
+test("a published plan with no sources gives no code", async () => {
+  const bridge = await inProcessBridge();
+  const plan = await prepared(bridge, asPlanText(OTHER));
+  const [site] = listRandomSites(compilePlayerProject(OTHER).plan!);
+  const reply = await bridge.client.request("drawCode", { plan, path: site!.path, site });
+  assert.equal(reply.result, null);
+});
