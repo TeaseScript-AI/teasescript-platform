@@ -23,7 +23,11 @@ import {
 } from "../src/type-inference/core/contract/frontier.js";
 import { stepsOf } from "../src/type-inference/core/contract/literal-index.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { withTestDemandAllowance, WorkLedger } from "../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+  WorkLedger,
+} from "../src/type-inference/core/budget.js";
 import { inMode, MODES, publication, settledAnswers } from "./helpers/type-core-oracles.js";
 import { marked } from "../src/type-inference/core/guards.js";
 import { itemScope } from "./helpers/type-core-items.js";
@@ -514,41 +518,44 @@ function heldRing(n: number, d: number, m: number, closed: boolean): string {
 
 test("a ring's held marks are one pending set per goal and base node, its automaton answering as the holders' marks do, in four modes (#1784)", () => {
   // (a sample of the family the queue runs whole: one doubling of the ring, the depth and the marked copies)
+  const rows: [number, number, number, boolean][] = [];
   for (const n of [3, 6])
     for (const d of [2, 4])
-      for (const m of [1, n - 1])
-        for (const closed of [false, true]) {
-          const source = heldRing(n, d, m, closed);
-          const files = [{ path: "main.tease", source }];
-          // (native exact where it ends; where it does not, below the read's whole path and eight more)
-          const horizon = closed ? d + 8 : null;
-          for (const mode of MODES) {
-            const pushed = analysed(source, mode);
-            const label = `n ${n}, d ${d}, m ${m}, closed ${closed}, ${JSON.stringify(mode)}`;
-            assert.equal(pushed.answers.budget.exhausted, null, label);
-            for (const { violations, largest } of pushed.invariants) {
-              assert.deepEqual(violations, [], label);
-              // (the marks still pending at a node: one per marked copy, whatever the depth)
-              assert.ok(largest <= m, `${label}: ${largest}`);
-            }
-            // (the pending states accept what the holders' marks mark, on every real holder's paths)
-            for (const truth of pushed.truth) assert.deepEqual(truth.differences, [], label);
-            const native = analysed(source, mode, horizon ?? "native");
-            // (where the native reader ends, every pushed slot is its read of the same path, marks included)
-            if (!closed) samePushedSlots(pushed, native, source);
-            // (#2005: an open ring's receiver scopes cost at most ×1.0105 native's work; a closed one's none)
-            assert.ok(
-              pushed.answers.budget.total <= native.answers.budget.total * (closed ? 1 : 1.0105),
-              `${label}: ${pushed.answers.budget.total} > ${native.answers.budget.total}`,
-            );
-            const published = publication(files, mode, GLOBALS);
-            assert.equal(
-              published,
-              withoutPushedReads(() => publication(files, mode, GLOBALS), horizon),
-              label,
-            );
-          }
-        }
+      for (const m of [1, n - 1]) for (const closed of [false, true]) rows.push([n, d, m, closed]);
+  // (#2005: an open ring of 24 whose 23 marked copies share one marking path: its holder's prefix made once)
+  rows.push([24, 8, 23, false]);
+  for (const [n, d, m, closed] of rows) {
+    const source = heldRing(n, d, m, closed);
+    const files = [{ path: "main.tease", source }];
+    // (native exact where it ends; where it does not, below the read's whole path and eight more)
+    const horizon = closed ? d + 8 : null;
+    for (const mode of MODES) {
+      const pushed = analysed(source, mode);
+      const label = `n ${n}, d ${d}, m ${m}, closed ${closed}, ${JSON.stringify(mode)}`;
+      assert.equal(pushed.answers.budget.exhausted, null, label);
+      for (const { violations, largest } of pushed.invariants) {
+        assert.deepEqual(violations, [], label);
+        // (the marks still pending at a node: one per marked copy, whatever the depth)
+        assert.ok(largest <= m, `${label}: ${largest}`);
+      }
+      // (the pending states accept what the holders' marks mark, on every real holder's paths)
+      for (const truth of pushed.truth) assert.deepEqual(truth.differences, [], label);
+      const native = analysed(source, mode, horizon ?? "native");
+      // (where the native reader ends, every pushed slot is its read of the same path, marks included)
+      if (!closed) samePushedSlots(pushed, native, source);
+      // (#2005: an open ring's receiver scopes cost at most ×1.0105 native's work; a closed one's none)
+      assert.ok(
+        pushed.answers.budget.total <= native.answers.budget.total * (closed ? 1 : 1.0105),
+        `${label}: ${pushed.answers.budget.total} > ${native.answers.budget.total}`,
+      );
+      const published = publication(files, mode, GLOBALS);
+      assert.equal(
+        published,
+        withoutPushedReads(() => publication(files, mode, GLOBALS), horizon),
+        label,
+      );
+    }
+  }
 });
 
 test("a ring read through a marked copy reaches its check, and its leaves are read marked, in four modes (#1784)", () => {
@@ -1066,19 +1073,65 @@ function floorControls(): { readonly source: string; readonly horizon: number | 
     ];
     out.push({ source: rows.join("\n") + "\n", horizon: null });
   }
+  // (a structural sibling two steps deep, read below it and one step past it, where a floor's pending mark would
+  // mark; and Codex r7's witness read one step past an already marked leaf, which a floor carries marked)
+  const sibling = [
+    "let p0={g:{h:0}}",
+    "let p1={g:1}",
+    "let p2={g:2}",
+    "p2.q=p0",
+    "p2=p1",
+    "if p0.g.h is integer { p1=p0 }",
+    "p2=p2.q",
+  ];
+  for (const read of ["p2.q.q.g.h", "p2.q.q.g.h.z"])
+    out.push({
+      source: [...sibling, `say "\${${read}}"`, "exit"].join("\n") + "\n",
+      horizon: null,
+    });
+  out.push({
+    source:
+      [
+        "let p0={a:0,b:0}",
+        "let p1={a:0,b:0}",
+        "let p2={a:0,b:0}",
+        "p2.q=p0",
+        "if p0.q.a is integer { p1=p0 }",
+        "if p0.q.q.b is integer { p1=p0 }",
+        "p2=p1",
+        "p2=p2.q",
+        'say "${p2.q.a.z} ${p2.q.q.b}"',
+        "exit",
+      ].join("\n") + "\n",
+    horizon: null,
+  });
   return out;
 }
 
-test("a receiver with a scalar sibling, and a key entry under a test, read as native reads them, in four modes (#2005)", () => {
-  // (one record sibling keeps a receiver structured; a scalar or `null` alone floors it)
+test("a receiver with a scalar sibling, a structural sibling, an already marked leaf and a key entry under a test, read as native reads them, in four modes (#2005)", () => {
+  // (one record sibling keeps a receiver structured; a scalar or `null` alone floors it; within a bounded allowance,
+  // so a rule that loses the floor exhausts instead of running on)
   for (const { source, horizon } of floorControls())
     for (const mode of MODES) {
       const label = `${JSON.stringify(mode)}\n${source}`;
-      const pushed = analysed(source, mode);
+      const pushed = withTestAllowance(1_000_000, () => analysed(source, mode));
       assert.equal(pushed.answers.budget.exhausted, null, label);
       for (const { violations } of pushed.invariants) assert.deepEqual(violations, [], label);
-      const native = analysed(source, mode, horizon ?? "native");
-      if (horizon === null) samePushedSlots(pushed, native, source);
+      const native = withTestAllowance(1_000_000, () =>
+        analysed(source, mode, horizon ?? "native"),
+      );
+      assert.equal(native.answers.budget.exhausted, null, label);
+      // (every settled answer both hold, where native ends; every pushed slot its native read)
+      if (horizon === null) {
+        pushed.settled.forEach((answers, pass) => {
+          for (const [key, items] of answers) {
+            const other = native.settled[pass]?.get(key);
+            if (key.startsWith("pr|") || other === undefined) continue;
+            assert.equal(items, other, `${key}: ${label}`);
+          }
+        });
+        samePushedSlots(pushed, native, source);
+      }
       const files = [{ path: "main.tease", source }];
       assert.equal(
         publication(files, mode, GLOBALS),
