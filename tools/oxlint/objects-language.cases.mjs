@@ -289,13 +289,13 @@ export const CASES = [
     name: "r2/v2NominalGetter",
     source:
       "import { type WorkLedger } from '../budget.js';\nimport { some, sorted, indexed } from '../narrowing-iteration.js';\ndeclare const work: WorkLedger;\nimport type { Other } from '../other.js';\nexport function witness(value: Other) { work.charge('objectSteps'); return value.text; }\n",
-    expect: ["entry-parameter", "retained-outside"],
+    expect: ["entry-parameter", "mixed-elements", "retained-outside"],
   },
   {
     name: "r2/v2Any",
     source:
       "import { type WorkLedger } from '../budget.js';\nimport { some, sorted, indexed } from '../narrowing-iteration.js';\ndeclare const work: WorkLedger;\ndeclare const x: any;\nexport function witness() { work.charge('objectSteps'); return x.value; }\n",
-    expect: ["any", "any"],
+    expect: ["any", "any", "mixed-elements"],
   },
   {
     name: "r2/v2BadWalk",
@@ -325,13 +325,13 @@ export const CASES = [
     name: "r2/wrongNominalIndexed",
     source:
       "import { type WorkLedger } from '../budget.js';\nimport { some, sorted, indexed } from '../narrowing-iteration.js';\ndeclare const work: WorkLedger;\nimport type { Other } from '../other.js';\nexport function witness(value: Other) { work.charge('objectSteps'); return indexed(work, 'objectSteps', value); }\n",
-    expect: ["entry-parameter", "indexed-class"],
+    expect: ["entry-parameter", "indexed-class", "mixed-elements"],
   },
   {
     name: "r2/nativeCustomConstructor",
     source:
       "import { type WorkLedger } from '../budget.js';\nimport { some, sorted, indexed } from '../narrowing-iteration.js';\ndeclare const work: WorkLedger;\nimport type { Other } from '../other.js';\nexport function witness(value: Other) { work.charge('objectSteps'); return new Set(value); }\n",
-    expect: ["entry-parameter", "retained-collection"],
+    expect: ["entry-parameter", "mixed-elements", "retained-collection"],
   },
   {
     name: "v3/controlEach",
@@ -835,19 +835,19 @@ export const CASES = [
     name: "r10/unknownThisFunction",
     source:
       "import { type WorkLedger as R10Work, joinParts } from '../budget.js';\nimport { each, sorted, concatenated } from '../narrowing-iteration.js';\nfunction read(this:unknown,work:R10Work):boolean{work.charge('objectSteps');return typeof this==='object';}\nexport function f(work:R10Work):boolean{work.charge('objectSteps');return read(work);}\n",
-    expect: ["any"],
+    expect: ["any", "mixed-elements"],
   },
   {
     name: "r10/anyThisFunction",
     source:
       "import { type WorkLedger as R10Work, joinParts } from '../budget.js';\nimport { each, sorted, concatenated } from '../narrowing-iteration.js';\nfunction read(this:any,work:R10Work):boolean{work.charge('objectSteps');return typeof this==='object';}\nexport function f(work:R10Work):boolean{work.charge('objectSteps');return read(work);}\n",
-    expect: ["any"],
+    expect: ["any", "mixed-elements"],
   },
   {
     name: "r10/unknownYield",
     source:
       "import { type WorkLedger as R10Work, joinParts } from '../budget.js';\nimport { each, sorted, concatenated } from '../narrowing-iteration.js';\nfunction* source(work:R10Work):Generator<string,void,unknown>{work.charge('objectSteps');typeof (yield 'x');}\nexport function f(work:R10Work):void{work.charge('objectSteps');for(const item of each(work,'objectSteps',source(work)))void item;}\n",
-    expect: ["any", "any"],
+    expect: ["any"],
   },
   {
     name: "r10/controlYieldUnused",
@@ -872,5 +872,143 @@ export const CASES = [
     source:
       "import { type WorkLedger as R10Work } from '../budget.js';\nimport { concatenated } from '../narrowing-iteration.js';\nfunction* source(work: R10Work, input: readonly string[]): Generator<string | readonly string[]> { work.charge('objectSteps'); yield 'x'; yield input; }\nexport function f(work: R10Work, input: readonly string[]): number { work.charge('objectSteps'); return concatenated<string | readonly string[]>(work, 'objectSteps', [source(work, input)]).length; }\n",
     expect: ["mixed-elements"],
+  },
+  {
+    name: "r11/bitwise",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R11Work):number{work.charge('objectSteps');const value:string|number=~1;return typeof value === 'number' ? value : 0;}\n",
+    expect: ["widening"],
+  },
+  {
+    name: "r11/not",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R11Work):boolean{work.charge('objectSteps');const value:string|boolean=!0;return value === true;}\n",
+    expect: ["widening"],
+  },
+  {
+    name: "r11/controlSigned",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R11Work):number{work.charge('objectSteps');const value:string|number=-1;return typeof value === 'number' ? value : 0;}\n",
+    expect: [],
+  },
+  {
+    name: "r11/controlBoolean",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R11Work):boolean{work.charge('objectSteps');const value:string|boolean=true;return value === true;}\n",
+    expect: [],
+  },
+  {
+    name: "r11/parenAssign",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R11Work):number{work.charge('objectSteps');const names=['b','a'];(names.length)=1;sorted(work,'objectSteps',names);return names.length;}\n",
+    expect: ["sorted-alias"],
+  },
+  {
+    name: "r11/parenIncrement",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R11Work):number{work.charge('objectSteps');const names=['b','a'];++(names.length);sorted(work,'objectSteps',names);return names.length;}\n",
+    expect: ["sorted-alias"],
+  },
+  {
+    name: "r11/destructure",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R11Work):number{work.charge('objectSteps');const names=['b','a'];[names.length]=[1];sorted(work,'objectSteps',names);return names.length;}\n",
+    expect: ["sorted-alias"],
+  },
+  {
+    name: "r11/objectDestructure",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R11Work):number{work.charge('objectSteps');const names=['b','a'];({n:names.length}={n:1});sorted(work,'objectSteps',names);return names.length;}\n",
+    expect: ["sorted-alias"],
+  },
+  {
+    name: "r11/compoundWrite",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R11Work):number{work.charge('objectSteps');const names=['b','a'];names.length+=1;sorted(work,'objectSteps',names);return names.length;}\n",
+    expect: ["sorted-alias"],
+  },
+  {
+    name: "r11/controlLengthRead",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R11Work):number{work.charge('objectSteps');const names=['b','a'];const n=[names.length][0]!;sorted(work,'objectSteps',names);return n+names.length;}\n",
+    expect: [],
+  },
+  {
+    name: "r11/nullableExport",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nconst arrow=(work:R11Work,input:{value:string}):string=>{work.charge('objectSteps');return input.value;};export const entry='x'.length>0?arrow:null;\n",
+    expect: ["export-form"],
+  },
+  {
+    name: "r11/undefinedExport",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nconst arrow=(work:R11Work,input:{value:string}):string=>{work.charge('objectSteps');return input.value;};export const entry='x'.length>0?arrow:undefined;\n",
+    expect: ["export-form"],
+  },
+  {
+    name: "r11/constructableExport",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport class Gathered {constructor(work:R11Work){work.charge('objectSteps');}}\n",
+    expect: ["export-form"],
+  },
+  {
+    name: "r11/controlDataExport",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport const LIMIT = 4;\n",
+    expect: [],
+  },
+  {
+    name: "r11/interface",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\ninterface Stream<T> extends Generator<string|T>{}\nfunction* source(work:R11Work,input:readonly string[]):Stream<readonly string[]>{work.charge('objectSteps');yield 'x';yield input;}\nexport function f(work:R11Work,input:readonly string[]):number{work.charge('objectSteps');let n=0;for(const item of each(work,'objectSteps',source(work,input)))n+=item.length;return n;}\n",
+    expect: ["collection-shape"],
+  },
+  {
+    name: "r11/homogeneousInterface",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\ninterface Stream<T> extends Generator<T>{}\nfunction* source(work:R11Work):Stream<string>{work.charge('objectSteps');yield 'x';}\nexport function f(work:R11Work):number{work.charge('objectSteps');let n=0;for(const item of each(work,'objectSteps',source(work)))n+=item.length;return n;}\n",
+    expect: ["collection-shape"],
+  },
+  {
+    name: "r11/intersection",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\ntype Labelled<T>=Generator<T>&{readonly label?:string};\nfunction* source(work:R11Work,input:readonly string[]):Labelled<string|readonly string[]>{work.charge('objectSteps');yield 'x';yield input;}\nexport function f(work:R11Work,input:readonly string[]):number{work.charge('objectSteps');let n=0;for(const item of each(work,'objectSteps',source(work,input)))n+=item.length;return n;}\n",
+    expect: ["collection-shape"],
+  },
+  {
+    name: "r11/collectionUnion",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R11Work,input:readonly string[],choose:boolean):number{work.charge('objectSteps');const items=choose?['x']:[input];let n=0;for(const item of each<string|readonly string[]>(work,'objectSteps',items))n+=item.length;return n;}\n",
+    expect: ["mixed-elements", "mixed-elements"],
+  },
+  {
+    name: "r11/mapStore",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R11Work,input:readonly string[]):number{work.charge('objectSteps');return new Map<string,string|readonly string[]>().set('x',input).size;}\n",
+    expect: ["mixed-elements"],
+  },
+  {
+    name: "r11/shorthandUnknown",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nfunction capture(work:R11Work,value:unknown):{value:unknown}{work.charge('objectSteps');return {value};}\nexport function f(work:R11Work):boolean{work.charge('objectSteps');return capture(work,'x') !== null;}\n",
+    expect: ["any", "mixed-elements"],
+  },
+  {
+    name: "r11/shorthandAny",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nfunction capture(work:R11Work,value:any):{value:any}{work.charge('objectSteps');return {value};}\nexport function f(work:R11Work):boolean{work.charge('objectSteps');return capture(work,'x') !== null;}\n",
+    expect: ["any", "mixed-elements"],
+  },
+  {
+    name: "r11/controlShorthandString",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nfunction capture(work:R11Work,value:string):{value:string}{work.charge('objectSteps');return {value};}\nexport function f(work:R11Work):number{work.charge('objectSteps');return capture(work,'x').value.length;}\n",
+    expect: [],
+  },
+  {
+    name: "r11/controlParenUnusedYield",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nfunction* source(work:R11Work):Generator<string,void,unknown>{work.charge('objectSteps');(yield 'x');}\nexport function f(work:R11Work):number{work.charge('objectSteps');let n=0;for(const item of each(work,'objectSteps',source(work)))n+=item.length;return n;}\n",
+    expect: [],
   },
 ];
