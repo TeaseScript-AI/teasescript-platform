@@ -492,16 +492,18 @@ test("a covered objects query charges exactly the visits its proof graph holds, 
  * instrumented visit count with no clock, the uncharged-work probe's measure.
  */
 function iteratorSteps<T>(callback: () => T): { readonly result: T; readonly steps: number } {
-  const prototypes = [
-    [][Symbol.iterator](),
-    new Map()[Symbol.iterator](),
-    new Set()[Symbol.iterator](),
-  ].map((iterator) => Object.getPrototypeOf(iterator) as { next: (...args: unknown[]) => unknown });
+  // (the built-in iterators' shared prototypes, each one's `next` wrapped while the callback runs)
+  type Stepper = { next: (...args: never[]) => IteratorResult<never> };
+  const prototypes: Stepper[] = [
+    Reflect.getPrototypeOf([][Symbol.iterator]()),
+    Reflect.getPrototypeOf(new Map()[Symbol.iterator]()),
+    Reflect.getPrototypeOf(new Set()[Symbol.iterator]()),
+  ].filter((prototype): prototype is Stepper => prototype !== null && "next" in prototype);
   const nexts = prototypes.map((prototype) => prototype.next);
   let steps = 0;
   prototypes.forEach((prototype, at) => {
     const next = nexts[at]!;
-    prototype.next = function (this: unknown, ...args: unknown[]) {
+    prototype.next = function (this: never, ...args: never[]) {
       steps += 1;
       return next.apply(this, args);
     };
