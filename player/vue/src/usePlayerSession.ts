@@ -3240,10 +3240,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     canClearScriptStorage,
     clearScriptStorage,
     /**
-     * The saved values as stored now, with the saved photos they reference, for an export; also during a session, whose
-     * saves count once they are stored. Rejects when storage cannot be read.
-     */
-    /**
      * The saved values as stored now, read freshly through the provider in issue order, for Debug's Storage tab; rejects
      * when storage cannot be read. `savedDataRevision` changes when this Player changed them.
      */
@@ -3506,10 +3502,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
 
 export type PlayerSessionHost = ReturnType<typeof usePlayerSession>;
 
-/**
- * The saved and supported revisions, as the start page's Technical details say them, when the JSON of a kept plan or
- * state is of another revision than `supported`, this Player's; else `null`.
- */
 /** Whether `info`, an engine error's details from the host, is a `CheckpointError`'s. */
 function isCheckpointErrorInfo(info: unknown): info is CheckpointErrorInfo {
   return (
@@ -3524,6 +3516,10 @@ function isCheckpointErrorInfo(info: unknown): info is CheckpointErrorInfo {
   );
 }
 
+/**
+ * The saved and supported revisions, as the start page's Technical details say them, when the JSON of a kept plan or
+ * state is of another revision than `supported`, this Player's; else `null`.
+ */
 function revisionChange(json: string, supported: number): string | null {
   let saved: unknown;
   try {
