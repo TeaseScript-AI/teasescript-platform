@@ -1869,8 +1869,7 @@ function literalHolds(frontier: Frontier, at: IndexNode): boolean {
  */
 function literalSafe(frontier: Frontier, state: number, at: IndexNode): boolean {
   const product = productOf(frontier);
-  let byState = product.safe.get(at);
-  const known = byState?.get(state);
+  const known = product.safe.get(at)?.get(state);
   if (known !== undefined) return known;
   const seen = new Map<IndexNode, Set<number>>();
   const visited: [IndexNode, number][] = [];
@@ -1900,14 +1899,14 @@ function literalSafe(frontier: Frontier, state: number, at: IndexNode): boolean 
     for (const to of mark.epsilon) open.push([node, to]);
   }
   // (every pair a safe walk reached is safe; a failed walk says so of its start alone)
-  for (const [node, id] of safe ? visited : [[at, state] as [IndexNode, number]]) {
+  const settled: [IndexNode, number][] = safe ? visited : [[at, state]];
+  for (const [node, id] of settled) {
     keep(frontier.contract.work, 1);
     let bySafe = product.safe.get(node);
     if (bySafe === undefined) product.safe.set(node, (bySafe = new Map()));
     bySafe.set(id, safe);
   }
-  byState ??= product.safe.get(at);
-  return byState?.get(state) ?? safe;
+  return safe;
 }
 
 /** #2005: `steps` from `from` on below a node no read below changes, each step taken directly (`innerBelow`). */
