@@ -264,8 +264,8 @@ export type PlayerSessionStart =
       readonly randomControl?: RandomControlOptions;
     }) => PlayerRuntimeSession);
 
-// Presentation lifecycle around the canonical runtime session. The adapter session stays the only
-// Player state; this host records which session is shown, when presentation must reset, maps
+// Presentation lifecycle around the shown session. It holds the shown `PlayerSession` publication; the engine's host
+// owns the canonical runtime state. This host records which session is shown, when presentation must reset, maps
 // browser time onto the session's scene time, and plays the session's media on browser elements.
 export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const resolvePackageAsset = options.resolveAsset ?? (() => null);
