@@ -128,8 +128,56 @@ export function sorted<T>(
   work: WorkLedger,
   counter: WorkCounter,
   items: T[],
-  compare: (a: T, b: T) => number,
+  compare?: (a: T, b: T) => number,
 ): T[] {
   work.charge(counter, sortCost(items.length));
   return items.sort(compare);
+}
+
+/** A positional view, including PathSteps: each element taken charged. */
+export function* indexed<T>(
+  work: WorkLedger,
+  counter: WorkCounter,
+  items: { readonly length: number; at(index: number): T | undefined },
+  from = 0,
+): Generator<T> {
+  for (let i = from; i < items.length; i += 1) {
+    work.charge(counter);
+    yield items.at(i)!;
+  }
+}
+/** Each source and every element copied charged before use. */
+export function concatenated<T>(
+  work: WorkLedger,
+  counter: WorkCounter,
+  sources: Iterable<Iterable<T>>,
+): T[] {
+  const result: T[] = [];
+  for (const source of each(work, counter, sources))
+    for (const item of each(work, counter, source)) result.push(item);
+  return result;
+}
+/** A suffix copied through the same element charge, never a native slice. */
+export function sliced<T>(
+  work: WorkLedger,
+  counter: WorkCounter,
+  items: readonly T[],
+  from: number,
+): T[] {
+  const result: T[] = [];
+  for (let i = from; i < items.length; i += 1) {
+    work.charge(counter);
+    result.push(items[i]!);
+  }
+  return result;
+}
+/** The variable signature parts: every copied and joined part charged. */
+export function joined(
+  work: WorkLedger,
+  counter: WorkCounter,
+  parts: readonly string[],
+  separator: string,
+): string {
+  work.charge(counter, parts.length);
+  return parts.join(separator);
 }

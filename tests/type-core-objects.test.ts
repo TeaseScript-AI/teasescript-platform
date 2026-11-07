@@ -6,7 +6,10 @@ import { analyseCore, solveDemands } from "../src/type-inference/core/answers.js
 import { Consumers } from "../src/type-inference/core/consumers.js";
 import { indexPaths, stepsOf } from "../src/type-inference/core/contract/literal-index.js";
 import { exportNames, keyBelowIn } from "../src/type-inference/core/contract/key-ids.js";
+import { writtenOf } from "../src/type-inference/core/contract/terms.js";
 import { absentWriterAt, objectsAt } from "../src/type-inference/core/contract/objects.js";
+import { readGroupsAt } from "../src/type-inference/core/contract/others.js";
+import type { ReadEntry } from "../src/type-inference/core/contract/model.js";
 import {
   DemandExhausted,
   withTestAllowance,
@@ -427,31 +430,64 @@ test("a declined objects query charges each entry it visits, and stops at the fi
       contract.literalIndex(literal).root.children.has("element"),
     )!;
     return inMode(MODES[0]!, () => {
-      solver.run(solver.proven(objectsAt(contract, array, ["element"])));
-      const before = program.work.total;
-      const { proof } = solver.run(solver.proven(objectsAt(contract, array, ["element", "zz"])));
-      assert.equal(proof?.complete, false);
-      return program.work.total - before;
+      // (each read group's entries counted as the walk takes them: the visits themselves, not only their charge)
+      const element = contract.literalIndex(array).root.children.get("element")!;
+      let visits = 0;
+      const restore: (() => void)[] = [];
+      for (const group of readGroupsAt(contract, element.reads, false)) {
+        const read = group.read as ReadEntry[];
+        const own = Object.hasOwn(read, Symbol.iterator);
+        const prior = read[Symbol.iterator];
+        read[Symbol.iterator] = function* (this: ReadEntry[]) {
+          for (let at = 0; at < this.length; at += 1) {
+            visits += 1;
+            yield this[at]!;
+          }
+        };
+        restore.push(() => {
+          if (own) read[Symbol.iterator] = prior;
+          else delete (read as Partial<ReadEntry[]>)[Symbol.iterator];
+        });
+      }
+      try {
+        solver.run(solver.proven(objectsAt(contract, array, ["element"])));
+        visits = 0;
+        const before = program.work.total;
+        const { proof } = solver.run(solver.proven(objectsAt(contract, array, ["element", "zz"])));
+        assert.equal(proof?.complete, false);
+        return { units: program.work.total - before, visits };
+      } finally {
+        for (const undo of restore) undo();
+      }
     });
   });
-  // (it stops at the first decline: the work does not grow with the entries after it)
-  assert.ok(units[1]! <= units[0]! + 8, units.join(", "));
+  // (it stops at the first decline: one entry visited, and the work not growing with the entries after it)
+  for (const { visits } of units) assert.equal(visits, 1, JSON.stringify(units));
+  assert.ok(units[1]!.units <= units[0]!.units + 8, JSON.stringify(units));
 });
 
 /**
  * The visits `absentWriterAt` makes over a covered query's proof graph, counted from the proofs themselves: each node,
  * each key and each store at the property below it, each writer, each list and each child edge, a seen one too.
  */
-function queryVisits(pass: CorePass, first: ProofDemand<ObjectsProof>, step: string): number {
+function queryVisits(
+  pass: CorePass,
+  first: ProofDemand<ObjectsProof>,
+  rest: readonly string[],
+  step: string,
+): number {
   const { contract, solver, definitions } = pass;
-  let visits = 0;
+  // (the absence query's and its demand factory's entries, and the query path's naming: R, its length)
+  let visits = 2 + rest.length;
   const seen = new Set<string>([first.key]);
   const open = [first];
   while (open.length > 0) {
     const { proof } = solver.run(solver.proven(open.pop()!));
-    visits += 1;
-    for (const { key } of proof!.keys)
+    visits += 1; // each support node is charged by its worklist take
+    for (const { key, place, path } of proof!.keys) {
       visits += 1 + (definitions.byKey.get(keyBelowIn(contract, key, [step])) ?? []).length;
+      if (writtenOf(pass.program.place(place).kind) !== null) visits += path.length + 3;
+    }
     visits += proof!.prior.length + proof!.lists.length + proof!.children.length;
     for (const child of proof!.children)
       if (!seen.has(child.key)) {
@@ -471,70 +507,72 @@ test("a covered objects query charges exactly the visits its proof graph holds, 
     const pass = passesOf(source, MODES[0]!, 30_000_000).at(-1)!;
     const { program, contract, solver } = pass;
     inMode(MODES[0]!, () => {
-      for (const literal of program.hasOf.keys())
-        for (const step of ["zz", "a", "p"]) {
-          const ask = () => absentWriterAt(contract, literal, [], step);
-          // (warmed: every proof built, so the second ask is the traversal alone)
-          if (!solver.run(ask()).covered) continue;
-          const before = program.work.counts().get("objectSteps") ?? 0;
-          solver.run(ask());
-          const charged = (program.work.counts().get("objectSteps") ?? 0) - before;
-          assert.equal(charged, queryVisits(pass, objectsAt(contract, literal, []), step), source);
-          checked += 1;
-        }
+      for (const literal of program.hasOf.keys()) {
+        // (the empty path, and a non-empty one where the literal holds a child: R = 0 and R = 1)
+        const first = [...contract.literalIndex(literal).root.children.keys()][0];
+        for (const rest of first === undefined ? [[]] : [[], [first]])
+          for (const step of ["zz", "a", "p"]) {
+            const ask = () => absentWriterAt(contract, literal, rest, step);
+            // (warmed: every proof built, so the second ask is the traversal alone)
+            if (!solver.run(ask()).covered) continue;
+            const before = program.work.counts().get("objectSteps") ?? 0;
+            solver.run(ask());
+            const charged = (program.work.counts().get("objectSteps") ?? 0) - before;
+            assert.equal(
+              charged,
+              queryVisits(pass, objectsAt(contract, literal, rest), rest, step),
+              `${rest.join(".")}.${step}: ${source}`,
+            );
+            checked += rest.length === 0 ? 1 : 100;
+          }
+      }
     });
   }
-  assert.ok(checked > 20, String(checked));
+  // (asks on both paths: some empty, some not)
+  assert.ok(checked % 100 > 20 && checked >= 100, String(checked));
 });
 
-/**
- * The iterator steps `callback` takes (arrays', maps' and sets' `next`), counted beside the work ledger: an
- * instrumented visit count with no clock, the uncharged-work probe's measure.
- */
-function iteratorSteps<T>(callback: () => T): { readonly result: T; readonly steps: number } {
-  // (the built-in iterators' shared prototypes, each one's `next` wrapped while the callback runs)
-  type Stepper = { next: (...args: never[]) => IteratorResult<never> };
-  const prototypes: Stepper[] = [
-    Reflect.getPrototypeOf([][Symbol.iterator]()),
-    Reflect.getPrototypeOf(new Map()[Symbol.iterator]()),
-    Reflect.getPrototypeOf(new Set()[Symbol.iterator]()),
-  ].filter((prototype): prototype is Stepper => prototype !== null && "next" in prototype);
-  const nexts = prototypes.map((prototype) => prototype.next);
-  let steps = 0;
-  prototypes.forEach((prototype, at) => {
-    const next = nexts[at]!;
-    prototype.next = function (this: never, ...args: never[]) {
-      steps += 1;
-      return next.apply(this, args);
-    };
-  });
-  try {
-    return { result: callback(), steps };
-  } finally {
-    prototypes.forEach((prototype, at) => (prototype.next = nexts[at]!));
-  }
-}
-
-test("an objects query's construction does no uncharged work that grows with its family: per ask, iterator steps less charged units stay bounded (#1747)", () => {
-  // (the construction's growth row: each family's members' queries built fresh at k and 4k; a fourth uncharged loop
-  // shows as the uncharged part per ask growing with k)
-  for (const shape of SHAPES) {
-    const perAsk = [8, 32].map((k) => {
-      const pass = passesOf(family(shape, k, true), MODES[0]!, 30_000_000).at(-1)!;
-      const { program, contract, solver } = pass;
-      const members = [...program.hasOf.keys()].filter((literal) =>
-        contract.literalIndex(literal).root.children.has(shape === "different-steps" ? "a" : "p"),
-      );
-      const rest = shape === "different-steps" ? ["a", "p"] : ["p"];
-      return inMode(MODES[0]!, () => {
-        const before = program.work.total;
-        const { steps } = iteratorSteps(() => {
-          for (const literal of members) solver.run(absentWriterAt(contract, literal, rest, "zz"));
-        });
-        const charged = program.work.total - before;
-        return Math.max(0, steps - charged) / members.length;
+test("an objects query's construction copies no path suffix and reads each input step a constant number of times, however deep (#1747, charging round)", () => {
+  // (R4's witness: a literal n deep read along its n steps; the walk copies a suffix only where a child entry needs it,
+  // through the charged helper, so the input path's own positions are read 3n times and its slices none)
+  const rows = [8, 32].map((n) => {
+    const source = `let xs=${"{p:".repeat(n)}{}${"}".repeat(n)}\nexit\n`;
+    const pass = passesOf(source, MODES[0]!, 30_000_000).at(-1)!;
+    const { program, contract, solver } = pass;
+    const literal = [...program.hasOf.keys()].find(
+      (value) => program.places[value]?.site?.start === source.indexOf("{"),
+    )!;
+    return inMode(MODES[0]!, () => {
+      const rest: string[] = Array<string>(n).fill("p");
+      solver.run(contract.contractOfValueAt(literal, [...rest, "zz"]));
+      let [slices, reads] = [0, 0];
+      Object.defineProperty(rest, "slice", {
+        value: function (this: string[], start?: number, end?: number) {
+          slices += 1;
+          return Array.prototype.slice.call(this, start, end);
+        },
+        configurable: true,
       });
+      const observed = new Proxy(rest, {
+        get(target, key, receiver) {
+          if (typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key)) reads += 1;
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      const before = program.work.counts().get("objectSteps") ?? 0;
+      const { proof } = solver.run(solver.proven(objectsAt(contract, literal, observed)));
+      const units = (program.work.counts().get("objectSteps") ?? 0) - before;
+      assert.equal(proof?.complete, true);
+      return { n, slices, reads, units };
     });
-    assert.ok(perAsk[1]! <= perAsk[0]! * 1.25 + 4, `${shape}: ${perAsk.join(", ")}`);
+  });
+  for (const { n, slices, reads } of rows) {
+    assert.equal(slices, 0, String(n));
+    assert.equal(reads, 3 * n, String(n));
   }
+  // (and its charged work grows with the depth, at most linearly)
+  assert.ok(
+    rows[1]!.units > rows[0]!.units && rows[1]!.units <= 4.5 * rows[0]!.units,
+    JSON.stringify(rows),
+  );
 });
