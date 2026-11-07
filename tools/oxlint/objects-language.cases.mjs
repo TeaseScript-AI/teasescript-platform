@@ -1,9 +1,9 @@
 /**
- * The objects.ts language's fixtures (#1747, HEAD 0 v3), each `objects.ts` in a fixture project
- * (`objects-language.fixture.mjs`):
- * - Sol's r1 form probes and witnesses (`r1/`);
- * - Sol's r2 witnesses and focused cases (`r2/`);
- * - v3's own cases, one per rule, with an admitted control beside each (`v3/`).
+ * The objects.ts language's fixtures (#1747), each `objects.ts` in a fixture project (`objects-language.fixture.mjs`),
+ * named by the #1921 review round that found them:
+ * - Sol's design r1 form probes and witnesses (`r1/`), and r2's witnesses and focused cases (`r2/`);
+ * - the language's own cases, one per rule, with an admitted control beside each (`v3/`);
+ * - Codex r6's and r9–r13's witnesses, each gate's clause with an admitted control (`r6/`, `r9/` … `r13/`).
  * `expect` is the sorted rules the checker rejects the source by (`[]`: admitted). `residual` marks a witness the
  * lint admits by its stated claim: runtime provenance through carriers is a reviewed boundary, not the lint's.
  */

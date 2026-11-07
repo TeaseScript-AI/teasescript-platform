@@ -6,7 +6,7 @@ import { CASES } from "./objects-language.cases.mjs";
 import { objectsRules } from "./objects-language.fixture.mjs";
 
 /*
- * objects.ts's admitted language (#1747, the lint-resolution HEAD 0 v3): every fixture case is rejected by exactly its
+ * objects.ts's admitted language (#1747, #1921): every fixture case is rejected by exactly its
  * pinned rules, or admitted; the witnesses admitted by the stated claim are the named residual.
  */
 

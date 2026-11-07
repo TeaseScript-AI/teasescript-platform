@@ -36,10 +36,10 @@ import { othersAt, readGroupsAt } from "./others.js";
 import { termAt, writtenOf } from "./terms.js";
 import { resultOf, valueRoute } from "./value-kinds.js";
 
-// #1747 PR 1: the objects a contract read holds at a path, and the earliest object lacking a property below it.
+// #1747: the objects a contract read holds at a path, and the earliest object lacking a property below it.
 
 /**
- * #1747 (TABLE r4.386): the objects a contract read of `value` at `rest` holds, as a proof: each literal node's object
+ * #1747: the objects a contract read of `value` at `rest` holds, as a proof: each literal node's object
  * list it reaches at the path (`ObjectSite`), the pure `missing` writers its read meets on the way (F11 at a prefix, a
  * stored `missing`), and the keys whose own stores and written type at a further property it does not cover. Its read
  * at `rest.s` for a property `s` then names its pure `missing` by `absentWriterAt` without reading `s`. A demand once

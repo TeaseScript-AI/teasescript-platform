@@ -22,7 +22,7 @@ import { coreRequest } from "./helpers/type-core-analysis.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
 /*
- * #1747 PR 1 (TABLE r4.386): the objects query (`contract/objects.ts`). Asked by no production path yet; here, for every
+ * #1747: the objects query (`contract/objects.ts`). No production path asks it; here, for every
  * literal at each path of its index, and every binding read whole and one property down, at each property any object
  * of the source names and one none does, the pure `missing` writer it names (`absentWriterAt`) is the ordinary
  * completed read's at that property (`contractOfValueAt`), wherever the query covers the read.
