@@ -1242,8 +1242,15 @@ export function pushedFacts(contract: Contract): {
   readonly pending: number;
   readonly reads: number;
   readonly declines: ReadonlyMap<string, number>;
+  /** #2005: whether its builds carry receiver scopes; its atoms, their receiver constraints, its shapes and floors. */
+  readonly scoped: boolean;
+  readonly atoms: number;
+  readonly constraints: number;
+  readonly shapes: number;
+  readonly floors: number;
 } {
   const frontier = FRONTIERS.get(contract);
+  const product = frontier?.product ?? null;
   let goals = 0;
   let edges = 0;
   for (const bySteps of frontier?.goals.values() ?? [])
@@ -1259,6 +1266,11 @@ export function pushedFacts(contract: Contract): {
     pending: frontier?.pendingSets.reduce((all, set) => all + set.length, 0) ?? 0,
     reads: [...(frontier?.reads.values() ?? [])].filter((read) => read !== null).length,
     declines: frontier?.declines ?? new Map(),
+    scoped: frontier?.scoped ?? false,
+    atoms: product?.atoms.length ?? 0,
+    constraints: product?.atoms.reduce((all, atom) => all + atom.scopes.length, 0) ?? 0,
+    shapes: product?.shapes.members.length ?? 0,
+    floors: product?.floors ?? 0,
   };
 }
 
@@ -1289,6 +1301,18 @@ export function pushedInvariant(contract: Contract): {
     largest = Math.max(largest, set.length);
     if (new Set(set.map(nameOf)).size !== set.length)
       violations.push(`pending set ${id}: a mark twice`);
+    // (#2005: a plain state absorbs its constrained atoms)
+    if (
+      frontier.product !== null &&
+      set.some((each) => each < 0 && set.includes(atomOf(frontier.product!, each).state))
+    )
+      violations.push(`pending set ${id}: an absorbed atom kept`);
+  });
+  // (#2005: each atom interned once, by its state and its scopes)
+  frontier.product?.atoms.forEach((atom, at) => {
+    const name = `${atom.state}:${atom.scopes.join(",")}`;
+    if (frontier.product!.atomIds.get(name) !== -(at + 1) || atom.scopes.length === 0)
+      violations.push(`atom ${-(at + 1)}: not its name's`);
   });
   // (each union of two sets holds every state of both)
   for (const [name, id] of frontier.unions) {
