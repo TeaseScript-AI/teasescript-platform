@@ -131,6 +131,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     readTransfer: TRANSFER,
     discardSessionReview: TRANSFER,
     adoptShown: EDIT,
+    settleAdoption: EDIT,
     applySavedDataEdit: EDIT,
     clearScriptStorage: EDIT,
     storeImageFile: EDIT,
@@ -822,6 +823,88 @@ test("every place of the host that reaches a store or the host is an operation, 
     Object.keys(OUTSIDE[MAIN] ?? {}),
   ].flat();
   assert.equal(new Set(main).size, main.length, "a place in two tables");
+});
+
+/**
+ * Each read of an adoption's saved values (`captureStorage`) in `source`, and whether it settles only through
+ * `settleAdoption`: a `.then` whose reply and rejection callbacks each call it and nothing else. With the problems of
+ * `settleAdoption` itself: its first statement must return unless `ownsShown(...)` holds.
+ */
+function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: string[] } {
+  const problems: string[] = [];
+  let reads = 0;
+  const line = (node: ts.Node) =>
+    source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+  const settles = (callback: ts.Expression | undefined) =>
+    callback !== undefined &&
+    ts.isArrowFunction(callback) &&
+    ts.isCallExpression(callback.body) &&
+    ts.isIdentifier(callback.body.expression) &&
+    callback.body.expression.text === "settleAdoption";
+  const visit = (node: ts.Node) => {
+    if (ts.isStringLiteralLike(node) && node.text === "captureStorage") {
+      const read = node.parent;
+      const access = read.parent;
+      const then = access?.parent;
+      if (
+        ts.isCallExpression(read) &&
+        read.arguments[1] === node &&
+        ts.isPropertyAccessExpression(read.expression) &&
+        read.expression.name.text === "read" &&
+        ts.isPropertyAccessExpression(access) &&
+        access.name.text === "then" &&
+        ts.isCallExpression(then) &&
+        then.arguments.length === 2 &&
+        settles(then.arguments[0]) &&
+        settles(then.arguments[1])
+      )
+        reads += 1;
+      else
+        problems.push(
+          `${line(node)}: a captureStorage read that does not settle only through settleAdoption`,
+        );
+    }
+    if (ts.isFunctionDeclaration(node) && node.name?.text === "settleAdoption") {
+      const first = node.body?.statements[0];
+      const guarded =
+        first !== undefined &&
+        ts.isIfStatement(first) &&
+        ts.isPrefixUnaryExpression(first.expression) &&
+        ts.isCallExpression(first.expression.operand) &&
+        ts.isIdentifier(first.expression.operand.expression) &&
+        first.expression.operand.expression.text === "ownsShown" &&
+        ts.isReturnStatement(first.thenStatement);
+      if (!guarded)
+        problems.push(`${line(node)}: settleAdoption does not begin with its ownership check`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return { reads, problems };
+}
+
+test("an adoption's read settles, by reply and by rejection, only through settleAdoption and its ownership check", () => {
+  const { reads, problems } = adoptionSettlements(
+    ts.createSourceFile(
+      MAIN,
+      readFileSync(resolve(process.cwd(), HOST_ROOT, MAIN), "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+    ),
+  );
+  assert.deepEqual(problems, []);
+  assert.equal(reads, 1, "the adoption's one read");
+  const of = (text: string) =>
+    adoptionSettlements(ts.createSourceFile("a.ts", text, ts.ScriptTarget.Latest, true)).problems;
+  // A rejection that skips it, a read awaited on its own, and an unguarded settlement are each found.
+  assert.equal(
+    of(
+      'host.read(s, "captureStorage").then((c) => settleAdoption(o, s, { capture: c }), () => false);',
+    ).length,
+    1,
+  );
+  assert.equal(of('const c = await host.read(s, "captureStorage");').length, 1);
+  assert.equal(of("async function settleAdoption() { await write(); }").length, 1);
 });
 
 test("every binding of the host made from a raw resource is one, the media store, or classified", () => {
