@@ -61,14 +61,19 @@ const states = new WeakMap<DeliveryOwner, OwnerState>();
 
 /**
  * Runs every undo, the latest first, also when one throws; each failure goes to `report`, never to the caller, so the
- * cleanup that follows an abort or a close always runs.
+ * cleanup that follows an abort or a close always runs. A report that fails in turn is dropped: a diagnostic can never
+ * stop the undos, the release or the client's settlement.
  */
 function undoAll(undos: readonly (() => void)[], report: (error: unknown) => void): void {
   for (const undo of [...undos].reverse())
     try {
       undo();
     } catch (error) {
-      report(error);
+      try {
+        report(error);
+      } catch {
+        // The diagnostic failed; the cleanup goes on.
+      }
     }
 }
 
@@ -152,16 +157,17 @@ export function deliveryOwner(report: (error: unknown) => void = reportUndoFailu
 
 /**
  * A registry a connection retains, owned by its deliveries: the only way to add an entry (`set`) registers its undo with
- * a delivery first, the innermost open one unless the caller names its own (as the facade does). Undoing restores what
- * the key held before, if the entry is still the one it added. Removing an entry is a release (`delete`, `clear`), which
- * registers nothing. The map it keeps is reachable only through it, so no entry can be added unregistered.
+ * a delivery first, the innermost open one unless the caller names its own (as the facade does). It adds new keys only,
+ * and never restores: undoing removes the entry if it is still the one it added. Removing an entry is a release
+ * (`delete`, `clear`), which registers nothing. The map it keeps is reachable only through it, so no entry can be added
+ * unregistered.
  */
 export class OwnedMap<K, V> {
   readonly #entries = new Map<K, V>();
   readonly #owner: DeliveryOwner;
   readonly #retire: ((value: V, key: K) => void) | undefined;
 
-  /** `retire`, if given, runs for every entry that leaves: undone, deleted or cleared. */
+  /** `retire`, if given, runs once for every entry that leaves: undone, deleted or cleared. */
   constructor(owner: DeliveryOwner, retire?: (value: V, key: K) => void) {
     this.#owner = owner;
     this.#retire = retire;
@@ -189,14 +195,14 @@ export class OwnedMap<K, V> {
     return this.#entries.entries();
   }
 
-  /** Adds `value` under `key`, owned by `delivery` until it is posted; refused, before anything changes, without one. */
+  /**
+   * Adds `value` under the new `key`, owned by `delivery` until it is posted. Refused, before anything changes, without
+   * a delivery, or for a key it holds already: an entry is never replaced, so no undo has a value to restore.
+   */
   set(key: K, value: V, delivery: Delivery = this.#owner.scope()): void {
-    const had = this.#entries.has(key);
-    const before = this.#entries.get(key);
+    if (this.#entries.has(key)) throw new DeliveryRefusedError("This registry holds that key already.");
     this.#owner.own(delivery, () => {
-      if (this.#entries.get(key) !== value) return;
-      if (had) this.#entries.set(key, before!);
-      else this.delete(key);
+      if (this.#entries.get(key) === value) this.delete(key);
     });
     this.#entries.set(key, value);
   }
@@ -218,7 +224,10 @@ export class OwnedMap<K, V> {
   }
 }
 
-/** One value a connection retains, owned by its deliveries as an `OwnedMap`'s entries are. */
+/**
+ * One value a connection retains as a cache, owned by its deliveries: setting it replaces the value, and undoing empties
+ * it if it still holds the undone value, never restoring an earlier one. A cache is recomputed when it is empty.
+ */
 export class OwnedCell<T> {
   #value: T | null = null;
   readonly #owner: DeliveryOwner;
@@ -231,11 +240,10 @@ export class OwnedCell<T> {
     return this.#value;
   }
 
-  /** Holds `value`, owned by `delivery` until it is posted: undoing restores the value before, if it is still this one. */
+  /** Holds `value`, owned by `delivery` until it is posted: undoing empties the cell, if it still holds `value`. */
   set(value: T, delivery: Delivery = this.#owner.scope()): void {
-    const before = this.#value;
     this.#owner.own(delivery, () => {
-      if (this.#value === value) this.#value = before;
+      if (this.#value === value) this.#value = null;
     });
     this.#value = value;
   }

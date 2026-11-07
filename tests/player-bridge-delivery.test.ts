@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 import test from "node:test";
+import { inspect } from "node:util";
+import ts from "typescript";
 
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import {
@@ -208,7 +212,7 @@ test("an undo that throws is reported and keeps neither the others nor the calle
   assert.throws(() => advanceDelivery({ ...owner }, null, { kind: "begin" }), DeliveryRefusedError);
 });
 
-test("an owned registry adds only inside a delivery, and its undo restores what the key held before", () => {
+test("an owned registry adds only inside a delivery, only a new key, and its undo removes without restoring", () => {
   const owner = deliveryOwner();
   const retired: string[] = [];
   const map = new OwnedMap<string, string>(owner, (value, key) => retired.push(`${key}=${value}`));
@@ -218,11 +222,15 @@ test("an owned registry adds only inside a delivery, and its undo restores what 
   map.set("k", "one");
   owner.commit(first);
   const second = owner.begin();
-  map.set("k", "two");
+  assert.throws(() => map.set("k", "two"), DeliveryRefusedError, "an entry is never replaced");
   map.set("new", "three");
   owner.rollback(second);
-  assert.deepEqual([...map], [["k", "one"]], "the replaced entry restored, the new one gone");
-  assert.deepEqual(retired, ["new=three"]);
+  assert.deepEqual([...map], [["k", "one"]], "the committed entry stays, the new one is gone");
+  assert.deepEqual(retired, ["new=three"], "what left was retired once");
+  map.delete("k");
+  map.delete("k");
+  map.clear();
+  assert.deepEqual(retired, ["new=three", "k=one"]);
   // A facade names its own delivery, whatever is innermost.
   const facade = owner.begin();
   const inner = owner.begin();
@@ -231,17 +239,79 @@ test("an owned registry adds only inside a delivery, and its undo restores what 
   assert.equal(map.get("facade"), "four", "the inner delivery did not own it");
   owner.rollback(facade);
   assert.equal(map.has("facade"), false);
-  const cell = new OwnedCell<string>(owner);
-  const third = owner.begin();
-  cell.set("x");
-  owner.rollback(third);
-  assert.equal(cell.value, null);
+});
+
+/** Two deliveries nested, each setting the same key or cell, ended in either order. */
+const REPLACE_AXES = { registry: ["map", "cell"], aborted: ["outerFirst", "innerFirst"] } as const;
+
+for (const each of product(REPLACE_AXES))
+  test(`an owned ${each.registry}, set by nested deliveries that both abort (${each.aborted}), keeps nothing`, () => {
+    const owner = deliveryOwner();
+    const map = new OwnedMap<string, string>(owner);
+    const cell = new OwnedCell<string>(owner);
+    const outer = owner.begin();
+    const inner = owner.begin();
+    if (each.registry === "map") {
+      map.set("k", "a", outer);
+      // The inner delivery cannot take the key over; it adds its own.
+      assert.throws(() => map.set("k", "b", inner), DeliveryRefusedError);
+      map.set("k2", "b", inner);
+    } else {
+      cell.set("a", outer);
+      cell.set("b", inner);
+    }
+    const [one, other] = each.aborted === "outerFirst" ? [outer, inner] : [inner, outer];
+    owner.rollback(one);
+    owner.rollback(other);
+    assert.deepEqual([...map], [], "nothing aborted comes back");
+    assert.equal(cell.value, null);
+  });
+
+test("the replacement cases are every coordinate of their declaration", () => {
+  const owed = [
+    { registry: "map", aborted: "outerFirst" },
+    { registry: "map", aborted: "innerFirst" },
+    { registry: "cell", aborted: "outerFirst" },
+    { registry: "cell", aborted: "innerFirst" },
+  ];
+  assert.deepEqual(coverageGaps(owed, product(REPLACE_AXES), { tuples: true }), []);
+});
+
+test("a reporter that throws, or an error whose inspection throws, never stops the undos or the close", (context) => {
+  context.mock.method(console, "error", (...args: unknown[]) => {
+    // As Node's console does: it inspects what it logs.
+    for (const arg of args) inspect(arg);
+  });
+  const hostile = {
+    [inspect.custom]() {
+      throw new Error("injected: inspecting the error fails");
+    },
+  };
+  for (const report of [
+    undefined,
+    () => {
+      throw new Error("injected: the reporter fails");
+    },
+  ]) {
+    const owner = report === undefined ? deliveryOwner() : deliveryOwner(report);
+    const undone: string[] = [];
+    const delivery = owner.begin();
+    owner.own(delivery, () => undone.push("first"));
+    owner.own(delivery, () => {
+      throw hostile;
+    });
+    owner.own(delivery, () => undone.push("last"));
+    owner.close();
+    assert.deepEqual(undone, ["last", "first"], "every undo ran");
+    assert.ok(owner.closed);
+  }
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
-// The census: what a connection retains is held only in owned registries, whose one way to add registers first.
+// The census: what a connection retains is held only in owned registries. It covers two places: the ops context, and
+// module-scope state in `player/engine-bridge/`. State held anywhere else is guarded by review and the family's rows.
 
-/** The context's fields that hold diagnostics or scalar state the connection keeps by design, not registries. */
+/** The context's paths that hold diagnostics or scalar state the connection keeps by design, not registries. */
 const CONNECTION_STATE = new Set([
   "delivery",
   "recorder",
@@ -252,10 +322,17 @@ const CONNECTION_STATE = new Set([
   "random",
 ]);
 
-/** Every field of `holder` that is a raw collection, by name: none may be reachable on a connection's context. */
-function rawCollections(holder: Readonly<Record<string, unknown>>, prefix: string): string[] {
-  return Object.entries(holder).flatMap(([name, value]) => {
-    if (CONNECTION_STATE.has(name) || typeof value === "function") return [];
+/**
+ * What on `holder` (at `path`) is not an owned registry or classified state: a raw collection, an unknown value, or an
+ * object with nothing in it. Exemptions are by exact path; functions are behaviour, not state.
+ */
+function unowned(holder: Readonly<Record<string, unknown>>, path: string): string[] {
+  const fields = Object.entries(holder);
+  if (fields.length === 0) return [`${path || "(context)"}: an empty object`];
+  return fields.flatMap(([name, value]) => {
+    const at = path === "" ? name : `${path}.${name}`;
+    if (CONNECTION_STATE.has(at) || typeof value === "function") return [];
+    if (value instanceof OwnedMap || value instanceof OwnedCell) return [];
     if (
       value instanceof Map ||
       value instanceof Set ||
@@ -263,31 +340,160 @@ function rawCollections(holder: Readonly<Record<string, unknown>>, prefix: strin
       value instanceof WeakSet ||
       Array.isArray(value)
     )
-      return [`${prefix}${name}`];
-    if (value instanceof OwnedMap || value instanceof OwnedCell) return [];
+      return [`${at}: a raw collection`];
     if (typeof value === "object" && value !== null)
-      return rawCollections(Object.fromEntries(Object.entries(value)), `${prefix}${name}.`);
-    return [`${prefix}${name}: neither owned nor classified`];
+      return unowned(Object.fromEntries(Object.entries(value)), at);
+    return [`${at}: neither owned nor classified`];
   });
 }
 
-/** The context's top-level fields whose type is a raw collection: `never` while every registry is owned. */
-type RawRegistries = {
-  [Field in keyof PlayerOpsContext]: PlayerOpsContext[Field] extends
-    Map<unknown, unknown> | Set<unknown> | WeakMap<WeakKey, unknown> | readonly unknown[]
-    ? Field
-    : never;
-}[keyof PlayerOpsContext];
-const NO_RAW_REGISTRY: [RawRegistries] extends [never] ? true : false = true;
+/** Whether every field of `T`, recursively, is an owned registry or behaviour: `true`, or the offending field's name. */
+type AllOwned<T> = {
+  [Field in keyof T]-?: T[Field] extends (...args: never[]) => infer _Result
+    ? true
+    : T[Field] extends OwnedMap<infer _Key, infer _Value> | OwnedCell<infer _Item>
+      ? true
+      : T[Field] extends object
+        ? [Exclude<AllOwned<T[Field]>, true>] extends [never]
+          ? true
+          : Field
+        : Field;
+}[keyof T];
+type ContextFields = Omit<
+  PlayerOpsContext,
+  "delivery" | "recorder" | "trace" | "traceId" | "traceIntent" | "transferCount" | "random"
+>;
+const ALL_OWNED: [Exclude<AllOwned<ContextFields>, true>] extends [never] ? true : false = true;
+// Its negative controls: a raw map, at the top or nested, and a scalar field are found.
+type Finds<T> = [Exclude<AllOwned<T>, true>] extends [never] ? false : true;
+const FINDS: readonly [
+  Finds<{ extra: Map<string, string> }>,
+  Finds<{ caches: { trace: Map<string, string> } }>,
+  Finds<{ count: number }>,
+] = [true, true, true];
 
-test("every registry a connection's context retains is owned by its deliveries, and nothing else on it is a raw collection", () => {
-  assert.equal(NO_RAW_REGISTRY, true);
-  assert.deepEqual(rawCollections({ ...playerOpsContext() }, ""), []);
-  // A raw map put on the context is found, as is a field no class names.
-  assert.deepEqual(rawCollections({ ...playerOpsContext(), extra: new Map() }, ""), ["extra"]);
-  assert.deepEqual(rawCollections({ ...playerOpsContext(), count: 1 }, ""), [
-    "count: neither owned nor classified",
-  ]);
+test("every field of a connection's context, recursively, is an owned registry or classified by its exact path", () => {
+  assert.equal(ALL_OWNED, true);
+  assert.deepEqual(FINDS, [true, true, true]);
+  assert.deepEqual(unowned({ ...playerOpsContext() }, ""), []);
+  // A raw map on the context, one nested under an exempt name, an empty object and an unclassified field are found.
+  const context = playerOpsContext();
+  assert.deepEqual(unowned({ ...context, extra: new Map() }, ""), ["extra: a raw collection"]);
+  assert.deepEqual(
+    unowned({ ...context, sourceViews: { ...context.sourceViews, trace: new Map() } }, ""),
+    ["sourceViews.trace: a raw collection"],
+  );
+  assert.deepEqual(unowned({ ...context, extra: {} }, ""), ["extra: an empty object"]);
+  assert.deepEqual(unowned({ ...context, count: 1 }, ""), ["count: neither owned nor classified"]);
+});
+
+const ENGINE_BRIDGE = resolve(process.cwd(), "player/engine-bridge");
+
+/**
+ * Every module-scope binding of `player/engine-bridge/` that can hold state across calls: a `let`, or a collection made
+ * outside any function (`new Map`, `Set`, `WeakMap`, `WeakSet`, an array literal), at module scope or as a class field.
+ * Each is classified by module and binding; anything else fails.
+ */
+const MODULE_STATE: Readonly<Record<string, string>> = {
+  "delivery.ts › states": "the owners' own state, weakly keyed by its owner",
+  "delivery.ts › OwnedMap.#entries": "an owned registry's map, private to it",
+  "in-process.ts › backends": "each bridge's backend, weakly keyed by its bridge",
+  "instruction-facts.ts › cache": "immutable facts, weakly keyed by their plan",
+  "transport.ts › nativePrototypes": "the transport's memo of native prototypes, weakly keyed",
+  "transport.ts › FLAT_KEYS": "a constant table",
+  "protocol.ts › REQUEST_KEYS": "a constant table",
+  "protocol.ts › REPLY_OK_KEYS": "a constant table",
+  "protocol.ts › REPLY_ERROR_KEYS": "a constant table",
+  "protocol.ts › BUILD_KEYS": "a constant table",
+  "inventory.ts › COMPLETED_FAMILIES": "a constant table",
+  "inventory.ts › ALLOWED_SOURCE": "a constant table",
+  "inventory.ts › WORKER_MODULES": "a constant table",
+  "inventory.ts › RATCHET": "a constant table",
+  "inventory.ts › VIEW_READERS": "a constant table",
+  "ops/session.ts › START_OPTIONS": "a constant table",
+};
+
+/** `node` without the casts and parentheses around it. */
+function bare(node: ts.Expression): ts.Expression {
+  let at = node;
+  while (
+    ts.isAsExpression(at) ||
+    ts.isSatisfiesExpression(at) ||
+    ts.isParenthesizedExpression(at) ||
+    ts.isTypeAssertionExpression(at)
+  )
+    at = at.expression;
+  return at;
+}
+
+const COLLECTIONS = new Set(["Map", "Set", "WeakMap", "WeakSet"]);
+const isCollection = (node: ts.Expression | undefined): boolean => {
+  if (node === undefined) return false;
+  const value = bare(node);
+  return (
+    ts.isArrayLiteralExpression(value) ||
+    (ts.isNewExpression(value) &&
+      ts.isIdentifier(value.expression) &&
+      COLLECTIONS.has(value.expression.text))
+  );
+};
+
+/** The module-scope state of `text` (module `module`), by `module › binding`. */
+function moduleState(module: string, text: string): string[] {
+  const source = ts.createSourceFile(module, text, ts.ScriptTarget.Latest, true);
+  const found: string[] = [];
+  for (const statement of source.statements) {
+    if (ts.isVariableStatement(statement)) {
+      const mutable = (statement.declarationList.flags & ts.NodeFlags.Const) === 0;
+      for (const declaration of statement.declarationList.declarations)
+        if (mutable || isCollection(declaration.initializer))
+          found.push(`${module} › ${declaration.name.getText(source)}`);
+    }
+    if (ts.isClassDeclaration(statement))
+      for (const member of statement.members)
+        if (ts.isPropertyDeclaration(member) && isCollection(member.initializer))
+          found.push(
+            `${module} › ${statement.name?.text ?? "(class)"}.${member.name.getText(source)}`,
+          );
+  }
+  return found;
+}
+
+function engineBridgeModules(): string[] {
+  const modules: string[] = [];
+  const walk = (folder: string) => {
+    for (const name of readdirSync(folder)) {
+      const path = join(folder, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (path.endsWith(".ts")) modules.push(relative(ENGINE_BRIDGE, path));
+    }
+  };
+  walk(ENGINE_BRIDGE);
+  return modules.sort();
+}
+
+test("every module-scope binding of the engine bridge that can hold state across calls is classified", () => {
+  const found = engineBridgeModules().flatMap((module) =>
+    moduleState(module, readFileSync(join(ENGINE_BRIDGE, module), "utf8")),
+  );
+  assert.deepEqual(
+    found.filter((binding) => !Object.hasOwn(MODULE_STATE, binding)),
+    [],
+    "unclassified",
+  );
+  assert.deepEqual(
+    Object.keys(MODULE_STATE).filter((binding) => !found.includes(binding)),
+    [],
+    "classified, but no such binding",
+  );
+  // A module-level map, a module-level `let` a registry could be stashed in, and a class field are found.
+  assert.deepEqual(
+    moduleState(
+      "ops/transfer.ts",
+      "const unowned = new Map<string, unknown>(); let stash = null; class Caches { readonly trace = new Map(); }",
+    ),
+    ["ops/transfer.ts › unowned", "ops/transfer.ts › stash", "ops/transfer.ts › Caches.trace"],
+  );
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
