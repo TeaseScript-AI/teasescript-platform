@@ -22,8 +22,10 @@ import {
   type RuntimeSessionView,
   type SerializableRuntimeValue,
 } from "../src/index.js";
+import { Attribution } from "./helpers/runtime-differential-side.js";
 import {
   differentialRun,
+  differentialRunOn,
   thisBuild,
   type DifferentialOptions,
   type DifferentialInput,
@@ -198,7 +200,7 @@ test("a bounded seeded sample of generated programs is equivalent on both routes
   const randomMode = (program: GeneratedProgram) =>
     program.tags.includes("rng")
       ? programs.filter((item) => item.tags.includes("rng")).indexOf(program) % 2 === 1
-        ? "choose"
+        ? "choose-natural"
         : "natural"
       : undefined;
   for (const program of programs) {
@@ -479,10 +481,12 @@ function injected(
   where: (record: SideRecord, at: InjectionSite) => boolean,
   change: (copy: SideRecord) => void,
   input: DifferentialInput = single("sensitivity", SENSITIVE, { seed: 5 }),
+  options: DifferentialOptions = {},
 ): DifferentialReport {
   let applied = false;
   const report = differentialRun(input, {
     ...CUTS,
+    ...options,
     inject: (record, at) => {
       if (applied || at.side !== "right" || !where(record, at)) return record;
       applied = true;
@@ -1693,4 +1697,83 @@ test.after(() => {
     };
   });
   console.log(JSON.stringify({ differentialCost: summary }));
+});
+
+test("a mismatch limit is a positive safe integer, and any other is refused before either side's run starts", () => {
+  // The admitted limits, each with the mismatches a comparison of twelve differing values reports under it.
+  const admitted: [label: string, limit: number | undefined, reported: number][] = [
+    ["absent, so 10", undefined, 10],
+    ["one", 1, 1],
+    ["ten", 10, 10],
+    ["the largest safe integer", Number.MAX_SAFE_INTEGER, 12],
+  ];
+  const twelve = Array.from({ length: 12 }, (_, index) => index);
+  const otherTwelve = twelve.map((index) => -index - 1);
+  for (const [label, limit, reported] of admitted) {
+    const options = limit === undefined ? {} : { limit };
+    // A limit only bounds what a discrepancy reports: equal values stay equal, on every restore route.
+    assert.equal(compareStructures({ a: [1] }, { a: [1] }, options).equal, true, label);
+    assert.deepEqual(
+      differentialRun(FAULT_INPUT, { ...CUTS, ...options }).verdict,
+      { kind: "equivalent" },
+      label,
+    );
+    const capped = compareStructures(twelve, otherTwelve, options);
+    assert.deepEqual(
+      [capped.equal, capped.mismatches.length, capped.truncated],
+      [false, reported, reported < 12],
+      label,
+    );
+  }
+  // The driver passes its limit on: two changed bindings are one mismatch under limit 1, and two by default.
+  const bothBindings = (options: DifferentialOptions) =>
+    injected(
+      (record, at) => uninterrupted(at) && binding(record, "computed") !== undefined,
+      (copy) => {
+        for (const name of ["x", "computed"]) {
+          const item = binding(copy, name)!;
+          // EVIDENCE: validation: `x` and `computed` hold integers.
+          item.value = (item.value as number) + 1;
+        }
+      },
+      undefined,
+      options,
+    ).verdict;
+  for (const [options, reported] of [
+    [{ limit: 1 }, 1],
+    [{}, 2],
+  ] as const) {
+    const verdict = bothBindings(options);
+    assert.equal(verdict.kind, "discrepancy", JSON.stringify(verdict));
+    if (verdict.kind === "discrepancy") assert.equal(verdict.mismatches.length, reported);
+  }
+
+  for (const [label, limit] of [
+    ["zero", 0],
+    ["negative", -1],
+    ["a fraction", 1.5],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["-Infinity", Number.NEGATIVE_INFINITY],
+    ["2^53", 2 ** 53],
+  ] as const) {
+    assert.throws(() => compareStructures(1, 1, { limit }), RangeError, label);
+    let ports = 0;
+    assert.throws(
+      () =>
+        differentialRunOn(
+          new Attribution(),
+          () => {
+            ports += 1;
+            throw new Error("no side may start");
+          },
+          FAULT_INPUT,
+          { ...CUTS, limit },
+        ),
+      RangeError,
+      label,
+    );
+    assert.equal(ports, 0, `${label}: no side's run started`);
+    assert.throws(() => differentialRun(FAULT_INPUT, { ...CUTS, limit }), RangeError, label);
+  }
 });

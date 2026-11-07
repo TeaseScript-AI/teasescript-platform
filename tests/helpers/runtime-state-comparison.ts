@@ -163,14 +163,16 @@ function mappedPosition(
  * `0` differ), arrays by length and position, and plain objects by their own enumerable keys in insertion order, then
  * their values: key order counts, because the runtime's canonical order is part of its output. Under a field of
  * `POSITION_FIELDS`, the oracle's positions are translated by `correspondence` first. Throws `MappingFailure` when the
- * correspondence cannot answer, and `NotPlainData` for a value outside plain data.
+ * correspondence cannot answer, and `NotPlainData` for a value outside plain data. `options.limit` is the most
+ * mismatches it reports, through `mismatchLimit`: a positive safe integer, 10 by default; any other value throws a
+ * `RangeError`, since a limit that keeps no mismatch would report equal values as different.
  */
 export function compareStructures(
   oracle: unknown,
   candidate: unknown,
   options: { readonly limit?: number; readonly correspondence?: Correspondence } = {},
 ): StructureComparison {
-  const limit = options.limit ?? 10;
+  const limit = mismatchLimit(options.limit);
   const correspondence = options.correspondence ?? IDENTITY;
   const mismatches: StructureMismatch[] = [];
   interface Work {
@@ -254,6 +256,14 @@ export function compareStructures(
     }
   }
   return { equal: mismatches.length === 0, mismatches, truncated: false };
+}
+
+/** The most mismatches a comparison reports: `limit` when it is a positive safe integer, 10 when it is absent. */
+export function mismatchLimit(limit: number | undefined): number {
+  if (limit === undefined) return 10;
+  if (!Number.isSafeInteger(limit) || limit < 1)
+    throw new RangeError(`A mismatch limit is a positive safe integer, not ${String(limit)}`);
+  return limit;
 }
 
 /** The harness's writing could not write a value: the record has no verdict, and the pair is a serializer failure. */

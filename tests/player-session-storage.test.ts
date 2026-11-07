@@ -26,6 +26,7 @@ import {
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
+import { decodeMessage, encodeMessage } from "../player/engine-bridge/transport.js";
 import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { AMSTERDAM, utc } from "./helpers/temporal-fixtures.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
@@ -745,7 +746,10 @@ test("a Debug edit 2,000 lists deep is stored, crosses the bridge and reaches th
   assert.equal(cloneGraphDifference(storage.entries.get("k"), deep), null, "stored");
   const [entry] = playerRuntimeSnapshot(host.session.value!).scriptStorage;
   assert.equal(entry?.key, "k");
-  assert.equal(cloneGraphDifference(entry?.value, deep), null, "in the host's session");
+  // The host's value is engine data, whose arrays have the runtime's captured-array prototype, so it is compared as it
+  // crosses the bridge: `cloneGraphDifference` compares what crossed a structured-clone port.
+  const crossed = decodeMessage(structuredClone(encodeMessage(entry?.value)));
+  assert.equal(cloneGraphDifference(crossed, deep), null, "in the host's session");
   assert.deepEqual(host.debugEdits.value, { firstEditSceneTimeMs: 0, editCount: 1 });
 });
 

@@ -158,7 +158,10 @@ function regressionInputs(seeds: readonly number[]): DifferentialInput[] {
   });
 }
 
-function programInput(program: GeneratedProgram, random?: "natural" | "choose"): DifferentialInput {
+function programInput(
+  program: GeneratedProgram,
+  random?: "natural" | "choose-natural",
+): DifferentialInput {
   return {
     name: program.id,
     sources: program.sources,
@@ -180,7 +183,7 @@ function sampleInputs(): DifferentialInput[] {
       program,
       program.tags.includes("rng")
         ? random.indexOf(program) % 2 === 1
-          ? "choose"
+          ? "choose-natural"
           : "natural"
         : undefined,
     ),

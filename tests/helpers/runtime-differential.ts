@@ -6,7 +6,12 @@
  * one lockstep control flow below decides for both.
  */
 
-import { compareStructures, IDENTITY, MappingFailure } from "./runtime-state-comparison.js";
+import {
+  compareStructures,
+  IDENTITY,
+  MappingFailure,
+  mismatchLimit,
+} from "./runtime-state-comparison.js";
 import { thisBuild } from "./runtime-differential-build.js";
 import {
   Attribution,
@@ -160,13 +165,14 @@ export function differentialRunOn(
     };
   };
 
+  // Before either side's run starts, and outside the `try`, which would report a bad option as a side's failure.
+  const limit = mismatchLimit(options.limit);
   try {
     route = options.route ?? "legacy";
     const sides = makePorts(route);
     ports = sides;
     const correspondence = options.correspondence ?? IDENTITY;
     const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
-    const limit = options.limit ?? 10;
     /** Compares plain data; a difference or a mapping failure stops the pair. */
     const compareData = (oracle: unknown, candidate: unknown, at: ComparisonSite) => {
       let comparison;
