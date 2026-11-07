@@ -211,8 +211,8 @@ test("the generated family holds every declared obligation and every pair of val
   for (const retirement of RETIREMENTS) assert.ok(CASES.some((c) => c.retirement === retirement));
 });
 
-for (const c of CASES)
-  test(`plan JSON lifetime: ${layerName(c)}`, () => {
+test(`plan JSON lifetime over the generated family (${CASES.length} cases, each named in its assertions)`, () => {
+  for (const c of CASES) {
     const h = run(c);
     // At the end the host holds the JSON of the live page's current plan alone, written once for this tenure.
     if (c.retirement === "current") {
@@ -220,9 +220,10 @@ for (const c of CASES)
         c.producer === "preparePlanText" || c.slot !== "absent" || c.reprepare === "yes";
       assert.equal(h.host.slots.get("A"), reserved ? "ready" : undefined, layerName(c));
     } else assert.equal(h.host.slots.has("A"), false, layerName(c));
-    if (c.retirement === "disposed") assert.equal(h.host.slots.size, 0);
-    assert.equal(h.lease().live, c.retirement !== "disposed");
-  });
+    if (c.retirement === "disposed") assert.equal(h.host.slots.size, 0, layerName(c));
+    assert.equal(h.lease().live, c.retirement !== "disposed", layerName(c));
+  }
+});
 
 test("A, then B, then A again: each tenure of A writes its JSON once, and B's is let go", () => {
   const h = harness("A B A");

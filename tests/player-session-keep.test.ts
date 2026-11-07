@@ -16,8 +16,12 @@ import {
 import { compilePlayerProject } from "../player/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import {
+  MOVES,
   PRODUCERS,
+  SUSPENSIONS,
   caseName,
+  stale,
+  type Move,
   familyCases,
   type FamilyCase,
   type Producer,
@@ -51,6 +55,8 @@ interface KeepHost {
   temporalCapture(): PlayerRuntimeSessionOptions;
   readonly bridge: Promise<PlayerBridge>;
   exportSession(): Promise<{ readonly transfer: ExportedSession }>;
+  setDebugMode(enabled: boolean): void;
+  readonly rooms: { readonly current: Readonly<Ref<"normal" | "debug">> };
   reviewSessionImport(transfer: ExportedSession): Promise<ImportReview>;
   importSession(review: ImportReview): Promise<void>;
 }
@@ -800,4 +806,322 @@ for (const c of familyCases()) {
 
 test("the composable's family drives every producer of the shared family", () => {
   assert.deepEqual(Object.keys(DRIVERS).sort(), Object.keys(PRODUCERS).sort());
+});
+
+/*
+ * Continuation ownership (`player/persistence-ownership.ts`): each producer's operation held at each of its main-side
+ * suspensions (`SUSPENSIONS`), while its page moves on (`MOVES`). A stale operation writes nothing to the kept store or
+ * the saved values after the move, and installs no Continue; one the move leaves current goes on.
+ */
+
+/** The kept store and saved values of `at`, with each write logged and the next call of a named method held on request. */
+function gated(context: TestContext, at: ReturnType<typeof browser>) {
+  const writes: string[] = [];
+  const armed = new Map<string, { reached: () => void; release: Promise<void> }>();
+  const reached = new Map<string, Promise<void>>();
+  let open = () => {};
+  const arm = (name: string) => {
+    let signal!: () => void;
+    reached.set(name, new Promise<void>((resolve) => (signal = resolve)));
+    const release = new Promise<void>((resolve) => (open = resolve));
+    armed.set(name, { reached: signal, release });
+  };
+  const hold = async (name: string) => {
+    const gate = armed.get(name);
+    if (gate === undefined) return;
+    armed.delete(name);
+    gate.reached();
+    await gate.release;
+  };
+  const { kept, provider } = at;
+  const discard = kept.discard.bind(kept);
+  kept.discard = async (scope) => {
+    writes.push("discard");
+    await hold("discard");
+    return discard(scope);
+  };
+  const publish = kept.publish.bind(kept);
+  kept.publish = async (scope, update) => {
+    writes.push("publish");
+    await hold("publish");
+    return publish(scope, update);
+  };
+  const read = kept.session.bind(kept);
+  kept.session = async (scope) => {
+    await hold("session");
+    return read(scope);
+  };
+  const replace = provider.replace.bind(provider);
+  provider.replace = async (entries) => {
+    writes.push("replace");
+    await hold("replace");
+    return replace(entries);
+  };
+  const write = provider.write.bind(provider);
+  provider.write = async (key, value) => {
+    writes.push("write");
+    return write(key, value);
+  };
+  const clear = provider.clear.bind(provider);
+  provider.clear = async () => {
+    writes.push("clear");
+    return clear();
+  };
+  const load = provider.load.bind(provider);
+  provider.load = async () => {
+    await hold("load");
+    return load();
+  };
+  void context;
+  return { writes, arm, reached: (name: string) => reached.get(name)!, release: () => open() };
+}
+
+interface HeldOperation {
+  readonly host: KeepHost;
+  readonly scope: EffectScope;
+  readonly plan: InstructionPlan;
+  /** Releases what holds the operation, and resolves once its caller is done. */
+  readonly finish: () => Promise<void>;
+  /** The session a held restore introduced, which a stale restore must release. */
+  readonly restored?: () => string | null;
+}
+
+/** A Continue's restore, held at `point`. */
+async function heldRestore(context: TestContext, at: ReturnType<typeof browser>, point: string) {
+  await seedKept(context, at, ASKS, false);
+  const gates = gated(context, at);
+  const { host, scope } = await mount(context, at);
+  const bridge = await host.bridge;
+  let introduced: string | null = null;
+  let release = () => {};
+  if (point === "storeRead") {
+    gates.arm("session");
+    release = gates.release;
+  } else {
+    const reply = holdReply(context, bridge, "restoreKept");
+    const request = bridge.client.request;
+    // The reply's session, so a stale restore is seen to release it.
+    context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) =>
+      request(...args).then((result) => {
+        if (args[0] === "restoreKept" && result.session !== null) introduced = result.session;
+        return result;
+      }),
+    );
+    release = reply.release;
+    const preparing = prepareOn(host, ASKS);
+    await reply.sent;
+    return {
+      gates,
+      held: {
+        host,
+        scope,
+        plan: ASKS,
+        restored: () => introduced,
+        finish: async () => {
+          release();
+          await preparing;
+          await tasks();
+        },
+      },
+    };
+  }
+  const preparing = prepareOn(host, ASKS);
+  await gates.reached("session");
+  return {
+    gates,
+    held: {
+      host,
+      scope,
+      plan: ASKS,
+      finish: async () => {
+        release();
+        await preparing;
+        await tasks();
+      },
+    },
+  };
+}
+
+/** A session import, held at `point`. */
+async function heldImport(context: TestContext, at: ReturnType<typeof browser>, point: string) {
+  const exporting = await page(context, at, ASKS);
+  await exporting.host.activate();
+  await until(() => exporting.host.session.value !== null, "no session to export");
+  const { transfer } = await exporting.host.exportSession();
+  exporting.scope.stop();
+  await tasks();
+  const gates = gated(context, at);
+  const { host, scope } = await page(context, at, ASKS);
+  const review = await host.reviewSessionImport(transfer);
+  let release = () => {};
+  let reached: Promise<void>;
+  const store = {
+    storageReplace: "replace",
+    discard: "discard",
+    publish: "publish",
+    reload: "load",
+  }[point];
+  if (store !== undefined) {
+    gates.arm(store);
+    release = gates.release;
+    reached = gates.reached(store);
+  } else {
+    const reply = holdReply(context, await host.bridge, "planText");
+    release = reply.release;
+    reached = reply.sent;
+  }
+  const importing = host.importSession(review).catch(() => {});
+  await reached;
+  return {
+    gates,
+    held: {
+      host,
+      scope,
+      plan: ASKS,
+      finish: async () => {
+        release();
+        await importing;
+        await tasks();
+      },
+    },
+  };
+}
+
+/** A keep, held at `point`. */
+async function heldKeep(context: TestContext, at: ReturnType<typeof browser>, point: string) {
+  const gates = gated(context, at);
+  const { host, scope } = await page(context, at, ASKS);
+  let release = () => {};
+  let reached: Promise<void>;
+  if (point === "reply") {
+    const reply = holdReply(context, await host.bridge, "captureKeep");
+    release = reply.release;
+    reached = reply.sent;
+  } else {
+    gates.arm(point);
+    release = gates.release;
+    reached = gates.reached(point);
+  }
+  const activating = host.activate();
+  await reached;
+  return {
+    gates,
+    held: {
+      host,
+      scope,
+      plan: ASKS,
+      finish: async () => {
+        release();
+        await activating;
+        await tasks();
+      },
+    },
+  };
+}
+
+/** A reservation whose task has not run. */
+async function heldReservation(context: TestContext, at: ReturnType<typeof browser>) {
+  const gates = gated(context, at);
+  const { host, scope } = await mount(context, at);
+  const token = await held(host, ASKS);
+  const preparing = host.prepareScript(token, {
+    plan: token,
+    options: () => ({ ...host.scriptStorageOptions(), ...host.temporalCapture() }),
+  });
+  return {
+    gates,
+    held: {
+      host,
+      scope,
+      plan: ASKS,
+      finish: async () => void (await preparing),
+    } satisfies HeldOperation,
+  };
+}
+
+/** Each producer's operation held at each of its suspensions; the type requires one for every declared one. */
+const HELD: { readonly [P in Producer]: Record<(typeof SUSPENSIONS)[P][number], typeof heldKeep> } =
+  {
+    preparePlanText: { task: (context, at) => heldReservation(context, at) },
+    restoreKept: {
+      storeRead: (context, at) => heldRestore(context, at, "storeRead"),
+      reply: (context, at) => heldRestore(context, at, "reply"),
+    },
+    planText: {
+      storageReplace: (context, at) => heldImport(context, at, "storageReplace"),
+      discard: (context, at) => heldImport(context, at, "discard"),
+      reply: (context, at) => heldImport(context, at, "reply"),
+      publish: (context, at) => heldImport(context, at, "publish"),
+      reload: (context, at) => heldImport(context, at, "reload"),
+    },
+    captureKeep: {
+      reply: (context, at) => heldKeep(context, at, "reply"),
+      discard: (context, at) => heldKeep(context, at, "discard"),
+      publish: (context, at) => heldKeep(context, at, "publish"),
+    },
+  };
+
+/** The page of `held` moves on as `move` says. */
+async function moveOn(held: HeldOperation, move: Move) {
+  if (move === "otherPlan") await prepareAgain(held.host, ASKS_OTHER);
+  else if (move === "samePlan") await prepareAgain(held.host, held.plan);
+  else if (move === "room") {
+    held.host.setDebugMode(true);
+    await until(
+      () => held.host.rooms.current.value === "debug",
+      "the page did not open the debug room",
+    );
+  } else held.scope.stop();
+}
+
+// EVIDENCE: invariant: the keys of `SUSPENSIONS`, which are the producers.
+for (const producer of Object.keys(SUSPENSIONS) as Producer[])
+  for (const point of SUSPENSIONS[producer])
+    for (const move of MOVES) {
+      const retires = stale(producer, move);
+      if (retires === "unreachable") continue;
+      test(`continuation ownership: ${producer} at ${point}, ${move}`, async (context) => {
+        stubBrowser(context);
+        const at = browser();
+        planWrites(context, ASKS, ASKS_OTHER);
+        // EVIDENCE: invariant: `HELD` has a driver for every declared suspension of every producer.
+        const driver = (HELD[producer] as Record<string, typeof heldKeep>)[point]!;
+        const { gates, held: operation } = await driver(context, at);
+        const bridge = await operation.host.bridge;
+        const token = await held(operation.host, operation.plan);
+        await moveOn(operation, move);
+        const mark = gates.writes.length;
+        await operation.finish();
+        for (let turn = 0; turn < 4; turn++) await tasks();
+        const after = gates.writes.slice(mark);
+        if (producer === "preparePlanText") {
+          // The reservation: let go of where the move retired it, kept where it did not.
+          const before = await writesOn(operation.host, operation.plan);
+          await bridge.client.request("planText", { plan: token });
+          assert.equal((await writesOn(operation.host, operation.plan)) - before, retires ? 1 : 0);
+          return;
+        }
+        if (retires) {
+          assert.deepEqual(after, [], `the stale ${producer} wrote after the move`);
+          if (move !== "disposed" && move !== "samePlan")
+            assert.notEqual(
+              held.host.activation.value,
+              "continue",
+              "a stale operation installed Continue",
+            );
+          const restored = held.restored?.() ?? null;
+          if (restored !== null && move !== "disposed")
+            assert.equal(bridge.store(restored), null, "the stale restore's session was released");
+        } else
+          assert.ok(
+            after.includes("publish"),
+            `the ${producer} the move left current did not save`,
+          );
+      });
+    }
+
+test("continuation ownership holds every declared suspension of every producer", () => {
+  // EVIDENCE: invariant: the keys of `SUSPENSIONS`, which are the producers.
+  for (const producer of Object.keys(SUSPENSIONS) as Producer[])
+    assert.deepEqual(Object.keys(HELD[producer]).sort(), [...SUSPENSIONS[producer]].sort());
 });
