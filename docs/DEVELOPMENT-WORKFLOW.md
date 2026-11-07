@@ -447,7 +447,8 @@ and the coordinator may redirect at any review. On the full route, the plan is a
 coordinators' repository that the pull request links, and the coordinator accepts it before code. Anything a later
 reader needs from it, or from the reports it links, is summarised in the pull request. A full-route plan states:
 
-- the files and the expected size of each change (lines changed per file);
+- the files and the expected size of each change (lines changed per file), and where new code goes: its module and
+  folder, per [Code structure](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-structure);
 - what must stay identical and what may differ;
 - the evidence level;
 - the growth bar, when it applies;
@@ -556,8 +557,9 @@ READY contains:
   complete;
 - every review round so far, as a link to its comment, with its verdict;
 - departures from the accepted plan;
-- confusing code met, one line each, with what was done (fixed here, or the issue), as in
-  [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead);
+- confusing code or structure met, one line each, with what was done (fixed here, or the issue), as in
+  [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead) and
+  [Code structure](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-structure);
 - on the full route, what the final review should cover.
 
 After any repair, the builder sends READY again at the new head.
@@ -569,8 +571,9 @@ The coordinator writes the final reviewer's brief. It contains:
 - the exact head and base, and what to read;
 - numbered items, each with the claim, the cases to construct beyond the pull request's own tests, and what counts as
   a blocker;
-- the clarity item: does anything the change adds or touches mislead, as in
-  [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead);
+- the clarity and structure item: does anything the change adds or touches mislead, or sit outside the module and
+  folder its owner names, as in [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead)
+  and [Code structure](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-structure);
 - the delta item: from the diff against the base, confirm that the change is exactly the planned one and nothing else,
   naming collateral or generated files, debug code, secrets, unrelated changes, and stale documentation;
 - the output format, which follows

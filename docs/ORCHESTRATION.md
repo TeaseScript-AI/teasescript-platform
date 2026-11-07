@@ -88,13 +88,20 @@ result depends on, recorded with the evidence per result; otherwise it reruns.
 
 ## Parallel lanes
 
-A lane is a set of files that move together plus one chain of plans, not an agent. One agent works in it at a time;
+A lane owns a folder or a set of folders, and every file in them, plus one chain of plans; it is not an agent. One agent works in it at a time;
 the agent is kept while the chain is open and released at its end. Lanes run in parallel unless they change the same
 functions. Items that change the same function run one after the
 other: the second waits until the first has merged, then rebases onto the new base. Because the shared function
 changed, that rebase changes the second item's delta, so its affected evidence reruns and its review rounds restart on
 the changed part ([Pull requests and rebases](DEVELOPMENT-WORKFLOW.md#pull-requests-and-rebases)). This is not a stack
 and not an identity rebase. While a pull request waits on a design round, its lane builds its next item.
+
+## Structure
+
+You own the structure of the whole: each pull request can be reasonable while the whole drifts. After each merged
+package, or at each milestone, run `node tools/structure-report.mjs --json` and compare it with the last report kept
+in the evidence (`--compare`). When a signal shows a clear seam, plan the split or the folder move as its own pull
+request, scheduled between packages, and act on the structure concerns lanes report.
 
 ## Facts that cross lanes
 
