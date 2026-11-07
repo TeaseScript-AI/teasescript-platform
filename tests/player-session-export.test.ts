@@ -14,6 +14,8 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import { preparedPlan } from "./helpers/prepared-plan.js";
+import type { PlayerBridge } from "../player/player-bridge.js";
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import {
@@ -65,8 +67,9 @@ interface TransferHost {
   readonly imageCapture: { choose(reference: string): boolean; answer(input: "button"): Intent };
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
+  readonly bridge: Promise<PlayerBridge>;
   prepareScript(
-    plan: InstructionPlan,
+    plan: string,
     create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession,
   ): Promise<void>;
   activate(): Promise<void>;
@@ -155,7 +158,7 @@ async function page(context: TestContext, at: ReturnType<typeof browser>, plan: 
   assert.ok(host);
   context.after(() => scope.stop());
   await host.loadScriptStorage();
-  await host.prepareScript(plan, (options) =>
+  await host.prepareScript(await preparedPlan(host.bridge, plan), (options) =>
     createPlayerRuntimeSession(plan, { ...options, ...host.scriptStorageOptions() }),
   );
   return host;

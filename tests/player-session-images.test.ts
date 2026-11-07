@@ -10,6 +10,8 @@ import {
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import { preparedPlan } from "./helpers/prepared-plan.js";
+import type { PlayerBridge } from "../player/player-bridge.js";
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import {
   assembleDebugExport,
@@ -21,7 +23,7 @@ import {
 import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
 import { memoryKeptSessionStore, type KeptSessionStore } from "../player/kept-sessions.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
-import type { InstructionPlan, SerializableRuntimeValue } from "../src/index.js";
+import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { answerWith, type Intent } from "./helpers/player-input.js";
@@ -50,8 +52,9 @@ interface ImageHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
+  readonly bridge: Promise<PlayerBridge>;
   prepareScript(
-    plan: InstructionPlan,
+    plan: string,
     create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession,
   ): Promise<void>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
@@ -265,7 +268,7 @@ test("after a reload, Continue's debug export offers the photo its state holds, 
     assert.ok(host);
     context.after(() => scope.stop());
     await host.loadScriptStorage();
-    await host.prepareScript(plan, (options) =>
+    await host.prepareScript(await preparedPlan(host.bridge, plan), (options) =>
       createPlayerRuntimeSession(plan, { ...options, ...host.scriptStorageOptions() }),
     );
     return { host, scope };

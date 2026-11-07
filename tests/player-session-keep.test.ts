@@ -12,7 +12,8 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import { compilePlayerProject } from "../player/compile-project.js";
+import { preparedPlan } from "./helpers/prepared-plan.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { InstructionPlan } from "../src/index.js";
@@ -34,8 +35,8 @@ interface KeepHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepareScript(
-    plan: InstructionPlan,
-    create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession,
+    plan: string,
+    create: { readonly plan: string; readonly options: () => PlayerRuntimeSessionOptions },
   ): Promise<void>;
   activate(): Promise<void>;
   toStartPage(): Promise<void>;
@@ -59,6 +60,12 @@ after(() => {
 
 before(async () => {
   await loadHostFacade();
+  const facade: Record<string, unknown> = await loadPlayerModule(
+    "player/engine-bridge/in-process.ts",
+  );
+  assert.equal(typeof facade.heldPlan, "function");
+  // EVIDENCE: validation: the bundle facade's `heldPlan`, checked as a function above.
+  heldPlan = facade.heldPlan as typeof heldPlan;
   const module: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );
@@ -136,12 +143,39 @@ function planWrites(context: TestContext, ...plans: InstructionPlan[]) {
   const counts = new Map<unknown, number>();
   JSON.stringify = new Proxy(stringify, {
     apply(target, _self, args) {
-      if (plans.includes(args[0])) counts.set(args[0], (counts.get(args[0]) ?? 0) + 1);
+      // The host holds its own plan, prepared from this plan's text: its writes count as this plan's.
+      const plan = heldAs.get(args[0]) ?? args[0];
+      if (plans.includes(plan)) counts.set(plan, (counts.get(plan) ?? 0) + 1);
       return target(args[0], args[1], args[2]);
     },
   });
   context.after(() => (JSON.stringify = stringify));
   return (plan: InstructionPlan | undefined = plans[0]) => counts.get(plan) ?? 0;
+}
+
+/** The plans the hosts hold, each as the test's plan it was prepared from (`planWrites`). */
+const heldAs = new Map<unknown, InstructionPlan>();
+/** Each page's host token of a test plan: preparing a plan again on a page reuses it, as the plan is the same. */
+const tokens = new WeakMap<KeepHost, Map<InstructionPlan, string>>();
+let heldPlan: (bridge: PlayerBridge, token: string) => object;
+
+/** The token under which `host`'s bridge holds `plan`, prepared there from the plan's text the first time. */
+async function held(host: KeepHost, plan: InstructionPlan): Promise<string> {
+  const known = tokens.get(host) ?? new Map<InstructionPlan, string>();
+  tokens.set(host, known);
+  const token = known.get(plan) ?? (await preparedPlan(host.bridge, plan));
+  known.set(plan, token);
+  heldAs.set(heldPlan(await host.bridge, token), plan);
+  return token;
+}
+
+/** `plan`'s Start on `host`, as a host prepares it: the held plan, with the page's storage and the click's capture. */
+async function prepareOn(host: KeepHost, plan: InstructionPlan) {
+  const token = await held(host, plan);
+  await host.prepareScript(token, {
+    plan: token,
+    options: () => ({ ...host.scriptStorageOptions(), ...host.temporalCapture() }),
+  });
 }
 
 /** A page of the Player in `at` that prepares `plan`'s Start, or Continue for the session `at` keeps. */
@@ -157,13 +191,7 @@ async function page(context: TestContext, at: ReturnType<typeof browser>, plan: 
   assert.ok(host);
   context.after(() => scope.stop());
   await host.loadScriptStorage();
-  await host.prepareScript(plan, (options) =>
-    createPlayerRuntimeSession(plan, {
-      ...options,
-      ...host.scriptStorageOptions(),
-      ...host.temporalCapture(),
-    }),
-  );
+  await prepareOn(host, plan);
   return { host, scope };
 }
 
@@ -354,13 +382,7 @@ function holdNext(at: ReturnType<typeof browser>) {
 
 /** Prepares `plan`'s Start again on `host`'s page, as a host does for another script or the same one. */
 async function prepareAgain(host: KeepHost, plan: InstructionPlan) {
-  await host.prepareScript(plan, (options) =>
-    createPlayerRuntimeSession(plan, {
-      ...options,
-      ...host.scriptStorageOptions(),
-      ...host.temporalCapture(),
-    }),
-  );
+  await prepareOn(host, plan);
 }
 
 test("a save still being stored leaves the plan JSON prepared for the next Start, of the same plan or another", async (context) => {

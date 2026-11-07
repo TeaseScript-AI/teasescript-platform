@@ -9,6 +9,8 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import { preparedPlan } from "./helpers/prepared-plan.js";
+import type { PlayerBridge } from "../player/player-bridge.js";
 import type { CapturedMediaRepository } from "../player/captured-media.js";
 import {
   keptSession,
@@ -46,8 +48,9 @@ interface RoomHost {
     resetDebug(): Promise<void>;
   };
   setDebugMode(enabled: boolean): void;
+  readonly bridge: Promise<PlayerBridge>;
   prepareScript(
-    plan: InstructionPlan,
+    plan: string,
     create: (recording: {
       readonly recorder: DebugRecorder;
       readonly debugMode: boolean;
@@ -172,7 +175,7 @@ async function settle(context: TestContext) {
 
 async function prepare(context: TestContext, host: RoomHost, plan: InstructionPlan) {
   await host.loadScriptStorage();
-  await host.prepareScript(plan, (recording) =>
+  await host.prepareScript(await preparedPlan(host.bridge, plan), (recording) =>
     createPlayerRuntimeSession(plan, { ...recording, ...host.scriptStorageOptions() }),
   );
   await settle(context);

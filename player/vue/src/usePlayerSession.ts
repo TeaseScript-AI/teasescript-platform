@@ -34,7 +34,6 @@ import {
   playerRuntimeSnapshot,
   playerRuntimeSnapshotJson,
   playerRuntimeSnapshotOrNull,
-  restorePlayerRuntimeSessionAt,
   resumePlayerRuntimeRandomDraw,
   setPlayerRuntimeRandomControl,
   type PlayerRuntimeRestorePoint,
@@ -56,12 +55,11 @@ import {
   hatch,
   heldPlan,
   heldRecording,
-  holdPlan,
   introduceNow,
 } from "../../engine-bridge/in-process.js";
-import type { CheckpointCapture } from "../../engine-bridge/ops/persistence.js";
 import type { StartOptions } from "../../engine-bridge/ops/session.js";
 import type { TracingIntent } from "../../engine-bridge/player-ops.js";
+import type { CheckpointCapture, KeepCapture } from "../../engine-bridge/ops/persistence.js";
 import {
   bridgeOf,
   endsQuietly,
@@ -97,8 +95,8 @@ import {
 import type { RuntimeDebugContext } from "../../../src/index.js";
 import type { DebugView, DebugViewRequest } from "../../debug-view.js";
 import {
-  CheckpointError,
   serializeValidatedRuntimeJson,
+  type CheckpointErrorInfo,
 } from "../../../src/runtime/snapshot/checkpoint-json.js";
 import { INSTRUCTION_PLAN_VERSION } from "../../../src/plan/model.js";
 import { RUNTIME_SNAPSHOT_VERSION } from "../../../src/runtime/snapshot/snapshot-format.js";
@@ -132,7 +130,6 @@ import {
   type PlayerNotice,
 } from "../../notices.js";
 import type {
-  InstructionPlan,
   InterpreterEvent,
   MediaReportOutcome,
   RandomControlOptions,
@@ -1162,8 +1159,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     bridge?.unclaim(claim);
     disposed = true;
     supersede();
-    dropPreparedPlanJson();
     unsavedPlanJson = null;
+    preparedPlanJson = null;
+    // The host's JSON of the script's plan, written or waiting for its task, is not needed any more.
+    if (scriptPlan !== null && bridge !== null)
+      void bridge.client.request("releasePlanText", { plan: scriptPlan }).catch(() => {});
     loads.clear();
     device.reset();
     for (const element of audioElements.splice(0)) {
@@ -1711,8 +1711,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const keptSessions = options.keptSessions ?? memoryKeptSessionStore();
   const keptScope = options.scriptStorage?.scope ?? null;
   const keptStore = (): KeptSessionStore => (room.value === "debug" ? debugRooms : keptSessions);
-  // The plan of the script, which a kept session runs.
-  let scriptPlan: InstructionPlan | null = null;
+  // The host's token of the script's plan, which a kept session runs.
+  let scriptPlan: string | null = null;
   // What is kept of the shown session, so that keeping it again adds only the events after it: whether the plan is kept,
   // and how many events, the last of which is `last`. A new session starts with none.
   let kept: {
@@ -1722,48 +1722,24 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   } = { plan: false, count: 0, last: null };
   let keeping: Promise<void> | null = null;
   let keepAgain = false;
-  // The plan's JSON for a new session's first save, written in a task of its own before Start, so that Start does not
-  // write it (#1707). Only unused: the save that takes it detaches it.
-  let preparedPlanJson: {
-    readonly plan: InstructionPlan;
-    json: string | null;
-    timer: ReturnType<typeof setTimeout> | null;
-  } | null = null;
-  // The plan's JSON a save took and has not yet stored, so that a retry after a failed write writes it again as it is.
-  let unsavedPlanJson: { readonly plan: InstructionPlan; readonly json: string } | null = null;
-  /** Prepares `plan`'s JSON in a later task, unless it is prepared or a save still holds it. */
-  function preparePlanJson(plan: InstructionPlan, json: string | null = null) {
-    if (preparedPlanJson?.plan === plan && (json === null || preparedPlanJson.json !== null))
-      return;
-    dropPreparedPlanJson();
-    const ready = json ?? (unsavedPlanJson?.plan === plan ? unsavedPlanJson.json : null);
-    const slot: NonNullable<typeof preparedPlanJson> = { plan, json: ready, timer: null };
-    if (ready === null)
-      slot.timer = setTimeout(() => {
-        slot.timer = null;
-        try {
-          slot.json = serializeValidatedRuntimeJson(plan);
-        } catch {
-          // The save writes it then, and fails as it would have.
-        }
-      }, 0);
-    preparedPlanJson = slot;
-  }
-  function dropPreparedPlanJson() {
-    if (preparedPlanJson?.timer != null) clearTimeout(preparedPlanJson.timer);
-    preparedPlanJson = null;
-  }
+  // The plan's JSON a save took from the host and has not yet stored, so that a retry after a failed write writes it again
+  // as it is. The host writes a plan's JSON for a new session's first save in a task of its own before Start, so that
+  // Start does not write it (#1707; `ops/persistence.ts`).
+  let unsavedPlanJson: { readonly plan: string; readonly json: string } | null = null;
+  // The JSON a save still held when a Start of the same plan was prepared, which that Start's first save stores.
+  let preparedPlanJson: { readonly plan: string; readonly json: string } | null = null;
   /**
-   * `plan`'s JSON for a save to store: prepared, held for a retry, or else written now, as a Start before its
-   * preparation ran needs. The save holds it until stored.
+   * Has the host write the held plan `plan`'s JSON in a later task for a new session's first save, unless a save still
+   * holds it, whose JSON that save then stores too.
    */
-  function takePlanJson(plan: InstructionPlan): NonNullable<typeof unsavedPlanJson> {
-    const prepared = preparedPlanJson?.plan === plan ? preparedPlanJson.json : null;
-    if (preparedPlanJson?.plan === plan) dropPreparedPlanJson();
-    const json =
-      prepared ??
-      (unsavedPlanJson?.plan === plan ? unsavedPlanJson.json : serializeValidatedRuntimeJson(plan));
-    return (unsavedPlanJson = { plan, json });
+  function preparePlanJson(plan: string) {
+    if (unsavedPlanJson?.plan === plan) {
+      preparedPlanJson = unsavedPlanJson;
+      return;
+    }
+    void bridgeReady
+      .then((host) => host.client.request("preparePlanText", { plan }))
+      .catch(() => {});
   }
   /**
    * Keeps the shown session, where a reload continues it, together with the photos only it uses. One write runs at a
@@ -1789,26 +1765,48 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Only a script a host prepared with `prepareScript` keeps its session.
     if (keptScope === null || scriptPlan === null || current === null) return;
     if (inspecting.value || activation.value !== null) return;
-    // Taken before anything waits: later operations change the session.
-    let snapshotJson: string;
-    try {
-      snapshotJson = hatch(current, (current) => playerRuntimeSnapshotJson(current));
-    } catch {
-      // A state this browser cannot write, such as one holding a list too long to save, cannot be kept, and the point kept
-      // before must not stand in for it: a reload would go on from an earlier state as if it were this one.
-      await forgetKeptSession(current);
-      return;
-    }
+    // The session's events: its store's, which a capture's events end in.
     const events = current.events;
     const from =
       kept.count <= events.length && (kept.count === 0 || events[kept.count - 1] === kept.last)
         ? kept.count
         : 0;
-    const count = events.length;
+    const withPlan = !(kept.plan && from > 0);
+    const token = current.planToken;
+    const retry = !withPlan
+      ? null
+      : unsavedPlanJson?.plan === token
+        ? unsavedPlanJson
+        : preparedPlanJson?.plan === token
+          ? preparedPlanJson
+          : null;
+    if (retry !== null && retry === preparedPlanJson) preparedPlanJson = null;
+    // The state the host holds now, after the session's earlier requests; later operations change the session.
+    let capture: KeepCapture;
+    try {
+      capture = await bridgeOf(current).read<KeepCapture>(current, "captureKeep", {
+        withPlan: withPlan && retry === null,
+      });
+    } catch (error) {
+      // A state this browser cannot write, such as one holding a list too long to save, cannot be kept, and the point kept
+      // before must not stand in for it: a reload would go on from an earlier state as if it were this one.
+      if (
+        error instanceof BridgeRequestError &&
+        error.kind === "engine" &&
+        error.name !== "SessionGoneError"
+      )
+        await forgetKeptSession(current);
+      // A host that is gone, or no longer holds the session, keeps the point kept before.
+      return;
+    }
+    const { snapshotJson } = capture;
+    const count = capture.eventsThrough;
+    if (count > events.length) return;
     const added = events.slice(from, count);
     const last = events[count - 1] ?? null;
-    const planJson =
-      kept.plan && from > 0 ? null : takePlanJson(heldPlan(current.connection, current.planToken));
+    const planJson = !withPlan
+      ? null
+      : (unsavedPlanJson = retry ?? { plan: token, json: capture.planJson! });
     const marks = { editedWhileDebugging: debugEdits.value, rewoundWhileDebugging: rewound.value };
     // Written once, for the photos they show and for the store.
     const eventsJson = added.map(serializeValidatedRuntimeJson);
@@ -1900,20 +1898,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Start. Call it instead of `prepare` once the stored values are loaded.
    */
   async function prepareScript(
-    plan: InstructionPlan | string,
+    plan: string,
     create: PlayerSessionStart,
     sources?: ReadonlyMap<string, string>,
   ): Promise<void> {
-    // The host holds the plan, under the token `prepare` gave it, or as this Player compiled it.
+    // The host holds the plan, under the token `prepare` gave it.
     // Owned from the call: a later preparation, or a transition that replaces it, while the host gets ready retires it.
     const owner = ++preparation;
-    const host = await bridgeReady;
+    await bridgeReady;
     if (disposed || owner !== preparation) return;
-    if (typeof plan === "string") scriptPlan = heldPlan(host, plan);
-    else {
-      holdPlan(host, plan);
-      scriptPlan = plan;
-    }
+    scriptPlan = plan;
     lastStart.value = create;
     if (sources !== undefined) scriptSources = sources;
     await prepareKept(owner);
@@ -1925,13 +1919,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   async function prepareKept(owner = ++preparation): Promise<void> {
     const plan = scriptPlan;
-    const found = plan === null ? { planJson: null } : await restoreKept(plan);
+    const found = plan === null ? {} : await restoreKept(plan);
     if (disposed || owner !== preparation) {
       if ("session" in found) bridgeOf(found.session).release(found.session);
       return;
     }
     if ("session" in found) {
-      dropPreparedPlanJson();
       for (const [reference, stored] of found.media)
         capturedMedia.restoreSessionMedia(reference, stored);
       kept = {
@@ -1942,70 +1935,64 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       prepareRestore(found.session, found.marks);
       return;
     }
-    // Unless the session goes on, a new session's first save stores the plan's JSON written here.
-    if (plan !== null && found.planJson !== null) preparePlanJson(plan, found.planJson);
+    // Unless the session goes on, a new session's first save stores the plan's JSON, which the host wrote to compare it.
+    if (plan !== null) preparePlanJson(plan);
     if (lastStart.value !== null) prepareStart(lastStart.value, found.outdated);
   }
   /**
-   * The kept session, restored, when it runs `plan` and has not ended, with the stored records of the photos only it
-   * uses; else, for Start, the plan's JSON written to compare it, and why the kept session cannot continue when its plan
-   * or state is of another revision than this Player's. Nothing of this Player changes yet (`prepareKept`); a session
-   * restored but not continued is released in the host.
+   * The kept session, restored in the host, when it runs the held plan `plan` and has not ended, with the stored records of
+   * the photos only it uses; else, for Start, why the kept session cannot continue when its plan or state is of another
+   * revision than this Player's. Nothing of this Player changes yet (`prepareKept`); a session restored but not continued
+   * is released in the host.
    */
   async function restoreKept(
-    plan: InstructionPlan,
+    plan: string,
   ): Promise<
     | {
         readonly session: PlayerSession;
         readonly marks: DebugHistoryMarks;
         readonly media: readonly (readonly [string, StoredCapturedMedia | null])[];
       }
-    | { readonly planJson: string | null; readonly outdated?: Problem }
+    | { readonly outdated?: Problem }
   > {
-    if (keptScope === null) return { planJson: null };
+    if (keptScope === null) return {};
     await storageRoute;
     const store = keptStore();
     const stored = await store.session(keptScope).catch(() => null);
     const found = stored === null ? null : keptSession(stored);
-    if (found === null) return { planJson: null };
+    if (found === null) return {};
     // Not for a session that ended, which only its events can show when its state is of another revision: the engine
     // ends a session with an `exit` or `runtimeFailure` event.
     const explain = !found.events.some(
       (event) => event.kind === "exit" || event.kind === "runtimeFailure",
     );
-    const planJson =
-      preparedPlanJson?.plan === plan && preparedPlanJson.json !== null
-        ? preparedPlanJson.json
-        : serializeValidatedRuntimeJson(plan);
-    if (found.planJson !== planJson) {
-      // After a Player update the same script compiles to a plan of another revision; the plan has no runtime error.
-      const revisions = explain ? revisionChange(found.planJson, INSTRUCTION_PLAN_VERSION) : null;
-      return revisions === null
-        ? { planJson }
-        : {
-            planJson,
-            outdated: { message: `Unsupported instruction-plan revision. ${revisions}` },
-          };
-    }
-    let restored: PlayerSession;
+    let restored: PlayerSession | "otherPlan" | "ended";
     try {
       const host = await bridgeReady;
-      restored = introduceNow(host, () =>
-        restorePlayerRuntimeSessionAt(plan, found.snapshotJson, found.events),
-      );
+      restored = await host.restoreKept(plan, found.planJson, found.snapshotJson, found.events);
     } catch (error) {
       // The runtime's error says how it refuses a state of another revision.
       const revisions = explain
         ? revisionChange(found.snapshotJson, RUNTIME_SNAPSHOT_VERSION)
         : null;
-      if (revisions === null || !(error instanceof CheckpointError)) return { planJson };
+      if (
+        revisions === null ||
+        !(error instanceof BridgeRequestError) ||
+        error.name !== "CheckpointError" ||
+        !isCheckpointErrorInfo(error.info)
+      )
+        return {};
       const { code, path, message } = error.info;
-      return { planJson, outdated: { code, path, message: `${message} ${revisions}` } };
+      return { outdated: { code, path, message: `${message} ${revisions}` } };
     }
-    if (restored.state.status === "halted" || restored.state.status === "failed") {
-      bridgeOf(restored).release(restored);
-      return { planJson };
+    if (restored === "otherPlan") {
+      // After a Player update the same script compiles to a plan of another revision; the plan has no runtime error.
+      const revisions = explain ? revisionChange(found.planJson, INSTRUCTION_PLAN_VERSION) : null;
+      return revisions === null
+        ? {}
+        : { outdated: { message: `Unsupported instruction-plan revision. ${revisions}` } };
     }
+    if (restored === "ended") return {};
     // The debug room reads its photos like its saved ones; a normal session's come back as session media.
     const media: (readonly [string, StoredCapturedMedia | null])[] = [];
     if (store === keptSessions)
@@ -2053,7 +2040,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if ("unavailable" in found) throw new StorageTransferError(found.unavailable);
     let restorePoint: PlayerRuntimeRestorePoint;
     try {
-      // The checkpoint as the host holds it now, after the session's earlier requests, with the events it goes with.
       const capture = await bridgeOf(found.session).read<CheckpointCapture>(
         found.session,
         "captureCheckpoint",
@@ -2110,7 +2096,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       throw new StorageTransferError(
         "This Player does not keep sessions, so it cannot import one.",
       );
-    const restored = restoreSessionTransfer(transfer, keptScope, scriptPlan);
+    const restored = restoreSessionTransfer(
+      transfer,
+      keptScope,
+      heldPlan(await bridgeReady, scriptPlan),
+    );
     const saved = new Set(storedValueReferences(transfer.entries));
     // Without durable captured media, a saved value's photo would not outlive this page.
     if (
@@ -2199,8 +2189,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           // the session is not kept without the media it uses.
           for (const photo of capturedMedia.sessionRecords(references))
             await keptSessions.media.add(photo);
+          const planJson = (await (await bridgeReady).client.request("planText", { plan })).result;
+          if (typeof planJson !== "string") throw new Error("The host wrote no plan JSON.");
           await keptSessions.publish(scope, {
-            planJson: serializeValidatedRuntimeJson(plan),
+            planJson,
             snapshotJson: review.snapshotJson,
             eventsFrom: 0,
             events: transfer.session.events,
@@ -3218,6 +3210,20 @@ export type PlayerSessionHost = ReturnType<typeof usePlayerSession>;
  * The saved and supported revisions, as the start page's Technical details say them, when the JSON of a kept plan or
  * state is of another revision than `supported`, this Player's; else `null`.
  */
+/** Whether `info`, an engine error's details from the host, is a `CheckpointError`'s. */
+function isCheckpointErrorInfo(info: unknown): info is CheckpointErrorInfo {
+  return (
+    typeof info === "object" &&
+    info !== null &&
+    "code" in info &&
+    typeof info.code === "string" &&
+    "path" in info &&
+    typeof info.path === "string" &&
+    "message" in info &&
+    typeof info.message === "string"
+  );
+}
+
 function revisionChange(json: string, supported: number): string | null {
   let saved: unknown;
   try {

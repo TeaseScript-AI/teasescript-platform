@@ -9,6 +9,7 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import { preparedPlan } from "./helpers/prepared-plan.js";
 import { playerRuntimeAwaitsHost } from "../player/runtime-view.js";
 import { memoryKeptRoomStore, memoryKeptSessionStore } from "../player/kept-sessions.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
@@ -37,7 +38,7 @@ interface RandomHost {
   readonly rooms: { readonly current: Readonly<Ref<"normal" | "debug">> };
   readonly bridge: Promise<PlayerBridge>;
   prepareScript(
-    plan: InstructionPlan | string,
+    plan: string,
     create:
       | ((recording: {
           readonly recorder: DebugRecorder;
@@ -213,7 +214,7 @@ async function mount(context: TestContext, plan: InstructionPlan) {
   })!;
   context.after(() => scope.stop());
   await mounted.host.loadScriptStorage();
-  await mounted.host.prepareScript(plan, (recording) =>
+  await mounted.host.prepareScript(await preparedPlan(mounted.host.bridge, plan), (recording) =>
     createPlayerRuntimeSession(plan, { ...recording, ...mounted.host.scriptStorageOptions() }),
   );
   await settle(context);
