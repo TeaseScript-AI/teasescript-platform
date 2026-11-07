@@ -16,8 +16,9 @@ import {
  * piece of what the ops made in the holder it names, each holder with a container of its own, so the parent can find
  * that holder on the piece's path. An `object` case's piece has no marker, so its holder keeps it paired with a marked
  * tag, a test-side string never set on session data; after the snapshot it releases the pair, and the piece must then
- * be collected: so that holder alone kept it. A `string/representation/cut` case keeps its marked path in the representation it names,
- * with the marker split at `cut`. `clean` keeps nothing.
+ * be collected. That the original, not only its tag, was in the named holder is not observed (#1930). A
+ * `string/representation/cut` case keeps its marked path in the representation it names, with the marker split at
+ * `cut`. `clean` keeps nothing.
  */
 
 const { playerBridgeOps, playerOpsContext } =
@@ -252,7 +253,8 @@ async function runCases() {
     await run("teardown", null);
     if (piece !== null) {
       // An object piece carries no marker: its holder keeps it in a pair with a marked tag, a test-side string set
-      // here and never on session data, so the parent finds the pair, and so the piece, on the holder's path.
+      // here and never on session data, so the parent finds the pair on the holder's path. That the original is the
+      // one in the pair is not observed (#1930).
       const kept = observation === "object" ? [piece, copy(`tag ${marker}`)] : piece;
       const release = HOLDERS[holder!]!(kept, textOf(piece), marker, name);
       if (observation === "object") releases.push(release);

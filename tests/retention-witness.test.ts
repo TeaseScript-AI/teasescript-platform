@@ -141,7 +141,7 @@ test("the retention witness finds a piece kept in any holder after teardown, and
       assert.equal(through[0]!.length, length, `${name}: ${observed(through[0])}`);
     if (name.startsWith("object/")) {
       assert.ok(held > 0, `${name}: the object observation finds the kept piece`);
-      assert.equal(released, 0, `${name}: its holder alone kept it`);
+      assert.equal(released, 0, `${name}: released, it is collected`);
     }
   }
 });
