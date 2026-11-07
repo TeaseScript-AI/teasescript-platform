@@ -364,18 +364,17 @@ const READ_FIXTURES: Record<IntrinsicRead, readonly [expected: string, differing
   "Set entries": ["new Set([1])", "new Set([2])"],
 };
 
-/** A representative of each kind the kind table admits, as source evaluated in either realm. */
-const KIND_SURFACES: readonly [kind: string, source: string][] = [
-  ["date", "new Date(3)"],
-  ["regexp", "/x+/gi"],
-  ["view", "new Uint16Array([1, 2])"],
-  ["view", "new DataView(new ArrayBuffer(2))"],
-  ["buffer", "new Uint8Array([1, 2]).buffer"],
-  ["map", "new Map([[1, { a: 2 }]])"],
-  ["set", "new Set([1, 2])"],
-  ["array", "[1, { a: 2 }]"],
-  ["record", "({ a: 1, b: [2] })"],
-];
+/** Source that makes a sample of the kind `kind` with the global constructor `name`, in whichever realm runs it. */
+function sampleSource(kind: string, name: string): string {
+  if (name === "DataView") return "new DataView(new ArrayBuffer(2))";
+  if (kind === "view" || kind === "buffer") return `new ${name}(2)`;
+  if (kind === "date") return `new ${name}(3)`;
+  if (kind === "regexp") return `new ${name}("x+", "gi")`;
+  if (kind === "map") return `new ${name}([[1, { a: 2 }]])`;
+  if (kind === "set") return `new ${name}([1, 2])`;
+  if (kind === "array") return `${name}.of(1, { a: 2 })`;
+  return `Object.assign(new ${name}(), { a: 1, b: [2] })`;
+}
 
 const REALMS = {
   "this realm": (source: string): object => vm.runInThisContext(source),
@@ -407,7 +406,7 @@ function shadow(value: object, owner: object, key: string | symbol, claim: unkno
   Object.defineProperty(value, key, { value: method ? () => claim : claim, configurable: true });
 }
 
-test("no own property can change what the comparator reads of a built-in object, in either realm", () => {
+test("no own property changes how the comparator compares a built-in object's kind and contents, in either realm", () => {
   const verdict = (actual: unknown, expected: unknown) => {
     try {
       return cloneGraphDifference(actual, expected, RECORD_CLASSES) === null ? "equal" : "differs";
@@ -443,57 +442,108 @@ test("no own property can change what the comparator reads of a built-in object,
           generated.add(name);
         }
 
-  // Every other own key of each admitted kind's prototype chain: a shadow that throws when read is never read.
-  const enumerated = new Set<string>();
-  const surfaced = new Set<string>();
-  const readsOnSurface = new Set<string>();
-  const reads = new Set(
-    Object.values(INTRINSIC_READS).map(({ owner, key }) => `${owner} ${String(key)}`),
+  // The surfaces: each `types` predicate of this Node that the kind table admits names its global constructor
+  // (`isUint8Array`, `Uint8Array`), whose prototype chain is walked through `Object.prototype`; an array's and a
+  // record's are `Array`'s and `Object`'s. A predicate with no global constructor must hold for a walked sample.
+  const admitted = new Set([...Object.values(KIND_OF_TYPE), "array", "record"]);
+  admitted.delete("unsupported");
+  const constructors = new Map<string, string>([
+    ["Array", "array"],
+    ["Object", "record"],
+  ]);
+  const umbrellas: string[] = [];
+  for (const predicate of Object.keys(types)) {
+    const kind = KIND_OF_TYPE[predicate] ?? "unsupported";
+    if (kind === "unsupported") continue;
+    const name = predicate.slice("is".length);
+    if (typeof Object.getOwnPropertyDescriptor(globalThis, name)?.value === "function")
+      constructors.set(name, kind);
+    else umbrellas.push(predicate);
+  }
+  assert.deepEqual(new Set(constructors.values()), admitted, "every admitted kind has a surface");
+  const samples = [...constructors].map(([name, kind]) =>
+    REALMS["this realm"](sampleSource(kind, name)),
   );
-  for (const [kind, source] of KIND_SURFACES) {
-    surfaced.add(kind);
+  const predicates = new Map(Object.entries(types));
+  for (const predicate of umbrellas)
+    assert.ok(
+      samples.some((sample) => predicates.get(predicate)!(sample)),
+      `${predicate} holds for a walked sample`,
+    );
+
+  // Each own key of each surface (`constructor` aside), on each side, in both realms. A key the comparator reads must
+  // have run all its cases above. Any other key gets an accessor that throws when read: the comparator never reads it,
+  // so a sample still equals its clone, and against a primitive it still differs, without throwing.
+  const readNames = new Map(
+    Object.entries(INTRINSIC_READS).map(([name, { owner, key }]) => [
+      `${owner} ${String(key)}`,
+      name,
+    ]),
+  );
+  const pending = new Set<string>();
+  const executed = new Set<string>();
+  const unshadowable = new Set<string>();
+  const readsOnSurface = new Set<string>();
+  for (const [name, kind] of constructors)
     for (
-      let prototype: object | null = Object.getPrototypeOf(vm.runInThisContext(source));
+      let prototype: object | null = Object.getPrototypeOf(
+        REALMS["this realm"](sampleSource(kind, name)),
+      );
       prototype !== null;
       prototype = Object.getPrototypeOf(prototype)
     ) {
       const owner = Object.entries(OWNER_PROTOTYPES).find(([, value]) => value === prototype)?.[0];
       for (const key of Reflect.ownKeys(prototype)) {
         if (key === "constructor") continue;
-        const surface = `${kind} ${source} ${String(key)}`;
-        enumerated.add(surface);
-        if (owner !== undefined && reads.has(`${owner} ${String(key)}`)) {
-          // A slot the comparator reads, which the cases above shadowed.
-          readsOnSurface.add(`${owner} ${String(key)}`);
-          generated.add(surface);
-          continue;
-        }
+        const read = owner === undefined ? undefined : readNames.get(`${owner} ${String(key)}`);
         for (const [realm, make] of Object.entries(REALMS))
           for (const position of ["expected", "actual"]) {
-            const expected = make(source);
-            const actual: object = structuredClone(expected);
-            const lied = position === "actual" ? actual : expected;
-            const descriptor = Object.getOwnPropertyDescriptor(lied, key);
-            if (descriptor !== undefined && !descriptor.configurable) continue; // an own slot, such as an array's `length`
-            Object.defineProperty(lied, key, {
-              get: () => {
-                throw new Error(`read ${String(key)}`);
-              },
-              configurable: true,
-            });
-            assert.equal(verdict(actual, expected), "equal", `${surface} × ${position} × ${realm}`);
+            const surface = `${name} ${String(key)} × ${position} × ${realm}`;
+            pending.add(surface);
+            if (read !== undefined) {
+              readsOnSurface.add(read);
+              for (const outcome of ["equal", "differs"])
+                assert.ok(generated.has(`${read} × ${position} × ${outcome} × ${realm}`), surface);
+              executed.add(surface);
+              continue;
+            }
+            for (const against of ["its clone", "a primitive"]) {
+              const sample = make(sampleSource(kind, name));
+              const clone: object = structuredClone(sample);
+              // The shadowed object is the sample on the expected side, or its clone on the actual side.
+              const lied = position === "expected" ? sample : clone;
+              const expected = against === "a primitive" && position === "actual" ? 0 : sample;
+              const actual =
+                against === "a primitive" ? (position === "actual" ? clone : 0) : clone;
+              const descriptor = Object.getOwnPropertyDescriptor(lied, key);
+              if (descriptor !== undefined && !descriptor.configurable) {
+                // An own slot of the instance, such as an array's `length`: no property can shadow it.
+                unshadowable.add(surface);
+                continue;
+              }
+              Object.defineProperty(lied, key, {
+                get: () => {
+                  throw new Error(`read ${String(key)}`);
+                },
+                configurable: true,
+              });
+              const outcome = against === "a primitive" ? "differs" : "equal";
+              assert.equal(verdict(actual, expected), outcome, `${surface} against ${against}`);
+            }
+            if (!unshadowable.has(surface)) executed.add(surface);
           }
-        generated.add(surface);
       }
     }
-  }
-  // Every kind the kind table admits has its prototype surface enumerated, and every enumerated key has its case.
-  const admitted = new Set([...Object.values(KIND_OF_TYPE), "array", "record"]);
-  admitted.delete("unsupported");
-  assert.deepEqual(surfaced, admitted);
-  for (const surface of enumerated) assert.ok(generated.has(surface), surface);
+  // Every enumerated key, on each side and in each realm, ran its cases or is an own slot no property can shadow.
+  for (const surface of pending)
+    assert.ok(executed.has(surface) || unshadowable.has(surface), surface);
+  assert.deepEqual(
+    [...unshadowable].map((surface) => surface.split(" × ")[0]),
+    [...unshadowable].map(() => "Array length"),
+    "only an array's length cannot be shadowed",
+  );
   // And every slot the comparator reads lies on an admitted kind's surface.
-  assert.deepEqual(readsOnSurface, reads);
+  assert.deepEqual(readsOnSurface, new Set(Object.keys(INTRINSIC_READS)));
 });
 
 test("what native clone refuses is refused at every depth it can read, also inside a Proxy", () => {

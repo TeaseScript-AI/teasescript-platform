@@ -157,7 +157,9 @@ const FLAGS: readonly [IntrinsicRead, string][] = [
 // oxlint-disable-next-line anti-slop/no-object-parameters -- EVIDENCE: fixture: reads the slots of a regular expression `cloneKind` classified.
 function regExpText(value: object): string {
   const flags = FLAGS.filter(([name]) => intrinsic(name, value) === true).map(([, flag]) => flag);
-  return `/${String(intrinsic("RegExp source", value))}/${flags.join("")}`;
+  const source = intrinsic("RegExp source", value);
+  if (typeof source !== "string") throw new TypeError(`RegExp source read ${typeof source}`);
+  return `/${source}/${flags.join("")}`;
 }
 
 /** A view's type, offset, length and buffer: a typed array's by its name, a `DataView`'s otherwise. */
@@ -189,6 +191,33 @@ function viewSlots(value: object): {
 function collectionEntries(name: "Map entries" | "Set entries", value: object): unknown[] {
   // EVIDENCE: invariant: `Map.prototype.entries` and `Set.prototype.entries` return an iterator of their entries.
   return [...(intrinsic(name, value) as Iterable<unknown>)];
+}
+
+/** The names `describe` gives each kind of object. */
+const KIND_NAMES: Readonly<Record<Exclude<CloneKind, "view">, string>> = {
+  date: "a Date",
+  regexp: "a RegExp",
+  buffer: "an ArrayBuffer",
+  map: "a Map",
+  set: "a Set",
+  array: "an array",
+  record: "an ordinary object",
+  unsupported: "an object of a kind this does not compare",
+};
+
+/**
+ * How a compared value reads in a difference: a primitive as `String` gives it (a string quoted), a function or object
+ * by its kind alone (`cloneKind`, a view by its type), so no property of the value is read or coerced. The only place
+ * the comparator turns a compared value into text.
+ */
+function describe(value: unknown, classes: readonly RecordClass[]): string {
+  if (typeof value === "function") return "a function";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value !== "object" || value === null) return String(value);
+  const kind = cloneKind(value, classes);
+  if (kind !== "view") return KIND_NAMES[kind];
+  const type = viewSlots(value).type;
+  return `${/^[AEIOU]/u.test(type) ? "an" : "a"} ${type}`;
 }
 
 /** A class whose instances a test lists as records. */
@@ -244,7 +273,7 @@ export function cloneGraphDifference(
     if (typeof a === "function" || typeof e === "function")
       return fail("a function, which native clone refuses");
     if (typeof e !== "object" || e === null || typeof a !== "object" || a === null) {
-      if (!Object.is(a, e)) return fail(`${String(a)} is not ${String(e)}`);
+      if (!Object.is(a, e)) return fail(`${describe(a, classes)} is not ${describe(e, classes)}`);
       continue;
     }
     const known = forward.get(e);
@@ -258,7 +287,8 @@ export function cloneGraphDifference(
     const kind = cloneKind(e, classes);
     if (kind === "unsupported") return fail("an expected object of a kind this does not compare");
     const actualKind = cloneKind(a, classes);
-    if (actualKind !== kind) return fail(`a ${actualKind} where a ${kind} was expected`);
+    if (actualKind !== kind)
+      return fail(`${describe(a, classes)} where ${describe(e, classes)} was expected`);
     const push = (key: string, actualChild: unknown, expectedChild: unknown) =>
       pairs.push({
         actual: actualChild,
