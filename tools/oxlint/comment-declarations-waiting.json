@@ -354,12 +354,6 @@
     "waits": "#1937"
   },
   {
-    "file": "tests/helpers/type-core-narrowing.ts",
-    "kind": "docblock",
-    "text": "Stage 3b's narrowing index asked as its consumers will ask it (TABLE §13; S10's second part wires them): a pass made",
-    "waits": "#1937"
-  },
-  {
     "file": "tests/type-core-candidate.test.ts",
     "kind": "docblock",
     "text": "The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; TABLE r4.59; the lead's answer 3). Every",

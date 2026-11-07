@@ -16,7 +16,7 @@ import { ReceivingDomain } from "../../src/type-inference/core/inherited/receivi
 import { Solver, withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { Values } from "../../src/type-inference/core/values.js";
 
-/**
+/*
  * Stage 3b's narrowing index asked as its consumers ask it (the route rule's `required`, #1073 PR 4): a
  * pass made as `analyseCore`'s first pass makes one, without its consumers, and each read's narrowing (N2, with N5's
  * preserving stores) and route (N3) asked, so a test sees the index's answers and a work family its construction and

@@ -445,10 +445,6 @@ export interface NotChecked {
 }
 
 /**
- * An error, a written type's error, or a warning with its explanation and its one obligation (§4); each a consumer's
- * with its rule's code, the rule, and the offending kinds (an error's every kind; a warning's explaining item's).
- */
-/**
  * N10's payload of the route rule's error (N3, N10; AD-1, #1073): the rule, the writer D′ whose value
  * brings the offending kind to the use by a route without a check, and the tests that route lacks, in the order the
  * message offers them.
@@ -464,6 +460,10 @@ export interface RequiredCheck {
   readonly provenance: Provenance;
 }
 
+/**
+ * An error, a written type's error, or a warning with its explanation and its one obligation (§4); each a consumer's
+ * with its rule's code, the rule, and the offending kinds (an error's every kind; a warning's explaining item's).
+ */
 export type CoreDiagnostic =
   | BudgetStop
   | NotChecked
