@@ -23,7 +23,7 @@ export const PRODUCERS = {
 export type Producer = keyof typeof PRODUCERS;
 
 /** The ops that touch no plan JSON a reader could keep, and why. */
-export const NOT_PRODUCERS = {
+const NOT_PRODUCERS = {
   releasePlanText: "cleanup: the one remover of a reserved plan JSON",
   captureCheckpoint: "a whole checkpoint, which holds the plan inside it; no plan JSON of its own",
 } as const;
