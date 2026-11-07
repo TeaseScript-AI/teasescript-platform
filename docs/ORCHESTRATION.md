@@ -58,12 +58,17 @@ A brief is a file the assignment points to. What it asks for follows the workflo
   [Review convergence](DEVELOPMENT-WORKFLOW.md#review-convergence) instead.
 - Correct course in small steps, not by abrupt stops or reversals. Stop running work only when continuing does real
   harm.
-- A builder idle beyond its prompt-cache lifetime re-reads its context at full cost on the next wake. When that context
-  is stale, restart it as a fresh agent from its plan instead: the plan file on the full route, or the pull-request
-  description on the light route. A long-running lane that resumes correctly from its plan keeps its worktree and queue
-  ownership.
-- A lane parked on another lane's merge gets bounded preparatory work in the meantime (its next item's plan, its body
-  draft, a probe), never an empty wake; its wake signal for the real work stays the merge.
+- An agent idle beyond its prompt-cache lifetime re-reads its whole context at full cost on the next wake, and that
+  cost grows with the thread. Keep a lane's agent warm or end it; never wake it cold. Judge warmth by the clock: the
+  thread's last activity against the cache lifetime.
+- New work for a lane whose agent is cold goes to a fresh agent, with a brief that points at the lane's plan record and
+  its pull-request description. The lane keeps both current as it goes, so a restart needs nothing else. A lane that
+  resumes correctly from them keeps its worktree and queue ownership.
+- A lane that waits ends its turn with a wait no longer than the cache lifetime, and re-arms it inside the run, so it
+  keeps itself warm.
+- At each periodic check, a lane that would go cold before the next check gets the ruling it waits on, or bounded
+  preparatory work (its next item's plan, its description draft, a probe). It never gets an empty wake. Its wake
+  signal for the real work stays the event it waits on, such as another lane's merge.
 - When a reviewer finds a sibling in every part of a construction, the next step is your reassessment of the class, not
   another repair: a narrower claim stated truthfully beats a wider one that review keeps refuting.
 - An observation is not an instruction: weigh it, or ask, before changing work because of it.
@@ -81,7 +86,9 @@ result depends on, recorded with the evidence per result; otherwise it reruns.
 
 ## Parallel lanes
 
-Lanes run in parallel unless they change the same functions. Items that change the same function run one after the
+A lane is a set of files that move together plus one chain of plans, not an agent. One agent works in it at a time;
+the agent is kept while the chain is open and released at its end. Lanes run in parallel unless they change the same
+functions. Items that change the same function run one after the
 other: the second waits until the first has merged, then rebases onto the new base. Because the shared function
 changed, that rebase changes the second item's delta, so its affected evidence reruns and its review rounds restart on
 the changed part ([Pull requests and rebases](DEVELOPMENT-WORKFLOW.md#pull-requests-and-rebases)). This is not a stack
