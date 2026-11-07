@@ -30,8 +30,9 @@ const keyOf = (tuple: Coordinates) =>
   JSON.stringify(Object.entries(tuple).sort(([one], [other]) => (one < other ? -1 : 1)));
 
 /**
- * What `observed` misses of `feasible`, and what it has that is not feasible: every pair of axis values, and with
- * `tuples`, every whole tuple. Empty when the family covers exactly the feasible space.
+ * What `observed` misses of `feasible`, and what it has that is not feasible. By default it matches the feasible pair
+ * projections only: a family can cover every pair and still miss whole cases. With `tuples`, it also matches the
+ * complete coordinates, so empty then means the family is exactly the feasible space.
  */
 export function coverageGaps(
   feasible: readonly Coordinates[],
