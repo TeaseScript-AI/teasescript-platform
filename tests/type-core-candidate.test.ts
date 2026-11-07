@@ -3620,7 +3620,10 @@ test("the route rule's error stands where a run can bring the null unchecked, an
     ],
     // (Codex r2 on #1937: a `not`, a later test of the same call, an `or`'s guard, a leaving guard, an optional type test
     // of a union, and an `else` arm of a non-null test)
-    ['let n = 1\nif askBoolean "Clear?" { n = null }\nwhile not (n != null) { n = 1 }\nrepeat n {}\nexit\n', false],
+    [
+      'let n = 1\nif askBoolean "Clear?" { n = null }\nwhile not (n != null) { n = 1 }\nrepeat n {}\nexit\n',
+      false,
+    ],
     [
       'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null and f() > 0 and f() != null { say "y" }\nexit\n',
       false,
@@ -3633,9 +3636,39 @@ test("the route rule's error stands where a run can bring the null unchecked, an
       'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null { exit }\nrepeat f() {}\nexit\n',
       false,
     ],
-    ['function f: integer | string { return "s" }\nif f() is integer? { repeat f() {} }\nexit\n', false],
+    [
+      'function f: integer | string { return "s" }\nif f() is integer? { repeat f() {} }\nexit\n',
+      false,
+    ],
     [
       'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null { say "y" } else { repeat f() {} }\nexit\n',
+      true,
+    ],
+    // (Codex r3 on #1937: a guard that leaves through its `else` arm or its `then` arm beside an `else`, or with
+    // `continue` in a loop, is a check on every route past it; one of the wrong form, one in a sibling block, or a
+    // `while` a `break` leaves is not)
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null { say "y" } else { exit }\nrepeat f() {}\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null { exit } else { say "y" }\nrepeat f() {}\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nrepeat 2 { if f() == null { continue }\nrepeat f() {} }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null { say "y" } else { exit }\nrepeat f() {}\nexit\n',
+      true,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif askBoolean("b") { if f() == null { exit } }\nrepeat f() {}\nexit\n',
+      true,
+    ],
+    [
+      'let n = 1\nif askBoolean "Clear?" { n = null }\nwhile n == null { if askBoolean "b" { break }\nn = 1 }\nrepeat n {}\nexit\n',
       true,
     ],
     // (a called function's written union proves itself, r4.118 (1): Codex r1 F4)
@@ -3675,6 +3708,24 @@ test("the route rule's error stands where a run can bring the null unchecked, an
       ),
     ),
   );
+  // (S7: a method call's receiver that may be null is the runtime's check at the call, where a run fails: Codex r3 F6)
+  for (const source of [
+    "let xs = [null, [1]]\nxs[0].sort()\nexit\n",
+    "let xs = [null, [1]]\n(xs[0]).sort()\nexit\n",
+    'let xs = [null, ["a"]]\nsay xs[0].join(",")\nexit\n',
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const syntax = syntaxOf(source);
+    const derived = derive(syntax, compactAnalysis(request));
+    const failure = evaluate(syntax, derived.stores, {}, false, derived.content).run.failure;
+    assert.ok(
+      derived.discharges.some(
+        (d) => d.by === "native" && d.what === "member" && `TSR016@${d.site}` === failure,
+      ),
+      `${source}: ${failure} ${JSON.stringify(derived.discharges)}`,
+    );
+  }
 });
 
 test("no production code selects the core: only tests reach the candidate entry", () => {
