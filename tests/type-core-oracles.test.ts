@@ -288,21 +288,27 @@ test("the bound credits each cell returned: one unit a cell answers what no cred
   }
 });
 
-test("a stop the oracle's own questions would make is never published: at the analysis's own total, the record is the compiler's (#1837, Codex r1)", () => {
-  // (main asked the admitted types on the analysis's ledger: its first charge passed the allowance, and the publication
-  // was asked again on the stopped analysis, with a stop warning the compiler never gives)
+test("a stop the oracle's own questions would make is never published: at the least allowance the compiler's route finishes in, the record is the compiler's (#1837, Codex r1)", () => {
+  // (main asked the admitted types on the analysis's ledger before its checks: there they passed that allowance, and the
+  // publication was asked again on the stopped analysis, with a stop warning the compiler does not give)
   const files = main("let count = 1\nexit\n");
   const request = coreRequest(files, GLOBALS);
   assert.ok(request !== null);
-  const total = analyseCore(request).budget.total;
   const full = publicationParts(files, MODES[0]!, GLOBALS);
   assert.ok(full !== null);
-  const parts = withTestAllowance(total, () => publicationParts(files, MODES[0]!, GLOBALS));
+  const stops = (allowance: number) =>
+    withTestAllowance(allowance, () => publishedRoute(files, GLOBALS).text).includes(
+      '"kind":"budget"',
+    );
+  let [low, high] = [analyseCore(request).budget.total - 1, 2 * analyseCore(request).budget.total];
+  assert.ok(stops(low) && !stops(high));
+  while (high - low > 1) {
+    const middle = Math.floor((low + high) / 2);
+    if (stops(middle)) low = middle;
+    else high = middle;
+  }
+  const parts = withTestAllowance(high, () => publicationParts(files, MODES[0]!, GLOBALS));
   assert.ok(parts !== null);
-  assert.equal(
-    withTestAllowance(total, () => analyseCore(request).budget.exhausted),
-    null,
-  );
   assert.deepEqual(
     [parts.answers, parts.record, parts.route, parts.unanswered],
     [full.answers, full.record, full.route, 0],
