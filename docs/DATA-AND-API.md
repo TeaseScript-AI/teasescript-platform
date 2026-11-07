@@ -38,7 +38,7 @@ The lower-level layer includes:
 - checkpoint creation, serialization, deserialization, and restore functions;
 - versioned RNG state creation and advancement helpers.
 
-The normal composition is:
+Two compositions run the one engine. The snapshot-taking route, where the caller holds the state:
 
 ```text
 source
@@ -48,12 +48,23 @@ source
     -> executeInstruction, stepToEvent, or run
 ```
 
+The engine-owned session, which keeps the plan and the canonical snapshot itself, as the Player runs it
+([Runtime sessions](RUNTIME.md#runtime-sessions)):
+
+```text
+source
+    -> compileSource
+    -> compiled instruction plan
+    -> createFreshRuntimeSession, createRuntimeSession, or restoreRuntimeSession
+    -> the session's run, stepToEvent, executeInstruction, and completions
+```
+
 Ordinary TeaseScript source is compiled through `compileSource(...)`; the resulting validated instruction plan runs
 with explicit serializable runtime state. Parser AST data remains available to compiler and authoring tooling, but
 there is no supported caller-constructed AST compilation route. `validateInstructionPlan(...)` independently rejects
 non-JSON-safe plan data.
 
-The explicit plan/snapshot/runtime API is the canonical resumable route for waits, including pending actions, checkpoints, completion, and resumption.
+Both routes are resumable at waits, including pending actions, checkpoints, completion, and resumption.
 
 Runtime builtins are explicit capabilities. Only own registered properties are callable, core builtins retain precedence, and low-level named arguments use a prototype-free record. These rules prevent inherited JavaScript properties or prototype-mutating names from becoming implicit capabilities.
 
