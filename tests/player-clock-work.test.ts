@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import type { DebugRecorder } from "../player/debug-recorder.js";
+import { compilePlayerProject } from "../player/compile-project.js";
 import type { BridgeClient } from "../player/engine-bridge/client.js";
+import type { StartOptions } from "../player/engine-bridge/ops/session.js";
+import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import { memoryKeptSessionStore } from "../player/kept-sessions.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { coverageGaps, product } from "./helpers/family-coverage.js";
 import { loadHostFacade } from "./helpers/host-sessions.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
@@ -23,12 +25,12 @@ import { loadPlayerModule } from "./helpers/player-modules.js";
 interface SessionHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly bridge: Promise<PlayerBridge>;
-  prepare(
-    create: (recording: {
-      readonly recorder: DebugRecorder;
-      readonly debugMode: boolean;
-    }) => PlayerRuntimeSession,
-  ): void;
+  prepareScript(
+    token: string,
+    start: { readonly plan: string; readonly options: () => Omit<StartOptions, "debugMode"> },
+  ): Promise<void>;
+  scriptStorageOptions(): Omit<StartOptions, "debugMode">;
+  temporalCapture(): Omit<StartOptions, "debugMode">;
   activate(): Promise<void>;
   loadScriptStorage(): Promise<void>;
   observe(): Promise<PlayerRuntimeSession | null>;
@@ -92,8 +94,9 @@ const OWN_OP: Readonly<Record<Work, string | null>> = {
 /** The ops the host receives from the work's trigger on, up to its own op, as the oracle derives them. */
 function expected(work: Work, state: State): string[] {
   const own = OWN_OP[work] === null ? [] : [OWN_OP[work]];
-  // Held (a waiting draw), nothing is observed.
-  if (state === "held") return own;
+  // Held (a waiting draw), nothing is observed; and Debug mode reaches a session only while it runs or waits for
+  // input, as today, so it goes to the host once the draw is decided.
+  if (state === "held") return work === "debugMode" ? [] : own;
   const catchingUp = state === "catch-up begun" || state === "catch-up stepped";
   const observes = NEEDS[work] === "observe" || catchingUp;
   // An observation drops the catch-up under way first.
@@ -120,21 +123,33 @@ test("the clock-work family covers every kind of work in every state of the cloc
 
 /**
  * Ops whose reply the caller sees only once `release` is called (the host has run them, the session's queue goes
- * on), and section ops the host refuses without running them, as a refusal of their basis.
+ * on), and section ops refused as their basis would be, without reaching the host.
  */
 interface Gate {
   hold(op: string, count?: number): void;
-  release(): void;
+  /** Lets the held replies through, or rejects them with `error`. */
+  release(error?: Error): void;
   refuse(op: string, count: number, code: string): void;
 }
 
-/** Records every op `bridge`'s client posts, with the observed time of the latest publication when it is posted. */
+/** One request the host received, in order, with the observed time of the session's latest publication then. */
+interface Received {
+  readonly op: string;
+  readonly args: unknown;
+  readonly atMs: number | null;
+}
+
+/**
+ * The requests `bridge`'s host receives, in the order it receives them: the in-process client posts each one as a
+ * structured clone, at its queue turn. Also counts the section sends, refused ones included (`attempts`).
+ */
 function track(context: TestContext, bridge: PlayerBridge) {
-  const posts: { readonly op: string; readonly atMs: number | null; readonly args: unknown }[] = [];
+  const posts: Received[] = [];
+  const attempts: string[] = [];
   const held = new Map<string, number>();
   const refused = new Map<string, { left: number; code: string }>();
-  let release!: () => void;
-  let released = new Promise<void>((resolve) => (release = resolve));
+  let release!: (error: Error | null) => void;
+  let released = new Promise<Error | null>((resolve) => (release = resolve));
   const shown: { session: PlayerRuntimeSession | null } = { session: null };
   const observedMs = () => {
     const current = shown.session;
@@ -142,28 +157,47 @@ function track(context: TestContext, bridge: PlayerBridge) {
     // EVIDENCE: fixture: the composable's shown session is a publication of this bridge.
     return bridge.latest(current as never)?.state.observedSessionTimeMs ?? null;
   };
+  const seen = new Set<unknown>();
+  const clone = globalThis.structuredClone;
+  context.mock.method(
+    globalThis,
+    "structuredClone",
+    (value: unknown, options?: StructuredSerializeOptions) => {
+      if (
+        typeof value === "object" &&
+        value !== null &&
+        "kind" in value &&
+        value.kind === "request" &&
+        "op" in value &&
+        typeof value.op === "string" &&
+        "id" in value &&
+        !seen.has(value.id)
+      ) {
+        seen.add(value.id);
+        posts.push({ op: value.op, args: "args" in value ? value.args : null, atMs: observedMs() });
+      }
+      return clone(value, options);
+    },
+  );
   const delayed = <T>(op: string, reply: Promise<T>): Promise<T> => {
     const left = held.get(op) ?? 0;
     if (left === 0) return reply;
     held.set(op, left - 1);
-    return released.then(() => reply);
+    return released.then((error) => (error === null ? reply : Promise.reject(error)));
   };
   const client: BridgeClient = bridge.client;
   const request = client.request.bind(client);
   context.mock.method(
     client,
     "request",
-    (op: string, args: unknown, options?: Parameters<typeof request>[2]) => {
-      const reply = request(op, args, options);
-      posts.push({ op, atMs: observedMs(), args });
-      return delayed(op, reply);
-    },
+    (op: string, args: unknown, options?: Parameters<typeof request>[2]) =>
+      delayed(op, request(op, args, options)),
   );
   const section = client.section.bind(client);
   context.mock.method(client, "section", (session: string, body: Parameters<typeof section>[1]) =>
     section(session, (send) =>
       body((op, args, basis, onReply) => {
-        posts.push({ op, atMs: observedMs(), args });
+        attempts.push(op);
         const refusing = refused.get(op);
         if (refusing !== undefined && refusing.left > 0) {
           refusing.left -= 1;
@@ -176,13 +210,13 @@ function track(context: TestContext, bridge: PlayerBridge) {
   const gate: Gate = {
     hold: (op, count = 1) => void held.set(op, count),
     refuse: (op, count, code) => void refused.set(op, { left: count, code }),
-    release: () => {
-      release();
-      released = new Promise<void>((resolve) => (release = resolve));
+    release: (error) => {
+      release(error ?? null);
+      released = new Promise<Error | null>((resolve) => (release = resolve));
       held.clear();
     },
   };
-  return { posts, gate, shown, observedMs };
+  return { posts, attempts, gate, shown, observedMs };
 }
 
 /** Lets the work queued so far run: replies, the clock's continuations and its tasks. */
@@ -193,16 +227,21 @@ async function settle(rounds = 20) {
 
 /** A script with a repeating timer to catch up on, and an audio cue; `draw` adds a random draw first, which waits. */
 const script = (draw: boolean) =>
-  [
-    ...(draw ? ["let r = random()"] : []),
-    'let rounds = 0\ntimer(duration: 10 ms, async: true, repeat: true, display: "hidden") {\n  rounds += 1\n}',
-    'playAudio async "cue.mp3"',
-    'say "Read me", 20 s',
-    'showButton "Done"',
-    "exit",
-  ].join("\n");
+  compilePlayerProject(
+    [
+      ...(draw ? ["let r = random()"] : []),
+      'let rounds = 0\ntimer(duration: 10 ms, async: true, repeat: true, display: "hidden") {\n  rounds += 1\n}',
+      'playAudio async "cue.mp3"',
+      'say "Read me", 20 s',
+      'showButton "Done"',
+      "exit",
+    ].join("\n"),
+  ).plan!;
 
-/** A Player in a stub page that keeps its sessions, with a monotonic clock the test moves and timers it fires. */
+/**
+ * A Player in a stub page that keeps its sessions, started from a held plan as a hosted script is, with a monotonic
+ * clock the test moves and timers it fires. `held`: every random site asks, so the first draw waits and the clock holds.
+ */
 async function mount(context: TestContext, held: boolean) {
   const elements: EventTarget[] = [];
   const document = Object.assign(new EventTarget(), { visibilityState: "visible" });
@@ -261,14 +300,24 @@ async function mount(context: TestContext, held: boolean) {
   )!;
   context.after(() => scope.stop());
   await host.loadScriptStorage();
-  // Every site asks: the first draw waits, and the clock holds.
   if (held) host.setRandomControl({ sites: [] });
-  host.prepare((recording) =>
-    createPlayerRuntimeSession(script(held), { wallClockMs: 0, ...recording }),
-  );
-  await host.activate();
-  await settle();
   const bridge = await host.bridge;
+  const start = async (draw: boolean) => {
+    const reply = await bridge.client.request("prepare", {
+      source: { kind: "plan", text: serializeValidatedRuntimeJson(script(draw)) },
+    });
+    // EVIDENCE: validation: `prepare` replies from the same build with its result.
+    const prepared = reply.result as PrepareResult;
+    assert.equal(prepared.kind, "prepared");
+    const token = prepared.kind === "prepared" ? prepared.plan : "";
+    await host.prepareScript(token, {
+      plan: token,
+      options: () => ({ ...host.scriptStorageOptions(), ...host.temporalCapture() }),
+    });
+    await host.activate();
+    await settle();
+  };
+  await start(held);
   const tracked = track(context, bridge);
   tracked.shown.session = host.session.value;
   return {
@@ -276,6 +325,7 @@ async function mount(context: TestContext, held: boolean) {
     elements,
     scope,
     timeouts,
+    start,
     ...tracked,
     /** The page shows again after `milliseconds` hidden: a late observation, which catches up on a copy. */
     late(milliseconds: number) {
@@ -398,11 +448,11 @@ test("an observation refused twice at its turn is no observation: null, nothing 
   const shown = player.host.session.value;
   player.gate.refuse("observeTime", 2, "basis");
   const armed = player.timeouts.armed;
-  const from = player.posts.length;
+  const from = player.attempts.length;
   assert.equal(await player.host.observe(), null);
   await settle();
   assert.equal(
-    player.posts.slice(from).filter((post) => post.op === "observeTime").length,
+    player.attempts.slice(from).filter((op) => op === "observeTime").length,
     2,
     "one retry",
   );
@@ -413,9 +463,9 @@ test("an observation refused twice at its turn is no observation: null, nothing 
 test("a refusal of another kind is not retried", async (context) => {
   const player = await mount(context, false);
   player.gate.refuse("observeTime", 1, "session");
-  const from = player.posts.length;
+  const from = player.attempts.length;
   await assert.rejects(player.host.observe());
-  assert.equal(player.posts.slice(from).filter((post) => post.op === "observeTime").length, 1);
+  assert.equal(player.attempts.slice(from).filter((op) => op === "observeTime").length, 1);
 });
 
 // R4: an observation's completion publishes and schedules nothing once it is retired.
@@ -427,7 +477,8 @@ test("a rejection after disposal arms no timer", async (context) => {
   await settle();
   player.scope.stop();
   const armed = player.timeouts.armed;
-  player.gate.release();
+  // An error the clock handles by going on from the latest session: disposed, it schedules nothing.
+  player.gate.release(new Error("The reply failed."));
   await settle();
   assert.equal(player.timeouts.armed, armed);
 });
@@ -463,13 +514,7 @@ test("an unmount or a replacement with an observation in flight publishes nothin
       await settle();
       if (interference === "unmount") player.scope.stop();
       else {
-        player.host.prepare((recording) =>
-          createPlayerRuntimeSession('say "replacement", instant\nshowButton "Done"\nexit', {
-            wallClockMs: 0,
-            ...recording,
-          }),
-        );
-        await player.host.activate();
+        await player.start(false);
       }
       const shown = player.host.session.value;
       player.gate.release();
