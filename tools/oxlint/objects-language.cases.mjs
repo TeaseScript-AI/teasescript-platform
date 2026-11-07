@@ -867,4 +867,10 @@ export const CASES = [
       "import { type WorkLedger as R10Work } from '../budget.js';\nfunction g(work: R10Work, key: { readonly keys: readonly string[] }[\"keys\"][number]): number { work.charge('objectSteps'); return key.length; }\nexport function f(work: R10Work): number { work.charge('objectSteps'); return g(work, 'x'); }\n",
     expect: [],
   },
+  {
+    name: "r10/concatenatedMixedSource",
+    source:
+      "import { type WorkLedger as R10Work } from '../budget.js';\nimport { concatenated } from '../narrowing-iteration.js';\nfunction* source(work: R10Work, input: readonly string[]): Generator<string | readonly string[]> { work.charge('objectSteps'); yield 'x'; yield input; }\nexport function f(work: R10Work, input: readonly string[]): number { work.charge('objectSteps'); return concatenated<string | readonly string[]>(work, 'objectSteps', [source(work, input)]).length; }\n",
+    expect: ["mixed-elements"],
+  },
 ];
