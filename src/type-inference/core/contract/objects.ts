@@ -261,10 +261,12 @@ function declined(contract: Contract): ObjectsProof {
   };
 }
 
-/** Whether a path holds a choice's selection step, which the query does not follow. */
-function selecting(contract: Contract, rest: readonly string[]): boolean {
+/**
+ * Whether a path holds a choice's selection step, which the query does not follow: its entry and each step `some`
+ * reads charged once, to the first selection (exported for that charging test).
+ */
+export function selecting(contract: Contract, rest: readonly string[]): boolean {
   contract.work.charge("objectSteps");
-  contract.pass.program.work.charge("objectSteps", rest.length);
   return some(
     contract.work,
     "objectSteps",
