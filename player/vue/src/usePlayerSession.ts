@@ -60,7 +60,11 @@ import {
 import type { StartOptions } from "../../engine-bridge/ops/session.js";
 import type { TracingIntent } from "../../engine-bridge/player-ops.js";
 import type { CheckpointCapture, KeepCapture } from "../../engine-bridge/ops/persistence.js";
-import { StaleOperation, type PersistenceOwnership } from "../../persistence-ownership.js";
+import {
+  StaleOperation,
+  persistenceOwnership as ownershipOf,
+  type PersistenceOwnership,
+} from "../../persistence-ownership.js";
 import {
   EMPTY_PLAN_JSON_LEASE,
   settle,
@@ -1199,19 +1203,43 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * them again (`activate`).
    */
   async function loadScriptStorage(): Promise<void> {
-    if (!scriptStorage) return;
+    applyScriptStorage(await readScriptStorage());
+  }
+  /**
+   * The stored values read freshly, with the references among them the media store had stored, or `null` when storage
+   * could not be read; `undefined` without storage. It changes nothing on the page: `applyScriptStorage` does.
+   */
+  async function readScriptStorage(): Promise<
+    | {
+        readonly entries: readonly RuntimeScriptStorageEntrySnapshot[];
+        readonly storedFiles: ReadonlySet<string>;
+      }
+    | null
+    | undefined
+  > {
+    if (!scriptStorage) return undefined;
     try {
       const entries = await scriptStorage.load();
-      readStoredFiles = await capturedMedia
+      const storedFiles = await capturedMedia
         .storedReferences(storedValueReferences(entries))
         .catch(() => new Set<string>());
-      storedEntries.value = entries;
-      savedDataRevision.value++;
-      notices.dismiss(playerNoticeKeys.storageUnavailable);
+      return { entries, storedFiles };
     } catch {
+      return null;
+    }
+  }
+  /** Shows what `readScriptStorage` read, at once. */
+  function applyScriptStorage(read: Awaited<ReturnType<typeof readScriptStorage>>): void {
+    if (read === undefined) return;
+    if (read === null) {
       storedEntries.value = null;
       notices.publish(playerNotices.storageUnavailable());
+      return;
     }
+    readStoredFiles = read.storedFiles;
+    storedEntries.value = read.entries;
+    savedDataRevision.value++;
+    notices.dismiss(playerNoticeKeys.storageUnavailable);
   }
   /**
    * Session options for the script's storage; call it from the Start factory. The references in the stored values that
@@ -1737,25 +1765,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * and, where it has one, the preparation it began in. `current` is the one rule for every such operation: once the page
    * closes, switches room or store, prepares another plan, or (with a preparation) a newer preparation begins, the
    * operation is stale. A stale operation issues nothing more: `check` after each await before the next request or store
-   * write, and `commit` for every page effect at its end.
+   * write, and every page effect is applied synchronously through `commit`.
    */
   function persistenceOwnership(owner: number | null = null): PersistenceOwnership {
     const inRoom = room.value;
     const store = keptStore();
     const tenure = planTenure;
-    const current = () =>
-      !disposed &&
-      room.value === inRoom &&
-      keptStore() === store &&
-      planTenure === tenure &&
-      (owner === null || owner === preparation);
-    return {
-      current,
-      check: () => {
-        if (!current()) throw new StaleOperation();
-      },
-      commit: (effect) => (current() ? effect() : undefined),
-    };
+    return ownershipOf(
+      () =>
+        !disposed &&
+        room.value === inRoom &&
+        keptStore() === store &&
+        planTenure === tenure &&
+        (owner === null || owner === preparation),
+    );
   }
   // The operation that set `importing` last, which alone clears it: a stale one never clears a newer one's.
   let importingHolder: object | null = null;
@@ -1865,7 +1888,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     ctx.check();
     try {
       // A new session replaces the one kept before.
-      if (from === 0) await discardKeptSession(inDebugRoom);
+      if (from === 0) {
+        await discardKeptSession(inDebugRoom);
+        if (inDebugRoom) ctx.commit(() => (debugRoom.value = { session: false }));
+      }
       ctx.check();
       // The session is kept only with every photo it uses: one that cannot be stored keeps the session kept before.
       if (inDebugRoom) {
@@ -1907,10 +1933,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   async function forgetKeptSession(current: PlayerSession, ctx: PersistenceOwnership) {
     const inDebugRoom = room.value === "debug";
     ctx.commit(() => (kept = { plan: false, count: 0, last: null }));
-    await discardKeptSession(inDebugRoom).catch(() => {});
-    ctx.check();
+    const discarded = await discardKeptSession(inDebugRoom).then(
+      () => true,
+      () => false,
+    );
     const live = current.state.status === "running" || current.state.status === "waiting";
     ctx.commit(() => {
+      if (discarded && inDebugRoom) debugRoom.value = { session: false };
       if (!live) notices.dismiss(playerNoticeKeys.sessionNotKept);
       else if (!notices.list.some((notice) => notice.key === playerNoticeKeys.sessionNotKept))
         notices.publish(playerNotices.sessionNotKept());
@@ -1918,12 +1947,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   /**
    * Discards the session the room keeps: the normal room's with the photos only it uses, the debug room's alone, since
-   * the room's saved data and photos stay.
+   * the room's saved data and photos stay. The caller shows that the debug room keeps no session.
    */
-  async function discardKeptSession(inDebugRoom: boolean) {
-    if (!inDebugRoom) return keptSessions.discard(keptScope!);
-    await debugRooms.discardSession(keptScope!);
-    debugRoom.value = { session: false };
+  function discardKeptSession(inDebugRoom: boolean): Promise<void> {
+    return inDebugRoom ? debugRooms.discardSession(keptScope!) : keptSessions.discard(keptScope!);
   }
   /** Keeps the shown session as it is now and waits until it is kept. */
   async function keepSession(): Promise<void> {
@@ -1978,12 +2005,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /**
    * Shows Continue when the script keeps a session that can go on, else Start, with the reason when a Player update
    * changed the format of the kept session. Only while the preparation `owner` is current: the kept session restored,
-   * its photos, and its plan's JSON are installed together, or not at all.
+   * its photos, and its plan's JSON are installed together, or not at all. Resolves to whether it did.
    */
-  async function prepareKept(owner = ++preparation): Promise<void> {
+  async function prepareKept(owner = ++preparation): Promise<boolean> {
     // The preparation `owner`, in the room and plan tenure it began in, installs what it found; a stale one, nothing.
     const ctx = persistenceOwnership(owner);
-    await owned(async () => {
+    return owned(async () => {
       ctx.check();
       const plan = scriptPlan;
       const found = plan === null ? {} : await restoreKept(plan, ctx);
@@ -2247,7 +2274,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const { transfer } = review;
     const scope = keptScope;
     const plan = scriptPlan;
-    const storage = scriptStorage;
+    // The provider's own route: the saved values the import stored are shown by its final read, while it owns the page.
+    const storage = storageProvider!;
     const releaseImporting = holdImporting();
     // A session of this script in progress ends first; Debug's rewind could restore this script's earlier saved data
     // over the import, so its history ends.
@@ -2261,20 +2289,26 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     let ranToEnd = false;
     try {
       ranToEnd = await owned(async () => {
-        try {
+        const replaceSession = async (): Promise<void> => {
           // A session being kept is kept before the import replaces it.
           while (keeping !== null) await keeping;
           ctx.check();
           // Each photo and file is held under the reference the session and the values hold, as a restored kept
           // session's are; a value's is stored when the values are. One held already is the same (`reviewSessionImport`).
           const added = transfer.media.filter((medium) => !capturedMedia.knows(medium.reference));
-          for (const medium of added)
-            capturedMedia.restoreSessionMedia(medium.reference, sessionMediumRecord(medium, scope));
+          ctx.commit(() => {
+            for (const medium of added)
+              capturedMedia.restoreSessionMedia(
+                medium.reference,
+                sessionMediumRecord(medium, scope),
+              );
+          });
           try {
             await storage.replace(transfer.entries);
           } catch {
-            ctx.check();
-            for (const medium of added) capturedMedia.discard(medium.reference);
+            ctx.commit(() => {
+              for (const medium of added) capturedMedia.discard(medium.reference);
+            });
             failure =
               "Nothing was imported: this browser could not save the session's data, for example because storage is full.";
             return;
@@ -2282,7 +2316,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           ctx.check();
           let discarded = false;
           try {
-            kept = { plan: false, count: 0, last: null };
+            ctx.commit(() => (kept = { plan: false, count: 0, last: null }));
             await keptSessions.discard(scope);
             discarded = true;
             ctx.check();
@@ -2295,7 +2329,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
               ctx.check();
             }
             // The plan's JSON, which the host holds for the page (`plan-json-lease.ts`).
-            settlePlanJson({ kind: "prepare", plan });
+            ctx.commit(() => settlePlanJson({ kind: "prepare", plan }));
             const host = await bridgeReady;
             ctx.check();
             const planJson = (await host.client.request("planText", { plan })).result;
@@ -2315,13 +2349,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
               ? "The session's saved data was imported, but this browser could not keep the session, for example because storage is full. Start begins a new session with that data."
               : "The session's saved data was imported, but this browser could not replace the session it kept for this script. Continue, if offered, goes on with that earlier session.";
           }
-        } finally {
-          // The import's own preparation, while it is current: the saved values it stored, and its Start or Continue.
-          await ctx.commit(async () => {
-            await loadScriptStorage();
-            await ctx.commit(() => prepareKept(owner));
-          });
-        }
+        };
+        // An error no step expects is thrown once the import prepared, as a stale end is at once.
+        const unexpected = await replaceSession().then(
+          () => null,
+          (error: unknown) => (error instanceof StaleOperation ? Promise.reject(error) : { error }),
+        );
+        // The import's own preparation, while it owns the page: the saved values it stored, and its Start or Continue.
+        ctx.check();
+        const stored = await readScriptStorage();
+        ctx.commit(() => applyScriptStorage(stored));
+        if (!(await prepareKept(owner))) throw new StaleOperation();
+        if (unexpected !== null) throw unexpected.error;
       });
     } finally {
       releaseImporting();
