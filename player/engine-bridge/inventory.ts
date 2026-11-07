@@ -159,21 +159,9 @@ export const RATCHET: readonly RatchetEntry[] = [
     family: "L5h",
   },
   {
-    importer: "player/session-transfer.ts",
-    target: "player/runtime-adapter.ts",
-    name: "restorePlayerRuntimeSession",
-    family: "L5h",
-  },
-  {
     importer: "player/vue/src/usePlayerSession.ts",
     target: "player/runtime-adapter.ts",
     name: "playerRuntimeSnapshot",
-    family: "L5h",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeSnapshotJson",
     family: "L5h",
   },
   {

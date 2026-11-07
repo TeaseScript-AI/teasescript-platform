@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { Upload } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -14,15 +14,14 @@ import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import DialogTrigger from "@/components/ui/dialog/DialogTrigger.vue";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  readPlayerTransferFile,
-  readPlayerTransferText,
-  type PlayerTransfer,
-  type SessionTransfer,
-  type SessionTransferMedium,
-} from "../../session-transfer.js";
+import type { SessionTransferMedium } from "../../session-transfer.js";
 import { StorageTransferError, type StorageBundle } from "../../storage-transfer.js";
-import type { SavedDataImportReview, SessionImportReview } from "./usePlayerSession";
+import type {
+  PlayerTransferRead,
+  SavedDataImportReview,
+  SessionImportReview,
+  SessionTransferRead,
+} from "./usePlayerSession";
 
 // Imports saved data or a session exported from another Player, as a file or pasted text. Saved data goes into the
 // scope of each script in it, or of the ones the player keeps ticked; a session continues the script this Player shows.
@@ -33,9 +32,13 @@ const props = defineProps<{
   available: boolean;
   /** Whether a session of the shown script is in progress, which importing that script ends. */
   sessionInProgress: boolean;
+  /** Reads a file's bytes or a pasted text in the engine host. */
+  read: (input: { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string }) => Promise<PlayerTransferRead>;
   review: (bundle: StorageBundle) => Promise<SavedDataImportReview>;
   commit: (review: SavedDataImportReview, chosen: ReadonlySet<string>) => Promise<void>;
-  reviewSession: (transfer: SessionTransfer) => Promise<SessionImportReview>;
+  reviewSession: (transfer: SessionTransferRead) => Promise<SessionImportReview>;
+  /** Lets go of a session read for an import that is not imported now. */
+  discardSession: (transfer: SessionTransferRead) => void;
   commitSession: (review: SessionImportReview) => Promise<void>;
 }>();
 
@@ -57,8 +60,23 @@ const heading = ref<HTMLElement | null>(null);
 // Each reading belongs to one opening of the dialog; a late result after Cancel or closing is discarded.
 let attempt = 0;
 
+/**
+ * Leaves the session review shown, if any: the host's copy of its session is not needed any more. An import under way
+ * still needs it; `confirmSession` lets go of it once the import settles.
+ */
+function leaveSessionReview() {
+  const current = step.value;
+  if (current.kind === "sessionReview") props.discardSession(current.review.transfer);
+}
+// A reading or review still pending belongs to no dialog any more: it lets go of its session when it arrives.
+onBeforeUnmount(() => {
+  attempt++;
+  leaveSessionReview();
+});
+
 watch(open, () => {
   attempt++;
+  leaveSessionReview();
   step.value = { kind: "input", problem: null };
   pasted.value = "";
   dragging.value = false;
@@ -84,14 +102,16 @@ function choose(scope: string, on: boolean) {
   chosen.value = next;
 }
 
-async function read(load: () => Promise<PlayerTransfer>) {
+async function read(load: () => Promise<PlayerTransferRead>) {
   const current = ++attempt;
+  leaveSessionReview();
   step.value = { kind: "reading" };
   try {
     const transfer = await load();
     if (transfer.kind === "session") {
-      const review = await props.reviewSession(transfer.session);
-      if (current !== attempt) return;
+      if (current !== attempt) return props.discardSession(transfer);
+      const review = await props.reviewSession(transfer);
+      if (current !== attempt) return props.discardSession(transfer);
       step.value = { kind: "sessionReview", review, problem: null };
     } else {
       const review = await props.review(transfer.bundle);
@@ -110,7 +130,7 @@ async function read(load: () => Promise<PlayerTransfer>) {
   }
 }
 function readFile(file: File) {
-  void read(async () => readPlayerTransferFile(new Uint8Array(await file.arrayBuffer())));
+  void read(async () => props.read({ bytes: new Uint8Array(await file.arrayBuffer()) }));
 }
 function chooseFile(event: Event) {
   const input = event.target instanceof HTMLInputElement ? event.target : null;
@@ -124,18 +144,21 @@ function drop(event: DragEvent) {
   const files = event.dataTransfer?.files;
   if (!files || files.length === 0) return;
   if (files.length > 1) {
-    // Refusing this drop also discards a reading that is still pending, so it cannot become the review.
+    // Refusing this drop invalidates a pending read, so it cannot become the review, and releases any shown session
+    // review.
     attempt++;
+    leaveSessionReview();
     step.value = { kind: "input", problem: "Drop one exported file." };
     return;
   }
   readFile(files[0]!);
 }
 function reviewText() {
-  void read(() => readPlayerTransferText(pasted.value));
+  void read(() => props.read({ text: pasted.value }));
 }
 function cancelReview() {
   attempt++;
+  leaveSessionReview();
   step.value = { kind: "input", problem: null };
 }
 async function confirm() {
@@ -166,9 +189,11 @@ async function confirmSession() {
   step.value = { kind: "sessionImporting", review: current.review };
   try {
     await props.commitSession(current.review);
+    props.discardSession(current.review.transfer);
     if (confirmed === attempt) step.value = { kind: "done", session: true };
   } catch (error) {
-    if (confirmed !== attempt) return;
+    // The dialog moved on meanwhile: nothing offers the review again. Shown again, it keeps its session for a retry.
+    if (confirmed !== attempt) return props.discardSession(current.review.transfer);
     step.value = {
       kind: "sessionReview",
       review: current.review,

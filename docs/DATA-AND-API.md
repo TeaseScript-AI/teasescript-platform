@@ -38,7 +38,7 @@ The lower-level layer includes:
 - checkpoint creation, serialization, deserialization, and restore functions;
 - versioned RNG state creation and advancement helpers.
 
-The normal composition is:
+Two compositions run the one engine. The snapshot-taking route, where the caller holds the state:
 
 ```text
 source
@@ -48,12 +48,23 @@ source
     -> executeInstruction, stepToEvent, or run
 ```
 
+The engine-owned session, which keeps the plan and the canonical snapshot itself, as the Player runs it
+([Runtime sessions](RUNTIME.md#runtime-sessions)):
+
+```text
+source
+    -> compileSource
+    -> compiled instruction plan
+    -> createFreshRuntimeSession, createRuntimeSession, or restoreRuntimeSession
+    -> the session's run, stepToEvent, executeInstruction, and completions
+```
+
 Ordinary TeaseScript source is compiled through `compileSource(...)`; the resulting validated instruction plan runs
 with explicit serializable runtime state. Parser AST data remains available to compiler and authoring tooling, but
 there is no supported caller-constructed AST compilation route. `validateInstructionPlan(...)` independently rejects
 non-JSON-safe plan data.
 
-The explicit plan/snapshot/runtime API is the canonical resumable route for waits, including pending actions, checkpoints, completion, and resumption.
+Both routes are resumable at waits, including pending actions, checkpoints, completion, and resumption.
 
 Runtime builtins are explicit capabilities. Only own registered properties are callable, core builtins retain precedence, and low-level named arguments use a prototype-free record. These rules prevent inherited JavaScript properties or prototype-mutating names from becoming implicit capabilities.
 
@@ -102,9 +113,11 @@ active foreground/background action
 
 The exact cross-origin envelope, field names, capability-negotiation schema, reconnect protocol, and save acknowledgement remain open. They are not defined by ADR 0016.
 
-Camera and file APIs continue to return engine-managed references rather than browser objects. Package-defined camera
-roles, player device aliases, captured-media recovery after reload or restore, and persistent media collections remain
-separate follow-up designs; the camera and microphone permission and ownership model is in [`SECURITY.md`](SECURITY.md).
+Camera and file APIs continue to return engine-managed references rather than browser objects. Captured media already
+outlive a reload: a photo a saved value references is stored durably, and one only a kept session uses is kept with that
+session and comes back with its Continue ([Image input](RUNTIME.md#image-input)). Package-defined camera roles, player
+device aliases, and persistent media collections remain separate follow-up designs; the camera and microphone permission
+and ownership model is in [`SECURITY.md`](SECURITY.md).
 Follow-ups are recorded in
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
@@ -205,7 +218,7 @@ later.
 
 A player moves the session they play by hand and offline to another browser or device, where Continue goes on with it
 as after a reload, through Player Settings ([Player UI](ui/PLAYER-UI.md#player-settings)); `player/session-transfer.ts`
-owns the format. The session travels as its canonical checkpoint, which the runtime exports and restores
+owns the format, and the engine host reads it (`player/session-transfer-read.ts`). The session travels as its canonical checkpoint, which the runtime exports and restores
 (`createPlayerRuntimeRestorePoint` and `restorePlayerRuntimeSession`), not in a second save format. The document is
 UTF-8 JSON with exactly these fields:
 

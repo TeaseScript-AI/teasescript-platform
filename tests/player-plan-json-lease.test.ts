@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { persistenceOps } from "../player/engine-bridge/ops/persistence.js";
-import { playerOpsContext } from "../player/engine-bridge/player-ops.js";
+import { playerBridgeOps, playerOpsContext } from "../player/engine-bridge/player-ops.js";
 import {
   EMPTY_PLAN_JSON_LEASE,
   settle,
@@ -11,6 +10,7 @@ import {
   type PlanJsonMessage,
 } from "../player/plan-json-lease.js";
 import {
+  NOT_PRODUCERS,
   PRODUCERS,
   RETIREMENTS,
   caseName,
@@ -141,7 +141,8 @@ const layerName = (c: LayerCase) =>
 
 /** Whether the producer's outcome reads the plan's JSON in the host. */
 const reads = (producer: Producer, outcome: string) =>
-  !(producer === "captureKeep" && outcome === "gone");
+  !(producer === "captureKeep" && outcome === "gone") &&
+  !(producer === "reviewTransfer" && outcome === "released");
 
 function run(c: LayerCase) {
   const h = harness(layerName(c));
@@ -176,9 +177,10 @@ function run(c: LayerCase) {
 const CASES = [...layerCases()];
 
 test("every op of the host is classified: a producer of the family, or named as none", () => {
-  const ops = persistenceOps(playerOpsContext());
-  assert.deepEqual(unclassifiedOps(ops), []);
-  for (const producer of Object.keys(PRODUCERS)) assert.ok(producer in ops, `${producer} is an op`);
+  const composed = Object.keys(playerBridgeOps(playerOpsContext()));
+  assert.deepEqual(unclassifiedOps(Object.fromEntries(composed.map((op) => [op, null]))), []);
+  for (const op of [...Object.keys(PRODUCERS), ...Object.keys(NOT_PRODUCERS)])
+    assert.ok(composed.includes(op), `${op} is an op of the composed host`);
 });
 
 test("the generated family holds every declared obligation and every pair of values that can meet", () => {

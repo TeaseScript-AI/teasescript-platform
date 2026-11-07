@@ -30,7 +30,6 @@ import { type LockDialogInput } from "../../lock-service.js";
 import type { LockServices } from "../../encryption/lock.js";
 import {
   playerRuntimeSnapshot,
-  playerRuntimeSnapshotJson,
   playerRuntimeSnapshotOrNull,
   type PlayerRuntimeRestorePoint,
   type PlayerRuntimeSession,
@@ -129,7 +128,6 @@ import {
 } from "../../storage-transfer.js";
 import { type PlayerDiagnostic } from "../../session-camera.js";
 import {
-  restoreSessionTransfer,
   sessionMediumRecord,
   sessionTransferMedium,
   type SessionTransfer,
@@ -1075,16 +1073,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The persistence operations under way (`persistenceOwnership`), each revoked for good where it retires.
   const pendingOwnerships = new Set<PersistenceOwnership>();
   /** Ends every persistence operation the page's change of room, store, plan tenure, preparation or life retired. */
-  function revokeRetiredOperations() {
-    for (const ownership of pendingOwnerships) ownership.revoke();
+  function retireStaleOperations() {
+    for (const ownership of pendingOwnerships) ownership.retireIfStale();
   }
   /** A new preparation, which retires the ones before it. */
   function nextPreparation(): number {
     preparation += 1;
-    revokeRetiredOperations();
+    retireStaleOperations();
     return preparation;
   }
-  watch(room, revokeRetiredOperations, { flush: "sync" });
+  watch(room, retireStaleOperations, { flush: "sync" });
   // A Continue under way in the host, whose session no other activation may let run on; see `supersede`.
   let continuing: PlayerSession | null = null;
   // The Start or Continue still beginning over the bridge. A later activation begins only once it settled, so the
@@ -1555,6 +1553,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * first under new references. When this Player's script is among them, a session in progress ends first and Start is
    * offered with the imported data. A script that fails keeps its saved data; the rejection names it, and the scripts
    * imported before it stay imported. Unchosen scripts are untouched.
+   *
+   * The import is a persistence operation of this page (`persistence-ownership.ts`): this page's own writes and effects
+   * go through its ownership, which a move of the page retires, so a stale import shows and says nothing. Another
+   * script's saved data are the player's confirmed writes for a script this page does not show: no state of this page
+   * retires them, and they finish (`importOtherScript`).
    */
   async function importSavedData(
     review: SavedDataImportReview,
@@ -1567,69 +1570,105 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const ownChosen =
       scriptStorage !== undefined && chosen.has(scriptStorage.scope) && !inDebugRoom;
     const releaseImporting = holdImporting();
-    // A Continue or Start still being prepared for the script would offer what the import replaces.
-    if (ownChosen) nextPreparation();
-    const failed: string[] = [];
     // Start keeps saying why the kept session cannot continue while a failed import leaves that session.
     let outdated = ownChosen ? activation.value?.outdated : undefined;
-    try {
-      // Debug's rewind could restore this script's earlier saved data over the import, so its history ends too, and so
-      // does an inspected state, also one that ended.
-      if (ownChosen) {
-        if (sessionInProgress.value || inspecting.value) endSession();
-        rewindRetirements.value++;
-        // A session being kept is kept before the import discards it.
-        while (keeping !== null) await keeping;
-      }
+    // Debug's rewind could restore this script's earlier saved data over the import, so its history ends too, and so
+    // does an inspected state, also one that ended.
+    if (ownChosen) {
+      if (sessionInProgress.value || inspecting.value) endSession();
+      rewindRetirements.value++;
+    }
+    // Then the import is a preparation of its own: a Continue or Start still being prepared for the script would offer
+    // what it replaces. It takes its number after the session it ends, which takes one itself.
+    const ctx = persistenceOwnership(ownChosen ? nextPreparation() : null);
+    const failed: string[] = [];
+    const importScripts = async (): Promise<void> => {
+      // A session being kept is kept before the import discards it.
+      if (ownChosen) while (keeping !== null) await keeping;
       for (const script of review.bundle.scripts) {
         if (!chosen.has(script.scope)) continue;
         try {
-          const own = script.scope === scriptStorage?.scope;
-          // Without durable captured media, imported photos would not outlive this page.
-          if (own && capturedMediaPersistence === undefined && usesImages(script))
-            throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
-          // The script's next session loads the imported values: its kept session, with its older view, goes first, and
-          // a script whose kept session stays keeps its saved data.
-          await keptSessions.discard(script.scope);
-          if (own) outdated = undefined;
-          if (own && inDebugRoom) {
-            const media = ownStoredMedia(script.scope);
-            const storage = withCapturedMedia(options.scriptStorage!, media);
-            try {
-              await replaceScript(storage, media, script, review.images);
-            } finally {
-              await storage.drain();
-              media.close();
-            }
-          } else if (own) {
-            await replaceScript(scriptStorage, capturedMedia, script, review.images);
-          } else {
-            const { storage, media } = options.savedData!.persistence(script.scope);
-            try {
-              await replaceScript(storage, media, script, review.images);
-            } finally {
-              await storage.close();
-              media.close();
-            }
+          if (script.scope !== scriptStorage?.scope) {
+            await importOtherScript(script, review.images);
+            continue;
           }
+          // Without durable captured media, imported photos would not outlive this page.
+          if (capturedMediaPersistence === undefined && usesImages(script))
+            throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
+          // The script's next session loads the imported values: its kept session, with its older view, goes first,
+          // and a script whose kept session stays keeps its saved data.
+          await ctx.kept(keptSessions).discard(script.scope);
+          outdated = undefined;
+          if (inDebugRoom) await replaceOwnInDebugRoom(ctx, script, review.images);
+          else await replaceScript(operationStorage(ctx), capturedMedia, script, review.images);
         } catch (error) {
+          // This page's write was refused: the page moved on, and the import goes on with the other scripts.
+          if (error instanceof StaleOperation) continue;
           failed.push(
             `${script.name ?? script.scope} (${error instanceof CapturedMediaNotStoredError ? "its photos could not be stored" : "it could not be saved, for example because storage is full"})`,
           );
         }
       }
-    } finally {
-      if (ownChosen) {
-        await loadScriptStorage();
-        releaseImporting();
-        if (lastStart.value !== null && !sessionInProgress.value)
-          prepareStart(lastStart.value, outdated);
-      } else releaseImporting();
-    }
-    if (failed.length > 0)
+    };
+    // An error no step expects is thrown once the import is done, as before.
+    const unexpected = await importScripts().then(
+      () => null,
+      (error: unknown) => ({ error }),
+    );
+    // This page's end of the import, while it owns the page: the saved values it stored, then Start. `ranToEnd` says
+    // whether that end ran whole, or, with no end of this page's, whether the page still owns the import.
+    const ranToEnd = ownChosen
+      ? await owned(ctx, async () => {
+          ctx.check();
+          const stored = await readScriptStorage(operationStorage(ctx), ctx);
+          ctx.commit(() => applyScriptStorage(stored));
+          releaseImporting();
+          ctx.commit(() => {
+            if (lastStart.value !== null && !sessionInProgress.value)
+              prepareStart(lastStart.value, outdated);
+          });
+        })
+      : ctx.current();
+    pendingOwnerships.delete(ctx);
+    releaseImporting();
+    if (unexpected !== null) throw unexpected.error;
+    // A stale import says nothing: the page moved on.
+    if (failed.length > 0 && ranToEnd)
       throw new StorageTransferError(
         `Not imported, and their saved data is unchanged: ${failed.join("; ")}. Any other chosen script was imported.`,
       );
+  }
+  /** Replaces the script's own saved data while the debug room is shown, for the persistence operation `ctx`. */
+  async function replaceOwnInDebugRoom(
+    ctx: PersistenceOwnership,
+    script: StorageBundleScript,
+    images: readonly CheckedTransferImage[],
+  ): Promise<void> {
+    const media = ownStoredMedia(script.scope);
+    const storage = withCapturedMedia(options.scriptStorage!, media);
+    try {
+      await replaceScript(storage.forOperation(ctx), media, script, images);
+    } finally {
+      await storage.drain();
+      media.close();
+    }
+  }
+  /**
+   * Imports another script's saved data, which this page does not show: its kept session goes first, then its values,
+   * with their photos. These are the player's confirmed writes; no state of this page retires them.
+   */
+  async function importOtherScript(
+    script: StorageBundleScript,
+    images: readonly CheckedTransferImage[],
+  ): Promise<void> {
+    await keptSessions.discard(script.scope);
+    const { storage, media } = options.savedData!.persistence(script.scope);
+    try {
+      await replaceScript(storage, media, script, images);
+    } finally {
+      await storage.close();
+      media.close();
+    }
   }
   /** The script's own stored photos while the debug room is shown; close it after use. */
   function ownStoredMedia(scope: string): CapturedMediaStore {
@@ -1805,7 +1844,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const settled = settle(planJsonLease, event);
     if (settled.lease.current !== planJsonLease.current) planTenure += 1;
     planJsonLease = settled.lease;
-    revokeRetiredOperations();
+    retireStaleOperations();
     for (const message of settled.messages) {
       const op = message.kind === "write" ? "preparePlanText" : "releasePlanText";
       void bridge?.client.request(op, { plan: message.plan }).catch(() => {});
@@ -1960,8 +1999,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       ? ctx.rooms(debugRooms).discardSession(keptScope!)
       : ctx.kept(keptSessions).discard(keptScope!);
   }
-  /** Keeps the shown session as it is now and waits until it is kept. */
-  async function keepSession(): Promise<void> {
+  /**
+   * Asks to keep the shown session as it is now and waits until the keep work under way settles. Keeping is best effort:
+   * it settles also when the session is not kept, as when it cannot be written, the store refuses it, or the page
+   * moved on; nothing here proves that the session was kept.
+   */
+  async function settleKeepAttempt(): Promise<void> {
     keepSessionLater();
     while (keeping !== null) await keeping;
   }
@@ -2141,7 +2184,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   async function toStartPage(): Promise<void> {
     if (session.value?.state.status !== "halted") return;
-    await keepSession();
+    await settleKeepAttempt();
     if (disposed || session.value?.state.status !== "halted") return;
     endSession();
     await prepareKept();
@@ -2222,7 +2265,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Checks an exported session for an import into the script this Player shows, all of it; nothing changes yet. Rejects
    * with a `StorageTransferError` saying why it cannot continue here.
    */
-  async function reviewSessionImport(transfer: SessionTransfer): Promise<SessionImportReview> {
+  async function reviewSessionImport(transfer: SessionTransferRead): Promise<SessionImportReview> {
+    try {
+      return await reviewedImport(transfer);
+    } catch (error) {
+      // A session that cannot be imported here holds nothing in the host any more.
+      discardSessionReview(transfer);
+      throw error;
+    }
+  }
+  async function reviewedImport(transfer: SessionTransferRead): Promise<SessionImportReview> {
     if (room.value === "debug")
       throw new StorageTransferError(
         "A session cannot be imported into the debug room. Open this script outside the debug room and import it there.",
@@ -2231,10 +2283,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       throw new StorageTransferError(
         "This Player does not keep sessions, so it cannot import one.",
       );
-    const restored = restoreSessionTransfer(
-      transfer,
-      keptScope,
-      heldPlan(await bridgeReady, scriptPlan),
+    // Restored in the host against the held plan, as Continue would find it after a reload; its state stays there.
+    const host = await bridgeReady;
+    await asTransferError(
+      host.client.request("reviewTransfer", {
+        ticket: transfer.ticket,
+        scope: keptScope,
+        plan: scriptPlan,
+      }),
     );
     const saved = new Set(storedValueReferences(transfer.entries));
     // Without durable captured media, a saved value's photo would not outlive this page.
@@ -2264,10 +2320,34 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
     return {
       transfer,
-      snapshotJson: playerRuntimeSnapshotJson(restored),
       name: transfer.name ?? options.savedData?.name(keptScope) ?? null,
       currentValues: current.length,
     };
+  }
+  /**
+   * Reads an exported file's bytes or a pasted text of saved data or a session, in the host: saved data whole, a session
+   * for `reviewSessionImport`. Rejects with a `StorageTransferError` saying why it cannot be read.
+   */
+  async function readTransfer(
+    input: { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string },
+  ): Promise<PlayerTransferRead> {
+    const host = await bridgeReady;
+    // EVIDENCE: validation: `readTransfer` replies from the same build with what it read.
+    return (await asTransferError(host.client.request("readTransfer", input)))
+      .result as PlayerTransferRead;
+  }
+  /** The tickets of the session imports under way, which `discardSessionReview` refuses. */
+  const importedTickets = new Set<string>();
+  /**
+   * Lets go of a session read for an import that will not be imported: cancelled, replaced, or refused. Throws for one
+   * whose import runs: that import still needs it, and lets the dialog go of it once it settles.
+   */
+  function discardSessionReview(transfer: SessionTransferRead): void {
+    if (importedTickets.has(transfer.ticket))
+      throw new Error(
+        "A review being imported cannot be discarded: its import still needs the session read for it.",
+      );
+    void bridge?.client.request("releaseTransfer", { ticket: transfer.ticket }).catch(() => {});
   }
   /**
    * Imports a reviewed session. A session of this script in progress ends first; the session's saved values replace the
@@ -2305,6 +2385,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const sessions = ctx.kept(keptSessions);
     let failure: string | null = null;
     let ranToEnd = false;
+    importedTickets.add(transfer.ticket);
     try {
       ranToEnd = await owned(ctx, async () => {
         const replaceSession = async (): Promise<void> => {
@@ -2338,8 +2419,21 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             await sessions.discard(scope);
             discarded = true;
             ctx.check();
-            const eventsJson = transfer.session.events.map(serializeValidatedRuntimeJson);
-            const references = capturedMediaReferencesIn(review.snapshotJson, eventsJson);
+            // The state as the kept session stores it, and its events as the engine writes them, from the host.
+            const host = await bridgeReady;
+            ctx.check();
+            const committed = (
+              await ctx.admit(() =>
+                host.client.request("transferCommit", { ticket: transfer.ticket }),
+              )
+            ).result;
+            ctx.check();
+            // EVIDENCE: validation: `transferCommit` replies from the same build with the reviewed state and events.
+            const { snapshotJson, eventsJson } = committed as {
+              readonly snapshotJson: string;
+              readonly eventsJson: readonly string[];
+            };
+            const references = capturedMediaReferencesIn(snapshotJson, eventsJson);
             // Unlike keeping a session as it plays, every photo goes into a store the discard emptied, so a failure is
             // real: the session is not kept without the media it uses.
             for (const photo of capturedMedia.sessionRecords(references)) {
@@ -2348,17 +2442,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             }
             // The plan's JSON, which the host holds for the page (`plan-json-lease.ts`).
             ctx.commit(() => settlePlanJson({ kind: "prepare", plan }));
-            const host = await bridgeReady;
-            ctx.check();
             const planJson = (await ctx.admit(() => host.client.request("planText", { plan })))
               .result;
             ctx.check();
             if (typeof planJson !== "string") throw new Error("The host wrote no plan JSON.");
             await sessions.publish(scope, {
               planJson,
-              snapshotJson: review.snapshotJson,
+              snapshotJson,
               eventsFrom: 0,
-              events: transfer.session.events,
+              events: transfer.events,
               eventsJson,
               marks: { editedWhileDebugging: null, rewoundWhileDebugging: null },
             });
@@ -2382,6 +2474,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (unexpected !== null) throw unexpected.error;
       });
     } finally {
+      importedTickets.delete(transfer.ticket);
       releaseImporting();
     }
     // A stale import says nothing: the page moved on.
@@ -2551,7 +2644,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         const live = sessionLive.value;
         // The normal room keeps its session as it is now, which a later visit continues; one that ended is kept as it
         // ended, by the keep still under way.
-        if (live) await keepSession();
+        if (live) await settleKeepAttempt();
         else while (keeping !== null) await keeping;
         const making = live || debugRoom.value === null;
         const replacing = live && debugRoom.value !== null;
@@ -2604,7 +2697,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       // Another tab created it meanwhile, or this browser cannot keep it: then it lives in this page.
       if ((await debugRooms.read(scope).catch(() => null)) === null) {
         debugRooms = memoryKeptRoomStore();
-        revokeRetiredOperations();
+        retireStaleOperations();
         copied = await debugRooms
           .create(scope, entries, photos)
           .then(all, () => debugRooms.create(scope, [], []).then(() => new Set<string>()));
@@ -3159,10 +3252,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     canClearScriptStorage,
     clearScriptStorage,
     /**
-     * The saved values as stored now, with the saved photos they reference, for an export; also during a session, whose
-     * saves count once they are stored. Rejects when storage cannot be read.
-     */
-    /**
      * The saved values as stored now, read freshly through the provider in issue order, for Debug's Storage tab; rejects
      * when storage cannot be read. `savedDataRevision` changes when this Player changed them.
      */
@@ -3214,7 +3303,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       return "unavailable" in found ? found.unavailable : null;
     }),
     exportSession,
+    readTransfer,
     reviewSessionImport,
+    discardSessionReview,
     importSession,
     /**
      * The current or last session's recorded engine calls for a debug export, after a Player error those up to it until
@@ -3423,10 +3514,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
 
 export type PlayerSessionHost = ReturnType<typeof usePlayerSession>;
 
-/**
- * The saved and supported revisions, as the start page's Technical details say them, when the JSON of a kept plan or
- * state is of another revision than `supported`, this Player's; else `null`.
- */
 /** Whether `info`, an engine error's details from the host, is a `CheckpointError`'s. */
 function isCheckpointErrorInfo(info: unknown): info is CheckpointErrorInfo {
   return (
@@ -3441,6 +3528,10 @@ function isCheckpointErrorInfo(info: unknown): info is CheckpointErrorInfo {
   );
 }
 
+/**
+ * The saved and supported revisions, as the start page's Technical details say them, when the JSON of a kept plan or
+ * state is of another revision than `supported`, this Player's; else `null`.
+ */
 function revisionChange(json: string, supported: number): string | null {
   let saved: unknown;
   try {
@@ -3491,6 +3582,21 @@ async function replaceScript(
   }
 }
 
+/**
+ * `request`'s answer; a refusal the host gave as a `StorageTransferError` is one here too, with its words. The bridge
+ * carries an error's name and message, not its class (`BridgeRequestError` copies the name onto itself), so a caller
+ * that tests `instanceof StorageTransferError` needs the error rebuilt here.
+ */
+async function asTransferError<T>(request: Promise<T>): Promise<T> {
+  try {
+    return await request;
+  } catch (error) {
+    if (error instanceof BridgeRequestError && error.name === "StorageTransferError")
+      throw new StorageTransferError(error.message);
+    throw error;
+  }
+}
+
 /** Whether a held record is the medium of an import: the same kind, type, and bytes. */
 async function sameMedium(
   record: CapturedMediaRecord,
@@ -3530,11 +3636,27 @@ export interface SessionExport {
   readonly missing: number;
 }
 
+/**
+ * A session read for an import (`readTransfer`): its scope, title, saved values, photos and files, and events, while its
+ * checkpoint and restored state stay in the host under `ticket`.
+ */
+export interface SessionTransferRead {
+  readonly ticket: string;
+  readonly scope: string;
+  readonly name: string | null;
+  readonly entries: readonly RuntimeScriptStorageEntrySnapshot[];
+  readonly media: readonly SessionTransferMedium[];
+  readonly events: readonly InterpreterEvent[];
+}
+
+/** What an exported file or text holds, as `readTransfer` read it: the saved data of scripts, or a session. */
+export type PlayerTransferRead =
+  | { readonly kind: "savedData"; readonly bundle: StorageBundle }
+  | ({ readonly kind: "session" } & SessionTransferRead);
+
 /** A checked session import, shown before the player confirms it. */
 export interface SessionImportReview {
-  readonly transfer: SessionTransfer;
-  /** The restored state, as the kept session stores it. */
-  readonly snapshotJson: string;
+  readonly transfer: SessionTransferRead;
   readonly name: string | null;
   /** How many values the script has saved now, which the import replaces. */
   readonly currentValues: number;

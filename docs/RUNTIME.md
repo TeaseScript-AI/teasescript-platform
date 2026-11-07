@@ -19,8 +19,9 @@ issued it still owns the UI, and the player's input is posted only then. The Pla
 is exported only where one is kept: checked for a restore point, a debug export, or a saved-data adoption, such as by
 `playerRuntimeSnapshot`; and as the trusted export (Boundaries below) for the kept session, a rewind point, and the
 debug recorder's anchors, which are checked where they are restored or exported. The host writes the kept session's state, a
-session export's checkpoint and the plan's JSON a first save stores, and restores the kept session Continue offers; the
-main realm stores and posts them as text. The host holds the plan's JSON for the page's current plan while the page is
+session export's checkpoint and the plan's JSON a first save stores, restores the kept session Continue offers, and reads
+an exported file of saved data or a session, whose checkpoint it restores and keeps for the import; the main realm stores
+and posts them as text. The host holds the plan's JSON for the page's current plan while the page is
 open (`player/plan-json-lease.ts`). Continue and a rewind restore with
 `restoreRuntimeSession`, a restore point with `deserializeRuntimeSession`, each checking the state once (Boundaries
 below). An operation goes through a publication that shows the current state; once an operation changed the state, one
@@ -1372,15 +1373,17 @@ survives checkpoint and restore, and replays a repeated completion as `alreadySe
 image or a photo taken for the request as session media with the lifecycle of a `takePhoto()` photo; see
 [Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation) for its file and camera routes.
 
-The Player opens the session camera after Start when the trusted host grants the camera capability, answers each capture
+The Player opens the session camera from the activating Start or Continue click, before ordinary script execution, when
+the trusted host grants the camera capability; a camera failure does not stop the start. It answers each capture
 once from that open stream, and delivers the answer until the runtime settles it. Captured photos are session media; a
 save stores the photos its value references durably before the value is persisted
 (`player/captured-media-persistence.ts`); when that fails, the host acknowledges the `storageWrite` as `failed`, so the
 previous value is kept as for any failed persistent write. Media no saved value references, nor a session the Player
-keeps for a reload ([Session start](ui/PLAYER-UI.md#session-start-and-user-activation)), is reclaimed
-opportunistically when a Player opens while no Player of the same scope is live in any tab (Web Locks) and the saved
-values can be read completely; without Web Locks it is not reclaimed, and while a Player lives nothing is deleted. The
-technical playground has no camera and answers a pending capture as `unconfigured` when execution continues.
+keeps for a reload ([Session start](ui/PLAYER-UI.md#session-start-and-user-activation)), is reclaimed opportunistically
+when a Player opens while no Player of the same scope is live in any tab (Web Locks) and the saved values can be read (a
+value its store cannot read counts as gone, with its media); without Web Locks it is not reclaimed, and while a Player
+lives nothing is deleted. The technical playground has no camera and answers a pending capture as `unconfigured` when
+execution continues.
 
 ## Forms
 
@@ -1689,8 +1692,8 @@ WebM signatures are read as they intend, Ogg is audio, and an M4A major brand is
 | `application/octet-stream` | anything else, such as SVG, HTML, BMP, AVIF, or text                              |
 
 The Player (`player/stored-files.ts`) answers each file store once, as it answers a photo: it keeps each file to store
-as session media of its kind, with the lifecycle of a photo, durable only while a saved value references it, and reads
-stored files' bytes, from durable storage when needed, and hashes them with `crypto.subtle.digest`. When it cannot
+as session media of its kind, with the lifecycle of a photo, durable while a saved value or a kept session uses it, and
+reads stored files' bytes, from durable storage when needed, and hashes them with `crypto.subtle.digest`. When it cannot
 decode, keep, read, or hash them, as outside a secure context, where the browser has no `crypto.subtle`, it answers
 `failed`.
 At Start it names the references in the saved values that its store holds, or had stored when it read them, so saved
@@ -2624,8 +2627,8 @@ The exported TypeScript source frontend, source compiler, low-level runtime, sna
 - stable package/plan identity and migration policy;
 - Standard Library imports, generated declarations/editor metadata transport, versioning, and capability access;
 - iframe host commands and response correlation;
-- captured-media recovery after reload or restore and persistent media collections, their cleanup and persistence
-  (camera and microphone ownership is in [`SECURITY.md`](SECURITY.md));
+- persistent media collections, their cleanup and persistence (camera and microphone ownership is in
+  [`SECURITY.md`](SECURITY.md));
 - time-integrity diagnostics and future server-authoritative scheduling;
 - server checkpoint persistence and conflict resolution;
 - performance profiling and safe optimization of snapshot cloning/liveness metadata.

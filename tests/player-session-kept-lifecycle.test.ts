@@ -24,6 +24,7 @@ import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { answerWith, type Intent } from "./helpers/player-input.js";
 import { loadHostFacade } from "./helpers/host-sessions.js";
+import { readForImport, type SessionRead } from "./helpers/transfer-read.js";
 
 // The kept session's lifecycle around its preparation and the saved-data import (#1862, #1863): a preparation that
 // something later replaced shows nothing and puts back no photo, and an import replaces a script's values only once
@@ -68,7 +69,10 @@ interface Host {
   reviewSavedDataImport(bundle: StorageBundle): Promise<SavedDataImportReview>;
   importSavedData(review: SavedDataImportReview, chosen: ReadonlySet<string>): Promise<void>;
   exportSession(): Promise<{ readonly transfer: SessionTransfer }>;
-  reviewSessionImport(transfer: SessionTransfer): Promise<SessionImportReview>;
+  readTransfer(input: {
+    readonly bytes: Uint8Array<ArrayBuffer>;
+  }): Promise<{ readonly kind: string }>;
+  reviewSessionImport(transfer: SessionRead): Promise<SessionImportReview>;
   importSession(review: SessionImportReview): Promise<void>;
 }
 let usePlayerSession: (options: {
@@ -435,7 +439,7 @@ test("a kept-session read answered after a session import leaves the imported se
   const at = await browser();
   await keepAtFirst(context, at);
   const { host, preparing } = await heldPage(context, at, at.holds.session);
-  await host.importSession(await host.reviewSessionImport(transfer));
+  await host.importSession(await host.reviewSessionImport(await readForImport(host, transfer)));
   at.holds.session.release();
   await preparing;
   await settle();
