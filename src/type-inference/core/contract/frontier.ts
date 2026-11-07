@@ -158,28 +158,7 @@ class Frontier {
   readonly pendingIds = new Map<string, number>();
   readonly advances = new Map<number, Map<string, Decision>>();
   readonly unions = new Map<string, number>();
-  /**
-   * #1784 (Codex r7, `marks-floor`): the compositions a build makes, a node and the steps read below it, each checked
-   * where the build ends (`floors`); and their receivers as interned sets of nodes, per set and step the set one step
-   * below, per set whether its kinds hold a structure a step below can be read from.
-   */
-  chains: Chain[] = [];
-  /** Per node, the receivers with no structure that hold it (`floors`): what is read below them is checked too. */
-  readonly floorNodes = new Map<number, number[]>();
-  /** Whether the graph holds a marked node (`markNode`). */
-  marks = false;
-  readonly floorNext = new Map<number, Map<string, number>>();
-  readonly floorSeen = new Set<number>();
-  readonly structured = new Map<number, boolean>();
-
   public constructor(readonly contract: Contract) {}
-}
-
-/** #1784: a composition a build makes (`composed`), and whether it reached a marked or held node. */
-interface Chain {
-  readonly root: number;
-  readonly steps: readonly string[];
-  held: boolean;
 }
 
 const FRONTIERS = new WeakMap<Contract, Frontier>();
@@ -359,7 +338,6 @@ function nativeNode(frontier: Frontier, value: PlaceId): number {
 
 /** #1784: `inner` reached marked: once (marking is idempotent), any holder's pending mark below it moot. */
 function markNode(frontier: Frontier, inner: number): number {
-  frontier.marks = true;
   let at = inner;
   for (let node = frontier.nodes[at]!; node.kind === "mark" || node.kind === "hold";) {
     if (node.kind === "mark") return at;
@@ -592,25 +570,14 @@ function valueChain(
   return { root, steps };
 }
 
-/**
- * `below`, one composition: the nodes `steps` below `root`, kept for the floor check where the build ends (`floors`):
- * each receiver on the way is the whole set of nodes at its prefix, as the native reader's key read has it.
- */
+/** `below` from a value's chain (`valueChain`): its root, its steps and the steps below them, one composition. */
 function composed(
   frontier: Frontier,
   root: number,
   steps: readonly string[],
   then: (node: number) => void,
 ): void {
-  if (steps.length === 0) return below(frontier, root, steps, 0, then);
-  // (its steps already kept by the caller; checked only where it reaches a marked or held node, `floors`)
-  const chain: Chain = { root, steps, held: false };
-  frontier.chains.push(chain);
-  below(frontier, root, steps, 0, (node) => {
-    const kind = frontier.nodes[node]!.kind;
-    if (kind === "mark" || kind === "hold") chain.held = true;
-    then(node);
-  });
+  below(frontier, root, steps, 0, then);
 }
 
 /** Declines a path with a step no property read takes (a selection, a member a built-in answers, an index). */
@@ -733,6 +700,11 @@ function rules(frontier: Frontier, goal: Goal): void {
     return below(frontier, node.inner, [s], 0, (found) => into(markNode(frontier, found)));
   if (node.kind === "hold") {
     const decision = advance(frontier, node.set, s);
+    // (#1784, Codex r7: below a receiver with no structure the native reader reads no shorter prefix's stores, so a
+    // held mark decided there is one it never makes: a held mark over a node with no structure deciding marked declines
+    // (`marks-floor`), conservatively, whatever else its receiver holds)
+    if (decision.marked && !structuredNode(frontier.nodes[node.inner]!))
+      throw new Decline("marks-floor");
     return below(frontier, node.inner, [s], 0, (found) =>
       into(pendingBelow(frontier, found, decision)),
     );
@@ -856,8 +828,6 @@ function drain(frontier: Frontier): void {
       if (task === undefined) break;
       task[0](task[1]);
     }
-    // (#1784: every composition the build made, its goals settled, checked once before they are final)
-    floors(frontier);
   } finally {
     frontier.draining = false;
   }
@@ -874,114 +844,11 @@ function rollback(frontier: Frontier): void {
   frontier.draining = false;
 }
 
-/**
- * #1784 (Codex r7): the native reader reads no shorter prefix's stores below a receiver whose kinds hold nothing a
- * step below can be read from (`receiverWalk`'s floor): its unknowns go on below it as they are. The graph composes
- * route by route, so below such a receiver a held mark can be decided marked through a store the native reader never
- * reads there: a marked composition crossing a floor declines (`marks-floor`). Each composition of the build, its
- * receivers its prefixes' whole sets (`floorStep`); a graph without marks is never asked.
- */
-function floors(frontier: Frontier): void {
-  const chains = frontier.chains;
-  frontier.chains = [];
-  if (!frontier.marks && frontier.pendingSets.length === 0) return;
-  for (const { root, steps, held } of chains) {
-    // (a composition that reaches no marked or held node gains no mark anywhere on its way)
-    if (!held) continue;
-    step(frontier, 1 + steps.length);
-    let set = intern(frontier, [root]);
-    for (const each of steps) {
-      floorAt(frontier, set);
-      set = floorStep(frontier, set, each);
-    }
-    floorAt(frontier, set);
-  }
-  // (and what this build read below a receiver with no structure, as a read of the key past it)
-  for (const goal of frontier.pending) {
-    const floorsAt = frontier.floorNodes.get(goal.node);
-    if (floorsAt === undefined) continue;
-    for (const set of floorsAt) floorBelow(frontier, set, goal.step);
-  }
-}
-
-/**
- * A receiver with no structure on a composition's way, once: kept for its members, so a read below it the next build
- * makes is checked as one past it; and every read below it already made, checked now.
- */
-function floorAt(frontier: Frontier, set: number): void {
-  if (structured(frontier, set) || frontier.floorSeen.has(set)) return;
-  frontier.floorSeen.add(set);
-  keep(frontier.contract.work, 1);
-  const steps = new Set<string>();
-  for (const node of setMembers(frontier, set)) {
-    step(frontier);
-    let list = frontier.floorNodes.get(node);
-    if (list === undefined) frontier.floorNodes.set(node, (list = []));
-    keep(frontier.contract.work, 1);
-    list.push(set);
-    for (const each of frontier.goals.get(node)?.keys() ?? []) steps.add(each);
-  }
-  for (const each of steps) floorBelow(frontier, set, each);
-}
-
-/** What the members of a receiver with no structure give one step below: none of them a mark the receiver lacks. */
-function floorBelow(frontier: Frontier, set: number, s: string): void {
-  const marks = new Set<number>();
-  for (const node of setMembers(frontier, set)) {
-    step(frontier);
-    const at = frontier.nodes[node]!;
-    if (at.kind === "mark") marks.add(at.inner);
-  }
-  for (const node of setMembers(frontier, set))
-    for (const found of frontier.goals.get(node)?.get(s)?.value ?? []) {
-      step(frontier);
-      const at = frontier.nodes[found]!;
-      if (at.kind === "mark" && !marks.has(at.inner)) throw new Decline("marks-floor");
-    }
-}
-
-/** A receiver one step below, interned, once per set and step. */
-function floorStep(frontier: Frontier, set: number, s: string): number {
-  let bySteps = frontier.floorNext.get(set);
-  const known = bySteps?.get(s);
-  if (known !== undefined) return known;
-  const into = new Set<number>();
-  for (const node of setMembers(frontier, set)) {
-    step(frontier);
-    const goal = frontier.goals.get(node)?.get(s);
-    if (goal === undefined) throw new Error("A composition's goal was not built.");
-    for (const found of goal.value) into.add(found);
-  }
-  const next = intern(frontier, into);
-  if (bySteps === undefined) frontier.floorNext.set(set, (bySteps = new Map()));
-  keep(frontier.contract.work, 2);
-  bySteps.set(s, next);
-  return next;
-}
-
-/**
- * Whether a set of nodes holds a structure a step below can be read from (`holdsBelow`): a leaf of such a kind, a
- * literal's node with a child, a term of such a kind or a value read there, and any key or native node (its kinds not
- * known here: never a floor); a mark or a hold as its inner node. Once per set.
- */
-function structured(frontier: Frontier, set: number): boolean {
-  const known = frontier.structured.get(set);
-  if (known !== undefined) return known;
-  let answer = false;
-  for (const member of setMembers(frontier, set)) {
-    step(frontier);
-    let node = frontier.nodes[member]!;
-    while (node.kind === "mark" || node.kind === "hold") node = frontier.nodes[node.inner]!;
-    if (
-      node.kind === "leaf" ? holdsBelow(node.item) : node.kind !== "lit" || litStructured(node.at)
-    ) {
-      answer = true;
-      break;
-    }
-  }
-  keep(frontier.contract.work, 1);
-  frontier.structured.set(set, answer);
-  return answer;
+/** Whether a node holds a structure a step below can be read from (`holdsBelow`): any but a leaf or literal node without one. */
+function structuredNode(node: FNode): boolean {
+  if (node.kind === "leaf") return holdsBelow(node.item);
+  if (node.kind === "lit") return litStructured(node.at);
+  return true;
 }
 
 /** A literal's index node's own structure: a child, a term of a kind with one, or a value read or computed there. */
@@ -1421,19 +1288,10 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
     properties(path);
     propertiesOrElements(steps);
     const frontier = frontierOf(contract);
-    const root = rootNode(frontier, keyPlace(key));
-    let set = intern(frontier, [root]);
+    let set = intern(frontier, [rootNode(frontier, keyPlace(key))]);
     for (const each of path) set = star(frontier, set, each);
     for (const each of steps) set = star(frontier, set, each);
-    // (#1784: the read's own receivers, its path's prefixes, as its compositions' are: `floors`)
-    const members = setMembers(frontier, set);
-    frontier.chains.push({
-      root,
-      steps: keptSteps(contract.work, path, steps),
-      held: members.some((node) => ["mark", "hold"].includes(frontier.nodes[node]!.kind)),
-    });
-    floors(frontier);
-    return members;
+    return setMembers(frontier, set);
   });
 }
 
