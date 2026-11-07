@@ -287,8 +287,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     randomOwner = ready.claim(claim);
     bridge = ready;
     ready.client.onLoss(bridgeLost);
-    // An injected bridge another Player traced on; this one could send nothing to it before now.
-    if (options.bridge !== undefined && ready.traced) pendingTracing = true;
+    // An injected bridge with a tracing serial allocated: only an earlier Player can have allocated it, as this one could
+    // send nothing to the bridge before now.
+    if (options.bridge !== undefined && ready.hasAllocatedTracingIntent) pendingTracing = true;
     flushTracing(ready);
     flushRandom(ready, null);
     return ready;

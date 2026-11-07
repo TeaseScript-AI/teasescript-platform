@@ -91,8 +91,12 @@ export class PlayerBridge {
     this.#tracingIntents += 1;
     return this.#tracingIntents;
   }
-  /** Whether a Player sent a tracing change on this connection: its work may still wait in the connection's queue. */
-  get traced(): boolean {
+  /**
+   * Whether a tracing serial was ever allocated on this connection (`nextTracingIntent`): true for the connection's
+   * lifetime once one was, also for an off intent and for the current Player's own, and with no host acknowledgement.
+   * An injected bridge that has one may still hold an earlier Player's tracing work in its queue.
+   */
+  get hasAllocatedTracingIntent(): boolean {
     return this.#tracingIntents > 0;
   }
   #randomIntents = 0;
