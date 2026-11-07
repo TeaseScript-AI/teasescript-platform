@@ -386,7 +386,8 @@ persistent identities.
   ([Review convergence](#review-convergence)), and merges. Rules of thumb: [`ORCHESTRATION.md`](ORCHESTRATION.md).
 - **Builder:** plans, implements, starts the plan and code review rounds, repairs, and reports. It never merges.
 - **Round reviewer:** runs pre-research, plan rounds, design rounds, and code review rounds.
-- **Independent final reviewer:** runs the final review, on a different model from the round reviewer.
+- **Independent final reviewer:** runs the final review in a fresh session that reviewed none of the pull request's
+  rounds. A different model only when the coordinator records why the round reviewer's model is not enough.
 
 The coordinators' private repository `TeaseScript-AI/orchestration-notes` holds the role-to-model table
 (`shared/model-roles.md`) and each coordinator's plans, design reports, and briefs; its README names where evidence
