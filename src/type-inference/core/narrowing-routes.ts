@@ -55,10 +55,11 @@ import { propertyName } from "./program.js";
  *   stores, projected only for the one candidate examined; each with the reach of its writer side (the outermost block
  *   its open writer segments reach), so a consumer finds the nearest candidate whose writer side reaches it by one
  *   binary search over a tree of reaches, never a backward scan.
- * A consumer's query examines that one candidate: its certification (a seed, a certified `otherwise`, a scalar copy
- * whose source read has a certified witness by this same query, memoised per node and key), then the corridor's
- * remaining segments (the middle and the consumer side), each one binary search per layer, and the consumer's own
- * statement's compulsory calls (the nearest call-in dominating n). An unsuitable candidate yields the warning.
+ * A consumer's query examines that one candidate: its certification (AD-1, TABLE r4.52: what its stored value holds,
+ * or a scalar copy whose source read has a witness by this same query, memoised per node and key; `#certificate`), then
+ * the corridor's remaining segments (the middle and the consumer side), each one binary search per layer, and the
+ * consumer's own statement's compulsory calls (the nearest call-in dominating n). An unsuitable candidate yields the
+ * warning. The consumers ask it through `required`, the route rule's one decision (`consumers/warnings.ts`).
  */
 
 /** A candidate D′ of a key: its definition, where it stands, and the end of the block its writer side reaches. */
