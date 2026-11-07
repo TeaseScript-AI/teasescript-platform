@@ -1,7 +1,6 @@
 import { computed, ref, shallowRef, watch } from "vue";
 import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
-import { createBrowserCaptureHost, browserMediaUrls } from "../../browser-capture.js";
-import { CaptureDevice } from "../../capture-device.js";
+import { browserMediaUrls } from "../../browser-capture.js";
 import { planLockNeeds } from "../../plan-metadata.js";
 import {
   CapturedMediaNotStoredError,
@@ -27,8 +26,7 @@ import {
   type ImageFileFilters,
 } from "../../image-file.js";
 import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../media-device.js";
-import { FileStoreService } from "../../stored-files.js";
-import { LockService, type LockDialog, type LockDialogInput } from "../../lock-service.js";
+import { type LockDialogInput } from "../../lock-service.js";
 import type { LockServices } from "../../encryption/lock.js";
 import {
   playerRuntimeSnapshot,
@@ -44,7 +42,6 @@ import {
   activePlayerRuntimeInteraction,
   playerTemporalContext,
   pendingPlayerRuntimeStorageWrite,
-  playerRuntimeCameraView,
   playerRuntimeMedia,
   playerRuntimeMediaOrigin,
   playerRuntimePermanentButtons,
@@ -74,7 +71,6 @@ import {
 import {
   bridgeOf,
   endsQuietly,
-  refusalCode,
   type PlayerBridge,
   type ServiceSection,
   type SessionSection,
@@ -126,7 +122,7 @@ import {
   type StorageBundle,
   type StorageBundleScript,
 } from "../../storage-transfer.js";
-import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../../session-camera.js";
+import { type PlayerDiagnostic } from "../../session-camera.js";
 import {
   restoreSessionTransfer,
   sessionMediumRecord,
@@ -153,13 +149,12 @@ import type {
 } from "../../../src/index.js";
 
 import { serializableEquals } from "../../../src/runtime/values/serializable-values.js";
-import { IMAGE_SKIP_TEXT } from "../../../src/image-input.js";
 import { silence } from "./generatedAudio";
-import { useCameraChoice } from "./useCameraChoice";
-import { useImageCapture } from "./useImageCapture";
-import { usePlayerTextPreference } from "./usePlayerPreference";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 import { useScreenWakeLock } from "./useScreenWakeLock";
+import { useCallView } from "./session/useCallView.js";
+import { usePlayerCameraLifecycle, useSessionCamera } from "./session/usePlayerCameras.js";
+import { usePlayerSessionServices } from "./session/usePlayerSessionServices.js";
 
 const PRIMED_AUDIO_ELEMENTS = 2;
 const SILENCE = silence(50);
@@ -594,22 +589,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     change.then(note, () => {});
     return change;
   }
-  // Changes whenever the session camera may have opened, failed, ended, or been released.
-  const cameraRevision = ref(0);
-  // The camera the player switched to; every camera the Player opens prefers it while the browser has it.
-  const chosenCamera = usePlayerTextPreference("player-camera");
-  const camera: SessionCamera<MediaStreamTrack> = new SessionCamera(
-    new CaptureDevice(
-      createBrowserCaptureHost((kind, state) => {
-        if (kind !== "camera") return;
-        if (state.status === "ended") camera.ended();
-        cameraRevision.value++;
-      }),
-      capturedMedia,
-    ),
+  const { cameraRevision, chosenCamera, camera } = useSessionCamera({
+    capturedMedia,
     reportDiagnostic,
-    { chosen: () => chosenCamera.value },
-  );
+  });
   /** Captured media resolves only through the trusted store, never as a package asset. */
   const resolveAsset = (path: string): string | null => {
     if (!isCapturedMediaReference(path)) return resolvePackageAsset(path);
@@ -646,16 +629,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // jumps published. -1 for none in this generation.
   const jumpedRevision = ref(-1);
   const activation = shallowRef<Activation | null>(null);
-  // The script places the camera view with `showCamera [stage]` and hides it with `hideCamera`; the view only previews
-  // the session camera, which stays open for `takePhoto()`. Without an available camera there is nothing to show.
-  const viewfinderPlacement = computed(() => {
-    const current = session.value;
-    return current === null ? null : playerRuntimeCameraView(current.state);
-  });
-  const viewfinder = computed(() => {
-    void cameraRevision.value;
-    return viewfinderPlacement.value === null ? null : camera.previewTrack;
-  });
   const notices = new PlayerNotices();
   const noticeList = shallowRef<readonly PlayerNotice[]>([]);
   notices.subscribe((current) => (noticeList.value = current));
@@ -852,58 +825,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       }),
     );
 
-  // The call view (L5f): Debug's Now view and the error dialog read the active calls, which only publications of a
-  // session whose calls are viewed carry. While any demand stands, the shown session's calls are viewed; the view moves
-  // with the shown lineage, as Debug's rewind and Return move it, and ends with the last demand. A stopped session needs
-  // no request: its stop's acknowledgement froze it with its call view.
-  let callDemands = 0;
-  let callViewed: PlayerSession | null = null;
-  function viewCalls(target: PlayerSession, on: boolean) {
-    void bridgeOf(target)
-      .viewCalls(target, on)
-      .then(
-        (merged) => {
-          if (merged !== null) publishOwned(merged);
-        },
-        (error) => {
-          // A stopped or released session, or a lost Worker, takes no call view: the stop or the loss reports itself, and
-          // nothing ends further.
-          if (endsQuietly(error) || refusalCode(error) === "session") return;
-          if (!disposed && !stopped.value && session.value?.lineage === target.lineage)
-            reportHostError(error);
-        },
-      );
-  }
-  function followCallView() {
-    const shown = disposed || stopped.value || callDemands === 0 ? null : session.value;
-    if (callViewed !== null && callViewed.lineage !== shown?.lineage) {
-      if (!stopped.value) viewCalls(callViewed, false);
-      callViewed = null;
-    }
-    if (shown !== null && callViewed === null) {
-      callViewed = shown;
-      viewCalls(shown, true);
-    }
-  }
-  watch([() => session.value?.lineage, stopped], followCallView);
-  tryOnScopeDispose(() => {
-    callDemands = 0;
-    followCallView();
+  const { demandCallView } = useCallView({
+    session,
+    stopped,
+    isDisposed: () => disposed,
+    publishOwned,
+    reportHostError,
   });
-  /** Asks for the shown session's call view until `release`, which only the first call of does anything. */
-  function demandCallView(): { release(): void } {
-    callDemands += 1;
-    followCallView();
-    let released = false;
-    return {
-      release() {
-        if (released) return;
-        released = true;
-        callDemands -= 1;
-        followCallView();
-      },
-    };
-  }
   const stageImage = computed(() =>
     session.value === null ? null : playerRuntimeMedia(session.value.state).stage.image,
   );
@@ -966,48 +894,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     (active) => (active ? sampling.resume() : sampling.pause()),
     { immediate: true },
   );
-  const captures = new CaptureService(() => camera.answer(), {
-    session: () => servicedSession.value,
-    generation: () => generation.value,
-    section: serviceSection,
+  const { captures, fileStores, lockDialog, locks } = usePlayerSessionServices({
+    camera,
     capturedMedia,
-    diagnostic: reportDiagnostic,
-    later: (task) => setTimeout(task, 0),
+    reportDiagnostic,
+    servicedSession,
+    generation,
+    serviceSection,
+    options,
   });
-  const serviceCapture = () => captures.request();
-  // A new generation also retires an answer the services hold, while the serviced session stays `null` (#1882).
-  watch([servicedSession, generation], () => void serviceCapture());
-  // Stores and reads the files of `fileFromBase64`, `fileToBase64`, `toJson`, and `fromJson` as session media.
-  const fileStores = new FileStoreService({
-    session: () => servicedSession.value,
-    generation: () => generation.value,
-    section: serviceSection,
-    media: capturedMedia,
-    diagnostic: reportDiagnostic,
-    later: (task) => setTimeout(task, 0),
-  });
-  watch([servicedSession, generation], () => fileStores.request());
-  // Locks and opens text and stored files for encryptText, encryptFile, decryptText, and decryptFile, and presents
-  // their dialogs; what the player types in them stays in the service's memory.
-  const lockDialog = shallowRef<{ readonly dialog: LockDialog; readonly busy: boolean } | null>(
-    null,
-  );
-  const locks = new LockService({
-    session: () => servicedSession.value,
-    generation: () => generation.value,
-    section: serviceSection,
-    media: capturedMedia,
-    diagnostic: reportDiagnostic,
-    dialog: (dialog, busy) => (lockDialog.value = dialog === null ? null : { dialog, busy }),
-    later: (task) => setTimeout(task, 0),
-    after: (delayMs, task) => {
-      const timer = setTimeout(task, delayMs);
-      return () => clearTimeout(timer);
-    },
-    subtle: globalThis.crypto?.subtle,
-    ...(options.lockServices === undefined ? {} : { crypto: options.lockServices }),
-  });
-  watch([servicedSession, generation], () => locks.request());
   // A script that locks or opens loads the lock code while the Player is online, so locking works offline later; one
   // that locks also loads the public keys' code.
   watch(
@@ -1028,87 +923,25 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         );
     },
   );
-  // A session that ended releases its camera.
-  watch(
-    () => session.value?.state.status,
-    (status) => {
-      if (status === "halted" || status === "failed") camera.release();
-    },
-  );
-
-  // The camera step of `askImage` uses the session camera while it is open. Otherwise it opens a camera of its own, which
-  // only that step uses and which is released when the step ends, so it never serves `takePhoto()` or a script's camera
-  // view. Its problems show in the viewfinder itself.
-  const cameraOffered =
-    options.capabilities?.camera === true ||
-    (typeof navigator !== "undefined" &&
-      typeof navigator.mediaDevices?.getUserMedia === "function");
-  const captureCamera: SessionCamera<MediaStreamTrack> = new SessionCamera(
-    new CaptureDevice(
-      createBrowserCaptureHost((kind, state) => {
-        if (kind !== "camera") return;
-        if (state.status === "ended") captureCamera.ended();
-        cameraRevision.value++;
-      }),
-      capturedMedia,
-    ),
-    () => {},
-    { chosen: () => chosenCamera.value },
-  );
-  // A phone's camera often stops while the page is in the background, as when another app takes it: once the page is
-  // shown again, an open camera that ended or stays muted opens again.
-  const cameraShown = () => {
-    if (document.visibilityState === "hidden") return;
-    camera.shown();
-    captureCamera.shown();
-  };
-  useEventListener(
-    () => (typeof document === "undefined" ? undefined : document),
-    "visibilitychange",
-    cameraShown,
-  );
-  useEventListener(
-    () => (typeof window === "undefined" ? undefined : window),
-    "pageshow",
-    cameraShown,
-  );
-  const cameraChoice = useCameraChoice({
-    cameras: [camera, captureCamera],
-    revision: cameraRevision,
-    chosen: chosenCamera,
-  });
-  const imageCapture = useImageCapture({
-    // A session a Player error stopped takes no input, so its request's steps close.
-    session: computed(() => (stopped.value ? null : servicedSession.value)),
-    generation,
-    sessionCamera: camera,
+  const {
+    cameraOffered,
     captureCamera,
+    cameraChoice,
+    imageCapture,
+    viewfinderPlacement,
+    viewfinder,
+  } = usePlayerCameraLifecycle({
+    session,
+    servicedSession,
+    stopped,
+    generation,
+    notices,
+    capturedMedia,
+    camera,
     cameraRevision,
-    media: capturedMedia,
-    offered: cameraOffered,
+    chosenCamera,
+    options,
   });
-  // An image request that allows only the camera cannot be answered with an image where no camera can be used; one the
-  // player may skip says that Skip still answers it. Each such request, of a session and an action, is reported once, so
-  // a dismissal holds only for the request it was given for.
-  const cameraOnlyRequest = () => {
-    const request = session.value && activePlayerRuntimeInteraction(session.value.state);
-    return request?.ui.kind === "image" && !request.ui.allowFile && !cameraOffered ? request : null;
-  };
-  watch(
-    () => {
-      const request = cameraOnlyRequest();
-      return request === null ? null : `${generation.value}:${request.actionId}`;
-    },
-    (reported) => {
-      const request = cameraOnlyRequest();
-      if (reported === null || request?.ui.kind !== "image")
-        notices.dismiss(playerNoticeKeys.imageNeedsCamera);
-      else
-        notices.publish(
-          playerNotices.imageNeedsCamera(request.ui.allowSkip ? IMAGE_SKIP_TEXT : null),
-        );
-    },
-  );
   // A stopped session's captures and cameras end; its media goes with the media watcher above.
   watch(
     stopped,
