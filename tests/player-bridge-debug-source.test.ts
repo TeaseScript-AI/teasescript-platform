@@ -104,7 +104,10 @@ async function tape(bridge: PlayerBridge) {
       bridge.client.request("codeLines", args),
       (error: unknown) => error instanceof BridgeRequestError && error.code === "arguments",
     );
-  return steps;
+  // After `teardown` the connection holds no plan, so no plan's code, not even one asked about before.
+  await bridge.client.request("teardown", null);
+  const afterTeardown = await Promise.all([code(source, sites[0]!), code(sameAsText, sites[0]!)]);
+  return { ...steps, afterTeardown };
 }
 
 test("the draw's code comes from the sources the Worker compiled, the same in-process and in a Worker", async () => {
@@ -119,6 +122,7 @@ test("the draw's code comes from the sources the Worker compiled, the same in-pr
   // Another plan's draw gets none from these sources, nor an unknown plan.
   assert.deepEqual([inProcess.other, inProcess.unknown], [null, null]);
   assert.deepEqual(inProcess.lines, outcomeLines(['["red", "blue"]', "true"], 4));
+  assert.deepEqual(inProcess.afterTeardown, [null, null]);
   const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(WORKER, BUILD), BUILD));
   try {
     assert.deepEqual(await tape(worker), inProcess);

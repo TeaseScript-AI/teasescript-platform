@@ -14,45 +14,48 @@ import type { BridgeOps } from "../worker-host.js";
  * as code. Both are made here, in the Worker, from the source it compiled, so the Player's page holds no parser.
  */
 export function debugOps(context: PlayerOpsContext): BridgeOps {
-  // The sidecar text of each plan the Worker compiled, made once Debug asks; `null` for one it could not make.
-  const texts = new Map<string, Promise<string | null>>();
-  const textOf = (token: string): Promise<string | null> => {
-    let text = texts.get(token);
+  // The sidecar text made from each plan's sources, once Debug asks; `null` for one it could not make. Keyed by the
+  // sources themselves and the plans the connection holds, so what `teardown` drops the caches drop with it.
+  const texts = new WeakMap<object, Promise<string | null>>();
+  const textOf = (token: string): Promise<string | null> | null => {
+    const files = context.sources.get(token);
+    const plan = context.plans.get(token);
+    if (files === undefined || plan === undefined) return null;
+    let text = texts.get(files);
     if (text === undefined) {
-      const files = context.sources.get(token)!;
-      const plan = context.plans.get(token)!;
       text = import("../../../src/index.js").then(
         ({ createSourceDebugSidecar }) => createSourceDebugSidecar(files, plan),
         () => null,
       );
-      texts.set(token, text);
+      texts.set(files, text);
     }
     return text;
   };
-  // The loaded sidecar of each plan Debug asked about.
-  const loaded = new Map<string, Promise<SourceDebugSidecar | null>>();
+  // The sidecar bound to each plan Debug asked about, once found.
+  const bound = new WeakMap<object, SourceDebugSidecar>();
   /**
    * The sidecar for plan `token`, read as playback reads one: its own, or, for a plan the Worker did not compile itself,
    * such as a restored session's, one made for another plan; the loader accepts a sidecar only for the plan it is bound
-   * to, so another plan's sources never show.
+   * to, so another plan's sources never show. A plan the connection no longer holds has none.
    */
-  async function bound(token: string): Promise<SourceDebugSidecar | null> {
+  async function sidecarOf(token: string): Promise<SourceDebugSidecar | null> {
     const plan = context.plans.get(token);
     if (plan === undefined) return null;
+    const known = bound.get(plan);
+    if (known !== undefined) return known;
     const candidates = context.sources.has(token) ? [token] : [...context.sources.keys()];
     for (const candidate of candidates) {
       const text = await textOf(candidate);
+      // A teardown while the sidecar was made leaves the plan nothing.
+      if (context.plans.get(token) !== plan) return null;
       if (text === null) continue;
       const load = loadSourceDebugSidecar(text, plan);
-      if (load.kind === "valid") return load.sidecar;
+      if (load.kind !== "valid") continue;
+      bound.set(plan, load.sidecar);
+      return load.sidecar;
     }
     return null;
   }
-  const sidecarOf = (token: string): Promise<SourceDebugSidecar | null> => {
-    let sidecar = loaded.get(token);
-    if (sidecar === undefined) loaded.set(token, (sidecar = bound(token)));
-    return sidecar;
-  };
   return {
     drawCode: {
       session: "none",
@@ -91,6 +94,8 @@ export function debugOps(context: PlayerOpsContext): BridgeOps {
           readonly texts: readonly string[];
           readonly first: number;
         };
+        // Nothing to classify loads no tooling.
+        if (texts.length === 0) return { result: [] };
         const { outcomeLines } = await import("../../random-draw-code.js");
         return { result: outcomeLines(texts, first) };
       },

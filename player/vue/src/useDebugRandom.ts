@@ -155,13 +155,16 @@ export function useDebugRandom(player: PlayerSessionHost) {
   );
   watch(
     [draw, historyRevision],
-    ([current]) => {
+    ([current], previous) => {
+      // Another draw's lines never show as this one's: they go before this draw's are asked for.
+      if (current !== previous?.[0]) historyLines.value = [];
       const shown = player.session.value;
-      if (current === null || shown === null) {
+      if (current === null || shown === null) return;
+      const tried = triedOf(current.site);
+      if (tried.history.length === 0) {
         historyLines.value = [];
         return;
       }
-      const tried = triedOf(current.site);
       shown.connection.client
         .request("codeLines", { texts: tried.history, first: tried.first })
         .then(

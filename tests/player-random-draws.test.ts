@@ -668,3 +668,55 @@ test("the picker's sites and code come from the Worker, which compiled the sourc
   // The first draw's natural outcome is the site's history, as code.
   assert.equal(random.historyLines.value.length, 1);
 });
+
+test("a site's earlier outcomes never show at another site's draw, even before its own arrive", async (context) => {
+  const source =
+    'for turn in 1..=2 {\n    let roll = randomInteger(1..=6)\n    let hit = chance(50)\n    say "${roll} ${hit}", instant\n}\nshowButton "Next"\nexit';
+  const { host, random } = await mount(context, compiled('showButton "Waiting"\nexit'));
+  const bridge = await host.bridge;
+  const reply = await bridge.client.request("prepare", {
+    source: { kind: "source", script: source },
+  });
+  // EVIDENCE: validation: `prepare` replies from the same build with its result.
+  const token = (reply.result as { readonly plan: string }).plan;
+  // Hold the replies to `codeLines` once the test asks.
+  let holding = false;
+  const held: (() => void)[] = [];
+  const request = bridge.client.request;
+  bridge.client.request = (op, ...rest) => {
+    const answer = request(op, ...rest);
+    if (op !== "codeLines" || !holding) return answer;
+    return new Promise((resolve, reject) => held.push(() => void answer.then(resolve, reject)));
+  };
+  await host.prepareScript(token, { plan: token, options: () => host.scriptStorageOptions() });
+  await host.activate();
+  await settle(context);
+  // The first turn: each site's first draw, so each site has one earlier outcome after it.
+  for (let step = 0; step < 2; step += 1) {
+    assert.ok(random.resolve("natural"));
+    await settle(context);
+  }
+  const roll = random.draw.value;
+  assert.ok(roll !== null);
+  assert.equal(
+    random.historyLines.value.length,
+    1,
+    "the integer site's outcome shows at its second draw",
+  );
+  holding = true;
+  assert.ok(random.resolve("natural"));
+  await settle(context);
+  const hit = random.draw.value;
+  assert.ok(hit !== null && hit.site !== roll.site);
+  assert.equal(
+    random.historyLines.value.length,
+    0,
+    "the integer site's lines went before the chance site's arrive",
+  );
+  for (const release of held) release();
+  await settle(context);
+  const text = random.historyLines.value.map((line) =>
+    line.segments.map((segment) => segment.text).join(""),
+  );
+  assert.deepEqual(text, random.tried(hit.site).history);
+});
