@@ -42,7 +42,11 @@ only under the allowance.
 
 Without a tape a case observes each wait's deadline. With one, every host call is the tape's next entry, `observeTime`
 too; after a call that leaves nothing to run, such as a form edit or a refused answer, the next follows at once. The
-tape must be used up exactly when the session stops waiting, and each `unit` call must complete. A project case
+tape must be used up exactly when the session stops waiting, and each `unit` call must complete. Every session the
+case makes receives its host calls through a guard (`checkedHostSession`), which compares each call's method and data
+arguments, where the session receives it and before it runs, with the tape's entry, read from the tape alone, and a
+`completeAction`'s media store questions and answers with the entry's recorded ones: a different call fails there,
+also one with the same effect. The differential test guards the sessions it makes the same way. A project case
 (`project`, `files` in order) compiles with `compileProject`; `fresh` adds session options such as
 `persistentScriptStorage`. `saidSha256` states a case's texts by the SHA-256 of their canonical JSON when they are long.
 
@@ -64,8 +68,9 @@ diff shows one line per cut. A manifest statement, a tape's problem or a restore
 `--cpu --base <dist> --candidate <dist> --out <dir>` loads both builds in one process, requires the candidate to give
 the base's results at every cut (counts may differ) and both to hold the manifest's statements, then runs them
 interleaved, the builds' order alternating per round, after tagged warmup rounds. The timed part is the drive
-(`stepToEvent` or `run`), `observeTime` and tape calls; every timed run is recorded outside those calls and must equal
-its build's untimed record. `<dir>` gets `samples.jsonl` (raw CPU microseconds per sample) and `summary.json`:
+(`stepToEvent` or `run`), `observeTime` and tape calls, with the guard's comparisons outside it and its record of the
+media store's answers inside; every timed run is recorded outside those calls and must equal its build's untimed
+record. `<dir>` gets `samples.jsonl` (raw CPU microseconds per sample) and `summary.json`:
 per case and build the instructions per unit, CPU per unit and per instruction, the paired `base / candidate` speed in
 matching rounds as median [min–max], and the suite's geometric mean of those medians. CPU is reported, never checked.
 
