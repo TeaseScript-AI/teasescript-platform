@@ -152,13 +152,15 @@ async function mount(
 
 /**
  * The ops each section of `bridge` posts, in order, with their arguments; `on(op, …)` runs once when `op` is posted, and
- * `replied` lists the replies' ops as they arrive.
+ * `replied` lists the replies' ops as they arrive; each post says whether its own reply has.
  */
 function track(context: TestContext, bridge: PlayerBridge) {
+  // Each post, with whether its own reply has arrived.
   const posts: {
     readonly op: string;
     readonly args: Record<string, unknown>;
     readonly basis: number | null;
+    replied: boolean;
   }[] = [];
   const replied: string[] = [];
   const hooks = new Map<string, () => void>();
@@ -171,12 +173,14 @@ function track(context: TestContext, bridge: PlayerBridge) {
         body((op, args, basis, onReply) => {
           // EVIDENCE: fixture: the ops of this file's tests post record arguments.
           const record = args as Record<string, unknown>;
-          posts.push({ op, args: record, basis });
+          const post = { op, args: record, basis, replied: false };
+          posts.push(post);
           const sent = send(op, args, basis, onReply);
           const hook = hooks.get(op);
           hooks.delete(op);
           hook?.();
           return sent.then((reply) => {
+            post.replied = true;
             replied.push(op);
             return reply;
           });
@@ -493,8 +497,8 @@ for (const target of ["an answer", "the pacing skip"] as const)
     const hidden = observations.at(-1);
     assert.ok(hidden !== undefined, "the page hide's observation reaches the host");
     assert.equal(posted.ops().at(-1), "observeTime", "queued behind the input");
-    // Its reply arrives a host delay later; only then can it have published.
-    for (let waited = 0; !posted.replied.includes("observeTime"); waited += 10) {
+    // Its own reply arrives a host delay later; only then can it have published.
+    for (let waited = 0; !hidden.replied; waited += 10) {
       assert.ok(waited < 2_000, "the page hide's observation has its reply");
       await new Promise((resolve) => setTimeout(resolve, 10));
     }

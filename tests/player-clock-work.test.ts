@@ -665,12 +665,25 @@ test("every completion effect of an observation goes through its one lifetime de
   });
   assert.ok(observing?.body, "the clock has its observation");
   assert.deepEqual(generations, ["whileLive"], "only the decision reads an observation's lifetime");
-  const effects: string[] = [];
+  // An admit-list: every call `observing` makes outside `whileLive`'s effect argument is one named here as having no
+  // completion effect; any other call, a new helper included, fails until it is classified.
+  const effectFree = new Set([
+    "cancel",
+    "owned",
+    "sceneTimeMs",
+    "mediaReports",
+    "bridgeOf",
+    "bridgeOf(shown).section",
+    "section.send",
+    "refusalCode",
+    "endsQuietly",
+    "whileLive",
+  ]);
+  const decided: string[] = [];
+  const undecided: string[] = [];
   observing.body.forEachChild(function visit(node): void {
-    if (
-      ts.isCallExpression(node) &&
-      ["publishLater", "recover", "scheduleWakeUp"].includes(node.expression.getText(file))
-    ) {
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression.getText(file);
       let inside = false;
       for (
         let at: ts.Node | undefined = node.parent;
@@ -684,9 +697,18 @@ test("every completion effect of an observation goes through its one lifetime de
           at.parent.arguments[1] === at
         )
           inside = true;
-      effects.push(`${node.expression.getText(file)}: ${inside ? "decided" : "undecided"}`);
+      (inside ? decided : undecided).push(callee);
     }
     node.forEachChild(visit);
   });
-  assert.deepEqual(effects.sort(), ["publishLater: decided", "recover: decided"]);
+  assert.deepEqual(
+    undecided.filter((callee) => !effectFree.has(callee)),
+    [],
+    "a call outside the decision that is not classified as effect-free",
+  );
+  assert.deepEqual(
+    [...new Set(decided)].sort(),
+    ["publishLater", "recover"],
+    "the decided effects",
+  );
 });
