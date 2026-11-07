@@ -50,7 +50,6 @@ import {
   tapPublications,
   trackRequests,
   withLiveHost,
-  type HostEffects,
   type LiveComposable,
   type LiveHost,
   type LiveHostModules,
@@ -60,6 +59,7 @@ import {
   type RequestTracker,
   type ReplayStep,
 } from "./helpers/replay-harness.js";
+import type { EffectSample } from "./helpers/live-host-effects.js";
 import { compareStructures, renderPath } from "./helpers/runtime-state-comparison.js";
 import type * as RuntimeAdapter from "../player/runtime-adapter.js";
 import type { RuntimeSnapshot } from "../src/index.js";
@@ -535,7 +535,7 @@ interface ReplayRun {
   /** The publications the session's store was given from the cut on. */
   readonly trace: PublicationTap;
   /** The composable's effects at the cut and after each step since; `null` without the composable. */
-  readonly effects: readonly HostEffects[] | null;
+  readonly effects: readonly EffectSample[] | null;
   /**
    * What the composable showed after the cut, each by value: its revision relative to the cut's, its state, and every
    * event it held since the cut; `null` without the composable.
@@ -553,15 +553,18 @@ async function cutAndRecover(
   session: PlayerSession,
   tracker: RequestTracker,
   host: LiveHost | null,
+  throwing = true,
 ) {
   const before = bridge.latest(session)!;
   const trace = tapPublications(bridge, session);
   const mark = tracker.log.length;
-  const effects: HostEffects[] = host === null ? [] : [host.effects()];
-  await assert.rejects(
-    bridge.request(before, "observeTime", { atMs: 1_000, media: [] }),
-    (error: unknown) => error instanceof Error && error.name === "RuntimeDataError",
-  );
+  const effects: EffectSample[] = host === null ? [] : [await host.effects()];
+  // The control run takes the same steps from the same state, without the call that throws or the recovery.
+  if (throwing)
+    await assert.rejects(
+      bridge.request(before, "observeTime", { atMs: 1_000, media: [] }),
+      (error: unknown) => error instanceof Error && error.name === "RuntimeDataError",
+    );
   assert.equal(
     bridge.latest(session),
     before,
@@ -578,7 +581,7 @@ async function cutAndRecover(
         await bridge.request(shown, op, args, host === null ? {} : { publish: host.show });
         if (host !== null) {
           await host.settle();
-          effects.push(host.effects());
+          effects.push(await host.effects());
         }
       }
       // The run ends quiescent too: every request after the cut, the host's own included, has its reply.
@@ -756,7 +759,8 @@ interface JudgedRun {
 async function judged(
   run: ReplayRun,
   judge: (judgment: () => void) => void,
-  last?: () => Promise<HostEffects>,
+  last?: () => Promise<EffectSample>,
+  control?: ControlRun,
 ): Promise<JudgedRun> {
   const verdicts: Record<Kind, unknown> = {
     "successful replay": new Error("successful replay was not judged"),
@@ -771,16 +775,29 @@ async function judged(
       verdicts[kind] = error;
     }
   if (run.effects !== null) {
-    // Replay and recovery made no main-side effect: the composable's counts stayed at their value before the cut, also
-    // after everything it did since, the judgments included.
+    // Replay and recovery made no main-side effect: at every sample, the judgments' included, every host service's
+    // state and every mutating call equal the control run's, which took the same steps without the cut. What the steps
+    // themselves do (the script's end releasing its medium) is in both; what recovery adds is a difference.
     let effects: unknown = null;
     try {
+      assert.ok(control !== undefined, "the composable's run has its control run");
+      if (control.verdict !== null) throw control.verdict;
       const samples = last === undefined ? run.effects : [...run.effects, await last()];
-      assert.deepEqual(
-        samples,
-        samples.map(() => samples[0]),
-        "the composable's effects grew after the cut",
+      assert.equal(
+        samples.length,
+        control.effects.length,
+        "the recovery and control runs took as many samples",
       );
+      samples.forEach((sample, index) => {
+        const comparison = compareStructures(control.effects[index], sample);
+        const first = comparison.mismatches[0];
+        assert.ok(
+          comparison.equal,
+          first === undefined
+            ? `the composable's effects differ from the control run's at sample ${index}`
+            : `the composable's effects differ from the control run's at sample ${index}, ${renderPath(first.path)}: control ${first.oracle}, recovery ${first.candidate}`,
+        );
+      });
     } catch (error) {
       effects = error;
     }
@@ -797,7 +814,8 @@ const runOn = (backend: Backend, start: () => Promise<JudgedRun>) => {
 const RUNS: Record<Backend, () => Promise<JudgedRun>> = {
   "in-process": () => bridgeRun(true),
   "a Worker": () => bridgeRun(false),
-  "the composable": () => composableRun(),
+  // The control run first, whose effect samples the recovery run's are judged against while its host lives.
+  "the composable": async () => composableRun(await controlRun()),
 };
 
 const REPLAY_CASES = KINDS.flatMap((kind) =>
@@ -858,8 +876,11 @@ const bundle = () =>
     const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
     // EVIDENCE: validation: Vite loaded the real source module; this is its host API.
     const usePlayerSession = module.usePlayerSession as LiveHostModules["usePlayerSession"];
+    const captured = await loadPlayerModule("player/captured-media.ts");
+    // EVIDENCE: validation: the bundle's captured-media module exports its store class.
+    const capturedMediaStore = captured.CapturedMediaStore as LiveHostModules["capturedMediaStore"];
     return {
-      modules: { usePlayerSession },
+      modules: { usePlayerSession, capturedMediaStore },
       // EVIDENCE: validation: the bundle's in-process backend, whose sessions the composable's facade reaches.
       facade: (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof InProcess,
       // EVIDENCE: validation: the bundle's adapter, whose sessions the bundle's host holds.
@@ -867,15 +888,34 @@ const bundle = () =>
     };
   })());
 
+/** The control run's effect samples, and whether its own trace equals the adapter oracle (`null` when it does). */
+interface ControlRun {
+  readonly effects: readonly EffectSample[];
+  readonly verdict: unknown;
+}
+
 /**
- * A run in the real composable on its in-process engine: the composable itself writes and acknowledges the save, plays
- * the medium and answers the capture; the test makes the call that throws, then the steps, each publication handed to
- * the composable as its own work would show it, and judges every kind before the composable stops.
+ * The real composable on its in-process engine, restored at the fixture's state: the composable itself writes and
+ * acknowledges the save, plays the medium and answers the capture, up to a quiescent cut. `body` then runs while its
+ * host lives. `run` names the run for the mutants, which arm only in the recovery run.
  */
-async function composableRun(): Promise<JudgedRun> {
+async function liveRun<T>(
+  run: "recovery" | "control",
+  body: (live: {
+    readonly host: LiveHost;
+    readonly player: RecordingComposable;
+    readonly bridge: PlayerBridge;
+    readonly tracker: RequestTracker;
+    readonly session: PlayerSession;
+    readonly before: RuntimeSnapshot;
+    readonly adapter: typeof RuntimeAdapter;
+    readonly facade: typeof InProcess;
+  }) => Promise<T>,
+): Promise<T> {
   const { modules, facade, adapter } = await bundle();
   const bridge = facade.createInProcessBackend(BUILD);
   const tracker = trackRequests(bridge);
+  Reflect.set(globalThis, "__replayRun", run);
   try {
     return await withLiveHost(modules, bridge, async (host) => {
       // EVIDENCE: validation: the bundle's composable has the recording test API beside the harness's.
@@ -910,21 +950,66 @@ async function composableRun(): Promise<JudgedRun> {
         session.revision,
         "the composable shows the cut",
       );
+      // Before the cut the composable itself saved, played the medium and answered the capture.
+      const counted = (await host.effects()).calls;
+      assert.ok(
+        (counted["scriptStorage"]?.["write"] ?? 0) >= 1 &&
+          (counted["Audio"]?.["play"] ?? 0) >= 1 &&
+          tracker.log.some((request) => request.op === "answerCapture"),
+        JSON.stringify(counted),
+      );
+      const before = facade.hatch(session, adapter.playerRuntimeSnapshot);
+      return await body({ host, player, bridge, tracker, session, before, adapter, facade });
+    });
+  } finally {
+    Reflect.deleteProperty(globalThis, "__replayRun");
+    tracker.stop();
+    bridge.client.terminate();
+  }
+}
+
+/**
+ * The control run: the same restore, cut and steps in the live composable, without the call that throws or the
+ * recovery. Its effect samples, taken at the same points, are what the recovery run's must equal; its own trace must
+ * equal the adapter oracle given its requests, judged while its host lives.
+ */
+async function controlRun(): Promise<ControlRun> {
+  return liveRun("control", async ({ host, bridge, tracker, session, before }) => {
+    const cut = await cutAndRecover(bridge, session, tracker, host, false);
+    // Where the recovery run reads its frozen recording.
+    cut.effects.push(await host.effects());
+    const requests = await cut.recover();
+    let verdict: unknown = null;
+    try {
+      host.judge(() => assertTrace(cut.trace, afterCut(before, requests).entries));
+    } catch (error) {
+      verdict = error;
+    }
+    await quiesce(bridge, session, tracker, host.settle);
+    const last = await host.effects();
+    host.judge(() => cut.effects.push(last));
+    return { effects: cut.effects, verdict };
+  });
+}
+
+/**
+ * The recovery run in the real composable: the call that throws, then the steps, each publication handed to the
+ * composable as its own work would show it; every kind is judged before the composable stops, its effects against the
+ * control run's.
+ */
+async function composableRun(control: ControlRun): Promise<JudgedRun> {
+  return liveRun(
+    "recovery",
+    async ({ host, player, bridge, tracker, session, before, adapter, facade }) => {
       const cutRevision = session.revision;
       const cutEvents = session.events.length;
-      const before = facade.hatch(session, adapter.playerRuntimeSnapshot);
       const atCut = plainRecording(player.debugRecording());
       assert.ok(atCut !== null);
       const cut = await cutAndRecover(bridge, session, tracker, host);
       const frozen = plainRecording(player.debugRecording());
       assert.ok(frozen !== null);
-      cut.effects.push(host.effects());
+      cut.effects.push(await host.effects());
       const requests = await cut.recover();
-      const counted = host.effects();
-      assert.ok(
-        counted.writes >= 1 && counted.elements >= 1 && counted.captures >= 1,
-        JSON.stringify(counted),
-      );
       return await judged(
         {
           before,
@@ -947,12 +1032,11 @@ async function composableRun(): Promise<JudgedRun> {
         host.judge,
         async () => {
           await quiesce(bridge, session, tracker, host.settle);
-          return host.judge(() => host.effects());
+          const sample = await host.effects();
+          return host.judge(() => sample);
         },
+        control,
       );
-    });
-  } finally {
-    tracker.stop();
-    bridge.client.terminate();
-  }
+    },
+  );
 }

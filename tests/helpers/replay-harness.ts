@@ -15,7 +15,13 @@ import {
 import type { DebugAnswerInput } from "../../player/debug-export.js";
 import type { MediaProgressReport } from "../../src/playback.js";
 import type { PlayerSession } from "../../player/runtime-view.js";
-import type { ScriptStorageProvider } from "../../player/script-storage.js";
+import type { CapturedMediaStore } from "../../player/captured-media.js";
+import {
+  LiveHostEffects,
+  type EffectSample,
+  type FakeMedium,
+  type LiveHostOptions,
+} from "./live-host-effects.js";
 import { compareStructures, renderPath } from "./runtime-state-comparison.js";
 
 /*
@@ -293,12 +299,14 @@ export function adapterReplay(
   for (const [index, request] of requests.entries()) {
     const ended = request.ended;
     assert.ok(ended !== null, `request ${index} (${request.op}) after the cut had not ended`);
-    if (!ended.ok && ended.refused) continue;
+    // Only engine inputs may be sent after the cut, also when refused: a service's completion (`answerCapture`, a
+    // storage acknowledgement, a media report) by any route is an effect of the replay.
     const call = ADAPTER_OPS[request.op];
     assert.ok(
       call !== undefined,
-      `the oracle has no adapter call for '${request.op}': add it to ADAPTER_OPS in tests/helpers/replay-harness.ts`,
+      `'${request.op}' was sent after the cut, which is no engine input the oracle replays (ADAPTER_OPS in tests/helpers/replay-harness.ts): a service completion, or an input to add there`,
     );
+    if (!ended.ok && ended.refused) continue;
     // EVIDENCE: validation: every op the Player sends takes an object of arguments.
     const args = request.args as Record<string, unknown>;
     if (!ended.ok) {
@@ -383,12 +391,9 @@ export function assertTrace(tap: PublicationTap, oracle: readonly TraceEntry[]):
 
 /** What the live host's composable is, from the Player bundle (`loadPlayerModule`). */
 export interface LiveHostModules {
-  readonly usePlayerSession: (options: {
-    readonly bridge: Promise<PlayerBridge>;
-    readonly debugHistorySpill: () => Promise<null>;
-    readonly resolveAsset: (path: string) => string | null;
-    readonly scriptStorage: ScriptStorageProvider;
-  }) => LiveComposable;
+  readonly usePlayerSession: (options: LiveHostOptions<PlayerBridge>) => LiveComposable;
+  /** The bundle's captured-media store class, which the composable makes its own store of. */
+  readonly capturedMediaStore: { prototype: CapturedMediaStore };
 }
 
 /** The composable's host API the harness drives. */
@@ -399,14 +404,6 @@ export interface LiveComposable {
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): Promise<void>;
   update(next: PlayerSession): void;
-}
-
-/** The composable's main-side effects: storage writes, media elements and their starts, capture answers. */
-export interface HostEffects {
-  readonly writes: number;
-  readonly elements: number;
-  readonly plays: number;
-  readonly captures: number;
 }
 
 /** One session the composable showed: its revision, state and every event it held, by value, as it showed them. */
@@ -425,55 +422,32 @@ export interface LiveHost {
   readonly show: PublishHook;
   /** Lets the composable's watchers and the work they start run, before the next step. */
   settle(): Promise<void>;
-  /** The effects so far. */
-  effects(): HostEffects;
+  /** Every host service's state by value and every mutating call so far (`LiveHostEffects`). */
+  effects(): Promise<EffectSample>;
   /** Every session the composable showed, by value, in order, from the start. */
   readonly observed: readonly ShownSession[];
   /** The media elements the composable made. */
-  readonly elements: readonly (EventTarget & { src: string })[];
+  readonly elements: readonly FakeMedium[];
   /** Runs a judgment, only while the composable lives. */
   judge<T>(judgment: () => T): T;
 }
 
 /**
- * Runs `body` with a live composable on the in-process backend `bridge`: its storage writes, media elements, plays and
- * capture answers counted, the scene clock standing still, and a fake `Audio` that keeps `paused` as a real element does
- * (a play leaves it playing), so that a publication it observes again does not look like a medium to start again. Every
- * judgment runs inside `body`; the composable stops, and the globals are restored, only after it.
+ * Runs `body` with a live composable on the in-process backend `bridge`: every host service it is given or makes
+ * recorded (`LiveHostEffects`), the scene clock standing still, and a fake `Audio` whose elements keep their state as a
+ * real element does (a play leaves it playing), so that a publication it observes again does not look like a medium to
+ * start again. Every judgment runs inside `body`; the composable stops, and the globals are restored, only after it.
  */
 export async function withLiveHost<T>(
   modules: LiveHostModules,
   bridge: PlayerBridge,
   body: (host: LiveHost) => Promise<T>,
 ): Promise<T> {
-  const counts = { writes: 0, elements: 0, plays: 0, captures: 0 };
-  const elements: (EventTarget & { src: string })[] = [];
+  const effects = new LiveHostEffects();
   const surface = {
-    document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
-    window: new EventTarget(),
-    Audio: class extends EventTarget {
-      src = "";
-      preload = "";
-      volume = 1;
-      duration = 9;
-      paused = true;
-      ended = false;
-      currentTime = 0;
-      constructor() {
-        super();
-        counts.elements++;
-        elements.push(this);
-      }
-      play = async () => {
-        counts.plays++;
-        this.paused = false;
-      };
-      pause() {
-        this.paused = true;
-      }
-      load() {}
-      removeAttribute() {}
-    },
+    document: effects.eventTarget("document", { visibilityState: "visible" }),
+    window: effects.eventTarget("window", {}),
+    Audio: effects.audio(),
   };
   const previous = Object.keys(surface).map(
     (name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const,
@@ -483,30 +457,12 @@ export async function withLiveHost<T>(
   const now = performance.now;
   // The scene clock stands still: only the steps move time.
   performance.now = () => 0;
-  const section = bridge.client.section;
-  bridge.client.section = (id, run) =>
-    section(id, (send) =>
-      run((op, ...rest) => {
-        if (op === "answerCapture") counts.captures++;
-        return send(op, ...rest);
-      }),
-    );
+  effects.install(modules.capturedMediaStore);
   const scope = effectScope();
   let alive = true;
   try {
     const player = scope.run(() =>
-      modules.usePlayerSession({
-        bridge: Promise.resolve(bridge),
-        debugHistorySpill: async () => null,
-        resolveAsset: (path: string) => `https://fixture/${path}`,
-        scriptStorage: {
-          scope: "replay",
-          load: async () => [],
-          write: async () => void counts.writes++,
-          replace: async () => {},
-          clear: async () => {},
-        },
-      }),
+      modules.usePlayerSession(effects.options(Promise.resolve(bridge))),
     )!;
     const observed: ShownSession[] = [];
     scope.run(() =>
@@ -531,9 +487,9 @@ export async function withLiveHost<T>(
         await nextTick();
         await new Promise((resolve) => setTimeout(resolve, 5));
       },
-      effects: () => ({ ...counts }),
+      effects: () => effects.sample(),
       observed,
-      elements,
+      elements: effects.elements,
       judge: (judgment) => {
         assert.ok(alive, "a judgment runs only while the live host lives");
         return judgment();
@@ -542,7 +498,7 @@ export async function withLiveHost<T>(
   } finally {
     alive = false;
     scope.stop();
-    bridge.client.section = section;
+    effects.uninstall();
     performance.now = now;
     for (const [name, descriptor] of previous)
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);

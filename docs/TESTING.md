@@ -524,7 +524,7 @@ job's deadline. A behaviour changed after the pin shows as a difference, which o
 
 `tests/helpers/replay-harness.ts` is the L5 gate's shared replay harness (#1919). `tests/player-bridge-recording.test.ts`
 uses it for the replay family: successful replay, frozen failure replay and live recovery, each in-process, in a Node
-Worker, and in the composable on its in-process engine. It has three parts:
+Worker, and in the composable on its in-process engine. It has these parts:
 
 - **`tapPublications`:** the complete trace of the publications a session's store is given after a cut, by value, from
   the cut's revision and event cursor, with what the store holds once it applied each: its state and every event since
@@ -535,8 +535,14 @@ Worker, and in the composable on its in-process engine. It has three parts:
   host applied them. The trace is then compared exactly.
 - **`withLiveHost`:** the real composable. Each publication is handed to it in the tick its store applies it, and the
   next step waits until it has settled. Every session it shows is recorded by value and must equal the oracle's, each
-  publication once, in order. Its storage writes, media and capture answers are sampled after every step and once more
-  after the judgments, and must not grow. Every judgment runs while the composable lives.
+  publication once, in order. Every judgment runs while the composable lives.
+- **`LiveHostEffects`** (`tests/helpers/live-host-effects.ts`): every host service the composable is given or makes is
+  recorded. That covers script storage, kept sessions and debug rooms, their media repositories, the captured-media
+  store, media elements and object URLs, `document` and `window`, and lock fetches. A sample holds each service's state
+  by value and the count of each of its mutating calls, counted before the call runs. Samples are taken at the cut,
+  after every step, and once more after the judgments, and none may differ from the cut's. Each service's members are
+  classified there; a new member fails until it is classified. The capture host's device internals are outside the
+  claim (the fixture's camera is unsupported), and a control shows no device probe after the cut.
 
 The cut and the run's end are quiescent (`quiesce`): no request in flight, every reply delivered, and nothing more
 published.

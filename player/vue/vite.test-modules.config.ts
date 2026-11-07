@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 
 /** The Player browser-source modules that compiled Node tests load through `tests/helpers/player-modules.ts`. */
 const modules = [
+  "player/captured-media.ts",
   "player/compile-project.ts",
   "player/engine-bridge/client.ts",
   "player/engine-bridge/in-process.ts",
