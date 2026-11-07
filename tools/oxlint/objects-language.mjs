@@ -494,13 +494,20 @@ export function objectsLanguage({
     );
     if (element === undefined || !primitiveOnly(element) || kind(element) === "none")
       return reject(call, "sorted-elements", "`sorted` over elements that are not primitive");
-    // never aliased: read only by `.length`, as `sorted`'s array, or as a source `concatenated` copies the elements of
+    // never aliased: read only by `.length`, as `sorted`'s array, or as a source `concatenated` copies the elements of;
+    // an exported candidate is used by every importer
+    if (ts.getCombinedModifierFlags(declaration) & ts.ModifierFlags.Export)
+      reject(declaration, "sorted-alias", "alias of an array `sorted` sorts (an exported one)");
+    /** The symbol an identifier refers to: a shorthand's value, an export specifier's local target. */
+    const referent = (node) => {
+      const p = node.parent;
+      if (ts.isShorthandPropertyAssignment(p) && p.name === node)
+        return checker.getShorthandAssignmentValueSymbol(p);
+      if (ts.isExportSpecifier(p)) return checker.getExportSpecifierLocalTargetSymbol(p);
+      return checker.getSymbolAtLocation(node);
+    };
     const visit = (node) => {
-      if (
-        ts.isIdentifier(node) &&
-        node !== declaration.name &&
-        checker.getSymbolAtLocation(node) === symbol
-      ) {
+      if (ts.isIdentifier(node) && node !== declaration.name && referent(node) === symbol) {
         const p = node.parent;
         // gate 2: only these uses, nothing that writes or keeps it
         const read =
@@ -748,7 +755,7 @@ export function objectsLanguage({
       const declared = checker.getTypeFromTypeNode(node.type);
       const given = checker.getTypeAtLocation(node.initializer);
       if (
-        !trivial(strip(node.initializer)) &&
+        !trivial(node.initializer) &&
         (!assignable(declared, given) || !assignable(given, declared))
       )
         reject(node, "widening", "binding typed otherwise than its value (a widening alias)");

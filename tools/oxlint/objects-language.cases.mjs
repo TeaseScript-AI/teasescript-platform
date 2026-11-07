@@ -1023,4 +1023,64 @@ export const CASES = [
       "import { type WorkLedger as R11Work } from '../budget.js';\nexport function f(work:R11Work):number{work.charge('objectSteps');const s=new Set<string>();s.add('x');return s.size;}\n",
     expect: [],
   },
+  {
+    name: "r12/nonNullNull",
+    source:
+      "import { type WorkLedger as R12Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R12Work):number{work.charge('objectSteps');const value:string|number=null!;return typeof value==='number'?value:0;}\n",
+    expect: ["widening"],
+  },
+  {
+    name: "r12/nonNullNumber",
+    source:
+      "import { type WorkLedger as R12Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R12Work):number{work.charge('objectSteps');const value:string|number=1!;return typeof value==='number'?value:0;}\n",
+    expect: ["widening"],
+  },
+  {
+    name: "r12/controlNull",
+    source:
+      "import { type WorkLedger as R12Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R12Work):number{work.charge('objectSteps');const value:string|null=null;return value===null?0:1;}\n",
+    expect: [],
+  },
+  {
+    name: "r12/shorthandCapture",
+    source:
+      "import { type WorkLedger as R12Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R12Work):number{work.charge('objectSteps');const names=['b','a'];const box={names};box.names.length=1;sorted(work,'objectSteps',names);return names.length;}\n",
+    expect: ["sorted-alias"],
+  },
+  {
+    name: "r12/exportList",
+    source:
+      "import { type WorkLedger as R12Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nfunction g(work:R12Work):number{work.charge('objectSteps');sorted(work,'objectSteps',names);return names.length;}\nconst names=['b','a'];\nexport { names, g };\n",
+    expect: ["sorted-alias"],
+  },
+  {
+    name: "r12/exportedConst",
+    source:
+      "import { type WorkLedger as R12Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport const names=['b','a'];\nexport function g(work:R12Work):number{work.charge('objectSteps');sorted(work,'objectSteps',names);return names.length;}\n",
+    expect: ["sorted-alias"],
+  },
+  {
+    name: "r12/forOfWrite",
+    source:
+      "import { type WorkLedger as R12Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R12Work):number{work.charge('objectSteps');const names=['b','a'];for(names.length of each(work,'objectSteps',[1])){}sorted(work,'objectSteps',names);return names.length;}\n",
+    expect: ["sorted-alias"],
+  },
+  {
+    name: "r12/nonNullWrite",
+    source:
+      "import { type WorkLedger as R12Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport function f(work:R12Work):number{work.charge('objectSteps');const names=['b','a'];names.length!+=1;sorted(work,'objectSteps',names);return names.length;}\n",
+    expect: ["sorted-alias"],
+  },
+  {
+    name: "r12/unknownExport",
+    source:
+      "import { type WorkLedger as R12Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nexport declare const hidden:unknown;\n",
+    expect: ["export-form", "mixed-elements"],
+  },
+  {
+    name: "r12/localIterable",
+    source:
+      "import { type WorkLedger as R12Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\ninterface Iterable<T> extends Generator<T>{}\nfunction* source(work:R12Work):Iterable<string>{work.charge('objectSteps');yield 'x';}\nexport function f(work:R12Work):number{work.charge('objectSteps');let n=0;for(const item of each(work,'objectSteps',source(work)))n+=item.length;return n;}\n",
+    expect: ["collection-shape"],
+  },
 ];
