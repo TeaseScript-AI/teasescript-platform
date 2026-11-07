@@ -1810,7 +1810,22 @@ export function derive(
           content.fallbacks.push({ owner: site(fallback), site: at, type });
       }
       native("fallback", at);
-    } else if (check.kind === "copy-type" && !check.against.includes("unknown")) {
+    } else if (
+      (check.kind === "copy-type" ||
+        // (C1's check of a copied integer that may be null, at its store's value: the store's own, as a copy type's)
+        (check.kind === "null-check" &&
+          check.against.length > 0 &&
+          check.against.every((kind) => kind === "integer") &&
+          statements.some((candidate) => {
+            const store = storeOf(candidate);
+            return (
+              store !== null &&
+              site(unwrap(store.value)) === at &&
+              (check.target === store.name || check.target.startsWith(`${store.name}.`))
+            );
+          }))) &&
+      !check.against.includes("unknown")
+    ) {
       const statement = statements
         .filter(
           (candidate) =>
