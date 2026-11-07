@@ -2030,8 +2030,9 @@ const savedDataScripts = (name: VariantName) =>
   Object.entries(SAVED_DATA_SCRIPTS).find(([variant]) => variant === name)?.[1] ?? null;
 
 /**
- * The scripts a saved-data import wrote, as `SAVED_DATA_SCRIPTS` declares: another script's, written also after the page
- * moved on, and, when it ran to its end (`ranToEnd`), the shown one's; a script it does not write keeps no imported value.
+ * Whether the scripts a saved-data import wrote are those `SAVED_DATA_SCRIPTS` declares, by a projection of their saved
+ * data: another script's keys, written also after the page moved on, and, when it ran to its end (`ranToEnd`), whether
+ * the shown one holds the imported score. The values' contents are the import tests' to check.
  */
 async function assertWrites(name: VariantName, at: FamilyBrowser, ranToEnd: boolean) {
   const scripts = savedDataScripts(name);
