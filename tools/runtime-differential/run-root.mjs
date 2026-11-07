@@ -128,6 +128,10 @@ function build(recipe) {
       innermost(value).items[0] = Number.NaN;
       return value;
     }
+    case "plain":
+      // JSON data only, parsed here; what JSON cannot carry has its own builder above.
+      if (typeof recipe.text !== "string") throw new Error("plain needs a text");
+      return JSON.parse(recipe.text);
     default:
       throw new Error(`unknown recipe builder ${recipe.builder}`);
   }

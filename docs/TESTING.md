@@ -498,8 +498,8 @@ rejection included; 2 for a harness failure or an unknown verdict.
 
 `tests/runtime-differential.test.ts` runs this build against itself over the regressions in
 `tools/runtime-differential/regressions/` (with their independent expectations) and a seeded sample covering every
-generator tag. It also runs a 10,000-level host list and the sensitivity controls, each a `discrepancy` at its own
-path. `node tools/runtime-differential/run.mjs --seed S --count N [--route core] [--shrink]` runs larger campaigns
+generator tag. It also runs 10,000-level host values (a list, and lists, objects, dicts and sets nested in turn) and
+the sensitivity controls, each a `discrepancy` at its own path; `FUZZ_ACCEPTANCE=1` adds a 10,000-level chain of sets. `node tools/runtime-differential/run.mjs --seed S --count N [--route core] [--shrink]` runs larger campaigns
 after `npm run build`; run them as background jobs.
 
 Each side sits behind a port (`tests/helpers/runtime-differential-side.ts`): this build in this process, or a root's
@@ -513,10 +513,16 @@ pinned oracle root of the runtime pipeline oracle (left) against this build (rig
 - a candidate that imports outside its inventory, and a runner that exits or writes a malformed or invalid reply:
   `harness-failure`;
 - one accepted control per route of `admitExternal`, which builds a recipe's value inside a root and admits it through
-  that root's public API (host globals, script storage, or a substituted checkpoint binding).
+  that root's public API (host globals, script storage, or a substituted checkpoint binding). A recipe names a builder
+  of what JSON cannot carry (an accessor, a cycle, a hole, a prototype, a non-finite number), a deep or wide value, or
+  `plain` JSON data as `canonicalText`;
+- nested-set admission against the pinned root (#1904): a seeded family, collisions, precedence and recipes, each
+  with its declared acceptance, and a nested host value through every restore route.
 
 With `FUZZ_ACCEPTANCE=1` it also runs `tools/runtime-differential/acceptance.json`, every pair of which must be
-`equivalent`. `run.mjs --oracle [--manifest FILE]` runs a campaign the same way, each line naming the oracle's commit and
+`equivalent`, a larger nested-set family and a deeper chain pair. Run both on-demand parts after a build with
+`FUZZ_ACCEPTANCE=1 npm run oracle:test` and `FUZZ_ACCEPTANCE=1 node tools/test-output-filter.mjs
+dist/tests/runtime-differential.test.js`. `run.mjs --oracle [--manifest FILE]` runs a campaign the same way, each line naming the oracle's commit and
 the candidate's closure digest. A runner that never answers, or fails before it opens its pipes, is bounded only by the
 job's deadline. A behaviour changed after the pin shows as a difference, which only a new seal removes.
 

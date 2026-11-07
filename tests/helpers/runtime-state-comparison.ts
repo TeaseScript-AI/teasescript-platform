@@ -375,13 +375,16 @@ export function deepList(
   return value;
 }
 
-/** `depth` sets, each holding the next and an integer of its own level, around `leaf`. */
+/**
+ * `depth` sets, each holding the next and an integer of its own level counted from 1, around `leaf`: with the default
+ * leaf every set's two members differ, so the value is valid.
+ */
 export function deepSetChain(
   depth: number,
   leaf: SerializableRuntimeValue = 0,
 ): SerializableRuntimeValue {
   let value = leaf;
-  for (let level = 0; level < depth; level += 1) value = { kind: "set", items: [level, value] };
+  for (let level = 0; level < depth; level += 1) value = { kind: "set", items: [level + 1, value] };
   return value;
 }
 
