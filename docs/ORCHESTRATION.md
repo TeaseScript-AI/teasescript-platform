@@ -28,9 +28,17 @@ for the builder.
 
 A brief is a file the assignment points to. What it asks for follows the workflow's requirements for
 [the plan](DEVELOPMENT-WORKFLOW.md#the-plan), [READY](DEVELOPMENT-WORKFLOW.md#builder-messages-and-ready), and
-[the final-review brief](DEVELOPMENT-WORKFLOW.md#the-final-review). A final-review brief is also bounded: named cases,
-campaigns of a stated size, and evidence the reviewer samples rather than every run. The final reviewer's only write
-stays one comment on the pull request.
+[the final-review brief](DEVELOPMENT-WORKFLOW.md#the-final-review).
+
+- Ask for every finding within the scope, ranked, with a coverage statement of what was read in full, in part, or
+  skipped. Never ask for a fixed number of findings ("the top 10"): the agent stops when it reaches it. Bound the cost
+  by the scope and the job limits instead; a fixed number of cases to construct is a different thing and stays allowed.
+- Before sending, read the brief as its receiver would. Would it stop early, miss part of the scope (the code, its
+  documentation, similar names), or not know what "done" means? Fix the brief rather than following up.
+- A final-review brief is also bounded: named cases, campaigns of a stated size, and evidence the reviewer samples
+  rather than every run. The final reviewer's only write stays one comment on the pull request.
+- To complete a deliverable an agent left incomplete, continue that same session: it has read the material and knows
+  its unreported candidates. A fresh session is for an independent check.
 
 ## Pacing
 
@@ -47,8 +55,8 @@ stays one comment on the pull request.
 
 ## Merge
 
-Encode the [merge checklist](DEVELOPMENT-WORKFLOW.md#merge) as a script whose guards refuse: the records script
-compiles, the evidence manifest verifies, the base is unchanged since READY, and the head is clean. Let it write the
+Encoding the [merge checklist](DEVELOPMENT-WORKFLOW.md#merge) as a script helps when its guards refuse: the records
+script compiles, the evidence manifest verifies, the base is unchanged since READY, and the head is clean. Let it write the
 records (the table row, the plan row, the tracker row) in the same step as the merge. Prepare those rows at READY, with
 one placeholder for the final verdict.
 
@@ -75,7 +83,9 @@ premise, correct it in the open.
 
 - Keep messages short, with the owner's action first.
 - Never present your own conclusion as the owner's.
-- Appearance and other product choices, and policy, are the owner's ([Roles](DEVELOPMENT-WORKFLOW.md#roles)).
+- Appearance and other product choices, and policy, are the owner's ([Roles](DEVELOPMENT-WORKFLOW.md#roles)). A choice
+  that keeps today's behavior is the coordinator's; a builder labelling it an owner decision is corrected, not
+  forwarded.
 - Show the exact wording of any persistent change.
 - Put questions for the owner on the issue tracker.
 
