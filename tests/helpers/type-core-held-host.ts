@@ -1270,7 +1270,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
   }
 }
 
-/** An analysis of a program's files with its reads recorded (`recordingReads`), for its label source (`labelSource`). */
+/** An analysis of a program's files with its reads recorded (`recordingReads`), for its label source. */
 export function recordedAnalysis(files: readonly SourceFile[]): Answers {
   const request = coreRequest([...files], GLOBALS);
   if (request === null) throw new Error("The files do not resolve.");

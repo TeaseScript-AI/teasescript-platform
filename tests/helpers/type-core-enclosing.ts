@@ -286,14 +286,14 @@ export function enclosingFamily(few = false): EnclosingCase[] {
   return [...cases, ...analysisFamily(few)];
 }
 
+/** Whole replacements of `xs` before an add: each costs a deeper decision more, so an allowance stops those alone. */
+const REPLACED = (seed: string): string[] => Array.from({ length: 40 }, () => `xs = [${seed}]`);
+
 /**
  * The forms the candidate route leaves out (S10), each into a written destination: an argument to a written parameter,
  * one of a dead call, a return into a written result, an add and an `addAll` into a written list of the form, and a
  * replacement of a written dict or set of lists; a literal per value (`few` in the anchors) and a host value.
  */
-/** Whole replacements of `xs` before an add: each costs a deeper decision more, so an allowance stops those alone. */
-const REPLACED = (seed: string): string[] => Array.from({ length: 40 }, () => `xs = [${seed}]`);
-
 function analysisFamily(few: boolean): EnclosingCase[] {
   const cases: EnclosingCase[] = [];
   const forms = [

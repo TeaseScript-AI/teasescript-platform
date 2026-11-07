@@ -60,7 +60,6 @@ const planned = (diagnostics: unknown[] = [], planHash = "p", checks = "c") => (
   planHash,
   decisionCounts: { ordinary: [1], completion: [1] },
 });
-/** A record of four rows, `row(mode index)` giving each one's legacy, core and delta. */
 /** `shadow.mjs --demands`'s rows: the core alone at a demand allowance, each run reaching a completion or not. */
 const control = (demand: number, completion = [1]) => ({
   demand,
@@ -69,6 +68,7 @@ const control = (demand: number, completion = [1]) => ({
     core: { outcome: "plan", decisionCounts: { ordinary: [1], completion } },
   })),
 });
+/** A record of four rows, `row(mode index)` giving each one's legacy, core and delta. */
 const record = (key: string, row: (i: number) => Record<string, unknown>) => ({
   key,
   origins: [{ set: "synthetic", name: key }],

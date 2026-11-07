@@ -40,7 +40,7 @@ import { readFixture } from "./helpers/type-core-fixture.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
-/**
+/*
  * The determinism of the coarse core (ADR 0021 1.6; the port plan's S3 note §1): the answers depend on the program,
  * never on the order the analysis visits its consumers or discovers its demands. Every record of the expectation set
  * is analysed in four orders; every component of demands the set produces is solved again from each member as the

@@ -11,6 +11,8 @@ Keep a roster in the coordinators' repository: each lane, its current item, what
 [friction](FRICTION.md#known-friction) issues that touch its files or tools, and one line per open pull request
 listing each review round's findings by their nouns. On resume, read the roster and the latest log lines, not the
 transcript, then re-establish each lane's state from GitHub before the next write, as `AGENTS.md` requires.
+When a child's work is done, clean up after it as the agent environment's `/opt/agent-stack/ORCHESTRATION.md`
+"Cleanup after a child" says; that section is the canonical text.
 
 ## Messages
 
