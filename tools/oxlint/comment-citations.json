@@ -484,8 +484,8 @@
     "TABLE §": 1
   },
   "tools/oxlint/check-comment-forecasts.mjs": {
-    "TABLE §": 2,
-    "TABLE r4": 1
+    "TABLE r4": 1,
+    "TABLE §": 1
   },
   "tools/oxlint/check-obligation-inventory.mjs": {
     "TABLE r4": 6

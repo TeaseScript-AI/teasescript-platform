@@ -3,22 +3,25 @@ import { test } from "node:test";
 
 import { citationCounts, FORECASTS, forecastsIn } from "./check-comment-forecasts.mjs";
 
-// A forecast of each form, and a citation of each kind #1977 allows.
+// A forecast of each form; the citations #1977 allows; and prose and counted references, which are no forecasts.
 const FORECAST_TEXTS = {
   "until #N": "the cache stays until #1234 replaces it",
   "until a package or stage": "the preload stays in the composable until L5i.7",
   "once #N": "it moves once #42 merges",
+  "when or after #N lands or merges": "it goes when #1216 lands",
   "will be replaced": "this path will be replaced",
   "which replaces this": "decided before L5g, which replaces this",
   TODO: "TODO(#7): read the clock",
 };
 const CITATIONS = [
   "as #1234 decided",
-  "r4.93's witnesses",
-  "TABLE § 3",
   "stage 3 joins the narrowing",
   "PR 1900 moved it",
   "as before #1216",
+  "after #1216 the order holds",
+  // (counted in comment-citations.json, not citations)
+  "r4.93's witnesses",
+  "TABLE § 3",
   "Replaces this runner's next reply",
   "loops until the queue is empty",
   "runs once each page load",

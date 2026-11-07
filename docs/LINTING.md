@@ -18,9 +18,9 @@ that list only shrinks, and each cleanup removes its files from it.
 
 `tools/oxlint/check-comment-forecasts.mjs` refuses a comment that forecasts later work, in the forms
 [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead) lists (its
-`FORECASTS` table); a citation of a repository record passes. `comment-forecasts-allowed.json` lists the forecasts
-that stay for now, and each entry must still be found; `comment-citations.json` holds each file's exact counts of
-`TABLE r4` and `TABLE §` in comments, which may only fall.
+`FORECASTS` table); a citation of a repository record passes. `TABLE r4` and `TABLE §` are no citations (TABLE is not in
+the repository): `comment-citations.json` holds each file's exact counts of them in comments, which may only fall.
+`comment-forecasts-allowed.json` lists the forecasts the check accepts, and each entry must still be found.
 
 ## Type evidence
 

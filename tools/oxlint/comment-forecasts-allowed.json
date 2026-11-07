@@ -23,5 +23,10 @@
     "file": "tests/helpers/type-core-paste.ts",
     "form": "once #N",
     "text": "once #1413"
+  },
+  {
+    "file": "tests/type-core-stop.test.ts",
+    "form": "when or after #N lands or merges",
+    "text": "when #1216 lands"
   }
 ]

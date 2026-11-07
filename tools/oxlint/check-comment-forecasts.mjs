@@ -6,9 +6,10 @@ import { lintFiles } from "./files.mjs";
 
 // A comment says what the code does now and never forecasts later work (IMPLEMENTATION-AND-REVIEW.md "Code that does
 // not mislead", #1977). This check reads comments only, never strings or code, in the linted files and in `.vue`
-// files' `<script>` blocks. A citation of a repository record (a bare `#N`, `r4.N`, `TABLE §`, `stage N`, `PR N`,
-// "before #N") matches no form. `comment-forecasts-allowed.json` lists the forecasts that stay for now, and every
-// entry must still be found; `comment-citations.json` holds each file's exact counts of `TABLE r4` and `TABLE §`.
+// files' `<script>` blocks. A citation of a repository record matches no form: a bare `#N`, a completed stage, `PR N`,
+// "(as) before #N". `TABLE r4` and `TABLE §` are no citations, as TABLE is not in the repository (#1977): each file's
+// exact count of them in comments is in `comment-citations.json`, which may only fall. `comment-forecasts-allowed.json`
+// lists the forecasts this check accepts, and every entry must still be found.
 
 /** The forms of a forecast, #1977's list, each one pattern over a comment's text. */
 export const FORECASTS = [
@@ -18,6 +19,10 @@ export const FORECASTS = [
     pattern: /\buntil (?:L\d[a-z]?(?:\.\d+)?|activation|stage \S+)/iu,
   },
   { form: "once #N", pattern: /\bonce #\d+/iu },
+  {
+    form: "when or after #N lands or merges",
+    pattern: /\b(?:when|after) #\d+ (?:lands|merges|is merged)\b/iu,
+  },
   { form: "will be replaced", pattern: /\bwill be replaced\b/iu },
   { form: "which replaces this", pattern: /\bwhich replaces this\b/iu },
   { form: "TODO", pattern: /\bTODO\b/u },
