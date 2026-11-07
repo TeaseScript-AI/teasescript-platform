@@ -1690,8 +1690,8 @@ WebM signatures are read as they intend, Ogg is audio, and an M4A major brand is
 | `application/octet-stream` | anything else, such as SVG, HTML, BMP, AVIF, or text                              |
 
 The Player (`player/stored-files.ts`) answers each file store once, as it answers a photo: it keeps each file to store
-as session media of its kind, with the lifecycle of a photo, durable only while a saved value references it, and reads
-stored files' bytes, from durable storage when needed, and hashes them with `crypto.subtle.digest`. When it cannot
+as session media of its kind, with the lifecycle of a photo, durable while a saved value or a kept session uses it, and
+reads stored files' bytes, from durable storage when needed, and hashes them with `crypto.subtle.digest`. When it cannot
 decode, keep, read, or hash them, as outside a secure context, where the browser has no `crypto.subtle`, it answers
 `failed`.
 At Start it names the references in the saved values that its store holds, or had stored when it read them, so saved
@@ -2625,8 +2625,8 @@ The exported TypeScript source frontend, source compiler, low-level runtime, sna
 - stable package/plan identity and migration policy;
 - Standard Library imports, generated declarations/editor metadata transport, versioning, and capability access;
 - iframe host commands and response correlation;
-- captured-media recovery after reload or restore and persistent media collections, their cleanup and persistence
-  (camera and microphone ownership is in [`SECURITY.md`](SECURITY.md));
+- persistent media collections, their cleanup and persistence (camera and microphone ownership is in
+  [`SECURITY.md`](SECURITY.md));
 - time-integrity diagnostics and future server-authoritative scheduling;
 - server checkpoint persistence and conflict resolution;
 - performance profiling and safe optimization of snapshot cloning/liveness metadata.
