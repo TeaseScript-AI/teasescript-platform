@@ -1009,7 +1009,7 @@ test("below a receiver with no structure the pushed read over-marks where native
       .map((item) =>
         item
           .split("|")
-          .map((field, at) => (at === 1 || at === 4 || at === 6 ? "*" : field))
+          .map((field, at) => (at === 1 ? "*" : at === 6 ? field.replace("g", "") : field))
           .join("|"),
       )
       .join(" ");
