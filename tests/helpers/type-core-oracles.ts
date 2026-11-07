@@ -804,35 +804,53 @@ function publishedElements<Occurrence>(
     .filter(({ kind }) => kind.kind === "binding")
     .map((place) => place.id);
   return inMode(mode, () => {
-    // (one meter for the publication's own questions, reported from before its analysis: `questionWork`)
-    const questions = new Questions();
-    const answers = analyseCore(request);
-    let published: ReturnType<typeof publishedAnswers>;
-    try {
-      published = publishedAnswers(answers, bindings, request, questions);
-    } catch (error) {
-      if (!(error instanceof AnswersStopped)) throw error;
-      // (its answers' questions stopped: no answers nor record, and every node unanswered after the bindings left)
-      return {
-        answers: "null",
-        record: "null",
-        occurrences: [],
-        route: JSON.stringify(publishedRoute(files, globals).text),
-        unanswered: error.left + answers.graph.nodes.length,
-        unansweredBy: error.by,
-      };
-    }
-    const route = publishedRoute(files, globals);
-    const { occurrences, unanswered, unansweredBy } = answeredOccurrences(answers, questions, each);
-    return {
-      answers: JSON.stringify(published.text),
-      record: JSON.stringify(published.record),
-      occurrences,
-      route: JSON.stringify(route.text),
-      unanswered,
-      ...(unansweredBy === undefined ? {} : { unansweredBy }),
-    };
+    // (the analysis's parts first, its answers dropped when they end; then the route's compile, so that the two
+    // analyses' heaps are never held at once: with sharing off each can take a gigabyte, #1603)
+    const analysed = analysedElements(request, bindings, each);
+    return { ...analysed, route: JSON.stringify(publishedRoute(files, globals).text) };
   });
+}
+
+/**
+ * `publishedElements`' parts of the analysis of `request`: its answers and record (`publishedAnswers`) and every
+ * occurrence's answer up to the oracle's own stop, its answers held only while they are asked.
+ */
+function analysedElements<Occurrence>(
+  request: CoreAnalysisRequest,
+  bindings: readonly PlaceId[],
+  each: (text: string) => Occurrence,
+): {
+  readonly answers: string;
+  readonly record: string;
+  readonly occurrences: readonly Occurrence[];
+  readonly unanswered: number;
+  readonly unansweredBy?: UnansweredBy;
+} {
+  // (one meter for the publication's own questions, reported from before its analysis: `questionWork`)
+  const questions = new Questions();
+  const answers = analyseCore(request);
+  let published: ReturnType<typeof publishedAnswers>;
+  try {
+    published = publishedAnswers(answers, bindings, request, questions);
+  } catch (error) {
+    if (!(error instanceof AnswersStopped)) throw error;
+    // (its answers' questions stopped: no answers nor record, and every node unanswered after the bindings left)
+    return {
+      answers: "null",
+      record: "null",
+      occurrences: [],
+      unanswered: error.left + answers.graph.nodes.length,
+      unansweredBy: error.by,
+    };
+  }
+  const { occurrences, unanswered, unansweredBy } = answeredOccurrences(answers, questions, each);
+  return {
+    answers: JSON.stringify(published.text),
+    record: JSON.stringify(published.record),
+    occurrences,
+    unanswered,
+    ...(unansweredBy === undefined ? {} : { unansweredBy }),
+  };
 }
 
 /**
