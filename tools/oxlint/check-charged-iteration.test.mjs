@@ -34,6 +34,9 @@ export function listed(units: number): number {
 export function helper(items: readonly number[]): number {
   return items.length;
 }
+export function joinParts(...parts: readonly (string | number | readonly string[])[]): string {
+  return parts.length === 0 ? "" : "|";
+}
 `;
 
 const OUTSIDE = new Set([
@@ -261,8 +264,8 @@ export const all = [table, text, sum, size, number];
   assert.deepEqual(rejected(sourceText), [6, 15, 16, 17, 19]);
 });
 
-test("the configured checker covers objects.ts: a raw loop there is rejected, a charged one accepted (#1747)", () => {
-  // (through the configured scope itself: dropping objects.ts from it lets the raw loop pass, and this fails)
+/** The lines the configured checker reports in an `objects.ts` holding `source`, the scope's other files empty. */
+function objectsLines(source) {
   const project = new Project({
     useInMemoryFileSystem: true,
     compilerOptions: {
@@ -280,9 +283,15 @@ test("the configured checker covers objects.ts: a raw loop there is rejected, a 
   assert.ok(objects !== undefined, "objects.ts is in the configured scope");
   for (const file of CONFIGURED.files)
     if (file !== objects) project.createSourceFile(`/repo/${file}`, "export {};\n");
-  project.createSourceFile(
-    `/repo/${objects}`,
-    `
+  project.createSourceFile(`/repo/${objects}`, source);
+  return chargedIterationDiagnostics(project.getProgram().compilerObject, "/repo", CONFIGURED)
+    .filter(({ fileName }) => fileName.endsWith("/objects.ts"))
+    .map(({ line }) => line);
+}
+
+test("the configured checker covers objects.ts: a raw loop there is rejected, a charged one accepted (#1747)", () => {
+  // (through the configured scope itself: dropping objects.ts from it lets the raw loop pass, and this fails)
+  const lines = objectsLines(`
 import { each } from "../narrowing-iteration.js";
 import type { WorkLedger } from "../budget.js";
 declare const work: WorkLedger;
@@ -299,15 +308,29 @@ export function charged(): number {
   for (const item of each(work, "objectSteps", items)) total += item;
   return total;
 }
-`,
-  );
-  const lines = chargedIterationDiagnostics(
-    project.getProgram().compilerObject,
-    "/repo",
-    CONFIGURED,
-  )
-    .filter(({ fileName }) => fileName.endsWith("/objects.ts"))
-    .map(({ line }) => line);
+`);
   // (the raw loop's line, and nothing in the charged function)
   assert.deepEqual(lines, [9]);
+});
+
+test("in objects.ts an object spread and an array part of `joinParts` are rejected, scalar parts accepted (#1747, Codex r5)", () => {
+  // (an `object` may be an array, and `joinParts` names an array part by walking it: both are input-sized)
+  const lines = objectsLines(`
+import { joinParts, type WorkLedger } from "../budget.js";
+declare const work: WorkLedger;
+export function copy(input: object): object {
+  work.charge("objectSteps");
+  return { ...input };
+}
+export function name(input: readonly string[]): string {
+  work.charge("objectSteps");
+  return joinParts(input);
+}
+export function scalar(kind: string, at: number): string {
+  work.charge("objectSteps");
+  return joinParts(kind, at);
+}
+`);
+  // (the spread's line and the array join's, and nothing in the scalar join)
+  assert.deepEqual(lines, [6, 10]);
 });
