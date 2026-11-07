@@ -1096,6 +1096,15 @@ for (const producer of Object.keys(SUSPENSIONS) as Producer[])
         const bridge = await operation.host.bridge;
         const token = await held(operation.host, operation.plan);
         await moveOn(operation, move);
+        // The page goes on with what the move prepared: its Start runs, so nothing should show a start page again.
+        const preparationOwned = producer === "restoreKept" || producer === "planText";
+        if (preparationOwned && move !== "disposed") {
+          await operation.host.activate();
+          await until(
+            () => operation.host.session.value !== null && operation.host.activation.value === null,
+            "the moved-on page did not start",
+          );
+        }
         const mark = gates.writes.length;
         const publishedAtMark = at.published.length;
         await operation.finish();
@@ -1110,11 +1119,11 @@ for (const producer of Object.keys(SUSPENSIONS) as Producer[])
         }
         if (retires) {
           assert.deepEqual(after, [], `the stale ${producer} wrote after the move`);
-          if (move !== "disposed" && move !== "samePlan")
-            assert.notEqual(
+          if (preparationOwned && move !== "disposed")
+            assert.equal(
               operation.host.activation.value,
-              "continue",
-              "a stale operation installed Continue",
+              null,
+              "a stale operation prepared a Start or Continue over the running session",
             );
           const restored = operation.restored?.() ?? null;
           if (restored !== null && move !== "disposed")
