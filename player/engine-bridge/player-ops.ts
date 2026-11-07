@@ -433,7 +433,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
  * last diagnostics of the connection; this is no reset of the whole context. The `teardown` op runs it on a connection
  * that stays open; `closeConnection` runs it as the connection ends.
  */
-export function releaseConnection(context: PlayerOpsContext, sessions: HostSessions): void {
+function releaseConnection(context: PlayerOpsContext, sessions: HostSessions): void {
   context.plans.clear();
   context.sources.clear();
   context.sourceViews.clear();
