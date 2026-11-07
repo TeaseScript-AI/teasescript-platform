@@ -11,6 +11,7 @@ import {
   markResidual,
   markStep,
   marksAt,
+  markPrefixVisits,
   markStates,
 } from "../src/type-inference/core/contract/marks.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
@@ -93,6 +94,7 @@ function analysed(source: string, mode = MODES[0]!, oracle: "native" | number | 
     const invariants = passes.map((pass) => pushedInvariant(pass.contract));
     // (the automaton's size as the analysis left it, before the truth checks compile every holder)
     const states = passes.map((pass) => markStates(pass.contract));
+    const prefixVisits = passes.map((pass) => markPrefixVisits(pass.contract));
     const truth = passes.map((pass) => markTruth(pass.contract));
     return {
       answers,
@@ -101,6 +103,7 @@ function analysed(source: string, mode = MODES[0]!, oracle: "native" | number | 
       invariants,
       truth,
       states,
+      prefixVisits,
       settled: passes.map(settledAnswers),
     };
   } finally {
@@ -1043,4 +1046,44 @@ test("below a receiver with no structure the pushed read over-marks where native
           if (!marked) assert.equal(differing, 0, source);
           if (marked && depth === 2 && !nested && step === "q") assert.ok(differing > 0, source);
         }
+});
+
+/** Astra r2 B3's family: `x` copied `copies` times under a conjunction of `tests` tests of its properties, then marked. */
+function guardedCopies(tests: number, copies: number): string {
+  const literal = `{${Array.from({ length: tests }, (_, i) => `a${i}:0`).join(",")}}`;
+  const condition = Array.from({ length: tests }, (_, i) => `x.a${i} is integer`).join(" and ");
+  return (
+    [
+      `let x=${literal}`,
+      `x=${literal}`,
+      "let saved=x",
+      `if ${condition} {`,
+      ...Array.from({ length: copies }, (_, i) => `let save${i}=x`),
+      "}",
+      "let p0=x",
+      `let p1=${literal}`,
+      `let p2=${literal}`,
+      "p2.q=p0",
+      "p2=p1",
+      "p1=p0",
+      "p2=p2.q",
+      'say "${p2.q.a0}"',
+      "exit",
+    ].join("\n") + "\n"
+  );
+}
+
+test("a holder's compilation visits each guarded prefix of reads its tests guard alike once, however many such reads (Astra r2 B3)", () => {
+  const visits = (tests: number, copies: number): number => {
+    const { prefixVisits, invariants } = analysed(guardedCopies(tests, copies));
+    for (const { violations } of invariants)
+      assert.deepEqual(violations, [], `${tests} tests, ${copies} copies`);
+    return prefixVisits.reduce((sum, at) => sum + at, 0);
+  };
+  // (the copies under one conjunction ask one answer: the visits do not grow with them)
+  const one = visits(16, 1);
+  assert.ok(one > 0, String(one));
+  for (const copies of [4, 16]) assert.equal(visits(16, copies), one, `16 tests, ${copies} copies`);
+  // (and grow with the tests as the distinct prefixes do: linearly)
+  assert.equal(visits(32, 32), 2 * visits(16, 16));
 });

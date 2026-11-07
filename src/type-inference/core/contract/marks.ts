@@ -588,6 +588,8 @@ interface MarkAutomaton {
   readonly roots: Map<Holder, number>;
   readonly starts: Map<Holder, Map<number, MarkResidual>>;
   readonly moves: Map<number, Map<string, MarkResidual>>;
+  /** The guarded prefixes the holders' compilations visited (Astra r2 B3's growth test). */
+  prefixVisits: number;
 }
 
 const AUTOMATA = new WeakMap<Contract, MarkAutomaton>();
@@ -600,7 +602,13 @@ function automatonOf(contract: Contract): MarkAutomaton {
   if (known === undefined)
     AUTOMATA.set(
       contract,
-      (known = { states: [], roots: new Map(), starts: new Map(), moves: new Map() }),
+      (known = {
+        states: [],
+        roots: new Map(),
+        starts: new Map(),
+        moves: new Map(),
+        prefixVisits: 0,
+      }),
     );
   return known;
 }
@@ -765,7 +773,9 @@ function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): 
     program.work.charge("eventSteps");
     automaton.states[stateAt(contract, automaton, root, stepsOf(contract, at))]!.accepting = true;
   }
-  // its own reads: each tested path below a read's key whose region holds the read (`readsAt`'s hit)
+  // its own reads: each tested path below a read's key whose region holds the read (`readsAt`'s hit), the paths of
+  // reads `guardedBelow` answers alike asked once (Astra r2 B3: n copies under n tests visit n paths, not n²)
+  const asked = new Set<string>();
   for (const read of holder.reads) {
     program.work.charge("eventSteps");
     let current = read.value;
@@ -780,8 +790,14 @@ function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): 
     const node = program.occNode.get(current);
     if (binding === undefined || node === undefined || node === null) continue;
     const base = keyOf(binding, joinSteps(steps.reverse(), read.path));
+    const group = guards.guardedBelowGroup(base, node);
+    if (group !== null) {
+      if (asked.has(group)) continue;
+      asked.add(group);
+    }
     for (const text of guards.guardedBelow(base, node)) {
       program.work.charge("eventSteps", 1 + text.length);
+      automaton.prefixVisits += 1;
       automaton.states[stateAt(contract, automaton, root, splitPath(text))]!.accepting = true;
     }
   }
@@ -804,6 +820,11 @@ function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): 
     }
   }
   return root;
+}
+
+/** Test-only: the guarded prefixes a pass's holder compilations visited (Astra r2 B3). */
+export function markPrefixVisits(contract: Contract): number {
+  return AUTOMATA.get(contract)?.prefixVisits ?? 0;
 }
 
 /** Test-only: the holders a pass's mark automaton compiled. */
