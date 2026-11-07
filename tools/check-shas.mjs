@@ -12,7 +12,8 @@ import { existsSync, readFileSync } from "node:fs";
 // repository that resolves it must contain it (`git for-each-ref --contains` over `refs/remotes`), else it is local
 // only, such as a head from before a rebase. A repository without remote-tracking refs is named once, and its tokens
 // are not checked for that. An unresolved token may be a commit not fetched yet: the message says to fetch it; this
-// tool never fetches.
+// tool never fetches. A token that is no commit but a tree, such as a stored baseline's `src` tree hash, is reported
+// as a tree, resolved, without the remote check: proving a tree reachable from a remote ref is costly.
 // Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too. Every run that completes ends
 // with one line counting the tokens by result and the placeholders, so no output means it did not run.
 //
@@ -72,7 +73,10 @@ export function placeholdersOf(text) {
   ];
 }
 
-/** `token` in `repository`: `{ sha }` when one commit has it, `{ ambiguous: n }` when several do, else `null`. */
+/**
+ * `token` in `repository`: `{ sha }` when one commit has it, `{ tree }` when it is no commit but a tree, `{ ambiguous:
+ * n }` when several commits share it, else `null`.
+ */
 function resolve(token, repository) {
   const verified = spawnSync(
     "git",
@@ -80,6 +84,19 @@ function resolve(token, repository) {
     { encoding: "utf8" },
   );
   if (verified.status === 0) return { sha: verified.stdout.trim() };
+  // (no commit: a tree, such as a stored baseline's `src` tree, is a citation too; a commit would have peeled above)
+  if (
+    spawnSync("git", ["-C", repository, "cat-file", "-t", token], {
+      encoding: "utf8",
+    }).stdout.trim() === "tree"
+  )
+    return {
+      tree: spawnSync(
+        "git",
+        ["-C", repository, "rev-parse", "--verify", "--quiet", `${token}^{tree}`],
+        { encoding: "utf8" },
+      ).stdout.trim(),
+    };
   const candidates = spawnSync("git", ["-C", repository, "rev-parse", `--disambiguate=${token}`], {
     encoding: "utf8",
   }).stdout.trim();
@@ -124,7 +141,7 @@ function main() {
   const text = readFileSync(files.length === 1 ? files[0] : 0, "utf8");
 
   let failed = false;
-  const counts = { resolved: 0, ambiguous: 0, unresolved: 0, local: 0, skipped: 0 };
+  const counts = { resolved: 0, trees: 0, ambiguous: 0, unresolved: 0, local: 0, skipped: 0 };
   // Whether each repository has remote-tracking refs, named once when it has none.
   const remoteRefs = new Map();
   const hasRemoteRefs = (repository) => {
@@ -162,24 +179,32 @@ function main() {
       .map((entry) => ({ ...entry, remote: onRemote(entry.answer.sha, entry.repository) }));
     const resolved = found.find(({ remote }) => remote !== false);
     const local = resolved ? undefined : found[0];
+    const tree = resolved || local ? undefined : answers.find(({ answer }) => answer?.tree);
     const ambiguous = answers.find(({ answer }) => answer?.ambiguous);
     counts[
       resolved
         ? "resolved"
-        : local
-          ? "local"
-          : ambiguous
-            ? "ambiguous"
-            : why !== null
-              ? "skipped"
-              : "unresolved"
+        : tree
+          ? "trees"
+          : local
+            ? "local"
+            : ambiguous
+              ? "ambiguous"
+              : why !== null
+                ? "skipped"
+                : "unresolved"
     ] += 1;
     if (local) {
       failed = true;
       process.stdout.write(
-        `local only  ${token}  ${local.answer.sha} in ${local.repository}, on no remote ref: push it, or cite one that is on origin\n`,
+        `local only  ${token}  ${local.answer.sha} in ${local.repository}, on no remote ref: push it, or cite one on origin; ` +
+          "for exact pre-rebase heads, push one archive ref whose parents are the cited heads\n",
       );
-    } else if (resolved)
+    } else if (tree)
+      process.stdout.write(
+        `tree        ${token}  ${tree.answer.tree} in ${tree.repository}: a tree, not checked on a remote\n`,
+      );
+    else if (resolved)
       process.stdout.write(
         `resolved    ${token}  ${resolved.answer.sha} in ${resolved.repository}\n`,
       );
@@ -202,7 +227,7 @@ function main() {
   }
   const tokens = Object.values(counts).reduce((sum, n) => sum + n, 0);
   process.stdout.write(
-    `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.ambiguous} ambiguous, ` +
+    `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.ambiguous} ambiguous, ` +
       `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths); ` +
       `${placeholders.length} placeholders\n`,
   );

@@ -102,7 +102,7 @@ test(
       assert.equal(status, 0, out);
       assert.match(
         out,
-        /9 tokens: 0 resolved, 0 ambiguous, 0 unresolved, 0 local only, 9 skipped/u,
+        /9 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 9 skipped/u,
       );
       // A commit URL is checked; a path that holds a real SHA still reports it.
       const url = check("https://github.com/o/r/commit/0123abc4567", [directory]);
@@ -179,11 +179,11 @@ test(
       for (const [text, line] of [
         [
           "",
-          "0 tokens: 0 resolved, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths); 0 placeholders",
+          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths); 0 placeholders",
         ],
         [
           `at ${shas[0].slice(0, 9)}, <sha>`,
-          "1 tokens: 1 resolved, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths); 1 placeholders",
+          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths); 1 placeholders",
         ],
       ]) {
         const { out } = check(text, [directory]);
@@ -243,13 +243,13 @@ test(
       assert.match(
         off.out,
         new RegExp(
-          `local only +${local.slice(0, 9)} +${local} in .*: push it, or cite one that is on origin`,
+          `local only +${local.slice(0, 9)} +${local} in .*: push it, or cite one on origin; for exact pre-rebase heads, push one archive ref whose parents are the cited heads`,
           "u",
         ),
       );
       assert.match(
         off.out.trim().split("\n").at(-1),
-        /1 tokens: 0 resolved, 0 ambiguous, 0 unresolved, 1 local only, 0 skipped/u,
+        /1 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 1 local only, 0 skipped/u,
       );
     } finally {
       for (const path of [directory, origin]) rmSync(path, { recursive: true, force: true });
@@ -266,9 +266,38 @@ test(
       const { status, out } = check(`${shas[0]} and ${shas[1]}`, [directory]);
       assert.equal(status, 0, out);
       assert.equal(out.match(/no remote refs in .*: reachability not checked/gu)?.length, 1, out);
-      assert.match(out, /2 tokens: 2 resolved, 0 ambiguous, 0 unresolved, 0 local only/u);
+      assert.match(out, /2 tokens: 2 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only/u);
     } finally {
       rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "a tree hash resolves as a tree, without the remote check; a commit is never taken for its tree",
+  { timeout: 30_000 },
+  () => {
+    const { directory, origin, pushed } = withRemote();
+    try {
+      const tree = spawnSync("git", ["-C", directory, "rev-parse", `${pushed}^{tree}`], {
+        encoding: "utf8",
+      }).stdout.trim();
+      const { status, out } = check(
+        `baseline tree ${tree.slice(0, 9)}, head ${pushed.slice(0, 9)}`,
+        [directory],
+      );
+      assert.equal(status, 0, out);
+      assert.match(
+        out,
+        new RegExp(
+          `tree +${tree.slice(0, 9)} +${tree} in .*: a tree, not checked on a remote`,
+          "u",
+        ),
+      );
+      assert.match(out, new RegExp(`resolved +${pushed.slice(0, 9)} +${pushed}`, "u"));
+      assert.match(out.trim().split("\n").at(-1), /2 tokens: 1 resolved, 1 trees,/u);
+    } finally {
+      for (const path of [directory, origin]) rmSync(path, { recursive: true, force: true });
     }
   },
 );
