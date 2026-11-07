@@ -18,9 +18,11 @@ import { memoryKeptRoomStore, type KeptRoomStore } from "../player/kept-sessions
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../src/index.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { published } from "./helpers/debug-readers.js";
+import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { hostTrace, loadHostFacade, onHost } from "./helpers/host-sessions.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
+import type * as ClientModule from "../player/engine-bridge/client.js";
 
 /** The value trace the host's session runs with, as the host holds it. */
 const traceOf = (session: PlayerRuntimeSession | null | undefined) =>
@@ -110,12 +112,21 @@ interface Rewind {
   returnToSession(): boolean;
 }
 let usePlayerSession: (options: {
+  bridge?: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
   debugHistorySpill: () => Promise<DebugHistorySpill | null>;
   debugHistoryMemoryBudget?: number;
   debugRooms?: KeptRoomStore;
 }) => RewindHost;
 let useDebugRewind: (player: RewindHost) => Rewind;
+// The composable's own in-process backend and the client's loss class, from the modules it loads.
+let createInProcessBackend: (build: {
+  readonly commit: null;
+  readonly dirty: null;
+  readonly mode: null;
+  readonly appVersion: null;
+}) => PlayerBridge;
+let BridgeLostError: typeof ClientModule.BridgeLostError;
 let usePlayerDebug: (
   player: RewindHost,
   initial: { readonly menu: boolean; readonly autoSkip: boolean },
@@ -130,6 +141,15 @@ before(async () => {
     "player/vue/src/useDebugRewind.ts",
   );
   const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/usePlayerDebug.ts");
+  const facade: Record<string, unknown> = await loadPlayerModule(
+    "player/engine-bridge/in-process.ts",
+  );
+  const client: Record<string, unknown> = await loadPlayerModule("player/engine-bridge/client.ts");
+  assert.equal(typeof facade.createInProcessBackend, "function");
+  // EVIDENCE: validation: Vite loaded the real source modules; these are the composable's own backend and loss class.
+  createInProcessBackend = facade.createInProcessBackend as typeof createInProcessBackend;
+  // EVIDENCE: validation: as above.
+  BridgeLostError = client.BridgeLostError as typeof BridgeLostError;
   assert.equal(typeof debug.usePlayerDebug, "function");
   // EVIDENCE: validation: as above.
   usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
@@ -140,6 +160,29 @@ before(async () => {
   // EVIDENCE: validation: as above.
   useDebugRewind = rewind.useDebugRewind as typeof useDebugRewind;
 });
+
+/**
+ * An in-process bridge whose connection `lose()` loses as a real loss does: the client rejects everything pending and
+ * posts nothing more, and its loss listeners run in the same tick.
+ */
+function lossyBridge(): { readonly bridge: PlayerBridge; lose(): void } {
+  const bridge = createInProcessBackend({
+    commit: null,
+    dirty: null,
+    mode: null,
+    appVersion: null,
+  });
+  const listeners: ((error: ClientModule.BridgeLostError) => void)[] = [];
+  bridge.client.onLoss = (listener) => void listeners.push(listener);
+  return {
+    bridge,
+    lose: () => {
+      bridge.client.terminate();
+      const lost = new BridgeLostError("The engine Worker failed: injected.");
+      for (const listener of listeners) listener(lost);
+    },
+  };
+}
 
 /** Saved data in memory, recording each provider call; `replace` can be made to fail. */
 function memoryStorage() {
@@ -219,7 +262,12 @@ function memorySpill() {
 function createHost(
   context: TestContext,
   provider: ScriptStorageProvider,
-  options: { readonly memoryBudget?: number; readonly debugRooms?: KeptRoomStore } = {},
+  options: {
+    readonly memoryBudget?: number;
+    readonly debugRooms?: KeptRoomStore;
+    /** A bridge of its own whose connection the test can lose (`lose`), as `player-bridge-loss.test.ts` does it. */
+    readonly lossy?: boolean;
+  } = {},
 ) {
   // Event targets are the only browser surface these scripts use, besides the audio elements a Start primes while it
   // reads the stored values.
@@ -244,9 +292,11 @@ function createHost(
   }
   context.mock.timers.enable({ apis: ["setTimeout"] });
   const spill = memorySpill();
+  const lossy = options.lossy === true ? lossyBridge() : null;
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      ...(lossy && { bridge: Promise.resolve(lossy.bridge) }),
       scriptStorage: provider,
       debugHistorySpill: async () => spill.spill,
       ...(options.debugRooms && { debugRooms: options.debugRooms }),
@@ -264,7 +314,15 @@ function createHost(
     debug.stop();
     scope.stop();
   });
-  return { host, rewind, debug, scope, spill: spill.state, holdGets: spill.holdGets };
+  return {
+    host,
+    rewind,
+    debug,
+    scope,
+    spill: spill.state,
+    holdGets: spill.holdGets,
+    lose: lossy?.lose,
+  };
 }
 
 // Lets storage writes report, which the host does in a later task.
@@ -844,17 +902,74 @@ test("the call view follows the shown session through Back and Return while a de
 });
 
 /*
- * The async exits of Back's and an adoption's reads in the host (L5h.3a): each read held while the page moves on as each
- * end does it, then let go. Back parks nothing and shows no restored state, but a Player error stop leaves the shown
- * session to go back from, as Debug's rewind allows after a stop; an adoption writes no saved value, but one Debug's end
- * waits for, which completes (DEBUGGER.md "Rewind"). The read's own failure is the step's failure, with an adoption's
- * notice. Unmounting ends Debug's features and the Player together.
+ * The async exits of Back's and an adoption's reads in the host (L5h.3a), as one declaration: the read × where it is
+ * held (before its request is posted, or after the host captured, with its reply held) × what the page does meanwhile ×
+ * how the read settles (its reply, or a rejection). The outcome is one decision, `exitOutcome`: when the page moved on,
+ * the step changes nothing (Back parks nothing; an adoption writes and says nothing), but for the two exceptions of
+ * DEBUGGER.md "Rewind": Back after a Player error stop parks the stopped session, and Debug's end waits for an adoption
+ * under way, which completes or fails as it would. A read that settles by rejection fails its step; a failed adoption
+ * that still owns the page says so. Unmounting ends Debug's features and the Player together; a lost connection settles
+ * every read it held by rejection.
  */
+const EXIT_AXES = {
+  read: ["back", "adopt"],
+  hold: ["request", "reply"],
+  lifecycle: ["none", "publication", "replaced", "debugOff", "stopped", "disposed", "lost"],
+  settlement: ["reply", "rejection"],
+} as const;
+type ExitCase = { readonly [Axis in keyof typeof EXIT_AXES]: (typeof EXIT_AXES)[Axis][number] };
 const READS = { back: "captureKeep", adopt: "captureStorage" } as const;
-const ENDS = ["replaced", "debugOff", "stopped", "disposed", "readFails"] as const;
 
-/** Holds the first request of `op` on `bridge` until `release()`, or rejects it when `fails`. */
-function holdRead(context: TestContext, bridge: PlayerBridge, op: string, fails: boolean) {
+/**
+ * Why a combination is no case: a lost connection posts nothing more and delivers no reply; and an inspected state, which
+ * an adoption reads, shows no newer publication, for it runs nothing until it is adopted.
+ */
+const infeasible = ({ read, lifecycle, settlement }: Coordinates) =>
+  (lifecycle === "lost" && settlement === "reply") ||
+  (read === "adopt" && lifecycle === "publication");
+
+/** Every case of the declaration, but the infeasible. */
+function exitCases(): ExitCase[] {
+  const cases: ExitCase[] = [];
+  for (const read of EXIT_AXES.read)
+    for (const hold of EXIT_AXES.hold)
+      for (const lifecycle of EXIT_AXES.lifecycle)
+        for (const settlement of EXIT_AXES.settlement) {
+          const each: ExitCase = { read, hold, lifecycle, settlement };
+          if (!infeasible(each)) cases.push(each);
+        }
+  return cases;
+}
+
+/** What the step does in `each`: whether it succeeds, whether the saved values are written, and whether it says it failed. */
+function exitOutcome({ read, lifecycle, settlement }: ExitCase): {
+  readonly done: boolean;
+  readonly wrote: boolean;
+  readonly notice: boolean;
+} {
+  const replied = settlement === "reply";
+  if (read === "back")
+    return {
+      done: replied && (lifecycle === "none" || lifecycle === "stopped"),
+      wrote: false,
+      notice: false,
+    };
+  // The adoption owns the page while nothing replaced, stopped or unmounted it; Debug's end waits for it.
+  const owns = lifecycle === "none" || lifecycle === "debugOff";
+  return { done: owns && replied, wrote: owns && replied, notice: owns && !replied };
+}
+
+/**
+ * Holds the first request of `op` on `bridge`: before it is posted (`request`), or after the host answered it (`reply`),
+ * until `release()`; then it settles with the host's answer, or rejects (`rejects`).
+ */
+function holdRead(
+  context: TestContext,
+  bridge: PlayerBridge,
+  op: string,
+  hold: ExitCase["hold"],
+  rejects: boolean,
+) {
   let reached!: () => void;
   const arrived = new Promise<void>((resolve) => (reached = resolve));
   let release!: () => void;
@@ -864,57 +979,76 @@ function holdRead(context: TestContext, bridge: PlayerBridge, op: string, fails:
   context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
     if (args[0] !== op || !first) return request(...args);
     first = false;
-    reached();
-    return gate.then(() =>
-      fails ? Promise.reject(new Error("The read failed.")) : request(...args),
-    );
+    const settle = (answer: ReturnType<typeof request>) =>
+      rejects ? answer.then(() => Promise.reject(new Error("The read failed."))) : answer;
+    if (hold === "request") {
+      reached();
+      return gate.then(() => settle(request(...args)));
+    }
+    const answered = request(...args);
+    void answered.then(reached, reached);
+    return gate.then(() => settle(answered));
   });
   return { arrived, release: () => release() };
 }
 
-// EVIDENCE: invariant: the keys of `READS`, declared literally above.
-for (const read of Object.keys(READS) as (keyof typeof READS)[])
-  for (const end of ENDS)
-    test(`${read === "back" ? "Back" : "an adoption"}'s read in the host, then the page ${end}`, async (context) => {
-      const storage = memoryStorage();
-      const made = createHost(context, storage.provider);
-      const { host, rewind } = made;
-      await start(context, host);
-      await choose(context, host, "One");
-      if (read === "adopt") assert.equal(await rewind.back(0), true);
-      const shownBefore = host.session.value;
-      const callsBefore = storage.calls.length;
-      const held = holdRead(context, await host.bridge, READS[read], end === "readFails");
-      const step = read === "back" ? rewind.back(0) : rewind.resume();
-      await held.arrived;
-      if (end === "replaced") {
-        host.prepare((recording) =>
-          createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
-        );
-        host.activate();
-      } else if (end === "debugOff") made.debug.stop();
-      else if (end === "stopped") host.reportHostError(new Error("A Player error."));
-      else if (end === "disposed") {
-        made.debug.stop();
-        made.scope.stop();
-      }
-      held.release();
-      const done = await step;
+for (const each of exitCases())
+  test(`a rewind read in the host: ${Object.values(each).join(", ")}`, async (context) => {
+    const storage = memoryStorage();
+    const made = createHost(context, storage.provider, { lossy: each.lifecycle === "lost" });
+    const { host, rewind } = made;
+    await start(context, host);
+    await choose(context, host, "One");
+    if (each.read === "adopt") assert.equal(await rewind.back(0), true);
+    const bridge = await host.bridge;
+    const shown = shownView(host);
+    const callsBefore = storage.calls.length;
+    const held = holdRead(
+      context,
+      bridge,
+      READS[each.read],
+      each.hold,
+      each.settlement === "rejection",
+    );
+    const step = each.read === "back" ? rewind.back(0) : rewind.resume();
+    await held.arrived;
+    if (each.lifecycle === "publication") {
+      // The page shows a newer publication of the session, which the read did not see: a later observation.
+      context.mock.timers.tick(1_000);
+      host.observe();
       await settle(context);
-      const wrote = storage.calls.slice(callsBefore).includes("replace");
-      const notice = host.notices.value.some((one) => one.key === "rewind-not-adopted");
-      if (read === "back") {
-        // Nothing was parked, but after a stop: no state shows for inspection.
-        const parks = end === "stopped";
-        assert.equal(done, parks, "Back's result");
-        assert.equal(host.rewind.inspecting.value, parks, "a state shown for inspection");
-        if (end === "readFails") assert.equal(host.session.value, shownBefore);
-        assert.equal(wrote, false);
-        return;
-      }
-      // An adoption Debug's end waits for completes; any other end writes nothing.
-      const completes = end === "debugOff";
-      assert.equal(done, completes, "the adoption's result");
-      assert.equal(wrote, completes, "the saved values written");
-      assert.equal(notice, end === "readFails", "the notice");
-    });
+      assert.notEqual(shownView(host).revision, shown.revision, "a newer publication shows");
+    } else if (each.lifecycle === "replaced") {
+      host.prepare((recording) =>
+        createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
+      );
+      host.activate();
+    } else if (each.lifecycle === "debugOff") made.debug.stop();
+    else if (each.lifecycle === "stopped") host.reportHostError(new Error("A Player error."));
+    else if (each.lifecycle === "disposed") {
+      made.debug.stop();
+      made.scope.stop();
+    } else if (each.lifecycle === "lost") made.lose!();
+    held.release();
+    const done = await step.catch(() => false);
+    await settle(context);
+    const want = exitOutcome(each);
+    assert.equal(done, want.done, "the step's result");
+    assert.equal(
+      storage.calls.slice(callsBefore).includes("replace"),
+      want.wrote,
+      "the saved values written",
+    );
+    assert.equal(
+      host.notices.value.some((one) => one.key === "rewind-not-adopted"),
+      want.notice,
+      "the adoption's failure said",
+    );
+    if (each.read === "back")
+      assert.equal(host.rewind.inspecting.value, want.done, "a state parked");
+  });
+
+test("the rewind reads' exit cases are every feasible coordinate of their declaration", () => {
+  const all = product(EXIT_AXES).filter((each) => !infeasible(each));
+  assert.deepEqual(coverageGaps(all, exitCases(), { tuples: true }), []);
+});
