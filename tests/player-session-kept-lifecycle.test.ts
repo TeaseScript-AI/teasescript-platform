@@ -14,11 +14,12 @@ import type {
   PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import { preparedPlan } from "./helpers/prepared-plan.js";
+import type { PlayerBridge } from "../player/player-bridge.js";
 import type { SavedDataHost } from "../player/saved-data.js";
 import { createLocalScriptStorage, type ScriptStorageProvider } from "../player/script-storage.js";
 import type { SessionTransfer } from "../player/session-transfer.js";
 import type { StorageBundle, StorageBundleScript } from "../player/storage-transfer.js";
-import type { InstructionPlan } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { answerWith, type Intent } from "./helpers/player-input.js";
@@ -52,8 +53,9 @@ interface Host {
   readonly imageCapture: { choose(reference: string): boolean; answer(input: "button"): Intent };
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
+  readonly bridge: Promise<PlayerBridge>;
   prepareScript(
-    plan: InstructionPlan,
+    plan: string,
     create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession,
   ): Promise<void>;
   prepare(create: () => PlayerRuntimeSession): void;
@@ -238,8 +240,11 @@ function page(context: TestContext, at: Browser, options: { scope?: string; room
   return { host, close: () => scope.stop() };
 }
 
-const prepare = (host: Host, plan = PLAN) =>
-  host.prepareScript(plan, (options) =>
+/** The token under which `host`'s bridge holds `plan`, prepared there from its text as a host does. */
+const token = (host: Host, plan = PLAN) => preparedPlan(host.bridge, plan);
+/** Prepares the held plan `held`, of the test plan `plan`, at once: `prepareScript`'s ownership begins with the call. */
+const prepare = (host: Host, held: string, plan = PLAN) =>
+  host.prepareScript(held, (options) =>
     createPlayerRuntimeSession(plan, { ...options, ...host.scriptStorageOptions() }),
   );
 
@@ -265,7 +270,7 @@ async function keepAtFirst(
 ) {
   const { host, close } = page(context, at, options);
   await host.loadScriptStorage();
-  await prepare(host);
+  await prepare(host, await token(host));
   assert.equal(host.activation.value, "start");
   await host.activate();
   const store = options.room === "debug" ? at.innerRooms : at.innerKept;
@@ -287,7 +292,7 @@ async function heldPage(
   await opened.host.loadScriptStorage();
   const reached = hold.reached;
   hold.arm();
-  const preparing = prepare(opened.host);
+  const preparing = prepare(opened.host, await token(opened.host));
   await until(() => hold.reached > reached, "the read was not issued");
   assert.equal(opened.host.activation.value, null);
   return { ...opened, preparing };
@@ -297,7 +302,7 @@ async function heldPage(
 async function fresh(context: TestContext, at: Browser, scope = SHOWN) {
   const { host, close } = page(context, at, { scope });
   await host.loadScriptStorage();
-  await prepare(host);
+  await prepare(host, await token(host));
   const offered = host.activation.value;
   await host.activate();
   await until(() => said(host).includes("First"), "the fresh page showed nothing");
@@ -355,7 +360,7 @@ test("a kept photo read answered after the import is not put back, and one answe
   async function keepPhoto(at: Browser): Promise<string> {
     const { host, close } = page(context, at);
     await host.loadScriptStorage();
-    await prepare(host, PHOTO);
+    await prepare(host, await token(host, PHOTO), PHOTO);
     await host.activate();
     await until(() => host.session.value?.state.status === "waiting", "the session did not ask");
     const stored = await host.images.store(new File([PNG], "photo.png"), {
@@ -377,7 +382,7 @@ test("a kept photo read answered after the import is not put back, and one answe
     const opened = page(context, at);
     await opened.host.loadScriptStorage();
     at.holds.photo.arm();
-    const preparing = prepare(opened.host, PHOTO);
+    const preparing = prepare(opened.host, await token(opened.host, PHOTO), PHOTO);
     await until(() => at.holds.photo.reached === 1, "the photo was not read");
     return { ...opened, preparing };
   }
@@ -407,7 +412,7 @@ test("a prepared script that a newer Start replaced while the host got ready off
   await keepAtFirst(context, at);
   const { host } = page(context, at);
   await host.loadScriptStorage();
-  const preparing = prepare(host);
+  const preparing = prepare(host, await token(host));
   host.prepare(() => createPlayerRuntimeSession(OTHER_START, host.scriptStorageOptions()));
   await preparing;
   await settle();
@@ -424,7 +429,7 @@ test("a kept-session read answered after a session import leaves the imported se
   await keepAtFirst(context, elsewhere);
   const exporting = page(context, elsewhere);
   await exporting.host.loadScriptStorage();
-  await prepare(exporting.host);
+  await prepare(exporting.host, await token(exporting.host));
   const { transfer } = await exporting.host.exportSession();
 
   const at = await browser();
@@ -480,7 +485,7 @@ test("the start page's own read offers Start, and a read answered after unmount 
   const at = await browser();
   const { host } = page(context, at);
   await host.loadScriptStorage();
-  await prepare(host, ENDS);
+  await prepare(host, await token(host, ENDS), ENDS);
   await host.activate();
   await until(() => host.session.value?.state.status === "halted", "the session did not end");
   at.holds.session.arm();
@@ -506,7 +511,7 @@ test("a saved-data import whose kept session cannot be discarded leaves the scri
     await keepAtFirst(context, at);
     const { host } = page(context, at);
     await host.loadScriptStorage();
-    await prepare(host);
+    await prepare(host, await token(host));
     assert.equal(host.activation.value, "continue");
     if (refuse) at.refused.add(SHOWN);
     const outcome = await importSaved(host, [SHOWN]).then(
@@ -535,7 +540,7 @@ test("among several scripts only the one whose kept session cannot be discarded 
   for (const scope of [SHOWN, OTHER, NEW]) await keepAtFirst(context, at, { scope });
   const { host } = page(context, at);
   await host.loadScriptStorage();
-  await prepare(host);
+  await prepare(host, await token(host));
   at.refused.add(OTHER);
   const outcome = await importSaved(host, [SHOWN, OTHER], [SHOWN, OTHER, NEW]).then(
     () => "",
@@ -559,7 +564,7 @@ test("the debug room imports the script's own saved data only once its kept sess
     await keepAtFirst(context, at, { room: "debug" });
     const { host } = page(context, at, { room: "debug" });
     await host.loadScriptStorage();
-    await prepare(host);
+    await prepare(host, await token(host));
     assert.equal(host.activation.value, "continue");
     if (refuse) at.refused.add(SHOWN);
     const outcome = await importSaved(host, [SHOWN]).then(

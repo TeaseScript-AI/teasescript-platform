@@ -246,12 +246,6 @@ export function heldTrace(bridge: PlayerBridge): RuntimeDebugContext | null {
   return backendOf(bridge).context.trace;
 }
 
-/** **Facade.** Holds `plan`, which the main realm compiled, in the host; returns its token, the one it has if held. */
-export function holdPlan(bridge: PlayerBridge, plan: InstructionPlan): string {
-  const { context } = backendOf(bridge);
-  return [...context.plans].find(([, held]) => held === plan)?.[0] ?? context.hold(plan);
-}
-
 /** **Facade.** The plan the host holds under `token`, for code that still needs the graph. */
 export function heldPlan(bridge: PlayerBridge, token: string): InstructionPlan {
   const plan = backendOf(bridge).context.plans.get(token);

@@ -19,6 +19,7 @@ import type * as RuntimeView from "../player/runtime-view.js";
 import type { PlayerSession } from "../player/runtime-view.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import { preparedPlan } from "./helpers/prepared-plan.js";
 
 /*
  * At a Player error stop, what is shown is what the host ran, which its export and recording hold, and nothing shows
@@ -216,7 +217,7 @@ test("a Start queued behind prepare that a factory Start replaced leaves the rec
   const obsolete = compiler.compilePlayerProject(
     'say "obsolete", instant\nshowButton "Old"\nexit',
   ).plan!;
-  const token = facade.holdPlan(bridge, obsolete);
+  const token = await preparedPlan(Promise.resolve(bridge), obsolete);
   player.prepare({ plan: token, options: () => ({ wallClockMs: 0 }) });
   const compiling = bridge.client.request("prepare", {
     source: { kind: "source", script: 'showButton "Compile"\nexit' },
@@ -463,7 +464,8 @@ for (const kind of [
       const plan = compiler.compilePlayerProject(
         'say "started", instant\nshowButton "Next"\nexit',
       ).plan!;
-      player.prepare({ plan: facade.holdPlan(bridge, plan), options: () => ({ wallClockMs: 0 }) });
+      const token = await preparedPlan(Promise.resolve(bridge), plan);
+      player.prepare({ plan: token, options: () => ({ wallClockMs: 0 }) });
       if (kind === "start-queued")
         compiled = bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
     } else {
@@ -749,6 +751,12 @@ for (const form of ["a factory", "a held plan"] as const)
     let temporal = DEFAULT_TEMPORAL_CONTEXT;
     context.mock.method(Date, "now", () => epoch);
     const { bridge, player } = await mount(context, 0, undefined, () => temporal);
+    const script = 'showButton "Go"\nexit';
+    // Held before anything is timed, as a host's `prepare` holds it.
+    const token = await preparedPlan(
+      Promise.resolve(bridge),
+      compiler.compilePlayerProject(script).plan!,
+    );
     // The Continue's `beginRecording` reply is held, so the Start waits for it (`begunInFlight`).
     const request = bridge.client.request.bind(bridge.client);
     let release!: () => void;
@@ -762,10 +770,9 @@ for (const form of ["a factory", "a held plan"] as const)
     });
     player.prepareRestore(compiler.createPlayerRuntimeSession('showButton "Old"\nexit'));
     const obsolete = player.activate();
-    const script = 'showButton "Go"\nexit';
     if (form === "a held plan")
       player.prepare({
-        plan: facade.holdPlan(bridge, compiler.compilePlayerProject(script).plan!),
+        plan: token,
         // As `hostedScript.ts` asks for it.
         options: () => player.temporalCapture(),
       });
@@ -862,11 +869,12 @@ for (const camera of [false, true])
       });
       await player.bridge;
       const script = 'showButton "Ready"\nexit';
+      const token = await preparedPlan(
+        Promise.resolve(bridge),
+        compiler.compilePlayerProject(script).plan!,
+      );
       if (form === "a held plan")
-        player.prepare({
-          plan: facade.holdPlan(bridge, compiler.compilePlayerProject(script).plan!),
-          options: () => player.temporalCapture(),
-        });
+        player.prepare({ plan: token, options: () => player.temporalCapture() });
       else
         player.prepare((recording) =>
           compiler.createPlayerRuntimeSession(script, {

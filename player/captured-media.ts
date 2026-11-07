@@ -1,3 +1,5 @@
+import { StaleOperation, type PersistenceOwnership } from "./persistence-ownership.js";
+
 /**
  * What a stored record is: a photo, a chosen image, or a recording, or a file a script stored (V30 §33), as its type
  * gives it. A `file` is of no recognized type and is never shown or played.
@@ -201,22 +203,28 @@ export class CapturedMediaStore {
 
   /**
    * Of `candidates`, the references of media this store holds or has stored durably: one read of the stored references,
-   * none of their media. Text that only has the shape of a reference is not among them.
+   * none of their media. Text that only has the shape of a reference is not among them. For a persistence operation,
+   * `owner` admits the read (`persistence-ownership.ts`).
    */
-  async storedReferences(candidates: Iterable<string>): Promise<Set<string>> {
+  async storedReferences(
+    candidates: Iterable<string>,
+    owner?: PersistenceOwnership,
+  ): Promise<Set<string>> {
     const wanted = [...candidates];
     const found = new Set(wanted.filter((reference) => this.knows(reference)));
     if (found.size === wanted.length || this.#repository === null || this.#closed) return found;
-    const stored = new Set(await this.#repository.listReferences(this.#namespace));
+    const repository = owner === undefined ? this.#repository : owner.photos(this.#repository);
+    const stored = new Set(await repository.listReferences(this.#namespace));
     for (const reference of wanted) if (stored.has(reference)) found.add(reference);
     return found;
   }
 
   /**
    * Stores the session media among `references` durably; references this store does not hold are ordinary data and
-   * ignored. Idempotent: media already stored, also by an earlier attempt, is kept as it is.
+   * ignored. Idempotent: media already stored, also by an earlier attempt, is kept as it is. For a persistence operation,
+   * `owner` admits each store call and applies what was stored (`persistence-ownership.ts`).
    */
-  async promote(references: Iterable<string>): Promise<void> {
+  async promote(references: Iterable<string>, owner?: PersistenceOwnership): Promise<void> {
     for (const reference of references) {
       const record = this.#records.get(reference);
       if (record === undefined) continue;
@@ -224,8 +232,13 @@ export class CapturedMediaStore {
       if (this.#repository === null || this.#durableDisabled)
         throw new CapturedMediaNotStoredError("No durable media storage is available.");
       if (this.#durable.has(reference)) continue;
-      await insertOrConfirm(this.#repository, record);
-      this.#durable.add(reference);
+      if (owner === undefined) {
+        await insertOrConfirm(this.#repository, record);
+        this.#durable.add(reference);
+      } else {
+        await insertOrConfirm(owner.photos(this.#repository), record);
+        owner.commit(() => this.#durable.add(reference));
+      }
     }
   }
 
@@ -377,7 +390,14 @@ export async function insertOrConfirm(
   try {
     await repository.add(record);
   } catch (error) {
-    const stored = await repository.get(record.namespace, record.reference).catch(() => null);
+    // A persistence operation's handle that refused the call: the operation ends, and nothing is confirmed.
+    if (error instanceof StaleOperation) throw error;
+    const stored = await repository
+      .get(record.namespace, record.reference)
+      .catch((caught: unknown) => {
+        if (caught instanceof StaleOperation) throw caught;
+        return null;
+      });
     if (validCapturedMediaRecord(stored, record.namespace, record.reference) === null)
       throw new CapturedMediaNotStoredError("The captured media could not be stored.", {
         cause: error,

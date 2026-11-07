@@ -165,12 +165,6 @@ export const RATCHET: readonly RatchetEntry[] = [
   },
   {
     importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/engine-bridge/in-process.ts",
-    name: "holdPlan",
-    family: "L5h",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
     target: "player/runtime-adapter.ts",
     name: "playerRuntimeSnapshot",
     family: "L5h",
@@ -337,12 +331,6 @@ export const RATCHET: readonly RatchetEntry[] = [
     importer: "player/vue/src/usePlayerSession.ts",
     target: "player/engine-bridge/in-process.ts",
     name: "introduceNow",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "restorePlayerRuntimeSessionAt",
     family: "L5i",
   },
   {
