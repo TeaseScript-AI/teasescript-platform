@@ -33,6 +33,8 @@ const FRESH = new Set(["copied", "sliced", "sorted", "concatenated", "each", "in
 /** The only local class, and the native constructions. */
 const LOCAL_CLASS = "Gathered";
 const NATIVE_CONSTRUCTORS = new Set(["Map", "Set"]);
+/** The native members that store into their receiver (gate 4 checks the receiver's element kinds). */
+const NATIVE_STORES = new Set(["push", "set", "add"]);
 /** The native members whose result is the receiver's own stored content. */
 const NATIVE_READS = new Set(["get", "keys", "values", "pop"]);
 const KEY_WALK = "src/type-inference/core/contract/key-ids.ts:keyWalk";
@@ -112,7 +114,11 @@ export function objectsLanguage({
   const elementOf = (type) => {
     if (checker.isArrayLikeType(type)) return checker.getIndexTypeOfType(type, ts.IndexKind.Number);
     const name = (type.getSymbol() ?? type.aliasSymbol)?.name;
-    const args = type.aliasTypeArguments ?? checker.getTypeArguments?.(type) ?? [];
+    // (the resolved reference's arguments, never an alias's: `S<T> = Generator<string | T>` is `Generator<string | T>`)
+    const args =
+      type.flags & ts.TypeFlags.Object && type.objectFlags & ts.ObjectFlags.Reference
+        ? checker.getTypeArguments(type)
+        : [];
     if (name === "Set" || name === "ReadonlySet") return args[0];
     if (name === "Map" || name === "ReadonlyMap" || name === "WeakMap") return args[1];
     if (name !== undefined && ITERABLES.has(name)) return args[0];
@@ -142,40 +148,47 @@ export function objectsLanguage({
     typeof checker.isTypeAssignableTo === "function"
       ? checker.isTypeAssignableTo(a, b)
       : checker.typeToString(a) === checker.typeToString(b);
-  /** A value that carries nothing in: a primitive literal, `null`, a boolean, an empty array. */
+  /**
+   * Gate 1's only exceptions, values that carry nothing in: `null`, a primitive literal (a boolean, or a number with its
+   * sign, included), `[]`, and a `new` without arguments.
+   */
   const trivial = (e) =>
-    ts.isLiteralExpression(e) ||
-    ts.isPrefixUnaryExpression(e) ||
-    [ts.SyntaxKind.NullKeyword, ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword].includes(
-      e.kind,
-    ) ||
-    (ts.isArrayLiteralExpression(e) && e.elements.length === 0);
-  /** The module's exported functions' declarations (an export list's included), each once. */
-  const exportedFunctions = () => {
+    e.kind === ts.SyntaxKind.NullKeyword ||
+    ts.isStringLiteral(e) ||
+    ts.isNoSubstitutionTemplateLiteral(e) ||
+    ts.isNumericLiteral(e) ||
+    ts.isBigIntLiteral(e) ||
+    e.kind === ts.SyntaxKind.TrueKeyword ||
+    e.kind === ts.SyntaxKind.FalseKeyword ||
+    (ts.isPrefixUnaryExpression(e) &&
+      (ts.isNumericLiteral(e.operand) || ts.isBigIntLiteral(e.operand))) ||
+    (ts.isArrayLiteralExpression(e) && e.elements.length === 0) ||
+    (ts.isNewExpression(e) && (e.arguments?.length ?? 0) === 0);
+  /**
+   * Gate 3: the module's callable exports (an export list's, a default's and a re-export's included), each once, by
+   * its declaration, or by its export where it resolves to none here. Only a local function declaration is an entry.
+   */
+  const callableExports = () => {
     const module = checker.getSymbolAtLocation(sourceFile);
-    const found = new Set();
+    const found = new Map();
     for (const exported of module === undefined ? [] : checker.getExportsOfModule(module)) {
-      const declaration = original(exported)?.valueDeclaration;
-      if (declaration === undefined || !local(declaration)) continue;
-      if (ts.isFunctionDeclaration(declaration)) found.add(declaration);
-      else if (
-        ts.isVariableDeclaration(declaration) &&
-        declaration.initializer !== undefined &&
-        (ts.isArrowFunction(strip(declaration.initializer)) ||
-          ts.isFunctionExpression(strip(declaration.initializer)))
-      )
-        found.add(declaration);
+      const target = original(exported);
+      const declaration = target?.valueDeclaration ?? target?.declarations?.[0];
+      const at = declaration ?? exported.declarations?.[0];
+      if (at === undefined) continue;
+      const type = checker.getTypeOfSymbolAtLocation(target ?? exported, at);
+      if (type.getCallSignatures().length === 0 && type.getConstructSignatures().length === 0)
+        continue;
+      found.set(declaration ?? at, exported.declarations?.[0] ?? at);
     }
     return found;
   };
-  const fresh = (e) =>
-    ts.isArrayLiteralExpression(e) ||
-    ts.isObjectLiteralExpression(e) ||
-    ts.isNewExpression(e) ||
-    ts.isLiteralExpression(e) ||
-    [ts.SyntaxKind.NullKeyword, ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword].includes(
-      e.kind,
-    );
+  const exportedFunctions = () => {
+    const found = new Set();
+    for (const declaration of callableExports().keys())
+      if (ts.isFunctionDeclaration(declaration) && local(declaration)) found.add(declaration);
+    return found;
+  };
 
   // ---- origin: a native receiver's or a helper collection's, traced to a construction or a named reviewed leaf ----
   const tracing = new Set();
@@ -372,8 +385,23 @@ export function objectsLanguage({
       DEMAND_CALLBACKS.has(parent.name.text)
     );
   };
+  /** Whether an expression is written: assigned, compounded, incremented or deleted. */
+  const written = (e) => {
+    const p = e.parent;
+    return (
+      (ts.isBinaryExpression(p) &&
+        p.left === e &&
+        p.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        p.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ||
+      ((ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) &&
+        [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(p.operator)) ||
+      ts.isDeleteExpression(p)
+    );
+  };
   const sortedArgument = (call) => {
     if (call.arguments.length > 3) return reject(call, "comparator", "sort comparator");
+    if (!ts.isExpressionStatement(call.parent))
+      reject(call, "sorted-result", "`sorted` but as a statement, its result discarded");
     const argument = strip(call.arguments[2]);
     const symbol = ts.isIdentifier(argument) ? checker.getSymbolAtLocation(argument) : undefined;
     const declaration = symbol?.valueDeclaration;
@@ -406,21 +434,35 @@ export function objectsLanguage({
         checker.getSymbolAtLocation(node) === symbol
       ) {
         const p = node.parent;
+        // gate 2: only these uses, nothing that writes or keeps it
         const read =
-          (ts.isPropertyAccessExpression(p) && p.expression === node && p.name.text === "length") ||
-          (ts.isCallExpression(p) && helperOf(p) === "sorted" && p.arguments[2] === node) ||
+          (ts.isPropertyAccessExpression(p) &&
+            p.expression === node &&
+            p.name.text === "length" &&
+            !written(p)) ||
+          (ts.isCallExpression(p) &&
+            helperOf(p) === "sorted" &&
+            p.arguments[2] === node &&
+            ts.isExpressionStatement(p.parent)) ||
           (ts.isArrayLiteralExpression(p) &&
             ts.isCallExpression(p.parent) &&
-            helperOf(p.parent) === "concatenated");
+            helperOf(p.parent) === "concatenated" &&
+            p.parent.arguments[2] === p);
         if (!read) reject(node, "sorted-alias", "alias of an array `sorted` sorts");
       }
       ts.forEachChild(node, visit);
     };
     visit(sourceFile);
   };
+  /** Gate 4 where the file walks or writes a collection: its element kinds alike. */
+  const mixedAt = (e) => {
+    if (mixedElements(checker.getTypeAtLocation(e)))
+      reject(e, "mixed-elements", "collection of mixed element kinds");
+  };
   const helperContract = (call, helper) => {
     const at = COLLECTION_ARGUMENT.get(helper);
     if (at !== undefined && call.arguments[at] !== undefined) {
+      mixedAt(call.arguments[at]);
       const reason = origin(call.arguments[at]);
       if (reason !== null)
         reject(
@@ -440,6 +482,7 @@ export function objectsLanguage({
         reject(call, "concatenated-literal", "`concatenated` but over a literal array of sources");
       else
         for (const source of sources.elements) {
+          mixedAt(source);
           const reason = origin(source);
           if (reason !== null)
             reject(
@@ -544,6 +587,7 @@ export function objectsLanguage({
       }
       if (!outside.has(name)) return; // (the retained OUTSIDE rule reports it)
       if (fileOf(declaration) === "lib") {
+        if (NATIVE_STORES.has(symbol.name)) mixedAt(callee.expression);
         const reason = origin(callee.expression);
         if (reason !== null)
           reject(
@@ -571,9 +615,13 @@ export function objectsLanguage({
     );
     return declaration !== undefined && !local(declaration) && outsideClass(declaration);
   };
-  // the module's entries, by its exports (an export list included): function declarations only
-  for (const declaration of exportedFunctions())
-    if (ts.isFunctionDeclaration(declaration)) {
+  // gate 3, the module's entries: every callable export a local function declaration, its parameters entry types
+  for (const [declaration, exportedAt] of callableExports())
+    if (
+      ts.isFunctionDeclaration(declaration) &&
+      local(declaration) &&
+      declaration.body !== undefined
+    ) {
       for (const parameter of declaration.parameters)
         if (!entryType(checker.getTypeAtLocation(parameter)))
           reject(
@@ -581,27 +629,12 @@ export function objectsLanguage({
             "entry-parameter",
             "entry parameter but a primitive, a native array of primitives or an audited class",
           );
-    } else reject(declaration, "export-form", "exported function but a function declaration");
-  /** Whether a captured value in an annotated aggregate is typed otherwise than its place in it (a widening alias). */
-  const widened = (e) => {
-    e = strip(e);
-    if (ts.isArrayLiteralExpression(e)) return e.elements.some(widened);
-    if (ts.isObjectLiteralExpression(e))
-      return e.properties.some((member) =>
-        ts.isPropertyAssignment(member)
-          ? widened(member.initializer)
-          : ts.isShorthandPropertyAssignment(member)
-            ? differs(member.name)
-            : false,
+    } else
+      reject(
+        local(exportedAt) ? exportedAt : sourceFile,
+        "export-form",
+        "callable export but a local function declaration",
       );
-    if (trivial(e) || ts.isNewExpression(e)) return false;
-    return differs(e);
-  };
-  const differs = (e) => {
-    const place = checker.getContextualType(e);
-    const given = checker.getTypeAtLocation(e);
-    return place !== undefined && (!assignable(place, given) || !assignable(given, place));
-  };
   const visit = (node) => {
     if (ts.isCallExpression(node) || ts.isNewExpression(node)) checkCall(node);
     else if (ts.isTaggedTemplateExpression(node))
@@ -640,32 +673,44 @@ export function objectsLanguage({
       node.type !== undefined &&
       node.initializer !== undefined
     ) {
-      const value = strip(node.initializer);
+      // gate 1: the whole value typed as the binding, both ways, but for the four trivial values
       const declared = checker.getTypeFromTypeNode(node.type);
       const given = checker.getTypeAtLocation(node.initializer);
       if (
-        fresh(value) ? widened(value) : !assignable(declared, given) || !assignable(given, declared)
+        !trivial(strip(node.initializer)) &&
+        (!assignable(declared, given) || !assignable(given, declared))
       )
         reject(node, "widening", "binding typed otherwise than its value (a widening alias)");
     }
+    // gate 4 on every binding, parameter and field (and, in `helperContract` and `checkCall`, on every collection the
+    // file walks or writes); gate 5 on every value expression, `this` and `yield` included
+    const value = valueExpression(node);
     if (
       (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isPropertyDeclaration(node)) &&
       mixedElements(checker.getTypeAtLocation(node))
     )
       reject(node, "mixed-elements", "collection of mixed element kinds");
-    if (
-      (ts.isIdentifier(node) ||
-        ts.isPropertyAccessExpression(node) ||
-        ts.isCallExpression(node) ||
-        ts.isElementAccessExpression(node)) &&
-      !ts.isPartOfTypeNode(node) &&
-      valuePosition(node)
-    ) {
+    if (value) {
       const type = checker.getTypeAtLocation(node);
       if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown))
         reject(node, "any", "`any` or `unknown` value");
     }
     ts.forEachChild(node, visit);
+  };
+  /**
+   * Whether a node is a value expression whose value is used: an expression (`this` included) outside types, imports
+   * and exports, not a declared or member name, and not a `yield` whose value is discarded.
+   */
+  const valueExpression = (node) =>
+    (ts.isExpression(node) || node.kind === ts.SyntaxKind.ThisKeyword) &&
+    !inType(node) &&
+    !(ts.isYieldExpression(node) && ts.isExpressionStatement(node.parent)) &&
+    !ts.isOmittedExpression(node) &&
+    valuePosition(node);
+  /** Whether a node stands inside a type (a literal type's literal included). */
+  const inType = (node) => {
+    for (let at = node; at !== undefined; at = at.parent) if (ts.isTypeNode(at)) return true;
+    return false;
   };
   const valuePosition = (node) => {
     for (let at = node; at !== undefined; at = at.parent)
