@@ -374,9 +374,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     void acknowledged.then(commit);
   }
   /**
-   * The engine Worker was lost. **The owner's choice point** (L5 series, Doubt 3): what the player sees then is decided
-   * before L5g, which replaces this. Until then it takes the path of an exception of the Player that cannot be
-   * recovered, the error stop. An intentional `terminate()` is no loss and never reaches it.
+   * The engine Worker was lost: the path of an exception of the Player that cannot be recovered, the error stop. What
+   * the player sees then is the owner's open decision (#1897). An intentional `terminate()` is no loss and never reaches
+   * it.
    */
   function bridgeLost(error: Error) {
     if (disposed) return;

@@ -14,7 +14,14 @@ export type BridgeFamily =
   "L5b" | "L5c" | "L5d" | "L5e" | "L5f" | "L5g" | "L5h" | "L5i" | "activation";
 
 /** Families whose PRs have landed: none of their entries may remain in `RATCHET`. */
-export const COMPLETED_FAMILIES: readonly BridgeFamily[] = ["L5b", "L5c", "L5d", "L5e", "L5f"];
+export const COMPLETED_FAMILIES: readonly BridgeFamily[] = [
+  "L5b",
+  "L5c",
+  "L5d",
+  "L5e",
+  "L5f",
+  "L5g",
+];
 
 /** The `src/` modules the main realm may load, grouped by why. */
 export const ALLOWED_SOURCE: readonly {
