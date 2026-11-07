@@ -46,7 +46,8 @@ export function useDebugRewind(player: PlayerSessionHost) {
     history.value.follow(session, marks());
     revision.value++;
   }
-  // Every published session is followed, so a point keeps exactly the events that led to it.
+  // Every published session is followed: a point keeps the events of the publication it follows, and the state the host
+  // holds when it is read, which can be a later publication's (#1981).
   watch(player.generation, () => publishing || end(), { flush: "sync" });
   watch(rewind.retirements, end, { flush: "sync" });
   watch(player.session, follow, { flush: "sync" });

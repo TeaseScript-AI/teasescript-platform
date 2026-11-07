@@ -5,7 +5,7 @@ import { planLockNeeds } from "../../plan-metadata.js";
 import {
   CapturedMediaNotStoredError,
   CapturedMediaStore,
-  insertOrConfirm,
+  insertOrAcceptExisting,
   isCapturedMediaReference,
   isWellFormedCapturedMediaReference,
   type CapturedMediaRecord,
@@ -29,7 +29,6 @@ import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../medi
 import { type LockDialogInput } from "../../lock-service.js";
 import type { LockServices } from "../../encryption/lock.js";
 import {
-  playerRuntimeSnapshot,
   playerRuntimeSnapshotOrNull,
   type PlayerRuntimeRestorePoint,
   type PlayerRuntimeSession,
@@ -53,7 +52,7 @@ import {
 } from "../../engine-bridge/in-process.js";
 import type { StartOptions } from "../../engine-bridge/ops/session.js";
 import type { RandomIntent, TracingIntent } from "../../engine-bridge/player-ops.js";
-import type { CheckpointCapture, KeepCapture } from "../../engine-bridge/ops/persistence.js";
+import type { KeepCapture } from "../../engine-bridge/ops/persistence.js";
 import type {
   DrawResolution,
   RandomTriedView,
@@ -374,9 +373,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     void acknowledged.then(commit);
   }
   /**
-   * The engine Worker was lost. **The owner's choice point** (L5 series, Doubt 3): what the player sees then is decided
-   * before L5g, which replaces this. Until then it takes the path of an exception of the Player that cannot be
-   * recovered, the error stop. An intentional `terminate()` is no loss and never reaches it.
+   * The engine Worker was lost: the path of an exception of the Player that cannot be recovered, the error stop. What
+   * the player sees then is the owner's open decision (#1897). An intentional `terminate()` is no loss and never reaches
+   * it.
    */
   function bridgeLost(error: Error) {
     if (disposed) return;
@@ -434,7 +433,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const current = session.value;
     if (current === null || !debugTracing.value) return Promise.resolve(null);
     return bridgeOf(current)
-      .read<DebugView>(current, "debugView", { request })
+      .read(current, "debugView", { request })
       .then(
         (view) => (session.value?.lineage === current.lineage ? view : null),
         (error: unknown) => {
@@ -1192,7 +1191,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     try {
       const entries = await values.load();
       const storedFiles = await capturedMedia
-        .storedReferences(storedValueReferences(entries), owner)
+        .knownReferences(storedValueReferences(entries), owner)
         .catch(rejectedUnlessStale(new Set<string>()));
       return { entries, storedFiles };
     } catch (error) {
@@ -1898,7 +1897,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     let capture: KeepCapture;
     try {
       capture = await ctx.admit(() =>
-        bridgeOf(current).read<KeepCapture>(current, "captureKeep", {
+        bridgeOf(current).read(current, "captureKeep", {
           plan: withPlan ? current.planToken : null,
         }),
       );
@@ -1946,7 +1945,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         // The photos no save stored go with the session, a photo already kept as it is; a stored one stays stored
         // while the session uses it (`capturedMediaStorage`).
         for (const photo of capturedMedia.sessionRecords(references)) {
-          await insertOrConfirm(store.media, photo);
+          await insertOrAcceptExisting(store.media, photo);
           ctx.check();
         }
       }
@@ -2218,10 +2217,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if ("unavailable" in found) throw new StorageTransferError(found.unavailable);
     let restorePoint: PlayerRuntimeRestorePoint;
     try {
-      const capture = await bridgeOf(found.session).read<CheckpointCapture>(
-        found.session,
-        "captureCheckpoint",
-      );
+      const capture = await bridgeOf(found.session).read(found.session, "captureCheckpoint");
       restorePoint = Object.freeze({
         checkpointJson: capture.checkpointJson,
         events: Object.freeze(found.session.events.slice(0, capture.eventsThrough)),
@@ -2604,7 +2600,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const shown = session.value;
     if (shown === null) return Promise.resolve(null);
     return bridgeOf(shown)
-      .read<RandomTriedView>(shown, "randomTried", { site })
+      .read(shown, "randomTried", { site })
       .catch(() => null);
   }
   /** Whether the shown session runs or waits. */
@@ -2830,12 +2826,22 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   async function adoptShown(shown: PlayerSession): Promise<boolean> {
     const owner = generation.value;
-    // The adopted state, exported once before the first await.
-    const adopted = hatch(shown, (current) => playerRuntimeSnapshot(current));
     rewindWork.value = "adopt";
     try {
-      if (scriptStorage && adopted.scriptStoragePersistent)
-        await scriptStorage.replace(adopted.scriptStorage);
+      // The adopted state's saved values, read in the host; nothing else runs meanwhile (`rewindWork`).
+      const adopted = await bridgeOf(shown).read(shown, "captureStorage");
+      // Moved on during the read: nothing is written, and nothing is said.
+      if (
+        disposed ||
+        generation.value !== owner ||
+        !inspecting.value ||
+        stopped.value ||
+        session.value?.lineage !== shown.lineage ||
+        session.value.revision !== adopted.revision ||
+        shown.revision !== adopted.revision
+      )
+        return false;
+      if (scriptStorage && adopted.persistent) await scriptStorage.replace(adopted.entries);
     } catch {
       if (!disposed) notices.publish(playerNotices.rewindNotAdopted());
       return false;

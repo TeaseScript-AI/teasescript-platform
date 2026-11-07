@@ -22,7 +22,14 @@ import {
 } from "../../runtime-adapter.js";
 import { playerRuntimePacingGate } from "../../runtime-view.js";
 import { isValidEpochMilliseconds } from "../../../src/temporal.js";
-import { everyItem, exactly, isRecord, isStringArray, isTime } from "../argument-checks.js";
+import {
+  everyItem,
+  exactly,
+  isPlainRecord,
+  isRecord,
+  isStringArray,
+  isTime,
+} from "../argument-checks.js";
 import { instructionFacts } from "../instruction-facts.js";
 import type { RandomControlOptions } from "../../../src/runtime/random/random-control.js";
 import {
@@ -234,10 +241,13 @@ const START_OPTIONS = [
 const isEpochTime = (value: unknown): value is number =>
   typeof value === "number" && isValidEpochMilliseconds(value);
 
-/** The shape of `start`'s options; the engine validates their content as it starts the session. */
+/**
+ * The shape of `start`'s options, a plain record (a `Date` or a `Map` is none); the engine validates their content as it
+ * starts the session.
+ */
 function isStartOptions(value: unknown): value is StartOptions {
   return (
-    isRecord(value) &&
+    isPlainRecord(value) &&
     exactly(value, [], START_OPTIONS) &&
     (value.scriptStorage === undefined || everyItem(value.scriptStorage, isRecord)) &&
     (value.persistentScriptStorage === undefined ||

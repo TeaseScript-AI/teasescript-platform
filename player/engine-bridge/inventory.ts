@@ -14,7 +14,14 @@ export type BridgeFamily =
   "L5b" | "L5c" | "L5d" | "L5e" | "L5f" | "L5g" | "L5h" | "L5i" | "activation";
 
 /** Families whose PRs have landed: none of their entries may remain in `RATCHET`. */
-export const COMPLETED_FAMILIES: readonly BridgeFamily[] = ["L5b", "L5c", "L5d", "L5e", "L5f"];
+export const COMPLETED_FAMILIES: readonly BridgeFamily[] = [
+  "L5b",
+  "L5c",
+  "L5d",
+  "L5e",
+  "L5f",
+  "L5g",
+];
 
 /** The `src/` modules the main realm may load, grouped by why. */
 export const ALLOWED_SOURCE: readonly {
@@ -153,24 +160,18 @@ export interface RatchetEntry {
 export const RATCHET: readonly RatchetEntry[] = [
   // L5h
   {
-    importer: "player/debug-history.ts",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeSnapshotJson",
-    family: "L5h",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeSnapshot",
-    family: "L5h",
-  },
-  {
     importer: "player/vue/src/usePlayerSession.ts",
     target: "player/runtime-adapter.ts",
     name: "playerRuntimeSnapshotOrNull",
     family: "L5h",
   },
-  // L5i
+  // L5i (the history's points with its host core, L5i.6: #1981)
+  {
+    importer: "player/debug-history.ts",
+    target: "player/runtime-adapter.ts",
+    name: "playerRuntimeSnapshotJson",
+    family: "L5i",
+  },
   {
     importer: "player/debug-export-assembly.ts",
     target: "src/index.ts",
