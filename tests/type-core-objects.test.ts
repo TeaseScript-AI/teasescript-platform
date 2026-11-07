@@ -8,8 +8,7 @@ import { indexPaths, stepsOf } from "../src/type-inference/core/contract/literal
 import { exportNames, keyBelowIn } from "../src/type-inference/core/contract/key-ids.js";
 import { writtenOf } from "../src/type-inference/core/contract/terms.js";
 import { absentWriterAt, objectsAt } from "../src/type-inference/core/contract/objects.js";
-import { readGroupsAt } from "../src/type-inference/core/contract/others.js";
-import type { ReadEntry } from "../src/type-inference/core/contract/model.js";
+import { othersAt, readGroupsAt } from "../src/type-inference/core/contract/others.js";
 import {
   DemandExhausted,
   withTestAllowance,
@@ -417,57 +416,71 @@ test("an objects query charges each writer it meets and each edge it reads, a se
 });
 
 test("a declined objects query charges each entry it visits, and stops at the first decline (#1747, Codex r3)", () => {
-  // (n bindings read into one array beside a host value: the host's query declines, the rest is not read for it)
-  const units = [4, 64].map((n) => {
-    const rows = Array.from({ length: n }, (_, i) => `let b${i}={p${i}:1}`);
-    rows.push(
-      `let xs=[hostValue,${Array.from({ length: n }, (_, i) => `b${i}`).join(",")}]`,
-      "exit",
-    );
-    const pass = passesOf(rows.join("\n") + "\n", MODES[0]!, 30_000_000).at(-1)!;
-    const { program, contract, solver } = pass;
-    const array = [...program.hasOf.keys()].find((literal) =>
-      contract.literalIndex(literal).root.children.has("element"),
-    )!;
-    return inMode(MODES[0]!, () => {
-      // (each read group's entries counted as the walk takes them: the visits themselves, not only their charge)
-      const element = contract.literalIndex(array).root.children.get("element")!;
-      let visits = 0;
-      const restore: (() => void)[] = [];
-      for (const group of readGroupsAt(contract, element.reads, false)) {
-        // (the group's own list, its iterator counting each entry taken, put back after)
-        const read: { [Symbol.iterator]: () => Iterator<ReadEntry> } & ArrayLike<ReadEntry> =
-          group.read;
-        const prior = Object.getOwnPropertyDescriptor(read, Symbol.iterator);
-        Object.defineProperty(read, Symbol.iterator, {
-          configurable: true,
-          value: function* (this: ArrayLike<ReadEntry>) {
-            for (let at = 0; at < this.length; at += 1) {
-              visits += 1;
-              yield this[at]!;
-            }
-          },
-        });
-        restore.push(() => {
-          if (prior === undefined) Reflect.deleteProperty(read, Symbol.iterator);
-          else Object.defineProperty(read, Symbol.iterator, prior);
-        });
-      }
-      try {
+  // (n bindings into one array after a host value, read as they are or computed: the host's query declines, the rest
+  // is not read for it)
+  for (const [kind, element] of [
+    ["reads", (value: string) => value],
+    ["others", (value: string) => `${value} otherwise {a:1}`],
+  ] as const) {
+    const units = [4, 64].map((n) => {
+      const rows = Array.from({ length: n }, (_, i) => `let b${i}={p${i}:1}`);
+      const elements = ["hostValue", ...Array.from({ length: n }, (_, i) => `b${i}`)].map(element);
+      rows.push(`let xs=[${elements.join(",")}]`, "exit");
+      const pass = passesOf(rows.join("\n") + "\n", MODES[0]!, 30_000_000).at(-1)!;
+      const { program, contract, solver } = pass;
+      const array = [...program.hasOf.keys()].find((literal) =>
+        contract.literalIndex(literal).root.children.has("element"),
+      )!;
+      return inMode(MODES[0]!, () => {
         solver.run(solver.proven(objectsAt(contract, array, ["element"])));
-        visits = 0;
-        const before = program.work.total;
-        const { proof } = solver.run(solver.proven(objectsAt(contract, array, ["element", "zz"])));
-        assert.equal(proof?.complete, false);
-        return { units: program.work.total - before, visits };
-      } finally {
-        for (const undo of restore) undo();
-      }
+        // (each group's entries counted as the walk takes them: the visits themselves, not only their charge)
+        const node = contract.literalIndex(array).root.children.get("element")!;
+        const others = othersAt(contract, node.others, false);
+        const groups = [
+          ...readGroupsAt(contract, node.reads, false),
+          ...(contract.othersBelowOf.get(others) ?? others),
+        ];
+        let visits = 0;
+        const restore: (() => void)[] = [];
+        for (const group of groups) {
+          if (group === null) continue;
+          // (the group's own list, its iterator counting each entry taken, put back after)
+          const read: { [Symbol.iterator]: () => Iterator<unknown> } & ArrayLike<unknown> =
+            group.read;
+          const prior = Object.getOwnPropertyDescriptor(read, Symbol.iterator);
+          Object.defineProperty(read, Symbol.iterator, {
+            configurable: true,
+            value: function* (this: ArrayLike<unknown>) {
+              for (let at = 0; at < this.length; at += 1) {
+                visits += 1;
+                yield this[at];
+              }
+            },
+          });
+          restore.push(() => {
+            if (prior === undefined) Reflect.deleteProperty(read, Symbol.iterator);
+            else Object.defineProperty(read, Symbol.iterator, prior);
+          });
+        }
+        try {
+          const before = program.work.total;
+          const { proof } = solver.run(
+            solver.proven(objectsAt(contract, array, ["element", "zz"])),
+          );
+          assert.equal(proof?.complete, false, kind);
+          return { groups: groups.length, units: program.work.total - before, visits };
+        } finally {
+          for (const undo of restore) undo();
+        }
+      });
     });
-  });
-  // (it stops at the first decline: one entry visited, and the work not growing with the entries after it)
-  for (const { visits } of units) assert.equal(visits, 1, JSON.stringify(units));
-  assert.ok(units[1]!.units <= units[0]!.units + 8, JSON.stringify(units));
+    // (it stops at the first decline: one entry visited of n + 1 groups, and the work not growing with those after it)
+    for (const [at, n] of [4, 64].entries()) {
+      assert.ok(units[at]!.groups > n, `${kind}: ${JSON.stringify(units)}`);
+      assert.equal(units[at]!.visits, 1, `${kind}: ${JSON.stringify(units)}`);
+    }
+    assert.ok(units[1]!.units <= units[0]!.units + 8, `${kind}: ${JSON.stringify(units)}`);
+  }
 });
 
 /**
