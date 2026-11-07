@@ -940,9 +940,12 @@ const INTENDED: readonly Intended[] = [
       "AD-1 (TABLE r4.52, r4.118 (1), #1073 PR 4): a written union's member the use does not take, brought by a route " +
       "without a check, is the route rule's error, whose fix is the test the route lacks (`if x is T`), not the current " +
       "checker's conversion of a value it took as definite",
-    matches: ({ message }) => /^'[^']+' can be [^.]+ here because of line \d+\. Check that '[^']+' is [^.']+ first\.$/.test(message),
-    replacement: () => /Check that '[^']+' is [^.']+ first\./,
-    count: 10,
+    matches: ({ message }) =>
+      /^'[^']+' can be [^.]+ here because of line \d+\. Check '[^']+' first, as in 'if [^']+ is [^']+'\.$/.test(
+        message,
+      ),
+    replacement: () => /Check '[^']+' first, as in 'if [^']+ is [^']+'\./,
+    count: 8,
   },
   {
     rule:
