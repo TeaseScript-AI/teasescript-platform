@@ -781,6 +781,7 @@ class Fixture {
   public adapter(side: SideName): PipelineAdapter {
     const build = thisBuild(side);
     const real = build.sessions;
+    // oxlint-disable-next-line typescript/no-this-alias -- EVIDENCE: fixture: the adapter's getters and methods, whose own `this` is the adapter, reach the fixture through it.
     const fixture = this;
     const use = (origin: string, member: string, kind: FaultKind) =>
       fixture.use(side, origin, member, kind);
@@ -884,6 +885,7 @@ class Fixture {
 
   /** A host that observes each delay's deadline, its factory, `next` and returned calls counted. */
   public host(side: SideName): HostDriver {
+    // oxlint-disable-next-line typescript/no-this-alias -- EVIDENCE: fixture: the host's `next` getter, whose own `this` is the host, reaches the fixture through it.
     const fixture = this;
     fixture.use(side, "host", "factory", "invocation");
     const host: HostDriver = {

@@ -34,8 +34,8 @@
   "overrides": [
     {
       "files": [
-        "player/capture-device.ts",
         "player/captured-media.ts",
+        "player/player-bridge.ts",
         "src/compiler/lowering/compiler.ts",
         "src/deterministic-math.ts",
         "src/external-data-capture.ts",
@@ -61,6 +61,7 @@
         "src/validation-testing.ts",
         "src/xmp-keywords.ts",
         "tests/families-runner.test.ts",
+        "tests/helpers/live-host-effects.ts",
         "tests/type-core-closure.test.ts",
         "tests/type-core-mixed-family.test.ts",
         "tests/type-core-stop.test.ts"

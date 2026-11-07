@@ -494,7 +494,7 @@ export class CaptureDevice<Track extends CaptureTrack> {
     source.released?.abort();
     source.released = null;
     if (this.#recording?.sources.includes(kind)) this.#recording.interrupt();
-    if (kind === "microphone") for (const sampler of [...this.#samplers]) sampler.close();
+    if (kind === "microphone") for (const sampler of this.#samplers) sampler.close();
     track.stop();
   }
 
