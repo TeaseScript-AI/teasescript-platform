@@ -29,7 +29,6 @@ import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../medi
 import { type LockDialogInput } from "../../lock-service.js";
 import type { LockServices } from "../../encryption/lock.js";
 import {
-  playerRuntimeSnapshot,
   playerRuntimeSnapshotOrNull,
   type PlayerRuntimeRestorePoint,
   type PlayerRuntimeSession,
@@ -2835,12 +2834,22 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   async function adoptShown(shown: PlayerSession): Promise<boolean> {
     const owner = generation.value;
-    // The adopted state, exported once before the first await.
-    const adopted = hatch(shown, (current) => playerRuntimeSnapshot(current));
     rewindWork.value = "adopt";
     try {
-      if (scriptStorage && adopted.scriptStoragePersistent)
-        await scriptStorage.replace(adopted.scriptStorage);
+      // The adopted state's saved values, read in the host; nothing else runs meanwhile (`rewindWork`).
+      const adopted = await bridgeOf(shown).read(shown, "captureStorage");
+      // Moved on during the read: nothing is written, and nothing is said.
+      if (
+        disposed ||
+        generation.value !== owner ||
+        !inspecting.value ||
+        stopped.value ||
+        session.value?.lineage !== shown.lineage ||
+        session.value.revision !== adopted.revision ||
+        shown.revision !== adopted.revision
+      )
+        return false;
+      if (scriptStorage && adopted.persistent) await scriptStorage.replace(adopted.entries);
     } catch {
       if (!disposed) notices.publish(playerNotices.rewindNotAdopted());
       return false;

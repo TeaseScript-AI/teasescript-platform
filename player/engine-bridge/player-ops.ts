@@ -19,6 +19,7 @@ import type {
 import { decideDraw, RandomHistory, type RandomNext } from "../random-decisions.js";
 import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
 import { SourceViewCaches, sourceViewOps } from "./ops/source-views.js";
+import { historyOps } from "./ops/history.js";
 import { inputOps } from "./ops/input.js";
 import { mediaOps } from "./ops/media.js";
 import { persistenceOps, type PlanTextSlot } from "./ops/persistence.js";
@@ -416,6 +417,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     ...resourceOps(context),
     ...persistenceOps(context),
     ...transferOps(context),
+    ...historyOps(context),
     ...traceOps(context),
     ...randomOps(context),
   };

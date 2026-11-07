@@ -5,6 +5,7 @@ import type { PlanMetadata } from "./player-ops.js";
 import type { DebugView, DebugViewRequest } from "../debug-view.js";
 import type { CheckpointCapture, KeepCapture } from "./ops/persistence.js";
 import type { RandomTriedView } from "./ops/random.js";
+import type { StorageCapture } from "./ops/history.js";
 import type { PlayerRuntimeState } from "../runtime-adapter.js";
 
 /*
@@ -83,6 +84,10 @@ export interface ReadOps {
     readonly args: { readonly site: string };
     readonly result: RandomTriedView;
   };
+  readonly captureStorage: {
+    readonly args: Record<string, never>;
+    readonly result: StorageCapture;
+  };
 }
 export type ReadOp = keyof ReadOps;
 /** The read ops by name, at run time: exactly the keys of `ReadOps`. */
@@ -91,4 +96,5 @@ export const READ_OPS = {
   captureKeep: true,
   captureCheckpoint: true,
   randomTried: true,
+  captureStorage: true,
 } as const satisfies Record<ReadOp, true>;
