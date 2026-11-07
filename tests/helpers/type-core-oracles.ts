@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { getHeapStatistics } from "node:v8";
 
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import { keyIdPath } from "../../src/type-inference/core/contract/key-ids.js";
@@ -303,11 +304,11 @@ export type UnansweredBy =
   | { readonly reason: QuestionStop; readonly binding: PlaceId };
 
 /**
- * Why the oracle's own questions stopped: `questions` past their bound (`Questions`) or the analysis's work, `read-depth`
- * past the read-depth limit, after an analysis that finished either way; `stopped` where the analysis itself stopped in
- * one of its phases (`budget.stoppedIn`, not `questions`).
+ * Why the oracle's own questions stopped: `questions` past their bound (`Questions`) or the analysis's work, `memory`
+ * past their room in the heap, `read-depth` past the read-depth limit, after an analysis that finished each way;
+ * `stopped` where the analysis itself stopped in one of its phases (`budget.stoppedIn`, not `questions`).
  */
-type QuestionStop = "questions" | "read-depth" | "stopped";
+type QuestionStop = "questions" | "memory" | "read-depth" | "stopped";
 
 /**
  * #1837: K, the units the oracle's own questions may spend per cell they return (an occurrence's answer, its element's
@@ -317,6 +318,35 @@ type QuestionStop = "questions" | "read-depth" | "stopped";
  * @public (the families runner reads it from a built tree, not by an import: its grant to a publication run)
  */
 export const QUESTION_UNITS_PER_CELL = 64;
+
+/**
+ * #1837: the heap the core keeps per cell the oracle's questions return (its memo of the answers), as the oracle counts
+ * it: about 1.4× the largest measured live heap per answered cell (453.7 bytes, `W24-varied` at k = 1,024; flat over k
+ * 256 → 1,024 on the three families measured, so linear in the output, as the units are).
+ */
+export const QUESTION_BYTES_PER_CELL = 640;
+
+/** The heap the oracle's questions leave to the analysis, the route and what V8 has yet to collect: 1 GiB. */
+const QUESTION_HEAP_RESERVE = 1_024 * 2 ** 20;
+
+/**
+ * The questions' room in the heap: this process's V8 heap limit (fixed by its `--max-old-space-size`, as the families
+ * runner sets it) less the reserve, or a test's (`withQuestionMemory`).
+ */
+let questionRoom: number | null = null;
+const heapRoom = (): number =>
+  questionRoom ?? getHeapStatistics().heap_size_limit - QUESTION_HEAP_RESERVE;
+
+/** Test-only: `run` with the oracle's questions given `room` bytes of heap. */
+export function withQuestionMemory<T>(room: number, run: () => T): T {
+  const outer = questionRoom;
+  questionRoom = room;
+  try {
+    return run();
+  } finally {
+    questionRoom = outer;
+  }
+}
 
 /** The oracle's own questions' bound: the program's allowance (`null`) or a test's, and K (`withQuestionBound`). */
 let questionBound: { readonly allowance: number | null; readonly perCell: number } = {
@@ -350,7 +380,7 @@ export function questionWork(): { readonly units: number; readonly cells: number
 
 /** The oracle's own questions stopped (`Questions`), and why. */
 class QuestionsStopped extends Error {
-  public constructor(public readonly reason: "questions" | "read-depth") {
+  public constructor(public readonly reason: "questions" | "memory" | "read-depth") {
     super(`The oracle's questions stopped (${reason}).`);
     this.name = "QuestionsStopped";
   }
@@ -360,8 +390,9 @@ class QuestionsStopped extends Error {
  * #1837: the oracle's own questions to a finished analysis, each run apart (`Answers.apart`: finishing work, which never
  * stops the analysis nor counts to its allowance) and metered on their own. They stop (`QuestionsStopped`) at the
  * question after which the units they spent pass the bound: the program's allowance plus K per cell returned so far
- * (`withQuestionBound`). Checked between questions, so no question is cut midway; the families runner's limit bounds
- * one question's own cost. A question that passes the read-depth limit or the analysis's work (a decision's restart)
+ * (`withQuestionBound`); or where `QUESTION_BYTES_PER_CELL` per cell returned passes their room in the heap
+ * (`memory`), so that they end before V8 runs out of it. Checked between questions, so no question is cut midway; the
+ * families runner's limit bounds one question's own cost. A question that passes the read-depth limit or the analysis's work (a decision's restart)
  * stops them there too. Each publication's questions are one meter (`questionWork`).
  */
 class Questions {
@@ -390,6 +421,7 @@ class Questions {
     const allowance = questionBound.allowance ?? answers.budget.allowance;
     if (this.#units > allowance + questionBound.perCell * this.#cells)
       throw new QuestionsStopped("questions");
+    if (QUESTION_BYTES_PER_CELL * this.#cells > heapRoom()) throw new QuestionsStopped("memory");
     return answer;
   }
 }

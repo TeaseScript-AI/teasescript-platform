@@ -44,7 +44,8 @@ runner prints it on stderr with its source, mode and check, writes it with each 
 from stalls, in a source that stalls later too (`tests/families-runner.test.ts`, in CI). A publication is had only up to
 the oracle's own stop. Its own questions (each binding's admitted types, then the occurrences) run apart from the
 analysis's allowance and stop after the one whose units pass the program's allowance plus 64 per cell returned (an
-occurrence's answer, its element's and each property's; two a binding), or past the read-depth limit (#1837); the
+occurrence's answer, its element's and each property's; two a binding), where 640 bytes per cell returned pass
+their room in the heap (the process's V8 heap limit less 1 GiB), or past the read-depth limit (#1837); the
 nodes from there on stay unanswered (`publicationHashes`'s `unanswered`, #1499), after the bindings left where the
 admitted types stopped. A publication run's unit limit grants the same 64 per cell its tree's oracle reports so far
 (`questionWork`), so the oracle's stop comes first wherever a question reports its cells before the runner's limit; one
@@ -54,7 +55,8 @@ what it leaves unanswered is too. Such a run is counted apart (`unansweredAlike`
 exception: the runner writes it to `--out` and counts it apart (`unanswered`). Each such run records why on each tree
 (`by`, on `--out` and the source's `--work` line, and on a stored run), with the first node or the binding left:
 `questions` (the analysis finished and the oracle's questions passed their bound; their per-cell cost rises by a log
-factor, #1941), `read-depth` (the analysis finished and a question passed the read-depth limit), `stopped` (the
+factor, #1941), `memory` (their room in the heap passed: the core keeps its answers, about 450 bytes a cell, so the
+oracle ends before V8 runs out of heap), `read-depth` (the analysis finished and a question passed the read-depth limit), `stopped` (the
 analysis's own budget stopped it), or `unknown` where the tree's oracle or a run stored before this names none. `stalls.mjs` counts them as runner artefacts, one group a reason and `unansweredAlike`,
 each with its runs, sources and first witness, on a line of its own where any group has runs and always in `--index`.
 It prints one JSON line per generator and

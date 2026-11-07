@@ -258,7 +258,7 @@ ${
  */
 const reasoned = (
   count: number,
-  reason: "questions" | "read-depth" | "stopped" | null,
+  reason: "questions" | "memory" | "read-depth" | "stopped" | null,
   at = "node: 7",
 ): string => `import { createHash } from "node:crypto";
 export const MODES = [false, true].flatMap((reversed) =>
@@ -278,7 +278,7 @@ test("the corpus runner records why an oracle left a run unanswered, and the sta
     const tree = (
       name: string,
       count: number,
-      reason: "questions" | "read-depth" | "stopped" | null,
+      reason: "questions" | "memory" | "read-depth" | "stopped" | null,
       at = "node: 7",
     ) => {
       const folder = join(directory, name);
@@ -299,9 +299,11 @@ test("the corpus runner records why an oracle left a run unanswered, and the sta
       tree("questions101", 2, "questions", "node: 101"),
       tree("stopped202", 3, "stopped", "node: 202"),
     ];
-    const [depth2, depth3, binding2, binding3] = [
+    const [depth2, depth3, memory2, memory3, binding2, binding3] = [
       tree("depth2", 2, "read-depth"),
       tree("depth3", 3, "read-depth"),
+      tree("memory2", 2, "memory"),
+      tree("memory3", 3, "memory"),
       tree("binding2", 2, "questions", "binding: 5"),
       tree("binding3", 3, "questions", "binding: 5"),
     ];
@@ -345,6 +347,7 @@ test("the corpus runner records why an oracle left a run unanswered, and the sta
     const q = groups(questions2, questions3, "questions");
     assert.deepEqual(q.rows, {
       "unanswered: questions": [4, 1],
+      "unanswered: memory": [0, 0],
       "unanswered: read-depth": [0, 0],
       "unanswered: stopped": [0, 0],
       "unanswered: unknown": [0, 0],
@@ -372,6 +375,15 @@ test("the corpus runner records why an oracle left a run unanswered, and the sta
       ],
     );
     assert.deepEqual(d.out[0].by.head, { reason: "read-depth", node: 7 });
+    // (the questions' room in the heap passed: its own group, never a crash, #1837)
+    const h = groups(memory2, memory3, "memory");
+    assert.deepEqual(
+      [h.rows["unanswered: memory"], h.rows["unanswered: questions"]],
+      [
+        [4, 1],
+        [0, 0],
+      ],
+    );
     // (the answers' own questions stopped at a binding: named so on the record and the witness)
     const b = groups(binding2, binding3, "binding");
     assert.deepEqual(b.out[0].by.head, { reason: "questions", binding: 5 });
@@ -461,6 +473,7 @@ test("the corpus runner records why an oracle left a run unanswered, and the sta
         artefacts.map((r: { group: string; runs: number }) => [r.group, r.runs]),
         [
           ["unanswered: questions", 4],
+          ["unanswered: memory", 0],
           ["unanswered: read-depth", 0],
           ["unanswered: stopped", 4],
           ["unanswered: unknown", 0],
@@ -472,6 +485,7 @@ test("the corpus runner records why an oracle left a run unanswered, and the sta
     const a = groups(questions2, questions2, "alike");
     assert.deepEqual(a.rows, {
       "unanswered: questions": [0, 0],
+      "unanswered: memory": [0, 0],
       "unanswered: read-depth": [0, 0],
       "unanswered: stopped": [0, 0],
       "unanswered: unknown": [0, 0],

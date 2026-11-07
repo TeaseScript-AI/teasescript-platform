@@ -29,11 +29,13 @@ import {
   publishedAnswers,
   publishedRoute,
   publishedUpToOrder,
+  QUESTION_BYTES_PER_CELL,
   QUESTION_UNITS_PER_CELL,
   questionWork,
   stoppedRecord,
   stopSet,
   withQuestionBound,
+  withQuestionMemory,
 } from "./helpers/type-core-oracles.js";
 
 /*
@@ -317,6 +319,24 @@ test("a stop the oracle's own questions would make is never published: at the le
     [parts.answers, parts.record, parts.route, parts.unanswered],
     [full.answers, full.record, full.route, 0],
   );
+});
+
+test("the oracle's questions stop as memory where their bytes a cell pass their room in the heap, before V8 runs out of it (#1837)", () => {
+  const files = main(SMALL[0]!);
+  const full = publicationParts(files, MODES[0]!, GLOBALS);
+  assert.ok(full !== null && full.unanswered === 0);
+  const { cells } = questionWork();
+  const at = (room: number) =>
+    withQuestionMemory(room, () => publicationParts(files, MODES[0]!, GLOBALS)!);
+  // (room for every cell answers it whole; a byte less stops at the question that returned the last cell)
+  assert.deepEqual(at(QUESTION_BYTES_PER_CELL * cells), full);
+  const stopped = at(QUESTION_BYTES_PER_CELL * cells - 1);
+  assert.ok(stopped.unanswered > 0);
+  assert.equal(stopped.unansweredBy?.reason, "memory");
+  assert.deepEqual(stopped.occurrences, full.occurrences.slice(0, stopped.occurrences.length));
+  // (no room even for the first binding's cells: the answers' own questions stop, at that binding)
+  const none = at(0);
+  assert.deepEqual([none.answers, none.unansweredBy?.reason], ["null", "memory"]);
 });
 
 test("an analysis its own budget stopped is answered whole within its questions' bound, so no node is left unanswered and none is stopped (#1837)", () => {
