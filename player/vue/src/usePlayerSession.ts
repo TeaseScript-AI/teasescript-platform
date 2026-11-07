@@ -1826,11 +1826,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     keeping = (async () => {
       // The caller finishes first, such as a Continue that gives the session its marks.
       await Promise.resolve();
-      do {
-        keepAgain = false;
-        await keepOnce();
-      } while (keepAgain && !disposed);
-    })().finally(() => (keeping = null));
+      try {
+        do {
+          keepAgain = false;
+          await keepOnce();
+        } while (keepAgain && !disposed);
+      } finally {
+        // In the same step as the last check, so a request after it starts a new write instead of being lost.
+        keeping = null;
+      }
+    })();
   }
   async function keepOnce() {
     const current = session.value;
