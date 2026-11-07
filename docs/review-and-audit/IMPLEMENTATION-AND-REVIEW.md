@@ -24,9 +24,7 @@ Choose the simplest complete solution for the current requirement and real bound
 and pragmatic YAGNI. Apply DRY when removing duplication keeps or lowers total complexity. Less code
 or documentation is beneficial when clarity, behavior, evidence, and maintenance remain at least as
 strong; prefer clear local repetition over abstraction or indirection that makes the whole result
-harder to understand or change. Simplicity is judged on the code a reader meets afterwards, not on the size of the
-diff: putting new code in the module and folder its owner names is part of the simplest complete solution, and a
-folder or module for a new concern is not the speculative abstraction YAGNI forbids.
+harder to understand or change.
 
 ### Input-driven scaling and native JavaScript resilience
 

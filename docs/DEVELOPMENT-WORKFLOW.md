@@ -99,7 +99,10 @@ Once the current requirement and its authority are established, choose the
 simplest complete approach that safely satisfies that requirement and its real
 boundaries. Assess simplicity across design, implementation, evidence, workflow,
 and maintenance cost. The smallest individual patch is not automatically the
-simplest overall solution.
+simplest overall solution. Simplicity is judged on the code a reader meets
+afterwards, not on the size of the diff: putting new code in the module and
+folder its owner names is part of the simplest complete solution, and a folder or
+module for a new concern is not the speculative abstraction YAGNI forbids.
 
 Pragmatic YAGNI applies this rule to future-facing complexity. Implement only
 the complexity needed for the current requirement and its real boundaries.
