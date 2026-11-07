@@ -1011,4 +1011,16 @@ export const CASES = [
       "import { type WorkLedger as R11Work } from '../budget.js';\nimport { each, sorted } from '../narrowing-iteration.js';\nfunction* source(work:R11Work):Generator<string,void,unknown>{work.charge('objectSteps');(yield 'x');}\nexport function f(work:R11Work):number{work.charge('objectSteps');let n=0;for(const item of each(work,'objectSteps',source(work)))n+=item.length;return n;}\n",
     expect: [],
   },
+  {
+    name: "r11/intersectionBinding",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\ntype Labelled<T>=Generator<T>&{readonly label?:string};\nfunction* source(work:R11Work,input:readonly string[]):Labelled<string|readonly string[]>{work.charge('objectSteps');yield 'x';yield input;}\nexport function f(work:R11Work,input:readonly string[]):boolean{work.charge('objectSteps');const items=source(work,input);return items.label===undefined;}\n",
+    expect: ["mixed-elements"],
+  },
+  {
+    name: "r11/controlSet",
+    source:
+      "import { type WorkLedger as R11Work } from '../budget.js';\nexport function f(work:R11Work):number{work.charge('objectSteps');const s=new Set<string>();s.add('x');return s.size;}\n",
+    expect: [],
+  },
 ];
