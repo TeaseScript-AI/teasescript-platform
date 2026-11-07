@@ -12,10 +12,15 @@ export class WorkLedger {
 }
 export function joinParts(...parts: readonly (string | number | readonly string[])[]): string { return parts.length > 0 ? "|" : ""; }
 export function keptArray<T>(_work: WorkLedger, steps: readonly T[]): readonly T[] { return steps; }
+export function keptParts(_work: WorkLedger, ...parts: readonly (string | readonly string[])[]): string { return parts.length > 0 ? "|" : ""; }
 `,
   "src/type-inference/core/definitions.ts": `export function sortCost(n: number): number { return n; }
 export function keyOf(place: number, path: readonly string[]): string { return path.length === 0 ? String(place) : "|"; }
 export function keyBelow(key: string, rest: readonly string[]): string { return rest.length === 0 ? key : "|"; }
+export function keyPath(key: string): string[] { return key.split("."); }
+`,
+  "src/type-inference/core/contract/kinds.ts": `export interface Item { readonly tag: string }
+export function heldReference(items: readonly Item[]): boolean { return items.length > 0; }
 `,
   "src/type-inference/core/barrel.ts": `export { joinParts as renamed } from "./budget.js";
 export * as api from "./budget.js";
