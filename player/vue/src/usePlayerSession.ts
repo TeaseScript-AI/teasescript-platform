@@ -66,6 +66,7 @@ import type { StartOptions } from "../../engine-bridge/ops/session.js";
 import {
   bridgeOf,
   endsQuietly,
+  refusalCode,
   type PlayerBridge,
   type ServiceSection,
   type SessionSection,
@@ -341,11 +342,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const host = bridgeOf(target);
     const acknowledged = host.halt(target);
     const commit = () => {
-      endHalting(stop);
-      if (disposed || stop !== activationToken) return;
+      if (disposed || stop !== activationToken) return endHalting(stop);
+      // The final publication shows, then the stop; the halt holds the session stopped until then, so nothing reacting
+      // to that publication (the stop's call view, also of an unchanged state) sees it running for a moment.
       const final = host.latest(target);
       if (final !== null) session.value = final;
       hostError.value ??= name;
+      endHalting(stop);
     };
     if (host.frozen(target)) return commit();
     haltUntil(stop);
@@ -731,6 +734,59 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         },
       }),
     );
+
+  // The call view (L5f): Debug's Now view and the error dialog read the active calls, which only publications of a
+  // session whose calls are viewed carry. While any demand stands, the shown session's calls are viewed; the view moves
+  // with the shown lineage, as Debug's rewind and Return move it, and ends with the last demand. A stopped session needs
+  // no request: its stop's acknowledgement froze it with its call view.
+  let callDemands = 0;
+  let callViewed: PlayerSession | null = null;
+  function viewCalls(target: PlayerSession, on: boolean) {
+    void bridgeOf(target)
+      .viewCalls(target, on)
+      .then(
+        (merged) => {
+          if (merged !== null) publishOwned(merged);
+        },
+        (error) => {
+          // A stopped or released session, or a lost Worker, takes no call view: the stop or the loss reports itself, and
+          // nothing ends further.
+          if (endsQuietly(error) || refusalCode(error) === "session") return;
+          if (!disposed && !stopped.value && session.value?.lineage === target.lineage)
+            reportHostError(error);
+        },
+      );
+  }
+  function followCallView() {
+    const shown = disposed || stopped.value || callDemands === 0 ? null : session.value;
+    if (callViewed !== null && callViewed.lineage !== shown?.lineage) {
+      if (!stopped.value) viewCalls(callViewed, false);
+      callViewed = null;
+    }
+    if (shown !== null && callViewed === null) {
+      callViewed = shown;
+      viewCalls(shown, true);
+    }
+  }
+  watch([() => session.value?.lineage, stopped], followCallView);
+  tryOnScopeDispose(() => {
+    callDemands = 0;
+    followCallView();
+  });
+  /** Asks for the shown session's call view until `release`, which only the first call of does anything. */
+  function demandCallView(): { release(): void } {
+    callDemands += 1;
+    followCallView();
+    let released = false;
+    return {
+      release() {
+        if (released) return;
+        released = true;
+        callDemands -= 1;
+        followCallView();
+      },
+    };
+  }
   const stageImage = computed(() =>
     session.value === null ? null : playerRuntimeMedia(session.value.state).stage.image,
   );
@@ -2704,6 +2760,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
 
   return {
     session: computed(() => session.value),
+    demandCallView,
     /** The engine's host, once it is ready. */
     bridge: bridgeReady,
     generation: computed(() => generation.value),

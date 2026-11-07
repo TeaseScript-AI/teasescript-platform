@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { hatch } from "../../engine-bridge/in-process.js";
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { useElementVisibility } from "@vueuse/core";
 import { Badge } from "@/components/ui/badge";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
@@ -12,7 +11,7 @@ import {
   playerRuntimeDebugNow,
   type PlayerDebugSourceLocation,
   type PlayerDebugWaitKind,
-} from "../../runtime-adapter.js";
+} from "../../runtime-view.js";
 import { debugStageImage } from "./debugStageImage";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
@@ -28,12 +27,13 @@ const props = defineProps<{
 }>();
 const root = ref<HTMLElement | null>(null);
 
+// The Now view reads the session's active calls, which its publications carry while it is mounted (the call view): from
+// the first publication with them on, one reply after it mounts.
+const callView = props.player.demandCallView();
+onBeforeUnmount(callView.release);
 const now = computed(() => {
   const session = props.player.session.value;
-  return (
-    session &&
-    hatch(session, (held) => playerRuntimeDebugNow(held, props.player.sceneTimeMs.value))
-  );
+  return session && playerRuntimeDebugNow(session, props.player.sceneTimeMs.value);
 });
 // Remaining timer times tick like the timer rail, while the tab is on screen.
 const onScreen = useElementVisibility(root);
@@ -154,8 +154,9 @@ const imageOrigin = computed(() => {
 
 <template>
   <div ref="root" class="grid gap-3" data-debug-now>
-    <p v-if="!now" class="text-muted-foreground">No session yet.</p>
-    <template v-else>
+    <p v-if="!player.session.value" class="text-muted-foreground">No session yet.</p>
+    <!-- Until the first publication with the call view arrives, one reply after the tab mounts, it shows nothing. -->
+    <template v-else-if="now">
       <dl class="grid gap-1">
         <div class="flex min-w-0 gap-2">
           <dt class="text-muted-foreground">Next</dt>

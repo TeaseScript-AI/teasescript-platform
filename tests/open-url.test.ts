@@ -4,10 +4,10 @@ import test from "node:test";
 import {
   createPlayerRuntimeRestorePoint,
   openPlayerRuntimeUrl,
-  playerRuntimeDebugNow,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { debugNow } from "./helpers/debug-readers.js";
 import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeForeground, playerRuntimeUrlRequest } from "../player/runtime-view.js";
 import { openUrlTab, type UrlTab } from "../player/url-tab.js";
@@ -81,7 +81,7 @@ test("openUrl waits until the Player opened its web address, and nothing enters 
       form,
     );
     assert.deepEqual(playerRuntimeUrlRequest(session), { actionId: 1, url, atOnce: true }, form);
-    assert.equal(playerRuntimeDebugNow(session, 0).waitingAt?.kind, "url");
+    assert.equal(debugNow(session, 0).waitingAt?.kind, "url");
     const result = openPlayerRuntimeUrl(session);
     assert.equal(result?.outcome.kind, "completed", form);
     session = result.session;

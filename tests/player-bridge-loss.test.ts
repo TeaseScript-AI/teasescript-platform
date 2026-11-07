@@ -41,6 +41,7 @@ const CHANGED = [
   "the Worker's readiness",
   "the hosted script's preparation",
   "the start page's preparation",
+  "a call view request",
 ] as const;
 /** Consumers that were already safe, as controls. */
 const CONTROLS = [
@@ -232,6 +233,7 @@ interface LossHost {
   readonly bridge: Promise<PlayerBridge>;
   prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
   activate(): Promise<void>;
+  demandCallView(): { release(): void };
   inputSection<T>(
     body: (section: {
       observe(): Promise<PlayerSession | null>;
@@ -416,6 +418,20 @@ test("control: a media load report in flight when the Worker is lost ends quietl
     elements
       .find((element) => element.src.endsWith("bell.mp3"))!
       .dispatchEvent(new Event("loadedmetadata"));
+    await turns(2);
+    lose();
+  });
+  assert.deepEqual(unhandled, []);
+  assert.equal(player.hostError.value, "BridgeLostError");
+  assert.equal(hostErrors(), 1);
+});
+
+test("a call view request in flight when the Worker is lost ends quietly, and the loss is the error stop once", async (context) => {
+  covered.add("a call view request");
+  const { player, lose, hostErrors } = await mount(context, 50);
+  const unhandled = await unhandledDuring(async () => {
+    // Debug's Now view opens: its call view request is posted, its reply 50 ms away.
+    player.demandCallView();
     await turns(2);
     lose();
   });

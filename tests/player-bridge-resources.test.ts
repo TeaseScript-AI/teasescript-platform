@@ -25,6 +25,7 @@ import { FileStoreService } from "../player/stored-files.js";
 import type { ActionCompletionOutcome } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
+import { viewCalls, viewed, withoutViews } from "./helpers/debug-readers.js";
 import { hatch, inProcessBridge } from "./helpers/in-process-bridge.js";
 import { serviceSection } from "./helpers/service-section.js";
 
@@ -129,9 +130,12 @@ function answerFor(state: PlayerSession["state"], photoHeld: boolean) {
 async function playTape(
   bridge: PlayerBridge,
   recording = false,
+  calls = false,
 ): Promise<{ readonly steps: unknown[]; readonly session: PlayerSession }> {
   let session = await bridge.start(await prepared(bridge, SCRIPT), START, recording);
-  const steps: unknown[] = [shown(session)];
+  if (calls) session = await viewCalls(bridge, session, true);
+  const seen = (current: PlayerSession) => ({ ...shown(current), viewed: viewed(current) });
+  const steps: unknown[] = [seen(session)];
   const capture = activePlayerRuntimeCapture(session.state)!;
   const valid = { actionId: capture.actionId, answer: { kind: "unavailable", reason: "denied" } };
   const holed: unknown[] = [];
@@ -158,14 +162,14 @@ async function playTape(
   ] as const) {
     const result = await bridge.request<ActionCompletionOutcome>(session, op, args);
     session = bridge.latest(session)!;
-    steps.push({ op, result, session: shown(session) });
+    steps.push({ op, result, session: seen(session) });
   }
   // A basis an op since replaced is refused without effect.
   await assert.rejects(
     bridge.request(session, "answerCapture", { ...valid, held: [] }, { basis: 0 }),
     refusedAs("basis"),
   );
-  steps.push(shown(bridge.latest(session)!));
+  steps.push(seen(bridge.latest(session)!));
   let photos = 0;
   while (session.state.status === "waiting") {
     const photo = activePlayerRuntimeCapture(session.state) !== null;
@@ -177,7 +181,7 @@ async function playTape(
       held,
     });
     session = bridge.latest(session)!;
-    steps.push({ op: next.op, held, result, session: shown(session) });
+    steps.push({ op: next.op, held, result, session: seen(session) });
     if (result.kind !== "invalidPayload") continue;
     // The capture service's fallback, which names no reference and has no admission.
     const fallback = await bridge.request<ActionCompletionOutcome>(session, next.op, {
@@ -186,7 +190,7 @@ async function playTape(
       held: null,
     });
     session = bridge.latest(session)!;
-    steps.push({ op: next.op, result: fallback, session: shown(session) });
+    steps.push({ op: next.op, result: fallback, session: seen(session) });
   }
   return { steps, session };
 }
@@ -203,6 +207,10 @@ test("L5e's ops give the same replies, publications and events in-process and in
   try {
     const played = await playTape(inProcess);
     assert.deepEqual((await playTape(worker)).steps, played.steps);
+    // With the call view (L5f) the critical view is the same, and the full view equal across the backends.
+    const full = await playTape(await inProcessBridge(), false, true);
+    assert.deepEqual((await playTape(worker, false, true)).steps, full.steps);
+    assert.deepEqual(withoutViews(full.steps), withoutViews(played.steps));
     // EVIDENCE: fixture: `playTape`'s steps have these fields.
     const tape = played.steps as TapeStep[];
     const [start, unknown, wrongKind, afterRefusals, ...answers] = tape;

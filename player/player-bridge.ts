@@ -6,7 +6,7 @@ import {
   type SectionSend,
 } from "./engine-bridge/client.js";
 import type { StartOptions } from "./engine-bridge/ops/session.js";
-import type { Introduction, Publication } from "./engine-bridge/session-protocol.js";
+import type { CallViewReply, Introduction, Publication } from "./engine-bridge/session-protocol.js";
 import type { PlayerSession } from "./runtime-view.js";
 import { SessionStore } from "./session-store.js";
 
@@ -138,6 +138,35 @@ export class PlayerBridge {
     );
   }
 
+  /**
+   * Starts (`on`) or ends the call view of `session`'s publications (`viewCalls`). Its reply, the host's latest
+   * publication's call view, is merged into the store's publication of the same revision as the reply arrives, before any
+   * later reply applies; resolves with that merged session, or `null` when the store holds another revision by then.
+   */
+  async viewCalls(session: PlayerSession, on: boolean): Promise<PlayerSession | null> {
+    let merged: PlayerSession | null = null;
+    await this.#send(
+      session.id,
+      (onReply) =>
+        this.#client.request(
+          "viewCalls",
+          { on },
+          {
+            session: session.id,
+            basis: this.latest(session)?.revision ?? session.revision,
+            onReply: (result) => {
+              onReply(result);
+              // EVIDENCE: validation: `viewCalls` replies from the same build with a `CallViewReply`.
+              merged =
+                this.store(session.id)?.mergeCallView(result.result as CallViewReply) ?? null;
+            },
+          },
+        ),
+      undefined,
+    );
+    return merged;
+  }
+
   /** Runs `body` as one exclusive section of `session`; see `SessionSection`. */
   section<T>(session: PlayerSession, body: (section: SessionSection) => Promise<T>): Promise<T> {
     return this.#client.section(session.id, (send: SectionSend) => {
@@ -197,7 +226,12 @@ export class PlayerBridge {
     if (store === null || store.halted) return Promise.resolve();
     store.stopping();
     const acknowledged = this.#client
-      .signal("halt", null, session.id, () => store.freeze())
+      .signal("halt", null, session.id, (result) =>
+        store.freeze(
+          // EVIDENCE: validation: a Player session's `halt` acknowledgement carries a `CallViewReply` or `null`.
+          result.result as CallViewReply | null,
+        ),
+      )
       .then(
         () => {},
         () => store.freeze(),

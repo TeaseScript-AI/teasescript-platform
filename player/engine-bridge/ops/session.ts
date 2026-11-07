@@ -23,7 +23,7 @@ import { isValidEpochMilliseconds } from "../../../src/temporal.js";
 import { everyItem, exactly, isRecord, isStringArray, isTime } from "../argument-checks.js";
 import { instructionFacts } from "../instruction-facts.js";
 import { planMetadata, type PlanMetadata, type PlayerOpsContext } from "../player-ops.js";
-import type { Introduction, Publication } from "../session-protocol.js";
+import type { CallViewReply, Introduction, Publication } from "../session-protocol.js";
 import type { BridgeOp, BridgeOps, HostSession, OpOutcome } from "../worker-host.js";
 
 /**
@@ -35,6 +35,8 @@ export class HeldSession implements HostSession {
   #delivered = 0;
   /** The late observation being caught up on a copy of the runner, or `null`. */
   catchUp: PlayerRuntimeCatchUp | null = null;
+  /** Whether the main side views the session's calls (`viewCalls`): its publications then carry the call view. */
+  viewingCalls = false;
 
   constructor(
     session: PlayerRuntimeSession,
@@ -69,20 +71,40 @@ export class HeldSession implements HostSession {
     this.#current = next;
   }
 
-  /** Makes `next` the latest publication and hands it out: its state, revision, and the events after the cursor. */
+  /**
+   * Makes `next` the latest publication and hands it out: its critical state, revision, the events after the cursor,
+   * and the call view while the main side views the session's calls.
+   */
   publish(next: PlayerRuntimeSession): Publication {
     this.#current = next;
     const from = this.#delivered;
     const through = next.events.length;
     this.#delivered = through;
+    const { calls, ...state } = next.state;
     return Object.freeze({
       revision: next.revision,
-      state: next.state,
+      state: Object.freeze(state),
       from,
       eventsThrough: through,
       events: next.events.slice(from),
-      instructions: instructionFacts(next),
+      instructions: instructionFacts(next, this.viewingCalls),
+      callView: this.viewingCalls ? Object.freeze({ calls }) : null,
     });
+  }
+
+  /** The latest publication's call view, with its instruction facts: with the calls when `calls`, else none. */
+  callView(calls: boolean): CallViewReply {
+    const current = this.#current;
+    return Object.freeze({
+      revision: current.revision,
+      instructions: instructionFacts(current, calls),
+      callView: calls ? Object.freeze({ calls: current.state.calls }) : null,
+    });
+  }
+
+  /** What `halt`'s acknowledgement carries: the call view of the publication the stop froze, viewed or not. */
+  atStop(): CallViewReply {
+    return this.callView(true);
   }
 
   /** The session's first publication, from cursor 0, with its fixed fields; nothing was handed out before it. */
@@ -331,6 +353,18 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
           : publishing(held, result.session, result.outcome);
       },
       // Input: its staleness is the gate's action ID, checked above, not a basis (L5c).
+      false,
+    ),
+    // Starts or ends the call view of the session's publications (L5f). Its reply is the latest publication's call view,
+    // which the main side merges into the publication of the same revision; it publishes nothing.
+    viewCalls: sessionOp(
+      (args) => isRecord(args) && exactly(args, ["on"]) && typeof args.on === "boolean",
+      (held, args) => {
+        // EVIDENCE: validation: checkArguments accepted `on` as a boolean.
+        const { on } = args as { readonly on: boolean };
+        held.viewingCalls = on;
+        return { result: held.callView(on), view: null };
+      },
       false,
     ),
     beginRecording: sessionOp(

@@ -5,10 +5,10 @@ import {
   closePlayerRuntimeExport,
   closePlayerRuntimePopup,
   createPlayerRuntimeRestorePoint,
-  playerRuntimeDebugNow,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { debugNow } from "./helpers/debug-readers.js";
 import { createPlayerRuntimeSession } from "../player/compile-project.js";
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import { compileSource } from "../src/compiler.js";
@@ -76,7 +76,7 @@ test("exportText shows its text until the player closes it, with default title a
     text: '{"rounds":3}',
     fileName: "report.json",
   });
-  assert.equal(playerRuntimeDebugNow(session, 0).waitingAt?.kind, "export");
+  assert.equal(debugNow(session, 0).waitingAt?.kind, "export");
   // Only its own close continues it.
   assert.equal(closePlayerRuntimePopup(session), null);
   const first = closePlayerRuntimeExport(session);

@@ -4,7 +4,6 @@ import {
   completeAction,
   createFreshRuntimeSession,
   deserializeRuntimeSession,
-  interactionDeadlineMs,
   restoreRuntimeSession,
   RuntimeSessionError,
   serializeCheckpoint,
@@ -27,7 +26,6 @@ import {
   type RuntimeInteractionActionSnapshot,
   type CapturedMediaAdmission,
   type CaptureUnavailableReason,
-  type RuntimeLockChoice,
   type RuntimeLockNotice,
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSession,
@@ -60,8 +58,6 @@ import {
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import { IMAGE_SKIP_TEXT } from "../src/image-input.js";
 
-import { instructionSourcePath } from "../src/plan/model.js";
-
 import type { RuntimePlayerProfileInput } from "../src/runtime/host-data/player-profile.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
 
@@ -83,6 +79,8 @@ export interface PlayerRuntimeState extends RuntimeSessionView {
 }
 
 export interface PlayerRuntimeSession extends PlayerSessionView {
+  /** The engine's side keeps the full state, active calls included; a publication carries the critical view. */
+  readonly state: PlayerRuntimeState;
   readonly plan: InstructionPlan;
   /** The engine-owned runner of the session; only this adapter's functions operate it. */
   readonly engine: PlayerRuntimeEngine;
@@ -629,297 +627,6 @@ export function answeredByPlayerInput<T>(
   answer: () => T,
 ): T {
   return session.recorder === null ? answer() : session.recorder.answeredBy(input, answer);
-}
-
-/** What a Debug countdown counts down to: a `wait`, a `showButton` timeout, or chat pacing. */
-export interface PlayerRuntimeDebugCountdown {
-  readonly kind: "wait" | "button" | "pacing";
-  readonly deadlineMs: number;
-}
-
-/**
- * The deadline of the current foreground wait for Player Debug countdowns, from canonical state only: an authored
- * `wait` (not a blocking `timer`, which lowers to the same delay), a presented `showButton` with a timeout, or a
- * message's reading time. Suspended actions behind a running block never count; that block's own foreground work
- * does. A countdown ends only when its action settles or loses the foreground.
- */
-export function playerRuntimeDebugCountdown(
-  session: Pick<PlayerRuntimeSession, "plan" | "state">,
-): PlayerRuntimeDebugCountdown | null {
-  const { state: snapshot } = session;
-  if (snapshot.status !== "running" && snapshot.status !== "waiting") return null;
-  const foreground = snapshot.foregroundAction;
-  let countdown: PlayerRuntimeDebugCountdown | null = null;
-  if (foreground?.kind === "interaction") {
-    const deadlineMs = interactionDeadlineMs(foreground);
-    if (deadlineMs !== null) countdown = { kind: "button", deadlineMs };
-  } else if (foreground?.kind === "delay") {
-    const owner = session.plan.instructions[foreground.owningInstruction];
-    if (owner?.kind === "wait" && owner.command === "wait")
-      countdown = { kind: "wait", deadlineMs: foreground.deadlineMs };
-  } else if (foreground?.kind === "chatPacingGate") {
-    countdown = { kind: "pacing", deadlineMs: foreground.deadlineMs };
-  }
-  return countdown === null ? null : Object.freeze(countdown);
-}
-
-/** A script position as Player Debug shows it: the file's package path and its one-based line. */
-export interface PlayerDebugSourceLocation {
-  readonly path: string;
-  readonly line: number;
-}
-
-/** What the foreground action waits for, as Player Debug names it. */
-export type PlayerDebugWaitKind =
-  | "wait"
-  | "timer"
-  | "button"
-  | "choice"
-  | "input"
-  | "image"
-  | "popup"
-  | "url"
-  | "export"
-  | "pacing"
-  | "media"
-  | "save"
-  | "photo"
-  | "file"
-  | "lock"
-  | "unlock";
-
-/** One active call, innermost first: a function, a called file, or a timer, media cue or permanent-button block. */
-export interface PlayerDebugCall {
-  readonly kind: "function" | "file" | "timer" | "media" | "button";
-  /** The function or block name, or the called file's path. */
-  readonly name: string;
-  /** Where it was called, or for a block, the position it interrupted. */
-  readonly from: PlayerDebugSourceLocation;
-}
-
-/** One timer of the session, hidden ones included. */
-export interface PlayerDebugTimer {
-  readonly actionId: number;
-  /** A blocking `timer` runs in the foreground; an async timer in the background. */
-  readonly blocking: boolean;
-  readonly display: "hidden" | "visible" | "mystery";
-  readonly label: string | null;
-  readonly repeat: boolean;
-  /** `suspended`: a blocking timer that stands still while a block interrupts it. */
-  readonly state: "running" | "paused" | "suspended";
-  readonly remainingMs: number;
-  readonly startedAt: PlayerDebugSourceLocation;
-}
-
-/** One active audio or video instance, with the statement that started it. */
-export interface PlayerDebugMedia {
-  readonly mediaId: number;
-  readonly media: "audio" | "video";
-  readonly source: string;
-  /** `false` until the Player reported its load. */
-  readonly loaded: boolean;
-  readonly state: "running" | "paused";
-  readonly playheadMs: number;
-  readonly startedAt: PlayerDebugSourceLocation;
-}
-
-/** Player Debug's view of where the session is, derived on demand from canonical state; see `playerRuntimeDebugNow`. */
-export interface PlayerRuntimeDebugNow {
-  /** Where execution continues, or `null` once the session ended or failed. */
-  readonly next: PlayerDebugSourceLocation | null;
-  /** The foreground action the script waits for and the statement that requested it. */
-  readonly waitingAt: {
-    readonly kind: PlayerDebugWaitKind;
-    readonly at: PlayerDebugSourceLocation;
-    /**
-     * A lock step's openers, never its text, password, or key: whether its dialog asks the player, whether a password
-     * was written or its password field asks for one, how many public keys an encrypt call has, whether a decrypt call
-     * has a key, its time lock's moment in epoch milliseconds, or `null`, which the lock dialog suggests for a chosen
-     * time lock, and the openers the player chooses in the lock dialog.
-     */
-    readonly lock?: {
-      readonly dialog: boolean;
-      readonly password: boolean;
-      readonly publicKeys: number;
-      readonly key: boolean;
-      readonly timeLockMs: number | null;
-      readonly choices: readonly RuntimeLockChoice[];
-    };
-  } | null;
-  readonly calls: readonly PlayerDebugCall[];
-  readonly timers: readonly PlayerDebugTimer[];
-  readonly media: readonly PlayerDebugMedia[];
-}
-
-function debugLocation(
-  plan: InstructionPlan,
-  instruction: number,
-  line = plan.instructions[instruction]!.span.sl + 1,
-): PlayerDebugSourceLocation {
-  return Object.freeze({ path: instructionSourcePath(plan, instruction), line });
-}
-
-function debugWaitKind(
-  plan: InstructionPlan,
-  action: RuntimeSnapshot["foregroundAction"] & object,
-) {
-  switch (action.kind) {
-    case "delay": {
-      const owner = plan.instructions[action.owningInstruction];
-      return owner?.kind === "wait" && owner.command === "wait" ? "wait" : "timer";
-    }
-    case "interaction":
-      return action.interactionKind === "button" ||
-        action.interactionKind === "choice" ||
-        action.interactionKind === "image" ||
-        action.interactionKind === "popup" ||
-        action.interactionKind === "url" ||
-        action.interactionKind === "export"
-        ? action.interactionKind
-        : "input";
-    case "chatPacingGate":
-      return "pacing";
-    case "mediaPlayback":
-      return "media";
-    case "storageWrite":
-      return "save";
-    case "capture":
-      return "photo";
-    case "fileStore":
-      return "file";
-    case "lock":
-      return action.call === "encryptText" || action.call === "encryptFile" ? "lock" : "unlock";
-  }
-}
-
-/**
- * The active calls, innermost first, also of a failed session, where they are the calls the error happened in. Work is
- * proportional to the call depth.
- */
-export function playerRuntimeCalls(
-  session: Pick<PlayerRuntimeSession, "plan" | "state">,
-): readonly PlayerDebugCall[] {
-  const { plan, state: snapshot } = session;
-  // Each frame runs in the file that the next inner frame was called from, the innermost in the next statement's file.
-  const calls: PlayerDebugCall[] = [];
-  let runningIn = instructionSourcePath(plan, snapshot.nextInstruction);
-  for (const call of [...snapshot.calls].reverse()) {
-    const from =
-      call.interruption === null
-        ? debugLocation(plan, call.returnInstruction, call.callSiteSpan.start.line + 1)
-        : debugLocation(plan, call.returnInstruction);
-    calls.push(
-      Object.freeze({
-        kind: call.kind === "file" ? "file" : (call.interruption ?? "function"),
-        name: call.kind === "file" ? runningIn : call.functionName,
-        from,
-      }),
-    );
-    runningIn = from.path;
-  }
-  return Object.freeze(calls);
-}
-
-/**
- * Where the session is, for Player Debug's Now view at display scene time `nowMs`: the next statement, the statement
- * whose foreground action it waits for, the active calls, every timer, hidden ones included, and the active media. Paths are package
- * paths, relative to the folder of the entry script. Read-only and derived on demand; it adds nothing to the session.
- */
-export function playerRuntimeDebugNow(
-  session: Pick<PlayerRuntimeSession, "plan" | "state">,
-  nowMs: number,
-): PlayerRuntimeDebugNow {
-  const { plan, state: snapshot } = session;
-  const now = Math.max(snapshot.observedSessionTimeMs, nowMs);
-  const active = snapshot.status === "running" || snapshot.status === "waiting";
-  const foreground = snapshot.foregroundAction;
-
-  const timers: PlayerDebugTimer[] = [];
-  const delays = [
-    ...(foreground === null ? [] : [{ action: foreground, suspended: false }]),
-    ...(snapshot.suspendedAction === null
-      ? []
-      : [{ action: snapshot.suspendedAction, suspended: true }]),
-  ];
-  for (const { action, suspended } of delays) {
-    if (action.kind !== "delay" || debugWaitKind(plan, action) !== "timer") continue;
-    timers.push({
-      actionId: action.actionId,
-      blocking: true,
-      display: action.display,
-      label: action.label,
-      repeat: false,
-      state: suspended ? "suspended" : "running",
-      remainingMs: Math.max(
-        0,
-        action.deadlineMs - (suspended ? (snapshot.suspendedAtMs ?? now) : now),
-      ),
-      startedAt: debugLocation(plan, action.owningInstruction),
-    });
-  }
-  for (const action of snapshot.backgroundActions) {
-    if (action.kind !== "timer") continue;
-    const timer = action.timer;
-    timers.push({
-      actionId: action.actionId,
-      blocking: false,
-      display: timer.display,
-      label: timer.label,
-      repeat: timer.repeat,
-      state: timer.deadlineMs === null ? "paused" : "running",
-      remainingMs:
-        timer.deadlineMs === null ? (timer.remainingMs ?? 0) : Math.max(0, timer.deadlineMs - now),
-      startedAt: debugLocation(plan, action.owningInstruction),
-    });
-  }
-
-  const mediaOwners = new Map<number, number>();
-  for (const action of snapshot.backgroundActions)
-    if (action.kind === "media") mediaOwners.set(action.media.mediaId, action.owningInstruction);
-  const media = snapshot.media.map((projection) =>
-    Object.freeze({
-      mediaId: projection.mediaId,
-      media: projection.media,
-      source: projection.source,
-      loaded: projection.loaded,
-      state: projection.state,
-      playheadMs: projection.playheadMs,
-      startedAt: debugLocation(plan, mediaOwners.get(projection.mediaId)!),
-    }),
-  );
-
-  return Object.freeze({
-    next: active ? debugLocation(plan, snapshot.nextInstruction) : null,
-    waitingAt:
-      active && foreground !== null
-        ? Object.freeze({
-            kind: debugWaitKind(plan, foreground),
-            at: debugLocation(plan, foreground.owningInstruction),
-            ...(foreground.kind === "lock"
-              ? {
-                  // The password field of `password: askPassword(...)` is a password opener, not the dialog.
-                  lock: Object.freeze({
-                    dialog:
-                      foreground.phase === "ask" &&
-                      (foreground.passwordField === null || foreground.choices.length > 0),
-                    password: foreground.password !== null || foreground.passwordField !== null,
-                    publicKeys: foreground.publicKeys.length,
-                    key: foreground.key !== null,
-                    timeLockMs: foreground.timeLockMs,
-                    choices: foreground.choices,
-                  }),
-                }
-              : {}),
-          })
-        : null,
-    calls: active ? playerRuntimeCalls(session) : Object.freeze([]),
-    timers: Object.freeze(
-      active
-        ? timers.sort((left, right) => left.actionId - right.actionId).map((t) => Object.freeze(t))
-        : [],
-    ),
-    media: Object.freeze(active ? media : []),
-  });
 }
 
 /** How the Player answers a pending `takePhoto()`. */
