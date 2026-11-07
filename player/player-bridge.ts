@@ -373,7 +373,7 @@ export class PlayerBridge {
     return this.store(this.#own(session))?.halted ?? true;
   }
 
-  /** Releases `session` in the host now; its store goes with it. */
+  /** Forgets `session`'s local store now, and queues the host's release after the session's earlier work. */
   release(session: PlayerSession): void {
     const store = this.store(this.#own(session));
     if (store === null) return;
