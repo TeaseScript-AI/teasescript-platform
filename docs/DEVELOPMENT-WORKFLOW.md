@@ -435,6 +435,7 @@ its second round. There is no route beyond full; a family there follows the step
 | Runtime | a checkpoint field; the protocol between runtime and Player; a value or format rule | a local error with a reproduction | a test clean-up that touches no oracle or shared helper |
 | Player | who owns input state; the mechanism that orders asynchronous replies; a layout rule used everywhere | one component's layout fault; a guard against a double tap, with a deterministic regression test | wording in docs |
 | Backend | a database migration; an API contract, including an additive field; authentication | a validation fix in one endpoint | config comments |
+| Website front end | an API client contract; sign-in or session handling; a component or style rule used on every page | one page's fault, with a deterministic regression test | copy text |
 
 ### The plan
 
@@ -552,6 +553,8 @@ READY contains:
   complete;
 - every review round so far, as a link to its comment, with its verdict;
 - departures from the accepted plan;
+- confusing code met, one line each, with what was done (fixed here, or the issue), as in
+  [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead);
 - on the full route, what the final review should cover.
 
 After any repair, the builder sends READY again at the new head.
@@ -563,6 +566,8 @@ The coordinator writes the final reviewer's brief. It contains:
 - the exact head and base, and what to read;
 - numbered items, each with the claim, the cases to construct beyond the pull request's own tests, and what counts as
   a blocker;
+- the clarity item: does anything the change adds or touches mislead, as in
+  [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead);
 - the delta item: from the diff against the base, confirm that the change is exactly the planned one and nothing else,
   naming collateral or generated files, debug code, secrets, unrelated changes, and stale documentation;
 - the output format, which follows

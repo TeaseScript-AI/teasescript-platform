@@ -113,6 +113,29 @@ checker, lowering, plan, runtime and editor cannot drift apart.
 - When a second fix for the same kind of case is needed in one area, look for the shared cause before
   patching again (see Convergence).
 
+### Code that does not mislead
+
+Names, types, comments and documentation say what the code does. A large share of builders' and reviewers' wrong
+turns came from the code itself:
+
+- a helper whose name or type promised handling it did not do, so its callers stopped doing it;
+- a check that covered less than its name said, such as a guard that checked only on entry, a wait that covered one of
+  two queues, or a fake that counted one of three write methods;
+- documentation that still described an earlier design, architecture or language version;
+- two mechanisms for one job, or state with no single obvious owner;
+- a tool flag or default that silently overrides what the caller set;
+- names that differ by a letter, such as a file and its plural.
+
+When something misleads you, or would mislead the next builder:
+
+- Fix it at its source: rename it, make the misuse a type or runtime error, correct the comment or document, or fold
+  the two mechanisms into one. Fixing only your own call site is not enough.
+- Fix it in the current pull request when it is small and in code the change touches. Otherwise file an issue that
+  names the misleading thing, what it suggests, what it does, and where it led someone wrong. When the fix crosses
+  files another open pull request changes, file the issue and say so in READY rather than widening this one.
+- Report it in your next regular message (the plan, READY, a question or a review round), one line each, with what
+  you did. A separate message is only for one that blocks you or affects other work.
+
 ## Self-review and assigned review
 
 Before handoff, the implementer reviews the exact final diff. For each assigned review or re-review,
@@ -130,7 +153,10 @@ lenses below; not every lens applies equally, and preference alone is not a bloc
 paths, independently apply the input-driven scaling and native-JavaScript lens above; small fixtures and
 green CI do not by themselves prove that valid large or complex input avoids accidental amplification or
 native failure. On changes that encode a language rule or predict runtime behavior, apply the one-home
-lens above. Escalate uncertainty that cannot be bounded through a separately assigned
+lens above. On everything the change adds or touches, apply the [clarity lens](#code-that-does-not-mislead): a
+name, type, comment or document that promises a guarantee the code does not give, or hides one it needs, is a
+finding even when today's callers are correct. It blocks only when a caller is wrong today; otherwise it is fixed in
+the pull request when small, or filed. Escalate uncertainty that cannot be bounded through a separately assigned
 [`AUDIT.md`](AUDIT.md).
 
 - **Requirements and paths:** accepted behavior, scope, failures, indirect effects, and real
@@ -189,6 +215,7 @@ Non-authoritative memory aid; mark `N/A` only after considering the item.
 - [ ] Code, tests, documentation, workflows, and integrations form one result.
 - [ ] Language rules reused from their one home; analyses that predict runtime behavior derive it from
   the plan or shared helpers and are tested against the runtime.
+- [ ] Nothing the change adds or touches misleads; confusing code met on the way is fixed or filed.
 - [ ] Supported behavior and failures proved through real paths.
 - [ ] Tests and oracles are sound and worth their run time; negative probes used when warranted.
 - [ ] Documentation is canonical, current, consolidated, and token-efficient without semantic loss.
