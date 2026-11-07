@@ -1,11 +1,12 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 
 // Runs, before a push, the checks CI fails on for what changed since a base, in parallel, and prints one line per check
 // with its verdict and seconds, and the full output of a check that failed:
 //
-//   node tools/check-changed.mjs [--base <ref>]
+//   node tools/check-changed.mjs [--merged] [--base <ref>]
 //
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else `origin/main`; the
 // changes are those since its merge-base with HEAD, committed or not, untracked files included. Always: `git diff
@@ -13,8 +14,14 @@ import { dirname, join } from "node:path";
 // path belongs to (`projectsFor`): its type check and tests. A changed path no project claims, other than
 // documentation, runs every project's checks.
 //
-// Exit status: 0 when every check passed, 1 when one failed, 2 when the checks cannot run (no base, or no
-// `node_modules`, which it never installs: it names the fix).
+// `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
+// detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
+// changes are not in HEAD, so not in the merge; a conflict is exit 2, naming the files. The worktree is removed at the
+// end, also on SIGINT, SIGTERM and SIGHUP; only killing this process outright (`kill -9`) leaves it, for `git worktree
+// prune` and the temporary folder's cleanup.
+//
+// Exit status: 0 when every check passed, 1 when one failed, 2 when the checks cannot run (no base, a merge conflict,
+// a leftover it may not remove, or no `node_modules`, which it never installs: it names the fix).
 
 /** The projects a changed path can belong to, each with the npm scripts or commands that check it. */
 export const PROJECTS = {
@@ -60,28 +67,72 @@ const FORMATTED = /\.(?:ts|tsx|cts|mts|js|jsx|cjs|mjs)$/u;
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
 
+/** A reason the checks cannot run: exit 2. */
+class CannotRun extends Error {}
+
 function cannotRun(message) {
-  process.stderr.write(`check-changed: ${message}\n`);
-  process.exit(2);
+  throw new CannotRun(message);
 }
 
-function base(argv) {
-  if (argv[0] === "--base") {
-    if (argv.length !== 2) cannotRun("usage: node tools/check-changed.mjs [--base <ref>]");
-    return argv[1];
-  }
-  if (argv.length > 0) cannotRun("usage: node tools/check-changed.mjs [--base <ref>]");
+const USAGE = "usage: node tools/check-changed.mjs [--merged] [--base <ref>]";
+
+/** `--merged`, and the base: `--base`, else the open pull request's base, else `origin/main`. */
+function options(argv) {
+  const merged = argv.includes("--merged");
+  const rest = argv.filter((argument) => argument !== "--merged");
+  if (rest.length > 0 && !(rest.length === 2 && rest[0] === "--base")) cannotRun(USAGE);
+  if (rest.length === 2) return { merged, ref: rest[1] };
   const pr = spawnSync("gh", ["pr", "view", "--json", "baseRefName", "-q", ".baseRefName"], {
     encoding: "utf8",
   });
-  return pr.status === 0 && pr.stdout.trim() !== "" ? `origin/${pr.stdout.trim()}` : "origin/main";
+  return {
+    merged,
+    ref: pr.status === 0 && pr.stdout.trim() !== "" ? `origin/${pr.stdout.trim()}` : "origin/main",
+  };
 }
+
+/** The prefix of every temporary worktree `--merged` makes. */
+const TEMPORARY_PREFIX = join(tmpdir(), "check-changed-merged-");
+
+/**
+ * Removes `directory`, a temporary worktree of the repository at `repository`, and returns `null`; or, when
+ * `directory` is not one this tool made (its absolute path under `TEMPORARY_PREFIX`) and registered as a worktree of
+ * that repository, removes nothing and returns why.
+ */
+export function removeTemporaryWorktree(directory, repository) {
+  const real = (path) => (existsSync(path) ? realpathSync(path) : resolve(path));
+  if (resolve(directory) !== directory || !directory.startsWith(TEMPORARY_PREFIX))
+    return `${directory} is not a temporary worktree of check-changed`;
+  const listed = spawnSync("git", ["-C", repository, "worktree", "list", "--porcelain"], {
+    encoding: "utf8",
+  }).stdout.split("\n");
+  if (!listed.includes(`worktree ${real(directory)}`) && !listed.includes(`worktree ${directory}`))
+    return `${directory} is not a worktree of ${repository}`;
+  if (
+    spawnSync("git", ["-C", repository, "worktree", "remove", "--force", directory]).status !== 0
+  ) {
+    rmSync(directory, { recursive: true, force: true });
+    spawnSync("git", ["-C", repository, "worktree", "prune"]);
+  }
+  return null;
+}
+
+/** The checks running now, each its own process group, so `stop` reaches their children too. */
+const running = new Set();
+const stop = () => {
+  for (const child of running)
+    try {
+      process.kill(-child.pid, "SIGTERM");
+    } catch {}
+};
 
 /** The formatter CI's version pins: `agent-prettier` on the LXC, else the installed one when its version is the pin. */
 function prettier() {
   if (spawnSync("agent-prettier", ["--version"], { stdio: "ignore" }).status === 0)
     return ["agent-prettier"];
   const pinned = JSON.parse(readFileSync("package.json", "utf8")).devDependencies?.prettier;
+  if (!existsSync("node_modules/prettier/package.json"))
+    cannotRun("node_modules has no prettier: link or install the repository's");
   const installed = JSON.parse(readFileSync("node_modules/prettier/package.json", "utf8")).version;
   if (installed !== pinned)
     cannotRun(
@@ -93,35 +144,90 @@ function prettier() {
 function run(name, command, args) {
   const start = performance.now();
   return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
+    running.add(child);
     let output = "";
     child.stdout.on("data", (chunk) => (output += chunk));
     child.stderr.on("data", (chunk) => (output += chunk));
     child.on("error", (error) =>
       resolve({ name, passed: false, seconds: 0, output: error.message }),
     );
-    child.on("close", (code) =>
-      resolve({ name, passed: code === 0, seconds: (performance.now() - start) / 1000, output }),
-    );
+    child.on("close", (code) => {
+      running.delete(child);
+      resolve({ name, passed: code === 0, seconds: (performance.now() - start) / 1000, output });
+    });
   });
 }
 
-async function main() {
-  const ref = base(process.argv.slice(2));
-  let mergeBase;
+/**
+ * `--merged`: HEAD merged into the base's commit in a temporary worktree, which `cleanup` removes. The process then
+ * runs in that worktree, and the base it compares with is the base's commit.
+ */
+function enterMerge(ref, cleanups) {
+  const repository = git("rev-parse", "--show-toplevel");
+  const head = git("rev-parse", "HEAD");
+  let baseCommit;
   try {
-    mergeBase = git("merge-base", "HEAD", ref);
+    baseCommit = git("rev-parse", `${ref}^{commit}`);
   } catch {
-    cannotRun(`no merge-base of HEAD and ${ref}: fetch it, or name one with --base`);
+    cannotRun(`no commit ${ref}: fetch it, or name one with --base`);
   }
+  if (git("status", "--porcelain") !== "")
+    process.stderr.write(
+      "check-changed: warning: uncommitted changes are not in HEAD, so not in the merge\n",
+    );
+  const directory = mkdtempSync(TEMPORARY_PREFIX);
+  cleanups.push(() => {
+    const refused = removeTemporaryWorktree(directory, repository);
+    if (refused !== null) {
+      process.stderr.write(`check-changed: left ${directory} in place: ${refused}\n`);
+      process.exitCode = 2;
+    }
+  });
+  git("worktree", "add", "--quiet", "--detach", directory, baseCommit);
+  // (git asks a merge for a committer even with `--no-commit`, and a CI runner or a fresh worker has none)
+  const identity = ["-c", "user.name=check-changed", "-c", "user.email=check-changed@localhost"];
+  const merge = spawnSync(
+    "git",
+    ["-C", directory, ...identity, "merge", "--quiet", "--no-commit", "--no-ff", head],
+    { encoding: "utf8" },
+  );
+  if (merge.status !== 0) {
+    const conflicts = spawnSync(
+      "git",
+      ["-C", directory, "diff", "--name-only", "--diff-filter=U"],
+      { encoding: "utf8" },
+    ).stdout.trim();
+    cannotRun(
+      `HEAD does not merge into ${ref} (${baseCommit.slice(0, 9)}): ${conflicts.split("\n").join(", ") || merge.stderr.trim()}`,
+    );
+  }
+  symlinkSync(realpathSync(join(repository, "node_modules")), join(directory, "node_modules"));
+  process.chdir(directory);
+  process.stdout.write(
+    `check-changed: the merge of HEAD (${head.slice(0, 9)}) into ${ref} (${baseCommit.slice(0, 9)})\n`,
+  );
+  return baseCommit;
+}
+
+async function check(cleanups) {
+  const { merged, ref } = options(process.argv.slice(2));
   if (!existsSync("node_modules")) {
     const lxc = "/opt/agent-stack/teasescript-main/current/node_modules";
     cannotRun(
       existsSync(lxc)
         ? `no node_modules: link it with \`ln -s ${lxc} node_modules\``
-        : `no node_modules: link \`$(sx-tree ${mergeBase})/node_modules\`, or run \`npm ci\``,
+        : `no node_modules: link \`$(sx-tree ${spawnSync("git", ["merge-base", "HEAD", ref], { encoding: "utf8" }).stdout.trim() || "<merge-base SHA>"})/node_modules\`, or run \`npm ci\``,
     );
   }
+  let mergeBase;
+  if (merged) mergeBase = enterMerge(ref, cleanups);
+  else
+    try {
+      mergeBase = git("merge-base", "HEAD", ref);
+    } catch {
+      cannotRun(`no merge-base of HEAD and ${ref}: fetch it, or name one with --base`);
+    }
   const linkedLock = join(dirname(realpathSync("node_modules")), "package-lock.json");
   if (
     existsSync(linkedLock) &&
@@ -133,7 +239,8 @@ async function main() {
 
   const changed = [
     ...git("diff", "--name-only", "--diff-filter=d", mergeBase).split("\n"),
-    ...git("ls-files", "--others", "--exclude-standard").split("\n"),
+    // (the merge's worktree has no untracked file but the linked `node_modules`)
+    ...(merged ? [] : git("ls-files", "--others", "--exclude-standard").split("\n")),
   ].filter((path) => path !== "" && existsSync(path));
   const projects = projectsFor(changed);
   process.stdout.write(
@@ -167,6 +274,35 @@ async function main() {
   for (const { name, passed, output } of results)
     if (!passed) process.stdout.write(`\n--- ${name} ---\n${output}`);
   process.exitCode = results.every(({ passed }) => passed) ? 0 : 1;
+}
+
+async function main() {
+  const cleanups = [];
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    stop();
+    for (const step of cleanups) step();
+  };
+  for (const [signal, code] of [
+    ["SIGINT", 130],
+    ["SIGTERM", 143],
+    ["SIGHUP", 129],
+  ])
+    process.once(signal, () => {
+      cleanup();
+      process.exit(code);
+    });
+  try {
+    await check(cleanups);
+  } catch (error) {
+    if (!(error instanceof CannotRun)) throw error;
+    process.stderr.write(`check-changed: ${error.message}\n`);
+    process.exitCode = 2;
+  } finally {
+    cleanup();
+  }
 }
 
 if (import.meta.main) await main();
