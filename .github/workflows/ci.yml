@@ -16,9 +16,10 @@ concurrency:
 
 jobs:
   # The check runs as three jobs side by side (#1638, #1978): each installs and builds, then runs one third of the
-  # compiled tests (`--shard=i/3`, shared out by measured seconds, `tools/test-shards.mjs`); check-3 also runs the checks
-  # before the tests (`check:pretest`), once. Together they run what `npm run check` runs; `check`, the required check,
-  # passes only where all three passed.
+  # compiled tests (`--shard=i/3`, shared out by measured seconds, `tools/test-shards.mjs`); check-3 also runs the
+  # checks before the tests (`check:pretest`), once. Together they run what `npm run check` runs; `check`, the required
+  # check, passes only where all three passed. `tools/measure-test-files.mjs --from-ci` finds the test jobs by their
+  # step named "Build and run tests…" and the pre-test checks by "Check source before the tests": keep those names.
   check-1:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

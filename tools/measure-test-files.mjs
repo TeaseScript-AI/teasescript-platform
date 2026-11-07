@@ -72,7 +72,9 @@ function ciRuns(ids) {
   return ids.map((runId) => {
     // (a run's last attempt: re-running a run removes the artifacts of its earlier attempts)
     const where = `repos/{owner}/{repo}/actions/runs/${runId}`;
-    const commit = gh("api", where, "-q", ".head_sha");
+    const { head_sha: commit, conclusion } = JSON.parse(gh("api", where));
+    // (a run that did not pass may lack a test job that never started, whose files the other runs would then cover)
+    if (conclusion !== "success") fail([`run ${runId} did not pass (${conclusion})`]);
     const jobs = JSON.parse(gh("api", `${where}/jobs`, "-q", ".jobs"));
     const step = jobs
       .flatMap((job) => job.steps ?? [])
