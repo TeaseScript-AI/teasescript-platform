@@ -100,7 +100,10 @@ export function* absentWriterAt(
       const written = writtenOf(program.place(place).kind);
       if (written !== null && termAt(written, joinSteps(path, [step])) !== null) return UNCOVERED;
     }
-    for (const each of node.prior) writer = firstWriter(writer, each);
+    for (const each of node.prior) {
+      program.work.charge("invSteps");
+      writer = firstWriter(writer, each);
+    }
     for (const { literal, path } of node.lists) {
       program.work.charge("invSteps");
       const index = contract.literalIndex(literal);
@@ -109,12 +112,15 @@ export function* absentWriterAt(
         return UNCOVERED;
       writer = firstWriter(writer, lackingAt(contract, index, path, step));
     }
-    for (const child of node.children)
+    // (each edge read, a child already seen too: a dense graph's edges, not only its nodes)
+    for (const child of node.children) {
+      program.work.charge("invSteps");
       if (!seen.has(child.key)) {
         contract.keepText(child.key.length);
         seen.add(child.key);
         open.push(child);
       }
+    }
   }
   return { covered: true, writer };
 }
