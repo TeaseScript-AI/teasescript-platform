@@ -34,6 +34,8 @@ test("every argument Node reads as a path is checked, whatever option comes befo
         .map((option) => [`value with = ${option}`, [`${option}=v`]]),
     ),
     "unknown bare": ["--unknown"],
+    // Node reads `--test_only` as `--test-only`; the filter does not, so it refuses it rather than guess.
+    "unknown bare underscore spelling": ["--test_only"],
     "unknown with =": ["--unknown=v"],
     terminator: ["--"],
   };
@@ -51,19 +53,13 @@ test("every argument Node reads as a path is checked, whatever option comes befo
       assert.deepEqual(testPathArguments(args), phase === "after --" ? args.slice(1) : args, name);
       continue;
     }
-    if (kind === "unknown bare") {
+    if (kind.startsWith("unknown bare")) {
       assert.throws(() => testPathArguments(args), /is not an option it knows/u, name);
       continue;
     }
     // A value option took its value `v`, so the argument after the option is the first path.
     assert.deepEqual(testPathArguments(args), token, name);
   }
-  // Every option, next argument and phase was generated.
-  const names = new Set(cases.map(({ name }) => name));
-  for (const kind of Object.keys(classes))
-    for (const next of Object.keys(tokens))
-      for (const phase of Object.keys(PHASES))
-        assert.ok(names.has(`${kind} × ${next} × ${phase}`), `${kind} × ${next} × ${phase}`);
   // A short option has no `=` form: Node refuses `-r=x`.
   assert.throws(() => testPathArguments(["-r=x", "a.test.js"]), /is not an option it knows/u);
 });

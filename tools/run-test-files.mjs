@@ -13,8 +13,10 @@ import { spec } from "node:test/reporters";
 // names a file, it receives each file's seconds from its process's start to its end, as CI's test jobs keep them for
 // `tools/measure-test-files.mjs`.
 const filesAtOnce = Math.max(availableParallelism() - 1, 1);
+// A test runner option is any of Node's `--test…` or `--experimental-test…` options, also negated with `--no-`; Node
+// reads `_` in an option's name as `-`, so `--test_name_pattern=x` is one too.
 const testOptions = process.execArgv.filter((option) =>
-  /^--(?:experimental-)?test(?:-|=|$)/u.test(option),
+  /^--(?:no-)?(?:experimental-)?test(?:-|$)/u.test(option.split("=", 1)[0].replaceAll("_", "-")),
 );
 if (testOptions.length > 0) {
   await new Promise((resolve) =>
