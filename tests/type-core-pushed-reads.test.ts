@@ -962,7 +962,8 @@ test("two pending sets that meet at one node are held as their union, in four mo
   for (const mode of MODES) {
     const pushed = analysed(source, mode);
     const label = JSON.stringify(mode);
-    assert.ok(pushed.facts.reads > 0 && pushed.facts.declines.size === 0, label);
+    // (its read below `p2.q.q`, a floor, declines: `marks-floor`, Codex r7)
+    assert.ok(pushed.facts.reads > 0, label);
     for (const { violations } of pushed.invariants) assert.deepEqual(violations, [], label);
     for (const truth of pushed.truth) assert.deepEqual(truth.differences, [], label);
     const files = [{ path: "main.tease", source }];
@@ -972,4 +973,58 @@ test("two pending sets that meet at one node are held as their union, in four mo
       label,
     );
   }
+});
+
+/** Codex r7's family: a ring copying `p2.<step>` into `p2`, the copy into `p1` of `p0` held under tests below it. */
+function floorRing(step: string, nested: boolean, depth: number, marked: boolean): string {
+  const leaf = "{a:0,b:0}";
+  const literal = nested ? `{${step}:${leaf}}` : leaf;
+  return (
+    [
+      `let p0=${literal}`,
+      `let p1=${leaf}`,
+      `let p2=${leaf}`,
+      `p2.${step}=p0`,
+      ...(marked
+        ? [
+            `if p0.${step}.a is integer { p1=p0 }`,
+            `if p0.${Array(depth).fill(step).join(".")}.b is integer { p1=p0 }`,
+          ]
+        : ["p1=p0"]),
+      "p2=p1",
+      `p2=p2.${step}`,
+      `say "\${p2.b} \${p2.${step}.a} \${p2.${step}.${step}.b}"`,
+      "exit",
+    ].join("\n") + "\n"
+  );
+}
+
+test("a marked read below a receiver with no structure declines as the native reader floors it, in four modes (#1784, Codex r7)", () => {
+  for (const step of ["q", "r"])
+    for (const nested of [false, true])
+      for (const depth of [1, 2])
+        for (const marked of [true, false]) {
+          const source = floorRing(step, nested, depth, marked);
+          for (const mode of MODES) {
+            const label = `${JSON.stringify(mode)}\n${source}`;
+            const pushed = analysed(source, mode);
+            const native = analysed(source, mode, "native");
+            // (every slot both settle, the floor's below it included, as the native reader's: marks too)
+            sameSettled(pushed, native, source);
+            for (const { violations } of pushed.invariants) assert.deepEqual(violations, [], label);
+            const files = [{ path: "main.tease", source }];
+            assert.equal(
+              publication(files, mode, GLOBALS),
+              withoutPushedReads(() => publication(files, mode, GLOBALS)),
+              label,
+            );
+            const floors = pushed.all.reduce(
+              (all, facts) => all + (facts.declines.get("marks-floor") ?? 0),
+              0,
+            );
+            // (unmarked rings never decline there; a mark one step below its test's own depth does not cross a floor)
+            if (!marked || depth === 1) assert.equal(floors, 0, label);
+            if (marked && depth === 2 && !nested) assert.ok(floors > 0, label);
+          }
+        }
 });
