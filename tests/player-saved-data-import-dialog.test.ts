@@ -156,6 +156,18 @@ function expected({ state, event, settlement }: Row): {
   return { atEvent: [], atEnd: leaves ? ["t1"] : [] };
 }
 
+/**
+ * The review the dialog shows at the end of `row`, by its ticket, or `null` for none; `undefined` once it unmounted. A
+ * newer reading shows its own; an event that leaves shows none; otherwise what waited settles into the review of `t1`,
+ * also an import that failed, so the player can try again, while one that succeeded shows none.
+ */
+function expectedShown({ state, event, settlement }: Row): string | null | undefined {
+  if (event === "unmount") return undefined;
+  if (event === "newerRead") return "t2";
+  if (EVENTS[event].effect === "leaves") return null;
+  return state === "importing" && settlement === "succeeds" ? null : "t1";
+}
+
 /** Every row of the table: each state with each event, an import with each settlement, but `NOT_ROWS`. */
 function rows(): Row[] {
   const all: Row[] = [];
@@ -213,16 +225,14 @@ async function run(row: Row) {
 for (const row of rows())
   test(`the import dialog's session: ${rowName(row)}`, async () => {
     const { atEvent, atEnd, step } = await run(row);
-    const want = expected(row);
-    assert.deepEqual({ atEvent, atEnd }, want);
-    // A session the dialog let go of is shown no more, while it is mounted.
-    const shown =
-      step.kind === "sessionReview" && row.event !== "unmount"
-        ? step.review?.transfer.ticket
-        : null;
-    if (shown !== null && shown !== undefined)
-      assert.ok(!atEnd.includes(shown), `${shown} shown, let go of`);
-    if (row.event === "newerRead") assert.equal(shown, "t2", "the newer reading is shown");
+    assert.deepEqual({ atEvent, atEnd }, expected(row));
+    // The review shown at the end, and a session the dialog let go of is shown no more.
+    const want = expectedShown(row);
+    if (want !== undefined) {
+      const shown = step.kind === "sessionReview" ? (step.review?.transfer.ticket ?? null) : null;
+      assert.equal(shown, want, "the review shown");
+      if (shown !== null) assert.ok(!atEnd.includes(shown), `${shown} shown, let go of`);
+    }
   });
 
 test("the import dialog's session: a refused review is the composable's to let go of", async () => {
