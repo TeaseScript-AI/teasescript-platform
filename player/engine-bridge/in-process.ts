@@ -85,12 +85,8 @@ export function createInProcessBackend(
     options.delayMs === undefined
       ? queueMicrotask(deliverOne)
       : setTimeout(deliverOne, options.delayMs);
-  // Once the client ended, the host's posts fail: a reply of work still running then has no one to reach, and its
-  // delivery is undone as the reply fails (`worker-host.ts`).
-  let ended = false;
   const hostPort: HostPort = {
     post: (message) => {
-      if (ended) throw new Error("The client of this in-process host ended.");
       // Decoded on receipt, so `flush` reads the session of a reply that crossed as a flat form.
       const data = decodeMessage(structuredClone(message));
       const session =
@@ -112,7 +108,6 @@ export function createInProcessBackend(
     // The client ends, by a loss or `terminate()`, and terminates its port first (`client.ts`), so the host here, which
     // outlives it, closes the connection directly: nothing goes through the ended client.
     terminate: () => {
-      ended = true;
       toHost = null;
       toClient = null;
       transit.length = 0;
