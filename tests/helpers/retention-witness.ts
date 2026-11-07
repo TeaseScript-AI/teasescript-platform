@@ -29,6 +29,10 @@ export interface RetentionHit {
   readonly type: string;
   /** Whether its content was read with some part of a slice's parent: a hit by failing closed. */
   readonly partial: boolean;
+  /** Its structure as the snapshot shows it: `flat`, `slice`, or `cons(first,second)` of those. */
+  readonly shape: string;
+  /** A flat string's length; `null` for another shape. */
+  readonly length: number | null;
   readonly path: readonly string[];
 }
 
@@ -210,6 +214,17 @@ function retentionHits(
     for (const { type, name, to } of edgesOf(node))
       if (type !== "weak") retainers[to]!.push([node, name]);
   }
+  const shapeOf = (node: number, depth: number): string => {
+    const type = typeOf(node);
+    if (type === "string") return "flat";
+    if (type === "sliced string") return "slice";
+    if (type !== "concatenated string") return type;
+    if (depth === 0) return "cons(...)";
+    const parts: Record<string, number> = {};
+    for (const { name, to } of edgesOf(node)) parts[name] = to;
+    const part = (at: number | undefined) => (at === undefined ? "none" : shapeOf(at, depth - 1));
+    return `cons(${part(parts.first)},${part(parts.second)})`;
+  };
   const label = (node: number) => `${typeOf(node)} ${nameOf(node).slice(0, 60)}`;
   const pathOf = (node: number): readonly string[] => {
     // Breadth first from the hit to the snapshot's root, node 0.
@@ -239,6 +254,8 @@ function retentionHits(
       nodes.map((node) => ({
         type: typeOf(node),
         partial: strings.has(typeOf(node)) && !known(segmentsOf(node)),
+        shape: shapeOf(node, 3),
+        length: typeOf(node) === "string" ? nameOf(node).length : null,
         path: pathOf(node),
       })),
     ]),

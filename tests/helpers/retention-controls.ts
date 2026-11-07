@@ -14,8 +14,9 @@ import {
  * The retention child of the witness's positive controls (`retention-witness.test.ts`). A `scan/holder/piece` or
  * `object/holder/piece` case runs Debug's source ops on a connection of its own, tears it down, and then keeps one
  * piece of what the ops made in the holder it names, each holder with a container of its own, so the parent can find
- * that holder on the piece's path. An `object` case also releases its piece, which must then be collected: so that
- * holder alone kept it. A `string/representation/cut` case keeps its marked path in the representation it names,
+ * that holder on the piece's path. An `object` case's piece has no marker, so its holder keeps it paired with a marked
+ * tag, a test-side string never set on session data; after the snapshot it releases the pair, and the piece must then
+ * be collected: so that holder alone kept it. A `string/representation/cut` case keeps its marked path in the representation it names,
  * with the marker split at `cut`. `clean` keeps nothing.
  */
 
@@ -41,12 +42,12 @@ const PAD = "#".repeat(16);
 const keep = () => {};
 
 // The holders' containers, one each, named as the parent finds them on a path.
-const moduleHeld: Piece[] = [];
+const moduleHeld: Piece[][] = [];
 const closures: (() => Piece)[] = [];
 const weakKeys: object[] = [];
 const weakValues = new WeakMap<object, Piece>();
 const byToken = new Map<string, Piece>();
-const inSet = new Set<Piece>();
+const inSet = new Set<Piece[]>();
 const reactions: Promise<void>[] = [];
 const nested: Piece[][][] = [];
 // In dictionary mode, so a key is the object's own, not a hidden class's transition.
@@ -58,24 +59,44 @@ const lineCopies: string[] = [];
 const splitConses: string[] = [];
 const representations: string[] = [];
 class Held {
-  static readonly values: Piece[] = [];
+  static readonly values: Piece[][] = [];
 }
-const drop = <T>(list: T[], item: T) => void list.splice(list.indexOf(item), 1);
+/**
+ * What lets `item` go from `list`: by a weak reference, so that a release waiting to run holds nothing on a path the
+ * parent reads.
+ */
+const dropping = <T extends WeakKey>(list: T[], item: T) => {
+  const ref = new WeakRef(item);
+  return () => {
+    const kept = ref.deref();
+    if (kept !== undefined) list.splice(list.indexOf(kept), 1);
+  };
+};
+/** A closure that keeps `kept`, made in a frame of its own. */
+const reading = (kept: Piece) => () => kept;
+/** A pending promise whose reaction keeps `kept`, made in a frame of its own; and what settles it. */
+function pendingWith(kept: Piece): {
+  readonly pending: Promise<void>;
+  readonly settle: () => void;
+} {
+  let settle = () => {};
+  const pending = new Promise<void>((resolve) => (settle = resolve));
+  void pending.then(() => kept);
+  return { pending, settle };
+}
 
 /** Keeps `piece` in one kind of holder; returns what lets it go again. */
 type Holder = (piece: Piece, text: string, marker: string, name: string) => () => void;
 const HOLDERS: Record<string, Holder> = {
   module: (piece) => {
-    moduleHeld.push(piece);
-    return () => drop(moduleHeld, piece);
+    const slot = [piece];
+    moduleHeld.push(slot);
+    return dropping(moduleHeld, slot);
   },
   closure: (piece) => {
-    const read = (
-      (kept) => () =>
-        kept
-    )(piece);
+    const read = reading(piece);
     closures.push(read);
-    return () => drop(closures, read);
+    return dropping(closures, read);
   },
   global: (piece, _text, _marker, name) => {
     Object.assign(globalThis, { [`retention ${name}`]: piece });
@@ -89,35 +110,38 @@ const HOLDERS: Record<string, Holder> = {
     const key = {};
     weakKeys.push(key);
     weakValues.set(key, piece);
-    return () => drop(weakKeys, key);
+    return dropping(weakKeys, key);
   },
   set: (piece) => {
-    inSet.add(piece);
-    return () => void inSet.delete(piece);
+    const slot = [piece];
+    inSet.add(slot);
+    const ref = new WeakRef(slot);
+    return () => void inSet.delete(ref.deref()!);
   },
   promiseReaction: (piece) => {
     // The reaction, and the piece with it, hangs on the pending promise until it settles.
-    let settle = () => {};
-    const pending = new Promise<void>((resolve) => (settle = resolve));
-    void pending.then(() => piece);
+    const { pending, settle } = pendingWith(piece);
     reactions.push(pending);
+    const release = dropping(reactions, pending);
     return () => {
       settle();
-      drop(reactions, pending);
+      release();
     };
   },
   timer: (piece) => {
-    const timer = setTimeout(() => void piece, 1e9).unref();
-    return () => clearTimeout(timer);
+    const timer = setTimeout(reading(piece), 1e9).unref();
+    const ref = new WeakRef(timer);
+    return () => clearTimeout(ref.deref());
   },
   staticField: (piece) => {
-    Held.values.push(piece);
-    return () => drop(Held.values, piece);
+    const slot = [piece];
+    Held.values.push(slot);
+    return dropping(Held.values, slot);
   },
   arrayElement: (piece) => {
     const element = [[piece]];
     nested.push(element);
-    return () => drop(nested, element);
+    return dropping(nested, element);
   },
   // These keep strings: the piece's text, or what is made from it.
   propertyKey: (_piece, text) => {
@@ -227,7 +251,10 @@ async function runCases() {
     const before = heldBefore(context);
     await run("teardown", null);
     if (piece !== null) {
-      const release = HOLDERS[holder!]!(piece, textOf(piece), marker, name);
+      // An object piece carries no marker: its holder keeps it in a pair with a marked tag, a test-side string set
+      // here and never on session data, so the parent finds the pair, and so the piece, on the holder's path.
+      const kept = observation === "object" ? [piece, copy(`tag ${marker}`)] : piece;
+      const release = HOLDERS[holder!]!(kept, textOf(piece), marker, name);
       if (observation === "object") releases.push(release);
     }
     results.push({
@@ -249,7 +276,9 @@ function letGo(releases: (() => void)[]): void {
 const { results, releases } = await runCases();
 await collect();
 const held = results.map(({ before, context }) => stillHeld(before, context));
-// Each object case's holder lets its piece go: then it must be collected.
+// The snapshot shows every piece in its holder; then each object case's holder lets its piece go, and it must be
+// collected.
+const snapshot = await snapshotForRetention();
 letGo(releases);
 await collect();
 const report = results.map(({ name, extra, before, context, releases: let_go }, index) => ({
@@ -258,4 +287,4 @@ const report = results.map(({ name, extra, before, context, releases: let_go }, 
   held: held[index]!,
   released: let_go ? stillHeld(before, context) : 0,
 }));
-process.stdout.write(JSON.stringify({ report, snapshot: await snapshotForRetention() }));
+process.stdout.write(JSON.stringify({ report, snapshot }));

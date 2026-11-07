@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { runRetentionChild } from "./helpers/retention-witness.js";
+import { markedProject } from "./helpers/source-ops-project.js";
 
 /*
  * The retention witness's positive controls (`helpers/retention-witness.ts`): it must find a piece of session data
@@ -21,11 +22,10 @@ const OBJECT_HOLDERS = [
   "staticField",
   "arrayElement",
 ] as const;
-/** Each holder's own edge, which the path of what it keeps passes. */
-const EDGES: Record<string, string> = {
+/** Each holder kind's own edge, which the path of what it keeps passes. */
+const EDGE_OF: Record<string, string> = {
   module: "-moduleHeld->",
   closure: "-kept->",
-  global: "-retention scan/global/",
   mapByToken: "-byToken->",
   weakMapValue: "part of key",
   set: "-inSet->",
@@ -39,15 +39,15 @@ const EDGES: Record<string, string> = {
   lineCopy: "-lineCopies->",
   splitCons: "-splitConses->",
 };
-/** The snapshot node a representation must show as, and whether it is read by failing closed. */
-const SHOWN: Record<string, { readonly type: string; readonly partial: boolean }> = {
-  flat: { type: "string", partial: false },
-  cons: { type: "concatenated string", partial: false },
-  nestedCons: { type: "concatenated string", partial: false },
-  slice: { type: "sliced string", partial: true },
-  sliceInConsLeft: { type: "concatenated string", partial: true },
-  sliceInConsRight: { type: "concatenated string", partial: true },
-  long: { type: "string", partial: false },
+/** Each representation's structure, as the snapshot shows it. */
+const SHAPE_OF: Record<string, string> = {
+  flat: "flat",
+  cons: "cons(flat,flat)",
+  nestedCons: "cons(cons(flat,flat),flat)",
+  slice: "slice",
+  sliceInConsLeft: "cons(slice,flat)",
+  sliceInConsRight: "cons(flat,slice)",
+  long: "flat",
 };
 const MARKER_LENGTH = 14;
 const AXES = {
@@ -58,10 +58,36 @@ const AXES = {
   object: { holder: OBJECT_HOLDERS, piece: ["tokenArray", "enclosingSpans"] },
   // Every cut of the marker, from before its first character to after its last.
   string: {
-    holder: Object.keys(SHOWN),
+    holder: Object.keys(SHAPE_OF),
     piece: Array.from({ length: MARKER_LENGTH + 1 }, (_, cut) => String(cut)),
   },
 } as const;
+/** The marked path a string control holds, as long as it is with a marker. */
+const PATH_LENGTH = markedProject("m".repeat(MARKER_LENGTH)).files[0]!.path.length;
+
+/**
+ * What the snapshot must show for a case, from its axis values alone: the edge of the holder its piece is kept by,
+ * and for a string control the structure and length of the string it holds.
+ */
+function expectedOf(name: string): {
+  readonly edge: string;
+  readonly shape: string | null;
+  readonly length: number | null;
+} {
+  const [observation, holder] = name.split("/");
+  if (observation === "string")
+    return {
+      edge: "-representations->",
+      shape: SHAPE_OF[holder!]!,
+      length: holder === "long" ? 70_000 + PATH_LENGTH : null,
+    };
+  return {
+    edge: holder === "global" ? `-retention ${name}->` : EDGE_OF[holder!]!,
+    shape: null,
+    length: null,
+  };
+}
+
 const CASES = [
   ...Object.entries(AXES).flatMap(([observation, { holder, piece }]) =>
     holder.flatMap((each) => piece.map((kind) => `${observation}/${each}/${kind}`)),
@@ -92,31 +118,30 @@ test("the retention witness finds a piece kept in any holder after teardown, and
         );
   for (const { name, extra, held, released } of reports) {
     const found = hits.get(name)!;
-    const [observation, holder] = name.split("/");
     // What a holder keeps outside the connection leaves the connection as a fresh one.
     assert.equal(extra, 0, name);
-    if (observation === "clean") {
+    if (name === "clean") {
       assert.deepEqual([found, held], [[], 0], "a clean teardown leaves nothing");
-    } else if (observation === "scan") {
-      const paths = found.map(({ path }) => path.join(" "));
-      assert.ok(
-        paths.some((path) => path.includes(EDGES[holder!]!)),
-        `${name}: the scan finds the piece through its holder: ${paths.join(" || ")}`,
-      );
-    } else if (observation === "object") {
+      continue;
+    }
+    // The observed holder and structure, against what the case's axis values imply.
+    const { edge, shape, length } = expectedOf(name);
+    const through = found
+      .filter(({ path }) => path.join(" ").includes(edge))
+      .sort((left, right) => left.path.length - right.path.length);
+    const observed = (hit: (typeof found)[number] | undefined) =>
+      hit === undefined ? "none" : `${hit.shape}:${hit.length} via ${hit.path.join(" ")}`;
+    assert.ok(
+      through.length > 0,
+      `${name}: kept through ${edge}: ${found.map(observed).join(" || ")}`,
+    );
+    // The string it holds directly: the hit nearest its holder.
+    if (shape !== null) assert.equal(through[0]!.shape, shape, `${name}: ${observed(through[0])}`);
+    if (length !== null)
+      assert.equal(through[0]!.length, length, `${name}: ${observed(through[0])}`);
+    if (name.startsWith("object/")) {
       assert.ok(held > 0, `${name}: the object observation finds the kept piece`);
       assert.equal(released, 0, `${name}: its holder alone kept it`);
-    } else {
-      const { type, partial } = SHOWN[holder!]!;
-      assert.ok(
-        found.some(
-          (hit) =>
-            hit.type === type &&
-            hit.partial === partial &&
-            hit.path.join(" ").includes("-representations->"),
-        ),
-        `${name}: the scan reads it as a ${type}: ${JSON.stringify(found.map(({ type: t, partial: p }) => [t, p]))}`,
-      );
     }
   }
 });
