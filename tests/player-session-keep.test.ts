@@ -1039,27 +1039,32 @@ async function heldReservation(context: TestContext, at: ReturnType<typeof brows
   };
 }
 
+/** An operation held at one suspension, with the gates of its store. */
+type HeldDriver = (
+  context: TestContext,
+  at: ReturnType<typeof browser>,
+) => Promise<{ readonly gates: ReturnType<typeof gated>; readonly held: HeldOperation }>;
+
 /** Each producer's operation held at each of its suspensions; the type requires one for every declared one. */
-const HELD: { readonly [P in Producer]: Record<(typeof SUSPENSIONS)[P][number], typeof heldKeep> } =
-  {
-    preparePlanText: { task: (context, at) => heldReservation(context, at) },
-    restoreKept: {
-      storeRead: (context, at) => heldRestore(context, at, "storeRead"),
-      reply: (context, at) => heldRestore(context, at, "reply"),
-    },
-    planText: {
-      storageReplace: (context, at) => heldImport(context, at, "storageReplace"),
-      discard: (context, at) => heldImport(context, at, "discard"),
-      reply: (context, at) => heldImport(context, at, "reply"),
-      publish: (context, at) => heldImport(context, at, "publish"),
-      reload: (context, at) => heldImport(context, at, "reload"),
-    },
-    captureKeep: {
-      reply: (context, at) => heldKeep(context, at, "reply"),
-      discard: (context, at) => heldKeep(context, at, "discard"),
-      publish: (context, at) => heldKeep(context, at, "publish"),
-    },
-  };
+const HELD: { readonly [P in Producer]: Record<(typeof SUSPENSIONS)[P][number], HeldDriver> } = {
+  preparePlanText: { task: (context, at) => heldReservation(context, at) },
+  restoreKept: {
+    storeRead: (context, at) => heldRestore(context, at, "storeRead"),
+    reply: (context, at) => heldRestore(context, at, "reply"),
+  },
+  planText: {
+    storageReplace: (context, at) => heldImport(context, at, "storageReplace"),
+    discard: (context, at) => heldImport(context, at, "discard"),
+    reply: (context, at) => heldImport(context, at, "reply"),
+    publish: (context, at) => heldImport(context, at, "publish"),
+    reload: (context, at) => heldImport(context, at, "reload"),
+  },
+  captureKeep: {
+    reply: (context, at) => heldKeep(context, at, "reply"),
+    discard: (context, at) => heldKeep(context, at, "discard"),
+    publish: (context, at) => heldKeep(context, at, "publish"),
+  },
+};
 
 /** The page of `held` moves on as `move` says. */
 async function moveOn(held: HeldOperation, move: Move) {
@@ -1085,7 +1090,7 @@ for (const producer of Object.keys(SUSPENSIONS) as Producer[])
         const at = browser();
         planWrites(context, ASKS, ASKS_OTHER);
         // EVIDENCE: invariant: `HELD` has a driver for every declared suspension of every producer.
-        const driver = (HELD[producer] as Record<string, typeof heldKeep>)[point]!;
+        const driver = (HELD[producer] as Record<string, HeldDriver>)[point]!;
         const { gates, held: operation } = await driver(context, at);
         const bridge = await operation.host.bridge;
         const token = await held(operation.host, operation.plan);
@@ -1105,11 +1110,11 @@ for (const producer of Object.keys(SUSPENSIONS) as Producer[])
           assert.deepEqual(after, [], `the stale ${producer} wrote after the move`);
           if (move !== "disposed" && move !== "samePlan")
             assert.notEqual(
-              held.host.activation.value,
+              operation.host.activation.value,
               "continue",
               "a stale operation installed Continue",
             );
-          const restored = held.restored?.() ?? null;
+          const restored = operation.restored?.() ?? null;
           if (restored !== null && move !== "disposed")
             assert.equal(bridge.store(restored), null, "the stale restore's session was released");
         } else
