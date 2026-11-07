@@ -89,9 +89,10 @@ material shared-workflow failure instead of silently working around it.
 
 Do not invent project-wide policy, numeric thresholds, style or readability
 limits, naming rules, compatibility promises, mandatory tools, or workflow
-gates. Until a durable rule has evidence, owner approval, and synchronization
-into its canonical source, use configured tooling, current authority, and
-task-proportional judgment.
+gates. Until a durable rule has evidence, the approval that applies (`AGENTS.md`:
+the owner's, except for development tooling and mechanical checks), and
+synchronization into its canonical source, use configured tooling, current
+authority, and task-proportional judgment.
 
 ### KISS, pragmatic YAGNI, and DRY
 
