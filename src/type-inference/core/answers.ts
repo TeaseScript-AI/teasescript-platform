@@ -811,15 +811,16 @@ export function solveDemands(
   });
 }
 
-/**
- * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`, `lit|`, `op|`,
- * `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write them).
- */
 /** A proof demand asked for its answer alone (`demandWork`). */
 function* asked(demand: ProofDemand<Proof>): Work<readonly Item[]> {
   return yield demand;
 }
 
+/**
+ * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`,
+ * `lit|`, `op|`, `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write
+ * them).
+ */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   const [kind, ...parts] = key.split("|");
   const { program, contract, values, exact } = pass;
