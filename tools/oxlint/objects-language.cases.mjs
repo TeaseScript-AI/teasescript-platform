@@ -555,4 +555,10 @@ export const CASES = [
       "import { type WorkLedger } from '../budget.js';\nexport function f(work: WorkLedger): number { work.charge('objectSteps'); const xs: ({ readonly a: number } | { readonly b: string })[] = []; return xs.length; }\n",
     expect: ["mixed-elements"],
   },
+  {
+    name: "v3/angleCast",
+    source:
+      "import { type WorkLedger } from '../budget.js';\nexport function f(work: WorkLedger, input: readonly string[]): number { work.charge('objectSteps'); const xs = <readonly string[]>input; return xs.length; }\n",
+    expect: ["cast"],
+  },
 ];
