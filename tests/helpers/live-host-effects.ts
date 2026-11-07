@@ -25,11 +25,16 @@ import type {
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
 
 /*
- * The live host's complete effect witness (#1919, the effect-witness design approved for PR #1942): every host service
- * the replay harness's composable is given, or makes with a default, is recorded. A sample holds each service's state by
- * value and the count of each of its mutating calls, counted before the call validates or awaits anything, so a call
- * that changes nothing, or changes something and undoes it, still shows. Every method is classified; a service whose
- * methods differ from its classification fails, so a new method is classified before it counts.
+ * The live host's effect witness (#1919, the effect-witness design approved for PR #1942, with orchestrator 2's scope
+ * cut). The host services the replay harness's composable is given, or makes with a default, are recorded: storage,
+ * kept sessions and rooms, their repositories, the captured-media store, media elements, object URLs, `document` and
+ * `window` listeners and dispatches, and lock fetches. A sample holds each service's state by value and the count of
+ * each of its mutating calls, counted before the call validates or awaits anything, so a call that changes nothing, or
+ * changes something and undoes it, still shows; an element property set counts only when it changes the value. Every
+ * method is classified; a service whose methods differ from its classification fails, so a new method is classified
+ * before it counts. Outside the claim (docs/TESTING.md "Replay through the bridge"): listener identity, which is only
+ * counted; property writes on `document` and `window`; the bridge client's lifecycle registrations; and the capture
+ * host's device internals, of which only probes are counted.
  */
 
 /** How a member of a host service is classified. */
@@ -228,7 +233,7 @@ function assertClassified(
 /** The services' mutating calls so far, by service and method; a call counts as it is made. */
 type Calls = Record<string, Record<string, number>>;
 
-/** A sample of the live host's effects: every mutating call counted, and every service's state by value. */
+/** A sample of the live host's effects: each recorded service's mutating calls counted, and its state by value. */
 export interface EffectSample {
   readonly calls: Calls;
   readonly state: Sampled;
@@ -353,8 +358,14 @@ export class LiveHostEffects {
     return {
       ...recorded,
       add: (record) => {
-        this.#references.add(record.reference);
-        return add(record);
+        // Counted first, by the recorded `add`; only then is its input read, which may throw.
+        const added = add(record);
+        try {
+          this.#references.add(String(record.reference));
+        } catch {
+          // The call is counted; a record whose reference cannot be read is the repository's own failure.
+        }
+        return added;
       },
     };
   }

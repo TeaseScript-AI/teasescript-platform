@@ -280,6 +280,19 @@ const ADAPTER_OPS: Readonly<
 };
 
 /**
+ * Fails unless every one of `requests` (a session's after the cut) is an engine input the oracle replays, also when the
+ * bridge refused it: a service's completion (`answerCapture`, a storage acknowledgement, a media report) by any route
+ * is an effect of the replay.
+ */
+export function assertEngineInputs(requests: readonly LoggedRequest[]): void {
+  for (const request of requests)
+    assert.ok(
+      Object.hasOwn(ADAPTER_OPS, request.op),
+      `'${request.op}' was sent after the cut, which is no engine input the oracle replays (ADAPTER_OPS in tests/helpers/replay-harness.ts): a service completion, or an input to add there`,
+    );
+}
+
+/**
  * The oracle of a trace: `restored`, the adapter's session restored at the publication before the cut, given the live
  * run's requests of the session after the cut, in order, whatever sent them (`requests`, from `trackRequests`). A
  * request the bridge refused changed nothing and is skipped; one whose op threw must throw the same on the adapter and
@@ -299,13 +312,8 @@ export function adapterReplay(
   for (const [index, request] of requests.entries()) {
     const ended = request.ended;
     assert.ok(ended !== null, `request ${index} (${request.op}) after the cut had not ended`);
-    // Only engine inputs may be sent after the cut, also when refused: a service's completion (`answerCapture`, a
-    // storage acknowledgement, a media report) by any route is an effect of the replay.
-    const call = ADAPTER_OPS[request.op];
-    assert.ok(
-      call !== undefined,
-      `'${request.op}' was sent after the cut, which is no engine input the oracle replays (ADAPTER_OPS in tests/helpers/replay-harness.ts): a service completion, or an input to add there`,
-    );
+    assertEngineInputs([request]);
+    const call = ADAPTER_OPS[request.op]!;
     if (!ended.ok && ended.refused) continue;
     // EVIDENCE: validation: every op the Player sends takes an object of arguments.
     const args = request.args as Record<string, unknown>;
@@ -422,7 +430,7 @@ export interface LiveHost {
   readonly show: PublishHook;
   /** Lets the composable's watchers and the work they start run, before the next step. */
   settle(): Promise<void>;
-  /** Every host service's state by value and every mutating call so far (`LiveHostEffects`). */
+  /** Each recorded host service's state by value and its mutating calls so far (`LiveHostEffects`). */
   effects(): Promise<EffectSample>;
   /** Every session the composable showed, by value, in order, from the start. */
   readonly observed: readonly ShownSession[];
@@ -433,8 +441,8 @@ export interface LiveHost {
 }
 
 /**
- * Runs `body` with a live composable on the in-process backend `bridge`: every host service it is given or makes
- * recorded (`LiveHostEffects`), the scene clock standing still, and a fake `Audio` whose elements keep their state as a
+ * Runs `body` with a live composable on the in-process backend `bridge`: the host services it is given or makes
+ * recorded as `LiveHostEffects` names them, the scene clock standing still, and a fake `Audio` whose elements keep their state as a
  * real element does (a play leaves it playing), so that a publication it observes again does not look like a medium to
  * start again. Every judgment runs inside `body`; the composable stops, and the globals are restored, only after it.
  */

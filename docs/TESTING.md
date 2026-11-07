@@ -536,13 +536,30 @@ Worker, and in the composable on its in-process engine. It has these parts:
 - **`withLiveHost`:** the real composable. Each publication is handed to it in the tick its store applies it, and the
   next step waits until it has settled. Every session it shows is recorded by value and must equal the oracle's, each
   publication once, in order. Every judgment runs while the composable lives.
-- **`LiveHostEffects`** (`tests/helpers/live-host-effects.ts`): every host service the composable is given or makes is
-  recorded. That covers script storage, kept sessions and debug rooms, their media repositories, the captured-media
-  store, media elements and object URLs, `document` and `window`, and lock fetches. A sample holds each service's state
-  by value and the count of each of its mutating calls, counted before the call runs. Samples are taken at the cut,
-  after every step, and once more after the judgments, and none may differ from the cut's. Each service's members are
-  classified there; a new member fails until it is classified. The capture host's device internals are outside the
-  claim (the fixture's camera is unsupported), and a control shows no device probe after the cut.
+- **`LiveHostEffects`** (`tests/helpers/live-host-effects.ts`): the host services the composable is given or makes are
+  recorded:
+  - script storage;
+  - kept sessions and debug rooms, and their media repositories;
+  - the captured-media store;
+  - media elements and object URLs;
+  - `document` and `window` listeners and dispatches;
+  - lock fetches.
+
+  A sample holds each service's state by value and the count of each of its mutating calls, counted before the call
+  runs. An element property set counts only when it changes the value. Each service's members are classified there,
+  and a new member fails until it is classified.
+
+- **The control run:** the same restore, cut and steps in the live composable, without the call that throws or the
+  recovery. Samples are taken at the cut, after the throw, after every step, and once more after the judgments. Each
+  must equal the control run's sample at the same point, so what the steps themselves do (the script's end releasing
+  its medium) is in both, and what recovery adds is a difference. The session's requests are checked through that last
+  sample: each must be an engine input, and none may come after the judged trace.
+- **Outside the claim:**
+  - listener identity: listener counts are compared, not which callback;
+  - property writes on `document` and `window`;
+  - the bridge client's lifecycle registrations (`onLoss`);
+  - the capture host's device internals: the fixture's camera is unsupported, and a control shows no device probe
+    after the cut.
 
 The cut and the run's end are quiescent (`quiesce`): no request in flight, every reply delivered, and nothing more
 published.

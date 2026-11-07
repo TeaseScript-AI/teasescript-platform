@@ -45,6 +45,7 @@ import { plainRecording } from "./helpers/plain-recording.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import {
   adapterReplay,
+  assertEngineInputs,
   assertTrace,
   quiesce,
   tapPublications,
@@ -558,6 +559,7 @@ async function cutAndRecover(
   const before = bridge.latest(session)!;
   const trace = tapPublications(bridge, session);
   const mark = tracker.log.length;
+  const since = () => tracker.log.slice(mark).filter((request) => request.session === session.id);
   const effects: EffectSample[] = host === null ? [] : [await host.effects()];
   // The control run takes the same steps from the same state, without the call that throws or the recovery.
   if (throwing)
@@ -592,8 +594,10 @@ async function cutAndRecover(
         host?.settle ?? (() => new Promise((resolve) => setTimeout(resolve, 0))),
       );
       trace.stop();
-      return tracker.log.slice(mark).filter((request) => request.session === session.id);
+      return since();
     },
+    /** The session's requests from the cut until now, of every producer. */
+    since,
   };
 }
 
@@ -775,8 +779,8 @@ async function judged(
       verdicts[kind] = error;
     }
   if (run.effects !== null) {
-    // Replay and recovery made no main-side effect: at every sample, the judgments' included, every host service's
-    // state and every mutating call equal the control run's, which took the same steps without the cut. What the steps
+    // Replay and recovery made no main-side effect: at every sample, the judgments' included, each recorded host
+    // service's state and mutating calls (`LiveHostEffects`) equal the control run's, which took the same steps without the cut. What the steps
     // themselves do (the script's end releasing its medium) is in both; what recovery adds is a difference.
     let effects: unknown = null;
     try {
@@ -888,6 +892,25 @@ const bundle = () =>
     };
   })());
 
+/**
+ * The session's requests through the last sample, after the judgments (`late`): each an engine input, as the trace's,
+ * and none beyond those the trace judged (`judged`), so nothing the session sends after its trace closed goes unseen.
+ */
+function assertNothingSentLate(
+  late: readonly LoggedRequest[],
+  judged: readonly LoggedRequest[],
+): void {
+  assertEngineInputs(late);
+  assert.equal(
+    late.length,
+    judged.length,
+    `the session sent ${late
+      .slice(judged.length)
+      .map((request) => `'${request.op}'`)
+      .join(", ")} after its trace was judged`,
+  );
+}
+
 /** The control run's effect samples, and whether its own trace equals the adapter oracle (`null` when it does). */
 interface ControlRun {
   readonly effects: readonly EffectSample[];
@@ -987,6 +1010,11 @@ async function controlRun(): Promise<ControlRun> {
     }
     await quiesce(bridge, session, tracker, host.settle);
     const last = await host.effects();
+    try {
+      host.judge(() => assertNothingSentLate(cut.since(), requests));
+    } catch (error) {
+      verdict ??= error;
+    }
     host.judge(() => cut.effects.push(last));
     return { effects: cut.effects, verdict };
   });
@@ -1033,7 +1061,10 @@ async function composableRun(control: ControlRun): Promise<JudgedRun> {
         async () => {
           await quiesce(bridge, session, tracker, host.settle);
           const sample = await host.effects();
-          return host.judge(() => sample);
+          return host.judge(() => {
+            assertNothingSentLate(cut.since(), requests);
+            return sample;
+          });
         },
         control,
       );
