@@ -84,7 +84,7 @@ const CAPTURE_STORE = {
   discard: "mutating",
   holds: "read-only",
   knows: "read-only",
-  storedReferences: "read-only",
+  knownReferences: "read-only",
   promote: "mutating",
   sessionRecords: "read-only",
   restoreSessionMedia: "mutating",
