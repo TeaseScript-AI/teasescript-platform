@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
 import test, { after, before, type TestContext } from "node:test";
-import { effectScope, type EffectScope, type Ref } from "vue";
+import { effectScope, watch, type EffectScope, type Ref } from "vue";
 
 import {
   keptSession,
+  memoryKeptRoomStore,
   memoryKeptSessionStore,
+  type KeptRoomStore,
   type KeptSessionStore,
   type KeptSessionUpdate,
 } from "../player/kept-sessions.js";
@@ -14,9 +17,12 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
 import { compilePlayerProject } from "../player/compile-project.js";
+import { StaleOperation, persistenceOwnership } from "../player/persistence-ownership.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
+import { answerWith, type Intent } from "./helpers/player-input.js";
 import {
   MOVES,
+  POSTED,
   PRODUCERS,
   SUSPENSIONS,
   UNHELD_AWAITS,
@@ -60,6 +66,17 @@ interface KeepHost {
   readonly rooms: { readonly current: Readonly<Ref<"normal" | "debug">> };
   reviewSessionImport(transfer: ExportedSession): Promise<ImportReview>;
   importSession(review: ImportReview): Promise<void>;
+  readonly savedDataRevision: Readonly<Ref<number>>;
+  readonly notices: Readonly<Ref<readonly { readonly key: string }[]>>;
+  readonly canImportSavedData: Readonly<Ref<boolean>>;
+  readonly images: {
+    store(
+      file: File,
+      filters: { types: readonly string[] | null; mime: readonly string[] | null },
+    ): Promise<{ readonly reference: string } | { readonly message: string }>;
+  };
+  readonly imageCapture: { choose(reference: string): boolean; answer(input: "button"): Intent };
+  readonly inputSection: unknown;
 }
 /** An exported session, as this file passes it from an export to an import's review. */
 interface ExportedSession {
@@ -74,6 +91,8 @@ let usePlayerSession: (options: {
   scriptStorage: ScriptStorageProvider;
   capturedMedia: { repository: FakeMediaRepository };
   keptSessions: KeptSessionStore;
+  debugRooms?: KeptRoomStore;
+  decodeImage: (data: Blob) => Promise<{ width: number; height: number }>;
 }) => KeepHost;
 
 // Every page captures the zone `TZ` names into one module cache, so the file starts from a known zone, which no test
@@ -186,6 +205,10 @@ function planWrites(context: TestContext, ...plans: InstructionPlan[]) {
       }
       // The host holds its own plan, prepared from this plan's text: its writes count as this plan's.
       const plan = heldAs.get(args[0]) ?? args[0];
+      if (failPlanWrite !== null && plan === failPlanWrite && heldAs.has(args[0])) {
+        failPlanWrite = null;
+        throw new RangeError("Invalid string length");
+      }
       if (heldAs.has(args[0])) graphWrites.set(args[0], (graphWrites.get(args[0]) ?? 0) + 1);
       if (plans.includes(plan)) counts.set(plan, (counts.get(plan) ?? 0) + 1);
       return target(args[0], args[1], args[2]);
@@ -199,6 +222,8 @@ function planWrites(context: TestContext, ...plans: InstructionPlan[]) {
 const heldAs = new Map<unknown, InstructionPlan>();
 /** Whether `planWrites`'s writer fails the next snapshot, as a state too long to save does (`TSK004`). */
 let failNextSnapshot = false;
+/** The plan whose next write in a host `planWrites`'s writer fails, as one too large for the browser does. */
+let failPlanWrite: InstructionPlan | null = null;
 /** How often each host's own plan was written while `planWrites` counted. */
 const graphWrites = new Map<unknown, number>();
 /** How often `host`'s host wrote its plan of `plan` while `planWrites` counted. */
@@ -245,7 +270,11 @@ async function page(
 }
 
 /** A page of the Player in `at` with its saved values loaded, before it prepares a plan. */
-async function mount(context: TestContext, at: ReturnType<typeof browser>, delayMs?: number) {
+async function mount(
+  context: TestContext,
+  at: ReturnType<typeof browser> & { readonly rooms?: KeptRoomStore },
+  delayMs?: number,
+) {
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
@@ -262,6 +291,8 @@ async function mount(context: TestContext, at: ReturnType<typeof browser>, delay
       scriptStorage: at.provider,
       capturedMedia: { repository: at.repository },
       keptSessions: at.kept,
+      ...(at.rooms === undefined ? {} : { debugRooms: at.rooms }),
+      decodeImage: async () => ({ width: 2, height: 2 }),
     }),
   );
   assert.ok(host);
@@ -677,12 +708,17 @@ const DRIVERS: Record<
   async preparePlanText(context, at, c) {
     const { host, scope } = await mount(context, at);
     const token = await held(host, ASKS);
+    if (c.outcome === "writeFailed") failPlanWrite = ASKS;
+    context.after(() => (failPlanWrite = null));
     // Prepared without waiting: a retirement right after cancels the reservation before its task runs.
     const preparing = host.prepareScript(token, {
       plan: token,
       options: () => ({ ...host.scriptStorageOptions(), ...host.temporalCapture() }),
     });
-    if (c.outcome === "materialized") {
+    if (c.outcome === "writeFailed") {
+      await preparing;
+      await until(() => failPlanWrite === null, "the reservation's task did not try to write");
+    } else if (c.outcome === "materialized") {
       await preparing;
       for (let turn = 0; (await writesOn(host, ASKS)) === 0; turn++) {
         assert.ok(turn < 200, "the reservation was not written");
@@ -794,12 +830,13 @@ for (const c of familyCases()) {
       written - (driven.reviewWrites ?? 0) <= 1,
       `${caseName(c)}: written ${written} times`,
     );
-    // Asked for it twice now: held, it is not written again; let go of, each read writes it and keeps nothing.
+    // Asked for it twice now: held, it is not written again, or once after its task failed; let go of, each read writes
+    // it and keeps nothing.
     await bridge.client.request("planText", { plan: token });
     await bridge.client.request("planText", { plan: token });
     assert.equal(
       (await writesOn(driven.host, driven.plan)) - written,
-      c.retirement === "current" ? 0 : 2,
+      c.retirement !== "current" ? 2 : c.outcome === "writeFailed" ? 1 : 0,
       `${caseName(c)}: the host's plan JSON after the case`,
     );
   });
@@ -810,348 +847,514 @@ test("the composable's family drives every producer of the shared family", () =>
 });
 
 /*
- * Continuation ownership (`player/persistence-ownership.ts`): each producer's operation held at each of its main-side
- * suspensions (`SUSPENSIONS`), while its page moves on (`MOVES`). A stale operation writes nothing to the kept store or
- * the saved values after the move, and installs no Continue; one the move leaves current goes on.
+ * Continuation ownership (`player/persistence-ownership.ts`), closed over a generated family: each producer's operation
+ * held at each point of `SUSPENSIONS` while its page moves on (`MOVES`). One recorder takes every call of the kept
+ * store, its photos, the saved values' provider, the media store, the debug rooms and the host; it tells the
+ * operation's own calls by their async context, holds the point's first call, and fails a call the descriptor lists
+ * neither as a suspension nor as posted. Every row asserts both obligations: a stale operation writes to no store after
+ * the move, and changes nothing of the page (activation, the loaded saved values, `savedDataRevision`, the notices, the
+ * importing mark) but releasing its own importing mark. Its failure is neither shown nor thrown, and no rejection goes
+ * unhandled. An operation the move left current goes on. The sessions use a photo, and each read of the saved values
+ * gives values of its own, so a stale read's values are seen if shown.
  */
+test("an operation's commit applies synchronously while it is current, and ends it once stale", () => {
+  let current = true;
+  const ownership = persistenceOwnership(() => current);
+  assert.equal(
+    ownership.commit(() => 1),
+    1,
+  );
+  // An apply that awaits would go on after the commit's check.
+  const later = Promise.resolve();
+  assert.throws(() => ownership.commit(() => later), TypeError);
+  current = false;
+  let applied = false;
+  assert.throws(() => ownership.commit(() => (applied = true)), StaleOperation);
+  assert.equal(applied, false);
+  assert.throws(() => ownership.check(), StaleOperation);
+});
 
-/** The kept store and saved values of `at`, with each write logged and the next call of a named method held on request. */
-function gated(context: TestContext, at: ReturnType<typeof browser>) {
-  const writes: string[] = [];
-  const armed = new Map<string, { reached: () => void; release: Promise<void> }>();
-  const reached = new Map<string, Promise<void>>();
-  let open = () => {};
-  const arm = (name: string) => {
-    let signal!: () => void;
-    reached.set(name, new Promise<void>((resolve) => (signal = resolve)));
-    const release = new Promise<void>((resolve) => (open = resolve));
-    armed.set(name, { reached: signal, release });
-  };
-  const hold = async (name: string) => {
-    const gate = armed.get(name);
-    if (gate === undefined) return;
-    armed.delete(name);
-    gate.reached();
-    await gate.release;
-  };
-  const { kept, provider } = at;
-  const discard = kept.discard.bind(kept);
-  kept.discard = async (scope) => {
-    writes.push("discard");
-    await hold("discard");
-    return discard(scope);
-  };
-  const publish = kept.publish.bind(kept);
-  kept.publish = async (scope, update) => {
-    writes.push("publish");
-    await hold("publish");
-    return publish(scope, update);
-  };
-  const read = kept.session.bind(kept);
-  kept.session = async (scope) => {
-    await hold("session");
-    return read(scope);
-  };
-  const replace = provider.replace.bind(provider);
-  provider.replace = async (entries) => {
-    writes.push("replace");
-    await hold("replace");
-    return replace(entries);
-  };
-  const write = provider.write.bind(provider);
-  provider.write = async (key, value) => {
-    writes.push("write");
-    return write(key, value);
-  };
-  const clear = provider.clear.bind(provider);
-  provider.clear = async () => {
-    writes.push("clear");
-    return clear();
-  };
-  const load = provider.load.bind(provider);
-  provider.load = async () => {
-    await hold("load");
-    return load();
-  };
-  void context;
-  return { writes, arm, reached: (name: string) => reached.get(name)!, release: () => open() };
+const OPERATION = "operation";
+const MOVE = "move";
+const contexts = new AsyncLocalStorage<string>();
+
+const PHOTO_PLAN = compilePlayerProject(
+  'let picture: string = askImage(hint: "Add an image")\nlet a = askText(hint: "One")\nsay "Got ${a}.", instant\nexit',
+).plan!;
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+
+/** The methods of the recorded stores that write. */
+const WRITING = new Set(["publish", "discard", "discardSession", "replace", "write", "clear"]);
+const WRITING_MEDIA = new Set(["add", "delete"]);
+
+interface RecordedCall {
+  readonly name: string;
+  /** The async context the call was made in: the operation's, the move's, or none. */
+  readonly by: string | undefined;
+  readonly write: boolean;
 }
 
-interface HeldOperation {
+/**
+ * Every store of `at` behind one recorder, installed before its pages mount; `hold(name)` holds the operation's first
+ * call of `name` (a host request once it is posted, a store call before it runs) until `release()`.
+ */
+function recorder(context: TestContext, at: ReturnType<typeof familyBrowser>) {
+  const calls: RecordedCall[] = [];
+  let armed: string | null = null;
+  let reached = () => {};
+  let gate: Promise<void> = Promise.resolve();
+  let open = () => {};
+  let introduced: string | null = null;
+  const take = (name: string): Promise<void> | null => {
+    if (armed !== name || contexts.getStore() !== OPERATION) return null;
+    armed = null;
+    reached();
+    return gate;
+  };
+  const record = (name: string, write: boolean) =>
+    calls.push({ name, by: contexts.getStore(), write });
+  const instrument = <T extends object>(target: T, surface: string): T => {
+    const nested = new Map<string, unknown>();
+    return new Proxy(target, {
+      get(object, key) {
+        // EVIDENCE: invariant: the recorded stores are plain objects, read by their methods' and fields' names.
+        const value: unknown = (object as Record<PropertyKey, unknown>)[key];
+        if (typeof key !== "string") return value;
+        if (key === "media" && typeof value === "object" && value !== null) {
+          if (!nested.has(key)) nested.set(key, instrument(value, `${surface}.media`));
+          return nested.get(key);
+        }
+        if (typeof value !== "function") return value;
+        const name = `${surface}.${key}`;
+        return (...args: unknown[]) => {
+          const media = surface.endsWith(".media") || surface === "repository";
+          record(name, media ? WRITING_MEDIA.has(key) : WRITING.has(key));
+          const run = () => {
+            const result: unknown = value.apply(object, args);
+            // A debug room's saved values are a provider of their own.
+            return key === "values" && typeof result === "object" && result !== null
+              ? instrument(result, `${surface}.values`)
+              : result;
+          };
+          const held = take(name);
+          return held === null ? run() : held.then(run);
+        };
+      },
+    });
+  };
+  at.kept = instrument(at.kept, "kept");
+  at.provider = instrument(at.provider, "provider");
+  at.repository = instrument(at.repository, "repository");
+  at.rooms = instrument(at.rooms, "rooms");
+  return {
+    calls,
+    /** The host's requests of `bridge`'s page, recorded from now on. */
+    watchHost(bridge: PlayerBridge) {
+      const request = bridge.client.request.bind(bridge.client);
+      context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+        const name = `host.${args[0]}`;
+        record(name, false);
+        const by = contexts.getStore();
+        const reply = request(...args);
+        if (args[0] === "restoreKept" && by === OPERATION)
+          reply.then(
+            (result) => {
+              if (typeof result.session === "string") introduced = result.session;
+            },
+            () => {},
+          );
+        const held = take(name);
+        return held === null ? reply : reply.then(async (result) => (await held, result));
+      });
+    },
+    hold(name: string) {
+      armed = name;
+      gate = new Promise<void>((resolve) => (open = resolve));
+      return new Promise<void>((resolve) => (reached = resolve));
+    },
+    release: () => open(),
+    /** The session the operation's restore introduced in the host, if any. */
+    introduced: () => introduced,
+  };
+}
+
+/** One browser for the family: `browser()`'s, whose saved values give each read a value of its own. */
+function familyBrowser() {
+  const rooms: KeptRoomStore = memoryKeptRoomStore();
+  const at = { ...browser(), rooms };
+  type Entries = Parameters<ScriptStorageProvider["replace"]>[0];
+  let stored: Entries = [];
+  let reads = 0;
+  at.provider = {
+    scope: SCOPE,
+    load: async () => [...stored, { key: "read", value: ++reads }],
+    write: async (key, value) => {
+      stored = [...stored.filter((entry) => entry.key !== key), { key, value }];
+    },
+    replace: async (entries) => {
+      stored = entries.filter((entry) => entry.key !== "read");
+    },
+    clear: async () => {
+      stored = [];
+    },
+  };
+  return at;
+}
+
+/** The page as its player sees it, and each change of it with the async context that made it. */
+function pageLog(host: KeepHost) {
+  const snapshot = () => ({
+    activation: host.activation.value,
+    savedValues: host.scriptStorageOptions().scriptStorage ?? null,
+    savedDataRevision: host.savedDataRevision.value,
+    notices: host.notices.value.map((notice) => notice.key),
+    importing: !host.canImportSavedData.value,
+  });
+  type Snapshot = ReturnType<typeof snapshot>;
+  const changes: {
+    readonly by: string | undefined;
+    readonly from: Snapshot;
+    readonly to: Snapshot;
+  }[] = [];
+  let last = snapshot();
+  // Its own scope: the log goes on after the page closes.
+  const scope = effectScope(true);
+  scope.run(() =>
+    watch(
+      () => JSON.stringify(snapshot()),
+      () => {
+        const next = snapshot();
+        changes.push({ by: contexts.getStore(), from: last, to: next });
+        last = next;
+      },
+      { flush: "sync" },
+    ),
+  );
+  return { snapshot, changes, stop: () => scope.stop() };
+}
+
+/** Lets `host`'s session take the fixture photo at its first question, then waits for its next question. */
+async function answerPhoto(host: KeepHost): Promise<string> {
+  await until(() => host.session.value?.state.status === "waiting", "the session did not ask");
+  const stored = await host.images.store(new File([PNG], "photo.png"), { types: null, mime: null });
+  assert.ok("reference" in stored, "the photo was not stored");
+  assert.equal(host.imageCapture.choose(stored.reference), true);
+  const used = await answerWith(host, host.imageCapture.answer("button"));
+  assert.equal(used.outcome?.kind, "completed");
+  return stored.reference;
+}
+
+/** A page of `at` whose session took the photo and asks its next question, kept with the photo. */
+async function photoSession(context: TestContext, at: ReturnType<typeof familyBrowser>) {
+  const opened = await page(context, at, PHOTO_PLAN);
+  await opened.host.activate();
+  const reference = await answerPhoto(opened.host);
+  await until(
+    () => at.published.some((update) => update.snapshotJson.includes(reference)),
+    "the session was not kept with its photo",
+  );
+  for (let turn = 0; turn < 4; turn++) await tasks();
+  return opened;
+}
+
+/** An operation of a producer, prepared on its page; `start` begins it, in the operation's context. */
+interface Operation {
   readonly host: KeepHost;
   readonly scope: EffectScope;
   readonly plan: InstructionPlan;
-  /** Releases what holds the operation, and resolves once its caller is done. */
-  readonly finish: () => Promise<void>;
-  /** The session a held restore introduced, which a stale restore must release. */
-  readonly restored?: () => string | null;
+  start(): Promise<void>;
 }
+/** What a driver is given: the host's recorder, the page's hiding, and the row's point and variant. */
+interface OperationRow {
+  readonly watchHost: (bridge: PlayerBridge) => void;
+  readonly hide: () => void;
+  readonly point: string;
+  readonly publishFails: boolean;
+}
+type OperationDriver = (
+  context: TestContext,
+  at: ReturnType<typeof familyBrowser>,
+  row: OperationRow,
+) => Promise<Operation>;
 
-/** A Continue's restore, held at `point`. */
-async function heldRestore(context: TestContext, at: ReturnType<typeof browser>, point: string) {
-  await seedKept(context, at, ASKS, false);
-  const gates = gated(context, at);
-  const { host, scope } = await mount(context, at);
-  const bridge = await host.bridge;
-  let introduced: string | null = null;
-  let release = () => {};
-  if (point === "storeRead") {
-    gates.arm("session");
-    release = gates.release;
-  } else {
-    const reply = holdReply(context, bridge, "restoreKept");
-    const request = bridge.client.request;
-    // The reply's session, so a stale restore is seen to release it.
-    context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) =>
-      request(...args).then((result) => {
-        if (args[0] === "restoreKept" && result.session !== null) introduced = result.session;
-        return result;
-      }),
-    );
-    release = reply.release;
-    const preparing = prepareOn(host, ASKS);
-    await reply.sent;
+/** Each operation on its real path, up to its start. */
+const OPERATIONS: Record<Exclude<Producer, "preparePlanText">, OperationDriver> = {
+  // A Continue's restore of a session kept with its photo.
+  async restoreKept(context, at, { watchHost }) {
+    const seed = await photoSession(context, at);
+    seed.scope.stop();
+    await tasks();
+    const { host, scope } = await mount(context, at);
+    watchHost(await host.bridge);
+    const token = await held(host, PHOTO_PLAN);
     return {
-      gates,
-      held: {
-        host,
-        scope,
-        plan: ASKS,
-        restored: () => introduced,
-        finish: async () => {
-          release();
-          await preparing;
-          await tasks();
-        },
+      host,
+      scope,
+      plan: PHOTO_PLAN,
+      start: () =>
+        host.prepareScript(token, {
+          plan: token,
+          options: () => ({ ...host.scriptStorageOptions(), ...host.temporalCapture() }),
+        }),
+    };
+  },
+  // An import of an exported session that uses the photo, over the session it replaces.
+  async planText(context, at, { watchHost, publishFails }) {
+    const exporting = await photoSession(context, at);
+    const { transfer } = await exporting.host.exportSession();
+    exporting.scope.stop();
+    await tasks();
+    const { host, scope } = await page(context, at, PHOTO_PLAN);
+    const review = await host.reviewSessionImport(transfer);
+    watchHost(await host.bridge);
+    return {
+      host,
+      scope,
+      plan: PHOTO_PLAN,
+      start: () => {
+        if (publishFails) at.state.failing = 1;
+        return host.importSession(review);
       },
     };
-  }
-  const preparing = prepareOn(host, ASKS);
-  await gates.reached("session");
-  return {
-    gates,
-    held: {
-      host,
-      scope,
-      plan: ASKS,
-      finish: async () => {
-        release();
-        await preparing;
-        await tasks();
-      },
-    },
-  };
-}
-
-/** A session import, held at `point`. */
-async function heldImport(context: TestContext, at: ReturnType<typeof browser>, point: string) {
-  const exporting = await page(context, at, ASKS);
-  await exporting.host.activate();
-  await until(() => exporting.host.session.value !== null, "no session to export");
-  const { transfer } = await exporting.host.exportSession();
-  exporting.scope.stop();
-  await tasks();
-  const gates = gated(context, at);
-  const { host, scope } = await page(context, at, ASKS);
-  const review = await host.reviewSessionImport(transfer);
-  let release = () => {};
-  let reached: Promise<void>;
-  const store = {
-    storageReplace: "replace",
-    discard: "discard",
-    publish: "publish",
-    reload: "load",
-  }[point];
-  if (store !== undefined) {
-    gates.arm(store);
-    release = gates.release;
-    reached = gates.reached(store);
-  } else {
-    const reply = holdReply(context, await host.bridge, "planText");
-    release = reply.release;
-    reached = reply.sent;
-  }
-  const importing = host.importSession(review).catch(() => {});
-  await reached;
-  return {
-    gates,
-    held: {
-      host,
-      scope,
-      plan: ASKS,
-      finish: async () => {
-        release();
-        await importing;
-        await tasks();
-      },
-    },
-  };
-}
-
-/** A keep, held at `point`. */
-async function heldKeep(context: TestContext, at: ReturnType<typeof browser>, point: string) {
-  const gates = gated(context, at);
-  const { host, scope } = await page(context, at, ASKS);
-  let release = () => {};
-  let reached: Promise<void>;
-  if (point === "reply") {
-    const reply = holdReply(context, await host.bridge, "captureKeep");
-    release = reply.release;
-    reached = reply.sent;
-  } else {
-    gates.arm(point);
-    release = gates.release;
-    reached = gates.reached(point);
-  }
-  const activating = host.activate();
-  await reached;
-  return {
-    gates,
-    held: {
-      host,
-      scope,
-      plan: ASKS,
-      finish: async () => {
-        release();
-        await activating;
-        await tasks();
-      },
-    },
-  };
-}
-
-/** A reservation whose task has not run. */
-async function heldReservation(context: TestContext, at: ReturnType<typeof browser>) {
-  const gates = gated(context, at);
-  const { host, scope } = await mount(context, at);
-  const token = await held(host, ASKS);
-  const preparing = host.prepareScript(token, {
-    plan: token,
-    options: () => ({ ...host.scriptStorageOptions(), ...host.temporalCapture() }),
-  });
-  return {
-    gates,
-    held: {
-      host,
-      scope,
-      plan: ASKS,
-      finish: async () => void (await preparing),
-    } satisfies HeldOperation,
-  };
-}
-
-/** An operation held at one suspension, with the gates of its store. */
-type HeldDriver = (
-  context: TestContext,
-  at: ReturnType<typeof browser>,
-) => Promise<{ readonly gates: ReturnType<typeof gated>; readonly held: HeldOperation }>;
-
-/** Each producer's operation held at each of its suspensions; the type requires one for every declared one. */
-const HELD: { readonly [P in Producer]: Record<(typeof SUSPENSIONS)[P][number], HeldDriver> } = {
-  preparePlanText: { task: (context, at) => heldReservation(context, at) },
-  restoreKept: {
-    storeRead: (context, at) => heldRestore(context, at, "storeRead"),
-    reply: (context, at) => heldRestore(context, at, "reply"),
   },
-  planText: {
-    storageReplace: (context, at) => heldImport(context, at, "storageReplace"),
-    discard: (context, at) => heldImport(context, at, "discard"),
-    reply: (context, at) => heldImport(context, at, "reply"),
-    publish: (context, at) => heldImport(context, at, "publish"),
-    reload: (context, at) => heldImport(context, at, "reload"),
-  },
-  captureKeep: {
-    reply: (context, at) => heldKeep(context, at, "reply"),
-    discard: (context, at) => heldKeep(context, at, "discard"),
-    publish: (context, at) => heldKeep(context, at, "publish"),
+  // A first save of a session with its photo, after the earlier saves were refused; `forget` captures a state this
+  // browser cannot write.
+  async captureKeep(context, at, { watchHost, hide, point }) {
+    const { host, scope } = await page(context, at, PHOTO_PLAN);
+    watchHost(await host.bridge);
+    at.state.failing = Number.MAX_SAFE_INTEGER;
+    await host.activate();
+    const reference = await answerPhoto(host);
+    await until(
+      () => at.published.some((update) => update.snapshotJson.includes(reference)),
+      "the session's save was not tried",
+    );
+    for (let turn = 0; turn < 4; turn++) await tasks();
+    at.state.failing = 0;
+    return {
+      host,
+      scope,
+      plan: PHOTO_PLAN,
+      start: async () => {
+        if (point === "forget") failNextSnapshot = true;
+        hide();
+      },
+    };
   },
 };
 
-/** The page of `held` moves on as `move` says. */
-async function moveOn(held: HeldOperation, move: Move) {
-  if (move === "otherPlan") await prepareAgain(held.host, ASKS_OTHER);
-  else if (move === "samePlan") await prepareAgain(held.host, held.plan);
+/** The page of `operation` moves on as `move` says. */
+async function moveOn(operation: Operation, move: Move) {
+  if (move === "otherPlan") await prepareAgain(operation.host, ASKS_OTHER);
+  else if (move === "samePlan") await prepareAgain(operation.host, operation.plan);
   else if (move === "room") {
-    held.host.setDebugMode(true);
+    operation.host.setDebugMode(true);
     await until(
-      () => held.host.rooms.current.value === "debug",
+      () => operation.host.rooms.current.value === "debug",
       "the page did not open the debug room",
     );
-  } else held.scope.stop();
+  } else operation.scope.stop();
+}
+
+/** The calls each producer's operation reached across its rows. */
+const reachedCalls = new Map<Producer, Set<string>>();
+
+/** One row: `producer`'s operation held at `point` while its page moves as `move` says. */
+async function ownershipRow(
+  context: TestContext,
+  producer: Exclude<Producer, "preparePlanText">,
+  point: string,
+  move: Move | null,
+  publishFails = false,
+) {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  context.after(() => process.off("unhandledRejection", onUnhandled));
+  const shown = stubBrowser(context);
+  planWrites(context, PHOTO_PLAN, ASKS_OTHER);
+  context.after(() => (failNextSnapshot = false));
+  const at = familyBrowser();
+  const recorded = recorder(context, at);
+  const operation = await OPERATIONS[producer](context, at, {
+    watchHost: recorded.watchHost,
+    hide: shown.hide,
+    point,
+    publishFails,
+  });
+  const log = pageLog(operation.host);
+  context.after(log.stop);
+  const bridge = await operation.host.bridge;
+  // EVIDENCE: invariant: `point` is a key of the producer's suspensions, which the caller iterates.
+  const call = (SUSPENSIONS[producer] as Record<string, string>)[point]!;
+  const reached = recorded.hold(call);
+  const done = contexts
+    .run(OPERATION, () => operation.start())
+    .then(
+      () => ({ rejected: false as const }),
+      (error: unknown) => ({ rejected: true as const, error }),
+    );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<"missed">(
+    (resolve) => (timer = setTimeout(resolve, 2_000, "missed")),
+  );
+  const arrived = await Promise.race([reached, deadline]);
+  clearTimeout(timer);
+  assert.notEqual(arrived, "missed", `${call} was not reached`);
+  const retires = move === null ? false : stale(producer, move) === true;
+  // The page goes on with what the move prepared, where it can: its Start runs. An import under way holds Start back
+  // until a room change takes the page over; a room change waits for the saved values' calls issued before it, so an
+  // import held at one of them holds the room change too.
+  const moveWaits = producer === "planText" && move === "room" && call.startsWith("provider.");
+  const startsAnew =
+    move !== null &&
+    move !== "disposed" &&
+    (producer === "restoreKept" || (producer === "planText" && move === "room" && !moveWaits));
+  if (move !== null)
+    await contexts.run(MOVE, async () => {
+      await moveOn(operation, move);
+      if (startsAnew) {
+        await operation.host.activate();
+        await until(
+          () => operation.host.session.value !== null && operation.host.activation.value === null,
+          "the moved-on page did not start",
+        );
+      }
+      for (let turn = 0; turn < 4; turn++) await tasks();
+    });
+  const callsAtMark = recorded.calls.length;
+  const changesAtMark = log.changes.length;
+  const publishedAtMark = at.published.length;
+  const before = log.snapshot();
+  recorded.release();
+  const outcome = await done;
+  for (let turn = 0; turn < 6; turn++) await tasks();
+  const after = log.snapshot();
+  const own = recorded.calls.filter((made) => made.by === OPERATION);
+  const reachedHere = reachedCalls.get(producer) ?? new Set<string>();
+  reachedCalls.set(producer, reachedHere);
+  for (const made of own) reachedHere.add(made.name);
+  // Every call the operation made is a suspension or a posted call of the descriptor.
+  const listed = new Set<string>([...Object.values(SUSPENSIONS[producer]), ...Object.keys(POSTED)]);
+  assert.deepEqual(
+    own.filter((made) => !listed.has(made.name)).map((made) => made.name),
+    [],
+    "the operation made a call the descriptor does not list",
+  );
+  assert.deepEqual(unhandled, [], "a rejection went unhandled");
+  if (move === null || !retires) return { outcome, at, log, publishedAtMark, changesAtMark };
+  // Stale: no store write after the move, by destination.
+  assert.deepEqual(
+    recorded.calls
+      .slice(callsAtMark)
+      .filter((made) => made.by === OPERATION && made.write)
+      .map((made) => made.name),
+    [],
+    `the stale ${producer} wrote after the move`,
+  );
+  // No page effect after the move but releasing its own importing mark, which shows what the mark held back.
+  for (const change of log.changes.slice(changesAtMark).filter((made) => made.by === OPERATION)) {
+    const { importing: markFrom, activation: _from, ...restFrom } = change.from;
+    const { importing: markTo, activation: _to, ...restTo } = change.to;
+    assert.ok(
+      markFrom && !markTo && JSON.stringify(restFrom) === JSON.stringify(restTo),
+      `the stale ${producer} changed the page: ${JSON.stringify(change)}`,
+    );
+  }
+  // The page stays as the move left it, where the move did not wait for the operation.
+  if (!moveWaits)
+    assert.deepEqual(
+      after,
+      {
+        ...before,
+        importing: false,
+        activation: before.importing ? after.activation : before.activation,
+      },
+      `the page after the stale ${producer}`,
+    );
+  // Its failure is neither shown nor thrown.
+  assert.equal(outcome.rejected, false, `the stale ${producer} rejected`);
+  const introduced = recorded.introduced();
+  if (introduced !== null && move !== "disposed")
+    assert.equal(bridge.store(introduced), null, "the stale restore's session was released");
+  return { outcome, at, log, publishedAtMark, changesAtMark };
 }
 
 // EVIDENCE: invariant: the keys of `SUSPENSIONS`, which are the producers.
-for (const producer of Object.keys(SUSPENSIONS) as Producer[])
-  for (const point of SUSPENSIONS[producer])
+for (const producer of Object.keys(SUSPENSIONS) as Producer[]) {
+  if (producer === "preparePlanText") continue;
+  for (const point of Object.keys(SUSPENSIONS[producer]))
     for (const move of MOVES) {
       const retires = stale(producer, move);
       if (retires === "unreachable") continue;
       test(`continuation ownership: ${producer} at ${point}, ${move}`, async (context) => {
-        stubBrowser(context);
-        const at = browser();
-        planWrites(context, ASKS, ASKS_OTHER);
-        // EVIDENCE: invariant: `HELD` has a driver for every declared suspension of every producer.
-        const driver = (HELD[producer] as Record<string, HeldDriver>)[point]!;
-        const { gates, held: operation } = await driver(context, at);
-        const bridge = await operation.host.bridge;
-        const token = await held(operation.host, operation.plan);
-        await moveOn(operation, move);
-        // The page goes on with what the move prepared, where it can: its Start runs, so nothing should show a start page
-        // again. An import under way holds Start back until a room change takes the page over; a room change waits for
-        // the saved values' writes, so an import held at one of them (`storageReplace`, `reload`) holds the room change
-        // too.
-        const startsAnew =
-          move !== "disposed" &&
-          (producer === "restoreKept" ||
-            (producer === "planText" &&
-              move === "room" &&
-              point !== "storageReplace" &&
-              point !== "reload"));
-        if (startsAnew) {
-          await operation.host.activate();
-          await until(
-            () => operation.host.session.value !== null && operation.host.activation.value === null,
-            "the moved-on page did not start",
-          );
-        }
-        const mark = gates.writes.length;
-        const publishedAtMark = at.published.length;
-        await operation.finish();
-        for (let turn = 0; turn < 4; turn++) await tasks();
-        const after = gates.writes.slice(mark);
-        if (producer === "preparePlanText") {
-          // The reservation: let go of where the move retired it, kept where it did not.
-          const before = await writesOn(operation.host, operation.plan);
-          await bridge.client.request("planText", { plan: token });
-          assert.equal((await writesOn(operation.host, operation.plan)) - before, retires ? 1 : 0);
-          return;
-        }
-        if (retires) {
-          // The session the moved-on page started keeps itself; with none, nothing may write after the move.
-          if (!startsAnew)
-            assert.deepEqual(after, [], `the stale ${producer} wrote after the move`);
-          if (startsAnew)
-            assert.equal(
-              operation.host.activation.value,
-              null,
-              "a stale operation prepared a Start or Continue over the running session",
-            );
-          const restored = operation.restored?.() ?? null;
-          if (restored !== null && move !== "disposed")
-            assert.equal(bridge.store(restored), null, "the stale restore's session was released");
-        } else
+        const row = await ownershipRow(context, producer, point, move);
+        if (retires) return;
+        // A keep the move left current goes on: it saves, or after a state it cannot write, says so.
+        if (point === "forget")
           assert.ok(
-            at.published.length > publishedAtMark,
-            `the ${producer} the move left current did not save`,
+            row.log.changes
+              .slice(row.changesAtMark)
+              .some((change) => change.to.notices.includes("session-not-kept")),
+            "the current keep did not say that the session is not kept",
           );
+        else
+          assert.ok(row.at.published.length > row.publishedAtMark, "the current keep did not save");
       });
     }
+}
 
-test("continuation ownership holds every declared suspension, and names each await it does not hold", () => {
-  const heldPoints = new Set<string>(Object.values(SUSPENSIONS).flat());
+// The import's kept-session write fails: retired at its final read or its Continue's store read, it neither shows nor
+// throws that failure; current, it rejects with it.
+for (const point of ["reload", "restoreRead"] as const)
+  for (const move of MOVES)
+    test(`continuation ownership: planText failing its publish, at ${point}, ${move}`, async (context) => {
+      await ownershipRow(context, "planText", point, move, true);
+    });
+test("continuation ownership: a current import whose publish fails rejects with what was imported", async (context) => {
+  const { outcome } = await ownershipRow(context, "planText", "reload", null, true);
+  assert.equal(outcome.rejected, true);
+  assert.match(String(outcome.rejected && outcome.error), /could not keep the session/);
+});
+
+/** A reservation whose task has not run, while its page moves on. */
+for (const move of MOVES)
+  test(`continuation ownership: preparePlanText at task, ${move}`, async (context) => {
+    stubBrowser(context);
+    const at = browser();
+    planWrites(context, ASKS, ASKS_OTHER);
+    const { host, scope } = await mount(context, at);
+    const token = await held(host, ASKS);
+    const preparing = host.prepareScript(token, {
+      plan: token,
+      options: () => ({ ...host.scriptStorageOptions(), ...host.temporalCapture() }),
+    });
+    // The page reserves once its host is ready; the move comes before the reservation's task.
+    await host.bridge;
+    await held(host, ASKS);
+    await moveOn({ host, scope, plan: ASKS, start: async () => {} }, move);
+    await preparing;
+    for (let turn = 0; turn < 4; turn++) await tasks();
+    // Let go of where the move retired the plan, kept where it did not.
+    const bridge = await host.bridge;
+    const before = await writesOn(host, ASKS);
+    await bridge.client.request("planText", { plan: token });
+    assert.equal((await writesOn(host, ASKS)) - before, stale("preparePlanText", move) ? 1 : 0);
+  });
+
+test("continuation ownership covers its descriptor: each point a row, each call it reached listed and held", (context) => {
   for (const unheld of Object.keys(UNHELD_AWAITS))
-    assert.ok(!heldPoints.has(unheld), `${unheld} is both held and named unheld`);
+    assert.ok(!(unheld in POSTED), `${unheld} is both posted and named unheld`);
+  let points = 0;
   // EVIDENCE: invariant: the keys of `SUSPENSIONS`, which are the producers.
-  for (const producer of Object.keys(SUSPENSIONS) as Producer[])
-    assert.deepEqual(Object.keys(HELD[producer]).sort(), [...SUSPENSIONS[producer]].sort());
+  for (const producer of Object.keys(SUSPENSIONS) as Producer[]) {
+    if (producer === "preparePlanText") continue;
+    const reached = reachedCalls.get(producer) ?? new Set<string>();
+    for (const call of Object.values(SUSPENSIONS[producer])) {
+      points += 1;
+      assert.ok(reached.has(call), `${producer}'s ${call} was never reached`);
+    }
+    context.diagnostic(`${producer} reached ${[...reached].sort().join(", ")}`);
+  }
+  context.diagnostic(`${points} held points`);
 });

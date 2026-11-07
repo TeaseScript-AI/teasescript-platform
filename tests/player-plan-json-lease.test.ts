@@ -23,15 +23,16 @@ import {
 /*
  * How long the host holds a plan's JSON (`player/plan-json-lease.ts`), over the generated family of
  * `helpers/plan-json-family.ts`: `settle` against a model of the host's ops (`ops/persistence.ts`). The model keeps a
- * reservation apart from its write: `preparePlanText` reserves, its task writes, `releasePlanText` cancels or removes,
- * and a reader reads a written slot, writes a reserved one once, and writes for itself alone where none is reserved.
+ * reservation apart from its write: `preparePlanText` reserves, its task writes (or fails to, leaving the write to the
+ * first reader), `releasePlanText` cancels or removes, and a reader reads a written slot, writes a reserved one once,
+ * and writes for itself alone where none is reserved.
  * After every step of every case: the host holds a plan's JSON only for the live page's current plan; it is written at
  * most once per plan tenure; nothing is posted once the page closed.
  */
 
-/** The host's plan JSON as the model holds it: reserved and waiting for its task, or written. */
+/** The host's plan JSON as the model holds it: reserved and waiting for its task, reserved after its task failed, or written. */
 class HostModel {
-  readonly slots = new Map<string, "pending" | "ready">();
+  readonly slots = new Map<string, "pending" | "unwritten" | "ready">();
   /** Writes into a slot, per plan and tenure. */
   readonly writes = new Map<string, number>();
   /** Writes for one reader alone, which nothing keeps. */
@@ -48,9 +49,13 @@ class HostModel {
     if (message.kind === "release") this.slots.delete(message.plan);
     else if (!this.slots.has(message.plan)) this.slots.set(message.plan, "pending");
   }
-  /** The reservation's own task. */
-  task(plan: string) {
+  /** The reservation's own task, whose write may fail, as one of a plan too large for this browser does. */
+  task(plan: string, fails = false) {
     if (this.slots.get(plan) !== "pending") return;
+    if (fails) {
+      this.slots.set(plan, "unwritten");
+      return;
+    }
     this.slots.set(plan, "ready");
     this.#written(plan);
   }
@@ -58,7 +63,7 @@ class HostModel {
   read(plan: string) {
     const slot = this.slots.get(plan);
     if (slot === "ready") return;
-    if (slot === "pending") {
+    if (slot === "pending" || slot === "unwritten") {
       this.slots.set(plan, "ready");
       this.#written(plan);
     } else this.transient += 1;
@@ -151,8 +156,8 @@ function run(c: LayerCase) {
     h.event({ kind: "prepare", plan: "A" });
     if (c.reprepare === "yes") h.event({ kind: "prepare", plan: "A" });
     if (c.outcome === "cancelled") retire();
-    h.onHost((host) => host.task("A"), "the reservation's task");
-    if (c.outcome === "materialized") retire();
+    h.onHost((host) => host.task("A", c.outcome === "writeFailed"), "the reservation's task");
+    if (c.outcome !== "cancelled") retire();
     return h;
   }
   if (c.slot !== "absent") h.event({ kind: "prepare", plan: "A" });
@@ -215,7 +220,12 @@ test(`plan JSON lifetime over the generated family (${CASES.length} cases, each 
   for (const c of CASES) {
     const h = run(c);
     // At the end the host holds the JSON of the live page's current plan alone, written once for this tenure.
-    if (c.retirement === "current") {
+    if (c.retirement === "current" && c.outcome === "writeFailed") {
+      // The reservation stays, unwritten; its first reader writes it, once.
+      assert.equal(h.host.slots.get("A"), "unwritten", layerName(c));
+      h.onHost((host) => host.read("A"), "the first reader");
+      assert.equal(h.host.slots.get("A"), "ready", layerName(c));
+    } else if (c.retirement === "current") {
       const reserved =
         c.producer === "preparePlanText" || c.slot !== "absent" || c.reprepare === "yes";
       assert.equal(h.host.slots.get("A"), reserved ? "ready" : undefined, layerName(c));

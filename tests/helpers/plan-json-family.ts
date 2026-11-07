@@ -11,8 +11,9 @@
  * loss family's (`player-bridge-loss.test.ts`): the host and all it holds are gone.
  */
 export const PRODUCERS = {
-  // The page reserves the plan's JSON; its task writes it, unless a release cancels it first.
-  preparePlanText: ["materialized", "cancelled"],
+  // The page reserves the plan's JSON; its task writes it, unless a release cancels it first or the write fails, when
+  // the first reader writes it.
+  preparePlanText: ["materialized", "cancelled", "writeFailed"],
   // A Continue's comparison of the kept session's plan JSON, and its restore.
   restoreKept: ["restored", "otherPlan", "ended", "rejected"],
   // An import's save reads the plan's JSON.
@@ -59,32 +60,62 @@ export function unclassifiedOps(ops: Readonly<Record<string, unknown>>): string[
 }
 
 /**
- * Where each producer's operation awaits on the main side, so that its page may move on meanwhile: the composable's
- * family (`player-session-keep.test.ts`) holds each one and retires the operation there. A producer's operation is its
- * caller: a keep for `captureKeep`, the kept session's restore for `restoreKept`, a session import for `planText`.
+ * Where each producer's operation awaits on the main side, so that its page may move on meanwhile: each named point and
+ * the call it awaits there, as the composable's family (`player-session-keep.test.ts`) records the calls of the kept
+ * store, its photos, the saved values' provider, the media store, the debug rooms and the host (`host.<op>`). That
+ * family holds each point's first call and retires the operation there, and fails a run whose operation makes a call
+ * listed neither here nor in `POSTED`. A producer's operation is its caller: a keep for `captureKeep`, the kept
+ * session's restore for `restoreKept`, a session import for `planText`. The reservation's only await is the host's own
+ * task, which no main-side call holds.
  */
 export const SUSPENSIONS = {
-  // Its own task: a retirement before it cancels the reservation.
-  preparePlanText: ["task"],
-  // The kept store's read, and the host's reply.
-  restoreKept: ["storeRead", "reply"],
-  // The saved values' replacement, the kept store's discard, the host's reply, the publish, and the final reload.
-  planText: ["storageReplace", "discard", "reply", "publish", "reload"],
-  // The host's reply, the kept store's discard (a first save), and the publish.
-  captureKeep: ["reply", "discard", "publish"],
-} as const satisfies Record<Producer, readonly string[]>;
-export type Suspension<P extends Producer> = (typeof SUSPENSIONS)[P][number];
+  preparePlanText: { task: null },
+  restoreKept: {
+    storeRead: "kept.session",
+    reply: "host.restoreKept",
+    // The photo the kept session uses.
+    media: "kept.media.get",
+  },
+  planText: {
+    storageReplace: "provider.replace",
+    discard: "kept.discard",
+    photo: "kept.media.add",
+    reply: "host.planText",
+    publish: "kept.publish",
+    // The final read of the saved values the import stored, then its own Continue's restore.
+    reload: "provider.load",
+    restoreRead: "kept.session",
+    restoreReply: "host.restoreKept",
+    restoreMedia: "kept.media.get",
+  },
+  captureKeep: {
+    reply: "host.captureKeep",
+    // A first save's discard of the session kept before.
+    discard: "kept.discard",
+    photo: "kept.media.add",
+    publish: "kept.publish",
+    // The discard after a capture of a state this browser cannot write (`forgetKeptSession`).
+    forget: "kept.discard",
+  },
+} as const satisfies Record<Producer, Readonly<Record<string, string | null>>>;
+export type Suspension<P extends Producer> = keyof (typeof SUSPENSIONS)[P];
+
+/** Calls these operations post without awaiting them, and why. */
+export const POSTED = {
+  "host.preparePlanText": "the lease's reservation (`settlePlanJson`)",
+  "host.releasePlanText": "the lease's release of a replaced plan (`settlePlanJson`)",
+  "host.release": "a stale restore's session, which nothing shows",
+} as const;
 
 /**
- * Awaits no case holds, and why. They are awaits of the same operations, which the held ones bound on either side.
+ * Awaits of these operations that are no call: promises of the page itself, and why no case holds them. The held calls
+ * bound them on either side.
  */
 export const UNHELD_AWAITS = {
   storageRoute: "a promise the page resolves once at mount, before any operation of these cases",
   bridgeReady: "the connection, ready before any operation of these cases",
-  media: "a photo's store write; these sessions use no photo, so their operations never await it",
   pendingKeep: "an import waits for a keep under way; the keep's own suspensions are held instead",
 } as const;
-
 /** How an operation's page moves on while it waits: another plan, the same plan prepared anew, a room change, closing. */
 export const MOVES = ["otherPlan", "samePlan", "room", "disposed"] as const;
 export type Move = (typeof MOVES)[number];
