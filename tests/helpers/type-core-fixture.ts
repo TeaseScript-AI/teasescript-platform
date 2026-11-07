@@ -56,9 +56,8 @@ const RELEASED_S10_ROUTE_RULE_RECORDS: ReadonlySet<string> = new Set([
   // (S9b's F18 hold of this record was the route rule's error itself, Sol's scoping r1 §4)
   "cp9-cells/s9b/f18-held/computed-key/null-default",
   // (a use reached only by a `while n != null` loop's exit has no check on that route: the route rule's error, V30 §13;
-  // their records corrected with this PR)
+  // its record corrected with this PR)
   "cp9-cells/3b/forms/while-false-exit",
-  "cp9-cells/3b/review-early/n9-while-false-exit",
   "cp9-cells/3b/ad1/e1a/two-consumers",
   "cp9-cells/3b/ad1/e1a/unchecked",
   "cp9-cells/3b/ad1/e1b/unchecked",

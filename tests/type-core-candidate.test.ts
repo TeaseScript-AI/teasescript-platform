@@ -3602,6 +3602,18 @@ test("the route rule's error stands where a run can bring the null unchecked, an
     return analyseCore(request).diagnostics.some((d) => d.class === "compile-error");
   };
   for (const [source, error] of [
+    // (a loop's exit tests out the null: a check the compiler cannot keep, the warning; the other polarity is the error,
+    // the fixture's `forms/while-false-exit`; Codex r1 F1 on #1937)
+    ['let n = 1\nif askBoolean "Clear?" { n = null }\nwhile n == null { n = 1 }\nrepeat n {}\nexit\n', false],
+    // (a test of the producer in the use's own condition before it, of the needed form; another comparison checks
+    // nothing: Codex r1 F2, F5)
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null and f() > 0 { say "yes" }\nexit\n',
+      false,
+    ],
+    ['function f { if askBoolean("f") { return null }\n return 1 }\nif f() != 2 { repeat f() {} }\nexit\n', true],
+    // (a called function's written union proves itself, r4.118 (1): Codex r1 F4)
+    ['function f: integer | string { return "s" }\nrepeat f() {}\nexit\n', true],
     // (a parameter's default is selected only where some call omits the argument)
     ["function use(n = null) { repeat n {} }\nuse(2)\nexit\n", false],
     ["function use(n = null) { repeat n {} }\nuse()\nuse(2)\nexit\n", true],

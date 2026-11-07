@@ -97,6 +97,7 @@ function required(
   if (
     walk.finishing ||
     item.guarded === true ||
+    item.tested === true ||
     (item.reasons & REASON.budget) !== 0 ||
     item.tag === "unknown" ||
     item.tag === "empty"
@@ -158,16 +159,26 @@ function required(
   return true;
 }
 
-/** The members of the written union a read's variable declares, at the variable itself, or `null` (r4.118 (1)). */
+/**
+ * The members of the written union a read's variable declares, at the variable itself, or a called function's written
+ * result (r4.118 (1): the written domain proves itself at every consumer), or `null`.
+ */
 function writtenMembers(walk: Consumers, value: PlaceId): readonly ItemTag[] | null {
   const { program } = walk.pass;
   const at = program.places[value]?.site ?? null;
   const node = at === null ? null : program.exprAt(at);
   const expression = node?.expression;
-  if (node === null || expression === undefined) return null;
-  const path = stablePath(program, node.file, expression);
-  if (path === null || path.steps.length > 0) return null;
-  const written = writtenOf(program.place(path.root).kind);
+  const path =
+    node === null || expression === undefined ? null : stablePath(program, node.file, expression);
+  const c = program.opOf.get(value);
+  const written =
+    path !== null
+      ? path.steps.length > 0
+        ? null
+        : writtenOf(program.place(path.root).kind)
+      : c?.kind === "call" && "fn" in c
+        ? writtenOf(program.place(program.functionOf(c.fn).result).kind)
+        : null;
   if (written?.kind !== "union") return null;
   return typeTags(written);
 }
