@@ -7,7 +7,11 @@ import { Consumers } from "../src/type-inference/core/consumers.js";
 import { indexPaths, stepsOf } from "../src/type-inference/core/contract/literal-index.js";
 import { exportNames } from "../src/type-inference/core/contract/key-ids.js";
 import { absentWriterAt, objectsAt } from "../src/type-inference/core/contract/objects.js";
-import { DemandExhausted, withTestAllowance } from "../src/type-inference/core/budget.js";
+import {
+  DemandExhausted,
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../src/type-inference/core/budget.js";
 import { firstWriter, REASON, type Writer } from "../src/type-inference/core/items.js";
 import { stepName } from "../src/type-inference/core/program.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
@@ -318,4 +322,47 @@ test("the objects query covers a cycle of calls a literal seeds, and names its w
       assert.equal(text(derived.writer), text(writer), JSON.stringify(mode));
     });
   }
+});
+
+test("a key's read at the property stopped is not covered: the query names no writer the stopped read does not, in four modes (#1747, Codex r1)", () => {
+  // (the read of `b.p` finishes; its read at `zz` stops at the demand allowance, its answer the budget's unknown)
+  const source = 'let a={p:{}}\nlet b=a\na=b\nsay "${b.p.zz}"\nexit\n';
+  for (const mode of MODES) {
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+    const passes: CorePass[] = [];
+    const check = Consumers.prototype.check;
+    Consumers.prototype.check = function (this: Consumers) {
+      passes.push(this.pass);
+      check.call(this);
+    };
+    try {
+      withTestDemandAllowance(64, () => inMode(mode, () => analyseCore(request)));
+    } finally {
+      Consumers.prototype.check = check;
+    }
+    const pass = passes.at(-1)!;
+    const result = inMode(mode, () => compared(pass));
+    assert.deepEqual(result.differences, [], JSON.stringify(mode));
+  }
+});
+
+test("a key's stores at the property are each charged as the query reads them (#1747, Codex r1)", () => {
+  // (n stores the analysis rejects below `box.p`: the query visits each, so its work grows with them)
+  const units = [8, 32].map((n) => {
+    const rows = ["let box={p:{a:1}}"];
+    for (let i = 0; i < n; i++) rows.push(`box.p.a="bad${i}"`);
+    rows.push('say "${box.p.a}"', "exit");
+    const [pass] = passesOf(rows.join("\n") + "\n", MODES[0]!, 30_000_000);
+    const { program, contract, solver } = pass!;
+    const box = [...program.occurrenceOf.entries()].find(
+      ([, b]) => program.places[b]?.label === "box",
+    )![0];
+    return inMode(MODES[0]!, () => {
+      solver.run(absentWriterAt(contract, box, ["p"], "a"));
+      const before = program.work.total;
+      solver.run(absentWriterAt(contract, box, ["p"], "a"));
+      return program.work.total - before;
+    });
+  });
+  assert.ok(units[1]! > units[0]! + 16, units.join(", "));
 });
