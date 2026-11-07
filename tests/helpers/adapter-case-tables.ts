@@ -5,7 +5,7 @@ import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../src/value-k
 import { caseInputs, type CaseInputs } from "./adapter-case-inputs.js";
 import { isClosedFact, legacyOperation, type LegacyOutcome } from "./adapter-parity.js";
 
-/**
+/*
  * The case tables of the branched routines of the legacy checker (O4 stage 2b, work note §6.6): `askChoice`,
  * `askForm`, the list functions over values and selectors, `linearRegression` and `predict`. Each routine's table is
  * enumerated here from templates over the registry's kinds and the written forms of an operand, and every row is

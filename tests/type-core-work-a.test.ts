@@ -1237,10 +1237,6 @@ test("read chains and mixed-source adds grow no faster than measured", () => {
 });
 
 /**
- * A value's identity names its inputs by their own identities (TABLE §8, round 12 B4): a chain of 32 `otherwise`s, each
- * of the one before twice, is a source of 32 lines, never an identity of 2^32 characters.
- */
-/**
  * A search the ledger does not see (round 13 B2, round 14 H1): over a literal of k records of distinct fields, the
  * analysis's `indexOf` searches inspect entries in proportion to k, never k² (each identity's first element is found in
  * one pass). The count wraps the built-in for this analysis only.
@@ -1264,6 +1260,10 @@ test("a literal of 4,096 distinct records is searched in linear time", () => {
   assert.ok(inspected <= 64 * k, `${inspected} entries inspected`);
 });
 
+/**
+ * A value's identity names its inputs by their own identities (TABLE §8, round 12 B4): a chain of 32 `otherwise`s, each
+ * of the one before twice, is a source of 32 lines, never an identity of 2^32 characters.
+ */
 test("a chain of carriers over shared inputs is identified in linear space", () => {
   const levels = Array.from(
     { length: 32 },
@@ -1461,14 +1461,6 @@ test("a place replaced by objects of distinct properties takes work that grows w
   assert.deepEqual(steep, []);
 });
 
-/**
- * #1605: a value copied through a chain of wrappers, a store at its long key or the key's element checked: the check's
- * contract at each level of the stored value (its element, its element's element) stands one step below its parent's
- * position (`positions.ts`), never every wrapper's whole path again, so the work the store checks charge after the
- * analysis (`storeContracts`; every unit, apart work too, as the issue measured it), in total and by each counter of
- * at least 200 units, grows with the chain at k = 16 → 32 in every mode (3.38 to 3.76 per doubling on `3d052bf43`).
- * The series to k = 128 and the analysis beside a long key without copies are the PR's evidence, outside CI.
- */
 /**
  * The work the store checks charge after a family's analysis (`storeContracts`), every unit by counter (apart work
  * too, as #1605 measured it) with the analysis's syntax nodes, in a mode; and the analysis's charged total.

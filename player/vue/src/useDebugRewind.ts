@@ -104,8 +104,8 @@ export function useDebugRewind(player: PlayerSessionHost) {
     }
   }
 
-  /** Restores the point at `index`; the state left stays for Forward. Resolves to whether it was restored. */
   // Once a step read its state, the session must still be one that may be left, or the step changes nothing.
+  /** Restores the point at `index`; the state left stays for Forward. Resolves to whether it was restored. */
   const back = (index: number) =>
     step((current) =>
       current.back(index, () => {

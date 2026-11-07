@@ -639,11 +639,6 @@ export function readRecord(record) {
   return { reading: { key: record.key, name, rows, demands }, text: canonical([rows, demands]) };
 }
 
-/**
- * A classification that takes records one at a time (`add({ record, bytes, where })`: a source is classified when its
- * first record arrives, and only its reading's hash is kept, so a campaign of any size streams) and ends with
- * `finish(expected keys, or null where not checked)`.
- */
 /** The classes whose pairs the group table decides (taxonomy v3, #1744's group table). */
 const GROUPED = new Set(["differs/rule", "differs/checks", "differs/plan", "differs/wording"]);
 /** The group states of a grouped pair: `conforms` attributed, the rest open. */
@@ -706,7 +701,13 @@ export function groupOf(table, key, modeIndex, cls, row) {
   return { state: table.groups.get(binding.group).state, group: binding.group };
 }
 
-/** `groups`: the group table (`loadGroups`), or null where the grouped classes stay attributed as a class (v2's). */
+/**
+ * A classification that takes records one at a time (`add({ record, bytes, where })`: a source is classified when its
+ * first record arrives, and only its reading's hash is kept, so a campaign of any size streams) and ends with
+ * `finish(expected keys, or null where not checked)`.
+ *
+ * `groups`: the group table (`loadGroups`), or null where the grouped classes stay attributed as a class (v2's).
+ */
 export function classifier(groups = null) {
   const problems = [];
   const byKey = new Map();

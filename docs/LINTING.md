@@ -22,6 +22,15 @@ that list only shrinks, and each cleanup removes its files from it.
 the repository): `comment-citations.json` holds each file's exact counts of them in comments, which may only fall.
 `comment-forecasts-allowed.json` lists the forecasts the check accepts, and each entry must still be found.
 
+## Comment declarations
+
+`tools/oxlint/check-comment-declarations.mjs` refuses a backticked name in a comment that names nothing the repository
+declares or reads: it proves only that the name exists somewhere, not that it names what the comment's site means.
+`comment-external-names.json` declares names no file can, each with its kind and source; that list may grow. It also
+refuses a `/**` docblock that does not stand directly on its declaration (a blank line, another block or comment between,
+or nothing after it); a file's opening header and a same-line cast are allowed. `comment-declarations-waiting.json`
+lists the findings that wait for another pull request or the compiler's cleanup, and only shrinks.
+
 ## Type evidence
 
 Keep precise contracts through ordinary code. Do not erase a known value into `any`, `unknown`, broad `object`, or an
