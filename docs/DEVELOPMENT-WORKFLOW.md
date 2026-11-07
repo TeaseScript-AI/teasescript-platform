@@ -224,7 +224,11 @@ is converging and why. Whoever coordinates the work compares those answers acros
 non-converging review continues, taking these steps in order: one systematic structure, then an invariant, then a
 [design round](#design-rounds); a scope cut to an issue is possible at any step. The second sibling of one family
 starts the first step: the implementer stops repairing instances and reports one structure, and a third instance is
-not repaired on its own. A rule over an open set is built as in
+not repaired on its own. When the family's mechanism is another tool's or the runtime's semantics, such as a linter's
+configuration, a renderer, or runtime provenance read by a static check, that structure narrows the claim to what the
+repository owns, names the residual, and makes the other tool's own run, or the runtime evidence, the oracle for it;
+that run is then part of the change's required evidence, not an option. A narrowed claim that gains a sibling of its
+own still takes the next steps. A rule over an open set is built as in
 [Rules over an open set](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#rules-over-an-open-set) from the start.
 The structure and the invariant are bounded models as described below, not a generalized framework, which still needs an owner decision
 ([Proportional repair](#proportional-repair-and-owner-escalation)). The owner decides only when the outcome changes
