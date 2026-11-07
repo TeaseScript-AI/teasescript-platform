@@ -66,6 +66,7 @@ import type { StartOptions } from "../../engine-bridge/ops/session.js";
 import {
   bridgeOf,
   endsQuietly,
+  refusalCode,
   type PlayerBridge,
   type ServiceSection,
   type SessionSection,
@@ -748,9 +749,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           if (merged !== null) publishOwned(merged);
         },
         (error) => {
-          // A stopped or released session takes no call view: nothing ends further.
-          if (isHalted(error) || (error instanceof BridgeRequestError && error.code === "session"))
-            return;
+          // A stopped or released session, or a lost Worker, takes no call view: the stop or the loss reports itself, and
+          // nothing ends further.
+          if (endsQuietly(error) || refusalCode(error) === "session") return;
           if (!disposed && !stopped.value && session.value?.lineage === target.lineage)
             reportHostError(error);
         },
