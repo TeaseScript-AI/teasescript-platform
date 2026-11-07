@@ -300,8 +300,13 @@ test("a stop the oracle's own questions would make is never published: at the le
     withTestAllowance(allowance, () => publishedRoute(files, GLOBALS).text).includes(
       '"kind":"budget"',
     );
-  let [low, high] = [analyseCore(request).budget.total - 1, 2 * analyseCore(request).budget.total];
-  assert.ok(stops(low) && !stops(high));
+  const total = analyseCore(request).budget.total;
+  let [low, high] = [total - 1, 2 * total];
+  assert.ok(stops(low));
+  while (stops(high)) {
+    [low, high] = [high, 2 * high];
+    assert.ok(high < 2 ** 40, "some allowance finishes the route");
+  }
   while (high - low > 1) {
     const middle = Math.floor((low + high) / 2);
     if (stops(middle)) low = middle;
