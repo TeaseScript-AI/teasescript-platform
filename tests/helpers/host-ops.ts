@@ -20,6 +20,7 @@ export interface HostOp {
 }
 
 export const HOST_OPS = {
+  captureStorage: { planJson: "a held session's saved values, for a rewind adoption", read: true },
   releasePlanText: { planJson: "cleanup: the one remover of a reserved plan JSON", read: false },
   captureCheckpoint: {
     planJson: "a whole checkpoint, which holds the plan inside it; no plan JSON of its own",
