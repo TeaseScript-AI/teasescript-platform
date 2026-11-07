@@ -82,6 +82,11 @@ export function projectsFor(paths) {
   return projects;
 }
 
+/** The checks `projects` run, each once although several projects name it, in the order the projects name them. */
+export function checksOf(projects) {
+  return [...new Set([...projects].flatMap((project) => PROJECTS[project].checks))];
+}
+
 /** The extensions `npm run format:check` covers. */
 const FORMATTED = /\.(?:ts|tsx|cts|mts|js|jsx|cjs|mjs)$/u;
 
@@ -279,13 +284,12 @@ async function check(cleanups) {
     run("oxlint", process.execPath, ["tools/oxlint/run.mjs"]),
     run("knip", process.execPath, ["node_modules/knip/bin/knip.js"]),
   ];
-  for (const project of projects)
-    for (const check of PROJECTS[project].checks)
-      checks.push(
-        check === "tsc"
-          ? run("tsc", "node_modules/.bin/tsc", ["--noEmit", "-p", "tsconfig.json"])
-          : run(check, npm, ["run", "--silent", check]),
-      );
+  for (const check of checksOf(projects))
+    checks.push(
+      check === "tsc"
+        ? run("tsc", "node_modules/.bin/tsc", ["--noEmit", "-p", "tsconfig.json"])
+        : run(check, npm, ["run", "--silent", check]),
+    );
   const results = await Promise.all(checks);
   for (const { name, passed, seconds } of results)
     process.stdout.write(

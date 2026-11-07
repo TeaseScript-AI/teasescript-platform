@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { PROJECTS, projectsFor, removeTemporaryWorktree } from "./check-changed.mjs";
+import { PROJECTS, checksOf, projectsFor, removeTemporaryWorktree } from "./check-changed.mjs";
 
 // A representative changed path for each project, and the projects it alone needs.
 const REPRESENTATIVES = {
@@ -49,6 +49,12 @@ test(
     // `player/` outside `player/vue/` belongs to the TypeScript project, and `player/vue/` only to the Player's.
     assert.deepEqual([...projectsFor(["player/runtime-adapter.ts"])], ["typescript"]);
     assert.deepEqual([...projectsFor(["player/vue/src/usePlayerSession.ts"])], ["player-vue"]);
+    // A check that several projects name runs once: `lint:design` is the Player's and the design lint's.
+    const everyCheck = checksOf(projectsFor([".github/workflows/ci.yml"]));
+    assert.deepEqual(everyCheck, [
+      ...new Set(Object.values(PROJECTS).flatMap(({ checks }) => checks)),
+    ]);
+    assert.equal(everyCheck.filter((check) => check === "lint:design").length, 1);
   },
 );
 
