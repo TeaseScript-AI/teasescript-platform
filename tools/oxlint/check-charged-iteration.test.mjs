@@ -18,6 +18,14 @@ export function* steps(work: WorkLedger, counter: string, more: () => boolean): 
     yield;
   }
 }
+export function mapped<T, U>(work: WorkLedger, counter: string, items: Iterable<T>, map: (item: T) => U): U[] {
+  const made: U[] = [];
+  for (const item of items) {
+    work.charge(counter);
+    made.push(map(item));
+  }
+  return made;
+}
 export function some<T>(work: WorkLedger, counter: string, items: Iterable<T>, test: (item: T) => boolean): boolean {
   for (const item of each(work, counter, items)) if (test(item)) return true;
   return false;
@@ -329,6 +337,7 @@ export function keyBelow(key: string, rest: readonly string[]): string {
     `
 import { joinParts, type WorkLedger } from "../budget.js";
 import { keyBelow, keyOf } from "../definitions.js";
+import { mapped } from "../narrowing-iteration.js";
 declare const work: WorkLedger;
 export function copy(input: object): object {
   work.charge("objectSteps");
@@ -354,10 +363,19 @@ export function below(): string {
   work.charge("objectSteps");
   return keyBelow("1|", []);
 }
+export function labels(input: readonly string[]): string[] {
+  work.charge("objectSteps");
+  return mapped(work, "objectSteps", [input], joinParts);
+}
+export function called(input: readonly string[]): string[] {
+  work.charge("objectSteps");
+  return mapped(work, "objectSteps", [input], (parts) => joinParts(parts));
+}
 `,
     { "src/type-inference/core/definitions.ts": DEFINITIONS },
   );
-  // (the spread, the array join, the array key, and a narrowing modules' call even with a literal array; nothing in the
-  // scalar join or the literal key)
-  assert.deepEqual(lines, [7, 11, 19, 27]);
+  // (the spread, the array join, the array key, a narrowing modules' call even with a literal array, an allowed function
+  // handed as a callback, and the same call in an arrow, now seen with its array; nothing in the scalar join or the
+  // literal key)
+  assert.deepEqual(lines, [8, 12, 20, 28, 32, 36]);
 });

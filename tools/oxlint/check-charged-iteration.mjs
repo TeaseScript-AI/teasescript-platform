@@ -145,7 +145,8 @@ const OUTSIDE = new Set([...CONSTANT, ...CHARGING, ...STEP, ...FILED]);
 
 /**
  * objects.ts's own allowlist, the whole of what it may call outside the charged helpers: none of the narrowing modules'
- * entries apply to it. A call here that is handed a collection of any size must be in `OBJECTS_COLLECTIONS`.
+ * entries apply to it. Each is only called there, never used as a value, and a call handed a collection of any size
+ * must be in `OBJECTS_COLLECTIONS`.
  */
 const OBJECTS_OUTSIDE = new Set([
   // Fixed work: a lookup, a store of a value whole, a charge, a key's own text, a step's name.
@@ -541,6 +542,13 @@ export function chargedIterationDiagnostics(program, root, rules) {
                 node,
                 `\`${name}\` is not in OUTSIDE (tools/oxlint/check-charged-iteration.mjs): list it with why a call ` +
                   "walks nothing uncharged, or walk through narrowing-iteration.ts.",
+              );
+            // (in objects.ts an allowed function is only called, so the rule below sees each call's arguments)
+            else if (file === OBJECTS_FILE && callAt(node) === undefined)
+              report(
+                node,
+                `\`${name}\` is used as a value, so its calls' arguments escape this check: call it directly, ` +
+                  "in an arrow if a helper needs a callback.",
               );
             else if (
               file === OBJECTS_FILE &&
