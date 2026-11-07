@@ -134,6 +134,7 @@ function produces(work: WorkLedger, items: readonly Item[], tag: ItemTag): boole
       !((item.context === "call" && item.called !== true) || item.context === "handler") &&
       (item.reasons & REASON.budget) === 0 &&
       item.guarded !== true &&
+      item.tested !== true &&
       item.fromExternal !== true,
   );
 }
@@ -175,6 +176,11 @@ export class NarrowingRoutes {
   readonly #properties = new Map<PlaceId, ReadonlyMap<string, PlaceId>>();
   /** The program's ledger. */
   readonly #work: WorkLedger;
+  /** Per `if` or `while`, its condition's tests of the needed form (`#conditionTests`). */
+  readonly #conditions = new Map<
+    TreeStatement,
+    { readonly holding: ReadonlyMap<string, number>; readonly failing: ReadonlyMap<string, number> } | null
+  >();
 
   public constructor(
     readonly pass: CorePass,
@@ -419,34 +425,82 @@ export class NarrowingRoutes {
   }
 
   /**
-   * Whether a statement around `node` tests the text `text` in its condition (`if`, `while`): a check of a producer
-   * that the use repeats, such as `if read() != null { repeat read() {} }`, is a check on every route that the
-   * compiler cannot keep (V30 §13, the `call` warning), never the route rule's error.
+   * Whether a check of the needed form of the text `text` stands on every route to `node`, so that a producer the use
+   * repeats is a check the compiler cannot keep (V30 §13, the `call` warning), never the route rule's error: a
+   * condition around the use whose arm holds it (`X != null` or a type test in the `then` arm or a loop's body, each
+   * conjunct of an `and`; `X == null` or a negated type test in the `else` arm, each disjunct of an `or`), or a conjunct
+   * of the use's own condition before it (`if f() != null and f() > 0`). Each condition's tests found once.
    */
   #testedAround(node: FlowNode, text: string): boolean {
     this.#work.charge("exactQueries");
     const program = this.pass.program;
     const chain = this.#chainOf(node);
-    if (chain === null) return false;
+    if (chain === null || node.span === null) return false;
+    const use = node.span.start.offset;
     for (const place of each(program.work, "exactQueries", chain)) {
-      const owner = place.block.owner?.statement;
-      if (owner?.kind !== "ifStatement" && owner?.kind !== "whileStatement") continue;
-      const pending: Expression[] = [owner.condition];
-      for (const _ of steps(program.work, "exactQueries", () => pending.length > 0)) {
-        const at = peel(pending.pop()!, program.work);
-        if (at.kind === "typeTestExpression") {
-          if (this.#spelled(at.value, node.file, text)) return true;
-        } else if (at.kind === "binaryExpression") {
-          if (
-            (at.operator === "==" || at.operator === "!=") &&
-            (this.#spelled(at.left, node.file, text) || this.#spelled(at.right, node.file, text))
-          )
-            return true;
-          pending.push(at.left, at.right);
-        } else if (at.kind === "unaryExpression") pending.push(at.operand);
+      const owner = place.block.owner;
+      if (owner !== null && place.index >= 0) {
+        const arm = owner.arms[0] === place.block ? 0 : owner.arms[1] === place.block ? 1 : -1;
+        const tests = this.#conditionTests(owner, node.file);
+        if (tests !== null && arm === 0 && tests.holding.has(text)) return true;
+        if (tests !== null && arm === 1 && owner.statement.kind === "ifStatement" && tests.failing.has(text))
+          return true;
       }
+      // (the use's own statement: a conjunct of its condition before the use)
+      const statement = place.index < 0 ? undefined : place.block.statements[place.index];
+      const own = statement === undefined ? null : this.#conditionTests(statement, node.file);
+      const before = own?.holding.get(text);
+      if (before !== undefined && before <= use) return true;
     }
     return false;
+  }
+
+  /**
+   * An `if`'s or a `while`'s condition's tests of the needed form, by tested text with the end of its first test:
+   * those its condition holding proves (`holding`), and those its failing proves (`failing`), found once per statement.
+   */
+  #conditionTests(
+    statement: TreeStatement,
+    file: number,
+  ): { readonly holding: ReadonlyMap<string, number>; readonly failing: ReadonlyMap<string, number> } | null {
+    this.#work.charge("exactQueries");
+    const known = this.#conditions.get(statement);
+    if (known !== undefined) return known;
+    const ast = statement.statement;
+    if (ast.kind !== "ifStatement" && ast.kind !== "whileStatement") {
+      this.#conditions.set(statement, null);
+      return null;
+    }
+    const holding = new Map<string, number>();
+    const failing = new Map<string, number>();
+    const add = (into: Map<string, number>, tested: Expression, end: number): void => {
+      this.#work.charge("exactQueries");
+      const text = this.#text({ file, start: tested.span.start.offset, end: tested.span.end.offset });
+      if (!into.has(text)) into.set(text, end);
+    };
+    // (the conjuncts of the condition hold where it holds, its disjuncts fail where it fails)
+    const walk = (root: Expression, into: Map<string, number>, joined: string, positive: boolean): void => {
+      this.#work.charge("exactQueries");
+      const pending: Expression[] = [root];
+      for (const _ of steps(this.#work, "exactQueries", () => pending.length > 0)) {
+        const at = peel(pending.pop()!, this.#work);
+        const end = at.span.end.offset;
+        if (at.kind === "binaryExpression" && at.operator === joined) pending.push(at.left, at.right);
+        else if (at.kind === "typeTestExpression") {
+          if (at.negated !== positive && at.type.kind !== "optionalType") add(into, peel(at.value, this.#work), end);
+        } else if (at.kind === "binaryExpression" && at.operator === (positive ? "!=" : "==")) {
+          const left = peel(at.left, this.#work);
+          const right = peel(at.right, this.#work);
+          if (right.kind === "nullLiteral") add(into, left, end);
+          else if (left.kind === "nullLiteral") add(into, right, end);
+        }
+      }
+    };
+    walk(ast.condition, holding, "and", true);
+    walk(ast.condition, failing, "or", false);
+    const made = { holding, failing };
+    this.#conditions.set(statement, made);
+    return made;
   }
 
   /** The source text at a site, kept as charged text. */
@@ -464,16 +518,7 @@ export class NarrowingRoutes {
     return text;
   }
 
-  /** Whether an expression is spelled `text` in its file. */
-  #spelled(expression: Expression, file: number, text: string): boolean {
-    this.#work.charge("exactQueries");
-    const span = peel(expression, this.pass.program.work).span;
-    keepText(this.#work, text.length);
-    return (
-      span.end.offset - span.start.offset === text.length &&
-      this.#text({ file, start: span.start.offset, end: span.end.offset }) === text
-    );
-  }
+
 
   /**
    * Whether a value produces `tag` on some run where it stands (`node`), below `path`: a literal of that kind; an
