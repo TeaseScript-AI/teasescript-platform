@@ -677,8 +677,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     );
   }
   /**
-   * Adopts `next`: gives it this Player's random control from its next op on. Only the invariant's points call it: a
-   * Start's session shown, input adopting an inspected state, Continue after its kept draw went on.
+   * Adopts `next`: gives it this Player's random control from its next op on. Only the invariant's points call it:
+   * `showSession` without inspection, input adopting an inspected state, Continue after its kept draw went on. A Start's
+   * session is already its Player's from the `start` that made it.
    */
   function adoptRandom(next: PlayerSession) {
     if (lastRandom === undefined || disposed) return;
@@ -3001,8 +3002,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     return bridge;
   }
   /**
-   * The session `create` starts: over the bridge (`start`) for a held plan without Debug's random control, which cannot
-   * cross yet; otherwise in the host, before its first run (`introduceNow`). Either runs with the host's value trace.
+   * The session `create` makes: a held plan over the bridge (`start`), a transitional factory in the host before its
+   * first run (`introduceNow`). Either runs with the host's value trace. Only a Start (`kind`) carries its Player's
+   * random ownership; a restore takes it at its adoption.
    */
   function startedSession(
     create: PlayerSessionStart,

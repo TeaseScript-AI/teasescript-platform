@@ -49,7 +49,8 @@ export class HeldSession implements HostSession {
   #catchUp: PlayerRuntimeCatchUp | null = null;
   /**
    * The Player whose random control the session runs with (`RandomState.owner`): the one that started it, or that
-   * adopted it (`randomControl`); `null` for a session nobody adopted yet, as a restored one until its Continue.
+   * adopted it (`adoptRandom`); `null` for a session nobody holds, as a restore until its adoption, or a Continue's
+   * session it released (`releaseRandom`) until its kept draw went on.
    */
   #owner: number | null;
   /** The random control the session's engine runs with now. */

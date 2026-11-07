@@ -202,7 +202,7 @@ export interface HostFactoryInput {
  * publication. `make` is a transitional factory: a Start with Debug's trace or random control, a restore, a transfer,
  * DevelopmentPreview's Start. A session that brought a plan of its own gets a new plan token. `{ plan, options }`
  * starts a held plan instead. Either runs with the connection's value trace; a Start (`random`) also with its Player's
- * random control, a restore with none until its Continue adopts it (`randomControl`).
+ * random control. A restore begins without ownership, until an explicit adoption (`adoptRandom`).
  */
 export function introduceNow(
   bridge: PlayerBridge,
