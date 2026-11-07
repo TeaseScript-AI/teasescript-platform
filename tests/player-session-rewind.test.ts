@@ -545,6 +545,24 @@ test("turning Debug off while inspecting reinstates the session and deletes the 
   assert.equal(spill.destroyed, 1);
 });
 
+for (const end of ["Debug off", "unmount"] as const)
+  test(`after the connection is lost, ${end} while a state is inspected reinstates nothing and throws nothing`, async (context) => {
+    const storage = memoryStorage();
+    const made = createHost(context, storage.provider, { lossy: true });
+    const { host, rewind, debug, spill } = made;
+    await start(context, host);
+    await choose(context, host, "One");
+    assert.equal(await rewind.back(0), true);
+    const inspected = host.session.value;
+    made.lose!();
+    await settle(context);
+    // The lost host's states are gone, and with them Debug's history.
+    assert.equal(spill.destroyed, 1);
+    if (end === "Debug off") debug.stop();
+    else made.scope.stop();
+    assert.equal(host.session.value, inspected, "nothing reinstated");
+  });
+
 test("Back waits for a pending save, and a new session deletes the history", async (context) => {
   const storage = memoryStorage();
   const { host, rewind, spill } = createHost(context, storage.provider);
