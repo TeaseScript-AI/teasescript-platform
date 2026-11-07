@@ -149,8 +149,9 @@ turns came from the code itself:
 A comment says what the code does now, so it stays true whatever merges later. It never forecasts later work: no
 "until #N" or "until" a package or stage, no "once #N", no "will be replaced" or "replaces this", and no TODO in any
 form. A known temporary state is stated as a fact, and its plan lives in its issue. A reference to an accepted record
-(an issue, a TABLE revision or section, a completed stage, a merged pull request) is a citation and is allowed; what it
-says about the code must still be true now.
+in the repository (an issue, a merged pull request, an ADR, a section of a repository document) is a citation and is
+allowed; what it says about the code must still be true now. A reference to a document outside the repository is no
+citation, because a reviewer cannot read it.
 
 When something misleads you, or would mislead the next builder:
 
