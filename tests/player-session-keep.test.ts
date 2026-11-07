@@ -44,6 +44,7 @@ interface KeepHost {
   readonly bridge: Promise<PlayerBridge>;
 }
 let usePlayerSession: (options: {
+  bridge?: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
   capturedMedia: { repository: FakeMediaRepository };
   keptSessions: KeptSessionStore;
@@ -66,6 +67,9 @@ before(async () => {
   assert.equal(typeof facade.heldPlan, "function");
   // EVIDENCE: validation: the bundle facade's `heldPlan`, checked as a function above.
   heldPlan = facade.heldPlan as typeof heldPlan;
+  assert.equal(typeof facade.createInProcessBackend, "function");
+  // EVIDENCE: validation: the bundle's backend factory, checked as a function above.
+  createInProcessBackend = facade.createInProcessBackend as typeof createInProcessBackend;
   const module: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );
@@ -158,6 +162,10 @@ const heldAs = new Map<unknown, InstructionPlan>();
 /** Each page's host token of a test plan: preparing a plan again on a page reuses it, as the plan is the same. */
 const tokens = new WeakMap<KeepHost, Map<InstructionPlan, string>>();
 let heldPlan: (bridge: PlayerBridge, token: string) => object;
+let createInProcessBackend: (
+  build: { commit: null; dirty: null; mode: null; appVersion: null },
+  options: { readonly delayMs?: number },
+) => PlayerBridge;
 
 /** The token under which `host`'s bridge holds `plan`, prepared there from the plan's text the first time. */
 async function held(host: KeepHost, plan: InstructionPlan): Promise<string> {
@@ -179,10 +187,25 @@ async function prepareOn(host: KeepHost, plan: InstructionPlan) {
 }
 
 /** A page of the Player in `at` that prepares `plan`'s Start, or Continue for the session `at` keeps. */
-async function page(context: TestContext, at: ReturnType<typeof browser>, plan: InstructionPlan) {
+async function page(
+  context: TestContext,
+  at: ReturnType<typeof browser>,
+  plan: InstructionPlan,
+  delayMs?: number,
+) {
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      ...(delayMs === undefined
+        ? {}
+        : {
+            bridge: Promise.resolve(
+              createInProcessBackend(
+                { commit: null, dirty: null, mode: null, appVersion: null },
+                { delayMs },
+              ),
+            ),
+          }),
       scriptStorage: at.provider,
       capturedMedia: { repository: at.repository },
       keptSessions: at.kept,
@@ -475,4 +498,54 @@ test("Start and Continue capture a zone not seen before ahead of the click, and 
     ["Pacific/Marquesas", "Pacific/Chatham"],
     "Continue captured it again",
   );
+});
+
+test("a Start prepared while the first save's capture is out takes that save's plan JSON", async (context) => {
+  stubBrowser(context);
+  const expected = planJson(ASKS);
+  const writes = planWrites(context, ASKS);
+  const at = browser();
+  // Replies take 50 ms, so the capture's reply, with the plan's JSON, is out while the next Start is prepared.
+  const { host } = await page(context, at, ASKS, 50);
+  await until(() => writes() === 1, "the plan's JSON was not prepared");
+  const bridge = await host.bridge;
+  let captured!: () => void;
+  const capturing = new Promise<void>((resolve) => (captured = resolve));
+  const request = bridge.client.request.bind(bridge.client);
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    const sent = request(...args);
+    if (args[0] === "captureKeep") captured();
+    return sent;
+  });
+  await host.activate();
+  await capturing;
+  await prepareAgain(host, ASKS);
+  await until(() => at.published.length > 0, "the first session was not kept");
+  await host.activate();
+  await until(
+    () => at.published.filter((update) => update.planJson !== null).length > 1,
+    "the next session was not kept",
+  );
+  for (const update of at.published.filter((update) => update.planJson !== null))
+    assert.equal(update.planJson, expected);
+  assert.equal(writes(), 1, "the next Start took the first save's JSON");
+});
+
+test("a plan another preparation replaced, and the page's last one when it closes, let go of their JSON", async (context) => {
+  stubBrowser(context);
+  const writes = planWrites(context, ASKS, ENDS);
+  const at = browser();
+  const { host, scope } = await page(context, at, ASKS);
+  await tasks();
+  await prepareAgain(host, ENDS);
+  await tasks();
+  assert.deepEqual([writes(ASKS), writes(ENDS)], [1, 1]);
+  const bridge = await host.bridge;
+  const [asks, ends] = [await held(host, ASKS), await held(host, ENDS)];
+  scope.stop();
+  await tasks();
+  // Each JSON is written anew when asked for: the host let go of both.
+  await bridge.client.request("planText", { plan: asks });
+  await bridge.client.request("planText", { plan: ends });
+  assert.deepEqual([writes(ASKS), writes(ENDS)], [2, 2]);
 });

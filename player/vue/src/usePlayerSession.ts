@@ -1161,9 +1161,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     supersede();
     unsavedPlanJson = null;
     preparedPlanJson = null;
-    // The host's JSON of the script's plan, written or waiting for its task, is not needed any more.
-    if (scriptPlan !== null && bridge !== null)
-      void bridge.client.request("releasePlanText", { plan: scriptPlan }).catch(() => {});
+    // The host's JSON of the plans this page prepared, written or waiting for its task, is not needed any more.
+    for (const plan of [...askedPlanJson]) releasePlanJson(plan);
     loads.clear();
     device.reset();
     for (const element of audioElements.splice(0)) {
@@ -1728,6 +1727,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   let unsavedPlanJson: { readonly plan: string; readonly json: string } | null = null;
   // The JSON a save still held when a Start of the same plan was prepared, which that Start's first save stores.
   let preparedPlanJson: { readonly plan: string; readonly json: string } | null = null;
+  // The capture taking a plan's JSON from the host, while its reply is out: a Start of that plan prepared meanwhile
+  // takes the same JSON once it arrives (`prepareAfter`).
+  let planCapture: { readonly plan: string; prepareAfter: boolean } | null = null;
+  // The plans whose JSON this page asked the host to write, which it lets go of once no preparation of it needs it.
+  const askedPlanJson = new Set<string>();
+  /** Lets go of the host's JSON of `plan`, written or waiting, unless a capture is taking it. */
+  function releasePlanJson(plan: string) {
+    if (!askedPlanJson.delete(plan) || planCapture?.plan === plan || bridge === null) return;
+    void bridge.client.request("releasePlanText", { plan }).catch(() => {});
+  }
   /**
    * Has the host write the held plan `plan`'s JSON in a later task for a new session's first save, unless a save still
    * holds it, whose JSON that save then stores too.
@@ -1737,6 +1746,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       preparedPlanJson = unsavedPlanJson;
       return;
     }
+    if (planCapture?.plan === plan) {
+      planCapture.prepareAfter = true;
+      return;
+    }
+    askedPlanJson.add(plan);
     void bridgeReady
       .then((host) => host.client.request("preparePlanText", { plan }))
       .catch(() => {});
@@ -1781,24 +1795,34 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           ? preparedPlanJson
           : null;
     if (retry !== null && retry === preparedPlanJson) preparedPlanJson = null;
+    // The room the session is kept in is the one it plays in now; a switch while the capture is out drops it.
+    const inDebugRoom = room.value === "debug";
+    const store = keptStore();
+    const capturing = withPlan && retry === null ? { plan: token, prepareAfter: false } : null;
+    planCapture = capturing;
     // The state the host holds now, after the session's earlier requests; later operations change the session.
     let capture: KeepCapture;
     try {
       capture = await bridgeOf(current).read<KeepCapture>(current, "captureKeep", {
-        withPlan: withPlan && retry === null,
+        withPlan: capturing !== null,
       });
     } catch (error) {
+      if (planCapture === capturing) planCapture = null;
+      // A Start prepared while the capture was out has the host write the plan's JSON after all.
+      if (capturing?.prepareAfter === true) preparePlanJson(capturing.plan);
       // A request the Worker's loss ended, and a read of a session the host no longer holds, keep the point kept before.
       if (
         endsQuietly(error) ||
         (error instanceof BridgeRequestError && error.name === "SessionGoneError")
       )
         return;
+      if (disposed || (room.value === "debug") !== inDebugRoom) return;
       // A state this browser cannot write, such as one holding a list too long to save, cannot be kept, and the point kept
       // before must not stand in for it: a reload would go on from an earlier state as if it were this one.
-      await forgetKeptSession(current);
+      await forgetKeptSession(current, inDebugRoom);
       return;
     }
+    if (planCapture === capturing) planCapture = null;
     const { snapshotJson } = capture;
     const count = capture.eventsThrough;
     if (count > events.length) return;
@@ -1807,12 +1831,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const planJson = !withPlan
       ? null
       : (unsavedPlanJson = retry ?? { plan: token, json: capture.planJson! });
+    // A Start of the plan prepared while the capture was out takes the same JSON.
+    if (capturing?.prepareAfter === true) preparedPlanJson = unsavedPlanJson;
     const marks = { editedWhileDebugging: debugEdits.value, rewoundWhileDebugging: rewound.value };
     // Written once, for the photos they show and for the store.
     const eventsJson = added.map(serializeValidatedRuntimeJson);
     const references = capturedMediaReferencesIn(snapshotJson, eventsJson);
-    const inDebugRoom = room.value === "debug";
-    const store = keptStore();
     // The room's saved data are in use once storage reached it.
     await storageRoute;
     if (disposed || (room.value === "debug") !== inDebugRoom) return;
@@ -1849,9 +1873,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Discards the session kept for a reload when its state `current` cannot be kept, so the next state that can be is kept
    * anew; while the session runs or waits, a notice says that a reload would lose it.
    */
-  async function forgetKeptSession(current: PlayerSession) {
+  async function forgetKeptSession(current: PlayerSession, inDebugRoom = room.value === "debug") {
     kept = { plan: false, count: 0, last: null };
-    await discardKeptSession(room.value === "debug").catch(() => {});
+    await discardKeptSession(inDebugRoom).catch(() => {});
     const live = current.state.status === "running" || current.state.status === "waiting";
     if (!live) notices.dismiss(playerNoticeKeys.sessionNotKept);
     else if (!notices.list.some((notice) => notice.key === playerNoticeKeys.sessionNotKept))
@@ -1907,6 +1931,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const owner = ++preparation;
     await bridgeReady;
     if (disposed || owner !== preparation) return;
+    // A plan this one replaces needs no JSON for a first save any more.
+    if (scriptPlan !== null && scriptPlan !== plan) releasePlanJson(scriptPlan);
     scriptPlan = plan;
     lastStart.value = create;
     if (sources !== undefined) scriptSources = sources;
@@ -2346,8 +2372,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           return;
         const scope = normalStorage.scope;
         const live = sessionLive.value;
-        // The normal room keeps its session as it is now, which a later visit continues.
+        // The normal room keeps its session as it is now, which a later visit continues; one that ended is kept as it
+        // ended, by the keep still under way.
         if (live) await keepSession();
+        else while (keeping !== null) await keeping;
         const making = live || debugRoom.value === null;
         const replacing = live && debugRoom.value !== null;
         // A Continue or Start still being prepared is the normal room's.
