@@ -3602,12 +3602,6 @@ test("the route rule's error stands where a run can bring the null unchecked, an
     return analyseCore(request).diagnostics.some((d) => d.class === "compile-error");
   };
   for (const [source, error] of [
-    // (a written union's other kind the use does not take, made by a non-literal producer, certifies the route as the
-    // member does, r4.118 (1))
-    [
-      'let flagHost = askBoolean "f"\nlet d = dict{a: 1}\nlet value: boolean | string | null = d.get("x", default: null)\nif flagHost { value = "w" }\nsay d.get(value, default: 0)\nexit\n',
-      true,
-    ],
     // (a parameter's default is selected only where some call omits the argument)
     ["function use(n = null) { repeat n {} }\nuse(2)\nexit\n", false],
     ["function use(n = null) { repeat n {} }\nuse()\nuse(2)\nexit\n", true],
@@ -3626,6 +3620,23 @@ test("the route rule's error stands where a run can bring the null unchecked, an
       error,
       source,
     );
+  // (a written union's other kind the use does not take, made by a non-literal producer, certifies the union's route as
+  // the member's does, r4.118 (1))
+  const union =
+    'let flagHost = askBoolean "f"\nlet d = dict{a: 1}\nlet value: boolean | string | null = d.get("x", default: null)\n' +
+    'if flagHost { value = "w" }\nsay d.get(value, default: 0)\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source: union }], ["hostValue"]);
+  assert.ok(request !== null);
+  assert.ok(
+    inBothOrders(() =>
+      analyseCore(request).diagnostics.some(
+        (d) =>
+          d.class === "compile-error" &&
+          d.kind !== "written-type" &&
+          d.requiredCheck?.missingTests[0] === "if value is string",
+      ),
+    ),
+  );
 });
 
 test("no production code selects the core: only tests reach the candidate entry", () => {

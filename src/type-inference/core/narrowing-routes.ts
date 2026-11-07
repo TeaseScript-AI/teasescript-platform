@@ -343,8 +343,8 @@ export class NarrowingRoutes {
    * where its stored value produces the kind on some run, `false` where it does not, or the read whose own witness
    * certifies it (a scalar copy's source, a whole copy's source below the copied path, an `otherwise`'s left operand).
    * Every producer certifies by what its value holds (a literal, a default of any kind, a lookup, a parse, a
-   * conversion, a fallback): no producer is refused as such. A parameter's default is in its read's items only where some
-   * call omits the argument (V30: an error only for a run that can happen).
+   * conversion, a fallback): no producer is refused as such. A parameter's default is in its read's items only where
+   * some call omits the argument (V30: an error only for a run that can happen).
    */
   *#certificate(
     found: Candidate,
