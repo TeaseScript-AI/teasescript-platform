@@ -337,7 +337,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
         ? { kind: "invalid", errors: loaded.validation.errors }
         : { kind: "unreadable", message: loaded.message };
   };
-  /** A source's result, after the compiler loads: the only op the host awaits. */
+  /** A source's result, after the compiler loads. */
   const compile = async (script: string | PlayerProject): Promise<PrepareResult> => {
     const [{ compilePlayerProject }, { scriptIdentity }] = await Promise.all([
       import("../compile-project.js"),
