@@ -221,9 +221,10 @@ An entry's status is one of the closed list in
 `proven` (the current value, predicate, accepted domain, or formula is justified for its declared category, measurement
 definition, boundary, and input class); `provisional` (the local guard satisfies decision 7, but broader capacity or
 product evidence or policy remains incomplete, and the entry records that gap); `suspicious` (evidence gives a concrete
-reason not to trust the current bound); `obsolete` (the limit or mechanism no longer protects a reachable current
-boundary, has been replaced, or remains only as dead compatibility residue). An unresolved decision is no status: the
-governing-authority field records it as its unresolved-decision marker.
+reason not to trust the current bound, such as a missing local justification; it requires focused investigation or
+repair, and a bound that cannot satisfy decision 7 is removed or re-derived); `obsolete` (the limit or mechanism no
+longer protects a reachable current boundary, has been replaced, or remains only as dead compatibility residue). An
+unresolved decision is no status: the governing-authority field records it as its unresolved-decision marker.
 
 Update this file when implementation, evidence, or an Owner policy decision changes an entry. Historical roundness,
 another boundary's number, and empirical first-failure points do not justify retention. When temporary compatibility is
