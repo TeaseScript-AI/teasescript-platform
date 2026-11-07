@@ -259,6 +259,7 @@ test("the comparator tells apart what native clone keeps, and refuses every kind
     ["a null prototype", Object.assign(Object.create(null), { a: 1 })],
     ["another realm's array", vm.runInNewContext("[1, 2]")],
     ["an Array subclass", Object.assign(new (class List extends Array {})(), [1, 2])],
+    ["an array without a prototype", Object.setPrototypeOf([1], null)],
     ["another realm's Date", vm.runInNewContext("new Date(5)")],
     ["another realm's Map", vm.runInNewContext("new Map([[1, 2]])")],
     ["another realm's Set", vm.runInNewContext("new Set([1])")],
@@ -272,7 +273,7 @@ test("the comparator tells apart what native clone keeps, and refuses every kind
   const [one, two] = [twinBytes(), twinBytes()];
   const apart = { a: new Uint8Array(one, 0, 4), b: new Uint8Array(two, 4, 4) };
   const [atThree, atZero] = twin();
-  // Pairs that must differ although each side is of a compared kind.
+  // Other pairs that must differ.
   const differing: [label: string, actual: unknown, expected: unknown][] = [
     ["a view at another offset over the same bytes", atZero, atThree],
     [
