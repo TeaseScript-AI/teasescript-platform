@@ -3457,6 +3457,79 @@ test("a mixed error reads a copy's layer by its type below the copy's own level,
 });
 
 /**
+ * #1825: a mixed error names each set layer of its elements' type as a set, as the current checker's first sentence
+ * does: directly, inside a dict and around one, inside a list, in a join, below a property, a written copy and a
+ * nullable one, and each side by its own values where a set and a list meet (in both orders; the second error there is
+ * #2007's count difference, which this test does not pin). A nested list and a dict of lists stay as they were. In
+ * four modes.
+ */
+test("a mixed element's type names its set layers as sets (#1825)", () => {
+  const ONE = "A list holds one type. Use values of one type in it.";
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    [
+      'let xs=[set[[1]],set[["x"]]]\nexit\n',
+      `This list mixes a set (integer[] set) and a set (string[] set). ${ONE}`,
+    ],
+    [
+      'let xs=[dict {k:set[[1]]},dict {k:set[["x"]]}]\nexit\n',
+      `This list mixes a dict (integer[] set dict) and a dict (string[] set dict). ${ONE}`,
+    ],
+    [
+      'let xs=[set[dict {k:1}],set[dict {k:"x"}]]\nexit\n',
+      `This list mixes a set (integer dict set) and a set (string dict set). ${ONE}`,
+    ],
+    [
+      'let xs=[[set[1]],[set["x"]]]\nexit\n',
+      `This list mixes a list (integer set[]) and a list (string set[]). ${ONE}`,
+    ],
+    [
+      'let xs=[set[[1]]]+[set[["x"]]]\nexit\n',
+      "'+' would mix a set (integer[] set) and a set (string[] set). A list holds one type. Use values of one type in both lists.",
+    ],
+    [
+      'let xs=[set[1]]+[set["x"]]\nexit\n',
+      "'+' would mix a set (integer set) and a set (string set). A list holds one type. Use values of one type in both lists.",
+    ],
+    [
+      'let xs=[{f:set[[1]]},{f:set[["x"]]}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a set (integer[] set) in one and a set (string[] set) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let a:integer[] set=set[[1]]\nlet b:string[] set=set[["x"]]\nlet xs=[a,b]\nexit\n',
+      `This list mixes a set (integer[] set) and a set (string[] set). ${ONE}`,
+    ],
+    [
+      'let n:integer[]? set=set[[1]]\nlet xs=[n,set[["x"]]]\nexit\n',
+      `This list mixes a set (integer[]? set) and a set (string[] set). ${ONE}`,
+    ],
+    [
+      'let xs=[set[[1]],[["x"]]]\nexit\n',
+      `This list mixes a set (integer[] set) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[[["x"]],set[[1]]]\nexit\n',
+      `This list mixes a list (string[][]) and a set (integer[] set). ${ONE}`,
+    ],
+    [
+      'let xs=[[[1]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[dict {k:[1]},dict {k:["x"]}]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a dict (string[] dict). ${ONE}`,
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.code === "TSV044" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+});
+
+/**
  * #1762: a mixed error names a dict layer of its elements' type as a dict, as the current checker's first sentence does:
  * a written copy's (one that may be null too), a literal's, below a list, below a property, two deep, and a join's;
  * each side by its own values where a list and a dict meet. In four modes.
