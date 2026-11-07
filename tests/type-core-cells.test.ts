@@ -4337,6 +4337,14 @@ test("a value an operation carries of a named collection brings its element type
       [56],
     ],
     ["toSet", `${lists}let xs = [a.toSet(), b.toSet()]${after}`, "compile-error", [49]],
+    // (#1857: a property read below a copy is its receiver's element's property, both errors at the read, never the
+    // receiver's own property: reusing the path whatever its first step loses the store's TSV041)
+    [
+      "take, read at a property",
+      `let xs = [{p: 1}]\nlet ys = xs.take(1)\nlet n: integer = ys.p${after}`,
+      "compile-error",
+      [55, 55],
+    ],
     ["otherwise", `${lists}let xs = [a, b otherwise b]${after}`, "compile-error", [41]],
     [
       "a dict's values",
