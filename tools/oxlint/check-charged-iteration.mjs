@@ -1,6 +1,8 @@
 import { relative, resolve, sep } from "node:path";
 import { Project, ts } from "ts-morph";
 
+import { objectsLanguage } from "./objects-language.mjs";
+
 /**
  * Stage 3b's narrowing modules repeat work only through `narrowing-iteration.ts`, which charges every step to the work
  * ledger (TABLE §13.3), and every function body in them charges a unit on entry. This check guards the ordinary forms
@@ -586,6 +588,16 @@ export function chargedIterationDiagnostics(program, root, rules) {
       ts.forEachChild(node, visit);
     };
     visit(sourceFile);
+    if (file === OBJECTS_FILE)
+      objectsLanguage({
+        checker,
+        sourceFile,
+        iteration: rules.iteration,
+        outside,
+        fileOf,
+        nameOf,
+        report,
+      });
   }
 
   return diagnostics.sort(
