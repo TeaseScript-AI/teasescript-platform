@@ -489,35 +489,62 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   let debugRooms = options.debugRooms ?? memoryKeptRoomStore();
   const debugRoom = shallowRef<{ readonly session: boolean } | null>(null);
   let debugRoomStorage: CapturedMediaStorage | null = null;
-  // Where storage operations go: the provider in use, or a switch to another one, which operations issued meanwhile wait
+  /**
+   * Where saved values go: a provider used as it is, or one that keeps their captured media durable, each with its view
+   * for one persistence operation, whose ownership admits every call it makes (`persistence-ownership.ts`).
+   */
+  interface StorageRoute {
+    readonly provider: ScriptStorageProvider;
+    forOperation(owner: PersistenceOwnership): ScriptStorageProvider;
+  }
+  const plainRoute = (provider: ScriptStorageProvider): StorageRoute => ({
+    provider,
+    forOperation: (owner) => owner.values(provider),
+  });
+  const capturedRoute = (storage: CapturedMediaStorage): StorageRoute => ({
+    provider: storage,
+    forOperation: (owner) => storage.forOperation(owner),
+  });
+  const normalRoute: StorageRoute | undefined =
+    capturedMediaPersistence === undefined
+      ? options.scriptStorage && plainRoute(options.scriptStorage)
+      : capturedRoute(capturedMediaPersistence);
+  // Where storage operations go: the route in use, or a switch to another one, which operations issued meanwhile wait
   // for, in issue order.
-  let storageRoute: ScriptStorageProvider | Promise<ScriptStorageProvider> | undefined =
-    normalStorage;
-  const routed = <T>(operation: (provider: ScriptStorageProvider) => Promise<T>): Promise<T> => {
+  let storageRoute: StorageRoute | Promise<StorageRoute> | undefined = normalRoute;
+  const routed = <T>(operation: (route: StorageRoute) => Promise<T>): Promise<T> => {
     const route = storageRoute!;
     return route instanceof Promise ? route.then(operation) : operation(route);
   };
+  /** The saved values in use, for the persistence operation `owner`: every call it makes there is admitted. */
+  const operationStorage = (owner: PersistenceOwnership): ScriptStorageProvider => ({
+    scope: normalStorage!.scope,
+    load: () => routed((route) => route.forOperation(owner).load()),
+    write: (key, value) => routed((route) => route.forOperation(owner).write(key, value)),
+    replace: (entries) => routed((route) => route.forOperation(owner).replace(entries)),
+    clear: () => routed((route) => route.forOperation(owner).clear()),
+  });
   const storageProvider: ScriptStorageProvider | undefined = normalStorage && {
     scope: normalStorage.scope,
-    load: () => routed((provider) => provider.load()),
-    write: (key, value) => routed((provider) => provider.write(key, value)),
-    replace: (entries) => routed((provider) => provider.replace(entries)),
-    clear: () => routed((provider) => provider.clear()),
+    load: () => routed((route) => route.provider.load()),
+    write: (key, value) => routed((route) => route.provider.write(key, value)),
+    replace: (entries) => routed((route) => route.provider.replace(entries)),
+    clear: () => routed((route) => route.provider.clear()),
   };
   /**
    * Sends storage operations where `next` resolves from now on, once the operations issued before have finished where
    * they were issued. `next` must not reject.
    */
-  function switchStorage(next: () => Promise<ScriptStorageProvider>): Promise<void> {
+  function switchStorage(next: () => Promise<StorageRoute>): Promise<void> {
     const previous = storageRoute!;
     const switched = (async () => {
-      const provider = await previous;
+      const { provider } = await previous;
       await (provider === debugRoomStorage ? debugRoomStorage : capturedMediaPersistence)?.flush();
       return next();
     })();
     storageRoute = switched;
-    return switched.then((provider) => {
-      if (storageRoute === switched) storageRoute = provider;
+    return switched.then((route) => {
+      if (storageRoute === switched) storageRoute = route;
     });
   }
   /** Sends saved values and photos to the scope's debug room, which exists; `durable` are its photos this Player holds. */
@@ -525,18 +552,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     scope: string,
     state: { readonly session: boolean },
     durable: ReadonlySet<string>,
-  ): ScriptStorageProvider {
+  ): StorageRoute {
     capturedMedia.useRepository(debugRooms.media, durable);
     debugRoomStorage = withCapturedMedia(debugRooms.values(scope), capturedMedia);
     debugRoom.value = state;
-    return debugRoomStorage;
+    return capturedRoute(debugRoomStorage);
   }
   // The room the page opens is in use before a session is prepared; the debug room is made from a copy of the script's
   // own saved data when there is none yet.
   if (normalStorage !== undefined)
     void switchStorage(async () => {
       debugRoom.value = await debugRooms.read(normalStorage.scope).catch(() => null);
-      if (room.value === "normal") return normalStorage;
+      if (room.value === "normal") return normalRoute!;
       const durable =
         debugRoom.value === null
           ? await createDebugRoom(normalStorage.scope, false)
@@ -1135,6 +1162,19 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // that replaces what it would show, retires it: Start, Continue, a session's end (`supersede`), an import of the shown
   // script, a room change, unmount. Only the current one shows its Continue or Start and puts its photos back.
   let preparation = 0;
+  // The persistence operations under way (`persistenceOwnership`), each revoked for good where it retires.
+  const pendingOwnerships = new Set<PersistenceOwnership>();
+  /** Ends every persistence operation the page's change of room, store, plan tenure, preparation or life retired. */
+  function revokeRetiredOperations() {
+    for (const ownership of pendingOwnerships) ownership.revoke();
+  }
+  /** A new preparation, which retires the ones before it. */
+  function nextPreparation(): number {
+    preparation += 1;
+    revokeRetiredOperations();
+    return preparation;
+  }
+  watch(room, revokeRetiredOperations, { flush: "sync" });
   // A Continue under way in the host, whose session no other activation may let run on; see `supersede`.
   let continuing: PlayerSession | null = null;
   // The Start or Continue still beginning over the bridge. A later activation begins only once it settled, so the
@@ -1148,7 +1188,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function supersede() {
     activationToken++;
-    preparation++;
+    nextPreparation();
     // A pending error stop is retired with the activation it stopped; the replacement's input runs.
     halting.value = false;
     const obsolete = continuing;
@@ -1207,9 +1247,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   /**
    * The stored values read freshly, with the references among them the media store had stored, or `null` when storage
-   * could not be read; `undefined` without storage. It changes nothing on the page: `applyScriptStorage` does.
+   * could not be read; `undefined` without storage. It changes nothing on the page: `applyScriptStorage` does. For the
+   * persistence operation `owner`, every call it makes is admitted; a refused one rejects with `StaleOperation`.
    */
-  async function readScriptStorage(): Promise<
+  async function readScriptStorage(
+    owner?: PersistenceOwnership,
+  ): Promise<
     | {
         readonly entries: readonly RuntimeScriptStorageEntrySnapshot[];
         readonly storedFiles: ReadonlySet<string>;
@@ -1219,12 +1262,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   > {
     if (!scriptStorage) return undefined;
     try {
-      const entries = await scriptStorage.load();
+      const entries = await (owner === undefined ? scriptStorage : operationStorage(owner)).load();
       const storedFiles = await capturedMedia
-        .storedReferences(storedValueReferences(entries))
-        .catch(() => new Set<string>());
+        .storedReferences(storedValueReferences(entries), owner)
+        .catch(rejectedUnlessStale(new Set<string>()));
       return { entries, storedFiles };
-    } catch {
+    } catch (error) {
+      if (error instanceof StaleOperation) throw error;
       return null;
     }
   }
@@ -1594,7 +1638,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       scriptStorage !== undefined && chosen.has(scriptStorage.scope) && !inDebugRoom;
     const releaseImporting = holdImporting();
     // A Continue or Start still being prepared for the script would offer what the import replaces.
-    if (ownChosen) preparation++;
+    if (ownChosen) nextPreparation();
     const failed: string[] = [];
     // Start keeps saying why the kept session cannot continue while a failed import leaves that session.
     let outdated = ownChosen ? activation.value?.outdated : undefined;
@@ -1764,14 +1808,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * One persistence operation's ownership (keep, the kept session's restore, an import): the room, store, plan tenure
    * and, where it has one, the preparation it began in. `current` is the one rule for every such operation: once the page
    * closes, switches room or store, prepares another plan, or (with a preparation) a newer preparation begins, the
-   * operation is stale. A stale operation issues nothing more: `check` after each await before the next request or store
-   * write, and every page effect is applied synchronously through `commit`.
+   * operation is stale for good. A stale operation issues nothing more: it reaches its stores and the host only through
+   * the ownership's handles, which admit no call once it is stale, and applies every page effect synchronously through
+   * `commit`.
    */
   function persistenceOwnership(owner: number | null = null): PersistenceOwnership {
     const inRoom = room.value;
     const store = keptStore();
     const tenure = planTenure;
-    return ownershipOf(
+    const ownership = ownershipOf(
       () =>
         !disposed &&
         room.value === inRoom &&
@@ -1779,6 +1824,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         planTenure === tenure &&
         (owner === null || owner === preparation),
     );
+    pendingOwnerships.add(ownership);
+    return ownership;
   }
   // The operation that set `importing` last, which alone clears it: a stale one never clears a newer one's.
   let importingHolder: object | null = null;
@@ -1793,14 +1840,29 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       importing.value = false;
     };
   }
-  /** Runs `operation`, which ends without effect where its ownership went stale; resolves to whether it ran to its end. */
-  async function owned(operation: () => Promise<void>): Promise<boolean> {
+  /** A fallback for a failed store call of a persistence operation, unless its handle refused the call as stale. */
+  function rejectedUnlessStale<T>(fallback: T): (error: unknown) => T {
+    return (error) => {
+      if (error instanceof StaleOperation) throw error;
+      return fallback;
+    };
+  }
+  /**
+   * Runs `operation` of `ownership`, which ends without effect where its ownership went stale; resolves to whether it ran
+   * to its end.
+   */
+  async function owned(
+    ownership: PersistenceOwnership,
+    operation: () => Promise<void>,
+  ): Promise<boolean> {
     try {
       await operation();
       return true;
     } catch (error) {
       if (!(error instanceof StaleOperation)) throw error;
       return false;
+    } finally {
+      pendingOwnerships.delete(ownership);
     }
   }
   /** Settles `event` in the lease and posts the host messages it implies, on the connection the page has. */
@@ -1808,6 +1870,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const settled = settle(planJsonLease, event);
     if (settled.lease.current !== planJsonLease.current) planTenure += 1;
     planJsonLease = settled.lease;
+    revokeRetiredOperations();
     for (const message of settled.messages) {
       const op = message.kind === "write" ? "preparePlanText" : "releasePlanText";
       void bridge?.client.request(op, { plan: message.plan }).catch(() => {});
@@ -1844,7 +1907,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (inspecting.value || activation.value !== null) return;
     // The session is kept in the room and store it plays in now, of the plan tenure now.
     const ctx = persistenceOwnership();
-    await owned(() => keepIn(ctx, current, keptScope!));
+    await owned(ctx, () => keepIn(ctx, current, keptScope!));
   }
   async function keepIn(ctx: PersistenceOwnership, current: PlayerSession, scope: string) {
     // The session's events: its store's, which a capture's events end in.
@@ -1855,14 +1918,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         : 0;
     const withPlan = !(kept.plan && from > 0);
     const inDebugRoom = room.value === "debug";
-    const store = keptStore();
+    const store = ctx.kept(keptStore());
     // The state the host holds now, after the session's earlier requests, and for a first save the plan's JSON, which
     // the host holds for the page (`plan-json-lease.ts`); later operations change the session.
     let capture: KeepCapture;
     try {
-      capture = await bridgeOf(current).read<KeepCapture>(current, "captureKeep", {
-        plan: withPlan ? current.planToken : null,
-      });
+      capture = await ctx.admit(() =>
+        bridgeOf(current).read<KeepCapture>(current, "captureKeep", {
+          plan: withPlan ? current.planToken : null,
+        }),
+      );
     } catch (error) {
       // A request the Worker's loss ended keeps the point kept before.
       if (endsQuietly(error)) return;
@@ -1894,14 +1959,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     try {
       // A new session replaces the one kept before.
       if (from === 0) {
-        await discardKeptSession(inDebugRoom);
+        await discardKeptSession(ctx, inDebugRoom);
         if (inDebugRoom) ctx.commit(() => (debugRoom.value = { session: false }));
       }
       ctx.check();
       // The session is kept only with every photo it uses: one that cannot be stored keeps the session kept before.
       if (inDebugRoom) {
         // The debug room stores the session's photos like its saved ones.
-        await capturedMedia.promote(references);
+        await capturedMedia.promote(references, ctx);
         ctx.check();
       } else {
         // The photos no save stored go with the session, a photo already kept as it is; a stored one stays stored
@@ -1938,7 +2003,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   async function forgetKeptSession(current: PlayerSession, ctx: PersistenceOwnership) {
     const inDebugRoom = room.value === "debug";
     ctx.commit(() => (kept = { plan: false, count: 0, last: null }));
-    const discarded = await discardKeptSession(inDebugRoom).then(
+    const discarded = await discardKeptSession(ctx, inDebugRoom).then(
       () => true,
       () => false,
     );
@@ -1952,10 +2017,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   /**
    * Discards the session the room keeps: the normal room's with the photos only it uses, the debug room's alone, since
-   * the room's saved data and photos stay. The caller shows that the debug room keeps no session.
+   * the room's saved data and photos stay, for the persistence operation `ctx`. The caller shows that the debug room
+   * keeps no session.
    */
-  function discardKeptSession(inDebugRoom: boolean): Promise<void> {
-    return inDebugRoom ? debugRooms.discardSession(keptScope!) : keptSessions.discard(keptScope!);
+  function discardKeptSession(ctx: PersistenceOwnership, inDebugRoom: boolean): Promise<void> {
+    return inDebugRoom
+      ? ctx.rooms(debugRooms).discardSession(keptScope!)
+      : ctx.kept(keptSessions).discard(keptScope!);
   }
   /** Keeps the shown session as it is now and waits until it is kept. */
   async function keepSession(): Promise<void> {
@@ -1995,7 +2063,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   ): Promise<void> {
     // The host holds the plan, under the token `prepare` gave it.
     // Owned from the call: a later preparation, or a transition that replaces it, while the host gets ready retires it.
-    const owner = ++preparation;
+    const owner = nextPreparation();
     await bridgeReady;
     if (disposed || owner !== preparation) return;
     // A plan this one replaces needs no JSON any more; this one's is written now, in a task of its own, for the kept
@@ -2012,10 +2080,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * changed the format of the kept session. Only while the preparation `owner` is current: the kept session restored,
    * its photos, and its plan's JSON are installed together, or not at all. Resolves to whether it did.
    */
-  async function prepareKept(owner = ++preparation): Promise<boolean> {
+  async function prepareKept(
+    owner = nextPreparation(),
+    ctx = persistenceOwnership(owner),
+  ): Promise<boolean> {
     // The preparation `owner`, in the room and plan tenure it began in, installs what it found; a stale one, nothing.
-    const ctx = persistenceOwnership(owner);
-    return owned(async () => {
+    return owned(ctx, async () => {
       ctx.check();
       const plan = scriptPlan;
       const found = plan === null ? {} : await restoreKept(plan, ctx);
@@ -2062,7 +2132,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     await storageRoute;
     ctx.check();
     const store = keptStore();
-    const stored = await store.session(keptScope).catch(() => null);
+    const bound = ctx.kept(store);
+    const stored = await bound.session(keptScope).catch(rejectedUnlessStale(null));
     ctx.check();
     const found = stored === null ? null : keptSession(stored);
     if (found === null) return {};
@@ -2075,7 +2146,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     try {
       const host = await bridgeReady;
       ctx.check();
-      restored = await host.restoreKept(plan, found.planJson, found.snapshotJson, found.events);
+      restored = await ctx.admit(() =>
+        host.restoreKept(plan, found.planJson, found.snapshotJson, found.events),
+      );
     } catch (error) {
       if (error instanceof StaleOperation) throw error;
       ctx.check();
@@ -2118,7 +2191,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const media: (readonly [string, StoredCapturedMedia | null])[] = [];
     if (store === keptSessions)
       for (const reference of capturedMediaReferencesIn(found.snapshotJson, found.events)) {
-        media.push([reference, await store.media.get(keptScope, reference).catch(() => null)]);
+        media.push([
+          reference,
+          await bound.media.get(keptScope, reference).catch(rejectedUnlessStale(null)),
+        ]);
         owns();
       }
     owns();
@@ -2279,8 +2355,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const { transfer } = review;
     const scope = keptScope;
     const plan = scriptPlan;
-    // The provider's own route: the saved values the import stored are shown by its final read, while it owns the page.
-    const storage = storageProvider!;
     const releaseImporting = holdImporting();
     // A session of this script in progress ends first; Debug's rewind could restore this script's earlier saved data
     // over the import, so its history ends.
@@ -2288,12 +2362,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     rewindRetirements.value++;
     // The import is then a preparation of its own: a Continue or Start still being prepared would offer what it
     // replaces. It owns that preparation, in this room and plan tenure; once either moves on, it issues nothing more.
-    const owner = ++preparation;
+    const owner = nextPreparation();
     const ctx = persistenceOwnership(owner);
+    // The saved values in use and the kept sessions, through the import's handles. The values the import stored are
+    // shown by its final read, while it owns the page.
+    const storage = operationStorage(ctx);
+    const sessions = ctx.kept(keptSessions);
     let failure: string | null = null;
     let ranToEnd = false;
     try {
-      ranToEnd = await owned(async () => {
+      ranToEnd = await owned(ctx, async () => {
         const replaceSession = async (): Promise<void> => {
           // A session being kept is kept before the import replaces it.
           while (keeping !== null) await keeping;
@@ -2322,7 +2400,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           let discarded = false;
           try {
             ctx.commit(() => (kept = { plan: false, count: 0, last: null }));
-            await keptSessions.discard(scope);
+            await sessions.discard(scope);
             discarded = true;
             ctx.check();
             const eventsJson = transfer.session.events.map(serializeValidatedRuntimeJson);
@@ -2330,17 +2408,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             // Unlike keeping a session as it plays, every photo goes into a store the discard emptied, so a failure is
             // real: the session is not kept without the media it uses.
             for (const photo of capturedMedia.sessionRecords(references)) {
-              await keptSessions.media.add(photo);
+              await sessions.media.add(photo);
               ctx.check();
             }
             // The plan's JSON, which the host holds for the page (`plan-json-lease.ts`).
             ctx.commit(() => settlePlanJson({ kind: "prepare", plan }));
             const host = await bridgeReady;
             ctx.check();
-            const planJson = (await host.client.request("planText", { plan })).result;
+            const planJson = (await ctx.admit(() => host.client.request("planText", { plan })))
+              .result;
             ctx.check();
             if (typeof planJson !== "string") throw new Error("The host wrote no plan JSON.");
-            await keptSessions.publish(scope, {
+            await sessions.publish(scope, {
               planJson,
               snapshotJson: review.snapshotJson,
               eventsFrom: 0,
@@ -2362,9 +2441,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         );
         // The import's own preparation, while it owns the page: the saved values it stored, and its Start or Continue.
         ctx.check();
-        const stored = await readScriptStorage();
+        const stored = await readScriptStorage(ctx);
         ctx.commit(() => applyScriptStorage(stored));
-        if (!(await prepareKept(owner))) throw new StaleOperation();
+        if (!(await prepareKept(owner, ctx))) throw new StaleOperation();
         if (unexpected !== null) throw unexpected.error;
       });
     } finally {
@@ -2514,7 +2593,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         const making = live || debugRoom.value === null;
         const replacing = live && debugRoom.value !== null;
         // A Continue or Start still being prepared is the normal room's.
-        preparation++;
+        nextPreparation();
         room.value = "debug";
         kept = { plan: false, count: 0, last: null };
         keptPresentation = null;
@@ -2562,6 +2641,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       // Another tab created it meanwhile, or this browser cannot keep it: then it lives in this page.
       if ((await debugRooms.read(scope).catch(() => null)) === null) {
         debugRooms = memoryKeptRoomStore();
+        revokeRetiredOperations();
         copied = await debugRooms
           .create(scope, entries, photos)
           .then(all, () => debugRooms.create(scope, [], []).then(() => new Set<string>()));

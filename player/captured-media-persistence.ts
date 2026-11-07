@@ -1,5 +1,6 @@
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { isCapturedMediaReference, type CapturedMediaStore } from "./captured-media.js";
+import type { PersistenceOwnership } from "./persistence-ownership.js";
 import type { ScriptStorageProvider } from "./script-storage.js";
 
 /**
@@ -31,6 +32,11 @@ export interface CapturedMediaStorage extends ScriptStorageProvider {
   flush(): Promise<void>;
   /** Rejects later operations and resolves once every issued operation finished. */
   drain(): Promise<void>;
+  /**
+   * The same storage for one persistence operation (`persistence-ownership.ts`), in the same issue order: `owner` admits
+   * each call it makes of the provider and the media store, and applies what promotion stored.
+   */
+  forOperation(owner: PersistenceOwnership): ScriptStorageProvider;
 }
 
 /**
@@ -44,7 +50,7 @@ export interface CapturedMediaStorage extends ScriptStorageProvider {
  */
 export function withCapturedMedia(
   provider: ScriptStorageProvider,
-  media: CapturedMediaStore,
+  media: Pick<CapturedMediaStore, "promote">,
 ): CapturedMediaStorage {
   let queue: Promise<unknown> = Promise.resolve();
   let draining = false;
@@ -54,20 +60,29 @@ export function withCapturedMedia(
     queue = next.catch(() => {});
     return next;
   };
-  return {
+  // The operations on `values`, whose promotion stores through `promote`, in the one issue order.
+  const queued = (
+    values: ScriptStorageProvider,
+    promote: (references: Set<string>) => Promise<void>,
+  ): ScriptStorageProvider => ({
     scope: provider.scope,
-    load: () => enqueue(() => provider.load()),
+    load: () => enqueue(() => values.load()),
     write: (key, value) =>
       enqueue(async () => {
-        await media.promote(capturedMediaReferences(value));
-        await provider.write(key, value);
+        await promote(capturedMediaReferences(value));
+        await values.write(key, value);
       }),
     replace: (entries) =>
       enqueue(async () => {
-        for (const entry of entries) await media.promote(capturedMediaReferences(entry.value));
-        await provider.replace(entries);
+        for (const entry of entries) await promote(capturedMediaReferences(entry.value));
+        await values.replace(entries);
       }),
-    clear: () => enqueue(() => provider.clear()),
+    clear: () => enqueue(() => values.clear()),
+  });
+  return {
+    ...queued(provider, (references) => media.promote(references)),
+    forOperation: (owner) =>
+      queued(owner.values(provider), (references) => media.promote(references, owner)),
     async flush() {
       await queue;
     },
@@ -186,6 +201,16 @@ export function capturedMediaStorage(
     clear: async () => (await ready, storage.clear()),
     flush: async () => (await ready, storage.flush()),
     drain: () => storage.drain(),
+    forOperation(owner) {
+      const view = storage.forOperation(owner);
+      return {
+        scope: provider.scope,
+        load: async () => (await ready, view.load()),
+        write: async (key, value) => (await ready, view.write(key, value)),
+        replace: async (entries) => (await ready, view.replace(entries)),
+        clear: async () => (await ready, view.clear()),
+      };
+    },
     async close() {
       await ready;
       await storage.drain();
