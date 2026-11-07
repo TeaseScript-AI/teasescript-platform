@@ -1,22 +1,23 @@
 // The #1797 workloads (F-work) through the differential harness (0b.1): each host tape and tail case runs on both
 // sides of this build, every restore route included, and must be equivalent, and its uninterrupted run must say what
 // its independent reference says. The full sizes stay with `tools/benchmark-runtime.mjs`, whose cuts restore from
-// checkpoint JSON. A tape is run by the runner's own `tapeRun`, the one owner of the tape rule, so both drivers make
-// the same host calls at the same points.
+// checkpoint JSON. Every session the harness makes, fresh, restored or forked, receives its host calls through the
+// runner's guard (`checkedHostSession`), which checks each against the tape at the call, as the runner's own runs do.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import * as runtime from "../src/index.js";
-import type { FreshRuntimeOptions, InstructionPlan, ProjectSourceFile } from "../src/index.js";
+import type { FreshRuntimeOptions, ProjectSourceFile } from "../src/index.js";
 import {
   differentialRun,
   type DifferentialInput,
   type HostCall,
   type HostDriver,
+  type PipelineAdapter,
   type SideRecord,
+  thisBuild,
 } from "./helpers/runtime-differential.js";
 
 // The compiled test runs from dist/tests; the benchmark lives at the checkout root.
@@ -33,49 +34,33 @@ interface TapeEntry {
 interface TapeRun {
   next(where?: string): TapeEntry | null;
   call(entry: TapeEntry): HostCall;
-  settled(entry: TapeEntry, outcome: string | undefined): void;
-  end(status: string): readonly string[];
+  problems(): readonly string[];
+}
+interface Guard {
+  place(position: number): void;
+}
+interface Guards {
+  start(position: number | null): Guard;
+  problems(status: string): readonly string[];
+}
+/** The receipts a tape asks for, as the runner prepares them. */
+interface Expected {
+  readonly length: number;
 }
 interface Runner {
   loadTape(text: string, label: string): readonly TapeEntry[];
   tapeRun(tape: readonly TapeEntry[], label: string): TapeRun;
+  prepareTape(tape: readonly TapeEntry[]): Expected;
+  tapeGuards(expected: Expected, label: string): Guards;
+  checkedHostSession<T extends object>(session: T, guard: Guard): T;
   checkStated(
     statement: { readonly name: string; readonly said?: readonly string[] },
     record: {
       readonly said: readonly string[];
       readonly instructions: number;
-      readonly observed: {
-        readonly failure: string | null;
-        readonly tapeProblems: readonly string[];
-      };
+      readonly observed: { readonly failure: null; readonly tapeProblems: readonly string[] };
     },
   ): readonly string[];
-  canonicalJson(value: unknown): string;
-  loadCases(
-    directory: string,
-    options: { readonly select: readonly string[] },
-  ): readonly BenchmarkCase[];
-  compileCase(api: typeof runtime, testCase: BenchmarkCase): InstructionPlan;
-  recordCase(
-    api: typeof runtime,
-    testCase: BenchmarkCase,
-    options: { readonly plan: InstructionPlan },
-  ): CaseRecord;
-  compareRecords(expected: unknown, actual: CaseRecord): readonly string[];
-}
-/** A manifest case as the runner loads it; this test only replaces its source or tape. */
-interface BenchmarkCase {
-  readonly name: string;
-  readonly source: string;
-  readonly tape?: readonly TapeEntry[];
-  readonly said?: readonly string[];
-}
-/** A case's record as `recordCase` gives it. */
-interface CaseRecord {
-  readonly said: readonly string[];
-  readonly instructions: number;
-  readonly cuts: readonly { readonly kind: string; readonly outcome?: string | null }[];
-  readonly observed: { readonly failure: string | null; readonly tapeProblems: readonly string[] };
 }
 interface References {
   helperInput(tape: readonly TapeEntry[]): readonly string[];
@@ -263,91 +248,83 @@ const WORKLOADS: readonly Workload[] = [
   },
 ];
 
-/** A tape entry as the host call it asks for, as plain data, built from the tape's fields alone. */
-function entryText(item: TapeEntry): string {
-  const [first, second] = item.args;
-  const args =
-    item.kind === "observeTime"
-      ? [first, second ?? []]
-      : item.kind === "reportMediaLoad"
-        ? [first, second]
-        : [first];
-  const media = item.kind === "completeAction" ? (item.admissionQueries ?? []) : null;
-  return runner.canonicalJson({ kind: item.kind, args, media });
-}
-
-/** A host call as 0b.1 recorded it, in `entryText`'s form: read back field by field, independent of `tapeHostCall`. */
-function recordText(host: unknown): string {
-  if (typeof host !== "object" || host === null || !("kind" in host))
-    return runner.canonicalJson({ unreadable: host });
-  const args =
-    host.kind === "observeTime"
-      ? ["nowMs" in host ? host.nowMs : undefined, "reports" in host ? host.reports : []]
-      : host.kind === "reportMediaLoad"
-        ? ["mediaId" in host ? host.mediaId : undefined, "report" in host ? host.report : undefined]
-        : host.kind === "pressPermanentButton"
-          ? ["buttonId" in host ? host.buttonId : undefined]
-          : ["request" in host ? host.request : undefined];
-  const media =
-    host.kind === "completeAction"
-      ? "capturedMedia" in host && host.capturedMedia !== null
-        ? host.capturedMedia
-        : []
-      : null;
-  return runner.canonicalJson({ kind: host.kind, args, media });
-}
-
-/** How a host call of the differential run is misapplied: one entry's call changed, left out or made twice. */
-interface Misapplied {
-  readonly at: number;
-  readonly fault: Fault;
+/**
+ * This build's pipeline for one side, each session it makes guarded: a fresh one from the tape's start, a restored one
+ * placed at its cut once the harness writes its opening record (`place`), and a fork, by the guard, where its parent
+ * stood.
+ */
+function guardedBuild(
+  side: "left" | "right",
+  guards: Guards,
+  pending: Map<string, Guard>,
+): PipelineAdapter {
+  const base = thisBuild(side);
+  const made = base.sessions;
+  const restored = <T extends object>(session: T): T => {
+    const guard = guards.start(null);
+    pending.set(side, guard);
+    return runner.checkedHostSession(session, guard);
+  };
+  return {
+    ...base,
+    sessions: {
+      ...made,
+      createFreshRuntimeSession: (...args) =>
+        runner.checkedHostSession(made.createFreshRuntimeSession(...args), guards.start(0)),
+      createRuntimeSession: (...args) => restored(made.createRuntimeSession(...args)),
+      createTaggedRuntimeSession: (...args) => restored(made.createTaggedRuntimeSession(...args)),
+      restoreRuntimeSession: (...args) => restored(made.restoreRuntimeSession(...args)),
+      deserializeRuntimeSession: (...args) => restored(made.deserializeRuntimeSession(...args)),
+    },
+  };
 }
 
 /**
- * Runs `workload` through the harness, `misapplied` changing one host call (none but for the generated family), and
- * gives its report with every problem: each tape run's; each host call the left side's uninterrupted records hold
- * against its tape entry; each unit's completion in those records; and the runner's statement check of what they say.
+ * Runs `workload` through the harness and gives its report with every problem: the interpreter's, every guard's on both
+ * sides (each host call checked against the tape at the call, its media answers and units), and the runner's statement
+ * check of what the left side's uninterrupted records say.
  */
-function runWorkload(
-  workload: Workload,
-  { misapplied, maxCuts = 8 }: { misapplied?: Misapplied; maxCuts?: number } = {},
-) {
+function runWorkload(workload: Workload) {
   const tape = workload.tape;
-  const runs: TapeRun[] = [];
+  const interpreters: TapeRun[] = [];
   const host = (side: "left" | "right"): HostDriver => {
     const run = runner.tapeRun(tape ?? [], `${workload.name} (${side})`);
-    runs.push(run);
-    let index = 0;
-    let again: TapeEntry | null = null;
+    interpreters.push(run);
     return {
       next() {
-        if (again !== null) {
-          const twice = again;
-          again = null;
-          return run.call(twice);
-        }
-        let next = run.next();
-        if (next !== null && misapplied?.at === index && misapplied.fault === "drop") {
-          index++;
-          next = run.next();
-        }
-        if (next === null) return null;
-        const at = index++;
-        if (misapplied?.at !== at) return run.call(next);
-        if (misapplied.fault === "repeat") {
-          again = next;
-          return run.call(next);
-        }
-        return run.call(faulted(next, misapplied.fault));
+        const next = run.next();
+        return next === null ? null : run.call(next);
       },
     };
   };
+  const expected = runner.prepareTape(tape ?? []);
+  const guards = {
+    left: runner.tapeGuards(expected, `${workload.name} (left)`),
+    right: runner.tapeGuards(expected, `${workload.name} (right)`),
+  };
+  const pending = new Map<string, Guard>();
+  // Each side's uninterrupted host-call states, from which a restored session's place at its cut follows.
+  const hostStates = { left: new Set<number>(), right: new Set<number>() };
   const uninterrupted = new Map<number, SideRecord>();
   const report = differentialRun(input(workload.name, workload.rewrite), {
-    maxCuts,
-    ...(tape ? { host } : {}),
+    maxCuts: 8,
+    ...(tape
+      ? {
+          host,
+          left: guardedBuild("left", guards.left, pending),
+          right: guardedBuild("right", guards.right, pending),
+        }
+      : {}),
     inject(record, at) {
-      if (at.side === "left" && at.tail === "uninterrupted") uninterrupted.set(at.state, record);
+      if (at.tail === "uninterrupted") {
+        if (record.state.host !== null) hostStates[at.side].add(at.state);
+        if (at.side === "left") uninterrupted.set(at.state, record);
+      } else if (record.state.operation === "restore" && at.tail !== "fork") {
+        const guard = pending.get(at.side);
+        pending.delete(at.side);
+        const cut = at.cut ?? 0;
+        guard?.place([...hostStates[at.side]].filter((state) => state <= cut).length);
+      }
       return record;
     },
   });
@@ -356,26 +333,8 @@ function runWorkload(
     .map(([, record]) => record);
   const problems: string[] = [];
   if (tape) {
-    const calls = records.filter((record) => record.state.host !== null);
-    // Each host call made is its tape entry's, in order.
-    const made = calls.map((record) => recordText(record.state.host));
-    const asked = tape.map(entryText);
-    const differs = Math.max(made.length, asked.length);
-    for (let index = 0; index < differs; index++)
-      if (made[index] !== asked[index]) {
-        problems.push(
-          `${workload.name}: host call ${index + 1} is ${made[index]}, its tape entry ${asked[index]}`,
-        );
-        break;
-      }
-    // Each unit completed.
-    const check = runner.tapeRun(tape, `${workload.name} (left, uninterrupted)`);
-    for (const record of calls) {
-      const next = check.next();
-      if (next !== null) check.settled(next, resultOf(record).outcome);
-    }
-    problems.push(...check.end("halted"));
-    for (const run of runs) problems.push(...run.end("halted"));
+    for (const run of interpreters) problems.push(...run.problems());
+    problems.push(...guards.left.problems("halted"), ...guards.right.problems("halted"));
   }
   const said = records.flatMap((record) => resultOf(record).says);
   problems.push(
@@ -384,223 +343,16 @@ function runWorkload(
       { said, instructions: 0, observed: { failure: null, tapeProblems: [] } },
     ),
   );
-  return { report, problems, runs: runs.length };
+  return { report, problems, interpreters: interpreters.length };
 }
 
 for (const workload of WORKLOADS)
   test(`${workload.name} is equivalent on every restore route and says its reference`, () => {
-    const { report, problems, runs } = runWorkload(workload);
+    const { report, problems, interpreters } = runWorkload(workload);
     assert.deepEqual(report.verdict, { kind: "equivalent" }, workload.name);
     assert.deepEqual(report.outcomes.left, { kind: "completed" }, workload.name);
     assert.ok(report.tailSteps > 0, workload.name);
     assert.deepEqual(problems, [], workload.name);
-    // The cut probe's run and both sides' runs each had their own tape run.
-    if (workload.tape) assert.ok(runs >= 3, workload.name);
+    // The cut probe's run and both sides' runs each had their own interpreter.
+    if (workload.tape) assert.ok(interpreters >= 3, workload.name);
   });
-
-// The generated family of misapplied tapes (the tape-invariant family's closing invariant, Codex r4): every fault at
-// every position of every tape case, in each driver, must fail that driver's own checks, though both sides of the
-// differential run, misled alike, stay equivalent. The axes are declared once; a case's name is its axis values.
-const AXES = {
-  driver: ["runner", "differential"],
-  tape: ["helper-input", "form-completion", "storage-commit", "storage-failed", "file-store"],
-  fault: ["action", "actionKind", "payload", "failed", "kind", "drop", "repeat", "media"],
-  position: ["first", "refused", "last"],
-} as const;
-type Axis = keyof typeof AXES;
-const AXIS_NAMES: readonly Axis[] = ["driver", "tape", "fault", "position"];
-type Fault = (typeof AXES.fault)[number];
-type Position = (typeof AXES.position)[number];
-interface Combination {
-  readonly driver: (typeof AXES.driver)[number];
-  readonly tape: (typeof AXES.tape)[number];
-  readonly fault: Fault;
-  readonly position: Position;
-}
-const nameOf = (combination: Combination): string =>
-  `${combination.driver}/${combination.tape}/${combination.fault}/${combination.position}`;
-
-/** `item` with `fault` applied, for the faults that change one call rather than leave it out or repeat it. */
-function faulted(item: TapeEntry, fault: Fault): TapeEntry {
-  switch (fault) {
-    case "action":
-      return withRequest(item, { actionId: -1 });
-    case "actionKind":
-      return withRequest(item, { actionKind: "lock" });
-    case "payload":
-      return withRequest(
-        item,
-        item.kind === "completeAction"
-          ? { payload: { kind: "bogus" } }
-          : { update: { kind: "bogus" } },
-      );
-    case "failed":
-      return withRequest(item, { payload: { kind: "failed" } });
-    case "kind":
-      return {
-        ...item,
-        kind: item.kind === "completeAction" ? "updateInteraction" : "completeAction",
-      };
-    case "media":
-      return {
-        ...item,
-        admissionQueries: [
-          ...(item.admissionQueries ?? []),
-          { reference: "extra", kind: "file", result: true },
-        ],
-      };
-    case "drop":
-    case "repeat":
-      throw new Error(`${fault} changes the sequence, not a call`);
-  }
-}
-
-/** `tape` with `fault` at `at`: the tape a runner whose interpreter misapplied it would run. */
-function faultedTape(tape: readonly TapeEntry[], fault: Fault, at: number): readonly TapeEntry[] {
-  if (fault === "drop") return tape.filter((_, index) => index !== at);
-  if (fault === "repeat") return [...tape.slice(0, at + 1), ...tape.slice(at)];
-  return tape.map((item, index) => (index === at ? faulted(item, fault) : item));
-}
-
-const benchmarkCase = (name: string): BenchmarkCase =>
-  runner.loadCases(benchmark, { select: [name] })[0]!;
-// EVIDENCE: `baseline.json` is the runner's own baseline, which `tests/runtime-benchmark.test.ts` checks.
-const baseline = JSON.parse(read("baseline.json")) as { readonly cases: Record<string, unknown> };
-
-/**
- * The tape each driver runs for a tape case, and where its positions are: the first entry, the last, and the first
- * the engine refused (an outcome other than `completed` or `updated`), from the runner's own run of that tape.
- */
-function positionsOf(combination: Pick<Combination, "driver" | "tape">) {
-  const workload = byName(combination.tape);
-  const full = benchmarkCase(combination.tape);
-  const testCase: BenchmarkCase =
-    combination.driver === "runner"
-      ? full
-      : { ...full, source: workload.rewrite(full.source), tape: workload.tape! };
-  const tape = testCase.tape!;
-  const record = runner.recordCase(runtime, testCase, {
-    plan: runner.compileCase(runtime, testCase),
-  });
-  const outcomes = record.cuts.filter((cut) => cut.kind === "host").map((cut) => cut.outcome);
-  const refused = outcomes.findIndex((outcome) => outcome !== "completed" && outcome !== "updated");
-  const at: Record<Position, number | null> = {
-    first: 0,
-    refused: refused < 0 ? null : refused,
-    last: tape.length - 1,
-  };
-  return { testCase, tape, at };
-}
-
-const byName = (name: string): Workload => WORKLOADS.find((item) => item.name === name)!;
-const positions = new Map(
-  AXES.driver.flatMap((driver) =>
-    AXES.tape.map((tape) => [`${driver}/${tape}`, positionsOf({ driver, tape })] as const),
-  ),
-);
-const placed = (combination: Combination) =>
-  positions.get(`${combination.driver}/${combination.tape}`)!;
-
-/**
- * Whether a combination is a fault at all: its position exists, and a failed answer or a surplus media answer needs a
- * `completeAction`.
- */
-function valid(combination: Combination): boolean {
-  const { tape, at } = placed(combination);
-  const index = at[combination.position];
-  if (index === null) return false;
-  const needsCompletion = combination.fault === "media" || combination.fault === "failed";
-  return !needsCompletion || tape[index]!.kind === "completeAction";
-}
-
-const every: Combination[] = AXES.driver.flatMap((driver) =>
-  AXES.tape.flatMap((tape) =>
-    AXES.fault.flatMap((fault) =>
-      AXES.position.map((position) => ({ driver, tape, fault, position })),
-    ),
-  ),
-);
-const VALID = every.filter(valid);
-
-/** The pairs of axis values a set of combinations holds, as `axis=value|axis=value`. */
-function pairs(combinations: readonly Combination[]): Set<string> {
-  const axes = AXIS_NAMES;
-  const found = new Set<string>();
-  for (const combination of combinations)
-    for (const [i, a] of axes.entries())
-      for (const b of axes.slice(i + 1)) found.add(`${a}=${combination[a]}|${b}=${combination[b]}`);
-  return found;
-}
-
-/**
- * The generated cases: every valid runner combination (each takes milliseconds), and the fewest differential ones, in
- * order, that still hold every pair the valid combinations hold; each differential run takes about a second.
- */
-const GENERATED: Combination[] = (() => {
-  const chosen = VALID.filter((combination) => combination.driver === "runner");
-  const needed = pairs(VALID);
-  const covered = pairs(chosen);
-  const candidates = VALID.filter((combination) => combination.driver === "differential");
-  for (;;) {
-    let best: Combination | null = null;
-    let gain = 0;
-    for (const candidate of candidates) {
-      const added = [...pairs([candidate])].filter(
-        (pair) => needed.has(pair) && !covered.has(pair),
-      ).length;
-      if (added > gain) {
-        best = candidate;
-        gain = added;
-      }
-    }
-    if (best === null) return chosen;
-    chosen.push(best);
-    for (const pair of pairs([best])) covered.add(pair);
-  }
-})();
-
-test("the generated misapplied tapes cover every axis value and every pair of the valid combinations", () => {
-  const generated = GENERATED.map(nameOf).map((name) => {
-    const [driver, tape, fault, position] = name.split("/");
-    // EVIDENCE: `nameOf` joins exactly the four axis values, in `AXES`'s order, none of which holds a slash.
-    return { driver, tape, fault, position } as Combination;
-  });
-  assert.deepEqual([...AXIS_NAMES].sort(), Object.keys(AXES).sort());
-  const covered = pairs(generated);
-  for (const pair of pairs(VALID)) assert.ok(covered.has(pair), pair);
-  for (const axis of AXIS_NAMES)
-    for (const value of AXES[axis])
-      assert.ok(
-        generated.some((combination) => combination[axis] === value),
-        `${axis}=${value}`,
-      );
-});
-
-test("every generated misapplied tape fails its driver's own checks", () => {
-  const missed: string[] = [];
-  for (const combination of GENERATED) {
-    const { testCase, tape, at } = placed(combination);
-    const index = at[combination.position]!;
-    let problems: readonly string[];
-    if (combination.driver === "runner") {
-      const misapplied = { ...testCase, tape: faultedTape(tape, combination.fault, index) };
-      try {
-        const record = runner.recordCase(runtime, misapplied, {
-          plan: runner.compileCase(runtime, misapplied),
-        });
-        problems = [
-          ...runner.compareRecords(baseline.cases[combination.tape], record),
-          ...runner.checkStated(testCase, record),
-        ];
-      } catch (error) {
-        problems = [String(error)];
-      }
-    } else
-      problems = runWorkload(byName(combination.tape), {
-        misapplied: { at: index, fault: combination.fault },
-        maxCuts: 1,
-      }).problems;
-    if (problems.length === 0) missed.push(nameOf(combination));
-  }
-  assert.deepEqual(missed, []);
-});

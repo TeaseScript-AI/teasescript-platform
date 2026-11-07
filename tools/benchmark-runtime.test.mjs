@@ -15,6 +15,11 @@ import {
   sha256,
   stateDigest,
   summarizeCpu,
+  TapeMismatch,
+  checkedHostSession,
+  prepareTape,
+  tapeGuards,
+  tapeHostCall,
   tapeRun,
 } from "./benchmark-runtime.mjs";
 import * as references from "../benchmarks/runtime/references.mjs";
@@ -457,29 +462,229 @@ test('budget: "product" drives run without a budget, and a stated failure must h
   );
 });
 
-test("a tape's media store answers are given in their recorded order, and all of them", () => {
-  const entry = (admissionQueries) => ({ kind: "completeAction", args: [{}], admissionQueries });
-  const both = [
-    { reference: "r1", kind: "file", result: true },
-    { reference: "r2", kind: "image", result: true },
+// A stub session for the receipt checks: each host method records what it received and gives an outcome that never
+// depends on it, so only the receipt check can tell calls apart; its `n`th `completeAction` asks the media store
+// `questions(n)`.
+function receivingSession(questions = () => [], received = []) {
+  let completions = 0;
+  const answer =
+    (method) =>
+    (...args) => {
+      received.push([method, ...args]);
+      if (method === "completeAction")
+        for (const { reference, kind } of questions(completions++))
+          args[1]?.capturedMedia?.holds(reference, kind);
+      return { events: [], instructionsExecuted: 0, outcome: { kind: "completed" } };
+    };
+  return {
+    received,
+    completeAction: answer("completeAction"),
+    updateInteraction: answer("updateInteraction"),
+    observeTime: answer("observeTime"),
+    reportMediaLoad: answer("reportMediaLoad"),
+    pressPermanentButton: answer("pressPermanentButton"),
+    fork() {
+      return receivingSession(questions, received);
+    },
+    me() {
+      return this;
+    },
+  };
+}
+
+const query = (reference) => ({ reference, kind: "file", result: true });
+const entries = {
+  completeAction: (n) => ({
+    kind: "completeAction",
+    args: [{ actionId: n, payload: { kind: "stored", references: [`r${n}`] } }],
+    admissionQueries: [query(`r${n}`)],
+  }),
+  updateInteraction: (n) => ({
+    kind: "updateInteraction",
+    args: [{ actionId: n, update: { kind: "commit", fieldId: `f${n}` } }],
+  }),
+  observeTime: (n) => ({ kind: "observeTime", args: [n * 10, [{ mediaId: n }]] }),
+  reportMediaLoad: (n) => ({
+    kind: "reportMediaLoad",
+    args: [n, { kind: "loaded", durationMs: n }],
+  }),
+  pressPermanentButton: (n) => ({ kind: "pressPermanentButton", args: [n] }),
+};
+
+/** This test's own dispatch of a host call to a session's method. */
+function dispatch(session, call) {
+  switch (call.kind) {
+    case "completeAction":
+      return session.completeAction(call.request, { capturedMedia: call.capturedMedia });
+    case "updateInteraction":
+      return session.updateInteraction(call.request);
+    case "observeTime":
+      return session.observeTime(call.nowMs, call.reports);
+    case "reportMediaLoad":
+      return session.reportMediaLoad(call.mediaId, call.report);
+    case "pressPermanentButton":
+      return session.pressPermanentButton(call.buttonId);
+  }
+}
+
+/**
+ * Applies `tape` through one guarded stub session as the runner does, `change(call, index, entry)` giving the calls
+ * made for each entry (none, one or two), and gives every problem.
+ */
+function receive(tape, { change = (call) => call, questions = () => [] } = {}) {
+  const guards = tapeGuards(prepareTape(tape), "tape");
+  const session = checkedHostSession(receivingSession(questions), guards.start(0));
+  const interpreter = tapeRun(tape, "tape");
+  const problems = [];
+  for (let index = 0; index < tape.length; index++) {
+    const entry = interpreter.next();
+    for (const call of [change(interpreter.call(entry), index, entry)].flat())
+      try {
+        dispatch(session, call);
+      } catch (error) {
+        if (!(error instanceof TapeMismatch)) problems.push(String(error));
+      }
+  }
+  return [...problems, ...guards.problems("halted")];
+}
+
+test("a guard checks each receipt's method and data arguments at entry, before the session runs it", () => {
+  const tape = [
+    entries.updateInteraction(1),
+    entries.observeTime(2),
+    entries.pressPermanentButton(3),
   ];
-  const ask = (call) =>
-    call.capturedMedia.holds("r1", "file") && call.capturedMedia.holds("r2", "image");
-  const run = tapeRun([entry(both)], "tape");
-  assert.equal(ask(run.call(run.next())), true);
-  assert.deepEqual(run.end("halted"), []);
-  const reversed = tapeRun([entry([...both].reverse())], "tape");
-  assert.throws(() => ask(reversed.call(reversed.next())), /did not record .* file r1/);
-  const surplus = tapeRun(
-    [entry([...both, { reference: "r3", kind: "file", result: true }])],
-    "tape",
+  const guards = tapeGuards(prepareTape(tape), "tape");
+  const raw = receivingSession();
+  const session = checkedHostSession(raw, guards.start(0));
+  session.updateInteraction(tape[0].args[0], { debugTrace: "ignored" });
+  session.observeTime(20, [{ mediaId: 2 }]);
+  // r5's substitution: another method with an equal outcome is refused before the session receives it.
+  assert.throws(
+    () => session.updateInteraction({ actionId: 3, update: { kind: "select" } }),
+    TapeMismatch,
   );
-  ask(surplus.call(surplus.next()));
-  assert.deepEqual(surplus.end("halted"), [
-    "tape: tape entry 1: 1 recorded media answers were not asked for",
-  ]);
+  assert.equal(raw.received.length, 2);
+  assert.match(guards.problems("halted").join("\n"), /host call 3 is .*updateInteraction/);
+  assert.match(guards.problems("halted").join("\n"), /the session halted with 1 tape entries left/);
+  // Every other member is the session's own, bound to it.
+  assert.equal(session.me(), raw);
 });
 
+test("a fork's guard starts where its parent stood and moves on its own; a placed guard starts at its cut", () => {
+  const tape = [
+    entries.pressPermanentButton(1),
+    entries.pressPermanentButton(2),
+    entries.pressPermanentButton(3),
+  ];
+  const guards = tapeGuards(prepareTape(tape), "tape");
+  const parent = checkedHostSession(receivingSession(), guards.start(0));
+  parent.pressPermanentButton(1);
+  const fork = parent.fork();
+  fork.pressPermanentButton(2);
+  fork.pressPermanentButton(3);
+  parent.pressPermanentButton(2);
+  parent.pressPermanentButton(3);
+  const pending = guards.start(null);
+  const restored = checkedHostSession(receivingSession(), pending);
+  pending.place(2);
+  restored.pressPermanentButton(3);
+  assert.deepEqual(guards.problems("halted"), []);
+  // A restored session used before its place is known is refused.
+  const unplaced = checkedHostSession(receivingSession(), guards.start(null));
+  assert.throws(() => unplaced.pressPermanentButton(1), TapeMismatch);
+});
+
+// The readback family: every way a call can differ from its tape entry, at every position, for every method, must be
+// a problem, though the stub session's outcome never tells the calls apart. The axes are declared once; a case's name
+// is its axis values, and a coverage check derived from the names proves every axis value and valid pair is held.
+const READBACK = {
+  method: Object.keys(entries),
+  mismatch: ["method", "argument", "omitted", "repeated", "question", "unasked", "surplus"],
+  position: ["first", "middle", "last"],
+};
+const mediaMismatches = new Set(["question", "unasked", "surplus"]);
+const readbackCases = READBACK.method.flatMap((method) =>
+  READBACK.mismatch.flatMap((mismatch) =>
+    READBACK.position
+      .filter(() => !mediaMismatches.has(mismatch) || method === "completeAction")
+      .map((position) => ({
+        method,
+        mismatch,
+        position,
+        name: `${method}/${mismatch}/${position}`,
+      })),
+  ),
+);
+
+function readbackProblems({ method, mismatch, position }) {
+  const tape = [1, 2, 3].map((n) => entries[method](n));
+  const at = { first: 0, middle: 1, last: 2 }[position];
+  const other = method === "pressPermanentButton" ? "updateInteraction" : "pressPermanentButton";
+  const change = (call, index, entry) => {
+    if (index !== at) return call;
+    if (mismatch === "method") return tapeHostCall(entries[other](index + 1), call.capturedMedia);
+    if (mismatch === "argument")
+      return tapeHostCall(
+        { ...entry, args: [{ changed: true }, ...entry.args.slice(1)] },
+        call.capturedMedia,
+      );
+    if (mismatch === "omitted") return [];
+    if (mismatch === "repeated") return [call, call];
+    return call;
+  };
+  // The stub asks what each entry recorded, but at the position of a media mismatch.
+  const questions = (n) => {
+    const recorded = tape[n]?.admissionQueries ?? [];
+    if (n !== at) return recorded;
+    if (mismatch === "question") return [query("other")];
+    if (mismatch === "unasked") return [];
+    if (mismatch === "surplus") return [...recorded, query("extra")];
+    return recorded;
+  };
+  return receive(tape, { change, questions });
+}
+
+test("the readback family covers every axis value and every valid pair of its axes", () => {
+  const named = readbackCases.map(({ name }) => {
+    const [method, mismatch, position] = name.split("/");
+    return { method, mismatch, position };
+  });
+  const pairs = (cases) =>
+    new Set(
+      cases.flatMap((item) =>
+        ["method", "mismatch", "position"].flatMap((a, i, axes) =>
+          axes.slice(i + 1).map((b) => `${a}=${item[a]}|${b}=${item[b]}`),
+        ),
+      ),
+    );
+  const valid = READBACK.method
+    .flatMap((method) =>
+      READBACK.mismatch.flatMap((mismatch) =>
+        READBACK.position.map((position) => ({ method, mismatch, position })),
+      ),
+    )
+    .filter(
+      ({ method, mismatch }) => !mediaMismatches.has(mismatch) || method === "completeAction",
+    );
+  const covered = pairs(named);
+  for (const pair of pairs(valid)) assert.ok(covered.has(pair), pair);
+  for (const [axis, values] of Object.entries(READBACK))
+    for (const value of values)
+      assert.ok(
+        named.some((item) => item[axis] === value),
+        `${axis}=${value}`,
+      );
+});
+
+test("every call that differs from its tape entry is a problem, and the tape applied as written is none", () => {
+  for (const method of READBACK.method)
+    assert.deepEqual(readbackProblems({ method, mismatch: "none", position: "first" }), [], method);
+  const missed = readbackCases
+    .filter((item) => readbackProblems(item).length === 0)
+    .map(({ name }) => name);
+  assert.deepEqual(missed, []);
+});
 test("malformed tapes, and a tape whose units differ from the manifest's, are usage errors", async (t) => {
   for (const tape of [
     {},

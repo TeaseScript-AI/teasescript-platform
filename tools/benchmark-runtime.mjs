@@ -149,50 +149,161 @@ export function loadTape(text, label) {
 }
 
 /**
- * One run of a tape: the one owner of its rule, for the runner and the differential test alike. `next` gives the entry
- * the waiting session gets, or `null` when the tape is used up, a problem then; `call` makes an entry its host call, with
- * a media store that answers from the entry's recorded answers in order; `settled` checks that a unit completed; `end`
- * checks that the tape is used up and gives the problems. Each call's recorded media answers must all be asked for by
- * the next entry or the end.
+ * The interpreter's run of a tape: `next` gives the entry a waiting session gets, or `null` when the tape is used up,
+ * a problem then; `call` makes an entry its host call, with a media store that answers from the entry's recorded
+ * answers in order. What the session then receives is the guards' to check (`tapeGuards`), not the interpreter's.
  */
 export function tapeRun(tape, label) {
   let position = 0;
-  let media = null;
   const problems = [];
-  const asked = () => {
-    if (media !== null && media.reader.unasked() > 0)
-      problems.push(
-        `${label}: tape entry ${media.at}: ${media.reader.unasked()} recorded media answers were not asked for`,
-      );
-    media = null;
-  };
   return {
     next(where = "") {
-      asked();
       if (position === tape.length) {
         problems.push(`${label}: the tape is used up while the session waits${where}`);
         return null;
       }
       return tape[position++];
     },
-    call(entry) {
-      const reader = recordedMedia(entry.admissionQueries);
-      media = { reader, at: position };
-      return tapeHostCall(entry, reader);
-    },
-    settled(entry, outcome) {
-      if (entry.unit && outcome !== "completed")
-        problems.push(`${label}: tape entry ${position}, a unit, gave ${outcome}, not completed`);
-    },
-    end(status) {
-      asked();
-      if (position < tape.length)
-        problems.push(
-          `${label}: the session ${status} with ${tape.length - position} tape entries left`,
+    call: (entry) => tapeHostCall(entry, recordedMedia(entry.admissionQueries)),
+    problems: () => problems,
+  };
+}
+
+/** How many data arguments each host method takes before its options. */
+const receiptArity = {
+  completeAction: 1,
+  updateInteraction: 1,
+  observeTime: 2,
+  reportMediaLoad: 2,
+  pressPermanentButton: 1,
+};
+
+/**
+ * The calls a tape asks the session to receive, detached, from its entries' fields alone and never through
+ * `tapeHostCall`: each method, its data arguments (`observeTime`'s reports `[]` when the tape gives none), the media
+ * store's questions and answers a `completeAction` must see, and whether it completes a unit.
+ */
+export function prepareTape(tape) {
+  return JSON.parse(
+    JSON.stringify(
+      tape.map((entry) => ({
+        method: entry.kind,
+        args: entry.kind === "observeTime" ? [entry.args[0], entry.args[1] ?? []] : entry.args,
+        media: entry.kind === "completeAction" ? (entry.admissionQueries ?? []) : null,
+        unit: entry.unit === true,
+      })),
+    ),
+  );
+}
+
+/** A host call the session received that is not its tape's: thrown before the session runs it. */
+export class TapeMismatch extends Error {}
+
+/**
+ * The guards of one execution of a tape, one per session it makes (the fresh one, each restored one, each fork), all
+ * checking against one prepared expectation (`prepareTape`). A guard checks each host method's receipt at its entry,
+ * before the session runs it: the method and its data arguments must be the tape's next entry's, or it throws
+ * `TapeMismatch`. For a `completeAction` it watches the media store's questions and answers, which must be the entry's
+ * recorded ones, all of them, and a unit must complete. `start(position)` makes a guard at a position; a `null`
+ * position is set later with `place` (a restored session whose cut is not known yet). `problems(status)` gives every
+ * guard's problems, each with the entries it had left when the execution ended in `status`.
+ */
+export function tapeGuards(expected, label) {
+  const guards = [];
+  const problems = [];
+  const shown = (value) => canonicalJson(value);
+  const start = (position) => {
+    let at = position;
+    const guard = {
+      place(position) {
+        at = position;
+      },
+      get position() {
+        return at;
+      },
+      fork: () => start(at),
+      receive(method, args, apply, time) {
+        const arity = receiptArity[method];
+        const data = method === "observeTime" ? [args[0], args[1] ?? []] : args.slice(0, arity);
+        const want = at === null ? undefined : expected[at];
+        const got = { method, args: data };
+        if (want === undefined || shown(got) !== shown({ method: want.method, args: want.args })) {
+          const problem =
+            `${label}: host call ${at === null ? "?" : at + 1} is ${shown(got)}, its tape entry ` +
+            `${want === undefined ? "none" : shown({ method: want.method, args: want.args })}`;
+          problems.push(problem);
+          throw new TapeMismatch(problem);
+        }
+        const call = [...args];
+        const asked = [];
+        if (method === "completeAction") {
+          const options = args[arity] ?? {};
+          const store = options.capturedMedia;
+          call[arity] = {
+            ...options,
+            capturedMedia:
+              store === undefined
+                ? undefined
+                : {
+                    holds(reference, kind) {
+                      const query = { reference, kind, result: undefined };
+                      asked.push(query);
+                      query.result = store.holds(reference, kind);
+                      return query.result;
+                    },
+                  },
+          };
+        }
+        let result;
+        try {
+          result = time(() => apply(call));
+        } finally {
+          if (method === "completeAction" && shown(asked) !== shown(want.media))
+            problems.push(
+              `${label}: host call ${at + 1} asked the media store ${shown(asked)}, its tape entry recorded ` +
+                `${shown(want.media)}`,
+            );
+        }
+        if (want.unit && result?.outcome?.kind !== "completed")
+          problems.push(
+            `${label}: tape entry ${at + 1}, a unit, gave ${result?.outcome?.kind}, not completed`,
+          );
+        at++;
+        return result;
+      },
+    };
+    guards.push(guard);
+    return guard;
+  };
+  return {
+    start,
+    problems(status) {
+      const left = guards
+        .filter((guard) => guard.position !== null && guard.position < expected.length)
+        .map(
+          (guard) =>
+            `${label}: the session ${status} with ${expected.length - guard.position} tape entries left`,
         );
-      return problems;
+      return [...problems, ...new Set(left)];
     },
   };
+}
+
+/**
+ * `session` with its host methods checked by `guard` at receipt (see `tapeGuards`), `time` timing only the session's
+ * own work, and its forks checked by guards of their own, placed where it stood. Every other member is the session's.
+ */
+export function checkedHostSession(session, guard, time = (operation) => operation()) {
+  return new Proxy(session, {
+    get(target, name) {
+      if (Object.hasOwn(receiptArity, name))
+        return (...args) => guard.receive(name, args, (call) => target[name](...call), time);
+      if (name === "fork")
+        return (...args) => checkedHostSession(target.fork(...args), guard.fork(), time);
+      const value = target[name];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 /** The manifest's cases, each with its source text and hash; `select` picks by name, `all` adds the on-demand ones. */
@@ -221,7 +332,7 @@ export function loadCases(directory = benchmarkDirectory, { all = false, select 
         source,
         sourceSha256: sha256(source),
         ...(files ? { files } : {}),
-        ...(tape ? { tape, tapeSha256: sha256(tapeText) } : {}),
+        ...(tape ? { tape, tapeExpected: prepareTape(tape), tapeSha256: sha256(tapeText) } : {}),
         fresh: {
           seed: entry.seed ?? manifest.seed,
           wallClockMs: manifest.wallClockMs,
@@ -284,7 +395,16 @@ export function recordCase(
         return result;
       }
     : (operation) => operation();
-  let session = time(() => api.createFreshRuntimeSession(plan, testCase.fresh));
+  const tape = testCase.tape ?? null;
+  const tapeOwner = tape ? tapeRun(tape, testCase.name) : null;
+  // The session receives every host call through the guard, which checks it before the session runs it; `time` times
+  // the session's own work, never the check.
+  const guards = tape
+    ? tapeGuards(testCase.tapeExpected ?? prepareTape(tape), testCase.name)
+    : null;
+  const guard = guards?.start(0) ?? null;
+  const guarded = (made) => (guard === null ? made : checkedHostSession(made, guard, time));
+  let session = guarded(time(() => api.createFreshRuntimeSession(plan, testCase.fresh)));
   const setupCpuUs = cpu;
   cpu = 0;
   let instructions = 0;
@@ -295,8 +415,6 @@ export function recordCase(
   const drive = product
     ? () => session.run()
     : () => session.stepToEvent({ instructionBudget: budget });
-  const tape = testCase.tape ?? null;
-  const tapeOwner = tape ? tapeRun(tape, testCase.name) : null;
   const cut = (kind, result) => {
     instructions += result.instructionsExecuted;
     for (const event of result.events) if (event.kind === "say") said.push(event.text);
@@ -318,7 +436,7 @@ export function recordCase(
     };
     cuts.push(record);
     if (restore) {
-      session = api.deserializeRuntimeSession(JSON.stringify(session.exportCheckpoint()));
+      session = guarded(api.deserializeRuntimeSession(JSON.stringify(session.exportCheckpoint())));
       const restored = stateDigest(session.exportSnapshot());
       if (restored !== record.stateDigest)
         restoreProblems.push(
@@ -335,7 +453,10 @@ export function recordCase(
     instructions,
     ...(testCase.saidSha256 === undefined ? { said } : { saidSha256: sha256(canonicalJson(said)) }),
     cuts,
-    observed: { failure, tapeProblems: tapeOwner ? tapeOwner.end(status) : [] },
+    observed: {
+      failure,
+      tapeProblems: tape ? [...tapeOwner.problems(), ...guards.problems(status)] : [],
+    },
     ...(restore ? { restoreProblems } : {}),
     ...(timed ? { cpuUs: cpu, setupCpuUs } : {}),
   });
@@ -364,11 +485,9 @@ export function recordCase(
     if (tapeOwner) {
       const entry = tapeOwner.next(` at cut ${cuts.length}`);
       if (entry === null) return finish(null, snapshot.status);
-      const call = tapeOwner.call(entry);
-      const answered = time(() => applyHostCall(session, call));
+      const answered = applyHostCall(session, tapeOwner.call(entry));
       const after = cut("host", answered);
       if (after.status === "waiting" && !session.view().runnable) waiting = after;
-      tapeOwner.settled(entry, answered.outcome?.kind);
       continue;
     }
     const deadline = snapshot.foregroundAction?.deadlineMs;
