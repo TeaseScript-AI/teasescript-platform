@@ -43,7 +43,8 @@ A filed line is ranked by what deferring it costs, not by its date:
     it is small.
   - A fix in files no open lane owns, or in tooling, is the coordinator's light-route pull request between packages,
     as a move is. A friction fix never waits behind a lane's queue.
-- **Backlog:** a single, cheap instance that no lane is near. It stays filed until the friction check promotes it.
+- **Backlog:** a single, cheap instance that no lane is near. It stays filed until the friction check promotes it. A
+  scope cut's residual is backlog only when it cannot bite ([Design rounds](DEVELOPMENT-WORKFLOW.md#design-rounds)).
 
 A friction issue is not `spare capacity` unless its triage shows that deferring it costs nothing more. A fix in the
 repository never enters another lane's open pull request. A backward-compatible fix in the agent environment may land at
