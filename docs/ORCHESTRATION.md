@@ -16,6 +16,19 @@ not the transcript, then re-establish each lane's state from GitHub before the n
 Messages follow events, as [Builder messages and READY](DEVELOPMENT-WORKFLOW.md#builder-messages-and-ready) describes
 for the builder.
 
+Each incoming message gets the same four questions, in this order, before anything else:
+
+1. What does the lane need from you now, a ruling or a decision, and can you give it in this turn?
+2. What will it need next that you can already see, such as a rebase rule once the main branch moved, the bar its
+   measurement will be judged by, or the next round's scope? Send that now, with its conditions.
+3. Which claim in it gates a write of yours, such as a verdict, "CI green" or "evidence complete"? Read that claim from
+   its source.
+4. Which rule or fact in it must reach other lanes?
+
+Answer "nothing to do" only when all four are empty, and update the lane's line in the roster either way. Then check
+the shape of the turn end: a turn that ends with open jobs names the wait that wakes it, and a READY names its head and
+its evidence. A missing piece gets one line back, in the same turn.
+
 - One message carries one complete ruling.
 - Report each event once. Where the harness delivers a turn's final message to the coordinator, the report is that
   final message and nothing is sent besides it. Otherwise it is one sent message, and the final message is only the
@@ -61,16 +74,18 @@ A brief is a file the assignment points to. What it asks for follows the workflo
 - Correct course in small steps, not by abrupt stops or reversals. Stop running work only when continuing does real
   harm.
 - An agent idle beyond its prompt-cache lifetime re-reads its whole context at full cost on the next wake, and that
-  cost grows with the thread. Keep a lane's agent warm or end it; never wake it cold. Judge warmth by the clock: the
-  thread's last activity against the cache lifetime.
+  cost grows with the thread. Keep a lane's agent warm or end it; never wake it cold. An agent whose message you just
+  read is warm; otherwise judge warmth by the clock: the thread's last activity against the cache lifetime.
 - New work for a lane whose agent is cold goes to a fresh agent, with a brief that points at the lane's plan record and
   its pull-request description. The lane keeps both current as it goes, so a restart needs nothing else. A lane that
   resumes correctly from them keeps its worktree and queue ownership.
 - A lane that waits ends its turn with a wait no longer than the cache lifetime, and re-arms it inside the run, so it
   keeps itself warm.
-- At each periodic check, a lane that would go cold before the next check gets the ruling it waits on, or bounded
-  preparatory work (its next item's plan, its description draft, a probe). It never gets an empty wake. Its wake
-  signal for the real work stays the event it waits on, such as another lane's merge.
+- At each periodic check, read what each lane waits on from the roster ([State](#state)): the thread's last activity
+  only tells you whether that line is stale. A lane that would go cold before the next check gets the ruling when it
+  waits on you, or bounded preparatory work when it waits on another lane (its next item's plan, its description
+  draft, a probe). A lane whose wait is armed gets nothing, and none gets an empty wake. Its wake signal for the real
+  work stays the event it waits on, such as another lane's merge.
 - When a reviewer finds a sibling in every part of a construction, the next step is your reassessment of the class, not
   another repair: a narrower claim stated truthfully beats a wider one that review keeps refuting.
 - An observation is not an instruction: weigh it, or ask, before changing work because of it.
@@ -109,6 +124,10 @@ A measurement one lane makes that changes a rule another lane runs under (a runn
 source that stalls on the main branch) reaches every lane in the same turn, and the rule it corrects is corrected in the
 shared rules file, not only in the lane's thread.
 
+A new or changed rule reaches its readers in the turn it exists. It goes into the file they read, and to each lane it
+affects as one message that names that lane's own instance. A rule you pass to another coordinator comes with the
+sentence its builders will read.
+
 ## Measurement
 
 A conditional acceptance of a plan or ruling names the measurement that must confirm it, and the builder runs that
@@ -130,3 +149,4 @@ premise, correct it in the open.
 - Agree the interfaces between your lanes and theirs explicitly.
 - Tell the other coordinator when you change a file both of you depend on.
 - Say when a campaign of yours will take more than its share of the queue or the model budget, before it starts.
+- A question to another coordinator carries your own answer, so the reply is a yes or a correction.
