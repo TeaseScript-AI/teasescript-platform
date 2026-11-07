@@ -1,0 +1,11 @@
+--- a/scripts/scatslut.groovy
++++ b/scripts/scatslut.groovy
+@@ -159,7 +159,7 @@
+ def receivePosition1 = receivePositions[getRandom(receivePositions.size)]
+ def tools = ["toys.enema_kit","toys.enema_bulb"]
+ Collections.shuffle(tools)
+-def tool = loadFirstTrue(tools.toArray(strEmptyArray))
++def tool = loadFirstTrue(tools.toArray(strEmptyArray)) ?: "toys.enema_kit"
+ tool = tool.replace("toys.","").replace("clothes.","").replace("_"," ")
+ show("Ok, we'll see about that now. You'll prepare a enema of "+quantity1+" liters now, from an "+
+ 	tool+".\n"+

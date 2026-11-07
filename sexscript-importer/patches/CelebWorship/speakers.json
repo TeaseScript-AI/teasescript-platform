@@ -1,0 +1,34 @@
+{
+  "reason": "After a setup sequence without a speaker (disclaimer, name prompts, picture chooser), the celebrity the player named speaks every message in the first person (\"prove you are a fan of me\", line 45). Her name is the player's input who1 (first name) + \" \" + who2 (last name), as line 45 shows it; the player's buttons address her by who1.",
+  "speakers": {
+    "celebrity": {
+      "displayName": "Celebrity"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/CelebWorship.groovy:45",
+      "speaker": "celebrity"
+    }
+  ],
+  "names": [
+    {
+      "variable": "who1",
+      "files": [
+        "scripts/CelebWorship.groovy"
+      ],
+      "speaker": "celebrity",
+      "template": "{}"
+    },
+    {
+      "variable": "who2",
+      "files": [
+        "scripts/CelebWorship.groovy"
+      ],
+      "speaker": "celebrity",
+      "template": "{who1} {}"
+    }
+  ]
+}

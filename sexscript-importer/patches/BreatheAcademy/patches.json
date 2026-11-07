@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "terminal-happy-image",
+      "layer": "source",
+      "category": "e",
+      "reason": "The two final images call getLeahImage(\"BreatheAcademy/Leah/Dark/happy0.jpg\"), but getLeahImage takes a category such as \"happy\" and matches no file name, so the previous image stayed on screen. Show the named file, which the unit has, with setImage.",
+      "diff": "terminal-happy-image.diff"
+    }
+  ]
+}

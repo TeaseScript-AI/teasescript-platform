@@ -1,0 +1,10 @@
+def loader = new groovy.lang.GroovyClassLoader()
+def ss = loader.loadClass("Helper")
+ss.showWait(this, "Kneel")
+ss.rounds(this, 3, "Stroke")
+show("Twice ${ss.twice(2)}")
+show("Turns ${ss.turns(this, 2)}")
+if (ss.percentChance(this, 40)) show("Lucky")
+ss.start(this)
+ss.check(this, "good")
+return "next.groovy"

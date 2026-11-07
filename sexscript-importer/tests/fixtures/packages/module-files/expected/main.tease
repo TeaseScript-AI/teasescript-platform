@@ -1,0 +1,11 @@
+global function sexscriptLegacyRandom(limit) {
+  let bound = toInteger(limit otherwise 100)
+  if bound > 0 {
+    return randomInteger(0..bound)
+  }
+  if bound < 0 {
+    return -randomInteger(0..-bound)
+  }
+  return 0
+}
+goto "demo.tease"

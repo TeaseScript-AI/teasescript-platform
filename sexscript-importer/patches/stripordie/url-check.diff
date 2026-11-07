@@ -1,0 +1,22 @@
+--- a/scripts/stripordie.groovy
++++ b/scripts/stripordie.groovy
+@@ -1413,17 +1413,11 @@
+ 
+ 			// Verify that the URL is valid
+ 			if (link != "") {
+-				try {
+-    					def URL url = new URL(link)
+-    					def URLConnection conn = url.openConnection()
+-    					conn.connect()
++				if (link.toLowerCase().startsWith("http")) {
+ 					valid = true
+-				} catch (MalformedURLException e) {
++				} else {
+ 					badURL()
+ 					valid = false
+-				} catch (IOException e) {
+-					bad(URL)
+-					valid = false
+ 				}
+ 			} else valid = true
+ 		}

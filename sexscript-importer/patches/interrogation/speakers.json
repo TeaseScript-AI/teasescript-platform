@@ -1,0 +1,80 @@
+{
+  "reason": "Two characters. Anna, the receptionist, speaks the reception (config), the entry checks and the farewell, always with her office picture (interrogation/office.jpg). The unnamed interrogator speaks the interrogation and all torture scenes, the lobby menu over the empty chair picture, her first-person session reports (summarize) and the Watch screen. The author's introduction, the player's status page and the startup notice have no character; the phone ring and camera snap are narration.",
+  "speakers": {
+    "anna": {
+      "firstName": "Anna"
+    },
+    "interrogator": {
+      "displayName": "Interrogator"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/interrogation.groovy:instruct",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/interrogation.groovy:config",
+      "speaker": "anna"
+    },
+    {
+      "after": "scripts/interrogation.groovy:831",
+      "speaker": "anna"
+    },
+    {
+      "at": "scripts/interrogation.groovy:892",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/interrogation.groovy:892",
+      "speaker": "anna"
+    },
+    {
+      "at": "scripts/interrogation.groovy:917",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/interrogation.groovy:922",
+      "speaker": "anna"
+    },
+    {
+      "function": "scripts/interrogation.groovy:status",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/interrogation.groovy:788",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/interrogation.groovy:summarize",
+      "speaker": "interrogator"
+    },
+    {
+      "function": "scripts/interrogation.groovy:watch",
+      "speaker": "interrogator"
+    },
+    {
+      "function": "scripts/interrogation.groovy:interrogate",
+      "speaker": "interrogator"
+    },
+    {
+      "at": "scripts/interrogation.groovy:548",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/interrogation.groovy:548",
+      "speaker": "interrogator"
+    },
+    {
+      "image": "interrogation/office.jpg",
+      "speaker": "anna"
+    },
+    {
+      "image": "interrogation/chair.jpg",
+      "speaker": "interrogator"
+    }
+  ],
+  "names": []
+}

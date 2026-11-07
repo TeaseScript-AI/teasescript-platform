@@ -1,0 +1,25 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/justalittlefun.groovy:5",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/justalittlefun.groovy:11",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/justalittlefun.groovy:17",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

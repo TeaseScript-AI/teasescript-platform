@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "spanishcum-declaration",
+      "layer": "source",
+      "category": "e",
+      "reason": "spanishcum is read in the orgasm question before the def that sets it to 1, inside the branch, so the legacy script stopped there with a missing property. It is declared with 0 before the test, and the branch sets it.",
+      "diff": "spanishcum-declaration.diff"
+    }
+  ]
+}

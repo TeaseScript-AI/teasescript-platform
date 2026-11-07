@@ -1,0 +1,520 @@
+{
+  "reason": "Second-person cuckold story (two episodes, English and German). A narrator tells the story; the author's setup questions, toy checks and closing notes have no speaker. The player's partner (the hotwife, named by the player; shown by her role from the variable GF) speaks her e-mail in episode 1 and her text messages and lines in episode 2, mostly as <i>quotes</i> inside narration; Peter speaks his e-mail. Her other text messages are pictures (text1-26.jpg).",
+  "speakers": {
+    "hotwife": {
+      "displayName": "Wife"
+    },
+    "peter": {
+      "firstName": "Peter"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/firstcuckold.groovy",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/firstcuckold.groovy:111",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/firstcuckold.groovy:470",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/firstcuckold.groovy:493",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/firstcuckold.groovy:502",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/firstcuckold.groovy:602",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/firstcuckold.groovy:611",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/firstcuckold.groovy:696",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/firstcuckold.groovy:698",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/firstcuckold.groovy:703",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/firstcuckold.groovy:775",
+      "speaker": "peter"
+    },
+    {
+      "at": "scripts/firstcuckold.groovy:782",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/firstcuckold.groovy:785",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/firstcuckold_de.groovy",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/firstcuckold_de.groovy:111",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/firstcuckold_de.groovy:470",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/firstcuckold_de.groovy:493",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/firstcuckold_de.groovy:502",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/firstcuckold_de.groovy:602",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/firstcuckold_de.groovy:611",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/firstcuckold_de.groovy:696",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/firstcuckold_de.groovy:698",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/firstcuckold_de.groovy:703",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/firstcuckold_de.groovy:775",
+      "speaker": "peter"
+    },
+    {
+      "at": "scripts/firstcuckold_de.groovy:782",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/firstcuckold_de.groovy:785",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/first_cuckold_episode_2.groovy",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:151",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:240",
+      "speaker": "peter"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:246",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:301",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:304",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:312",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:315",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:348",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:351",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:375",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:378",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:382",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:396",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:522",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:525",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:539",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:546",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:559",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:566",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:587",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:591",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:613",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:630",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:643",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:646",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:652",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:656",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:660",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:681",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:689",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:697",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:731",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:738",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2.groovy:749",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/first_cuckold_episode_2_de.groovy",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:151",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:240",
+      "speaker": "peter"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:246",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:301",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:304",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:312",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:315",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:348",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:351",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:375",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:378",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:382",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:396",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:522",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:525",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:539",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:546",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:559",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:566",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:587",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:591",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:613",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:630",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:643",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:646",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:652",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:656",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:660",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:681",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:689",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:697",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:731",
+      "speaker": "hotwife"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:738",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/first_cuckold_episode_2_de.groovy:748",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2.groovy:270",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2.groovy:362",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2.groovy:518",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2.groovy:536",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2.groovy:556",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2.groovy:685",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2.groovy:729",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2_de.groovy:270",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2_de.groovy:362",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2_de.groovy:518",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2_de.groovy:536",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2_de.groovy:556",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2_de.groovy:685",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2_de.groovy:729",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/firstcuckold.groovy:223",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/firstcuckold.groovy:241",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/firstcuckold.groovy:343",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/firstcuckold.groovy:405",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/firstcuckold.groovy:444",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/firstcuckold_de.groovy:223",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/firstcuckold_de.groovy:241",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/firstcuckold_de.groovy:343",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/firstcuckold_de.groovy:405",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/firstcuckold_de.groovy:444",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/first_cuckold_episode_2_de.groovy:646",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/firstcuckold.groovy:195",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/firstcuckold.groovy:309",
+      "speaker": "narrator"
+    }
+  ],
+  "names": [
+    {
+      "variable": "hotwife",
+      "files": [
+        "scripts/firstcuckold.groovy",
+        "scripts/firstcuckold_de.groovy",
+        "scripts/first_cuckold_episode_2.groovy",
+        "scripts/first_cuckold_episode_2_de.groovy"
+      ],
+      "speaker": "hotwife",
+      "template": "{}"
+    }
+  ]
+}

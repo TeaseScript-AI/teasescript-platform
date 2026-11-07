@@ -1,0 +1,22 @@
+--- a/scripts/ShockJack.groovy
++++ b/scripts/ShockJack.groovy
+@@ -1632,7 +1632,8 @@
+     int menu = getSelectedValue("Do you know the rules?", [
+             "Yes",
+             "No",
+-            "Change Rules"
++            "Change Rules",
++            "End session"
+     ])
+     switch (menu) {
+         case 0:
+@@ -1644,6 +1645,9 @@
+         case 2:
+             changeConfig()
+             break
++        case 3:
++            exit()
++            break
+     }
+ }
+ 

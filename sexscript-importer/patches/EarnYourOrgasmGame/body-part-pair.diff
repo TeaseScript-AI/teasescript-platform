@@ -1,0 +1,11 @@
+--- a/scripts/EarnYourOrgasmGame.groovy
++++ b/scripts/EarnYourOrgasmGame.groovy
+@@ -56,7 +56,7 @@
+ // Challenge,End Time,Reward,Live
+ def ChallengeMemory= [["Loader",0,0,1]];
+ 
+-def BodyPart=[["asscrack",1],["ass",1],["balls",1],["cock",1],["pussy",1],["front thighs",1],["soles",1],["inner thighs",1],["back thighs",1],["palms",1],["chest",1],["tits",1],["nipples",1],["armpits",1],["exposed cockhead,1"]];
++def BodyPart=[["asscrack",1],["ass",1],["balls",1],["cock",1],["pussy",1],["front thighs",1],["soles",1],["inner thighs",1],["back thighs",1],["palms",1],["chest",1],["tits",1],["nipples",1],["armpits",1],["exposed cockhead",1]];
+ 
+ // Remove unwanted Arrays
+ if (loadBoolean("user.female")==true)

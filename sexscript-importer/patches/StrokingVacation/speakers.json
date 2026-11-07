@@ -1,0 +1,29 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/StrokingVacation.groovy:40",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StrokingVacation.groovy:73",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StrokingVacation_de.groovy:40",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/StrokingVacation_de.groovy:73",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

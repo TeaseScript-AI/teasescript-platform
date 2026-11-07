@@ -1,0 +1,141 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/BattleshipShock.groovy:12",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:19",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:72",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:128",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:135",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:138",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:229",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:232",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:241",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:278",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:350",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:491",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:494",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:500",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:524",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:538",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:603",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:619",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:634",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:655",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:668",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:679",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:690",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:699",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:707",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:713",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:720",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:727",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:733",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:791",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:794",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BattleshipShock.groovy:797",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

@@ -1,0 +1,10 @@
+// Workarounds where TeaseScript has no equivalent yet, each marked with a note: the player's language.
+// NOTE SX_LOCALE_WORKAROUND line 2: Workaround: TeaseScript has no query for the player's language yet (the localization question in COMPATIBILITY-GAPS.md), so the conversion assumes English, "en", where Groovy read the system language.
+let conditional = not ["de", "en"].contains("en")
+if conditional {
+  conditional = askBoolean prose "Check fonts?"
+}
+if conditional {
+  say prose "Fonts", instant
+}
+exit

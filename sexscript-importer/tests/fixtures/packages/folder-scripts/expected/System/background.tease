@@ -1,0 +1,2 @@
+say prose "Change the background", instant
+exit

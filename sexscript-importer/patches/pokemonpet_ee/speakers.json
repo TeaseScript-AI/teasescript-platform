@@ -1,0 +1,33 @@
+{
+  "reason": "The trainer Misty (\"Hi there! My name is Misty.\") speaks every in-session message, also under her Pikachu's pictures: \"Pikachu: Dick Slap Attack!\" is Misty calling her Pokemon's attack (\"Again, Pikachu: Tail Spank Attack!\", \"Pikachu: back in your Pokeball!\"), not Pikachu speaking. The title/equipment menu and the \"(Sorry!)\" notice are system text; the one bare stage direction \"(use the ruler to slap your balls)\" is narration.",
+  "speakers": {
+    "misty": {
+      "firstName": "Misty"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/Banjo/pokemonpet_ee.groovy:161",
+      "speaker": "misty"
+    },
+    {
+      "at": "scripts/Banjo/pokemonpet_ee.groovy:313",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/pokemonpet_ee.groovy:315",
+      "speaker": "misty"
+    },
+    {
+      "at": "scripts/Banjo/pokemonpet_ee.groovy:528",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/pokemonpet_ee.groovy:531",
+      "speaker": "misty"
+    }
+  ],
+  "names": []
+}

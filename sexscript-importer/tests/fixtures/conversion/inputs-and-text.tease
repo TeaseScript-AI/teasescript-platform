@@ -1,0 +1,89 @@
+let name = askText prose() ("What is your name?").replace("\n", " ")
+let weight = askNumber prose "Your weight?", prefill: 0
+say prose "Hello ${name}, you said ${weight}.", instant
+say prose "Choose a task", instant
+let task = askChoice 0: "Kneel",
+  1: "Wait",
+  2: "Count"
+while true {
+  say prose "Ready?", instant
+  if (askChoice 0: "No", 1: "Yes") != 0 {
+    break
+  }
+  say prose "Then wait.", instant
+  timer 10 s
+}
+wait 500 ms
+if name != "" {
+  say prose "Good, ${name}", instant
+}
+// The question of an endless loop's condition is asked again in every round.
+let roundValue = 0
+while true {
+  let ignoredAnswer1 = askText prose "Round ${roundValue}"
+  roundValue += 1
+  if roundValue == 2 {
+    break
+  }
+}
+// A question in a variable that never holds null needs no test before it is shown, also when the variable holds a
+// list elsewhere.
+// NOTE SX_UNION_TYPE line 19: Groovy let 'question' hold values of several types; TeaseScript declares it 'string | string[]' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if question is string { ... }
+let question: string | string[] = "Ready?"
+function menu {
+  question = ["Yes", "No"]
+}
+question = "Kneel?"
+say prose question, instant
+let kneel = askBoolean
+// A question read from storage may be null, which kept the current text, so it is still tested.
+let stored = load "question", default: ""
+if stored != "" {
+  say prose stored, instant
+}
+let answer = askText().replace("\n", " ")
+// A question that may be null elsewhere needs no test right after it was set to text.
+stored = "Ready now?"
+say prose stored, instant
+let ready = askBoolean
+// A character of a text is its one-character substring, also counted from the end.
+let code = askText prose() ("Square?", prefill: "B4").replace("\n", " ")
+say prose "Row ${code.substring(0, 1)}, column ${code.substring(code.length - 1)}", instant
+// Button texts that call a function are computed before the question, in order, as Groovy evaluated them first.
+function honorific {
+  return "Miss"
+}
+let question2 = "Ready, ${honorific()}?"
+let option = "Yes, ${honorific()}"
+if askBoolean prose question2, yesText: option {
+  say prose "Good.", instant
+}
+// A range goes through its values with their positions.
+let position = 0
+for value in 5..=6 {
+  say prose "${position}: ${value}", instant
+  position += 1
+}
+// FirstTimeCuckold episode 2: a button text that reads a stored name shows an empty text for a missing one, as the
+// legacy button did, also where it is an askBoolean's noText.
+say prose "Who controls the key?", instant
+if askBoolean yesText: "I do", noText: "${load("cuckold.hotwife", default: "")} has it" {
+  say prose "Fine.", instant
+}
+// show() returned null, so a menu whose message is show(text) showed the text and then its options.
+let menuText = "Main menu"
+say prose menuText, instant
+let menuChoice = askChoice 0: "Start", 1: "End"
+say prose "Chose ${menuChoice}", instant
+// A gauge wait of a negative number of seconds did not wait at all, so seconds not certain to be at least 0 count
+// from 0; a literal, a random number, and their sums are certain.
+let penalty = [-60, 0]
+penalty[0] = penalty[0] + 30
+timer toInteger(max(penalty[0], 0) * 1000) ms
+timer (randomInteger(0..3) + 1) s
+// So is a variable that every write sets to such a number.
+let gaugeStep = 1
+gaugeStep += 1
+timer (gaugeStep * 2) s
+say prose "Gauges done", instant
+exit

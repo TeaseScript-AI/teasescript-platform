@@ -1,0 +1,20 @@
+--- a/scripts/Domme2/eat.groovy
++++ b/scripts/Domme2/eat.groovy
+@@ -154,7 +154,6 @@
+ 					}
+ 					show("Good. Love to see you wearing them!")
+ 					showButton(">")
+-					save("domme2.kink",2)	
+ 					break
+ 
+ 			case 3:
+--- a/scripts/Domme2/chores.groovy
++++ b/scripts/Domme2/chores.groovy
+@@ -287,7 +287,6 @@
+ 					}
+ 					show("Good. Love to see you wearing them!")
+ 					showButton(">")	
+-					save("domme2.kink",2)	
+ 					break
+ 				case 3:
+ 					 setImage("Domme2/Domme"+load("domme2.dommepack")+"/Domme45.jpg")

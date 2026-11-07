@@ -1,0 +1,21 @@
+--- a/scripts/Baccarat.groovy
++++ b/scripts/Baccarat.groovy
+@@ -658,7 +658,7 @@
+ 	if(name.count("belt")>0)return "beltM.png"
+ 	if(loadBoolean("intro.female")&&(name.count("bikini")>0&&name.count("bottom")>0))
+ 		return "bikinibottomF.png"
+-	if(loadBoolean("intro.female")&&(name.count("bikini")>0&&name.count("top")==0))
++	if(loadBoolean("intro.female")&&(name.count("bikini")>0&&name.count("top")>0))
+ 		return "bikinitopF.png"
+ 	if(loadBoolean("intro.female")&&name.count("bikini")>0)return "bikinibottomF.png"
+ 	if(!loadBoolean("intro.female")&&name.count("bikini")>0)return "bikiniM.png"
+--- a/scripts/Baccarat-chemin-de-fer.groovy
++++ b/scripts/Baccarat-chemin-de-fer.groovy
+@@ -69,6 +69,7 @@
+ 
+ def Settings = {//basic settings------------------------------------------------------------
+ 	NoDecks = getInteger(Title+"Chemin de fer is usually played with six decks", 6)
++	if(NoDecks<=0)NoDecks=6
+ 	save("Baccarat.NoDecks", NoDecks)
+ 	ObeyRules = getBoolean(Title+"Do you want to obey the palyer rules stricktly?\n"+
+ 		"(This gives you the best chance of winning)", "Yes", "No")

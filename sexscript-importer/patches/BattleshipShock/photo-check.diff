@@ -1,0 +1,13 @@
+--- a/scripts/BattleshipShock.groovy
++++ b/scripts/BattleshipShock.groovy
+@@ -140,9 +140,7 @@
+ 		snapfile = getImage("Capturing Image")
+ 		show(null)
+ 		j--
+-		if((snapfile==null)||(!snapfile.contains("captured"))||
+-			picBlank(snapfile)||
+-			(new Date().getTime())-(new File(snapfile).lastModified())>30*60*1000){
++		if((snapfile==null)||picBlank(snapfile)){
+ // Try to catch pretending to have webcam by uploading file
+ 			if(!getBoolean("Cheat! That doesn't look like a valid picture taken today!\n\nYou can try again "+
+ 				j+" times. Do you want to? Will you behave?")) {return null}

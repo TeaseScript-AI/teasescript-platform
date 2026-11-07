@@ -1,0 +1,106 @@
+{
+  "reason": "A self-bondage timer whose owner (Master or Mistress, configured by the player; name owner_title + owner_name) speaks to the player under the owner picture, often of itself in the third person. Halfway through, a guest slave whose message comes from the server (\"Hi …, I'm \"+guest_subname) speaks under the guest's picture. Hardware checks, setup, the release safety check, uploads and sending are system text; the player's own message to the next slave (549-559) is to become a button by source patch.",
+  "speakers": {
+    "owner": {
+      "title": "Mistress"
+    },
+    "guest": {
+      "displayName": "Slave"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/selfbt.groovy:141",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/selfbt.groovy:145",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/selfbt.groovy:334",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/selfbt.groovy:420",
+      "speaker": "guest"
+    },
+    {
+      "at": "scripts/selfbt.groovy:443",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/selfbt.groovy:549",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/selfbt.groovy:569",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/selfbt.groovy:598",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/selfbt.groovy:614",
+      "speaker": "owner"
+    },
+    {
+      "message": "scripts/selfbt.groovy:549",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/selfbt.groovy:551",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/selfbt.groovy:553",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/selfbt.groovy:555",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/selfbt.groovy:558",
+      "speaker": "player"
+    }
+  ],
+  "names": [
+    {
+      "variable": "owner_title",
+      "files": [
+        "scripts/selfbt.groovy"
+      ],
+      "speaker": "owner",
+      "template": "{}",
+      "except": [
+        "scripts/selfbt.groovy:29"
+      ]
+    },
+    {
+      "variable": "owner_name",
+      "after": [
+        "scripts/selfbt.groovy:208"
+      ],
+      "files": [
+        "scripts/selfbt.groovy"
+      ],
+      "speaker": "owner",
+      "template": "{owner_title}{}"
+    },
+    {
+      "variable": "guest_subname",
+      "files": [
+        "scripts/selfbt.groovy"
+      ],
+      "speaker": "guest",
+      "template": "{}",
+      "except": [
+        "scripts/selfbt.groovy:29"
+      ]
+    }
+  ]
+}

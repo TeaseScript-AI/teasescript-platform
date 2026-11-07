@@ -1,0 +1,11 @@
+--- a/scripts/toy/chastity.groovy
++++ b/scripts/toy/chastity.groovy
+@@ -313,7 +313,7 @@
+ 					present([DRESSED,TEASE], [
+ 							["Are you sure, toy?", "I'm not giving you a choice here.", "Yes, your chastity is a choice. MY choice!"],
+ 							["Let me ask again: Can I keep you like that all the time?"]]);
+-					sh = getSelectedValue(null, [
++					getSelectedValue(null, [
+ 							gagText("Yes, ${dommeTitle()}", "yes"), gagText("Yes, ${dommeTitle()}", "yes")]);
+ 					setPermission(PERM_CHASTE, true);
+ 					present([DRESSED,TEASE], [

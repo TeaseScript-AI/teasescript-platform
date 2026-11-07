@@ -1,0 +1,18 @@
+--- a/scripts/sexscriptcardgameexample.groovy
++++ b/scripts/sexscriptcardgameexample.groovy
+@@ -222,9 +222,12 @@
+  
+ boolean endLoop = false
+ while (!endLoop) {
+-    if (getBoolean("Simple card game or more examples?", "simple card game", "more examples")) {
++    def choice = getSelectedValue("Simple card game or more examples?", ["simple card game", "more examples", "End"])
++    if (choice == 0) {
+         simpleCardGame()
+-    } else {
++    } else if (choice == 1) {
+         showMoreExamples()
++    } else {
++        endLoop = true
+     }
+ }
+\ No newline at end of file

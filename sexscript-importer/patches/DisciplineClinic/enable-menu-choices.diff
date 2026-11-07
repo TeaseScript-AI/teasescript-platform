@@ -1,0 +1,13 @@
+--- a/scripts/DisciplineClinic/DisciplineClinicMain.groovy
++++ b/scripts/DisciplineClinic/DisciplineClinicMain.groovy
+@@ -1505,8 +1505,8 @@
+ 							}
+ 						show(dialog)
+ 						showButton("-->")
+-						dialog = ["Back"]+mistressArray
+-						enableMiss = getSelectedValue("Would you like to change one?", dialog)
++						def enableMissChoices = ["Back"]+mistressArray
++						enableMiss = getSelectedValue("Would you like to change one?", enableMissChoices)
+ 						if (enableMiss > 0){
+ 							if (loadBoolean(scriptText+".not_"+mistressArray[enableMiss-1])) save(scriptText+".not_"+mistressArray[enableMiss-1],false)
+ 							else save(scriptText+".not_"+mistressArray[enableMiss-1],true)

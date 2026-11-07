@@ -1,0 +1,54 @@
+{
+  "reason": "One opponent per session (variable OpponentName, chosen from ten women in the opponent menu) deals the dice game and speaks every in-game message in the first person (\"I have 3 dice and 200 credits\", \"I rolled …\", market offers, punishments, the end scenes). The rules intro, opponent choice screens, the eStim setup notice and the game/rolling headers are system text; her stealing attempts are told in the third person (narration).",
+  "speakers": {
+    "opponent": {
+      "title": "Mistress"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/DiceBets.groovy:1783",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/DiceBets.groovy:1792",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DiceBets.groovy:1794",
+      "speaker": "opponent"
+    },
+    {
+      "function": "scripts/DiceBets.groovy:Stealing",
+      "speaker": "narrator"
+    },
+    {
+      "after": "scripts/DiceBets.groovy:1812",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/DiceBets.groovy:1859",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DiceBets.groovy:1860",
+      "speaker": "opponent"
+    },
+    {
+      "after": "scripts/DiceBets.groovy:1896",
+      "speaker": "opponent"
+    }
+  ],
+  "names": [
+    {
+      "variable": "OpponentName",
+      "files": [
+        "scripts/DiceBets.groovy"
+      ],
+      "speaker": "opponent",
+      "template": "{}"
+    }
+  ]
+}

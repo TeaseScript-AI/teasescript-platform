@@ -1,0 +1,90 @@
+{
+  "reason": "Two characters: the player's own CyberMistress (or Master, when the player does not like women; variable mname) hears the confession under the confess_/punishments_ pictures, then hands over to the person from the wet dream, whose name the player types (stored as wetdream.hername) and whose pictures the player supplies; she or he speaks from the first player picture (wetdream8) to the end. The Mistress returns only in the 'someone you don't know' ending.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress"
+    },
+    "dream": {
+      "title": "Miss"
+    }
+  },
+  "default": "mistress",
+  "prefixes": [],
+  "switches": [
+    {
+      "image": "wetdream/confess_",
+      "speaker": "mistress"
+    },
+    {
+      "image": "wetdream/punishments_",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/wetdream.groovy:190",
+      "speaker": "dream"
+    },
+    {
+      "at": "scripts/wetdream.groovy:1127",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/wetdream_nl.groovy:211",
+      "speaker": "dream"
+    },
+    {
+      "at": "scripts/wetdream_nl.groovy:1128",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/wetdream.groovy:112",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/wetdream.groovy:135",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/wetdream.groovy:158",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/wetdream.groovy:171",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "variable": "mname",
+      "files": [
+        "scripts/wetdream.groovy"
+      ],
+      "speaker": "mistress",
+      "values": {
+        "mistress": "Mistress",
+        "master": "Master"
+      },
+      "otherwise": "Mistress"
+    },
+    {
+      "variable": "mname",
+      "files": [
+        "scripts/wetdream_nl.groovy"
+      ],
+      "speaker": "mistress",
+      "values": {
+        "meesteres": "Meesteres",
+        "meester": "Meester"
+      },
+      "otherwise": "Meesteres"
+    },
+    {
+      "variable": "miss",
+      "files": [
+        "scripts/wetdream.groovy",
+        "scripts/wetdream_nl.groovy"
+      ],
+      "speaker": "dream",
+      "template": "{}"
+    }
+  ]
+}

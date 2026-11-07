@@ -1,0 +1,79 @@
+{
+  "reason": "The selected mistress speaks the play modules; the start screen, chooser and outfit controls are system prompts. Display name follows DOMME after each load, including outfit-specific titles; Ancilla is the default.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress",
+      "firstName": "Ancilla"
+    }
+  },
+  "default": "mistress",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/toy/intro.groovy:43",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/toy.groovy:380",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/toy.groovy:407",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/toy/social.groovy:showCalendar",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/toy.groovy:422",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/toy/play.groovy:sessionPlay",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/toy/imagery.groovy:127",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/toy/imagery.groovy:127",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/toy.groovy:201",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/toy.groovy:201",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/toy/chooser.groovy:chooseStart",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/toy/chooser.groovy:chooseMistress",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/toy/chooser.groovy:chooseOutfits",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/toy/intro.groovy:setupInitial",
+      "speaker": "mistress"
+    }
+  ],
+  "names": [
+    {
+      "variable": "mistressName",
+      "files": [
+        "scripts/toy.groovy"
+      ],
+      "speaker": "mistress",
+      "template": "{}"
+    }
+  ]
+}

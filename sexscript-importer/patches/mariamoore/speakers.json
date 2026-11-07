@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Maria Moore (Haiku and Luna inventories agree; settled by Opus).",
+  "speakers": {
+    "main": {
+      "firstName": "Maria",
+      "lastName": "Moore"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

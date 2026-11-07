@@ -1,0 +1,125 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/at-002/intro.groovy:6",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/intro.groovy:11",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/intro.groovy:21",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/intro.groovy:30",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/intro.groovy:38",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/intro.groovy:45",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/intro.groovy:52",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/intro.groovy:60",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/intro.groovy:65",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/intro.groovy:70",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/intro.groovy:91",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/intro.groovy:97",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/intro.groovy:115",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/setup.groovy:10",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/setup.groovy:15",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/setup.groovy:25",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/setup.groovy:42",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/setup.groovy:86",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/setup.groovy:92",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/setup.groovy:101",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/setup.groovy:141",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/tabata.groovy:22",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/tabata.groovy:29",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/tabata.groovy:30",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/tabata.groovy:53",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/tabata.groovy:58",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/tabata.groovy:67",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/at-002/tabata.groovy:129",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

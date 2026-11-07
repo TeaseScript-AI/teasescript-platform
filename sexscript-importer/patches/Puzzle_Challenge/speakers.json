@@ -1,0 +1,103 @@
+{
+  "reason": "The Mistress (Aiden Starr pictures, unnamed) runs the puzzle game, the punishments, the stroke tasks and the Kendra countdown; at the end of the countdown a granny picture says one line, and in the final dice game each woman in the line-up (granny, old, mature, young, teen, and the wrong-number booby prize) speaks under her own pictures. The sound/program test at the start is system text.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress"
+    },
+    "granny": {
+      "displayName": "Granny"
+    },
+    "old": {
+      "displayName": "Old woman"
+    },
+    "mature": {
+      "displayName": "Mature woman"
+    },
+    "young": {
+      "displayName": "Young woman"
+    },
+    "teen": {
+      "displayName": "Teen"
+    },
+    "wrongnumber": {
+      "displayName": "Wrong-number woman"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "image": "Puzzle Challenge/aiden",
+      "speaker": "mistress"
+    },
+    {
+      "image": "Puzzle Challenge/Kendra",
+      "speaker": "mistress"
+    },
+    {
+      "image": "Puzzle Challenge/gra",
+      "speaker": "granny"
+    },
+    {
+      "image": "Puzzle Challenge/old",
+      "speaker": "old"
+    },
+    {
+      "image": "Puzzle Challenge/mi",
+      "speaker": "mature"
+    },
+    {
+      "image": "Puzzle Challenge/mid",
+      "speaker": "wrongnumber"
+    },
+    {
+      "image": "Puzzle Challenge/young",
+      "speaker": "young"
+    },
+    {
+      "image": "Puzzle Challenge/teen",
+      "speaker": "teen"
+    },
+    {
+      "at": "scripts/Puzzle Challenge.groovy:175",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Puzzle Challenge.groovy:midg",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/Puzzle Challenge_de.groovy:175",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Puzzle Challenge_de.groovy:midg",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/Puzzle Challenge/Puzzle Challenge.groovy:175",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Puzzle Challenge/Puzzle Challenge.groovy:midg",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/Puzzle Challenge/Puzzle Challenge_de.groovy:175",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Puzzle Challenge/Puzzle Challenge_de.groovy:midg",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/Puzzle Challenge_de.groovy:1269",
+      "speaker": "granny"
+    },
+    {
+      "at": "scripts/Puzzle Challenge_de.groovy:1273",
+      "speaker": "mistress"
+    }
+  ],
+  "names": []
+}

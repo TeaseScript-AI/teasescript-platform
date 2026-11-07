@@ -1,0 +1,157 @@
+{
+  "reason": "One unnamed character, a Master (\"Your Master\", 90 times \"Master\" in the scripts); the speaker check found the first data's Mistress wrong.",
+  "speakers": {
+    "main": {
+      "title": "Master"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/DW_intro.groovy:15",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/bm.groovy:23",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/bm.groovy:32",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/disclaimer.groovy:16",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/log.groovy:17",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/log.groovy:19",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/log.groovy:20",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/log.groovy:35",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/log.groovy:44",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/log.groovy:46",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/log.groovy:47",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/setup.groovy:16",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/setup.groovy:36",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/setup.groovy:38",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/setup.groovy:43",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:32",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:34",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:60",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:133",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:220",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:224",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:226",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:228",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:234",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:242",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:250",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:254",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:326",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:618",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:656",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:657",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:746",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/tasks.groovy:817",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/toys.groovy:39",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/toys.groovy:40",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/DareWiliam/zip.groovy:16",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

@@ -1,0 +1,145 @@
+{
+  "reason": "One named character, Chloe (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Chloe",
+      "displayName": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/amnesia.groovy:8",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/amnesia.groovy:12",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/amnesia.groovy:16",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/amnesia.groovy:20",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/amnesia.groovy:24",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/amnesia.groovy:28",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/amnesia.groovy:32",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/amnesia.groovy:36",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/amnesia.groovy:41",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:47",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:51",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:53",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:57",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/amnesia.groovy:61",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:65",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/amnesia.groovy:69",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:77",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:81",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:87",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:98",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:104",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:118",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:155",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:157",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:161",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:165",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:196",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:198",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:200",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/amnesia.groovy:203",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "after": [
+        "scripts/amnesia.groovy:59"
+      ],
+      "files": [
+        "scripts/amnesia.groovy"
+      ],
+      "speaker": "main",
+      "template": "Chloe"
+    }
+  ]
+}

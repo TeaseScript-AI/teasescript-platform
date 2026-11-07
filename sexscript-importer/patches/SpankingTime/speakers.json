@@ -1,0 +1,25 @@
+{
+  "reason": "One named character, Mistress Crystal (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress",
+      "firstName": "Crystal",
+      "displayName": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": [
+    {
+      "after": [
+        "scripts/SpankingTime.groovy:79"
+      ],
+      "files": [
+        "scripts/SpankingTime.groovy"
+      ],
+      "speaker": "main",
+      "template": "Mistress Crystal"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+--- a/scripts/Lines/Kitty.groovy
++++ b/scripts/Lines/Kitty.groovy
+@@ -94,7 +94,7 @@
+ 	"I will be resetting the number of times you have visited me however, as well as lowering the starting difficulty, so you will have to start again, but reach a higher difficulty level if you want to earn another reward.\n"+
+ 	"See you next time slave, and I suggest you spend some more time with the other "+title+"es before they get annoyed at your lack of respect.");
+ 	save("Kitty.RTimes", 0)
+-	save("Kitty.rwd", +1)
++	save("Kitty.rwd", rwd+1)
+ 	save("Kitty.Difficulty", -3)
+ 	wait(30)
+ 	return null;

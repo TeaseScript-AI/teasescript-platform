@@ -1,0 +1,12 @@
+--- a/scripts/campdrain/day2.groovy
++++ b/scripts/campdrain/day2.groovy
+@@ -311,7 +311,8 @@
+ 					ss.playBPMList(this, 15, 0, imgList, msgList, bpmList);
+ 					
+ 					
+-					show("Good camper! Well my time with you is almost up and I'm sure daisy is anxious to get your hands on you"); wait(3);
++					// Legacy bug: copied from day 1's Mikayla, this named Daisy, who comes after her there; Jayden comes next here.
++					show("Good camper! Well my time with you is almost up and I'm sure Jayden is anxious to get your hands on you"); wait(3);
+ 					show("But I dont just take my top off for all new campers"); wait(3);
+ 					
+ 					if(getBoolean("What is the status of your cock?", "Hard", "Soft")) {

@@ -1,0 +1,11 @@
+--- a/scripts/DareWiliam/tasks.groovy
++++ b/scripts/DareWiliam/tasks.groovy
+@@ -309,7 +309,7 @@
+ show("report the following code to your Master: 5619.");
+ text = new Date().format( "dd-MM-yyyy HH:mm")
+ log.append(text+": Passed wrap-up no cum (963654)\r\n")
+-showbutton ("Got the code and will send it to my Master.");
++showButton ("Got the code and will send it to my Master.");
+ }
+ if (good < 4){
+ def cumI = 1;

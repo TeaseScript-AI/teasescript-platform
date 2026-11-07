@@ -1,0 +1,11 @@
+--- a/scripts/ShockReflex.groovy
++++ b/scripts/ShockReflex.groovy
+@@ -258,7 +258,7 @@
+ 
+ def BoxMullerRandom = {x, s->//---------------------------------------------------
+ //X = √(-2 ln U) cos(2πV)
+-	return ((-2.0*Math.log(getRandom(1000)/1000))*
++	return ((-2.0*Math.log((getRandom(1000)+1)/1001))*
+ 		Math.cos(2.0*Math.PI*getRandom(1000)/1000))*s+x
+ }
+ 

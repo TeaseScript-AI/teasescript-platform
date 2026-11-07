@@ -1,0 +1,13 @@
+--- a/scripts/Banjo/dungeoncrawl.groovy
++++ b/scripts/Banjo/dungeoncrawl.groovy
+@@ -7490,6 +7490,10 @@
+ 		if(arenaChoice=="Exit") {
+ 			arenaActive = false
+ 			escapePrevent = false
++			// Patched legacy bug: the arena loads a saved character, whose techniques stayed learned for a New Game, so its
++			// setTechs learned none of them again and then removed "None", which left no technique to choose; the title starts
++			// from a reset game, as after a Game Over.
++			gameReset()
+ 			room = "title"
+ 		}
+ 		else if(arenaChoice=="Bandit") {

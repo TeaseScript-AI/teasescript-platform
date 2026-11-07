@@ -1,0 +1,15 @@
+--- a/scripts/questionnaire.groovy
++++ b/scripts/questionnaire.groovy
+@@ -334,9 +334,9 @@
+ 		if (validate != null) {
+ 			choice = getSelectedValue("Oh, I see you have Jennifer's validation code " + validate + ". Do you want to send your answers to Mistress Jennifer?",["Oh, please, no!", "Yes, let's do it!"])
+ 			if (choice == 1) {
+-				i = loadInteger("questionnaire.years_exp")
+-				if (i!=null) { 
+-					log="years_exp=" + i
++				def yearsExp = loadInteger("questionnaire.years_exp")
++				if (yearsExp!=null) { 
++					log="years_exp=" + yearsExp
+ 				}
+ 				if (loadString("questionnaire.orientation")!=null) {
+ 					log=log + ", " + loadString("questionnaire.orientation")

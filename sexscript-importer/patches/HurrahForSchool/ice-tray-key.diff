@@ -1,0 +1,19 @@
+--- a/scripts/HurrahForSchool.groovy
++++ b/scripts/HurrahForSchool.groovy
+@@ -995,13 +995,14 @@
+ 	
+ 	def SchA4Mess3
+ 
+-	if(loadBoolean("toys.ice")) {
++	// Legacy bug: the toy chest and this script's toy screen save the ice tray as toys.ice_tray (patch ice-tray-key).
++	if(loadBoolean("toys.ice_tray")) {
+ 	SchA4Mess0 = SchA4Mess0<<"You look hot! Fill your "+SchGym0[SchSex]+" with ice! Don't think of "+
+ 		"removing it until you start shivering!"
+ 	SchA4Num0++
+ 	}
+ 
+-	if(loadBoolean("toys.ice")) {
++	if(loadBoolean("toys.ice_tray")) {
+ 	SchA4Mess2 = SchA4Mess2<<"You look hot! Fill your "+SchGym2[SchSex]+" with ice! Don't think of "+
+ 		"removing it until you start shivering!"
+ 	SchA4Num2++

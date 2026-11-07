@@ -1,0 +1,11 @@
+--- a/scripts/Farkel.groovy
++++ b/scripts/Farkel.groovy
+@@ -1063,7 +1063,7 @@
+ 			cal.add(Calendar.MINUTE, (int) (denialTimeStamp-getTime())/60)
+ 			denialUntil = cal.getTime()
+ 		}
+-		denialTimeStamp = (int) denialUntil.getTime()/1000 //Convert from millis to seconds. Comparable with getTime()
++		denialTimeStamp = (int) (denialUntil.getTime()/1000) //Convert from millis to seconds. Comparable with getTime()
+ 		if(rememberDenial){
+ 			save("Farkel.denialTimeStamp", denialTimeStamp)
+ 			denialMistress = mistress

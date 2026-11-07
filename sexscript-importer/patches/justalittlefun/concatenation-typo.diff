@@ -1,0 +1,11 @@
+--- a/scripts/justalittlefun.groovy
++++ b/scripts/justalittlefun.groovy
+@@ -76,7 +76,7 @@
+ 	if(val3p % 2 == 1) {
+ 		show(val3p+". Ok, you can get away with just one edge.")
+ 	} else {
+-		show(val3p." an even number, you will have to do the number of edges it says, so "+val3p+". Rest for a minute between each")
++		show(val3p+" an even number, you will have to do the number of edges it says, so "+val3p+". Rest for a minute between each")
+ 	}
+ }
+ wait(10)

@@ -1,0 +1,25 @@
+{
+  "patches": [
+    {
+      "id": "treasure-removal-order",
+      "layer": "source",
+      "category": "e",
+      "reason": "Handing a treasure to Elaina removes backPackArray[choice] from the backpack and then removes backPackArray[choice] from treasureArray, by which time that index names the next item (or nothing), so the wrong treasure, or none, left the treasure list. Remove the item from treasureArray first, then from the backpack, in both versions.",
+      "diff": "treasure-removal-order.diff"
+    },
+    {
+      "id": "dragon-lance-name",
+      "layer": "source",
+      "category": "e",
+      "reason": "The Fairy room tests backPackArray.contains(\"DragonLance\"), but the lance is added and read everywhere else as \"Dragon Lance\", so the lance could be taken again on every visit and the revisit text never showed. Test \"Dragon Lance\".",
+      "diff": "dragon-lance-name.diff"
+    },
+    {
+      "id": "single-room-restore",
+      "layer": "source",
+      "category": "e",
+      "reason": "The \"1 Room\" mode sets hasKey and gauntletMode to true for its rooms, and on leaving restores only hasKey, and always to false. Back in the game-mode menu, a Dungeon game then started in gauntlet mode over the dungeon's rooms (legacy ran past the end of the room list, with no prompt), or a gauntlet game without the key its configure step gave. Restore both as the current game mode sets them: true for a gauntlet, false for the dungeon.",
+      "diff": "single-room-restore.diff"
+    }
+  ]
+}

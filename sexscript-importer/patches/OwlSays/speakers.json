@@ -1,0 +1,63 @@
+{
+  "reason": "A memory game. The gallery members introduce themselves under their own pictures (galleryintro: \"My name is Miss Gold.\"); the Owl (TheSnowyOwl.png) announces each round; during the answer phase, the penalty and the counted spanking the round's spanker (an unnamed woman with an implement, picture lap73x.jpg) speaks in the first person (\"I get to spank you if you fail.\"). Title, instructions, configuration, the sequence name cards and the end screens are system text.",
+  "speakers": {
+    "gallery": {
+      "displayName": "Gallery Member"
+    },
+    "owl": {
+      "displayName": "The Owl"
+    },
+    "mistress": {
+      "title": "Mistress"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/TheSnowyOwl/OwlSays.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/OwlSays.groovy:streakcheck",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/OwlSays.groovy:galleryintro",
+      "speaker": "gallery"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/OwlSays.groovy:676",
+      "speaker": "owl"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/OwlSays.groovy:flash",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/TheSnowyOwl/OwlSays.groovy:phase2",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/OwlSays.groovy:599",
+      "speaker": "mistress"
+    },
+    {
+      "after": "scripts/TheSnowyOwl/OwlSays.groovy:630",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/OwlSays.groovy:659",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/OwlSays.groovy:708",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/TheSnowyOwl/OwlSays.groovy:1073",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

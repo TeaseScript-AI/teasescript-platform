@@ -1,0 +1,30 @@
+--- a/scripts/ShockQuiz.groovy
++++ b/scripts/ShockQuiz.groovy
+@@ -191,17 +191,21 @@
+ 
+ def getQuestions = {
+     def getQuizFiles = {
+-        def files = []
+-        def dir = new File(SCRIPTSDIR)
+-        dir.traverse(type: groovy.io.FileType.FILES, maxDepth: 0) { file -> files.add(file.absolutePath) }
+-        return files
++        // The question files of the package's BuzzQuiz folder.
++        return ["BuzzQuiz-questions_0.txt", "BuzzQuiz-questions_11.txt", "BuzzQuiz-questions_20.txt",
++                "BuzzQuiz-questions_3.txt", "BuzzQuiz-questions_30.txt"]
+     }
+     List questions = []
+     List quizzFiles = getQuizFiles()
+     quizzFiles.each { fName ->
+-        File txtFile = new File(fName)
++        File txtFile = new File(SCRIPTSDIR + "/" + fName)
+         List lines = txtFile.readLines()
+-        lines.each { strLine -> questions.add(strLine.split('\\|').collect()) }
++        lines.each { strLine ->
++            // Java's split dropped the empty fields after a line's last answer.
++            List fields = strLine.split('\\|').collect()
++            while (fields && fields[-1] == "") fields.remove(fields.size() - 1)
++            questions.add(fields)
++        }
+     }
+     return questions
+ }

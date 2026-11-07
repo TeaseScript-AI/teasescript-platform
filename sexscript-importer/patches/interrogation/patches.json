@@ -1,0 +1,45 @@
+{
+  "patches": [
+    {
+      "id": "summary-face",
+      "layer": "source",
+      "category": "b",
+      "reason": "Watching a player chose the female face when the player's summary, held in a list of cached summaries that starts with empty slots, mentions her or she; the test read the list slot four times. The conversion types the slots as possibly null, so each read stopped the package from compiling, although the slot was filled just before. The test reads text1, which already holds the same summary, after a check for null that legacy never needed: a stored summary was text, and a missing one made legacy fail where the check now keeps the male face.",
+      "diff": "summary-face.diff"
+    },
+    {
+      "id": "typed-answer",
+      "layer": "source",
+      "category": "b",
+      "reason": "The interview asked each question again until the answer was not empty, in the variable answer that also takes the mug shot, which is null where no photo came. TeaseScript keeps a variable that a loop sets at the type it is declared with when the loop starts again, so the test of the answer's length read text that may be null and stopped the package from compiling, although the loop starts with empty text and only ever sets text. The loop asks into typed, which only holds text, and answer takes it after the loop, so every question, answer, and stored value stays the same.",
+      "diff": "typed-answer.diff"
+    },
+    {
+      "id": "sex-partners-text",
+      "layer": "source",
+      "category": "e",
+      "reason": "The number of sex partners is asked as free text (getString) and saved as typed, and closing a session clears the collateral answer by saving \"\"; the summary then reads it with loadInteger(), which parsed the text as a Double and stopped the script on \"\" or on any answer that is not a number. The summary's null check shows the intent: a missing count reads as 0. The summary now reads the text and parses it as loadInteger() did, as a number whose whole part it takes (\"12.0\" is 12), where it is one, else takes it as missing.",
+      "diff": "sex-partners-text.diff"
+    },
+    {
+      "id": "degrading-names",
+      "layer": "output",
+      "category": "speakers",
+      "reason": "The chest word the player must write is the script's own list of degrading names for the player, which TeaseScript keeps on the built-in player speaker (V30 §37 name lists, owner 2026-10-15): the list fills player.degradingNames, and the text picks one of them as interpolation does. Groovy has no form for the player speaker, so this is an output edit.",
+      "file": "interrogation.tease",
+      "baseHash": "f81bbab5d3fcd94638ce0cca4c63c9e703ab626b3c506f4066c80281f41dca98",
+      "edits": [
+        {
+          "find": "let insult = [\"slut\", \"slave\", \"whore\"]\n",
+          "replace": "player.degradingNames = [\"slut\", \"slave\", \"whore\"]\n",
+          "count": 1
+        },
+        {
+          "find": "**${insult.random}**",
+          "replace": "**${player.degradingNames}**",
+          "count": 1
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+--- a/scripts/ChastityRouletteAlt.groovy
++++ b/scripts/ChastityRouletteAlt.groovy
+@@ -278,12 +278,12 @@
+ 					// Maximum multiplier. If it was not set, change it to 0 for show
+ 					if (MaxMultiplier<0) MaxMultiplier = 0
+ 					// Ask for the maximum multiplier to use
+-					MaxMultiplier = getString("Please enter the maximum multiplier.", MaxMultiplier)
++					def maxMultiplierText = getString("Please enter the maximum multiplier.", MaxMultiplier)
+ 					// We want to allow values of 0.1 etc so verify it is actually a number
+-					if (!MaxMultiplier.isNumber())
++					if (!maxMultiplierText.isNumber())
+ 						MaxMultiplier = -1			// Not a number so unset it.
+ 					else
+-						MaxMultiplier=MaxMultiplier.toDouble()	// Set to number entered
++						MaxMultiplier=maxMultiplierText.toDouble()	// Set to number entered
+ 
+ 					// If an invalid value was entered, 'unset' it.
+ 					if (MaxMultiplier<0) MaxMultiplier = -1

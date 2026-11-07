@@ -1,0 +1,44 @@
+--- a/scripts/ScarlettsBlackmail.groovy
++++ b/scripts/ScarlettsBlackmail.groovy
+@@ -316,9 +316,16 @@
+ else // initiationCompleted
+ {
+ 	def goddessImage = 1+getRandom(14);
+-	def profile = receiveString(scriptVersion+"_"+id);
+-	if(profile == null)
+-		profile = "";
++	// Patched legacy bug: the profile is stored in chunks under scriptVersion_id_<n>, and scriptVersion_id holds their
++	// count, which this read as the profile; it is put together from its chunks, as at the first visit.
++	def countProfileChunks = receiveInteger(scriptVersion+"_"+id);
++	def profile = "";
++	for(def i=0; countProfileChunks != null && i<countProfileChunks; ++i)
++	{
++		def nextProfileChunk = receiveString(scriptVersion+"_"+id+"_"+i);
++		if(nextProfileChunk != null)
++			profile += nextProfileChunk;
++	}
+ 	setImage("ScarlettsBlackmail/"+loadString("ScarlettsBlackmail.goddess")+"/"+(goddessImage<10?"0":"")+goddessImage+".jpg");
+ 	while(true)
+ 	{
+--- a/scripts/ScarlettsBlackmail_de.groovy
++++ b/scripts/ScarlettsBlackmail_de.groovy
+@@ -316,9 +316,16 @@
+ else // initiationCompleted
+ {
+ 	def goddessImage = 1+getRandom(14);
+-	def profile = receiveString(scriptVersion+"_"+id);
+-	if(profile == null)
+-		profile = "";
++	// Patched legacy bug: the profile is stored in chunks under scriptVersion_id_<n>, and scriptVersion_id holds their
++	// count, which this read as the profile; it is put together from its chunks, as at the first visit.
++	def countProfileChunks = receiveInteger(scriptVersion+"_"+id);
++	def profile = "";
++	for(def i=0; countProfileChunks != null && i<countProfileChunks; ++i)
++	{
++		def nextProfileChunk = receiveString(scriptVersion+"_"+id+"_"+i);
++		if(nextProfileChunk != null)
++			profile += nextProfileChunk;
++	}
+ 	setImage("ScarlettsBlackmail/"+loadString("ScarlettsBlackmail.goddess")+"/"+(goddessImage<10?"0":"")+goddessImage+".jpg");
+ 	while(true)
+ 	{

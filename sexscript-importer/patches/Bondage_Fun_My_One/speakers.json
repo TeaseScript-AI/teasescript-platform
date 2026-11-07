@@ -1,0 +1,97 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:64",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:91",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:103",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:124",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:134",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:136",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:147",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:218",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:223",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:226",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:246",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:249",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:386",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:428",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:429",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:548",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:572",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:573",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:704",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:784",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Bondage_Fun_My_One.groovy:785",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

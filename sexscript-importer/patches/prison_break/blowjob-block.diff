@@ -1,0 +1,12 @@
+--- a/scripts/prison_break.groovy
++++ b/scripts/prison_break.groovy
+@@ -2389,7 +2389,8 @@
+ 	def flag294_1000=loadInteger("prison_break.PB_BJCheat")
+ 	if(flag294_1000!=null && getTime()<flag294_1000) nicount294++
+ 	if( nicount294>0) {
+-		block="BlowKob3a"
++		// Legacy bug: the block is named BlowJob3a; "BlowKob3a" fell to the default and ended the game (patch blowjob-block).
++		block="BlowJob3a"
+ 		break
+ 	}
+ 	show("\"Suck on this.\"")

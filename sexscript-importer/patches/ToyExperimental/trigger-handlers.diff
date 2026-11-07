@@ -1,0 +1,17 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -299,9 +299,11 @@
+ 		];
+ 	};
+ 	final executeTrigger = { String triggerName, arg = null ->
+-		triggerHandlers
+-			.findAll { th -> th.triggerName == triggerName }
+-			.forEach { th -> th.func(arg ?: th.defaultArg) };
++		final handlers = triggerHandlers.findAll { th -> th.triggerName == triggerName };
++		for (th in handlers) {
++			final func = th.func;
++			func(arg ?: th.defaultArg);
++		}
+ 	};
+ 
+ 	// Session

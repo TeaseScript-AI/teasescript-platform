@@ -1,0 +1,13 @@
+{
+  "reason": "The characters (the mother Mrs. Johnson and her daughter Jessica) speak only in audio files (playSound m*.mp3 / d*.mp3); the text messages are one system note (the volume check) followed by second-person narration, so no text message has a character speaker.",
+  "speakers": {},
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/Mum and Daughters.groovy:6",
+      "speaker": "narrator"
+    }
+  ],
+  "names": []
+}

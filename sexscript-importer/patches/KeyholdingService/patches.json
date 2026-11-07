@@ -1,0 +1,46 @@
+{
+  "patches": [
+    {
+      "id": "set-new-image-name",
+      "layer": "source",
+      "category": "e",
+      "reason": "The image changer was renamed setNewImage1 (with first=false as default); every other old setNewImage() call is commented out, but this one still calls the old name and failed in Groovy.",
+      "diff": "set-new-image-name.diff"
+    },
+    {
+      "id": "unlock-combination-text",
+      "layer": "source",
+      "category": "e",
+      "reason": "The unlock message closes show(...) one line early, so \"Kombinationen är: <combination>\" was concatenated to show's null result and the following showButton, and the player never saw the combination the message announces. Close show after the combination; showButton stays the next statement.",
+      "diff": "unlock-combination-text.diff"
+    },
+    {
+      "id": "distraction-text",
+      "layer": "source",
+      "category": "e",
+      "reason": "The distraction message closes show(...) after its first line and adds the next two lines to show's null result, so only the first line appeared. Close show after the last line.",
+      "diff": "distraction-text.diff"
+    },
+    {
+      "id": "likemale-before-def",
+      "layer": "source",
+      "category": "e",
+      "reason": "The default image is chosen from likemale before the script's def of likemale further down, so the legacy script stopped there with a missing property when no image was installed. The test reads the setting the def reads, intro.likemale.",
+      "diff": "likemale-before-def.diff"
+    },
+    {
+      "id": "lick-scene-lines",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the keyholder's licking scene (block slickaorgasm) opened with two lines the player never saw, only her picture and ten seconds of waiting: the first stands as a bare text, which Groovy evaluated and discarded, and the second is assigned to the script's prompt variable text, which every menu sets anew before it shows it. Every other line of the scene is a show(...) followed by a wait: show both.",
+      "diff": "lick-scene-lines.diff"
+    },
+    {
+      "id": "keyholder-name",
+      "layer": "source",
+      "category": "speakers",
+      "reason": "The keyholder's chosen name lives only in storage (intro.keyholder), and the script read it with loadBoolean just to ask for it when nothing was saved: null in Groovy, while the converted boolean read of a text gives false for a missing value, so the converted script never asked. Read it as text into keyholdernamn, the variable that names the keyholder speaker (speakers.json), and ask while it is empty; the texts keep reading the key as before.",
+      "diff": "keyholder-name.diff"
+    }
+  ]
+}

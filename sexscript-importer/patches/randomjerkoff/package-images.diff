@@ -1,0 +1,24 @@
+--- a/scripts/randomjerkoff.groovy
++++ b/scripts/randomjerkoff.groovy
+@@ -73,10 +73,7 @@
+  */
+ def retrieveFiles = { id, information ->
+     def list = [] 
+-    def dir = new File(getImagePath(information))
+-    debug(dir)
+-    // groovy.io.FileType.FILES
+-    dir.eachFileRecurse ( groovy.io.FileType.FILES) { file ->
++    new File("images/randomjerkoff").eachFile { file ->
+         list << file
+     }
+     debug('nach eachFileRecurse')
+@@ -256,8 +253,7 @@
+ 	random = getRandom(100)
+ 
+ 	image = list.get(getRandom(list.size()-1))
+-	imageString = image.toString().substring(new String(getImagePath(information)).length())
+-	setImage(getImagePath(information) + imageString)
++	setImage(image)
+ 	// sound()
+ 
+ 	random = getRandom(15)

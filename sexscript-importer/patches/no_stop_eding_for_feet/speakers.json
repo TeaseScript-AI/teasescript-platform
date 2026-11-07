@@ -1,0 +1,59 @@
+{
+  "reason": "A linear web tease (one getInteger page per picture). The author's own preface and closing note have no character. Mistress Atago introduces herself, leaves at page 6 and comes back at page 47 (\"It's mistress atago.\") to guide the rest; while she is away the unnamed girls in the pictures (whom the text calls \"mistresses\") speak, except the pages where Astolfo (\"My name is Astolfo\", \"It's me again\") and his friend (\"I'm one of Astolfo's friends\") introduce themselves.",
+  "speakers": {
+    "atago": {
+      "title": "Mistress",
+      "firstName": "Atago"
+    },
+    "helper": {
+      "title": "Mistress"
+    },
+    "astolfo": {
+      "firstName": "Astolfo"
+    },
+    "friend": {
+      "displayName": "Astolfo's friend"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/no_stop_eding_for_feet.groovy:14",
+      "speaker": "atago"
+    },
+    {
+      "at": "scripts/no_stop_eding_for_feet.groovy:34",
+      "speaker": "helper"
+    },
+    {
+      "at": "scripts/no_stop_eding_for_feet.groovy:50",
+      "speaker": "astolfo"
+    },
+    {
+      "at": "scripts/no_stop_eding_for_feet.groovy:54",
+      "speaker": "helper"
+    },
+    {
+      "at": "scripts/no_stop_eding_for_feet.groovy:98",
+      "speaker": "astolfo"
+    },
+    {
+      "at": "scripts/no_stop_eding_for_feet.groovy:102",
+      "speaker": "friend"
+    },
+    {
+      "at": "scripts/no_stop_eding_for_feet.groovy:106",
+      "speaker": "helper"
+    },
+    {
+      "at": "scripts/no_stop_eding_for_feet.groovy:194",
+      "speaker": "atago"
+    },
+    {
+      "at": "scripts/no_stop_eding_for_feet.groovy:494",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

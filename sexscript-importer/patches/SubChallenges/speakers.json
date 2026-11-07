@@ -1,0 +1,137 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/SubChallenges.groovy:101",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SubChallenges.groovy:104",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SubChallenges.groovy:243",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SubChallenges.groovy:311",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SubChallenges.groovy:680",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SubChallenges.groovy:702",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SubChallenges.groovy:703",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SubChallenges.groovy:715",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SubChallenges.groovy:736",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SubChallenges.groovy:741",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SubChallenges.groovy:747",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/SubChallenges.groovy:749",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:66",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:67",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:68",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:69",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:70",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:88",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:93",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:94",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:95",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:96",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:97",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:118",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:154",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:161",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:181",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:184",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:234",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:236",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/TaskEditor.groovy:247",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

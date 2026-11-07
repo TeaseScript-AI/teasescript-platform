@@ -1,0 +1,53 @@
+--- a/scripts/sissyGame/sissyGameCollage.groovy
++++ b/scripts/sissyGame/sissyGameCollage.groovy
+@@ -235,39 +235,21 @@
+ 
+                 waitWithGauge(5)
+ 
+-                //Make Collage
+-
+-                def collageFile = null
+-
+-                def maxTries = 3
+-                def ctry=0
+-                while((ctry < maxTries) && (collageFile== null) ){
+-                    collageFile = createCollage(imageList,sissyName,1200,800,'','collage_'+the_id+'.jpg')
+-                    ctry++
+-                    wait(1)
++                //Show the collage images one by one: TeaseScript cannot compose them into one image
++                for (collageImage in myProfile.images) {
++                    showSImage(collageImage)
++                    wait(3)
+                 }
+ 
++                //reduce sissypoints from Profile
++                sissyPoints -= 50
++                save('sissyGamev2.points', sissyPoints)
++                myProfile.sissyPoints = sissyPoints
+ 
+-                if( collageFile != null ){
+-                    //Add to Profile
+-                    def myCollageFile = sendImage(collageFile)
+-
+-                    //reduce sissypoints from Profile
+-                    sissyPoints -= 50
+-                    save('sissyGamev2.points', sissyPoints)
+-                    myProfile.sissyPoints = sissyPoints
+-
+-                    myProfile.collage = myCollageFile;
++                send('sissyGamev2.Sissies-'+ the_id, myProfile)
+ 
+-                    send('sissyGamev2.Sissies-'+ the_id, myProfile)
+-                    showSImage(myCollageFile)
+-
+-                    show('There it is !!! I hope you like it !')
+-                    showButton('I love it!')
+-
+-                }else{
+-                    show('Oh no Something went wrong :(. You can <b>try again</b> or play through the main game another time.)')
+-                }
++                show('There it is !!! I hope you like it !')
++                showButton('I love it!')
+             } else{
+                 show('No Profile. Please play through the main script again.')
+             }

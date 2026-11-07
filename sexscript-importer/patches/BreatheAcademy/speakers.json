@@ -1,0 +1,21 @@
+{
+  "reason": "One named character, Leah (Haiku and Luna inventories agree; settled by Opus).",
+  "speakers": {
+    "main": {
+      "firstName": "Leah"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/BreatheAcademy.groovy:381",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/BreatheAcademy.groovy:719",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

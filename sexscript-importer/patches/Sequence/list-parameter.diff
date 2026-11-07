@@ -1,0 +1,11 @@
+--- a/scripts/Sequence.groovy
++++ b/scripts/Sequence.groovy
+@@ -64,7 +64,7 @@
+ 	if (failPoints<0) {failPoints=0}
+ }
+ 
+-def updateNumbers={nums,change->
++def updateNumbers={List nums,change->
+ for (def i=1;i<=change;i++) {
+ 	nums=nums[1..4]
+ 	nums=nums+(nums.last()+5)

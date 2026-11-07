@@ -1,0 +1,12 @@
+# External legacy inputs are intentionally not stored in Git.
+external/
+*.jar
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# Local/generated importer output.
+dist/
+coverage/
+.tmp/

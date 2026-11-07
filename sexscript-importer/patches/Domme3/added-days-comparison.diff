@@ -1,0 +1,11 @@
+--- a/scripts/Domme3/ask.groovy
++++ b/scripts/Domme3/ask.groovy
+@@ -798,7 +798,7 @@
+ 							show("You have "+loadInteger("domme3.chastitydays")+" days now.")
+ 							wait(4)
+ 						}
+-						else if((added > 0) && (addedDays = added))
++						else if((added > 0) && (addedDays == added))
+ 						{
+ 							show("Good "+gender+". Honesty is expected of you at all times.")
+ 							save("domme3.chastitydays", current + addedDays)

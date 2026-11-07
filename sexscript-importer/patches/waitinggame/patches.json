@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "shock-test-loop-comparison",
+      "layer": "source",
+      "category": "e",
+      "reason": "The shock-test menu loops while (checkingLevel = true), an assignment where a comparison was meant: \"Done\" sets checkingLevel = false, which the assignment overwrote at the next test. It never showed in legacy only because the game started from \"Done\" ends with exit(). Compare with == in both language versions.",
+      "diff": "shock-test-loop-comparison.diff"
+    }
+  ]
+}

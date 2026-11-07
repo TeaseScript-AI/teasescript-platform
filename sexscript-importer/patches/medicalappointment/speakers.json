@@ -1,0 +1,12 @@
+{
+  "reason": "One unnamed character speaks every message: the nurse who runs the experiment (setInfos at scripts/medicalappointment.groovy:1 calls her 'the nurse'). She has no name anywhere in the package, so she is shown by her role.",
+  "speakers": {
+    "nurse": {
+      "title": "Nurse"
+    }
+  },
+  "default": "nurse",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

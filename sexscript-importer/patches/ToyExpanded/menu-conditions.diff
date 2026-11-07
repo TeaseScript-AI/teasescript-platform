@@ -1,0 +1,38 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -484,8 +484,10 @@
+ 		requestables.remove(name);
+ 	};
+ 	final execRequestables = {reqs ->
+-		reqs.add([ lbl: "...nevermind", act: null ]);
+-		def req = getSelectedValue(null, reqs.collect { it.lbl });
++		reqs = reqs + [[ lbl: "...nevermind", act: null ]];
++		def labels = [];
++		for (r in reqs) labels.add(r.lbl);
++		def req = getSelectedValue(null, labels);
+ 		def act = reqs[req].act;
+ 		if (act)
+ 			return act(reqs[req].arg);
+@@ -563,12 +565,16 @@
+ 						execEvents(false);
+ 					}
+ 					else {
+-						def opts = options.values().toList().findAll {
+-							it -> !it.cond || it.cond()
+-						};
+-						def reqs = requestables.values().toList().findAll {
+-							it -> !it.cond || it.cond()
+-						};
++						def opts = [];
++						for (o in options.values()) {
++							def cond = o.cond;
++							if (!cond || cond()) opts.add(o);
++						}
++						def reqs = [];
++						for (r in requestables.values()) {
++							def cond = r.cond;
++							if (!cond || cond()) reqs.add(r);
++						}
+ 						if (reqs.size() > 0) opts.push([ lbl:"May I...", act:{r -> execRequestables(r)}, arg:reqs ])
+ 						opts.add([ lbl: "Nothing...", act: null ]);
+ 						stateIs("DEBUG") ? show(DOMME) : speak(compose([["Yes", "What is it,", "What's up"], ["toy?"]]));

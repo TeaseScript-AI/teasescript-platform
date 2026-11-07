@@ -1,0 +1,47 @@
+--- a/scripts/Domme3/spanking.groovy
++++ b/scripts/Domme3/spanking.groovy
+@@ -284,8 +284,8 @@
+ 			show("Stand straight, bare your ass. \n\n"+
+ 				"Get ready for smacking.")
+ 			wait(3)
+-			show("Ready, Miss.")	
+-			wait(1)	
++			// SX_PLAYER_LINE: the player's own reply, a button (provisional).
++			showButton("Ready, Miss.")
+ 			Domme3.spank(this,"Alternating cheeks",30,1)
+ 			image()
+ 			show("Sure you have a pink ass now, have you?")
+@@ -302,8 +302,8 @@
+ 			showButton("Have it, Miss.")	
+ 			show("Bend over.\n\nBe ready for some more smacking.")		
+ 			wait(3)
+-			show("Ready, Miss.")	
+-			wait(1)	
++			// SX_PLAYER_LINE: the player's own reply, a button (provisional).
++			showButton("Ready, Miss.")
+ 			Domme3.spank(this,"Alternating cheeks. \n\nDon't hold back!",50,1)
+ 			image()
+ 			if(getBoolean("Have you been bad?")) {
+@@ -313,8 +313,8 @@
+ 				showButton("Have it, Miss.")	
+ 				show("Bend over.\n\nBe ready for more smacking.")		
+ 				wait(3)
+-				show("Ready, Miss.")	
+-				wait(1)	
++				// SX_PLAYER_LINE: the player's own reply, a button (provisional).
++				showButton("Ready, Miss.")
+ 				Domme3.spank(this,"Alternating cheeks as hard as you can. \n\n!Make sure your butt is sore.",30,1)	
+ 				image()
+ 				show("Well done!")
+--- a/scripts/Domme3/fun.groovy
++++ b/scripts/Domme3/fun.groovy
+@@ -490,7 +490,8 @@
+ 								}
+ 								show("Back to work!")
+ 								wait(7)
+-								show("Yes, Miss.")	
++								// SX_PLAYER_LINE: the player's own reply, a button (provisional).
++								showButton("Yes, Miss.")
+ 							}
+ 							else {
+ 								show("Too bad.\n\nThen no more masturbation for you!\n\nNext time, say yes!")

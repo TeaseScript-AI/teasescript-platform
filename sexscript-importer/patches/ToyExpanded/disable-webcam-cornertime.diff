@@ -1,0 +1,12 @@
+--- a/scripts/toy/misc.groovy
++++ b/scripts/toy/misc.groovy
+@@ -591,7 +591,8 @@
+ 						present([DRESSED,nTEASE], [
+ 								["Do you want to disable the webcam thing altogether and let me give you normal corner time?"]]);
+ 						if (getBooleanG(null)) {
+-							setProp("toys.${WEBCT}", true);
++							// Legacy bug: this enabled the webcam corner time it offers to disable (patch disable-webcam-cornertime).
++							setProp("toys.${WEBCT}", false);
+ 							present([DRESSED,nTEASE], [["OK, as you want!"]]);
+ 							pause(4);
+ 						}

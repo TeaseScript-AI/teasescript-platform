@@ -1,0 +1,13 @@
+--- a/scripts/trick_or_treat_poker.groovy
++++ b/scripts/trick_or_treat_poker.groovy
+@@ -541,6 +541,10 @@
+             break
+         }
+     }
++    // Legacy bug: the loop ends with dress_id = strip_to, one past the outfits it strips to (the clothes list when no
++    // "strip less" happened), so the image read clothes[size], null, and failed; the end shows the last outfit
++    // (patch last-outfit).
++    dress_id = Math.max( strip_to - 1, 0 )
+ 
+     set_mistress_image()
+     action_edge( [description: 'Edge for me!'])

@@ -1,0 +1,32 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -67,18 +67,17 @@
+ 	final SPANKING_IMPLEMENTS = [CROP, PADDLE, WHIP, SPOON, CANE, RULER, HAIRBRUSH];
+ 	final LEVELS = [TEASE, DENIAL, KINK];
+ 	final getDomme = { domme, set = null ->
+-		final readDomme = { path ->
+-			if (!path) return [:];
+-			final f = new File(path);
+-			if (!f.exists()) return [:];
+-			return Eval.me(f.text);
+-		};
+-		def d = [
+-			"$DATAFOLDER/images/toy/domme.groovy",
+-			"$DATAFOLDER/images/toy/$domme/person.groovy",
+-			"$DATAFOLDER/images/toy/$domme/$set/set.groovy" ]
+-				.collect { readDomme(it) }
+-				.sum();
++		def d = [:];
++		d.put('title', 'Mistress');
++		if (domme == 'ancilla') {
++			d.put('name', 'Ancilla');
++			d.put('fullName', 'Ancilla Tilia');
++		}
++		else if (domme == 'emily') {
++			d.put('name', 'Emily');
++			d.put('fullName', 'Emily Marilyn');
++			d.put('locale', 'en-US');
++		}
+ 		d.id = domme;
+ 		return d;
+ 	};

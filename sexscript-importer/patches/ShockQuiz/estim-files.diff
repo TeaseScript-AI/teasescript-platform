@@ -1,0 +1,27 @@
+--- a/scripts/ShockQuiz.groovy
++++ b/scripts/ShockQuiz.groovy
+@@ -43,14 +43,17 @@
+     List<String> fileNames = []
+     List<String> uniqueNames = []
+     File dir = new File("sounds/" + SOUNDSDIR)
+-    dir.traverse(type: groovy.io.FileType.FILES, maxDepth: 0) { file ->
+-        if (file.name.endsWith(EXT)) fileNames.add(file.name)
+-        String name = file.name.split('\\.')[0]
++    // The folder's own files, as traverse with maxDepth 0 went through them.
++    dir.eachFile { file ->
++        if (file.isFile()) {
++            if (file.name.endsWith(EXT)) fileNames.add(file.name)
++            String name = file.name.split('\\.')[0]
+ 
+-        List find = name.findAll('\\d+$')
+-        if (!find.isEmpty()) {
+-            if (find[0].isNumber()) {
+-                String uName = name.replaceAll('\\d+$', '')
++            // The name before the number it ends with, if it ends with one.
++            String uName = name
++            while (uName.length() > 0 && "0123456789".contains(uName.substring(uName.length() - 1)))
++                uName = uName.substring(0, uName.length() - 1)
++            if (uName != name) {
+                 if (!(uName in uniqueNames)) uniqueNames.add(uName)
+             }
+         }

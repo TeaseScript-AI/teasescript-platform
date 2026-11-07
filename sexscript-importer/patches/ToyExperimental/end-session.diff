@@ -1,0 +1,12 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -421,7 +421,9 @@
+ 						if (!cond || cond()) opts.add(r);
+ 					}
+ 					opts.push([ lbl: "Back", act: null ]);
++					opts.add([ lbl: "End session", act: null ]);
+ 					def opt = getSelectedValue("Yes, toy?", opts.collect { it.lbl });
++					if (opts[opt].lbl == "End session") return;
+ 					def act = opts[opt].act;
+ 					if (act)
+ 						act(opts[opt].arg);

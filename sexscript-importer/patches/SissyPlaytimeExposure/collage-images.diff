@@ -1,0 +1,21 @@
+--- a/scripts/sissyGame/sissyGameCollage.groovy
++++ b/scripts/sissyGame/sissyGameCollage.groovy
+@@ -189,14 +189,10 @@
+     def imageList = []
+     if(myProfile != null){
+     //Get Images
+-    imageList = myProfile.images.collect { getImage(it) }
+-
+-    // Convert array to list and shuffle
+-    def imageListAsList = imageList.toList()
+-    Collections.shuffle(imageListAsList)
+-
+-    // back to  array
+-    imageList = imageListAsList as String[]
++    //The collage only checks that every image code is set: the slideshow shows the profile's images themselves
++    for (code in myProfile.images) {
++        imageList.add(code)
++    }
+     }
+ 
+     def readyForCollage = true

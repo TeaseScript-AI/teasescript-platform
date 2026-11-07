@@ -1,0 +1,32 @@
+{
+  "patches": [
+    {
+      "id": "co02-image-name",
+      "layer": "source",
+      "category": "b",
+      "reason": "The second script shows mandys_blackmail/co2.jpg, which the image pack lacks; the pack carries short-name copies that are byte-identical to the zero-padded ones (co1 = co01, co3 = co03, co9 = co09), and co02.jpg exists. Use co02.jpg.",
+      "diff": "co02-image-name.diff"
+    },
+    {
+      "id": "hart-female-key",
+      "layer": "source",
+      "category": "e",
+      "reason": "The German script's \"hard enough\" button reads loadBoolean(\"Hart.female\"), a key nothing saves, so every player got the male button; every other gendered button in this script and its siblings reads intro.female, which the profile saves. Read intro.female.",
+      "diff": "hart-female-key.diff"
+    },
+    {
+      "id": "email-recheck",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): after the email question, an address that contains the player's name or first name gets \"Not yours!\" and one more getString, whose answer was not checked again, so a short or empty answer stopped the script at str_email[2] (V2 explorer: TSR025); and the name check read loadString(\"mandys_blackmail.firstname\"), missing where the player skipped that part, which Groovy failed on (null) and the conversion reads as \"\", which every address contains, so it always said \"Not yours!\". Evident intent: re-ask inside the same email validation, and compare with a name only when one is known. The patch repeats both checks until they pass and skips an unknown name, in Mandys_blackmail.groovy, Mandys_blackmail_ext.groovy, mandys_blackmail.groovy, and the German mandys_blackmail_de.groovy (its own TSR025 at mandys_blackmail_de.tease:370), which share the code.",
+      "diff": "email-recheck.diff"
+    },
+    {
+      "id": "public-picture",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the second script's main62 shows setImage(loadString(\"mandys_blackmail/public.jpg\")), the storage value under that path, which nothing saves, so it showed no picture; the other versions of the script show the photo saved as images/mandys_blackmail/public.jpg there with setImage(\"mandys_blackmail/public.jpg\"). Show that photo.",
+      "diff": "public-picture.diff"
+    }
+  ]
+}

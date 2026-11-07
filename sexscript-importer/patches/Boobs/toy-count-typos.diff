@@ -1,0 +1,29 @@
+--- a/scripts/Boobs.groovy
++++ b/scripts/Boobs.groovy
+@@ -603,7 +603,7 @@
+ 
+ case "Plug":
+ 	def tocount66 = 0
+-	if(loadBoolean("toys.butt_plug")==true) clcount66++
++	if(loadBoolean("toys.butt_plug")==true) tocount66++
+ 	if( tocount66==0) {
+ 		block="Spank"
+ 		break
+@@ -615,7 +615,7 @@
+ 
+ case "Gag":
+ 	def tocount67 = 0
+-	if(loadBoolean("toys.ball_gag")==true) clcount67++
++	if(loadBoolean("toys.ball_gag")==true) tocount67++
+ 	if( tocount67==0) {
+ 		block="Plug"
+ 		break
+@@ -658,7 +658,7 @@
+ 
+ case "Dildo":
+ 	def tocount71 = 0
+-	if(loadBoolean("toys.dildo")==true) clcount71++
++	if(loadBoolean("toys.dildo")==true) tocount71++
+ 	if( tocount71==0) {
+ 		block="Egg"
+ 		break

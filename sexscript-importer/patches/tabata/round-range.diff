@@ -1,0 +1,11 @@
+--- a/scripts/at-002/tabata.groovy
++++ b/scripts/at-002/tabata.groovy
+@@ -29,7 +29,7 @@
+ int lower = getInteger("Enter the min number of edgeing rounds", 10);
+ int upper = getInteger("Enter the max number of edgeing rounds", 30);
+ 
+-int rand_num = Math.abs( new Random().nextInt() % (upper-lower) ) + lower;
++int rand_num = upper > lower ? Math.abs( new Random().nextInt() % (upper-lower) ) + lower : lower;
+ 
+ 
+ 

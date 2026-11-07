@@ -1,0 +1,134 @@
+// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
+function sexscriptLegacyCall(action, args) {
+  if action == "clearPiles" {
+    clearPiles()
+    return
+  }
+  if action == "drop" {
+    drop()
+    return
+  }
+  if action == "shuffleOut" {
+    shuffleOut()
+    return
+  }
+}
+// Groovy lists are shared, so a change through a variable that took an element, or through a loop's item, changed
+// the list it came from; the element is read through its list (PainStacks' stacks, whose session never ended).
+let stacks = [
+  [
+    [false],
+    [false]
+  ],
+  [[false]]
+]
+function fill {
+  let colIndex = 0
+  let stackIndex = 0
+  let done = 0
+  while done < 2 {
+    stackIndex = colIndex
+    if stackIndex < 0 {
+      stackIndex = stacks.length + stackIndex
+    }
+    if stacks[stackIndex][stacks[stackIndex].length - 1][0] == true {
+      colIndex = (colIndex + 1) % stacks.length
+      continue
+    }
+    let row = 0
+    while stacks[stackIndex][row][0] == true {
+      row += 1
+    }
+    stacks[stackIndex][row][0] = true
+    if stacks[stackIndex][stacks[stackIndex].length - 1][0] == true {
+      done += 1
+    }
+  }
+  say prose "Done ${done}", instant
+}
+fill()
+for stIndex in 0..stacks.length {
+  stacks[stIndex].add([true])
+}
+say prose "Rows ${stacks[0].length} ${stacks[1].length}", instant
+for stIndex2 in 0..stacks.length {
+  stacks[stIndex2][0][0] = false
+}
+say prose "First ${stacks[0][0][0]} ${stacks[1][0][0]}", instant
+// A position that may be -1 counted from the end (PainStacks' unfair pick).
+let unfairColumn = -1
+function pick {
+  let column = 0
+  let pickedIndex = 0
+  column = unfairColumn
+  pickedIndex = column
+  if pickedIndex < 0 {
+    pickedIndex = stacks.length + pickedIndex
+  }
+  stacks[pickedIndex][0][0] = true
+}
+pick()
+say prose "Last first ${stacks[1][0][0]}", instant
+// A position computed from the end counts from there too.
+let cells = [
+  [0],
+  [5]
+]
+let lastCellIndex = cells.length - 3
+if lastCellIndex < 0 {
+  lastCellIndex = cells.length + lastCellIndex
+}
+cells[lastCellIndex][0] = 1
+say prose "Cells ${cells[0][0]} ${cells[1][0]}", instant
+// A compound change through the element is written out, and a push goes to the element as it is.
+let counts = [[5]]
+let countIndex = 0
+// NOTE SX_PLUS_OPERAND_TYPE line 45: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+while counts[countIndex][0] < 6 {
+  counts[countIndex][0] = counts[countIndex][0] + 1
+}
+let queue = [[5, 2]]
+let waiting = queue[0]
+// NOTE SX_SHARED_LIST_WRITE line 48: Groovy shared the list in waiting with the variable, list element, or field it was assigned from, so this change affected that place too; in TeaseScript waiting holds a separate copy (ADR 0014).
+waiting = [7] + waiting
+// NOTE SX_LIST_JOIN line 49: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say prose "Counts ${counts[0][0]} ${waiting.join(",")}", instant
+// A list whose slot the script replaces leaves the element taken before out of it.
+let slots = [[0]]
+let held = slots[0]
+slots[0] = [5]
+held[0] = 1
+say prose "Slots ${slots[0][0]} ${held[0]}", instant
+// A closure that empties the list, called through another name or a map, leaves the element taken before out of it.
+let cards = [[0]]
+function drop {
+  cards.clear()
+}
+let dropAll = "drop"
+let held2 = cards[0]
+sexscriptLegacyCall(dropAll, [])
+held2[0] = 1
+say prose "Held ${held2[0]}", instant
+// So does one called through a closure in a map, or returned by another closure.
+let decks = [[0]]
+function shuffleOut {
+  decks.clear()
+}
+let handlers = { drop: "shuffleOut" }
+let kept = decks[0]
+sexscriptLegacyCall(handlers.drop, [])
+kept[0] = 1
+say prose "Kept ${kept[0]}", instant
+let piles = [[0]]
+function clearPiles {
+  piles.clear()
+}
+function forward {
+  return "clearPiles"
+}
+let callClear = forward()
+let top = piles[0]
+sexscriptLegacyCall(callClear, [])
+top[0] = 1
+say prose "Top ${top[0]}", instant
+exit

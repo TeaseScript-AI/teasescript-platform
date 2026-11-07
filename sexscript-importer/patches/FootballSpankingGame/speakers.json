@@ -1,0 +1,72 @@
+{
+  "reason": "A cheerleader picked at random from eight (variable cheerleader, introduced as \"<title> <name>\", e.g. Princess Jill) hosts the whole game: set-up, play-by-play questions, spanking orders, the final thrashing and the goodbye. When a solo player's team wins, she hands over to her friend the reward leader (variable rewardLeader, one of five), who speaks the whole reward show; the cheerleader returns for the closing lines. The title screen is a system screen.",
+  "speakers": {
+    "cheerleader": {
+      "displayName": "Cheerleader"
+    },
+    "rewardLeader": {
+      "displayName": "Reward Leader"
+    }
+  },
+  "default": "cheerleader",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/FootballSpankingGame.groovy:start",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/FootballSpankingGame.groovy:cheerleaderEnter",
+      "speaker": "cheerleader"
+    },
+    {
+      "at": "scripts/FootballSpankingGame.groovy:2192",
+      "speaker": "rewardLeader"
+    },
+    {
+      "after": "scripts/FootballSpankingGame.groovy:2844",
+      "speaker": "cheerleader"
+    }
+  ],
+  "names": [
+    {
+      "variable": "cheerleader",
+      "files": [
+        "scripts/FootballSpankingGame.groovy"
+      ],
+      "speaker": "cheerleader",
+      "values": {
+        "Abby": "Miss Abby",
+        "Elsa": "Miss Elsa",
+        "Gina": "Lady Gina",
+        "Jill": "Princess Jill",
+        "Jynx": "Diva Jynx",
+        "Peta": "Diva Peta",
+        "Samantha": "Miss Samantha",
+        "Sarah": "Princess Sarah"
+      },
+      "otherwise": "Cheerleader",
+      "except": [
+        "scripts/FootballSpankingGame.groovy:783"
+      ]
+    },
+    {
+      "variable": "rewardLeader",
+      "files": [
+        "scripts/FootballSpankingGame.groovy"
+      ],
+      "speaker": "rewardLeader",
+      "values": {
+        "Amy": "Amy",
+        "Brenda": "Brenda",
+        "Jen": "Jen",
+        "Kim": "Kim",
+        "Lisa": "Lisa"
+      },
+      "otherwise": "Reward Leader",
+      "except": [
+        "scripts/FootballSpankingGame.groovy:3071"
+      ]
+    }
+  ]
+}

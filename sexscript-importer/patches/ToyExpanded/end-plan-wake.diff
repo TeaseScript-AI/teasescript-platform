@@ -1,0 +1,11 @@
+--- a/scripts/toy/social.groovy
++++ b/scripts/toy/social.groovy
+@@ -131,7 +131,7 @@
+ 	};
+ 
+ 	toy.metaClass.endPlan { rt, plan, arg ->
+-		def sleep = !arg[0] && arg.waketime; //update: arg may be the friend's name
++		def sleep = arg.waketime ? true : false;
+ 		setAway(null);
+ 		if (rt && sessionSummon([DRESSED])) {
+ 			def planName = (plan in [GYM, PARTY]?"the ":"") + plan;

@@ -1,0 +1,22 @@
+--- a/scripts/Boobs.groovy
++++ b/scripts/Boobs.groovy
+@@ -603,7 +603,8 @@
+ 
+ case "Plug":
+ 	def tocount66 = 0
+-	if(loadBoolean("toys.butt_plug")==true) tocount66++
++	// Legacy bug: the toy chest saves the butt plug as toys.buttplug (patch toy-keys).
++	if(loadBoolean("toys.buttplug")==true) tocount66++
+ 	if( tocount66==0) {
+ 		block="Spank"
+ 		break
+@@ -615,7 +616,8 @@
+ 
+ case "Gag":
+ 	def tocount67 = 0
+-	if(loadBoolean("toys.ball_gag")==true) tocount67++
++	// Legacy bug: the toy chest saves the ball gag as toys.ballgag (patch toy-keys).
++	if(loadBoolean("toys.ballgag")==true) tocount67++
+ 	if( tocount67==0) {
+ 		block="Plug"
+ 		break

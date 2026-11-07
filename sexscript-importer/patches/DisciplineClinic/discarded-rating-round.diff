@@ -1,0 +1,11 @@
+--- a/scripts/DCAfterDark/DCAfterDarkMain.groovy
++++ b/scripts/DCAfterDark/DCAfterDarkMain.groovy
+@@ -1263,7 +1263,7 @@
+ 		returnArray = calculateSceneRating()
+ 		aveRating = returnArray[0]
+ 		numRatings = returnArray[1]
+-		aveRating.round(2)
++//		aveRating.round(2)
+ 
+ 		if (numRatings < sessionActivitiesArray.size() - 2) dialog = dialog + "(Not enough activities rated to generate scene rating)\n"
+ 		else dialog = dialog + "Your rating = "+String.format("%5.2f", aveRating)+"/5.00\n"

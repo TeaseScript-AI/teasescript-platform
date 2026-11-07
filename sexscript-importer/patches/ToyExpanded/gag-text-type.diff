@@ -1,0 +1,11 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -326,7 +326,7 @@
+ 		return true;
+ 	}
+ 	
+-	final gagText = { t, p ->
++	final gagText = { String t, p ->
+ 		if (!stateIs(GAGGED)) return t.toString();
+ 		if (findStateToy(GAGGED) in [RINGGAG, BITGAG]) {
+ 			def CONSONANTS = ["B", "C", "D", "F", "G", "H", "J", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "X", "Z"]

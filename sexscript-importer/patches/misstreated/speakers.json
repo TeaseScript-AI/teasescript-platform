@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Miss Treated (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Miss",
+      "firstName": "Treated"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

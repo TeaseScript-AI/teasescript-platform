@@ -1,0 +1,68 @@
+{
+  "reason": "A feature demo. Its opening lines describe the demo itself (system text); then the two picture models speak in the first person under their own pictures: the default male (\"I'm strong!\", \"And I'm the default male.\") and the default female (\"Hello! I'm the default female!\"), who then hosts the rest of the demo, also after the two background-colour restarts. The file dialog and the timer displays are system text.",
+  "speakers": {
+    "female": {
+      "displayName": "Default Female"
+    },
+    "male": {
+      "displayName": "Default Male"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/advancedexample.groovy:273",
+      "speaker": "male"
+    },
+    {
+      "at": "scripts/advancedexample.groovy:282",
+      "speaker": "female"
+    },
+    {
+      "at": "scripts/advancedexample.groovy:287",
+      "speaker": "male"
+    },
+    {
+      "at": "scripts/advancedexample.groovy:292",
+      "speaker": "female"
+    },
+    {
+      "function": "scripts/advancedexample.groovy:saveUserPicture",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/advancedexample.groovy:306",
+      "speaker": "female"
+    },
+    {
+      "at": "scripts/advancedexample.groovy:329",
+      "speaker": "female"
+    },
+    {
+      "at": "scripts/advancedexample.groovy:353",
+      "speaker": "female"
+    },
+    {
+      "at": "scripts/advancedexample.groovy:373",
+      "speaker": "female"
+    },
+    {
+      "function": "scripts/advancedexample.groovy:waitWithCount",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/advancedexample.groovy:379",
+      "speaker": "female"
+    },
+    {
+      "function": "scripts/advancedexample.groovy:waitWithCountDown",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/advancedexample.groovy:384",
+      "speaker": "female"
+    }
+  ],
+  "names": []
+}

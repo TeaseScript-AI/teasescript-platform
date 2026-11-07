@@ -1,0 +1,13 @@
+--- a/scripts/Mandys_blackmail2.groovy
++++ b/scripts/Mandys_blackmail2.groovy
+@@ -1076,7 +1076,9 @@
+ 	break
+ 
+ case "main62":
+-	setImage(loadString("mandys_blackmail/public.jpg"))
++	// Legacy bug: the picture is the photo saved as images/mandys_blackmail/public.jpg, as the other versions show it
++	// (patch public-picture).
++	setImage("mandys_blackmail/public.jpg")
+ 	show("Gosh.. still can't believe you actually did that!")
+ 	wait(10)
+ 	block = "main63"

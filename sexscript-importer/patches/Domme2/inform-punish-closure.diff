@@ -1,0 +1,22 @@
+--- a/scripts/Domme2/inform.groovy
++++ b/scripts/Domme2/inform.groovy
+@@ -10,6 +10,19 @@
+ def endReached = false
+ if(load("domme2.dommepack")==null) save("domme2.dommepack", 0);
+ 
++def punish = { i
++			->
++			def p = 0
++			if(load("domme2.punish")==null)
++			p=0
++			else
++			p = loadInteger("domme2.punish")
++			(1..i).each {
++			p++
++			}
++			save("domme2.punish",p)
++}
++
+ def percentChance = { percent ->
+    switch(getRandom(100)){
+       case 0..percent:

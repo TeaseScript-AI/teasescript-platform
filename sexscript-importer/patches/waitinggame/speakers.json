@@ -1,0 +1,44 @@
+{
+  "reason": "One woman speaks the story: the mistress the player picked in Settings (model \"n\" = Natasha Bell, the default, or \"v\" = Veselin), recognised from her story pictures (n/vintro2 onward); the menus, setup tutorial and narration before them are out-of-story text with no speaker.",
+  "speakers": {
+    "mistress": {
+      "firstName": "Natasha",
+      "lastName": "Bell"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "image": "waitinggame/nintro2",
+      "speaker": "mistress"
+    },
+    {
+      "image": "waitinggame/vintro2",
+      "speaker": "mistress"
+    },
+    {
+      "image": "waitinggame_de/nintro2",
+      "speaker": "mistress"
+    },
+    {
+      "image": "waitinggame_de/vintro2",
+      "speaker": "mistress"
+    }
+  ],
+  "names": [
+    {
+      "variable": "model",
+      "files": [
+        "scripts/waitinggame.groovy",
+        "scripts/waitinggame_de.groovy"
+      ],
+      "speaker": "mistress",
+      "values": {
+        "n": "Natasha Bell",
+        "v": "Veselin"
+      },
+      "otherwise": "Natasha Bell"
+    }
+  ]
+}

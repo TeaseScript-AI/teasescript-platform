@@ -1,0 +1,22 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -124,7 +124,18 @@
+ 	final loadI = "loadInteger";
+ 	final loadS = "loadString";
+ 	void setProp(String i, Object v) { save("toy.$i".toString(), v) }
+-	boolean has(String i) { loadBoolean("toys.$i") == true }
++	boolean has(String i) {
++		// The toys this script asks about, read by their own keys.
++		switch (i) {
++			case BALLGAG: return loadBoolean("toys.ballgag") == true
++			case CHASTITY: return loadBoolean("toys.chastity_belt") == true
++			case DILDO: return loadBoolean("toys.dildo") == true
++			case COLLAR: return loadBoolean("toys.dog_collar") == true
++			case HANDCUFFS: return loadBoolean("toys.handcuffs") == true
++			case CLAMPS: return loadBoolean("toys.nipple_clamps") == true
++		}
++		return loadBoolean("toys.$i") == true
++	}
+ 	boolean likes(String i) { loadBoolean("fetish.$i") == true }
+ 	boolean can(String i) { loadBoolean("toy.permission.$i") == true }
+ 	boolean perm(String i) { can(i) }

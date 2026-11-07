@@ -1,0 +1,12 @@
+{
+  "reason": "One named character, Anna (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Anna"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

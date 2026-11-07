@@ -1,0 +1,63 @@
+{
+  "reason": "One Mistress plays the guessing game; the player picks her on a profile screen from doms.json (Alexis or Miss D), and her name is the variable domName (\"Hi. I am ${domName}.\"). The profile picker, the e-stim test menu, the sound-preparing counter, debug output and the separate PainWaveGen tool are system screens.",
+  "speakers": {
+    "mistress": {
+      "title": "Miss",
+      "firstName": "D"
+    }
+  },
+  "default": "mistress",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/GuessMyNumber.groovy",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/GuessMyNumber.groovy:1451",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/GuessMyNumber.groovy:164",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/GuessMyNumber.groovy:206",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/GuessMyNumber.groovy:749",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/GuessMyNumber.groovy:749",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/GuessMyNumber.groovy:816",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/GuessMyNumber.groovy:1276",
+      "speaker": "mistress"
+    },
+    {
+      "entry": "scripts/PainWaveGen.groovy",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "variable": "domName",
+      "files": [
+        "scripts/GuessMyNumber.groovy"
+      ],
+      "speaker": "mistress",
+      "values": {
+        "Alexis": "Alexis",
+        "Miss D": "Miss D"
+      },
+      "otherwise": "Mistress"
+    }
+  ]
+}

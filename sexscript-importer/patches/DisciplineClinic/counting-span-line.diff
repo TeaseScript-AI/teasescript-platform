@@ -1,0 +1,25 @@
+--- a/scripts/DisciplineClinic/Punish.groovy
++++ b/scripts/DisciplineClinic/Punish.groovy
+@@ -3994,6 +3994,7 @@
+ 
+ 	def deltaTempo = 1
+ 	def dots = "\n\n....... "
++	def keepCounting = ""
+ 	def spankTypeChance = getRandom(100)
+ 	
+ 	if (eyesForward) {
+@@ -4213,12 +4214,12 @@
+ 			//Switch back to cheek during long series
+ 			if ((spanks > maxLongSpank) && (tempSpankCount == longSpankSwitch)){
+ 				dialog = "Center cheek, Alternate sides"
+-				if (counting) dialog = dialog + "\nKeep counting!\n"
++				if (counting) keepCounting = "\n<font size='10'><b>Keep counting!</b></font>\n"
+ 				message = "<font size='10'><b>"+dialog+"</b></font>"
+ 			}
+ 		}
+ 		//Show message and play sound for this spank
+-		if (counting) show("<font size='10'><b>"+message+"</b></font>")
++		if (counting) show("<font size='10'><b>"+message+"</b></font>"+keepCounting)
+ 		else show("<font size='10'><b>"+message+"\n."+tempSpankCount+".</b></font>")
+ 		
+ 		playBackgroundSound("DisciplinePack/"+spankSound+(1+getRandom(spankSoundLimit))+".wav")

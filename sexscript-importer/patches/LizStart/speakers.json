@@ -1,0 +1,152 @@
+{
+  "reason": "Liz, the girl from the pub who turns out to be the boss's daughter, speaks the date and every game (cards, dancing, push-ups); the Boss speaks his office scenes (002Start, 100End); short scene-setting lines are narration; title, toy check, game menu, score lines and THE END have no speaker. Recognised by file and by per-line switches, since the author shows text before setting the picture.",
+  "speakers": {
+    "liz": {
+      "firstName": "Liz"
+    },
+    "boss": {
+      "displayName": "Boss"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/Lizforall/game/001Start.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Lizforall/game/001Start.groovy:123",
+      "speaker": "liz"
+    },
+    {
+      "at": "scripts/Lizforall/game/001Start.groovy:127",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Lizforall/game/001Start.groovy:131",
+      "speaker": "liz"
+    },
+    {
+      "entry": "scripts/Lizforall/game/002Start.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Lizforall/game/002Start.groovy:12",
+      "speaker": "boss"
+    },
+    {
+      "at": "scripts/Lizforall/game/002Start.groovy:44",
+      "speaker": "liz"
+    },
+    {
+      "at": "scripts/Lizforall/game/002Start.groovy:53",
+      "speaker": "boss"
+    },
+    {
+      "at": "scripts/Lizforall/game/002Start.groovy:63",
+      "speaker": "liz"
+    },
+    {
+      "entry": "scripts/Lizforall/game/Cards.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Lizforall/game/Cards.groovy:19",
+      "speaker": "liz"
+    },
+    {
+      "at": "scripts/Lizforall/game/Cards.groovy:55",
+      "speaker": "liz"
+    },
+    {
+      "at": "scripts/Lizforall/game/Cards.groovy:215",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Lizforall/game/Cards.groovy:226",
+      "speaker": "liz"
+    },
+    {
+      "entry": "scripts/Lizforall/game/Ballo.groovy",
+      "speaker": "liz"
+    },
+    {
+      "entry": "scripts/Lizforall/game/Ballo02.groovy",
+      "speaker": "liz"
+    },
+    {
+      "entry": "scripts/Lizforall/game/Flex.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Lizforall/game/Flex.groovy:18",
+      "speaker": "liz"
+    },
+    {
+      "entry": "scripts/Lizforall/game/single/Cards.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Lizforall/game/single/Cards.groovy:19",
+      "speaker": "liz"
+    },
+    {
+      "at": "scripts/Lizforall/game/single/Cards.groovy:55",
+      "speaker": "liz"
+    },
+    {
+      "at": "scripts/Lizforall/game/single/Cards.groovy:215",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Lizforall/game/single/Cards.groovy:226",
+      "speaker": "liz"
+    },
+    {
+      "entry": "scripts/Lizforall/game/single/Ballo.groovy",
+      "speaker": "liz"
+    },
+    {
+      "entry": "scripts/Lizforall/game/single/Ballo02.groovy",
+      "speaker": "liz"
+    },
+    {
+      "entry": "scripts/Lizforall/game/single/Flex.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Lizforall/game/single/Flex.groovy:18",
+      "speaker": "liz"
+    },
+    {
+      "entry": "scripts/Lizforall/game/single/gamechoose.groovy",
+      "speaker": "liz"
+    },
+    {
+      "at": "scripts/Lizforall/game/single/gamechoose.groovy:35",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Lizforall/game/100End.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Lizforall/game/100End.groovy:14",
+      "speaker": "boss"
+    },
+    {
+      "at": "scripts/Lizforall/game/100End.groovy:34",
+      "speaker": "liz"
+    },
+    {
+      "at": "scripts/Lizforall/game/100End.groovy:47",
+      "speaker": "boss"
+    },
+    {
+      "at": "scripts/Lizforall/game/100End.groovy:62",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

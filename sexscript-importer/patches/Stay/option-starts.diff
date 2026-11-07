@@ -1,0 +1,13 @@
+--- a/scripts/TheSnowyOwl/Stay.groovy
++++ b/scripts/TheSnowyOwl/Stay.groovy
+@@ -502,8 +502,8 @@
+ def underware=false
+ def optall=true
+ def optplus
+-def optenh
+-def optrep
++def optenh=false
++def optrep=false
+ def optrep2
+ 
+ def setmin

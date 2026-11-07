@@ -1,0 +1,293 @@
+{
+  "reason": "A narrated party story: narration in the second person, setup menus as system. Two kinds of character speak in single-quoted lines inside narration (a mixed message goes to the character): the hostess, a guest chosen at run time (variable host), under her picture in the intro, warmup, draw, round and goodbye speeches; and the guest who is currently spanking or welcoming a player (spankSpanker in the spanking scenes, welcomer in the invitation matching, p1spanker in the solo draw summary).",
+  "speakers": {
+    "host": {
+      "displayName": "Hostess"
+    },
+    "guest": {
+      "displayName": "Guest"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/system/implements.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/DLC/spankcore.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/DLC/spankparty-pp00.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/DLC/spankparty-pp01.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/DLC/spankparty-pp02.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/DLC/spankparty-pp03.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:showToybox",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:playersDraw",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:1231",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:1233",
+      "speaker": "guest"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:guestarrival",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:welcomeMeet",
+      "speaker": "guest"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:welcomeCheck",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:1437",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:startIntro",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:1490",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:1496",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:1498",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:warmupIntro",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:1611",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:warmupReady",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:warmupRotate",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:1755",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:warmupOutro",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:warmupEnd",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:drawbegins",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:1806",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:anotherRound",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:1838",
+      "speaker": "host"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:roundsOver",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:partyEnd",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:1863",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:getSpanked",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:1950",
+      "speaker": "guest"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2089",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2096",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2103",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2110",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2117",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2127",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:getWarmup",
+      "speaker": "guest"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2186",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2193",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2200",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2207",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2214",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2224",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:getGoodbye",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2265",
+      "speaker": "guest"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:selectGoodbye",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/spankparty.groovy:goodbyeIntro",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2341",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2345",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2362",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2366",
+      "speaker": "host"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2401",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2416",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2429",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2440",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2449",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/spankparty.groovy:2455",
+      "speaker": "narrator"
+    }
+  ],
+  "names": [
+    {
+      "variable": "host",
+      "files": [
+        "scripts/Banjo/spankparty.groovy"
+      ],
+      "speaker": "host",
+      "template": "{}"
+    },
+    {
+      "variable": "spankSpanker",
+      "files": [
+        "scripts/Banjo/spankparty.groovy"
+      ],
+      "speaker": "guest",
+      "template": "{}"
+    },
+    {
+      "variable": "welcomer",
+      "files": [
+        "scripts/Banjo/spankparty.groovy"
+      ],
+      "speaker": "guest",
+      "template": "{}"
+    },
+    {
+      "variable": "p1spanker",
+      "files": [
+        "scripts/Banjo/spankparty.groovy"
+      ],
+      "speaker": "guest",
+      "template": "{}"
+    }
+  ]
+}

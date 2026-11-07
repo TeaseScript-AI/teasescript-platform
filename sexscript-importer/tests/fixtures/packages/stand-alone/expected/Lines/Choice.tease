@@ -1,0 +1,2 @@
+say prose "Write your lines.", instant
+exit

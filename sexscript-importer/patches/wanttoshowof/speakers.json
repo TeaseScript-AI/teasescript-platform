@@ -1,0 +1,26 @@
+{
+  "reason": "One named character, Miss Tasha (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Miss",
+      "firstName": "Tasha"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/wanttoshowof.groovy:8",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/wanttoshowof.groovy:12",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/wanttoshowof.groovy:16",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

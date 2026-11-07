@@ -1,0 +1,93 @@
+{
+  "reason": "Three women of a web-series crew take turns: the producer Crystal, the spanker Alexis and the camerawoman Naomi; every line follows a setImage of that woman's own picture (producer-, domme-, cameragirl-). Viewer comments come from anonymous viewers; narration, menus, settings and score screens have no speaker.",
+  "speakers": {
+    "crystal": {
+      "firstName": "Crystal",
+      "displayName": "Producer"
+    },
+    "alexis": {
+      "firstName": "Alexis",
+      "displayName": "Mistress"
+    },
+    "naomi": {
+      "firstName": "Naomi"
+    },
+    "viewer": {
+      "displayName": "Viewer"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "image": "smackedforcash/producer-",
+      "speaker": "crystal"
+    },
+    {
+      "image": "smackedforcash/domme-",
+      "speaker": "alexis"
+    },
+    {
+      "image": "smackedforcash/cameragirl-",
+      "speaker": "naomi"
+    },
+    {
+      "image": "smackedforcash/location-",
+      "speaker": "narrator"
+    },
+    {
+      "image": "smackedforcash/camera.jpg",
+      "speaker": "system"
+    },
+    {
+      "image": "smackedforcash/connect.jpg",
+      "speaker": "system"
+    },
+    {
+      "image": "smackedforcash/title.jpg",
+      "speaker": "system"
+    },
+    {
+      "image": "smackedforcash/money.jpg",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/smackedforcash.groovy:599",
+      "speaker": "crystal"
+    },
+    {
+      "at": "scripts/Banjo/smackedforcash.groovy:949",
+      "speaker": "viewer"
+    },
+    {
+      "at": "scripts/Banjo/smackedforcash.groovy:954",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/system/implements.groovy",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "after": [
+        "scripts/Banjo/smackedforcash.groovy:616"
+      ],
+      "files": [
+        "scripts/Banjo/smackedforcash.groovy"
+      ],
+      "speaker": "crystal",
+      "template": "Crystal"
+    },
+    {
+      "after": [
+        "scripts/Banjo/smackedforcash.groovy:624"
+      ],
+      "files": [
+        "scripts/Banjo/smackedforcash.groovy"
+      ],
+      "speaker": "alexis",
+      "template": "Alexis"
+    }
+  ]
+}

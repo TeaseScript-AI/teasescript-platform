@@ -1,0 +1,48 @@
+speaker system {
+  title: "System"
+}
+function sexscriptLegacyAskProfile {
+  if load("intro.name", default: "") == "" {
+    save (askText as system ("What is your name?", prefill: "Slave").replace("\n", " ")) as "intro.name"
+  }
+  let savedFemale: boolean? = load "intro.female", default: null
+  if savedFemale == null {
+    save (askBoolean as system "Are you a woman ?") as "intro.female"
+  }
+  player.firstName = load "intro.name", default: ""
+  if load("intro.female", default: null) == true {
+    player.gender = "female"
+  } else {
+    player.gender = "male"
+  }
+  let profileToysFields = dict{}
+  let profileToysIndex = 0
+  for profileToysKey in ["toys.clothespins"] {
+    if load(profileToysKey, default: null) == null {
+      profileToysFields[profileToysKey] = { value: false, text: ["clothespins"][profileToysIndex] }
+    }
+    profileToysIndex += 1
+  }
+  if profileToysFields.length > 0 {
+    let profileToysAnswers = askForm as system "What do you have in your toy chest ?", fields: profileToysFields
+    for profileToysKey in profileToysAnswers {
+      save profileToysAnswers[profileToysKey] as profileToysKey
+    }
+  }
+}
+// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (intro.female, intro.name, toys.clothespins) once; this package asks what is missing and saves it under the same keys; storage is per package, so each package asks once.
+sexscriptLegacyAskProfile()
+// Player settings read under another distribution's keys take the profile's: user.* from other menus (EarnYourOrgasmGame,
+// DareOTK), the gender term as the player's (DW_intro), and the toy chest's clothespins under its old name (Helldate).
+if load("intro.female", default: false) {
+  say prose "Hello, lady.", instant
+}
+let name = load "intro.name", default: ""
+if name != "" {
+  say prose "Hi ${name}", instant
+}
+say prose "You need a punishment, ${player.boyGirl}.", instant
+if load("toys.clothespins", default: false) {
+  say prose "Fetch your clothespins.", instant
+}
+exit

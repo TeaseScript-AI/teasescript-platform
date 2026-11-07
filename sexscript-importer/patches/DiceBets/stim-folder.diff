@@ -1,0 +1,13 @@
+--- a/scripts/DiceBets.groovy
++++ b/scripts/DiceBets.groovy
+@@ -903,7 +903,9 @@
+     }
+ 
+     def soundlist = []
+-    def dh = new File(currentFolder)
++    // Every call passes eStimSound, whose folder the package holds, so the walk goes through that folder: the conversion
++    // lists a walked folder only where the script fixes its path (patch stim-folder).
++    def dh = new File("sounds/" + eStimSound)
+     dh.eachFile {
+         if (it.name.endsWith('.wav')) {
+ 

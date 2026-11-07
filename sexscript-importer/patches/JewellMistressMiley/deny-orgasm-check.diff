@@ -1,0 +1,11 @@
+--- a/scripts/jewell/cumExact.groovy
++++ b/scripts/jewell/cumExact.groovy
+@@ -138,7 +138,7 @@
+ 	break
+ 
+ case "pickdick":
+-	if(true==loadInteger("Jewell.deny_Orgasm") && loadInteger("Jewell.deny_Orgasm")>getTime()) {
++	if(loadInteger("jewell.deny_Orgasm")!=null && loadInteger("jewell.deny_Orgasm")>getTime()) {
+ 		block="pickdickfail"
+ 		break
+ 	}

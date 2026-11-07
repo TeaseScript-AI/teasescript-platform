@@ -1,0 +1,29 @@
+--- a/scripts/sexscriptcardgameexample.groovy
++++ b/scripts/sexscriptcardgameexample.groovy
+@@ -75,7 +75,7 @@
+     int pointSum = 0
+     cardDeck.each { card ->
+         // card[0] is the first character and the rank of the card string
+-        pointSum += CARD_POINT_VALUES[card[0]]
++        pointSum += CARD_POINT_VALUES[card.substring(0, 1)]
+     }
+  
+     return pointSum
+@@ -86,7 +86,7 @@
+  
+     // card[0] is the first character and the rank
+     // card[1] is the second character and the suit
+-    return RANKS[card[0]] + " of " + SUITS[card[1]]
++    return RANKS[card.substring(0, 1)] + " of " + SUITS[card.substring(1, 2)]
+ }
+  
+ def showHands = {
+@@ -174,7 +174,7 @@
+  
+  
+     // check if ranks or suits are in a deck:
+-    show("is one or more Ace in deck ${deckA}: ${deckA.any { card -> card[0] == "A" }}" +
++    show("is one or more Ace in deck ${deckA}: ${deckA.any { card -> card.substring(0, 1) == "A" }}" +
+             "\n\nis one or more Ace in deck ${deckB}: ${deckB.any { card -> card[0] == "A" }}" +
+             "\n\nis one or more Hearts in deck ${deckA}: ${deckA.any { card -> card[1] == "H" }}" +
+             "\n\nis one or more Hearts in deck ${deckB}: ${deckB.any { card -> card[1] == "H" }}")

@@ -1,0 +1,161 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -366,6 +366,7 @@
+ 		OWNER = loadString("toy.owner");
+ 		loadDomme(OWNER);
+ 		def moduleSetup = loadModules(this);
++		chooseStart();
+ 		setDefault("toy.punishment", 0);
+ 		execEvents(false);
+ 		moduleSetup.each { p -> p() };
+--- a/scripts/toy/imagery.groovy
++++ b/scripts/toy/imagery.groovy
+@@ -31,7 +31,41 @@
+ 			};
+ 	}();
+ 
++	toy.metaClass.mistresses {
++		def names = [];
++		for (domme in IMAGEDATA.keySet()) {
++			if (!outfitSets(domme).isEmpty()) names.add(domme);
++		}
++		return names;
++	};
++
++	toy.metaClass.outfitSets { domme ->
++		def sets = [];
++		if (IMAGEDATA.containsKey(domme)) {
++			for (set in IMAGEDATA[domme].sets.keySet()) sets.add(set);
++		}
++		return sets;
++	};
++
++	toy.metaClass.outfitPreview { domme, set ->
++		final images = IMAGEDATA[domme].sets[set].images;
++		if (images == null || images.isEmpty()) return;
++		def preview = images[0].image;
++		for (image in images) {
++			if (image.tags.contains(DRESSED) && image.tags.contains(STOOD)) {
++				preview = image.image;
++				break;
++			}
++		}
++		setImage("toy/$domme/$set/${preview}.jpg");
++	};
++
++	toy.metaClass.outfitEnabled { domme, set ->
++		return loadBoolean("toy.outfits.$domme.$set") != false;
++	};
++
+ 	toy.metaClass.selectImage { domme, set, spec ->
++		if (!outfitEnabled(domme, set)) return null;
+ 		def matches = IMAGEDATA[domme];
+ 		if (!matches) return null;
+ 		matches = matches.sets[set];
+@@ -62,7 +96,7 @@
+ 	toy.metaClass.selectImageSet { domme, specs ->
+ 		def matches = IMAGEDATA[domme];
+ 		if (!matches) return null;
+-		matches = matches.sets.values().findAll({ s -> specs.every({ spec -> selectImage(domme, s.set, spec)})});
++		matches = matches.sets.values().findAll({ s -> outfitEnabled(domme, s.set) && specs.every({ spec -> selectImage(domme, s.set, spec)})});
+ 		return matches[getRandom(matches.size())];
+ 	};
+ 
+@@ -115,7 +149,7 @@
+ 			def prev = IMAGEDATA[DOMME.id];
+ 			if (prev) {
+ 				prev = prev.sets[outfit];
+-				if (prev && specs.every({ spec -> selectImage(DOMME.id, prev.set, spec)})) {
++				if (prev && outfitEnabled(DOMME.id, outfit) && specs.every({ spec -> selectImage(DOMME.id, prev.set, spec)})) {
+ 					loadDomme(DOMME.id, outfit);
+ 					return outfit;
+ 				}
+--- /dev/null
++++ b/scripts/toy/chooser.groovy
+@@ -0,0 +1,86 @@
++{ toy ->
++	toy.metaClass.chooseStart {
++		while (true) {
++			showLounge();
++			final action = getSelectedValue("Your mistress: ${DOMME.fullName}", ["Start", "Change mistress", "Outfits"]);
++			if (action == 0) return;
++			if (action == 1) chooseMistress();
++			if (action == 2) chooseOutfits();
++		}
++	};
++
++	toy.metaClass.chooseMistress {
++		final dommes = mistresses();
++		def index = dommes.indexOf(OWNER);
++		while (true) {
++			final domme = dommes[index];
++			loadDomme(domme);
++			setImage("toy/$domme/lounge.jpg");
++			final action = getSelectedValue("Choose your mistress: ${DOMME.fullName}", ["Previous", "Next", "Choose", "Cancel"]);
++			if (action == 3) { loadDomme(OWNER); return; }
++			if (action == 0) index = (index + dommes.size() - 1) % dommes.size();
++			if (action == 1) index = (index + 1) % dommes.size();
++			if (action == 2) {
++				if (domme != OWNER) changeMistress(domme);
++				return;
++			}
++		}
++	};
++
++	toy.metaClass.changeMistress { domme ->
++		// Keep relationship progress per mistress; migrate the existing relationship on the first change.
++		for (key in ["version", "punishment", "disappoint", "permission.cum", "permission.edge", "permission.perm_chaste", "perm_chaste_ask", "lastPlay"]) {
++			save("toy.relationships.$OWNER.$key", load("toy.$key"));
++			save("toy.$key", load("toy.relationships.$domme.$key"));
++		}
++		// Rebuild owner schedules, retaining equipment releases and redressing for the player's physical state.
++		for (name in [PLAY, "sleeping", "bedtimeCheck", "lunch", "shopping", "party", CUM]) removeEvent(name);
++		for (key in ["owner.away", "plan", "note", "noteInstr"]) save("toy.$key", null);
++		save("toy.owner.outfit", null);
++		save("toy.owner.outfitTime", null);
++		save("toy.owner", domme);
++		toy.OWNER = domme;
++		loadDomme(OWNER);
++		playSchedule();
++		sleepSchedule();
++		setupPlans();
++	};
++
++	toy.metaClass.chooseOutfits {
++		final sets = outfitSets(OWNER);
++		while (true) {
++			showLounge();
++			def labels = [];
++			def enabled = [];
++			for (set in sets) {
++				final on = outfitEnabled(OWNER, set);
++				labels.add(set + (on ? " (on)" : " (off)"));
++				enabled.add(on);
++			}
++			labels.add("Change switches");
++			labels.add("Back");
++			final action = getSelectedValue("Outfits: ${DOMME.fullName}. Select a set to preview it.", labels);
++			if (action == sets.size() + 1) return;
++			if (action >= 0 && action < sets.size()) {
++				outfitPreview(OWNER, sets[action]);
++				showButton(sets[action]);
++			}
++			if (action == sets.size()) {
++				final answers = getBooleans("Enable outfits for ${DOMME.fullName}", sets, enabled);
++				if (answers == null) continue;
++				if (!answers.contains(true)) {
++					showPopup("Keep at least one outfit on.");
++					continue;
++				}
++				for (int i = 0; i < sets.size(); i++) save("toy.outfits.$OWNER.${sets[i]}", answers[i]);
++				final outfit = loadString("toy.owner.outfit");
++				if (outfit != null && !outfitEnabled(OWNER, outfit)) {
++					save("toy.owner.outfit", null);
++					save("toy.owner.outfitTime", null);
++					loadDomme(OWNER);
++				}
++			}
++		}
++	};
++	return null;
++}

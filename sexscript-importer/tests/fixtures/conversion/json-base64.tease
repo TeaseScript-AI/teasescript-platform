@@ -1,0 +1,77 @@
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
+function sexscriptLegacyJsonSize(value) {
+  if value is list {
+    return value.length
+  }
+  return value.get("size", default: null)
+}
+// JSON and Base64 text (V30 §30): JsonOutput.toJson() is toJson(), a text's bytes in Base64 toBase64(), decodeBase64()
+// bytes that new String() makes text again fromBase64(), and a JsonSlurper's parseText() fromJson(). Text that is not
+// Base64 or JSON gives a default where Groovy failed, here into the catch, which returned null as fromJson() does.
+function encode(input) {
+  let json = toJson(input)
+  // NOTE SX_BASE64_ENCODE line 6: Java took the text's bytes in the player's platform charset (on Windows usually windows-1252); toBase64() encodes the text as UTF-8, which is the same for ASCII text.
+  return toBase64(json)
+}
+function decode(reportValue) {
+  // NOTE SX_TRY_WITHOUT_CATCH line 9: Legacy caught errors in this block; TeaseScript has no exceptions, so the block runs without its catch, and an error here stops the script.
+  if true {
+    // NOTE SX_BASE64_DECODE line 10: Groovy's decodeBase64() failed on a character outside Base64, and new String() made the bytes text in the player's platform charset (on Windows usually windows-1252); fromBase64() reads UTF-8, which is the same for ASCII text, also takes the URL-safe alphabet, and gives empty text for text that is not Base64 or whose bytes are no UTF-8.
+    let decoded = fromBase64(reportValue, default: "")
+    let json = decoded
+    // NOTE SX_JSON_PARSE line 13: JsonSlurper failed on text that is not JSON; fromJson() gives null for it. JsonSlurper read a number with a fraction as a decimal (BigDecimal) number, fromJson() as a binary one.
+    return fromJson(json, default: null)
+  }
+}
+// The parsed object's keys read as a map's, through the function that returns it.
+let config = { title: "Toy-ID-1", durationRange: { minimum: 30, maximum: 35 } }
+let report = decode(encode({ presetTitle: config.title, violations: 2 }))
+if not sexscriptLegacyTruth(report) {
+  say prose "I cannot read your report", instant
+} else if config.title != report.get("presetTitle", default: null) {
+  say prose "That is not the corner time I ordered", instant
+} else if report.get("violations", default: null) > 1 {
+  say prose "You moved ${report.get("violations", default: null)} times", instant
+}
+// A nested map's keys read as a map's too, a key "size" also; an array keeps its positions.
+// NOTE SX_JSON_PARSE line 26: JsonSlurper failed on text that is not JSON; fromJson() gives null for it. JsonSlurper read a number with a fraction as a decimal (BigDecimal) number, fromJson() as a binary one.
+let data = fromJson("{\"config\": {\"title\": \"Yes\", \"size\": 3}, \"rolls\": [4, 6]}", default: null)
+let inner = data.get("config", default: null)
+say prose "${data.get("config", default: null).get("title", default: null)} ${sexscriptLegacyJsonSize(inner)} ${data.get("rolls", default: null)[1]}", instant
+// A map that takes the place of a parse is a dict as well, and a list's size is its length.
+// NOTE SX_JSON_PARSE line 30: JsonSlurper failed on text that is not JSON; fromJson() gives null for it. JsonSlurper read a number with a fraction as a decimal (BigDecimal) number, fromJson() as a binary one.
+let fallbackValue = fromJson("null", default: null)
+// NOTE SX_JSON_VALUE line 31: This value goes where parsed JSON goes, whose keys reads read as a dict's; Groovy kept it as it was, and it goes through toJson() and fromJson() here, so that its maps are dicts too.
+fallbackValue = fallbackValue otherwise fromJson(toJson({ title: "Fallback" }, files: false), default: null, files: false)
+say prose "${fallbackValue.get("title", default: null)} ${sexscriptLegacyJsonSize(data.get("rolls", default: null))}", instant
+// A missing key read null, which a variable used as a number cannot hold: it keeps its value then, as for a storage
+// read (Groovy failed at `+= 1`); one that is only shown takes the null.
+let rounds = 1
+// NOTE SX_LOAD_KEEPS_VALUE line 36: Groovy stored null in 'rounds' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+rounds = data.get("rounds", default: rounds)
+// NOTE SX_PLUS_OPERAND_TYPE line 37: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+rounds += 1
+let title: string? = ""
+title = data.get("subtitle", default: null)
+say prose "${rounds} ${title}", instant
+exit

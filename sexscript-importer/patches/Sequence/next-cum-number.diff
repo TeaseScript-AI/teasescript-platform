@@ -1,0 +1,14 @@
+--- a/scripts/Sequence.groovy
++++ b/scripts/Sequence.groovy
+@@ -316,6 +316,11 @@
+ 	case "timer":
+ 		num=TimingNumbers[getRandom(TimingNumbers.size())]
+ 		break
++	// Legacy bug: no case for "cum", so the number of action 0 stayed null; it gets 10, as the main loop gives Cum
++	// (patch next-cum-number).
++	case "cum":
++		num=10
++		break
+ }
+ 	return [chosen, num]
+ }

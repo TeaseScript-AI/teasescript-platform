@@ -1,0 +1,38 @@
+--- a/scripts/DCAfterDark/DCAfterDarkMain.groovy
++++ b/scripts/DCAfterDark/DCAfterDarkMain.groovy
+@@ -1402,7 +1402,7 @@
+ 		}
+ 		while(availableMistressList.size() > 0 && !sceneSelected) {
+ 			mistressSelect = getRandom(availableMistressList.size())
+-			mistress = availableMistressList[mistressSelect]
++			mistress = mistressArray[availableMistressList[mistressSelect]]
+ 			availableMistressList.remove(mistressSelect)
+ 			setMistressSession(RANDOM_SESSION) //Just to get num scenes
+ 			//Build list of non-recent and available scenes
+@@ -1433,7 +1433,7 @@
+ 			}
+ 			while(availableMistressList.size() > 0 && !sceneSelected) {
+ 				mistressSelect = getRandom(availableMistressList.size())
+-				mistress = availableMistressList[mistressSelect]
++				mistress = mistressArray[availableMistressList[mistressSelect]]
+ 				availableMistressList.remove(mistressSelect)
+ 				setMistressSession(RANDOM_SESSION) //Just to get num scenes
+ 				//Build list of available recent scenes
+@@ -1464,7 +1464,7 @@
+ 			}
+ 			while(availableMistressList.size() > 0 && !sceneSelected) {
+ 				mistressSelect = getRandom(availableMistressList.size())
+-				mistress = availableMistressList[mistressSelect]
++				mistress = mistressArray[availableMistressList[mistressSelect]]
+ 				availableMistressList.remove(mistressSelect)
+ 				setMistressSession(RANDOM_SESSION) //Just to get num scenes
+ 				//Build list of non-recent available scenes
+@@ -1495,7 +1495,7 @@
+ 			}
+ 			while(availableMistressList.size() > 0 && !sceneSelected) {
+ 				mistressSelect = getRandom(availableMistressList.size())
+-				mistress = availableMistressList[mistressSelect]
++				mistress = mistressArray[availableMistressList[mistressSelect]]
+ 				availableMistressList.remove(mistressSelect)
+ 				setMistressSession(RANDOM_SESSION) //Just to get num scenes
+ 				//Build list of available recent scenes

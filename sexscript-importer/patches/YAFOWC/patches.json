@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "unfinished-init",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): init() saves each line as it is asked and the number of times to write each line only at its end, and the script runs init() only when line 1 is missing. A player who left during the setup after line 1 came back to the main path with no saved count: loadInteger(\"yafowc.needed\") was null and needed*numOfLines failed (V2 explorer: TSR027 at YAFOWC.tease:98). Evident intent: the main path needs a complete setup. The setup runs again when the count of lines or of times is missing too.",
+      "diff": "unfinished-init.diff"
+    }
+  ]
+}

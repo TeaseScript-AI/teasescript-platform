@@ -1,0 +1,15 @@
+--- a/scripts/jennifers_blackmail.groovy
++++ b/scripts/jennifers_blackmail.groovy
+@@ -49,10 +49,8 @@
+ 
+ // Get country - just to freak them out..
+ //def country = 'http://api.hostip.info/get_json.php'.toURL().text
+-def ipInfo = 'http://ipinfo.io/json'.toURL().text.split(",")
+-def country = ipInfo[4].split(":")[1].replaceAll("[^a-zA-Z]", "")
+-if (country == "XX")
+-  country = "Unknown"
++// The country came from an online service, which a package cannot reach
++def country = "Unknown"
+ 
+ // New level setting - how extreme do we go?
+ setImage(null);

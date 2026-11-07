@@ -1,0 +1,20 @@
+--- a/scripts/Night and Day.groovy	2026-10-15 00:00:00
++++ b/scripts/Night and Day.groovy	2026-10-15 00:00:00
+@@ -20,6 +20,8 @@
+ while (nametest) 
+ {
+   nametest = false
++  // Legacy bug: a replay after a wrong answer kept the picture of that answer; show this part's picture again.
++  setImage("milovana/1304/10-1.jpg")
+ wait(5);
+ show("I'm Julie, the one with the straight hair, and she's Laura, the one with the curly hair.")
+ wait(6);
+@@ -1241,6 +1243,8 @@
+ while (endtest) 
+ {
+   endtest = false
++  // Legacy bug: a replay after a wrong answer kept the picture of that answer; show this part's picture again.
++  setImage("milovana/1304/490-49.jpg")
+ 
+ show("We're not through with you by a long shot.")
+ wait(7);

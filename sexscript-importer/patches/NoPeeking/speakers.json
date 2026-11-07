@@ -1,0 +1,109 @@
+{
+  "reason": "Amia, the player's keyholder, runs the game and leads the blindfolded player to five friends in turn: Kaley, Cristina, Sunny, Lia and Gabby. Each girl's block opens with a 'Name:' line and uses its own numbered punishment closures; Amia speaks between the blocks (lines opening with '[narration] Amia:') and in the finale. The peek note and the peek-or-cum chooser are system screens.",
+  "speakers": {
+    "amia": {
+      "firstName": "Amia"
+    },
+    "kaley": {
+      "firstName": "Kaley"
+    },
+    "cristina": {
+      "firstName": "Cristina"
+    },
+    "sunny": {
+      "firstName": "Sunny"
+    },
+    "lia": {
+      "firstName": "Lia"
+    },
+    "gabby": {
+      "firstName": "Gabby"
+    }
+  },
+  "default": "amia",
+  "prefixes": [
+    {
+      "text": "Amia",
+      "speaker": "amia"
+    },
+    {
+      "text": "Kaley",
+      "speaker": "kaley"
+    },
+    {
+      "text": "Lia",
+      "speaker": "lia"
+    },
+    {
+      "text": "Gabby",
+      "speaker": "gabby"
+    }
+  ],
+  "switches": [
+    {
+      "at": "scripts/NoPeeking.groovy:481",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:484",
+      "speaker": "amia"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:486",
+      "speaker": "kaley"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:553",
+      "speaker": "amia"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:560",
+      "speaker": "cristina"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:644",
+      "speaker": "amia"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:652",
+      "speaker": "sunny"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:716",
+      "speaker": "amia"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:721",
+      "speaker": "lia"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:775",
+      "speaker": "amia"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:783",
+      "speaker": "gabby"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:830",
+      "speaker": "amia"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:440",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:441",
+      "speaker": "amia"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:458",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/NoPeeking.groovy:459",
+      "speaker": "amia"
+    }
+  ],
+  "names": []
+}

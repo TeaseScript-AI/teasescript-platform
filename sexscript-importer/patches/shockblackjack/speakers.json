@@ -1,0 +1,21 @@
+{
+  "reason": "Alexis, the dealer and only opponent, speaks every game line, rule explanation, hand report, taunt and punishment; the player calls her Miss. The configuration menu (settings questions and reset notices) is a system screen.",
+  "speakers": {
+    "alexis": {
+      "firstName": "Alexis"
+    }
+  },
+  "default": "alexis",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/shockblackjack.groovy:changeSettings",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/shockblackjack.groovy:636",
+      "speaker": "alexis"
+    }
+  ],
+  "names": []
+}

@@ -1,0 +1,63 @@
+{
+  "reason": "One Mistress owns the player as her toy: the domme selected by the storage key toy.owner (default \"ancilla\"; \"emily\" with the Emily pack), shown as \"Mistress <name>\" the way the package writes it (dommeTitle() + \" \" + dommeName()). Every line she says goes through speak()/present(); the lounge status lines are narration, and the calendar, debug screens and debug checks are system text.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress",
+      "firstName": "Ancilla"
+    }
+  },
+  "default": "mistress",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/toy.groovy:speak",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/toy.groovy:535",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/toy.groovy:543",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/toy.groovy:552",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/toy.groovy:555",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/toy.groovy:574",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/toy/social.groovy:showCalendar",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/toy/debug.groovy:setupShowState",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/toy/debug.groovy:31",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "variable": "OWNER",
+      "files": [
+        "scripts/toy.groovy"
+      ],
+      "speaker": "mistress",
+      "values": {
+        "ancilla": "Mistress Ancilla",
+        "emily": "Mistress Emily"
+      },
+      "otherwise": "Mistress"
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "reason": "An unfinished school framework: narration in the main and early scripts, the student Bianca in the early-arrival scene, the headmistress Mrs Malhotra's acceptance letter, an unnamed academy phone voice (Mistress by the default rule) and the unnamed geography Teacher. Speakers are recognised by file and by the narration/speech boundaries inside each scene.",
+  "speakers": {
+    "bianca": {
+      "firstName": "Bianca"
+    },
+    "malhotra": {
+      "title": "Mrs",
+      "lastName": "Malhotra",
+      "displayName": "Headmistress"
+    },
+    "mistress": {
+      "title": "Mistress"
+    },
+    "teacher": {
+      "displayName": "Teacher"
+    }
+  },
+  "default": "narrator",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/schoolscript.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/schoolscript.groovy:128",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/schoolscript/early.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/schoolscript/early.groovy:21",
+      "speaker": "bianca"
+    },
+    {
+      "at": "scripts/schoolscript/early.groovy:27",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/schoolscript/early.groovy:30",
+      "speaker": "bianca"
+    },
+    {
+      "at": "scripts/schoolscript/early.groovy:32",
+      "speaker": "narrator"
+    },
+    {
+      "entry": "scripts/schoolscript/firstrun.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/schoolscript/firstrun.groovy:14",
+      "speaker": "malhotra"
+    },
+    {
+      "at": "scripts/schoolscript/firstrun.groovy:59",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/schoolscript/firstrun.groovy:61",
+      "speaker": "mistress"
+    },
+    {
+      "entry": "scripts/schoolscript/geography.groovy",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/schoolscript/geography.groovy:24",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/schoolscript/geography.groovy:34",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/schoolscript/geography.groovy:73",
+      "speaker": "narrator"
+    }
+  ],
+  "names": [
+    {
+      "after": [
+        "scripts/schoolscript/firstrun.groovy:36"
+      ],
+      "files": [
+        "scripts/schoolscript/firstrun.groovy"
+      ],
+      "speaker": "malhotra",
+      "template": "Mrs Malhotra"
+    }
+  ]
+}

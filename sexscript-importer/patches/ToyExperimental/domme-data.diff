@@ -1,0 +1,61 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -47,23 +47,46 @@
+ 	final DRESSED = "dressed", TITS = "tits", PUSSY = "pussy", LINGERIE = "lingerie", TEASE = "tease", SIT = "sit", BOOTS = "boots", KNEEL = "kneel", STOOD = "stood", MEAN = "mean", CROP = "crop", ASS = "ass", SQUAT = "squat", SSSH = "sssh";
+ 	final nDRESSED = "!$DRESSED", nTITS = "!$TITS", nTEASE = "!$TEASE", nKNEEL = "!$KNEEL", nSQUAT = "!$SQUAT";
+ 	final getDomme = { domme, set = null ->
+-		final readDomme = { path ->
+-			if (!path) return [:];
+-			final f = new File(path);
+-			if (!f.exists()) return [:];
+-			return Eval.me(f.text);
+-		};
+-		def d = [
+-			"$DATAFOLDER/images/toy/domme.groovy",
+-			"$DATAFOLDER/images/toy/$domme/person.groovy",
+-			"$DATAFOLDER/images/toy/$domme/$set/set.groovy" ]
+-				.collect { readDomme(it) }
+-				.sum();
++		def d = [:];
++		d.put('title', 'Mistress');
++		if (domme == 'ancilla') {
++			d.put('name', 'Ancilla');
++			d.put('fullName', 'Ancilla Tilia');
++		}
++		if (domme == 'charlottespringer') {
++			d.put('name', 'Charlotte');
++			d.put('fullName', 'Charlotte Springer');
++		}
++		if (domme == 'danniiharwood') {
++			d.put('name', 'Dannii');
++			d.put('fullName', 'Dannii Harwood');
++		}
++		if (domme == 'emily') {
++			d.put('name', 'Emily');
++			d.put('fullName', 'Emily Marilyn');
++			d.put('locale', 'en-US');
++		}
++		if (domme == 'krystalwebb') {
++			d.put('name', 'Krystal');
++			d.put('fullName', 'Krystal Webb');
++		}
++		if (domme == 'lucyohara') {
++			d.put('name', 'Lucy');
++			d.put('fullName', 'Lucy O\'Hara');
++			d.put('title', 'Princess');
++		}
++		if (domme == 'saffrontaylor') {
++			d.put('name', 'Saffron');
++			d.put('fullName', 'Saffron Taylor');
++		}
++		if (domme == "lucyohara" && set == "bedroom") d.put("title", "Miss");
++		if (domme == "lucyohara" && set == "police") d.put("title", "Officer");
+ 		d.id = domme;
+ 		return d;
+ 	};
+ 	final loadDomme = { domme, set = null ->
+ 		DOMME = getDomme(domme, set);
++		final mistressName = "${DOMME.title} ${DOMME.name}";
+ 	}
+ 	final loadModules = { toy ->
+ 		new File("$DATAFOLDER/scripts/toy")

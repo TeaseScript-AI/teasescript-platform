@@ -1,0 +1,292 @@
+{
+  "reason": "Sub-side scripts (subcontrolv2, subcontrol, subcontrol-android): the sub's controlling Mistress or Master (the virtual default or a real dom linked by code; shown as MText + \" \" + mname once MText follows msex, as the dom side greets \"Welcome \"+MText+\" \"+mname; mname from the server, \"Mandy\" for the default virtual Mistress in v2) speaks in the first person from the webcam rules check on, in the main loop and in the tasks; setup, version, profile, settings, tips, inbox and error screens are system text. The SlaveMarket and the dom-side control scripts (subcontrol_control, controlsubv2, subcontrol/tasks, subcontrol/slavemarket) are system screens for the user.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/subcontrolv2.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/subcontrol.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/subcontrol-android.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/slavemarket.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/subcontrol_control.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/controlsubv2.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/subcontrol/tasks.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/subcontrol/slavemarket.groovy",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:536",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:564",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:605",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:761",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:797",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:939",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:1079",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:1084",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:1088",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:1192",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:1214",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:1296",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:1325",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:1330",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:1357",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrolv2.groovy:1371",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:550",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:590",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:647",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:832",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:841",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:843",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:847",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:851",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:858",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:869",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:1089",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:1239",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:1244",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:1248",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:1360",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:1413",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:1497",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:1526",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:1531",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:1564",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol.groovy:1585",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:436",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:478",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:535",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:717",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:726",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:728",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:732",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:736",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:743",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:754",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:974",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:1124",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:1129",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:1133",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:1245",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:1298",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:1382",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:1411",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:1416",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:1449",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/subcontrol-android.groovy:1470",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "after": [
+        "scripts/subcontrolv2.groovy:537",
+        "scripts/subcontrol.groovy:551",
+        "scripts/subcontrol-android.groovy:437"
+      ],
+      "files": [
+        "scripts/subcontrolv2.groovy",
+        "scripts/subcontrol.groovy",
+        "scripts/subcontrol-android.groovy"
+      ],
+      "speaker": "mistress",
+      "template": "{MText} {mname}"
+    }
+  ]
+}

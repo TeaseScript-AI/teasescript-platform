@@ -1,0 +1,160 @@
+--- a/scripts/Mandys_blackmail.groovy
++++ b/scripts/Mandys_blackmail.groovy
+@@ -281,18 +281,27 @@
+ 	def str_email = ""
+ 
+     str_email = getString(str9,"")
++	// Patched legacy bug: the answer to "Not yours!" was not checked again, so a short answer stopped the script at
++	// str_email[2], and a missing first name, read as "", matched every address. Both checks repeat until they pass,
++	// and only a known name is compared.
++	def ownName = loadString("intro.name")
++	def ownFirstName = loadString("mandys_blackmail.firstname")
++	def checking = true
++	while(checking) {
+ 	while(!str_email.matches(".{1,50}@.{5,50}")) {
+-		str9 += ", the correct one!"
+-		str_email = getString(str9,"")
+-		// Failing to put a valid email in adds  to faults
+-	    faults +=0.5
++			str9 += ", the correct one!"
++			str_email = getString(str9,"")
++			// Failing to put a valid email in adds  to faults
++		    faults +=0.5
+ 	}
+-    // Try to guess if user has put the right email address or using theirs
+-    if (str_email.toLowerCase().contains(loadString("intro.name").toLowerCase()) ||
+-    	str_email.toLowerCase().contains(loadString("mandys_blackmail.firstname").toLowerCase()) ) {
+-	    str9 += ", Not yours!"
+-	    str_email = getString(str9,"")
+-	    faults +=0.5
++	// Try to guess if user has put the right email address or using theirs
++	if ((ownName && str_email.toLowerCase().contains(ownName.toLowerCase())) ||
++		(ownFirstName && str_email.toLowerCase().contains(ownFirstName.toLowerCase()))) {
++		    str9 += ", Not yours!"
++		    str_email = getString(str9,"")
++		    faults +=0.5
++	} else
++		checking = false
+ 	}
+ 
+ 	save("mandys_blackmail.heremail",str_email)
+--- a/scripts/Mandys_blackmail_ext.groovy
++++ b/scripts/Mandys_blackmail_ext.groovy
+@@ -329,18 +329,27 @@
+ 	def str_email = ""
+ 
+     str_email = getString(str9,"")
++	// Patched legacy bug: the answer to "Not yours!" was not checked again, so a short answer stopped the script at
++	// str_email[2], and a missing first name, read as "", matched every address. Both checks repeat until they pass,
++	// and only a known name is compared.
++	def ownName = loadString("intro.name")
++	def ownFirstName = loadString("mandys_blackmail.firstname")
++	def checking = true
++	while(checking) {
+ 	while(!str_email.matches(".{1,50}@.{5,50}")) {
+-		str9 += ", the correct one!"
+-		str_email = getString(str9,"")
+-		// Failing to put a valid email in adds  to faults
+-	    faults +=0.5
++			str9 += ", the correct one!"
++			str_email = getString(str9,"")
++			// Failing to put a valid email in adds  to faults
++		    faults +=0.5
+ 	}
+-    // Try to guess if user has put the right email address or using theirs
+-    if (str_email.toLowerCase().contains(loadString("intro.name").toLowerCase()) ||
+-    	str_email.toLowerCase().contains(loadString("mandys_blackmail.firstname").toLowerCase()) ) {
+-	    str9 += ", Not yours!"
+-	    str_email = getString(str9,"")
+-	    faults +=0.5
++	// Try to guess if user has put the right email address or using theirs
++	if ((ownName && str_email.toLowerCase().contains(ownName.toLowerCase())) ||
++		(ownFirstName && str_email.toLowerCase().contains(ownFirstName.toLowerCase()))) {
++		    str9 += ", Not yours!"
++		    str_email = getString(str9,"")
++		    faults +=0.5
++	} else
++		checking = false
+ 	}
+ 
+ 	save("mandys_blackmail.heremail",str_email)
+--- a/scripts/mandys_blackmail.groovy
++++ b/scripts/mandys_blackmail.groovy
+@@ -281,18 +281,27 @@
+ 	def str_email = ""
+ 
+     str_email = getString(str9,"")
++	// Patched legacy bug: the answer to "Not yours!" was not checked again, so a short answer stopped the script at
++	// str_email[2], and a missing first name, read as "", matched every address. Both checks repeat until they pass,
++	// and only a known name is compared.
++	def ownName = loadString("intro.name")
++	def ownFirstName = loadString("mandys_blackmail.firstname")
++	def checking = true
++	while(checking) {
+ 	while(!str_email.matches(".{1,50}@.{5,50}")) {
+-		str9 += ", the correct one!"
+-		str_email = getString(str9,"")
+-		// Failing to put a valid email in adds  to faults
+-	    faults +=0.5
++			str9 += ", the correct one!"
++			str_email = getString(str9,"")
++			// Failing to put a valid email in adds  to faults
++		    faults +=0.5
+ 	}
+-    // Try to guess if user has put the right email address or using theirs
+-    if (str_email.toLowerCase().contains(loadString("intro.name").toLowerCase()) ||
+-    	str_email.toLowerCase().contains(loadString("mandys_blackmail.firstname").toLowerCase()) ) {
+-	    str9 += ", Not yours!"
+-	    str_email = getString(str9,"")
+-	    faults +=0.5
++	// Try to guess if user has put the right email address or using theirs
++	if ((ownName && str_email.toLowerCase().contains(ownName.toLowerCase())) ||
++		(ownFirstName && str_email.toLowerCase().contains(ownFirstName.toLowerCase()))) {
++		    str9 += ", Not yours!"
++		    str_email = getString(str9,"")
++		    faults +=0.5
++	} else
++		checking = false
+ 	}
+ 
+ 	save("mandys_blackmail.heremail",str_email)
+--- a/scripts/mandys_blackmail_de.groovy
++++ b/scripts/mandys_blackmail_de.groovy
+@@ -284,18 +284,27 @@
+ 	def str_email = ""
+ 
+     str_email = getString(str9,"")
++	// Patched legacy bug: the answer to "nicht deine!" was not checked again, so a short answer stopped the script at
++	// str_email[2], and a missing first name, read as "", matched every address. Both checks repeat until they pass,
++	// and only a known name is compared.
++	def ownName = loadString("intro.name")
++	def ownFirstName = loadString("mandys_blackmail.firstname")
++	def checking = true
++	while(checking) {
+ 	while(!str_email.matches(".{1,50}@.{5,50}")) {
+-		str9 += ", die Richtige!"
+-		str_email = getString(str9,"")
+-		// Failing to put a valid email in adds  to faults
+-	    faults +=0.5
++			str9 += ", die Richtige!"
++			str_email = getString(str9,"")
++			// Failing to put a valid email in adds  to faults
++		    faults +=0.5
+ 	}
+-    // Try to guess if user has put the right email address or using theirs
+-    if (str_email.toLowerCase().contains(loadString("intro.name").toLowerCase()) ||
+-    	str_email.toLowerCase().contains(loadString("mandys_blackmail.firstname").toLowerCase()) ) {
+-	    str9 += ", nicht deine!"
+-	    str_email = getString(str9,"")
+-	    faults +=0.5
++	// Try to guess if user has put the right email address or using theirs
++	if ((ownName && str_email.toLowerCase().contains(ownName.toLowerCase())) ||
++		(ownFirstName && str_email.toLowerCase().contains(ownFirstName.toLowerCase()))) {
++		    str9 += ", nicht deine!"
++		    str_email = getString(str9,"")
++		    faults +=0.5
++	} else
++		checking = false
+ 	}
+ 
+ 	save("mandys_blackmail.heremail",str_email)

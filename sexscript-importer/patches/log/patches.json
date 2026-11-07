@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "end-session",
+      "layer": "source",
+      "category": "b",
+      "reason": "Every path returns to the log script itself, so the legacy player ended it only by closing the script; a TeaseScript session needs an end. The menu gets a third choice, End session, which ends the script.",
+      "diff": "end-session.diff"
+    }
+  ]
+}

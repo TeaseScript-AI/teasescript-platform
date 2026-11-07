@@ -1,0 +1,32 @@
+--- a/scripts/toy/misc.groovy
++++ b/scripts/toy/misc.groovy
+@@ -678,9 +678,14 @@
+ 			def selected = 0;
+ 			while (selected >= 0) {
+ 				present([DRESSED,TEASE], null);
++				def levelsText = "";
++				for (l in LEVELS) {
++					def oneWay = mayChangeLevel(l) ? "" : " (one way)";
++					levelsText += "${l.capitalize()}: ${getLevel(l)}${oneWay}\n";
++				}
+ 				show(text +					
+ 						"Current settings (1: very little, 5: a lot)\n"+
+-						"${LEVELS.collect{ l -> "${l.capitalize()}: ${getLevel(l)}${ mayChangeLevel(l)?"":" (one way)" }\n"}.join()}\n"+
++						"${levelsText}\n"+
+ 						"What do you want to change?");
+ 
+ 				def settings = [];
+@@ -706,11 +711,11 @@
+ 						show(txt + "(1: very little, 5: a lot)");
+ 				
+ 						def values = [];
+-						(lmin..5).eachWithIndex{l, i -> values += [lbl: (String) l, ID: i]};
++						for (int i = 0; lmin + i <= 5; i++) values.add([lbl: "${lmin + i}".toString(), ID: i]);
+ 						values += [lbl: "Cancel", ID: -1];
+ 						def val = values[getSelectedValue(null, values.collect { it.lbl })];				
+ 						if (val.ID > -1) {
+-							setLevel(lev, val.lbl);
++							setLevel(lev, lmin + val.ID);
+ 							setLevelChange(lev);
+ 							if (lev==DENIAL && val.lbl=="1") {
+ 								present([DRESSED,TEASE], [

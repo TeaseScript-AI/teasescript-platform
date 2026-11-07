@@ -1,0 +1,15 @@
+--- a/scripts/toy/cornertime.groovy
++++ b/scripts/toy/cornertime.groovy
+@@ -41,9 +41,11 @@
+ 						["toy!", "slave!", "slut!", ""]])],
+ 				start: [compose([["You better not move!", "Stand still!", "Now freeze!"],
+ 						["I'm starting your cornertime now.", "I'm watching you!", "Your cornertime starts now."]])],
++				// Legacy bug: + bound tighter than == and ?:, so the list plus the context was compared with "training" and
++				// only the last phrase stayed; the conditional is parenthesized (patch encourage-precedence).
+ 				encourage: ["Just a few more minutes.", "Keep it up, you're doing well.", "Just a little longer.", 
+ 						"I'm still watching!"] +
+-						context=="training"?(getProp("${TRAINING}.require", loadB)?["Regular cornertime is good for you!", "This is where you belong once a day!"]:["Cornertime is good for you!", "This is where you belong once a day!"]):["You should train that each day! Ask me for it!"],
++						(context=="training"?(getProp("${TRAINING}.require", loadB)?["Regular cornertime is good for you!", "This is where you belong once a day!"]:["Cornertime is good for you!", "This is where you belong once a day!"]):["You should train that each day! Ask me for it!"]),
+ 				scold: ["Do I see you moving?", "Hey, don't move!", "I said no moving!", 
+ 						"Stop it, I see every movement!"],
+ 				penalize: ["I warned you not to move. I'm adding some more time to the clock.",

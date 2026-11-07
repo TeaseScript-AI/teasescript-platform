@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "link-value",
+      "layer": "source",
+      "category": "e",
+      "reason": "showColl opens the link of values[i+1], but no i exists in this function, so the legacy script stopped there with a missing property. The other branches read the link from values[4], as the heading does.",
+      "diff": "link-value.diff"
+    }
+  ]
+}

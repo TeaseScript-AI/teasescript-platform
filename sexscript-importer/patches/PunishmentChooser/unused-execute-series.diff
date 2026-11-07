@@ -1,0 +1,18 @@
+--- a/scripts/PunishmentChooser.groovy
++++ b/scripts/PunishmentChooser.groovy
+@@ -843,6 +843,7 @@
+ 	}
+ }	
+ 
++/*
+ //Need to set numSpanks and spot before calling this.
+ def executeSeries = {
+ 	def seriesTypes = 0
+@@ -935,6 +936,7 @@
+ 		spank("left "+spot+", hard",numSpanks,spankTempo)
+ 	}	
+ }
++*/
+ 
+ //Select Mistress
+ def mistressSelect = {

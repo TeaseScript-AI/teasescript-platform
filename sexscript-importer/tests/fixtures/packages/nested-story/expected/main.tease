@@ -1,0 +1,28 @@
+---
+title: "nested-story"
+---
+
+// NOTE SX_ENTRY_MENU: The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, so this menu offers each script that no other script chains to.
+speaker system {
+  title: "System"
+}
+global function sexscriptLegacyValue(value) {
+  return value
+}
+global function sexscriptLegacyLoadInteger(key, whenMissing = null) {
+  let value = load key, default: null
+  if value == null {
+    return whenMissing
+  }
+  return sexscriptLegacyValue(toInteger(value))
+}
+say as system "Which script do you want to start?", instant
+let picked = askChoice addon: "addon", start: "start"
+switch picked {
+  case "addon" {
+    goto "Story/addon.tease"
+  }
+  default {
+    goto "Story/start.tease"
+  }
+}

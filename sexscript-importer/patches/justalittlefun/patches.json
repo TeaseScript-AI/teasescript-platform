@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "concatenation-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "The even-roll message types a dot instead of + before the string (val3p.\" an even number…\"), which Groovy reads as a property lookup on the number and fails; the odd-roll line above concatenates val3p with +, so restore the +.",
+      "diff": "concatenation-typo.diff"
+    },
+    {
+      "id": "third-roll-texts",
+      "layer": "source",
+      "category": "e",
+      "reason": "The third roll draws 1+getRandom(6) from six texts, but the third text ends in + where the others end in a comma, so it ran on into the fourth and the list held five: a 3 showed both, a 4 the fifth text, a 5 the sixth, and a 6 showed \"6. null\" in Groovy and stops the script in TeaseScript. End the third text with a comma.",
+      "diff": "third-roll-texts.diff"
+    }
+  ]
+}

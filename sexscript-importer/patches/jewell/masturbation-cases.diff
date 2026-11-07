@@ -1,0 +1,13 @@
+--- a/scripts/jewell/masturbate.groovy
++++ b/scripts/jewell/masturbate.groovy
+@@ -37,8 +37,8 @@
+ 	case 7: block = "mast7"; break
+ 	case 8: block = "mast8"; break
+ 	case 9: block = "mast9"; break
+-	case 10: block = "mast8"; break
+-	case 11: block = "mast9"; break
++	case 10: block = "mast10"; break
++	case 11: block = "mast11"; break
+ 	}
+ 	break
+ 

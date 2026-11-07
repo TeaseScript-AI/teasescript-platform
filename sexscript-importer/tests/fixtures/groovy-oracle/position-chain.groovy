@@ -1,0 +1,26 @@
+def values = ["only"]
+def p0 = 1
+def p1 = p0 + p0
+def p2 = p1 + p1
+def p3 = p2 + p2
+def p4 = p3 + p3
+def p5 = p4 + p4
+def p6 = p5 + p5
+def p7 = p6 + p6
+def p8 = p7 + p7
+def p9 = p8 + p8
+def p10 = p9 + p9
+def p11 = p10 + p10
+def p12 = p11 + p11
+def p13 = p12 + p12
+def p14 = p13 + p13
+def p15 = p14 + p14
+def p16 = p15 + p15
+def p17 = p16 + p16
+def p18 = p17 + p17
+def p19 = p18 + p18
+def p20 = p19 + p19
+def p21 = p20 + p20
+def p22 = p21 + p21
+def p23 = p22 + p22
+show(values[p23 - p23])

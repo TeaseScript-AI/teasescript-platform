@@ -1,0 +1,150 @@
+--- a/scripts/Puzzle Challenge_de.groovy	1970-01-01 00:00:00.000000000 +0000
++++ b/scripts/Puzzle Challenge_de.groovy	1970-01-01 00:00:00.000000000 +0000
+@@ -636,7 +636,7 @@
+ 	setImage("Puzzle Challenge/selfpiss2.jpg")
+ 	show("Hey, du siehst durstig aus.")
+ 	waitWithGauge(10)
+-	setImage ("/selfpiss3.jpg")
++	setImage ("Puzzle Challenge/selfpiss3.jpg")
+ 	show("Trink ein Glas Wasser, beeil dich!")
+ 	showButton("Ich hab es gemacht")
+ 	setImage ("Puzzle Challenge/selfpiss1.jpg")
+@@ -1205,76 +1205,76 @@
+ 
+ if (getBoolean("Willst du jetzt schon eine Chance haben zu spritzen? Aber wenn du weiter spielst, hast du eine bessere Chance abzuspritzen... Denk gut darüber nach.", "Ich werde jetzt versuchen abzuspritzen", "Ich möchte eine bessere Chance haben zum abzuspritzen")) {
+ 
+-		setImage("/Kendra1.jpg")
++		setImage("Puzzle Challenge/Kendra1.jpg")
+ 		show("Hey, ich möchte dich kommen lassen... Aber es gibt einen Haken... Kein Problem, lass uns anfangen :)")
+ 		wait(13)
+-		setImage("/Kendra2.jpg")
++		setImage("Puzzle Challenge/Kendra2.jpg")
+ 		show("Rand (edge) für mich, schnell!")
+ 		showButton("Ich bin am Rand (edge).")
+-		setImage("/Kendra3.jpg")
++		setImage("Puzzle Challenge/Kendra3.jpg")
+ 		show("HÄNDE WEG! Ich will nicht, dass du abspritzt")
+ 		wait(13)
+ 		show("Binde deine Eier wie auf dem Bild von deinem Körper weg! mach es eng")
+-		setImage("/balltied.jpg")
++		setImage("Puzzle Challenge/balltied.jpg")
+ 		showButton("Ich hab es gemacht")
+-		setImage("/Kendra4.jpg")
++		setImage("Puzzle Challenge/Kendra4.jpg")
+ 		show("Wichs dich mit hoher Geschwindigkeit für mich, aber noch NICHT abspritzen oder Rand (edge)...")
+ 		waitWithGauge(30)
+-		setImage("/Kendra5.jpg")
++		setImage("Puzzle Challenge/Kendra5.jpg")
+ 		show("Bitteeee gib mir einen Rand (edge)... bitteeee")
+ 		showButton("Ich bin am Rand (edge)")
+-		setImage("/Kendra6.jpg")
++		setImage("Puzzle Challenge/Kendra6.jpg")
+ 		show("halte es!!")
+ 		wait(5)
+-		setImage("/Kendra7.jpg")
++		setImage("Puzzle Challenge/Kendra7.jpg")
+ 		show("HÄNDE WEG! kommst du näher? Haha")
+ 		waitWithGauge(10)
+-		setImage("/Kendra8.jpg")
++		setImage("Puzzle Challenge/Kendra8.jpg")
+ 		show("Ich gebe dir einen Countdown, du wirst genau bei Null abspritzen! nicht 1 Sekunde vorher oder nachher... verstanden?")
+ 		showButton("Ich mache alles für dich Herrin")
+-		setImage("/Kendra9.jpg")
++		setImage("Puzzle Challenge/Kendra9.jpg")
+ 		show("fang wieder an für mich zu Wichsen...")
+ 		waitWithGauge(10)
+ 		show("10")
+-		setImage("/Kendra10.jpg")
++		setImage("Puzzle Challenge/Kendra10.jpg")
+ 		wait(10)
+-		setImage("/Kendra11.jpg")
++		setImage("Puzzle Challenge/Kendra11.jpg")
+ 		show("9")
+ 		wait(9)
+-		setImage("/Kendra12.jpg")
++		setImage("Puzzle Challenge/Kendra12.jpg")
+ 		show("8")
+ 		wait(8)
+-		setImage("/Kendra13.jpg")
++		setImage("Puzzle Challenge/Kendra13.jpg")
+ 		show("7")
+ 		wait(7)
+-		setImage("/Kendra14.jpg")
++		setImage("Puzzle Challenge/Kendra14.jpg")
+ 		show("6")
+ 		wait(6)
+-		setImage("/Kendra15.jpg")
++		setImage("Puzzle Challenge/Kendra15.jpg")
+ 		show("5")
+ 		wait(5)
+-		setImage("/Kendra16.jpg")
++		setImage("Puzzle Challenge/Kendra16.jpg")
+ 		show("4")
+ 		wait(4)
+-		setImage("/Kendra17.jpg")
++		setImage("Puzzle Challenge/Kendra17.jpg")
+ 		show("3")
+ 		wait(3)
+-		setImage("/Kendra18.jpg")
++		setImage("Puzzle Challenge/Kendra18.jpg")
+ 		show("2")
+ 		wait(2)
+-		setImage("/Kendra19.jpg")
++		setImage("Puzzle Challenge/Kendra19.jpg")
+ 		show("1")
+ 		wait(1)
+ 		show("0 Komm, wenn du willst")
+-		setImage("e/granny.jpg")
++		setImage("Puzzle Challenge/granny.jpg")
+ 		wait(5)
+ 		show("Magst du meine haarige Muschi?")
+ 		waitWithGauge(15)
+-		setImage("/Kendra21.jpg")
++		setImage("Puzzle Challenge/Kendra21.jpg")
+ 
+ 	if (getBoolean("Bist du gekommen", "Ja ", "Nein")) {
+ 
+-		setImage("/aiden-starr-5.jpg");
++		setImage("Puzzle Challenge/aiden-starr-5.jpg");
+ 
+ 		show("Oh, tut mir leid... du hattest die Wahl für eine bessere Chance zu kommen...");
+ 
+@@ -1292,7 +1292,7 @@
+ 
+ 	else {
+ 
+-		setImage("/aiden-starr-6.jpg");
++		setImage("Puzzle Challenge/aiden-starr-6.jpg");
+ 
+ 		if (getBoolean("Ich gebe dir eine zusätzliche Chance abzuspritzen... aber du musst zuerst etwas für mich tun.", "Ich nutze die zusätzliche Chance", "Nein, ich will nicht, lass mich einfach gehen")) {
+ 
+@@ -1302,7 +1302,7 @@
+ 
+ 			pun(pun);
+ 
+-			setImage("/aiden-starr-3.jpg");
++			setImage("Puzzle Challenge/aiden-starr-3.jpg");
+ 
+ 			show("Willkommen zurück\nMach deinen Schwanz bereit, mach ihn schön hart!");
+ 			showButton("Ich bin fertig");
+@@ -1311,17 +1311,17 @@
+ 
+ 			waitWithGauge(15);
+ 
+-			setImage("/c1.jpg");
++			setImage("Puzzle Challenge/c1.jpg");
+ 
+ 			show("Komm für mich!!!");
+ 			wait(3);
+ 
+-			setImage("/c2.jpg");
++			setImage("Puzzle Challenge/c2.jpg");
+ 
+ 			show("Ich brauche dein Sperma!!!");
+ 			wait(2);
+ 
+-			setImage("/c3.jpg");
++			setImage("Puzzle Challenge/c3.jpg");
+ 
+ 			show("Pump weiter für mich!!!");
+ 			wait(4);

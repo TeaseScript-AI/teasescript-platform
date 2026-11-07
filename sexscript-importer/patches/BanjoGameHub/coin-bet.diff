@@ -1,0 +1,13 @@
+--- a/scripts/Banjo/fourheroes.groovy
++++ b/scripts/Banjo/fourheroes.groovy
+@@ -488,7 +488,9 @@
+ 	}
+ 	coinsOpponentBonus = getInteger("Enter the number of "+coin+"s to modify your opponent's starting "+coins+" by (this can be positive or negative to change difficulty).\n\n(default is 0, current is "+coinsOpponentBonus+")",coinsOpponentBonus)
+ 	coinsBet = getInteger("Enter the number of "+coin+"s bet per round.\n\n(default is 1, current is "+coinsBet+")",coinsBet)
+-	while(coinsBet<0) {
++	// Legacy bug: a bet of 0 was taken although the message asks for 1 or higher, and the coins then never change, so
++	// the game never ends (patch coin-bet).
++	while(coinsBet<1) {
+ 		coinsBet = getInteger("You must set the number of "+coin+"s to 1 or higher!\n\n(default is 1)",coinsBet)
+ 	}
+ 	betPay = getBoolean("Do you want the round winner to gain "+coin+"s?\n\n(default is false, current is "+betPay+")", "True", "False")

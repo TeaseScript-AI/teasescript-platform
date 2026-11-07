@@ -1,0 +1,22 @@
+--- a/scripts/DungeonTrials.groovy
++++ b/scripts/DungeonTrials.groovy
+@@ -5078,7 +5078,7 @@
+ 			wait(7)		
+ 		}
+ 		else {
+-			if (!backPackArray.contains("DragonLance")) {
++			if (!backPackArray.contains("Dragon Lance")) {
+ 				show("You head straight for the garden and look around, but neither the elf nor the fairies are around.")
+ 				wait(8)
+ 				dialog = "She warned you to stay away from the chest, but maybe it's worth a look."
+--- a/scripts/DungeonTrialsTrailer.groovy
++++ b/scripts/DungeonTrialsTrailer.groovy
+@@ -4832,7 +4832,7 @@
+ 			wait(7)		
+ 		}
+ 		else {
+-			if (!backPackArray.contains("DragonLance")) {
++			if (!backPackArray.contains("Dragon Lance")) {
+ 				show("You head straight for the garden and look around, but neither the elf nor the fairies are around.")
+ 				wait(8)
+ 				dialog = "She warned you to stay away from the chest, but maybe it's worth a look."

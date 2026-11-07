@@ -1,0 +1,16 @@
+--- a/scripts/Banjo/dungeoncrawl.groovy
++++ b/scripts/Banjo/dungeoncrawl.groovy
+@@ -974,11 +974,11 @@
+ 						pointsSkill = pointsSkill - 1
+ 					skillSneak = 1
+ 				} else if(setSkill==1) {
+-					if(skillScan==0)
++					if(skillSteal==0)
+ 						pointsSkill = pointsSkill - 1
+ 					skillSteal = 1
+ 				} else if(setSkill==2) {
+-					if(skillSteal==0)
++					if(skillScan==0)
+ 						pointsSkill = pointsSkill - 1
+ 					skillScan = 1
+ 				} else if(setSkill==3) {

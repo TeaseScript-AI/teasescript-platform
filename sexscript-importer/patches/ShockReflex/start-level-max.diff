@@ -1,0 +1,11 @@
+--- a/scripts/ShockReflex.groovy
++++ b/scripts/ShockReflex.groovy
+@@ -338,7 +338,7 @@
+ 			def tTime = tTimeStart
+ 			def powerLevel = powerLevelMin
+ 			if((ChangeOnHit==2&&ChangeOnMiss>0)||
+-				(ChangeOnMiss==2&&ChangeOnHit>0))powerLevel = powerLevelMax
++				(ChangeOnMiss==2&&ChangeOnHit>0))powerLevel = pLevelMax
+ 			for(int j=0; j<nTries; j++){
+ 				playBackgroundSound(null)
+ 				playBackgroundSound(aFileName(aFile, powerLevel))

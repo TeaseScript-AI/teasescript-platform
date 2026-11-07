@@ -1,0 +1,13 @@
+--- a/scripts/jeuxdemain_femme.groovy
++++ b/scripts/jeuxdemain_femme.groovy
+@@ -320,7 +320,9 @@
+ 	if (auto)
+ 		{
+ 		bPMF=getRandom(10)/5
+-		int nbTournew = Math.round( (loadFloat("jeuxdemain.nympheErec"))/bPMF);
++		// Legacy bug: the factor can be 0, which divided by zero; Groovy's Infinity rounded to no rounds, which a
++		// factor of 0 keeps (patch zero-speed-factor).
++		int nbTournew = bPMF==0 ? 0 : Math.round( (loadFloat("jeuxdemain.nympheErec"))/bPMF);
+ 		nbTour=nbTournew
+ 		}
+ 	def tempsImageF =(2/71)*bPMF;	setImage ("jeuxdemain/fente1.png");	show("Faites des caresses aller et retour \nau centre de votre fente  bien lubrifiée au rythme de la video.");			wait (1);

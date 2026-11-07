@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "unix-seconds",
+      "layer": "source",
+      "category": "b",
+      "reason": "currentTime holds a Date here but a number of seconds elsewhere, so its milliseconds (currentTime.time) do not convert. The live-player check and the saved live time use the legacy getTime(), the Unix seconds that currentTime.time / 1000 gave, in whole seconds.",
+      "diff": "unix-seconds.diff"
+    },
+    {
+      "id": "url-check",
+      "layer": "source",
+      "category": "b",
+      "reason": "The stream and news URLs were checked by opening a network connection to them (new URL(link).openConnection().connect() in a try/catch), which a package cannot do, so the check never passed and the script asked for the URL forever. Owner decision: a URL that starts with http counts as valid, which the script already wrote http after replacing https; any other answer is refused as before.",
+      "diff": "url-check.diff"
+    }
+  ]
+}

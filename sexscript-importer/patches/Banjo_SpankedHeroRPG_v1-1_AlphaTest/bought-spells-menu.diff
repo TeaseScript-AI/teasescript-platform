@@ -1,0 +1,98 @@
+--- a/scripts/Banjo/dungeoncrawl.groovy
++++ b/scripts/Banjo/dungeoncrawl.groovy
+@@ -4797,6 +4797,7 @@
+ 			if(!cantbuy) {
+ 				moneyPlayer = moneyPlayer - itemPrice
+ 				learnSpellBlast()
++				checkHasSpells()
+ 				show("You bought the Blast spell.")
+ 				showButton("Continue")
+ 			}
+@@ -4812,6 +4813,7 @@
+ 			if(!cantbuy) {
+ 				moneyPlayer = moneyPlayer - itemPrice
+ 				learnSpellHeal()
++				checkHasSpells()
+ 				show("You bought the Heal spell.")
+ 				showButton("Continue")
+ 			}
+@@ -4827,6 +4829,7 @@
+ 			if(!cantbuy) {
+ 				moneyPlayer = moneyPlayer - itemPrice
+ 				learnSpellConfuse()
++				checkHasSpells()
+ 				show("You bought the Confuse spell.")
+ 				showButton("Continue")
+ 			}
+@@ -4842,6 +4845,7 @@
+ 			if(!cantbuy) {
+ 				moneyPlayer = moneyPlayer - itemPrice
+ 				learnSpellBarrier()
++				checkHasSpells()
+ 				show("You bought the Barrier spell.")
+ 				showButton("Continue")
+ 			}
+@@ -4857,6 +4861,7 @@
+ 			if(!cantbuy) {
+ 				moneyPlayer = moneyPlayer - itemPrice
+ 				learnSpellDrain()
++				checkHasSpells()
+ 				show("You bought the Drain spell.")
+ 				showButton("Continue")
+ 			}
+@@ -4872,6 +4877,7 @@
+ 			if(!cantbuy) {
+ 				moneyPlayer = moneyPlayer - itemPrice
+ 				learnSpellZap()
++				checkHasSpells()
+ 				show("You bought the Zap spell.")
+ 				showButton("Continue")
+ 			}
+@@ -4887,6 +4893,7 @@
+ 			if(!cantbuy) {
+ 				moneyPlayer = moneyPlayer - itemPrice
+ 				learnSpellMasochist()
++				checkHasSpells()
+ 				show("You bought the Masochist spell.")
+ 				showButton("Continue")
+ 			}
+@@ -4948,6 +4955,7 @@
+ 			if(!cantbuy) {
+ 				moneyPlayer = moneyPlayer - itemPrice
+ 				learnTechFastAttack()
++				checkHasTechs()
+ 				show("You learned the Fast Attack tech.")
+ 				showButton("Continue")
+ 			}
+@@ -4963,6 +4971,7 @@
+ 			if(!cantbuy) {
+ 				moneyPlayer = moneyPlayer - itemPrice
+ 				learnTechStrongAttack()
++				checkHasTechs()
+ 				show("You learned the Strong Attack tech.")
+ 				showButton("Continue")
+ 			}
+@@ -4978,6 +4987,7 @@
+ 			if(!cantbuy) {
+ 				moneyPlayer = moneyPlayer - itemPrice
+ 				learnTechPickpocket()
++				checkHasTechs()
+ 				show("You learned the Pickpocket tech.")
+ 				showButton("Continue")
+ 			}
+@@ -4993,6 +5003,7 @@
+ 			if(!cantbuy) {
+ 				moneyPlayer = moneyPlayer - itemPrice
+ 				learnTechSelfHurt()
++				checkHasTechs()
+ 				show("You learned the Flagellate tech.")
+ 				showButton("Continue")
+ 			}
+@@ -5008,6 +5019,7 @@
+ 			if(!cantbuy) {
+ 				moneyPlayer = moneyPlayer - itemPrice
+ 				learnTechSlayer()
++				checkHasTechs()
+ 				show("You learned the Slayer tech.")
+ 				showButton("Continue")
+ 			}

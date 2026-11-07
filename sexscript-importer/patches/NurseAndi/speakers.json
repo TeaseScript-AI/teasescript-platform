@@ -1,0 +1,13 @@
+{
+  "reason": "One named character, Andi Pink (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Andi",
+      "lastName": "Pink"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}
