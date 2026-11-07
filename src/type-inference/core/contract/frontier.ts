@@ -10,9 +10,17 @@ import type { Work } from "../solver.js";
 import type { FlowSink } from "./contributions.js";
 import { entered, ingressLeafOf } from "./ingress.js";
 import { canonicalKey, isKeyId, keyDepthIn, stepsArray, type PathRef } from "./key-ids.js";
-import { hostAt, propertyOnly, unknownItem } from "./kinds.js";
-import { lackingAt, pathAt } from "./literal-index.js";
-import { depthOf, markStart, markStep, marksNothing, type MarkResidual } from "./marks.js";
+import { holdsBelow, hostAt, propertyOnly, unknownItem } from "./kinds.js";
+import { heldBelow, lackingAt, pathAt } from "./literal-index.js";
+import {
+  depthOf,
+  markStart,
+  markState,
+  markStep,
+  marksNothing,
+  rootAccepts,
+  type MarkResidual,
+} from "./marks.js";
 import type { Holder, IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
 
 /*
@@ -117,8 +125,8 @@ export function withoutPushedReads<T>(callback: () => T, depth: number | null = 
 
 /** A pass's producer graph (per contract: a new pass has a new one). */
 class Frontier {
-  readonly nodes: FNode[] = [];
-  readonly ids = new Map<string, number>();
+  readonly nodes: FNode[];
+  readonly ids: Map<string, number>;
   readonly goals = new Map<number, Map<string, Goal>>();
   /** Interned node sets: their members and, per step, the set one step below (final goals only). */
   readonly sets = new Map<string, number>();
@@ -129,15 +137,15 @@ class Frontier {
   /** Per pushed slot, its reach, or `null` where its closure declined. */
   readonly reads = new Map<string, Reach | null>();
   /** The host reads' leaves (`hostLeaf`). */
-  readonly hosts = new Set<number>();
+  readonly hosts: Set<number>;
   /** The stops and held places `heldStopped` last answered for, and its answer. */
   stopsSeen = { stops: -1, places: -1, held: false };
   /** Per binding, its root's node (`rootNode`). */
-  readonly roots = new Map<PlaceId, number>();
+  readonly roots: Map<PlaceId, number>;
   /** The bindings the graph holds a position of, which a stop at any of them makes decline (`stoppedAt`). */
-  readonly places = new Set<PlaceId>();
+  readonly places: Set<PlaceId>;
   /** Per place, whether a copy cycle through a projection holds it. */
-  readonly cyclic = new Map<PlaceId, boolean>();
+  readonly cyclic: Map<PlaceId, boolean>;
   /** Per goal (`node|step`) whose rules declined, the reason: a later build reaching it declines at once. */
   readonly poisoned = new Map<number, Map<string, string>>();
   /** Per decline reason, the pushed reads it declined (`pushedFacts`). */
@@ -158,8 +166,34 @@ class Frontier {
   readonly pendingIds = new Map<string, number>();
   readonly advances = new Map<number, Map<string, Decision>>();
   readonly unions = new Map<string, number>();
+  /**
+   * #2005: whether its builds carry receiver scopes (`compose`): from a build's first pending mark, or first mark
+   * accepted past a root a record does not witness, on (`Activate`), for the rest of the pass.
+   */
+  scoped = false;
+  /** #2005: the receiver-shape graph's (`shapesOf`): its routes mark nothing and its reads are not declined as guarded. */
+  readonly shapeOnly: boolean;
+  /** #2005: the pending atoms, the receiver-shape graph and their caches (`productOf`), once the builds are scoped. */
+  product: Product | null = null;
+  /** #2005: the term goals a floor reads (`termsAt`), and the marked leaves' unmarked bases (`markedLeaf`). */
+  terms: Terms | null = null;
+  readonly markBases = new Map<number, number>();
+  /** #2005: the node whose goal's rules run (`immediateSafe`). */
+  ruleNode: number | undefined = undefined;
 
-  public constructor(readonly contract: Contract) {}
+  /** A pass's graph; with `nodes`, the receiver-shape graph of that graph, sharing its nodes (#2005). */
+  public constructor(
+    readonly contract: Contract,
+    nodes: Frontier | null = null,
+  ) {
+    this.nodes = nodes?.nodes ?? [];
+    this.ids = nodes?.ids ?? new Map();
+    this.hosts = nodes?.hosts ?? new Set();
+    this.roots = nodes?.roots ?? new Map();
+    this.places = nodes?.places ?? new Set();
+    this.cyclic = nodes?.cyclic ?? new Map();
+    this.shapeOnly = nodes !== null;
+  }
 }
 
 const FRONTIERS = new WeakMap<Contract, Frontier>();
@@ -361,8 +395,11 @@ function internPending(
   frontier: Frontier,
   states: ReadonlySet<number> | readonly number[],
 ): number {
-  const list = [...states].sort((a, b) => a - b);
+  const sorted = [...states].sort((a, b) => a - b);
+  const list = frontier.scoped ? absorbed(frontier, sorted) : sorted;
   if (list.length === 0) return -1;
+  // (#2005: a build's first pending mark scopes the pass's builds, `reachSlot`)
+  if (!frontier.scoped) throw new Activate();
   const name = list.join(",");
   const known = frontier.pendingIds.get(name);
   if (known !== undefined) return known;
@@ -394,7 +431,12 @@ function decide(frontier: Frontier, adds: readonly Route[]): Decision {
     step(frontier);
     if (depthOf(contract, each.holder) === Infinity) throw new Decline("marks-depth");
     const residual = markStart(contract, each.holder, each.path);
-    if (residual.marked) return { marked: true, rest: -1 };
+    if (residual.marked) {
+      // (#2005: a mark accepted past its holder's root, where no record witnesses the receiver, scopes the builds)
+      if (!frontier.scoped && !rootAccepts(contract, each.holder) && !immediateSafe(frontier))
+        throw new Activate();
+      return { marked: true, rest: -1 };
+    }
     for (const state of residual.states) rest.add(state);
   }
   return { marked: false, rest: internPending(frontier, rest) };
@@ -406,7 +448,12 @@ function advance(frontier: Frontier, set: number, s: string): Decision {
   const known = bySteps?.get(s);
   if (known !== undefined) return known;
   step(frontier);
-  const decision = decided(frontier, markStep(frontier.contract, frontier.pendingSets[set]!, s));
+  const states = frontier.pendingSets[set]!;
+  // (#2005: a set of plain states, ascending after its atoms, has none)
+  const decision =
+    states[0]! >= 0
+      ? decided(frontier, markStep(frontier.contract, states, s))
+      : advanceAtoms(frontier, states, s);
   if (bySteps === undefined) frontier.advances.set(set, (bySteps = new Map()));
   bySteps.set(s, decision);
   return decision;
@@ -467,6 +514,7 @@ function routeOf(
     !(read.value !== undefined && read.ingress === ingressLeafOf(contract, read.value))
   )
     throw new Decline("ingress");
+  if (frontier.shapeOnly) return null;
   if (read.guarded) return (node) => markNode(frontier, node);
   if (marksNothing(contract, read.holder)) return null;
   const path = steps.reduce((at, step) => pathAt(contract, at, step), 0);
@@ -487,6 +535,7 @@ function selfMarks(
   s: string,
   into: (node: number) => void,
 ): void {
+  if (frontier.shapeOnly) return;
   const { contract } = frontier;
   const pending: Route[] = [];
   let guarded = false;
@@ -503,7 +552,7 @@ function selfMarks(
   }
   const decision: Decision = guarded ? { marked: true, rest: -1 } : decide(frontier, pending);
   if (!decision.marked && decision.rest < 0) return;
-  below(frontier, root, [s], 0, (found) => into(pendingBelow(frontier, found, decision)));
+  plainBelow(frontier, root, s, (found) => into(pendingBelow(frontier, found, decision)));
 }
 
 /** `into` through a read's marks (`routeOf`). */
@@ -526,8 +575,14 @@ function literalRoot(frontier: Frontier, literal: PlaceId): number {
 /**
  * The nodes a value stands for, each passed to `then`: a binding's read its root, a host's read its leaf, a property
  * read its owner's nodes one step below, a literal its root; declines for any other (and for a guarded or ingress read).
+ * With `tail`, the nodes `tail` below those, in the same walk (#2005: one receiver scope for the whole path).
  */
-function eachValue(frontier: Frontier, value: PlaceId, then: (node: number) => void): void {
+function eachValue(
+  frontier: Frontier,
+  value: PlaceId,
+  then: (node: number) => void,
+  tail: readonly string[] = [],
+): void {
   const { contract } = frontier;
   const { program, guards } = contract.pass;
   // (a chain of property reads walked down to its root once, its steps read below the root: no native recursion)
@@ -553,13 +608,14 @@ function eachValue(frontier: Frontier, value: PlaceId, then: (node: number) => v
   if (binding !== undefined) {
     if (program.isHost(binding)) root = hostLeaf(frontier, at);
     else {
-      if (!guards.untested(binding) || guards.guardedRead(at)) throw new Decline("guarded");
+      if (!frontier.shapeOnly && (!guards.untested(binding) || guards.guardedRead(at)))
+        throw new Decline("guarded");
       if (ingressLeafOf(contract, at) !== undefined) throw new Decline("ingress");
       root = rootNode(frontier, binding);
     }
   } else if (program.hasOf.has(at) && !program.cellOwner.has(at)) root = literalRoot(frontier, at);
   else throw new Decline("value");
-  below(frontier, root, steps, 0, then);
+  below(frontier, root, tail.length > 0 ? keptSteps(contract.work, steps, tail) : steps, 0, then);
 }
 
 /** Declines a path with a step no property read takes (a selection, a member a built-in answers, an index). */
@@ -628,12 +684,26 @@ function below(
   from: number,
   then: (node: number) => void,
 ): void {
+  if (frontier.scoped) return compose(frontier, [node], steps, from, then);
   if (from === steps.length) return then(node);
   const goal = goalOf(frontier, node, steps[from]!);
   const next = (found: number): void => below(frontier, found, steps, from + 1, then);
   step(frontier);
   goal.readers?.push(next);
   for (const found of goal.value) frontier.tasks.push([next, found]);
+}
+
+/** The nodes one step `s` below `node`, its goal's, each passed to `then`. */
+function plainBelow(
+  frontier: Frontier,
+  node: number,
+  s: string,
+  then: (node: number) => void,
+): void {
+  const goal = goalOf(frontier, node, s);
+  step(frontier);
+  goal.readers?.push(then);
+  for (const found of goal.value) frontier.tasks.push([then, found]);
 }
 
 function gain(frontier: Frontier, goal: Goal, found: number): void {
@@ -666,6 +736,16 @@ function gain(frontier: Frontier, goal: Goal, found: number): void {
 
 /** A goal's rules, read once: what one step below its node holds, each part as it is found. */
 function rules(frontier: Frontier, goal: Goal): void {
+  const before = frontier.ruleNode;
+  frontier.ruleNode = goal.node;
+  try {
+    goalRules(frontier, goal);
+  } finally {
+    frontier.ruleNode = before;
+  }
+}
+
+function goalRules(frontier: Frontier, goal: Goal): void {
   const { contract } = frontier;
   const node = frontier.nodes[goal.node]!;
   const s = goal.step;
@@ -679,10 +759,10 @@ function rules(frontier: Frontier, goal: Goal): void {
   }
   if (node.kind === "native") throw new Decline("native");
   if (node.kind === "mark")
-    return below(frontier, node.inner, [s], 0, (found) => into(markNode(frontier, found)));
+    return innerBelow(frontier, node.inner, s, (found) => into(markNode(frontier, found)));
   if (node.kind === "hold") {
     const decision = advance(frontier, node.set, s);
-    return below(frontier, node.inner, [s], 0, (found) =>
+    return innerBelow(frontier, node.inner, s, (found) =>
       into(pendingBelow(frontier, found, decision)),
     );
   }
@@ -735,7 +815,8 @@ function rules(frontier: Frontier, goal: Goal): void {
     );
   for (const read of at.reads) {
     const marked = marking(frontier, read, [s], into);
-    eachValue(frontier, read.value, (found) => below(frontier, found, [s], 0, marked));
+    if (frontier.scoped) eachValue(frontier, read.value, marked, [s]);
+    else eachValue(frontier, read.value, (found) => below(frontier, found, [s], 0, marked));
   }
 }
 
@@ -775,7 +856,8 @@ function stepEntry(
   const at = entry.at ?? [];
   properties(at);
   const steps = keptSteps(contract.work, at, [s]);
-  eachValue(frontier, entry.value!, (found) => below(frontier, found, steps, 0, marked));
+  if (frontier.scoped) eachValue(frontier, entry.value!, marked, steps);
+  else eachValue(frontier, entry.value!, (found) => below(frontier, found, steps, 0, marked));
 }
 
 /**
@@ -800,6 +882,12 @@ function drain(frontier: Frontier): void {
         }
         continue;
       }
+      // (#2005: a node's terms, a floor's, `termsAt`)
+      const term = frontier.terms?.fresh.pop();
+      if (term !== undefined) {
+        termRules(frontier, term);
+        continue;
+      }
       const task = frontier.tasks.pop();
       if (task === undefined) break;
       task[0](task[1]);
@@ -809,6 +897,10 @@ function drain(frontier: Frontier): void {
   }
   for (const goal of frontier.pending) goal.readers = null;
   frontier.pending = [];
+  if (frontier.terms !== null) {
+    for (const term of frontier.terms.pending) term.readers = null;
+    frontier.terms.pending = [];
+  }
 }
 
 /** Drops the goals of a build that declined or stopped: none of them is final. */
@@ -818,6 +910,13 @@ function rollback(frontier: Frontier): void {
   frontier.fresh = [];
   frontier.tasks = [];
   frontier.draining = false;
+  // (#2005: its term goals, and the receiver-shape graph's build it stopped in)
+  if (frontier.terms !== null) {
+    for (const term of frontier.terms.pending) frontier.terms.goals.delete(term.node);
+    frontier.terms.pending = [];
+    frontier.terms.fresh = [];
+  }
+  if (frontier.product !== null) rollback(frontier.product.shapes);
 }
 
 /** The nodes a build passes to its collector, once it is settled. */
@@ -852,7 +951,8 @@ function star(frontier: Frontier, set: number, stepName: string): number {
   const known = bySteps?.get(stepName);
   if (known !== undefined) return known;
   const nodes = collect(frontier, (then) => {
-    for (const node of frontier.members[set]!) below(frontier, node, [stepName], 0, then);
+    if (frontier.scoped) compose(frontier, frontier.members[set]!, [stepName], 0, then);
+    else for (const node of frontier.members[set]!) below(frontier, node, [stepName], 0, then);
   });
   const id = intern(frontier, nodes);
   if (bySteps === undefined) frontier.below.set(set, (bySteps = new Map()));
@@ -941,10 +1041,17 @@ function stateOf(frontier: Frontier, start: number, mark: boolean): number {
 function markedLeaf(frontier: Frontier, leaf: number): number {
   const node = frontier.nodes[leaf]!;
   if (node.kind !== "leaf") throw new Decline("marks-native");
-  return nodeId(frontier, joinParts("ml", leaf), () => ({
+  // (#2005: a marked leaf marked again is itself; a floor carries it marked through its base, `floorBelow`)
+  if (frontier.markBases.has(leaf)) return leaf;
+  const id = nodeId(frontier, joinParts("ml", leaf), () => ({
     kind: "leaf",
     item: marked([node.item])[0]!,
   }));
+  if (frontier.scoped && !frontier.markBases.has(id)) {
+    keep(frontier.contract.work, 2);
+    frontier.markBases.set(id, leaf);
+  }
+  return id;
 }
 
 /**
@@ -1188,7 +1295,11 @@ export function pushedInvariant(contract: Contract): {
     const [a, b] = name.split(",").map(Number);
     if (a === undefined || b === undefined) continue;
     const union = new Set(id < 0 ? [] : frontier.pendingSets[id]!);
-    if ([...frontier.pendingSets[a]!, ...frontier.pendingSets[b]!].some((each) => !union.has(each)))
+    if (
+      [...frontier.pendingSets[a]!, ...frontier.pendingSets[b]!].some(
+        (each) => !covered(frontier, union, each),
+      )
+    )
       violations.push(`the union of pending sets ${a} and ${b}: a state missing`);
   }
   let [held, bases] = [0, 0];
@@ -1202,10 +1313,8 @@ export function pushedInvariant(contract: Contract): {
         held += 1;
         seen.add(node.inner);
         const union = canonical.get(node.inner);
-        const names = new Set(
-          (union === undefined ? [] : frontier.pendingSets[union]!).map(nameOf),
-        );
-        if (frontier.pendingSets[node.set]!.some((each) => !names.has(nameOf(each))))
+        const states = new Set(union === undefined ? [] : frontier.pendingSets[union]!);
+        if (frontier.pendingSets[node.set]!.some((each) => !covered(frontier, states, each)))
           violations.push(
             `goal ${goal.node} at ${goal.step}: a held state of ${node.inner} outside its union`,
           );
@@ -1283,6 +1392,22 @@ function reachSlot(
   place: PlaceId,
   start: () => readonly number[],
 ): string | null {
+  try {
+    return builtSlot(contract, slot, place, start);
+  } catch (error) {
+    if (!(error instanceof Activate)) throw error;
+    // (#2005: the build stopped at its first pending mark, rolled back; built again, scoped)
+    frontierOf(contract).scoped = true;
+    return builtSlot(contract, slot, place, start);
+  }
+}
+
+function builtSlot(
+  contract: Contract,
+  slot: string,
+  place: PlaceId,
+  start: () => readonly number[],
+): string | null {
   const frontier = frontierOf(contract);
   // (after a stop at a place the graph holds, the native reader answers: its keys ask their stops one by one)
   if (heldStopped(frontier)) return null;
@@ -1343,4 +1468,576 @@ function* pushedRun(contract: Contract, slot: string): Work<readonly Item[]> {
     if (read !== null) flow!.attach(read, "writer");
   }
   return mergeItems(out, contract.pass.program.scope);
+}
+
+// --- receiver scopes (#2005) ---------------------------------------------------------------------------------------
+
+/*
+ * #2005: native reads no store at or below a receiver prefix holding no record or collection (`receiverWalk`, its
+ * floor, `holdsBelow`), carrying that prefix's unknowns. So a pending mark is the pair of its mark automaton's state
+ * and the receiver shapes it was reached under (an atom): it advances only while each of them holds something below it,
+ * and dies at a floor; a floor's own step stops its prefix's stores and carries its unknowns, its accepted marks too.
+ * The shapes are the receiver-shape graph's interned node sets (`shapesOf`: the same producers, unmarked). An atom of
+ * no shape is its plain state. With Q shapes reached, at most R·2^Q atoms, before absorption.
+ */
+
+/** #2005: a build's first pending mark, or first mark past an unwitnessed root: the build reruns, scoped. */
+class Activate extends Error {}
+
+/** #2005: a pending atom: a mark automaton state and the receiver shapes it holds under, ascending. */
+interface Atom {
+  readonly state: number;
+  readonly scopes: readonly number[];
+}
+
+/** #2005: an atom's step, once per atom and step: marked, or its atoms one step further. */
+interface AtomStep {
+  readonly marked: boolean;
+  readonly states: readonly number[];
+}
+
+interface Product {
+  /** The receiver-shape graph: its interned sets are the shapes. */
+  readonly shapes: Frontier;
+  /** The atoms by id (`-1 - index`), and their ids by state and scopes. */
+  readonly atoms: Atom[];
+  readonly atomIds: Map<string, number>;
+  readonly steps: Map<number, Map<string, AtomStep>>;
+  /** Per shape, whether a leaf of it holds below it (`structured`). */
+  readonly structured: Map<number, boolean>;
+  /** Per node, whether nothing below it reads (`pure`); per literal index node and state, its support (`literalSafe`). */
+  readonly pure: Map<number, boolean>;
+  readonly safe: WeakMap<IndexNode, Map<number, boolean>>;
+  /** Per state, whether it accepts through its epsilon edges. */
+  readonly accepts: Map<number, boolean>;
+  floors: number;
+}
+
+/** #2005: a node's terms as a floor reads them: its leaves and native values, found as goals are (`termsAt`). */
+interface TermGoal {
+  readonly node: number;
+  readonly value: Set<number>;
+  readers: ((node: number) => void)[] | null;
+}
+
+interface Terms {
+  readonly goals: Map<number, TermGoal>;
+  fresh: TermGoal[];
+  pending: TermGoal[];
+}
+
+function productOf(frontier: Frontier): Product {
+  return (frontier.product ??= {
+    shapes: new Frontier(frontier.contract, frontier),
+    atoms: [],
+    atomIds: new Map(),
+    steps: new Map(),
+    structured: new Map(),
+    pure: new Map(),
+    safe: new WeakMap(),
+    accepts: new Map(),
+    floors: 0,
+  });
+}
+
+function atomOf(product: Product, id: number): Atom {
+  return id >= 0 ? { state: id, scopes: [] } : product.atoms[-id - 1]!;
+}
+
+/** #2005: the atom of `state` under `scopes`, interned once; under none, the state itself. */
+function atomId(frontier: Frontier, state: number, scopes: readonly number[]): number {
+  if (scopes.length === 0) return state;
+  const product = productOf(frontier);
+  const list = [...new Set(scopes)].sort((a, b) => a - b);
+  const name = `${state}:${list.join(",")}`;
+  const known = product.atomIds.get(name);
+  if (known !== undefined) return known;
+  step(frontier, 1 + list.length);
+  frontier.contract.keepText(name.length);
+  keep(frontier.contract.work, 1 + list.length);
+  const id = -(product.atoms.length + 1);
+  product.atoms.push({ state, scopes: list });
+  product.atomIds.set(name, id);
+  return id;
+}
+
+/** #2005: a sorted pending list without the atoms its plain states absorb (`L(r)` holds `L(r) ∧ C`). */
+function absorbed(frontier: Frontier, list: readonly number[]): readonly number[] {
+  if (list.length === 0 || list[0]! >= 0) return list;
+  const product = productOf(frontier);
+  const plain = new Set<number>();
+  for (const id of list) {
+    step(frontier);
+    if (id >= 0) plain.add(id);
+  }
+  if (plain.size === 0) return list;
+  const out: number[] = [];
+  for (const id of list) {
+    step(frontier);
+    if (id >= 0 || !plain.has(atomOf(product, id).state)) out.push(id);
+  }
+  return out;
+}
+
+/** #2005: whether a pending set's states hold `state`: itself, or an atom's plain state that absorbs it. */
+function covered(frontier: Frontier, states: ReadonlySet<number>, state: number): boolean {
+  if (states.has(state)) return true;
+  return (
+    state < 0 && frontier.product !== null && states.has(atomOf(frontier.product, state).state)
+  );
+}
+
+/** #2005: a set's atoms one step further: each dies where one of its shapes is a floor, else steps with them. */
+function advanceAtoms(frontier: Frontier, states: readonly number[], s: string): Decision {
+  const product = productOf(frontier);
+  const rest = new Set<number>();
+  for (const id of states) {
+    step(frontier);
+    let bySteps = product.steps.get(id);
+    let known = bySteps?.get(s);
+    if (known === undefined) {
+      const atom = atomOf(product, id);
+      let live = true;
+      const scopes: number[] = [];
+      for (const scope of atom.scopes) {
+        step(frontier);
+        if (!structured(frontier, scope)) {
+          live = false;
+          break;
+        }
+        scopes.push(shapeStep(frontier, scope, s));
+      }
+      const residual = live
+        ? markStep(frontier.contract, [atom.state], s)
+        : { marked: false, states: [] };
+      known = {
+        marked: residual.marked,
+        states: residual.states.map((state) => atomId(frontier, state, scopes)),
+      };
+      if (bySteps === undefined) product.steps.set(id, (bySteps = new Map()));
+      keep(frontier.contract.work, 1 + known.states.length);
+      bySteps.set(s, known);
+    }
+    if (known.marked) return { marked: true, rest: -1 };
+    for (const state of known.states) rest.add(state);
+  }
+  return { marked: false, rest: internPending(frontier, rest) };
+}
+
+/** #2005: a node without its mark or hold. */
+function baseOf(frontier: Frontier, node: number): number {
+  let at = node;
+  for (let n = frontier.nodes[at]!; n.kind === "mark" || n.kind === "hold"; n = frontier.nodes[at]!)
+    at = n.inner;
+  return at;
+}
+
+/** #2005: the receiver shape of `roots`: their base nodes, one interned set of the receiver-shape graph. */
+function shapesOf(frontier: Frontier, roots: readonly number[]): number {
+  return intern(
+    productOf(frontier).shapes,
+    roots.map((node) => baseOf(frontier, node)),
+  );
+}
+
+/** #2005: a shape one step `s` below, the receiver-shape graph's (`next(S, s)`). */
+function shapeStep(frontier: Frontier, shape: number, s: string): number {
+  return star(productOf(frontier).shapes, shape, s);
+}
+
+/**
+ * #2005: `H(S)`: whether a leaf of a shape holds something below it (`holdsBelow`), once per shape. A shape of no such
+ * leaf but a native value's is not guessed: the native reader answers (`floor-shape-native`).
+ */
+function structured(frontier: Frontier, shape: number): boolean {
+  const product = productOf(frontier);
+  const known = product.structured.get(shape);
+  if (known !== undefined) return known;
+  const { shapes } = product;
+  let answer = false;
+  let opaque = false;
+  for (const leaf of leavesOf(shapes, setMembers(shapes, shape))) {
+    step(frontier);
+    const node = shapes.nodes[leaf]!;
+    if (node.kind === "native") opaque = true;
+    else if (node.kind === "leaf" && holdsBelow(node.item)) {
+      answer = true;
+      break;
+    }
+  }
+  if (!answer && opaque) throw new Decline("floor-shape-native");
+  keep(frontier.contract.work, 1);
+  product.structured.set(shape, answer);
+  return answer;
+}
+
+/**
+ * #2005: the nodes `steps` from `from` on below `roots`, each passed to `then`, in one receiver scope: at each prefix,
+ * the roots' shape there (`shapesOf`, `shapeStep`); a structured one's step is its goal's, a floor's carries its
+ * unknowns (`floorBelow`), and each node reached held takes the next prefix's shape (`constrain`). Roots that no read
+ * below them changes take their steps directly (`fastBelow`).
+ */
+function compose(
+  frontier: Frontier,
+  roots: readonly number[],
+  steps: readonly string[],
+  from: number,
+  then: (node: number) => void,
+): void {
+  if (from === steps.length) {
+    for (const node of roots) then(node);
+    return;
+  }
+  if (roots.every((node) => pure(frontier, node) || selfSafe(frontier, node))) {
+    for (const node of roots) fastBelow(frontier, node, steps, from, then);
+    return;
+  }
+  let shape = shapesOf(frontier, roots);
+  const shapes = [shape];
+  for (let at = from; at < steps.length; at += 1) {
+    step(frontier);
+    shape = shapeStep(frontier, shape, steps[at]!);
+    shapes.push(shape);
+  }
+  const walk = (node: number, at: number): void => {
+    if (at === steps.length) return then(node);
+    const next = shapes[at - from + 1]!;
+    const use = (found: number): void => walk(constrain(frontier, found, next), at + 1);
+    if (structured(frontier, shapes[at - from]!)) plainBelow(frontier, node, steps[at]!, use);
+    else floorBelow(frontier, node, steps[at]!, use);
+  };
+  for (const node of roots) walk(node, from);
+}
+
+/**
+ * #2005: a node reached held under the receiver shape `shape`: its atoms constrained by it; at a floor, its pending
+ * marks dropped (false there, and native excludes them on every continuation). A held literal that supports its marks
+ * keeps them as they are (`selfSafe`).
+ */
+function constrain(frontier: Frontier, node: number, shape: number): number {
+  const at = frontier.nodes[node]!;
+  if (at.kind !== "hold" || selfSafe(frontier, node)) return node;
+  const product = productOf(frontier);
+  if (!structured(frontier, shape)) {
+    product.floors += 1;
+    return at.inner;
+  }
+  const states = frontier.pendingSets[at.set]!;
+  let unchanged = true;
+  for (const id of states) {
+    step(frontier);
+    if (!atomOf(product, id).scopes.includes(shape)) {
+      unchanged = false;
+      break;
+    }
+  }
+  if (unchanged) return node;
+  const atoms = new Set<number>();
+  for (const id of states) {
+    step(frontier);
+    const atom = atomOf(product, id);
+    atoms.add(atomId(frontier, atom.state, [...atom.scopes, shape]));
+  }
+  const set = internPending(frontier, atoms);
+  if (set === at.set) return node;
+  return nodeId(frontier, joinParts("H", at.inner, set), () => ({
+    kind: "hold",
+    inner: at.inner,
+    set,
+  }));
+}
+
+/**
+ * #2005: one step below a node at a floor, as native reads it: a key's direct children with stores (a longer prefix's,
+ * which native still reads), and its terms' unknowns, a marked one still marked; a native value's declines.
+ */
+function floorBelow(
+  frontier: Frontier,
+  node: number,
+  s: string,
+  then: (node: number) => void,
+): void {
+  const at = frontier.nodes[baseOf(frontier, node)]!;
+  step(frontier);
+  if (at.kind === "key") {
+    const path = keptSteps(frontier.contract.work, at.path, [s]);
+    for (const member of at.members)
+      if (holds(frontier.contract, member, path)) then(keyNode(frontier, member, path));
+  }
+  termsAt(frontier, node, (term) => {
+    const leaf = frontier.nodes[term]!;
+    if (leaf.kind !== "leaf") throw new Decline("floor-native");
+    if (leaf.item.tag !== "unknown") return;
+    if (s === "element" && (leaf.item.reasons & REASON.external) !== 0)
+      throw new Decline("host element");
+    const base = frontier.markBases.get(term);
+    then(base === undefined ? term : markNode(frontier, base));
+  });
+}
+
+/** #2005: whether no read below a node changes it: an unknown leaf, or a literal whose index holds no read below. */
+function pure(frontier: Frontier, node: number): boolean {
+  const product = productOf(frontier);
+  const known = product.pure.get(node);
+  if (known !== undefined) return known;
+  let at = frontier.nodes[node]!;
+  if (at.kind === "mark") at = frontier.nodes[at.inner]!;
+  let answer = at.kind === "leaf" && at.item.tag === "unknown";
+  if (at.kind === "lit") {
+    const held = heldBelow(frontier.contract, at.at);
+    answer = held.reads === 0 && !held.others;
+  }
+  step(frontier);
+  keep(frontier.contract.work, 1);
+  product.pure.set(node, answer);
+  return answer;
+}
+
+/** #2005: a node held over a pure literal whose structure supports each of its plain states (`literalSafe`). */
+function selfSafe(frontier: Frontier, node: number): boolean {
+  const held = frontier.nodes[node]!;
+  if (held.kind !== "hold") return false;
+  const at = frontier.nodes[held.inner]!;
+  if (at.kind !== "lit" || !pure(frontier, held.inner)) return false;
+  for (const id of frontier.pendingSets[held.set]!) {
+    step(frontier);
+    if (id < 0 || !literalSafe(frontier, id, at.at)) return false;
+  }
+  return true;
+}
+
+/** #2005: whether a mark state accepts through its epsilon edges, once per state. */
+function acceptsNow(frontier: Frontier, state: number): boolean {
+  const product = productOf(frontier);
+  const known = product.accepts.get(state);
+  if (known !== undefined) return known;
+  const seen = new Set<number>([state]);
+  const open = [state];
+  let answer = false;
+  while (open.length > 0 && !answer) {
+    step(frontier);
+    const at = markState(frontier.contract, open.pop()!);
+    answer = at.accepting;
+    for (const to of at.epsilon)
+      if (!seen.has(to)) {
+        seen.add(to);
+        open.push(to);
+      }
+  }
+  keep(frontier.contract.work, 1);
+  product.accepts.set(state, answer);
+  return answer;
+}
+
+/** #2005: whether a literal index node holds a structure: one of its terms' kinds holds below it. */
+function literalHolds(frontier: Frontier, at: IndexNode): boolean {
+  for (const tag of at.terms.keys()) {
+    step(frontier);
+    if (holdsBelow(makeItem(tag, null))) return true;
+  }
+  return false;
+}
+
+/**
+ * #2005: whether a literal's structure supports a mark state's every continuation before it accepts, so its receiver
+ * scope adds nothing: each state and index node it reaches, on an explicit stack, accepts, or holds a structure and
+ * has the child each step takes. One pair failing fails it; once per state and index node.
+ */
+function literalSafe(frontier: Frontier, state: number, at: IndexNode): boolean {
+  const product = productOf(frontier);
+  let byState = product.safe.get(at);
+  const known = byState?.get(state);
+  if (known !== undefined) return known;
+  const seen = new Map<IndexNode, Set<number>>();
+  const visited: [IndexNode, number][] = [];
+  const open: [IndexNode | undefined, number][] = [[at, state]];
+  let safe = true;
+  while (open.length > 0 && safe) {
+    step(frontier);
+    const [node, id] = open.pop()!;
+    if (acceptsNow(frontier, id)) continue;
+    if (node === undefined) {
+      safe = false;
+      break;
+    }
+    const cached = product.safe.get(node)?.get(id);
+    if (cached === true) continue;
+    if (cached === false || !literalHolds(frontier, node)) {
+      safe = false;
+      break;
+    }
+    let states = seen.get(node);
+    if (states === undefined) seen.set(node, (states = new Set()));
+    if (states.has(id)) continue;
+    states.add(id);
+    visited.push([node, id]);
+    const mark = markState(frontier.contract, id);
+    for (const [s, to] of mark.next) open.push([node.children.get(s), to]);
+    for (const to of mark.epsilon) open.push([node, to]);
+  }
+  // (every pair a safe walk reached is safe; a failed walk says so of its start alone)
+  for (const [node, id] of safe ? visited : [[at, state] as [IndexNode, number]]) {
+    keep(frontier.contract.work, 1);
+    let bySafe = product.safe.get(node);
+    if (bySafe === undefined) product.safe.set(node, (bySafe = new Map()));
+    bySafe.set(id, safe);
+  }
+  byState ??= product.safe.get(at);
+  return byState?.get(state) ?? safe;
+}
+
+/** #2005: `steps` from `from` on below a node no read below changes, each step taken directly (`innerBelow`). */
+function fastBelow(
+  frontier: Frontier,
+  node: number,
+  steps: readonly string[],
+  from: number,
+  then: (node: number) => void,
+): void {
+  if (from === steps.length) return then(node);
+  innerBelow(frontier, node, steps[from]!, (found) =>
+    fastBelow(frontier, found, steps, from + 1, then),
+  );
+}
+
+/**
+ * One step below a marked or held node's inner node: its goal's; #2005, scoped, a pure one's step read directly, as
+ * its goal's rules would (a literal's child and F11's `missing`, an unknown leaf itself).
+ */
+function innerBelow(
+  frontier: Frontier,
+  node: number,
+  s: string,
+  then: (node: number) => void,
+): void {
+  const at = frontier.nodes[node]!;
+  if (frontier.scoped && pure(frontier, node)) {
+    step(frontier);
+    if (at.kind === "leaf") {
+      if (s === "element" && frontier.hosts.has(node)) throw new Decline("host element");
+      return then(node);
+    }
+    if (at.kind === "mark")
+      return innerBelow(frontier, at.inner, s, (found) => then(markNode(frontier, found)));
+    if (at.kind === "lit") {
+      const { contract } = frontier;
+      const { literal, index, id } = at;
+      if (at.at.reference) throw new Decline("reference");
+      if (s === "element" && (at.at.children.has(s) || at.at.empty))
+        throw new Decline("collection");
+      const child = at.at.children.get(s);
+      if (child !== undefined) then(litNode(frontier, literal, pathAt(contract, id, s), child));
+      const lacking = lackingAt(contract, index, id, s);
+      if (lacking !== null)
+        then(
+          leafNode(frontier, joinParts("m", literal, id, s), () =>
+            unknownItem(REASON.missing, lacking),
+          ),
+        );
+      return;
+    }
+  }
+  plainBelow(frontier, node, s, then);
+}
+
+/**
+ * #2005: whether the node whose rules run witnesses a record where a mark accepts past its holder's root: a literal
+ * holding an object, or a key whose first store is a live whole copy of an object.
+ */
+function immediateSafe(frontier: Frontier): boolean {
+  const id = frontier.ruleNode;
+  if (id === undefined) return false;
+  const node = frontier.nodes[id]!;
+  if (node.kind === "lit") return node.at.terms.has("object");
+  if (node.kind !== "key") return false;
+  const { definitions, lists, program } = frontier.contract.pass;
+  const first = definitions.byKey.get(node.key)?.[0];
+  return (
+    first !== undefined &&
+    first.kind === "whole" &&
+    first.value !== undefined &&
+    lists.live(first) &&
+    program.hasOf.get(first.value)?.[0]?.type.kind === "object"
+  );
+}
+
+/** #2005: a node's terms (`TermGoal`), each passed to `then` as found. */
+function termsAt(frontier: Frontier, node: number, then: (node: number) => void): void {
+  if (frontier.terms === null) frontier.terms = { goals: new Map(), fresh: [], pending: [] };
+  const terms = frontier.terms;
+  let goal = terms.goals.get(node);
+  if (goal === undefined) {
+    frontier.contract.keep(2);
+    goal = { node, value: new Set(), readers: [] };
+    terms.goals.set(node, goal);
+    terms.fresh.push(goal);
+    terms.pending.push(goal);
+  }
+  step(frontier);
+  goal.readers?.push(then);
+  for (const found of goal.value) frontier.tasks.push([then, found]);
+}
+
+function termGain(frontier: Frontier, goal: TermGoal, found: number): void {
+  step(frontier);
+  if (goal.value.has(found)) return;
+  goal.value.add(found);
+  keep(frontier.contract.work, 1);
+  for (const reader of goal.readers ?? []) frontier.tasks.push([reader, found]);
+}
+
+/**
+ * #2005: a term goal's rules: a leaf or native value is its own term; a marked or held node its inner node's, marked
+ * where marked; a key its live whole stores' values' terms; a literal index node its terms' leaves, its reads' terms
+ * through their marks and its computed values. A value the graph declines is read natively, unless the decline left
+ * goals of the build.
+ */
+function termRules(frontier: Frontier, goal: TermGoal): void {
+  const node = frontier.nodes[goal.node]!;
+  const { program, definitions, lists } = frontier.contract.pass;
+  const into = (found: number): void => termGain(frontier, goal, found);
+  step(frontier);
+  const term = (at: number, mark = false): void =>
+    termsAt(frontier, at, (found) => into(mark ? markedLeaf(frontier, found) : found));
+  const value = (at: PlaceId, route: ((node: number) => number) | null = null): void => {
+    const native = (): void =>
+      term(route === null ? nativeNode(frontier, at) : route(nativeNode(frontier, at)));
+    if (
+      program.occurrenceOf.get(at) === undefined &&
+      !program.projOf.has(at) &&
+      !(program.hasOf.has(at) && !program.cellOwner.has(at))
+    )
+      return native();
+    const before = frontier.pending.length;
+    try {
+      eachValue(frontier, at, (found) => term(route === null ? found : route(found)));
+    } catch (error) {
+      if (!(error instanceof Decline) || frontier.pending.length !== before) throw error;
+      native();
+    }
+  };
+  if (node.kind === "leaf" || node.kind === "native") return into(goal.node);
+  if (node.kind === "mark" || node.kind === "hold") return term(node.inner, node.kind === "mark");
+  if (node.kind === "key") {
+    for (const member of node.members)
+      for (const definition of definitions.byKey.get(keyOf(member, node.path)) ?? []) {
+        step(frontier);
+        if (!lists.live(definition)) continue;
+        if (
+          definition.kind !== "whole" ||
+          definition.value === undefined ||
+          definition.how === "argument" ||
+          definition.how === "parameter default"
+        )
+          throw new Decline("definition");
+        value(definition.value);
+      }
+    return;
+  }
+  for (const [tag, token] of node.at.terms)
+    into(
+      leafNode(frontier, joinParts("t", node.literal, node.id, tag), () => makeItem(tag, token)),
+    );
+  for (const read of node.at.reads) value(read.value, routeOf(frontier, read, []));
+  for (const other of node.at.others) into(nativeNode(frontier, other.value));
 }
