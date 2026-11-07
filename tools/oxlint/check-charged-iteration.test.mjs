@@ -305,22 +305,21 @@ test("the configured checker covers objects.ts: a raw loop there is rejected, a 
 import { each } from "../narrowing-iteration.js";
 import type { WorkLedger } from "../budget.js";
 declare const work: WorkLedger;
-declare const items: readonly number[];
-export function raw(): number {
+export function raw(items: readonly number[]): number {
   work.charge("objectSteps");
   let total = 0;
   for (const item of items) total += item;
   return total;
 }
-export function charged(): number {
+export function charged(items: readonly number[]): number {
   work.charge("objectSteps");
   let total = 0;
   for (const item of each(work, "objectSteps", items)) total += item;
   return total;
 }
 `);
-  // (the raw loop's line, and nothing in the charged function)
-  assert.deepEqual(lines, [9]);
+  // (the raw loop's line, and nothing in the charged function: its items an entry's input)
+  assert.deepEqual(lines, [8]);
 });
 
 test("objects.ts calls only its own allowlist, and hands no collection of any size to an allowed call outside OBJECTS_COLLECTIONS (#1747, Codex r5, r6)", () => {
@@ -376,6 +375,7 @@ export function called(input: readonly string[]): string[] {
   );
   // (the spread, the array join, the array key, a narrowing modules' call even with a literal array, an allowed function
   // handed as a callback, and the same call in an arrow, now seen with its array; nothing in the scalar join or the
-  // literal key)
-  assert.deepEqual(lines, [8, 12, 20, 28, 32, 36]);
+  // literal key. objects.ts's language (`objects-language.mjs`) also rejects the `object` entry parameter (6), the
+  // narrowing modules' `keyBelow` as a callee (28), the unadmitted helper `mapped` (32, 36) and the arrow handed to it (36))
+  assert.deepEqual(lines, [6, 8, 12, 20, 28, 28, 32, 32, 36, 36, 36]);
 });
