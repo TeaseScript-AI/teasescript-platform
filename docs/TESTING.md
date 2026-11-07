@@ -212,14 +212,14 @@ counts. CI runs only `npm run test:families`, which checks that every module sti
 
 ### Sampled sweeps
 
-CI runs `npm run check` as two jobs side by side, `check-1` and `check-2`, each meant to stay at least 3 minutes under
-its 15-minute limit at the slow end of runner variance (#1638): each builds and runs one half of the compiled tests
-(`npm test -- --shard=i/2`), `check-2` also the checks before them (`npm run check:pretest`). Every type-core test file
-and every other of 10 s or more is listed, costliest first, with its median seconds over three CI runs or more in
+CI runs `npm run check` as three jobs side by side, `check-1` to `check-3`, each meant to stay at least 3 minutes under
+its 15-minute limit at the slow end of runner variance (#1638, #1978): each builds and runs one third of the compiled
+tests (`npm test -- --shard=i/3`), `check-3` also the checks before them (`npm run check:pretest`). Every type-core test
+file and every other of 10 s or more is listed, costliest first, with its median seconds over three CI runs or more in
 `tools/costly-test-files.mjs`, beside the seconds of `check:pretest`: each test job keeps its files' seconds as an
 artifact for 7 days, and `node tools/measure-test-files.mjs --write --from-ci RUN ...` regenerates the module from them
 (its header names the runs; seconds measured on a worker do not predict CI's). The full suite starts the listed files
-first, and `tools/test-shards.mjs` shares the files out so that the jobs end together, `check-2`'s after its checks
+first, and `tools/test-shards.mjs` shares the files out so that the jobs end together, `check-3`'s after its checks
 before the tests. Their costliest sweeps
 that claim something at every member of a list of settled stops or allowances (`testedStops`, the stops before admission
 settled in `type-core-stop`, `completionAllowances`) visit of each list the first, the last and two evenly between
