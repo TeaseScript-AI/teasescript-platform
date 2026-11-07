@@ -218,6 +218,17 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
       // (a cycle's waiting scans are one run of the stack, as `join` makes it, so it waits on exactly where the scan
       // below is in it; its deferred scans finished last, so each is kept once, from the end)
       const cycle = cycleOf(admission, done.key);
+      // DEBUG #1931 hold probe (disposable, removed before READY)
+      if (cycle !== "" && below !== undefined && cycleOf(admission, below.key) === cycle) {
+        const inCycle = pending.map((each) => cycleOf(admission, each.key) === cycle);
+        let at = inCycle.length - 1;
+        while (at >= 0 && inCycle[at]) at -= 1;
+        if (inCycle.slice(0, at + 1).some(Boolean))
+          throw new Error(`A4 hold probe: the cycle of '${done.key}' is not one run ending below it`);
+      }
+      for (const read of (done as { reads?: { key: CanonicalKey; held: boolean }[] }).reads ?? [])
+        if (read.held && cycleOf(admission, read.key) !== cycleOf(admission, done.key))
+          throw new Error(`A4 hold probe: '${done.key}' read the deferred '${read.key}' outside its cycle`);
       if (cycle !== "" && below !== undefined && cycleOf(admission, below.key) === cycle) {
         deferred.push({ key: done.key, term });
         deferredKeys.add(done.key);
@@ -232,9 +243,18 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
           deferredKeys.delete(kept.key);
           admission.inherited.set(kept.key, kept.term);
         }
+        // DEBUG #1931 hold probe
+        if (cycle !== "" && deferred.some((each) => cycleOf(admission, each.key) === cycle))
+          throw new Error(`A4 hold probe: a deferred member of '${done.key}''s cycle was not kept`);
       }
       if (below !== undefined && below.cycle !== cycleOf(admission, below.key))
         pending[pending.length - 1] = scan(below.key);
+      // DEBUG #1931 hold probe: the scan below reads the finished one, unless it is taken again
+      if (below !== undefined && pending.at(-1) === below)
+        ((below as { reads?: { key: CanonicalKey; held: boolean }[] }).reads ??= []).push({
+          key: done.key,
+          held: deferredKeys.has(done.key),
+        });
       given = term;
     };
     // (the position of the lowest waiting scan in a deferred key's cycle: the stack walked down its run)
@@ -262,6 +282,9 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
       }
       const needed = step.value;
       const from = waiting.get(needed) ?? (deferredKeys.has(needed) ? lowest(needed) : undefined);
+      // DEBUG #1931 hold probe
+      if (from !== undefined && from < 0)
+        throw new Error(`A4 hold probe: the deferred '${needed}' has no waiting scan in its cycle`);
       if (from !== undefined) {
         const cycle = joinParts(top.key, needed);
         // (a scan that asks again across the cycle just closed inherits nothing: it never waits on itself twice)
