@@ -100,6 +100,20 @@ type Policy =
 
 /** Each entry point of the work census, by file and place: its policy, and the surfaces it reaches. */
 const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = {
+  "player/vue/src/usePlayerSession.ts usePlayerSession > importSavedData > owned:callback > commit:callback#2":
+    ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
+  "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback > replaceSession > admit:callback#1":
+    ["creation", ["BridgeClient.request"]],
+  "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback > replaceSession > admit:callback#2":
+    ["creation", ["BridgeClient.request"]],
+  "player/vue/src/usePlayerSession.ts usePlayerSession > readTransfer": [
+    "read",
+    ["BridgeClient.request"],
+  ],
+  "player/vue/src/usePlayerSession.ts usePlayerSession > reviewSessionImport": [
+    "read",
+    ["BridgeClient.request"],
+  ],
   "player/lock-service.ts LockService > request > later:callback": [
     "own observation",
     ["BridgeClient.request", "BridgeClient.section"],
@@ -349,8 +363,6 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "creation",
     ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback > replaceSession > admit:callback":
-    ["creation", ["BridgeClient.request"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback > replaceSession > commit:callback#4":
     ["creation", ["BridgeClient.request"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > keepIn > admit:callback": [
@@ -501,6 +513,9 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
 
 /** The escapes the census follows: an object literal's property, or a destructured binding, that holds a forwarder. */
 const FOLLOWED: readonly string[] = [
+  "player/vue/src/usePlayerSession.ts usePlayerSession > discardSessionReview {discardSessionReview}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > readTransfer {readTransfer}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > reviewSessionImport {reviewSessionImport}",
   "player/engine-bridge/client.ts openBridge > Promise:callback > request {request}",
   "player/engine-bridge/client.ts openBridge > Promise:callback > section {section}",
   "player/engine-bridge/client.ts openBridge > Promise:callback > signal {signal}",
@@ -648,6 +663,10 @@ const ADOPTIONS: Readonly<Record<string, readonly [Adoption, readonly string[]]>
 };
 /** The adoption census's followed escapes: the op tables' `run` members, and the facade's exposures. */
 const ADOPTION_ESCAPES: readonly string[] = [
+  "player/engine-bridge/ops/transfer.ts transferOps > readTransfer > run {run}",
+  "player/engine-bridge/ops/transfer.ts transferOps > releaseTransfer > run {run}",
+  "player/engine-bridge/ops/transfer.ts transferOps > reviewTransfer > run {run}",
+  "player/engine-bridge/ops/transfer.ts transferOps > transferCommit > run {run}",
   "player/engine-bridge/ops/persistence.ts persistenceOps > captureCheckpoint > run {run}",
   "player/engine-bridge/ops/persistence.ts persistenceOps > captureKeep > run {run}",
   "player/engine-bridge/ops/persistence.ts persistenceOps > planText > run {run}",
