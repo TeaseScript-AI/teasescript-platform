@@ -94,25 +94,25 @@ export function* absentWriterAt(
     // #1668: K, a query's proof names the writer of a read's `missing`, none of its items
     const { proof: node } = yield* solver.proven(open.pop()!);
     if (node === null || !node.complete) return UNCOVERED;
-    program.work.charge("invSteps");
+    program.work.charge("objectSteps");
     for (const { key, place, path } of node.keys) {
-      program.work.charge("invSteps");
+      program.work.charge("objectSteps");
       // (the read at the property is a key's own demand: stopped there, it answers no `missing` the query names)
       const below = keyBelowIn(contract, key, [step]);
       if (contract.keyStopped(below)) return UNCOVERED;
       for (const d of definitions.byKey.get(below) ?? []) {
-        program.work.charge("invSteps");
+        program.work.charge("objectSteps");
         if (lists.live(d)) return UNCOVERED;
       }
       const written = writtenOf(program.place(place).kind);
       if (written !== null && termAt(written, joinSteps(path, [step])) !== null) return UNCOVERED;
     }
     for (const each of node.prior) {
-      program.work.charge("invSteps");
+      program.work.charge("objectSteps");
       writer = firstWriter(writer, each);
     }
     for (const { literal, path } of node.lists) {
-      program.work.charge("invSteps");
+      program.work.charge("objectSteps");
       const index = contract.literalIndex(literal);
       const below = nodeAt(contract, index, path)?.children.get(step);
       if (below !== undefined && below.reads.length + below.others.length + below.exact.length > 0)
@@ -121,7 +121,7 @@ export function* absentWriterAt(
     }
     // (each edge read, a child already seen too: a dense graph's edges, not only its nodes)
     for (const child of node.children) {
-      program.work.charge("invSteps");
+      program.work.charge("objectSteps");
       if (!seen.has(child.key)) {
         contract.keepText(child.key.length);
         seen.add(child.key);
@@ -164,7 +164,7 @@ class Gathered {
   /** A query this one reads: its node among this one's, or this one declined. */
   public *from(demand: ProofDemand<ObjectsProof>): Work<void> {
     // (every visit charged, one after a decline too: its callers stop at the first, `literalObjects`)
-    this.contract.pass.program.work.charge("invSteps");
+    this.contract.pass.program.work.charge("objectSteps");
     if (!this.complete) return;
     // #1668: K, a query this one reads, for its proof alone
     const { proof } = yield* this.contract.pass.solver.proven(demand);
@@ -192,7 +192,7 @@ class Gathered {
     const children = [...this.#children.keys()];
     // (its parts sorted for the signature and copied into the proof, each charged)
     contract.pass.program.work.charge(
-      "invSteps",
+      "objectSteps",
       sortCost(names.length) + sortCost(children.length),
     );
     contract.keep(2 * (names.length + children.length));
@@ -232,7 +232,7 @@ const DECLINED: ObjectsProof = {
 
 /** Whether a path holds a choice's selection step, which the query does not follow. */
 function selecting(contract: Contract, rest: readonly string[]): boolean {
-  contract.pass.program.work.charge("invSteps", 1 + rest.length);
+  contract.pass.program.work.charge("objectSteps", 1 + rest.length);
   return rest.some((step) => step === SELECTED_VALUE || step === SELECTED_TEXT);
 }
 
@@ -243,7 +243,7 @@ function* valueObjects(
   rest: readonly string[],
 ): Work<Proven<ObjectsProof>> {
   const { program } = contract.pass;
-  program.work.charge("invSteps");
+  program.work.charge("objectSteps");
   const out = new Gathered(contract);
   if (selecting(contract, rest)) {
     out.complete = false;
@@ -327,11 +327,11 @@ function* literalObjects(
   let node = index.root;
   let id = 0;
   for (let length = 0; ; length += 1) {
-    program.work.charge("invSteps");
+    program.work.charge("objectSteps");
     const below = rest.slice(length);
     // (each group and entry visited charged, and the walk stops at the first decline: nothing after it changes it)
     for (const group of readGroupsAt(contract, node.reads, false)) {
-      program.work.charge("invSteps");
+      program.work.charge("objectSteps");
       // (a mixed class reads its other members where their answers differ: that depends on the property)
       if (group.rest.length > 0 && group.mixed !== 0) out.complete = false;
       for (const entry of group.read) {
@@ -342,7 +342,7 @@ function* literalObjects(
     }
     const groups = othersAt(contract, node.others, false);
     for (const group of contract.othersBelowOf.get(groups) ?? groups) {
-      program.work.charge("invSteps");
+      program.work.charge("objectSteps");
       if (group === null || (group.rest.length > 0 && group.mixed !== 0)) {
         out.complete = false;
         return;
@@ -378,7 +378,7 @@ function* entryObjects(
   entry: PrefixEntry,
   rest: readonly string[],
 ): Work<void> {
-  contract.pass.program.work.charge("invSteps");
+  contract.pass.program.work.charge("objectSteps");
   // (an opaque or deferred store: its unknown beside a `missing` joins their reasons)
   if (entry.unk !== undefined) {
     out.complete = false;
@@ -415,7 +415,7 @@ function* entryObjects(
  */
 function* keyObjectsMade(contract: Contract, key: Key): Work<Proven<ObjectsProof>> {
   const { program } = contract.pass;
-  program.work.charge("invSteps");
+  program.work.charge("objectSteps");
   const out = new Gathered(contract);
   const walk = keyWalk(contract, key);
   const { place } = walk;
@@ -447,7 +447,7 @@ function* keyObjectsMade(contract: Contract, key: Key): Work<Proven<ObjectsProof
   // (a property below it: its own stores and the written type there, which `absentWriterAt` asks)
   out.key({ key, place, path });
   for (let length = path.length; length >= 0 && length > receiver.floor; length -= 1) {
-    program.work.charge("invSteps");
+    program.work.charge("objectSteps");
     const stores = contract.prefixStores(walk.prefix(length));
     // (#1466's layers of a replaced source's stores: not followed)
     if (stores.subs !== null || stores.also.length > 0) {

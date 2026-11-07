@@ -62,6 +62,9 @@ export type WorkCounter =
   | "eventSteps"
   // the contract per demanded path and its source indexes
   | "invSteps"
+  // #1747: the objects query's own visits (`contract/objects.ts`): each proof node, entry, group, store, writer, list,
+  // child edge, sort step and copy it reads
+  | "objectSteps"
   // what the literal indexes, their identities and structures keep, charged before they keep it: each entry, scheduled
   // task and element of a sorted copy, and each text (a signature, a structure) by its size; and each path, key or
   // composite key the core makes past `SHORT` (`keptText` and the helpers beside it)
