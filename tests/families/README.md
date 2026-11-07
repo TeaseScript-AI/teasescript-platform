@@ -45,7 +45,7 @@ from stalls, in a source that stalls later too (`tests/families-runner.test.ts`,
 the oracle's own stop. Its own questions (each binding's admitted types, then the occurrences) run apart from the
 analysis's allowance and stop after the one whose units pass the program's allowance plus 64 per cell returned (an
 occurrence's answer, its element's and each property's; two a binding), where 640 bytes per cell returned pass
-their room in the heap (the process's V8 heap limit less 1 GiB), or past the read-depth limit (#1837); the
+their room in the heap (the process's V8 heap limit less 1.5 GiB), or past the read-depth limit (#1837); the
 nodes from there on stay unanswered (`publicationHashes`'s `unanswered`, #1499), after the bindings left where the
 admitted types stopped. A publication run's unit limit grants the same 64 per cell its tree's oracle reports so far
 (`questionWork`), so the oracle's stop comes first wherever a question reports its cells before the runner's limit; one

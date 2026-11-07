@@ -326,8 +326,12 @@ export const QUESTION_UNITS_PER_CELL = 64;
  */
 export const QUESTION_BYTES_PER_CELL = 640;
 
-/** The heap the oracle's questions leave to the analysis, the route and what V8 has yet to collect: 1 GiB. */
-const QUESTION_HEAP_RESERVE = 1_024 * 2 ** 20;
+/**
+ * The heap the oracle's questions leave to the analysis, the route and what V8 has yet to collect: 1.5 GiB. The
+ * analysis finishes before any question is asked, so the oracle cannot cap its heap; with sharing off it grows about
+ * ×3.6 a doubling (#1603), to 1,089 MiB at `W19-sources` k = 1,024, and V8 needs room beyond it to collect.
+ */
+const QUESTION_HEAP_RESERVE = 1_536 * 2 ** 20;
 
 /**
  * The questions' room in the heap: this process's V8 heap limit (fixed by its `--max-old-space-size`, as the families
