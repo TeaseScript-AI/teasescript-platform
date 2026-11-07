@@ -60,13 +60,19 @@ const heading = ref<HTMLElement | null>(null);
 // Each reading belongs to one opening of the dialog; a late result after Cancel or closing is discarded.
 let attempt = 0;
 
-/** Leaves the session review shown, if any: the host's copy of its session is not needed any more. */
+/**
+ * Leaves the session review shown, if any: the host's copy of its session is not needed any more. An import under way
+ * still needs it; `confirmSession` lets go of it once the import settles.
+ */
 function leaveSessionReview() {
   const current = step.value;
-  if (current.kind === "sessionReview" || current.kind === "sessionImporting")
-    props.discardSession(current.review.transfer);
+  if (current.kind === "sessionReview") props.discardSession(current.review.transfer);
 }
-onBeforeUnmount(leaveSessionReview);
+// A reading or review still pending belongs to no dialog any more: it lets go of its session when it arrives.
+onBeforeUnmount(() => {
+  attempt++;
+  leaveSessionReview();
+});
 
 watch(open, () => {
   attempt++;
@@ -184,7 +190,8 @@ async function confirmSession() {
     props.discardSession(current.review.transfer);
     if (confirmed === attempt) step.value = { kind: "done", session: true };
   } catch (error) {
-    if (confirmed !== attempt) return;
+    // The dialog moved on meanwhile: nothing offers the review again. Shown again, it keeps its session for a retry.
+    if (confirmed !== attempt) return props.discardSession(current.review.transfer);
     step.value = {
       kind: "sessionReview",
       review: current.review,
