@@ -386,10 +386,12 @@ test("an objects query charges each writer it meets and each edge it reads, a se
   // (n objects nested 0 … n deep: n F11 writers met along `element.p…`)
   const nested = (n: number): number => {
     const objects = Array.from({ length: n + 1 }, (_, d) => "{p:".repeat(d) + "{}" + "}".repeat(d));
-    return work(`let xs=[${objects.join(",")}]\nexit\n`, () => 1, [
-      "element",
-      ...Array(n).fill("p"),
-    ]);
+    // (the array literal: the one whose index holds its element)
+    const array = (pass: CorePass): number =>
+      [...pass.program.hasOf.keys()].find((literal) =>
+        pass.contract.literalIndex(literal).root.children.has("element"),
+      )!;
+    return work(`let xs=[${objects.join(",")}]\nexit\n`, array, ["element", ...Array(n).fill("p")]);
   };
   const [a, b] = [nested(4), nested(16)];
   assert.ok(b >= a + 12, `${a}, ${b}`);
