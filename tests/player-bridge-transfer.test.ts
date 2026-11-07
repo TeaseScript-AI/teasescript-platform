@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
+import ts from "typescript";
 
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
@@ -10,12 +13,14 @@ import {
   type PrepareResult,
 } from "../player/engine-bridge/player-ops.js";
 import type { HostSessions } from "../player/engine-bridge/worker-host.js";
+import { transferOps } from "../player/engine-bridge/ops/transfer.js";
 import { PlayerBridge } from "../player/player-bridge.js";
 import {
   createPlayerRuntimeRestorePoint,
   playerRuntimeSnapshotJson,
 } from "../player/runtime-adapter.js";
 import {
+  sessionTransferFile,
   sessionTransferText,
   type SessionTransfer,
   type SessionTransferMedium,
@@ -98,16 +103,6 @@ function ticketIn(result: unknown): string {
   return value.ticket;
 }
 
-/** The refusal of `request`, as the main side meets it: its class and words. */
-async function refusal(request: Promise<unknown>): Promise<{ name: string; message: string }> {
-  const error = await request.then(
-    () => assert.fail("not refused"),
-    (caught: unknown) => caught,
-  );
-  assert.ok(error instanceof Error);
-  return { name: error.name, message: error.message };
-}
-
 test("a session read, reviewed and committed in the host gives what the main realm's restore gives, in-process and in a Worker", async () => {
   const transfer = transferAt();
   const text = await sessionTransferText(transfer, false);
@@ -172,77 +167,632 @@ test("saved data comes back whole from the host, as the main realm's reader give
   assert.deepEqual(inProcess, { kind: "savedData", bundle });
 });
 
-test("every refusal keeps its class and its words, in-process and in a Worker", async () => {
+/*
+ * The transfer ops' family: each op of `transferOps`, each of its argument forms and outcomes, and each refusal the
+ * reader and the review make (`player/session-transfer-read.ts`), one row each, with its expected answer written here,
+ * not taken from the reader. Every row runs in-process and over a Node Worker. The coverage check compares the rows with
+ * the ops, their declared outcomes, and each `StorageTransferError` the reader's source raises.
+ */
+
+/** Each transfer op's outcomes; a row names one, and each is some row's. */
+const OUTCOMES = {
+  readTransfer: ["session", "savedData", "refused", "malformed"],
+  reviewTransfer: [
+    "reviewed",
+    "reviewedAgain",
+    "refused",
+    "unknownTicket",
+    "unknownPlan",
+    "malformed",
+  ],
+  transferCommit: ["committed", "committedAgain", "unreviewed", "unknownTicket", "malformed"],
+  releaseTransfer: ["released", "unknownTicket", "malformed"],
+} as const satisfies Record<keyof ReturnType<typeof transferOps>, readonly string[]>;
+type TransferOp = keyof typeof OUTCOMES;
+
+/** Refusals of the reader's source no row reaches, by their words, and why. */
+const UNREACHED: Readonly<Record<string, string>> = {
+  "This session's checkpoint is too large for this browser.":
+    "a checkpoint whose JSON passes the engine's string limit, far above what a test can build",
+};
+
+/** What a row answers: its op's result, projected, or the refusal's class and words. */
+type Answer = { readonly answer: Answered } | { readonly name: string; readonly message: string };
+/** An op's result as a row compares it: a read's kind, a commit's strings, or `null`. */
+type Answered = string | Committed | null;
+interface Committed {
+  readonly snapshotJson: string;
+  readonly eventsJson: readonly string[];
+}
+
+interface Row {
+  readonly op: TransferOp;
+  readonly outcome: string;
+  /** Makes the row's requests on `bridge`; its answer is the last one's. */
+  readonly run: (bridge: PlayerBridge) => Promise<Answer>;
+  readonly expected: Answer;
+}
+
+/** The answer of `request`, its result projected by `project`, or its refusal. */
+async function answerOf(
+  request: Promise<{ readonly result: unknown }>,
+  project: (result: unknown) => Answered = nullOf,
+): Promise<Answer> {
+  try {
+    return { answer: project((await request).result) };
+  } catch (error) {
+    assert.ok(error instanceof Error);
+    return { name: error.name, message: error.message };
+  }
+}
+
+const refusedWith = (message: string): Answer => ({ name: "StorageTransferError", message });
+const MALFORMED = (op: string): Answer => ({
+  name: "BridgeRefusal",
+  message: `Malformed arguments for '${op}'.`,
+});
+const NO_TICKET = {
+  name: "Error",
+  message: "No session read for an import is held under this ticket.",
+};
+/** A read's kind. */
+function kindOf(result: unknown): string {
+  const value = objectOf(result);
+  assert.ok("kind" in value && typeof value.kind === "string");
+  return value.kind;
+}
+/** A result that is none. */
+function nullOf(result: unknown): null {
+  assert.equal(result, null);
+  return null;
+}
+/** A commit's state and events' JSON. */
+function committedOf(result: unknown): Committed {
+  const value = objectOf(result);
+  assert.ok("snapshotJson" in value && typeof value.snapshotJson === "string");
+  assert.ok("eventsJson" in value && isStringArray(value.eventsJson));
+  return { snapshotJson: value.snapshotJson, eventsJson: value.eventsJson };
+}
+const isStringArray = (value: unknown): value is readonly string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+
+/** The exported session's document, as JSON. */
+const exportedDocument = async (): Promise<Record<string, unknown>> =>
   // EVIDENCE: fixture: an exported session is a JSON object.
-  const exported = JSON.parse(await sessionTransferText(transferAt(), false)) as Record<
-    string,
-    unknown
-  >;
-  const documents = [
-    "not json",
-    JSON.stringify({ format: "teasescript-checkpoint" }),
-    JSON.stringify({ ...exported, version: 2 }),
-    JSON.stringify({ ...exported, extra: true }),
-    JSON.stringify({ ...exported, checkpoint: null }),
-    JSON.stringify({ ...exported, events: [{ kind: "damaged" }] }),
-    JSON.stringify({ ...exported, entries: [{ key: 1, value: 1 }] }),
-    JSON.stringify({ ...exported, media: {} }),
-  ];
-  const expected = await Promise.all(
-    documents.map((text) => refusal(readPlayerTransferText(text))),
+  JSON.parse(await sessionTransferText(transferAt(), false)) as Record<string, unknown>;
+
+/** The first medium of the exported session's document. */
+const mediumOf = (document: Record<string, unknown>) => {
+  const media = document.media;
+  assert.ok(Array.isArray(media));
+  return { ...objectOf(media[0]) };
+};
+
+const ENDED_PLAN = compilePlayerProject('say "Bye", instant\nexit').plan!;
+const OTHER_PLAN_JSON = serializeValidatedRuntimeJson(
+  compilePlayerProject(SOURCE.replace("Hello", "Hello again")).plan!,
+);
+const UNUSED = "captured-media:22222222-2222-4222-8222-222222222222:1";
+
+/** A document read: `change` makes it from the exported session's. */
+const readRow = (
+  outcome: string,
+  change: (document: Record<string, unknown>) => object,
+  expected: Answer,
+): Row => ({
+  op: "readTransfer",
+  outcome,
+  run: async (bridge) =>
+    answerOf(
+      bridge.client.request("readTransfer", {
+        text: JSON.stringify(change(await exportedDocument())),
+      }),
+      kindOf,
+    ),
+  expected,
+});
+
+/** A document's session read, then reviewed against `planText`'s plan as script `scope`. */
+const reviewRow = (
+  outcome: string,
+  text: () => Promise<string>,
+  expected: Answer,
+  { scope = SCOPE, planText = PLAN_JSON }: { scope?: string; planText?: string } = {},
+): Row => ({
+  op: "reviewTransfer",
+  outcome,
+  run: async (bridge) => {
+    const plan = await prepared(bridge, planText);
+    const ticket = ticketIn(
+      (await bridge.client.request("readTransfer", { text: await text() })).result,
+    );
+    return answerOf(bridge.client.request("reviewTransfer", { ticket, scope, plan }));
+  },
+  expected,
+});
+
+/** The exported session's text, its document changed by `change`. */
+const changed = (change: (document: Record<string, unknown>) => object) => async () =>
+  JSON.stringify(change(await exportedDocument()));
+const plainText = () => sessionTransferText(transferAt(), false);
+
+/** A session read and reviewed, its ticket and plan, on `bridge`. */
+async function reviewed(bridge: PlayerBridge): Promise<{ ticket: string; plan: string }> {
+  const plan = await prepared(bridge);
+  const ticket = ticketIn(
+    (await bridge.client.request("readTransfer", { text: await plainText() })).result,
   );
-  for (const answer of expected) assert.equal(answer.name, "StorageTransferError");
-  // A review's refusals: another script, another plan, a damaged state, an ended session.
-  const ended = transferAt(createPlayerRuntimeSession('say "Bye", instant\nexit'));
-  const reviews = [
-    { text: JSON.stringify(exported), scope: "development-package:other", planText: PLAN_JSON },
+  await bridge.client.request("reviewTransfer", { ticket, scope: SCOPE, plan });
+  return { ticket, plan };
+}
+
+/** What a reviewed session's commit gives, by the main realm's restore. */
+async function committedOracle() {
+  const read = await readPlayerTransferText(await plainText());
+  assert.ok(read.kind === "session");
+  return {
+    snapshotJson: playerRuntimeSnapshotJson(restoreSessionTransfer(read.session, SCOPE, PLAN_JSON)),
+    eventsJson: read.session.session.events.map(serializeValidatedRuntimeJson),
+  };
+}
+
+async function transferRows(): Promise<Row[]> {
+  const committed = { answer: await committedOracle() };
+  const bundle: StorageBundle = {
+    scripts: [
+      { scope: SCOPE, name: null, photos: [photo], entries: [{ key: "photo", value: photo }] },
+    ],
+    images: [{ reference: photo, bytes: PNG }],
+  };
+  const bundleBytes = new Uint8Array(
+    await (await storageTransferFile(bundle, false)).arrayBuffer(),
+  );
+  const medium =
+    (change: (medium: Readonly<Record<string, unknown>>) => object) =>
+    (document: Record<string, unknown>) => ({ ...document, media: [change(mediumOf(document))] });
+  return [
+    // readTransfer
     {
-      text: JSON.stringify(exported),
-      scope: SCOPE,
-      planText: serializeValidatedRuntimeJson(
-        compilePlayerProject(SOURCE.replace("Hello", "Hello again")).plan!,
+      op: "readTransfer",
+      outcome: "session",
+      run: async (bridge) =>
+        answerOf(bridge.client.request("readTransfer", { text: await plainText() }), kindOf),
+      expected: { answer: "session" },
+    },
+    {
+      op: "readTransfer",
+      outcome: "session",
+      run: async (bridge) =>
+        answerOf(
+          bridge.client.request("readTransfer", {
+            bytes: new Uint8Array(
+              await (await sessionTransferFile(transferAt(), true)).arrayBuffer(),
+            ),
+          }),
+          kindOf,
+        ),
+      expected: { answer: "session" },
+    },
+    {
+      op: "readTransfer",
+      outcome: "savedData",
+      run: (bridge) =>
+        answerOf(bridge.client.request("readTransfer", { bytes: bundleBytes }), kindOf),
+      expected: { answer: "savedData" },
+    },
+    {
+      op: "readTransfer",
+      outcome: "refused",
+      run: (bridge) => answerOf(bridge.client.request("readTransfer", { text: "not json" })),
+      expected: refusedWith("This text is not saved data or a session exported from a Player."),
+    },
+    {
+      op: "readTransfer",
+      outcome: "refused",
+      run: (bridge) => answerOf(bridge.client.request("readTransfer", { text: "{not json" })),
+      expected: refusedWith(
+        "This is not saved data or a session exported from a Player: it is not valid JSON.",
       ),
     },
     {
-      text: JSON.stringify({
-        ...exported,
-        checkpoint: { ...objectOf(exported.checkpoint), version: 1 },
-      }),
-      scope: SCOPE,
-      planText: PLAN_JSON,
+      op: "readTransfer",
+      outcome: "refused",
+      run: (bridge) =>
+        answerOf(bridge.client.request("readTransfer", { bytes: new Uint8Array([1, 2, 3]) })),
+      expected: refusedWith(
+        "This is not saved data or a session exported from a Player: it is not valid JSON.",
+      ),
     },
-    { text: await sessionTransferText(ended, false), scope: SCOPE, planText: PLAN_JSON },
-  ];
-  const expectedReviews = await Promise.all(
-    reviews.map(async ({ text, scope, planText }) => {
-      const read = await readPlayerTransferText(text);
-      assert.ok(read.kind === "session");
-      return refusal(
-        Promise.resolve().then(() => restoreSessionTransfer(read.session, scope, planText)),
-      );
-    }),
-  );
-  const [inProcess, remote] = await onBoth(async (bridge) => {
-    const reads = await Promise.all(
-      documents.map((text) => refusal(bridge.client.request("readTransfer", { text }))),
-    );
-    const reviewed = [];
-    for (const { text, scope, planText } of reviews) {
-      const plan = await prepared(bridge, planText);
-      // EVIDENCE: fixture: `readTransfer` of a session answers its ticket.
-      const answer = (await bridge.client.request("readTransfer", { text })).result as {
-        readonly ticket: string;
-      };
-      reviewed.push(
-        await refusal(
-          bridge.client.request("reviewTransfer", { ticket: answer.ticket, scope, plan }),
+    {
+      op: "readTransfer",
+      outcome: "refused",
+      // A file whose JSON is no object; a text of one starts with no brace, which the first refusal row refuses.
+      run: (bridge) =>
+        answerOf(bridge.client.request("readTransfer", { bytes: new TextEncoder().encode("[]") })),
+      expected: refusedWith("This is not saved data or a session exported from a Player."),
+    },
+    readRow(
+      "refused",
+      () => ({ format: "teasescript-checkpoint" }),
+      refusedWith("This is not saved data or a session exported from a Player."),
+    ),
+    readRow(
+      "refused",
+      (d) => ({ ...d, version: 2 }),
+      refusedWith("This session uses a format version this Player cannot read."),
+    ),
+    readRow(
+      "refused",
+      (d) => ({ ...d, extra: true }),
+      refusedWith(
+        "This session must have exactly format, version, scope, name, checkpoint, events, entries, and media.",
+      ),
+    ),
+    readRow("refused", (d) => ({ ...d, scope: 1 }), refusedWith("This session has no scope.")),
+    readRow(
+      "refused",
+      (d) => ({ ...d, name: 1 }),
+      refusedWith("The name of this session's script is not text."),
+    ),
+    readRow(
+      "refused",
+      (d) => ({ ...d, checkpoint: null }),
+      refusedWith("This session has no checkpoint."),
+    ),
+    readRow(
+      "refused",
+      (d) => ({ ...d, events: [{ kind: "damaged" }] }),
+      refusedWith("The events of this session are damaged, so it cannot continue."),
+    ),
+    readRow(
+      "refused",
+      (d) => ({ ...d, entries: [{ key: 1, value: 1 }] }),
+      refusedWith("A saved value of this session is invalid: entries[0].key must be a string."),
+    ),
+    readRow(
+      "refused",
+      (d) => ({ ...d, media: {} }),
+      refusedWith("The photos and files of this session are not a list."),
+    ),
+    readRow(
+      "refused",
+      (d) => ({ ...d, media: [{}] }),
+      refusedWith(
+        "Photo or file 1 must have exactly reference, kind, type, width, height, durationMs, byteLength, and data.",
+      ),
+    ),
+    readRow(
+      "refused",
+      medium((m) => ({ ...m, reference: "photo" })),
+      refusedWith("Photo or file 1 has no valid reference."),
+    ),
+    readRow(
+      "refused",
+      (d) => ({ ...d, media: [mediumOf(d), mediumOf(d)] }),
+      refusedWith("Photo or file 2 is listed twice."),
+    ),
+    readRow(
+      "refused",
+      medium((m) => ({ ...m, reference: UNUSED })),
+      refusedWith("Photo or file 1 is not used by the session or its saved values."),
+    ),
+    readRow(
+      "refused",
+      medium((m) => ({ ...m, byteLength: -1 })),
+      refusedWith("Photo or file 1 has no valid byteLength."),
+    ),
+    readRow(
+      "refused",
+      medium((m) => ({ ...m, data: "***" })),
+      refusedWith("Photo or file 1 is damaged: its data is not base64url."),
+    ),
+    readRow(
+      "refused",
+      medium((m) => ({ ...m, byteLength: PNG.length + 1 })),
+      refusedWith(
+        `Photo or file 1 is damaged or incomplete: it has ${PNG.length} bytes instead of ${PNG.length + 1}.`,
+      ),
+    ),
+    readRow(
+      "refused",
+      medium((m) => ({ ...m, kind: "audio" })),
+      refusedWith("Photo or file 1 is damaged: its kind, type, size, or dimensions are not valid."),
+    ),
+    {
+      op: "readTransfer",
+      outcome: "malformed",
+      run: (bridge) => answerOf(bridge.client.request("readTransfer", {})),
+      expected: MALFORMED("readTransfer"),
+    },
+    {
+      op: "readTransfer",
+      outcome: "malformed",
+      run: (bridge) =>
+        answerOf(bridge.client.request("readTransfer", { text: "{}", bytes: bundleBytes })),
+      expected: MALFORMED("readTransfer"),
+    },
+    {
+      op: "readTransfer",
+      outcome: "malformed",
+      run: (bridge) => answerOf(bridge.client.request("readTransfer", { text: 1 })),
+      expected: MALFORMED("readTransfer"),
+    },
+    // reviewTransfer
+    reviewRow("reviewed", plainText, { answer: null }),
+    reviewRow(
+      "refused",
+      plainText,
+      refusedWith(
+        "This session belongs to another script, Story. Open that script and import it there.",
+      ),
+      { scope: "development-package:other" },
+    ),
+    reviewRow(
+      "refused",
+      plainText,
+      refusedWith(
+        "This session comes from another version of this script or of the Player, so it cannot continue here. Continue it where it was exported.",
+      ),
+      { planText: OTHER_PLAN_JSON },
+    ),
+    reviewRow(
+      "refused",
+      changed((d) => ({ ...d, checkpoint: { ...objectOf(d.checkpoint), version: 1 } })),
+      refusedWith(
+        "This session was exported by another version of the Player, so this Player cannot continue it. Continue it where it was exported.",
+      ),
+    ),
+    reviewRow(
+      "refused",
+      changed((d) => ({ ...d, checkpoint: { ...objectOf(d.checkpoint), snapshot: null } })),
+      refusedWith(
+        "This session is damaged, so it cannot continue. Export it again where it runs. Details: Runtime snapshot must be an object.",
+      ),
+    ),
+    reviewRow(
+      "refused",
+      () => sessionTransferText(transferAt(createPlayerRuntimeSession(ENDED_PLAN)), false),
+      refusedWith("This session has ended, so there is nothing to continue."),
+      { planText: serializeValidatedRuntimeJson(ENDED_PLAN) },
+    ),
+    {
+      op: "reviewTransfer",
+      outcome: "reviewedAgain",
+      // Refused for another script, then reviewed for this one: the ticket holds its session for a retry.
+      run: async (bridge) => {
+        const plan = await prepared(bridge);
+        const ticket = ticketIn(
+          (await bridge.client.request("readTransfer", { text: await plainText() })).result,
+        );
+        await answerOf(
+          bridge.client.request("reviewTransfer", {
+            ticket,
+            scope: "development-package:other",
+            plan,
+          }),
+        );
+        return answerOf(bridge.client.request("reviewTransfer", { ticket, scope: SCOPE, plan }));
+      },
+      expected: { answer: null },
+    },
+    {
+      op: "reviewTransfer",
+      outcome: "unknownTicket",
+      run: async (bridge) =>
+        answerOf(
+          bridge.client.request("reviewTransfer", {
+            ticket: "t0",
+            scope: SCOPE,
+            plan: await prepared(bridge),
+          }),
         ),
-      );
-    }
-    return { reads, reviewed };
+      expected: NO_TICKET,
+    },
+    {
+      op: "reviewTransfer",
+      outcome: "unknownPlan",
+      run: async (bridge) => {
+        const ticket = ticketIn(
+          (await bridge.client.request("readTransfer", { text: await plainText() })).result,
+        );
+        return answerOf(
+          bridge.client.request("reviewTransfer", { ticket, scope: SCOPE, plan: "p0" }),
+        );
+      },
+      expected: { name: "Error", message: "No plan 'p0' is held." },
+    },
+    {
+      op: "reviewTransfer",
+      outcome: "malformed",
+      run: (bridge) =>
+        answerOf(bridge.client.request("reviewTransfer", { ticket: "t1", scope: SCOPE })),
+      expected: MALFORMED("reviewTransfer"),
+    },
+    {
+      op: "reviewTransfer",
+      outcome: "malformed",
+      run: (bridge) =>
+        answerOf(bridge.client.request("reviewTransfer", { ticket: 1, scope: SCOPE, plan: "p1" })),
+      expected: MALFORMED("reviewTransfer"),
+    },
+    {
+      op: "reviewTransfer",
+      outcome: "malformed",
+      run: (bridge) =>
+        answerOf(
+          bridge.client.request("reviewTransfer", {
+            ticket: "t1",
+            scope: SCOPE,
+            plan: "p1",
+            extra: true,
+          }),
+        ),
+      expected: MALFORMED("reviewTransfer"),
+    },
+    // transferCommit
+    {
+      op: "transferCommit",
+      outcome: "committed",
+      run: async (bridge) =>
+        answerOf(
+          bridge.client.request("transferCommit", { ticket: (await reviewed(bridge)).ticket }),
+          committedOf,
+        ),
+      expected: committed,
+    },
+    {
+      op: "transferCommit",
+      outcome: "committedAgain",
+      // An import that failed after its commit commits again on its retry.
+      run: async (bridge) => {
+        const { ticket } = await reviewed(bridge);
+        await bridge.client.request("transferCommit", { ticket });
+        return answerOf(bridge.client.request("transferCommit", { ticket }), committedOf);
+      },
+      expected: committed,
+    },
+    {
+      op: "transferCommit",
+      outcome: "unreviewed",
+      run: async (bridge) =>
+        answerOf(
+          bridge.client.request("transferCommit", {
+            ticket: ticketIn(
+              (await bridge.client.request("readTransfer", { text: await plainText() })).result,
+            ),
+          }),
+        ),
+      expected: { name: "Error", message: "This session was not reviewed for an import." },
+    },
+    {
+      op: "transferCommit",
+      outcome: "unknownTicket",
+      run: (bridge) => answerOf(bridge.client.request("transferCommit", { ticket: "t0" })),
+      expected: NO_TICKET,
+    },
+    {
+      op: "transferCommit",
+      outcome: "malformed",
+      run: (bridge) => answerOf(bridge.client.request("transferCommit", { ticket: 1 })),
+      expected: MALFORMED("transferCommit"),
+    },
+    {
+      op: "transferCommit",
+      outcome: "malformed",
+      run: (bridge) => answerOf(bridge.client.request("transferCommit", null)),
+      expected: MALFORMED("transferCommit"),
+    },
+    // releaseTransfer
+    {
+      op: "releaseTransfer",
+      outcome: "released",
+      // Let go of, the ticket holds nothing: its commit finds no session.
+      run: async (bridge) => {
+        const { ticket } = await reviewed(bridge);
+        await bridge.client.request("releaseTransfer", { ticket });
+        return answerOf(bridge.client.request("transferCommit", { ticket }));
+      },
+      expected: NO_TICKET,
+    },
+    {
+      op: "releaseTransfer",
+      outcome: "unknownTicket",
+      run: (bridge) => answerOf(bridge.client.request("releaseTransfer", { ticket: "t0" })),
+      expected: { answer: null },
+    },
+    {
+      op: "releaseTransfer",
+      outcome: "malformed",
+      run: (bridge) =>
+        answerOf(bridge.client.request("releaseTransfer", { ticket: "t1", extra: 1 })),
+      expected: MALFORMED("releaseTransfer"),
+    },
+  ];
+}
+
+test("every transfer op's argument forms, outcomes and refusals answer as written, in-process and in a Worker", async () => {
+  const rows = await transferRows();
+  const [inProcess, remote] = await onBoth(async (bridge) => {
+    const answers: Answer[] = [];
+    for (const row of rows) answers.push(await row.run(bridge));
+    return answers;
   });
-  assert.deepEqual(inProcess, remote);
-  assert.deepEqual(inProcess, { reads: expected, reviewed: expectedReviews });
+  assert.deepEqual(remote, inProcess);
+  const named = (answers: readonly Answer[]) =>
+    answers.map((answer, index) => ({
+      row: `${rows[index]!.op} ${rows[index]!.outcome} #${index + 1}`,
+      ...answer,
+    }));
+  assert.deepEqual(named(inProcess), named(rows.map(({ expected }) => expected)));
+});
+
+/** The words of each `StorageTransferError` the reader's source raises, as a pattern its template's parts make. */
+function readerRefusals(): RegExp[] {
+  const path = resolve(process.cwd(), "player/session-transfer-read.ts");
+  const source = ts.createSourceFile(
+    path,
+    readFileSync(path, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const found: RegExp[] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isNewExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "StorageTransferError"
+    ) {
+      const words = node.arguments?.[0];
+      assert.ok(
+        words !== undefined &&
+          (ts.isStringLiteral(words) ||
+            ts.isTemplateExpression(words) ||
+            ts.isNoSubstitutionTemplateLiteral(words)),
+        `a refusal with words the check reads, line ${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}`,
+      );
+      const pattern = ts.isTemplateExpression(words)
+        ? [
+            escape(words.head.text),
+            ...words.templateSpans.map((span) => escape(span.literal.text)),
+          ].join(".+")
+        : escape(words.text);
+      found.push(new RegExp(`^${pattern}$`, "s"));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+test("the transfer family covers every op, outcome and refusal of the reader", async () => {
+  const rows = await transferRows();
+  assert.deepEqual(
+    Object.keys(transferOps(playerOpsContext())).sort(),
+    Object.keys(OUTCOMES).sort(),
+  );
+  for (const [op, outcomes] of Object.entries(OUTCOMES))
+    for (const outcome of outcomes)
+      assert.ok(
+        rows.some((row) => row.op === op && row.outcome === outcome),
+        `${op} ${outcome} has a row`,
+      );
+  for (const row of rows)
+    assert.ok(
+      OUTCOMES[row.op].some((outcome) => outcome === row.outcome),
+      `${row.op} declares ${row.outcome}`,
+    );
+  const messages = rows.flatMap(({ expected }) =>
+    "message" in expected ? [expected.message] : [],
+  );
+  for (const refusal of readerRefusals()) {
+    const reached = messages.some((message) => refusal.test(message));
+    const unreached = Object.keys(UNREACHED).some((message) => refusal.test(message));
+    assert.ok(
+      reached !== unreached,
+      `${refusal.source}: ${reached ? "reached and named unreached" : "no row reaches it"}`,
+    );
+  }
 });
 
 /** The host's ops on one connection, with no session. */
