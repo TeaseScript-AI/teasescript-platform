@@ -194,6 +194,41 @@ export function* members(
   return mergeItems(out, contract.pass.program.scope);
 }
 
+/**
+ * How a read of a value at a path is routed (`valueAt`), one classification shared with the objects query
+ * (`objects.ts`, #1747), so the two never route a value differently: a speaker's handle, a binding's read, a projection,
+ * a call's result, a literal, a choice, a fallback or `get` (its operands' answers composed), any other operation, or
+ * none of them (opaque).
+ */
+export type ValueRoute =
+  | "speaker"
+  | "binding"
+  | "projection"
+  | "call"
+  | "literal"
+  | "choice"
+  | "composite"
+  | "operation"
+  | "opaque";
+
+/** `ValueRoute`'s classification of a value (`valueAt`'s order). */
+export function valueRoute(program: CorePass["program"], value: PlaceId): ValueRoute {
+  if (program.speakerPlaces.has(value)) return "speaker";
+  if (program.occurrenceOf.has(value)) return "binding";
+  if (program.projOf.has(value)) return "projection";
+  if (program.callOutOf.has(value)) return "call";
+  if (program.hasOf.has(value) || program.cellOwner.has(value)) return "literal";
+  const operation = program.opOf.get(value);
+  if (operation === undefined) return "opaque";
+  if (
+    operation.kind === "operation" &&
+    operation.contract.family === "interaction" &&
+    interactionCategory(operation.contract.name)?.kind === "options"
+  )
+    return "choice";
+  return operation.kind === "fallback" || operation.kind === "get" ? "composite" : "operation";
+}
+
 /** The kinds at a path of a value, by the value's kind. */
 function* valueAt(
   contract: Contract,
@@ -212,9 +247,11 @@ function* valueAt(
     if (ref.length === 0) return yield* contract.contractOfValue(value, flow);
     const { program, guards } = contract.pass;
     program.work.charge("invSteps");
-    if (program.speakerPlaces.has(value)) return [unknownItem(REASON.opaque)];
-    const binding = program.occurrenceOf.get(value);
-    if (binding !== undefined) {
+    // (one classification with the objects query's, `valueRoute`)
+    const route = valueRoute(program, value);
+    if (route === "speaker") return [unknownItem(REASON.opaque)];
+    if (route === "binding") {
+      const binding = program.occurrenceOf.get(value)!;
       // (#1668: a binding read, the edge a copy of it makes, entered and marked as its value is)
       const read = flow?.child() ?? null;
       const items = contract.entered(
@@ -226,8 +263,8 @@ function* valueAt(
       if (read !== null) flow!.attach(read, "entered", ...(marks ? (["marked"] as const) : []));
       return marks ? marked(items) : items;
     }
-    const projection = program.projOf.get(value);
-    if (projection !== undefined) {
+    if (route === "projection") {
+      const projection = program.projOf.get(value)!;
       if (projection.step === "iteration")
         // (an iteration's and a length's walk read arrays: a span's steps copied out, `stepsArray`)
         return yield* contractIteration(contract, projection.owner, stepsArray(ref.steps()), flow);
@@ -256,11 +293,11 @@ function* valueAt(
       if (read !== null && keepsElements(owners)) flow!.attach(read, "selected");
       return withOwnSelection(elements, owners, contract.pass);
     }
-    if (program.callOutOf.has(value))
+    if (route === "call")
       return yield* contract.contractOf(keyAtRef(contract, resultOf(contract, value), ref), flow);
     // a literal's contract at a path once per literal and path, whatever asks: a selection nested k deep reads each
     // level's literal once, its answer composed from the level inside's, never again per level above (#1426)
-    if (program.hasOf.has(value) || program.cellOwner.has(value)) {
+    if (route === "literal") {
       const site = program.places[value]?.site ?? null;
       // (the rest in its identity: a wrapper's own literal asked by an array, at its cursor's span, G3 stage 1)
       const at = canonicalRest(contract, value, rest);
@@ -276,15 +313,11 @@ function* valueAt(
       };
       return yield demand;
     }
-    const operation = program.opOf.get(value);
-    if (operation === undefined) return [unknownItem(REASON.opaque)];
+    if (route === "opaque") return [unknownItem(REASON.opaque)];
+    const operation = program.opOf.get(value)!;
     // a choice's answer at a path once per choice and path, whatever asks: the key's contract and A5's candidate test of
     // the choice's own entry read it alike (S6-CARRIERS §4.5, Astra r6 B2), as `contractOfValue` reads an operation
-    if (
-      operation.kind === "operation" &&
-      operation.contract.family === "interaction" &&
-      interactionCategory(operation.contract.name)?.kind === "options"
-    ) {
+    if (route === "choice") {
       const site = program.places[value]?.site ?? operation.site;
       const slot = joinParts("cop", value, restPart(rest));
       flow?.include(slot, "operation");
@@ -303,7 +336,7 @@ function* valueAt(
     // its operands' answers at that path, so a chain of them read below its root by k consumers (C10 descending into a
     // nullable collection's element) walks each link once, never the chain before it again per reader (Astra r1, Codex
     // r4 and r5 on #1824)
-    if (operation.kind === "fallback" || operation.kind === "get") {
+    if (route === "composite") {
       const site = program.places[value]?.site ?? operation.site;
       const pathSlot = joinParts("cop", value, restPart(rest));
       flow?.include(pathSlot, "operation");
