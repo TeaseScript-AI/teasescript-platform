@@ -1,12 +1,13 @@
 import type { CapturedMediaRepository } from "../../player/captured-media.js";
 import type { KeptRoomStore, KeptSessionStore } from "../../player/kept-sessions.js";
 import type { ScriptStorageProvider } from "../../player/script-storage.js";
+import { HOST_OPS } from "./host-ops.js";
 
 /*
  * The plan JSON's lifetime family (`player/plan-json-lease.ts`), declared once for both of its witness layers: the
  * pure family (`player-plan-json-lease.test.ts`) and the composable's (`player-session-keep.test.ts`). A producer is an
- * op of the host that reads or writes a plan's canonical JSON. Every op of the composed host (`playerBridgeOps`) is
- * either a producer, with its outcomes, or classified here as not one; the coverage check compares this with the ops
+ * op of the host that reads or writes a plan's canonical JSON. Every op of the composed host is classified once, in
+ * `host-ops.ts`; the producers' outcomes are declared here, and the coverage check compares both with the ops
  * themselves, so a new op fails until it is classified, and a producer until both layers drive it.
  */
 
@@ -30,67 +31,12 @@ export const PRODUCERS = {
 } as const;
 export type Producer = keyof typeof PRODUCERS;
 
-const SESSION_OP =
-  "a held session's step, input or view: the session holds its plan, whose JSON it never writes";
-const SERVICE_OP = "a held session's answer from a service of the page: no plan";
-const DEBUG_SOURCE_OP = "Debug's source view of a held plan, from its sources, not its JSON";
-const RANDOM_OP = "Debug's random control and history on the connection: draws and sites, no plan";
-
-/** Every other op of the composed host (`playerBridgeOps`), and why it touches no plan JSON a reader could keep. */
-export const NOT_PRODUCERS = {
-  releasePlanText: "cleanup: the one remover of a reserved plan JSON",
-  captureCheckpoint: "a whole checkpoint, which holds the plan inside it; no plan JSON of its own",
-  prepare: "holds a plan under a new token; its JSON is written only when reserved",
-  planMetadata: "a held plan's metadata, read from the plan",
-  teardown: "cleanup: lets go of every plan's JSON with the plans",
-  readTransfer: "parses a document; it reaches no held plan",
-  transferCommit: "the reviewed state and the events' JSON, kept under the ticket",
-  releaseTransfer: "cleanup of a ticket, which holds no plan JSON",
-  debugTracing: "the connection's value trace",
-  debugView: "a held session's trace view",
-  restartTrace: "a held session's trace, begun anew",
-  setDebugMode: "a held session's Debug state",
-  start: SESSION_OP,
-  continue: SESSION_OP,
-  observeTime: SESSION_OP,
-  observeInput: SESSION_OP,
-  stepTime: SESSION_OP,
-  beginCatchUp: SESSION_OP,
-  stepCatchUp: SESSION_OP,
-  adoptCatchUp: SESSION_OP,
-  dropCatchUp: SESSION_OP,
-  skipPacing: SESSION_OP,
-  viewCalls: SESSION_OP,
-  beginRecording: SESSION_OP,
-  submitComposer: SESSION_OP,
-  selectChoice: SESSION_OP,
-  activateButton: SESSION_OP,
-  stepFormField: SESSION_OP,
-  dismissFormField: SESSION_OP,
-  clearFormField: SESSION_OP,
-  draftForm: SESSION_OP,
-  submitForm: SESSION_OP,
-  cancelForm: SESSION_OP,
-  skipImage: SESSION_OP,
-  answerImage: SESSION_OP,
-  openUrl: SESSION_OP,
-  closePopup: SESSION_OP,
-  closeExport: SESSION_OP,
-  pressPermanentButton: SESSION_OP,
-  completeStorageWrite: SESSION_OP,
-  applyStorageEdit: SESSION_OP,
-  reportMediaLoad: SESSION_OP,
-  answerCapture: SERVICE_OP,
-  answerFileStore: SERVICE_OP,
-  answerLock: SERVICE_OP,
-  drawCode: DEBUG_SOURCE_OP,
-  codeLines: DEBUG_SOURCE_OP,
-  randomControl: RANDOM_OP,
-  adoptRandom: RANDOM_OP,
-  releaseRandom: RANDOM_OP,
-  resolveDraw: RANDOM_OP,
-  randomTried: RANDOM_OP,
-} as const;
+/** Every other op of the composed host, and why it touches no plan JSON a reader could keep (`HOST_OPS`). */
+export const NOT_PRODUCERS: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(HOST_OPS).flatMap(([op, { planJson }]) =>
+    planJson === "producer" ? [] : [[op, planJson]],
+  ),
+);
 
 /** Where the page's plan stands when the producer's reply arrives: still current, replaced by another, or closed. */
 export const RETIREMENTS = ["current", "replaced", "disposed"] as const;
