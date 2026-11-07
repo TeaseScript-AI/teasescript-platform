@@ -3511,6 +3511,21 @@ test("a mixed element's type names its set layers as sets (#1825)", () => {
       'let xs=[[["x"]],set[[1]]]\nexit\n',
       `This list mixes a list (string[][]) and a set (integer[] set). ${ONE}`,
     ],
+    // (an `otherwise` names the set its operand gives, its fallback only where the operand may be null)
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[(a otherwise set[[2]]),set[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a set (string[] set). ${ONE}`,
+    ],
+    [
+      'let a:integer[] set=set[[1]]\nlet xs=[(a otherwise [[2]]),[["x"]]]\nexit\n',
+      `This list mixes a set (integer[] set) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[] set=set[[1]]\nlet xs=[{p:(a otherwise [[2]])},{p:set[["x"]]}]\nexit\n',
+      "This list mixes objects whose property 'p' holds a set (integer[] set) in one and a set (string[] set) in " +
+        "another. A list holds one type. Give 'p' one type in every element.",
+    ],
+    // (controls: a nested list and a dict of lists)
     [
       'let xs=[[[1]],[["x"]]]\nexit\n',
       `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
@@ -3526,6 +3541,16 @@ test("a mixed element's type names its set layers as sets (#1825)", () => {
         (each) => each.code === "TSV044" && each.message === message,
       );
       assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+      // (a set's `member` is the sentence's word alone: never a step of the rule's path, which rejects and checks)
+      const request = coreRequest(main(source));
+      assert.ok(request !== null);
+      const paths = inMode(mode, () => analyseCore(request).diagnostics).flatMap((each) =>
+        "rule" in each && each.rule.rule === "mixed" ? [each.rule.path] : [],
+      );
+      assert.ok(
+        paths.length > 0 && paths.every((path) => !path.includes("member")),
+        `${JSON.stringify(mode)} ${source}: ${JSON.stringify(paths)}`,
+      );
     }
 });
 
