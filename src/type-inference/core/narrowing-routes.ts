@@ -322,7 +322,8 @@ export class NarrowingRoutes {
     consider(yield* this.#ownCandidates(key, tag, others));
     for (const prefix of each(program.work, "eventSteps", keptPrefixes(program.work, key)))
       consider(this.#wholeStores(prefix));
-    // (`consider` sets `best`, which the compiler's flow analysis does not see)
+    // EVIDENCE: `consider` above assigns `best` inside its closure, which TypeScript's flow analysis does not track, so
+    // after the calls it is a candidate or still `null`.
     const found = best as Candidate | null;
     if (found === null) return null;
     // (a store whose own statement holds the read takes effect after it, `n += 1`: it brings the read nothing)

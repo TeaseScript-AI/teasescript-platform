@@ -978,7 +978,8 @@ const INTENDED: readonly Intended[] = [
     replacement: (pair) =>
       unproved(pair)[pair.forms.findIndex(({ form }) => form?.test(pair.message) !== true)] ??
       /(?!)/,
-    count: 17,
+    // (5 more since #1073 PR 4: the route rule's errors whose facts leave their fix in words)
+    count: 22,
   },
   {
     rule:

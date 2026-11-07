@@ -515,18 +515,28 @@ export function pastedForms(
   const text = messageSource([source], diagnostics);
   // (a warning's fallback is pasted into a program that otherwise compiles: beside an error it fixes nothing of that
   // error, whose own fix is pasted on its own)
-  const erring = diagnostics.some((diagnostic) => diagnostic.class === "compile-error");
+  // (the route rule's error gives the fix of the warning it stands in for, pasted as a warning's: AD-1, #1073 PR 4)
+  const routed = (diagnostic: (typeof diagnostics)[number]): boolean =>
+    diagnostic.class === "compile-error" &&
+    diagnostic.kind !== "written-type" &&
+    diagnostic.requiredCheck !== undefined;
+  const erring = diagnostics.some(
+    (diagnostic) => diagnostic.class === "compile-error" && !routed(diagnostic),
+  );
   for (const diagnostic of diagnostics) {
     if (diagnostic.site.start < start || diagnostic.site.end > end) continue;
     diagnosed = true;
     const message = coreMessage(diagnostic, text);
-    if (diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget") {
+    if (
+      (diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget") ||
+      routed(diagnostic)
+    ) {
       if (erring) continue;
       // (a member's subject is its receiver, written at the start of the warned access)
       const fallback = FALLBACK.exec(message)?.[1];
-      const { rule } = diagnostic;
+      const rule = "rule" in diagnostic ? diagnostic.rule : null;
       const subject =
-        rule.rule === "member"
+        rule?.rule === "member"
           ? rule.receiver
           : source.slice(diagnostic.site.start, diagnostic.site.end);
       if (fallback !== undefined)

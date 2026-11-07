@@ -1294,7 +1294,10 @@ test("a stored selection takes its element's narrowing as an index does, never i
   // AD-1)
   assert.match(tested("xs.random", "xs.random"), /^warning-runtime-check/);
   assert.match(untested("xs.random"), /^compile-error/);
-  assert.equal(tested("xs.first", "xs.last"), untested("xs.last"));
+  // (a test of `.first` is one of the element key `.last` reads too: the warning, the proof limit of a corridor that
+  // follows keys, not locations, #1938; with no test, `.last`'s `null` is the route rule's error)
+  assert.match(tested("xs.first", "xs.last"), /^warning-runtime-check/);
+  assert.match(untested("xs.last"), /^compile-error/);
   // an empty list passes every element test: C6 still asks the selection's element of its owner
   const empty = record(
     choice,
