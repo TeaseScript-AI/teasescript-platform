@@ -13,9 +13,11 @@
 //
 // The bar: the exit status covers the run, its decision and the delivery of both output streams. A signal or event
 // raised after both streams have finished and the loop is idle is outside the bar: it cannot change delivered output.
-// The boundary case is a SIGPIPE raised as the summary finishes, which Node never delivers before it exits. This joins
-// the accepted residual of a module calling `process.exit` or setting `exitCode` itself. The engine does neither; a
-// fatal abort exits 134.
+// This joins the accepted residual of a module calling `process.exit`, setting `exitCode`, or raising a signal at its
+// own process itself. A real broken pipe reaches the process as an `EPIPE` error on the stream, which the bar covers.
+// The boundary cases are signals raised with `process.kill(process.pid, "SIGPIPE")`: as the summary finishes, at
+// stderr's `prefinish`, and during the decision; Node may not deliver them before it exits. The engine does none of
+// these; a fatal abort exits 134.
 
 import { parseArgs } from "node:util";
 
