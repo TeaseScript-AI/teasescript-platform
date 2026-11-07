@@ -200,7 +200,8 @@ export class OwnedMap<K, V> {
    * a delivery, or for a key it holds already: an entry is never replaced, so no undo has a value to restore.
    */
   set(key: K, value: V, delivery: Delivery = this.#owner.scope()): void {
-    if (this.#entries.has(key)) throw new DeliveryRefusedError("This registry holds that key already.");
+    if (this.#entries.has(key))
+      throw new DeliveryRefusedError("This registry holds that key already.");
     this.#owner.own(delivery, () => {
       if (this.#entries.get(key) === value) this.delete(key);
     });
