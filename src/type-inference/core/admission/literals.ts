@@ -411,10 +411,6 @@ export function literalElements(
         readonly d: Definition;
         // (#1765: its layers at this path, `layersAt`'s, once asked; #1762: its dict layers too)
         layers?: boolean[];
-        // (#1901: a written copy at its own level whose occurrence may hold null there: its leaf confirmed by the walk,
-        // once asked)
-        confirm?: boolean;
-        leaf?: boolean;
         dicts?: boolean[];
       }
     >();
@@ -463,15 +459,7 @@ export function literalElements(
         cell,
         path,
         decided: first.get(at)!.tags,
-        // (a leaf the occurrence over-approximates, as an `otherwise`'s unused fallback, confirmed by the form walk:
-        // Codex r4 on #1908)
-        earliest:
-          earliest.confirm === true &&
-          !(earliest.leaf ??= layersAt(admission, earliest.d.value!, earliest.d.node, path, [
-            path.length,
-          ])[0]!)
-            ? earliest.tags
-            : earliest.own,
+        earliest: first.get(at)!.own,
         kinds,
         atCopy: atCopy.has(at),
         ...(optional === undefined ? {} : { optional }),
@@ -530,17 +518,15 @@ export function literalElements(
             const tags = written.filter((tag) => tag !== "null");
             // (its leaf's null by the form rule's copy case, as the later element's (`mayHoldNull`): at the deciding
             // copy's own level as it is read, narrowed, below it by the copied term. #1901, Astra r1's B1 on #1908; from
-            // the decider already asked, so no walk down the element where its occurrence holds no null, Codex r3; one
-            // that does is the walk's to confirm, where an error names it, Codex r4)
-            const occurrence = decider!.own === true;
-            const leafNull = occurrence
-              ? occurrenceNull(admission, d.value, d.node, path)
-              : written.includes("null");
+            // the decider already asked, so no walk down the element, Codex r3)
+            const leafNull =
+              decider!.own === true
+                ? occurrenceNull(admission, d.value, d.node, path)
+                : written.includes("null");
             first.set(at, {
               tags,
               written: true,
               own: below && leafNull ? [...tags, "null"] : tags,
-              confirm: below && occurrence && leafNull,
               d,
             });
           } else if (kinds.length === 1) {

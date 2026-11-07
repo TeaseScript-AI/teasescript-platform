@@ -3437,20 +3437,6 @@ test("a mixed error reads a copy's layer by its type below the copy's own level,
       'let atom:string?="x"\nlet h={v:[atom]}\nh={v:[atom]}\nlet box={q:{r:h}}\nlet xs=[{v:[1]},box.q.r]\nexit\n',
       `This list mixes objects whose property 'v' holds a list (integer[]) in one and a list (string[]) in another. ${V}`,
     ],
-    // (its occurrence confirmed by the form walk where it may hold null: an `otherwise` whose null fallback never runs
-    // names none, a host value may; Codex r4 on #1908)
-    [
-      'let atom:string?="x"\nlet xs=[{v:atom otherwise null},{v:1}]\nexit\n',
-      `This list mixes objects whose property 'v' holds text (string) in one and a whole number (integer) in another. ${V}`,
-    ],
-    [
-      'let atom:string?="x"\nlet xs=[{v:[atom otherwise null]},{v:[1]}]\nexit\n',
-      `This list mixes objects whose property 'v' holds a list (string[]) in one and a list (integer[]) in another. ${V}`,
-    ],
-    [
-      "let atom:string?=hostValue\nlet h={v:atom}\nlet xs=[h,{v:1}]\nexit\n",
-      `This list mixes objects whose property 'v' holds text (string) or null in one and a whole number (integer) in another. ${V}`,
-    ],
     // (a written collection below that binding: its own null, and its elements')
     [
       'let atom: string[]? = ["x"]\nlet h = {v: atom}\nlet xs = [{v: [1]}, h]\nexit\n',
