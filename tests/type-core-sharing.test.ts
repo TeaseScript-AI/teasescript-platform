@@ -794,7 +794,7 @@ const COMPOSED_ORDER_ROWS: readonly {
       // (its other kinds stored by handlers: a run the compiler does not prove, the warning, never the route rule's error,
       // AD-1 and X7)
       source:
-        'let value: integer | string | duration | boolean = true\ntimer async 1 s { value = 1 }\n' +
+        "let value: integer | string | duration | boolean = true\ntimer async 1 s { value = 1 }\n" +
         'timer async 2 s { value = "s" }\ntimer async 3 s { value = 1 s }\nif value {}\nexit\n',
       lists: (answers) =>
         warnings(answers).flatMap((warning) =>

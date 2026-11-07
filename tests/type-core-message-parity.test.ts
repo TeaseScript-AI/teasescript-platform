@@ -939,7 +939,9 @@ const ROUTE_TESTS: ReadonlyMap<string, readonly string[]> = new Map(
   readFixture().map((record) => [
     record.name,
     record.expected.diagnostics.flatMap((d) =>
-      d.requiredCheck === undefined ? [] : d.requiredCheck.missingTests.filter((t) => / is /.test(t)),
+      d.requiredCheck === undefined
+        ? []
+        : d.requiredCheck.missingTests.filter((t) => / is /.test(t)),
     ),
   ]),
 );
@@ -951,17 +953,16 @@ const INTENDED: readonly Intended[] = [
       "AD-1 (TABLE r4.52, r4.118 (1), #1073 PR 4): a written union's member the use does not take, brought by a route " +
       "without a check, is the route rule's error, whose fix is the test the route lacks (`if x is T`, its record's " +
       "N10 payload), not the current checker's conversion of a value it took as definite",
-    matches: (pair) => routeTests(pair.record).length > 0 && /^'[^']+' can be [^.]+ here because of line \d+\./.test(pair.message),
-    // (the test its record's payload names: as code, or in words of its type)
+    // (its code form is ADR 0021 rule 3.5's type test, below; here the test in words where its code is not proved,
+    // TABLE r4.162, of the type its record's payload names)
+    matches: (pair) =>
+      routeTests(pair.record).length > 0 &&
+      /^'[^']+' can be [^.]+ here because of line \d+\. Check that /.test(pair.message),
     replacement: (pair) => {
-      const tests = routeTests(pair.record);
-      const kind = /^if .+ is (\w+)$/.exec(tests[0] ?? "")?.[1] ?? "(?!)";
-      return new RegExp(
-        tests.map((test) => `as in '${escaped(test)} \\{`).join("|") +
-          `|Check that '[^']+' is [^.']*\\(${kind}\\) first\\.`,
-      );
+      const kind = /^if .+ is (\w+)$/.exec(routeTests(pair.record)[0] ?? "")?.[1] ?? "(?!)";
+      return new RegExp(`Check that '[^']+' is [^.']*\\(${kind}\\) first\\.`);
     },
-    count: 10,
+    count: 2,
   },
   {
     rule:
@@ -1035,7 +1036,8 @@ const INTENDED: readonly Intended[] = [
       diagnostic.class === "warning-runtime-check" &&
       diagnostic.fits.length > 0,
     replacement: ({ record, named }) => typeTest(named, UNION_TESTS.get(record)!),
-    count: 11,
+    // (9 since #1073 PR 4: its 10 written-union pairs are the route rule's errors, 8 with this type test as code)
+    count: 9,
   },
   {
     rule:

@@ -322,8 +322,7 @@ export class NarrowingRoutes {
     consider(yield* this.#ownCandidates(key, tag, others));
     for (const prefix of each(program.work, "eventSteps", keptPrefixes(program.work, key)))
       consider(this.#wholeStores(prefix));
-    // EVIDENCE: `consider` above assigns `best` inside its closure, which TypeScript's flow analysis does not track, so
-    // after the calls it is a candidate or still `null`.
+    // EVIDENCE: `consider` assigns `best` in its closure, which TypeScript's flow analysis does not track.
     const found = best as Candidate | null;
     if (found === null) return null;
     // (a store whose own statement holds the read takes effect after it, `n += 1`: it brings the read nothing)
@@ -331,7 +330,8 @@ export class NarrowingRoutes {
     const statement = last.index < 0 ? undefined : last.block.statements[last.index];
     if (statement !== undefined && statement.start <= at && at < statement.end) return null;
     const stored = found.def.value === undefined ? null : program.places[found.def.value]?.site;
-    if (stored !== undefined && stored !== null && stored.start <= at && at < stored.end) return null;
+    if (stored !== undefined && stored !== null && stored.start <= at && at < stored.end)
+      return null;
     return this.#open(key, tag, found, chain, node) ? found : null;
   }
 
@@ -397,7 +397,9 @@ export class NarrowingRoutes {
     if (left.length === 0) {
       const literal = literalTag(program, value);
       if (literal !== null)
-        return literal === tag || some(program.work, "exactQueries", others, (kind) => kind === literal);
+        return (
+          literal === tag || some(program.work, "exactQueries", others, (kind) => kind === literal)
+        );
       const c = program.opOf.get(value);
       // `a otherwise <literal>`: live, and selected where `a` is the literal `null` or its own `null` is certified at
       // that node
@@ -472,8 +474,10 @@ export class NarrowingRoutes {
     this.#work.charge("exactQueries");
     const span = peel(expression, this.pass.program.work).span;
     keepText(this.#work, text.length);
-    return span.end.offset - span.start.offset === text.length &&
-      this.#text({ file, start: span.start.offset, end: span.end.offset }) === text;
+    return (
+      span.end.offset - span.start.offset === text.length &&
+      this.#text({ file, start: span.start.offset, end: span.end.offset }) === text
+    );
   }
 
   /**
@@ -490,21 +494,22 @@ export class NarrowingRoutes {
   ): Work<boolean> {
     this.#work.charge("exactQueries");
     const program = this.pass.program;
-    if (path.length > 0) return produces(program.work, yield* this.pass.values.valueItems(value, node, path), tag);
+    if (path.length > 0)
+      return produces(program.work, yield* this.pass.values.valueItems(value, node, path), tag);
     // (the fallbacks from the outermost in, down to the first left side that is none)
     const rights: PlaceId[] = [];
     let left = value;
-    for (const _ of steps(program.work, "exactQueries", () => program.opOf.get(left)?.kind === "fallback")) {
+    for (const _ of steps(
+      program.work,
+      "exactQueries",
+      () => program.opOf.get(left)?.kind === "fallback",
+    )) {
       const c = program.opOf.get(left)!;
       if (c.kind !== "fallback") break;
       rights.push(c.right);
       left = c.left;
     }
-    const holds = function* (
-      at: PlaceId,
-      kind: ItemTag,
-      routes: NarrowingRoutes,
-    ): Work<boolean> {
+    const holds = function* (at: PlaceId, kind: ItemTag, routes: NarrowingRoutes): Work<boolean> {
       program.work.charge("exactQueries");
       const literal = literalTag(program, at);
       if (literal !== null) return literal === kind;
@@ -543,7 +548,8 @@ export class NarrowingRoutes {
     const { definitions, program } = this.pass;
     const argued = new Map<Key, number>();
     for (const d of each(program.work, "indexSteps", definitions.transferDefs))
-      if (d.how === "argument" && program.live(d.node)) argued.set(d.key, (argued.get(d.key) ?? 0) + 1);
+      if (d.how === "argument" && program.live(d.node))
+        argued.set(d.key, (argued.get(d.key) ?? 0) + 1);
     this.#arguments = argued;
     return argued;
   }
@@ -946,7 +952,9 @@ export class NarrowingRoutes {
     if (d.kind !== "whole" || d.weak || d.value === undefined) return false;
     const literal = literalTag(program, d.value);
     if (literal !== null)
-      return literal === tag || some(program.work, "indexSteps", others, (kind) => kind === literal);
+      return (
+        literal === tag || some(program.work, "indexSteps", others, (kind) => kind === literal)
+      );
     if (yield* this.#valueProduces(d.value, d.node, [], tag)) return true;
     for (const kind of each(program.work, "indexSteps", others))
       if (yield* this.#valueProduces(d.value, d.node, [], kind)) return true;
