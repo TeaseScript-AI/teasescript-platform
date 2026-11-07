@@ -182,11 +182,10 @@ export class NarrowingRoutes {
   readonly #conditions = new Map<
     TreeStatement,
     {
-        readonly holding: ReadonlyMap<string, number>;
-        readonly failing: ReadonlyMap<string, number>;
-        readonly failed: readonly string[];
-      }
-    | null
+      readonly holding: ReadonlyMap<string, number>;
+      readonly failing: ReadonlyMap<string, number>;
+      readonly failed: readonly string[];
+    } | null
   >();
 
   public constructor(
@@ -243,7 +242,10 @@ export class NarrowingRoutes {
     const writer = d?.value === undefined ? null : (program.places[d.value]?.site ?? null);
     // (a `while` between the writer and the use whose exit proves the needed form, `while n == null { … }`: the check
     // on that route the compiler cannot keep, the warning; Codex r1 F1 on #1937)
-    if (writer === null || (tag === "null" && this.#exitTested(node, this.#text(site), writer.start)))
+    if (
+      writer === null ||
+      (tag === "null" && this.#exitTested(node, this.#text(site), writer.start))
+    )
       return null;
     return writer;
   }
@@ -493,7 +495,12 @@ export class NarrowingRoutes {
         const arm = owner.arms[0] === place.block ? 0 : owner.arms[1] === place.block ? 1 : -1;
         const tests = this.#conditionTests(owner, node.file);
         if (tests !== null && arm === 0 && tests.holding.has(text)) return true;
-        if (tests !== null && arm === 1 && owner.statement.kind === "ifStatement" && tests.failing.has(text))
+        if (
+          tests !== null &&
+          arm === 1 &&
+          owner.statement.kind === "ifStatement" &&
+          tests.failing.has(text)
+        )
           return true;
       }
       // (the use's own statement: a conjunct of its condition before the use)
@@ -513,11 +520,10 @@ export class NarrowingRoutes {
     statement: TreeStatement,
     file: number,
   ): {
-        readonly holding: ReadonlyMap<string, number>;
-        readonly failing: ReadonlyMap<string, number>;
-        readonly failed: readonly string[];
-      }
-    | null {
+    readonly holding: ReadonlyMap<string, number>;
+    readonly failing: ReadonlyMap<string, number>;
+    readonly failed: readonly string[];
+  } | null {
     this.#work.charge("exactQueries");
     const known = this.#conditions.get(statement);
     if (known !== undefined) return known;
@@ -531,21 +537,32 @@ export class NarrowingRoutes {
     const failed: string[] = [];
     const add = (into: Map<string, number>, tested: Expression, end: number): void => {
       this.#work.charge("exactQueries");
-      const text = this.#text({ file, start: tested.span.start.offset, end: tested.span.end.offset });
+      const text = this.#text({
+        file,
+        start: tested.span.start.offset,
+        end: tested.span.end.offset,
+      });
       if (into.has(text)) return;
       into.set(text, end);
       if (into === failing) failed.push(text);
     };
     // (the conjuncts of the condition hold where it holds, its disjuncts fail where it fails)
-    const walk = (root: Expression, into: Map<string, number>, joined: string, positive: boolean): void => {
+    const walk = (
+      root: Expression,
+      into: Map<string, number>,
+      joined: string,
+      positive: boolean,
+    ): void => {
       this.#work.charge("exactQueries");
       const pending: Expression[] = [root];
       for (const _ of steps(this.#work, "exactQueries", () => pending.length > 0)) {
         const at = peel(pending.pop()!, this.#work);
         const end = at.span.end.offset;
-        if (at.kind === "binaryExpression" && at.operator === joined) pending.push(at.left, at.right);
+        if (at.kind === "binaryExpression" && at.operator === joined)
+          pending.push(at.left, at.right);
         else if (at.kind === "typeTestExpression") {
-          if (at.negated !== positive && at.type.kind !== "optionalType") add(into, peel(at.value, this.#work), end);
+          if (at.negated !== positive && at.type.kind !== "optionalType")
+            add(into, peel(at.value, this.#work), end);
         } else if (at.kind === "binaryExpression" && at.operator === (positive ? "!=" : "==")) {
           const left = peel(at.left, this.#work);
           const right = peel(at.right, this.#work);
@@ -575,8 +592,6 @@ export class NarrowingRoutes {
     for (const kind of each(this.#work, "exactQueries", others)) text = joinParts(text, kind);
     return text;
   }
-
-
 
   /**
    * Whether a value produces `tag` on some run where it stands (`node`), below `path`: a literal of that kind; an
