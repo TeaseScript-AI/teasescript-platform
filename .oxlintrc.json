@@ -1,9 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "categories": { "correctness": "off" },
-  "jsPlugins": [
-    { "name": "anti-slop", "specifier": "./tools/oxlint/anti-slop/src/index.ts" }
-  ],
+  "categories": { "correctness": "error" },
+  "jsPlugins": [{ "name": "anti-slop", "specifier": "./tools/oxlint/anti-slop/src/index.ts" }],
   "rules": {
     "constructor-super": "error",
     "no-constant-binary-expression": "error",
@@ -24,6 +22,61 @@
     "anti-slop/no-reflect-apply": "error",
     "anti-slop/no-unknown-returns": "error",
     "anti-slop/no-unsafe-dictionary-type": "error",
-    "anti-slop/require-safety-comment-for-type-assertion": "error"
-  }
+    "anti-slop/require-safety-comment-for-type-assertion": "error",
+    "prefer-rest-params": "error",
+    "unicorn/no-new-array": "off",
+    "require-yield": "off",
+    "no-unused-vars": [
+      "error",
+      { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "player/captured-media.ts",
+        "player/player-bridge.ts",
+        "src/compiler/lowering/compiler.ts",
+        "src/deterministic-math.ts",
+        "src/external-data-capture.ts",
+        "src/message-markup.ts",
+        "src/plan/dataflow.ts",
+        "src/plan/instruction-stream-analyses/execution-regions.ts",
+        "src/runtime/random/random.ts",
+        "src/runtime/snapshot/snapshot-validation-analysis.ts",
+        "src/runtime/values/plain-data.ts",
+        "src/runtime/values/serializable-values.ts",
+        "src/semantic/scope.ts",
+        "src/type-checker.ts",
+        "src/type-inference/collector.ts",
+        "src/type-inference/core/admission/eligibility.ts",
+        "src/type-inference/core/admission/groups.ts",
+        "src/type-inference/core/answers.ts",
+        "src/type-inference/core/checks/interactions.ts",
+        "src/type-inference/core/contract.ts",
+        "src/type-inference/core/contract/levels.ts",
+        "src/type-inference/core/items.ts",
+        "src/type-inference/core/plus-index.ts",
+        "src/type-inference/core/values.ts",
+        "src/validation-testing.ts",
+        "src/xmp-keywords.ts",
+        "tests/families-runner.test.ts",
+        "tests/helpers/live-host-effects.ts",
+        "tests/type-core-closure.test.ts",
+        "tests/type-core-mixed-family.test.ts",
+        "tests/type-core-stop.test.ts"
+      ],
+      "rules": {
+        "no-control-regex": "off",
+        "no-unused-vars": "off",
+        "no-useless-escape": "off",
+        "oxc/double-comparisons": "off",
+        "oxc/erasing-op": "off",
+        "typescript/no-this-alias": "off",
+        "unicorn/no-useless-fallback-in-spread": "off",
+        "unicorn/no-useless-spread": "off",
+        "unicorn/prefer-string-starts-ends-with": "off"
+      }
+    }
+  ]
 }

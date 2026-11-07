@@ -3357,6 +3357,106 @@ test("a mixed error keeps the later element's null below it (#1790)", () => {
     }
 });
 /**
+ * #1901: a written copy's layer is read by its type where the layer lies below the copy's own level, and by its
+ * occurrence where the layer is its own level, whatever binding carries it: an inferred binding of a join keeps the
+ * written null of the joined copy's element, while a property holding a narrowed scalar copy names none, also through
+ * a copy of that binding and a wrapper's read of it, whichever element comes first. Each as the current checker's first
+ * sentence; in four modes.
+ */
+test("a mixed error reads a copy's layer by its type below the copy's own level, by its occurrence at it (#1901)", () => {
+  const ONE = "A list holds one type. Use values of one type in it.";
+  const V = "A list holds one type. Give 'v' one type in every element.";
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    [
+      'let d: integer[]?[] = [[1]]\nlet held = d + [[2]]\nlet xs = [held, [["x"]]]\nexit\n',
+      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let d: integer[]?[] = [[1]]\nlet held = d + [[2]]\nlet xs = [{f: held}, {f: [["x"]]}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a list (integer[]?[]) in one and a list (string[][]) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let d: integer?[][] = [[1]]\nlet held = d + [[2]]\nlet xs = [held, [["x"]]]\nexit\n',
+      `This list mixes a list (integer?[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let d: integer?[] = [1]\nlet held = d + [2]\nlet xs = [held, ["x"]]\nexit\n',
+      `This list mixes a list (integer?[]) and a list (string[]). ${ONE}`,
+    ],
+    // (a narrowed scalar copy at its own level, through a binding and a copy of it: no null)
+    [
+      'let atom: string? = "x"\nlet h = {v: atom}\nlet xs = [{v: 1}, h]\nexit\n',
+      `This list mixes objects whose property 'v' holds a whole number (integer) in one and text (string) in another. ${V}`,
+    ],
+    [
+      'let atom: string? = "x"\nlet h = {v: atom}\nlet g = h\nlet xs = [{v: 1}, g]\nexit\n',
+      `This list mixes objects whose property 'v' holds a whole number (integer) in one and text (string) in another. ${V}`,
+    ],
+    // (and read through a wrapper, its key's type taken from the wrapper's frontier, `wrapped`: Codex r1)
+    [
+      'let atom:string?="x"\nlet h={v:atom}\nh={v:atom}\nlet box={q:h}\nlet xs=[{v:1},box.q]\nexit\n',
+      `This list mixes objects whose property 'v' holds a whole number (integer) in one and text (string) in another. ${V}`,
+    ],
+    // (the earliest element's leaf by the same rule as the later one's, both orders: a scalar copy at its own level
+    // narrowed, in a binding of it, a copy of that binding, below a property, two lists deep and through a wrapper; Astra
+    // r1 on #1908)
+    [
+      'let atom: string? = "x"\nlet h = {v: atom}\nlet xs = [h, {v: 1}]\nexit\n',
+      `This list mixes objects whose property 'v' holds text (string) in one and a whole number (integer) in another. ${V}`,
+    ],
+    [
+      'let atom:string?="x"\nlet h=[atom]\nlet g=h\nlet xs=[g,[1]]\nexit\n',
+      `This list mixes a list (string[]) and a list (integer[]). ${ONE}`,
+    ],
+    [
+      'let atom:string?="x"\nlet h=[atom]\nlet g=h\nlet xs=[[1],g]\nexit\n',
+      `This list mixes a list (integer[]) and a list (string[]). ${ONE}`,
+    ],
+    [
+      'let atom:string?="x"\nlet h={v:[atom]}\nlet g=h\nlet xs=[g,{v:[1]}]\nexit\n',
+      `This list mixes objects whose property 'v' holds a list (string[]) in one and a list (integer[]) in another. ${V}`,
+    ],
+    [
+      'let atom:string?="x"\nlet h={v:[atom]}\nlet g=h\nlet xs=[{v:[1]},g]\nexit\n',
+      `This list mixes objects whose property 'v' holds a list (integer[]) in one and a list (string[]) in another. ${V}`,
+    ],
+    [
+      'let atom:string?="x"\nlet h=[[atom]]\nlet g=h\nlet xs=[g,[[1]]]\nexit\n',
+      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+    ],
+    [
+      'let atom:string?="x"\nlet h=[[atom]]\nlet g=h\nlet xs=[[[1]],g]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let atom:string?="x"\nlet h={v:[atom]}\nh={v:[atom]}\nlet box={q:{r:h}}\nlet xs=[box.q.r,{v:[1]}]\nexit\n',
+      `This list mixes objects whose property 'v' holds a list (string[]) in one and a list (integer[]) in another. ${V}`,
+    ],
+    [
+      'let atom:string?="x"\nlet h={v:[atom]}\nh={v:[atom]}\nlet box={q:{r:h}}\nlet xs=[{v:[1]},box.q.r]\nexit\n',
+      `This list mixes objects whose property 'v' holds a list (integer[]) in one and a list (string[]) in another. ${V}`,
+    ],
+    // (a written collection below that binding: its own null, and its elements')
+    [
+      'let atom: string[]? = ["x"]\nlet h = {v: atom}\nlet xs = [{v: [1]}, h]\nexit\n',
+      `This list mixes objects whose property 'v' holds a list (integer[]) in one and a list (string[]) in another. ${V}`,
+    ],
+    [
+      'let atom: string?[] = ["x"]\nlet h = {v: atom}\nlet xs = [{v: [1]}, h]\nexit\n',
+      `This list mixes objects whose property 'v' holds a list (integer[]) in one and a list (string?[]) in another. ${V}`,
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.code === "TSV044" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+});
+
+/**
  * #1762: a mixed error names a dict layer of its elements' type as a dict, as the current checker's first sentence does:
  * a written copy's (one that may be null too), a literal's, below a list, below a property, two deep, and a join's;
  * each side by its own values where a list and a dict meet. In four modes.

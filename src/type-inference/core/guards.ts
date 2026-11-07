@@ -205,16 +205,50 @@ export class GuardIndex {
    * node, and the regions holding that one, never each tested key in turn (Codex r21 B1).
    */
   public guardedBelow(key: Key, node: FlowNode): readonly string[] {
+    return this.#below(key, node, null)!;
+  }
+
+  /**
+   * `guardedBelow`, or `null` where `asked` holds this read's group already: the reads it answers alike, the key's
+   * tested record and per laminar nest of it (a callable's branches, a file's operands) the innermost region holding
+   * the node, whose chain is the answer. So a holder's compilation asks one answer once per group of its reads, n
+   * copies under n tests n paths, not n² (Astra r2 B3); a read in a nest that is not laminar is asked by itself.
+   */
+  public guardedBelowOnce(key: Key, node: FlowNode, asked: Set<string>): readonly string[] | null {
+    return this.#below(key, node, asked);
+  }
+
+  #below(key: Key, node: FlowNode, asked: Set<string> | null): readonly string[] | null {
     const program = this.program;
     if (!program.reached(node)) return [];
-    const nests = this.#nestsBelow(recordKey(key));
+    const record = recordKey(key);
+    const nests = this.#nestsBelow(record);
     if (nests === null) return [];
     const held = new Set<string>();
     const branches = nests.branches.get(program.callableAt(node));
-    if (branches !== undefined) this.#holding(branches, program.position(node), held);
     const operands = node.span === null ? undefined : nests.operands.get(node.file);
+    const regions: [Nest, number][] = [];
+    if (branches !== undefined) regions.push([branches, program.position(node)]);
     if (operands !== undefined && node.span !== null)
-      this.#holding(operands, node.span.start.offset, held);
+      regions.push([operands, node.span.start.offset]);
+    if (asked !== null && regions.every(([nest]) => nest.laminar)) {
+      // (the innermost region of each nest, found as `#holding` finds it: the group, then its chains)
+      const innermost = regions.map(([nest, at]) =>
+        this.#innermost(nest, at, this.#startsBy(nest, at)),
+      );
+      const group = [
+        record,
+        ...regions.map(([nest], at) => `${this.#nestId(nest)}:${innermost[at]}`),
+      ].join(" ");
+      if (asked.has(group)) return null;
+      asked.add(group);
+      regions.forEach(([nest], at) => {
+        for (let index = innermost[at]!; index >= 0; index = nest.parents[index]!) {
+          program.work.charge("eventSteps");
+          held.add(nest.labels[index]!);
+        }
+      });
+    } else for (const [nest, at] of regions) this.#holding(nest, at, held);
     const out: string[] = [];
     for (const path of held) {
       let shorter = false;
@@ -227,6 +261,14 @@ export class GuardIndex {
     program.work.charge("eventSteps", sortCost(out.length));
     return out.sort();
   }
+
+  readonly #nestIds = new WeakMap<Nest, number>();
+  #nestId(nest: Nest): number {
+    let id = this.#nestIds.get(nest);
+    if (id === undefined) this.#nestIds.set(nest, (id = ++this.#nestCount));
+    return id;
+  }
+  #nestCount = 0;
 
   /**
    * `guardedBelow` at a value's read below its property and element projections (as `guardedRead`), once per read and
@@ -338,6 +380,23 @@ export class GuardIndex {
   /** Adds the labels of a nest's regions holding `at` to `held`: the last region starting by `at`, up to one holding it. */
   #holding(nest: Nest, at: number, held: Set<string>): void {
     const work = this.program.work;
+    const low = this.#startsBy(nest, at);
+    if (!nest.laminar) {
+      for (let index = 0; index < low; index += 1) {
+        work.charge("eventSteps");
+        if (nest.ends[index]! >= at) held.add(nest.labels[index]!);
+      }
+      return;
+    }
+    for (let index = this.#innermost(nest, at, low); index >= 0; index = nest.parents[index]!) {
+      work.charge("eventSteps");
+      held.add(nest.labels[index]!);
+    }
+  }
+
+  /** The count of a nest's regions starting by `at` (a binary search). */
+  #startsBy(nest: Nest, at: number): number {
+    const work = this.program.work;
     let low = 0;
     let high = nest.starts.length;
     while (low < high) {
@@ -346,13 +405,12 @@ export class GuardIndex {
       if (nest.starts[middle]! <= at) low = middle + 1;
       else high = middle;
     }
-    if (!nest.laminar) {
-      for (let index = 0; index < low; index += 1) {
-        work.charge("eventSteps");
-        if (nest.ends[index]! >= at) held.add(nest.labels[index]!);
-      }
-      return;
-    }
+    return low;
+  }
+
+  /** A laminar nest's innermost region holding `at`, `-1` where none does; `low` its regions starting by `at`. */
+  #innermost(nest: Nest, at: number, low: number): number {
+    const work = this.program.work;
     // (up the chain the regions end no earlier: a jump whose region ends before `at` passes every region below it)
     let index = low - 1;
     while (index >= 0 && nest.ends[index]! < at) {
@@ -360,10 +418,7 @@ export class GuardIndex {
       const jump = nest.jumps[index]!;
       index = jump >= 0 && nest.ends[jump]! < at ? nest.parents[jump]! : nest.parents[index]!;
     }
-    for (; index >= 0; index = nest.parents[index]!) {
-      work.charge("eventSteps");
-      held.add(nest.labels[index]!);
-    }
+    return index;
   }
 
   /**

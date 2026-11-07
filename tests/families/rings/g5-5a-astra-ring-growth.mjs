@@ -1,7 +1,7 @@
 // original many-quiet, many-conflict and related inputs; #1394 G5 5a Astra review / builder corpus
 // (R/astra-m4-g5-5a-review-evidence/growth.mjs).
 const corpus = (() => {
-  const { families: families } = (() => {
+  const { families } = (() => {
     const rows = (n, f) => Array.from({ length: n }, (_, i) => f(i));
     const families = {};
     const reads = (k) => rows(k, (i) => `say "\${a${i}.p0}"`);

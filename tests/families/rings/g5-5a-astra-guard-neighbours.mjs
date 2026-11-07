@@ -20,7 +20,7 @@ export const cases = (() => {
               "joined.q.r = hostValue",
               "a0 = joined",
             );
-          const probe = [
+          const _probe = [
             `let outside = a${from}`,
             `if a${from}.p is integer {`,
             `a${1 - from + k === k ? 0 : 1} = a${from}`,

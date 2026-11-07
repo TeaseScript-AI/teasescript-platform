@@ -2,7 +2,7 @@
 
 module.exports = async function runPatchPublicationRequest({ github, context, core }) {
   const body = context.payload.comment.body.trim();
-  const match = /^\/publish-patch ([A-Za-z0-9][A-Za-z0-9._\/-]{0,239}) ([0-9a-f]{64})$/.exec(body);
+  const match = /^\/publish-patch ([A-Za-z0-9][A-Za-z0-9._/-]{0,239}) ([0-9a-f]{64})$/.exec(body);
   if (!match) {
     core.setFailed(
       "Use exactly: /publish-patch agent-patch-publication/<unique-id> <manifest-sha256>",

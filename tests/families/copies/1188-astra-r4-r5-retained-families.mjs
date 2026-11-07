@@ -4,7 +4,7 @@ export const cases = (() => {
   const result = [];
   {
     let a,
-      allcases,
+      _allcases,
       annot,
       b,
       carrier,
@@ -75,13 +75,11 @@ export const cases = (() => {
             }
           }
           lines.push(
-            ...[
-              make,
-              `let relay0={cargo:${read}}`,
-              "let relay1=relay0",
-              "let relay2=relay1",
-              "let picked=relay2.cargo",
-            ],
+            make,
+            `let relay0={cargo:${read}}`,
+            "let relay1=relay0",
+            "let relay2=relay1",
+            "let picked=relay2.cargo",
           );
           for (sink of ["list", "assign", "field"]) {
             for (rev of [false, true]) {
@@ -116,10 +114,10 @@ export const cases = (() => {
           cross = ["a=d", "c=b"];
           lines.push(...(edgeorder ? cross.slice().reverse() : cross));
           if (["left", "both"].includes(feeds)) {
-            lines.push(...["let inlet={cell:{v:lval},keep:0}", "b=inlet"]);
+            lines.push("let inlet={cell:{v:lval},keep:0}", "b=inlet");
           }
           if (["right", "both"].includes(feeds)) {
-            lines.push(...["let supply={cell:{v:rval},keep:0}", "d=supply"]);
+            lines.push("let supply={cell:{v:rval},keep:0}", "d=supply");
           }
           for ([view, consumer] of [
             ["direct", ["let outcome=[b,d]"]],
@@ -149,7 +147,7 @@ export const cases = (() => {
         for (memberseed of [false, true]) {
           lines = ["let input:integer=43", "let first={v:input,spare:0}", "let inlet=first"];
           if (rejecting) {
-            lines.push(...["inlet={v:2.75,spare:0}"]);
+            lines.push("inlet={v:2.75,spare:0}");
           }
           lines.push(
             ...["let ring0=inlet"]
@@ -161,15 +159,13 @@ export const cases = (() => {
               .concat([`ring0=ring${count - 1}`]),
           );
           if (memberseed) {
-            lines.push(...["ring1.spare=3"]);
+            lines.push("ring1.spare=3");
           }
           lines.push(
-            ...[
-              `let dead=[{v:false,spare:0},ring${count - 1}]`,
-              "let wrap={r:dead.first}",
-              "let peer={v:3.25,spare:0}",
-              "let outcome=[peer,wrap.r]",
-            ],
+            `let dead=[{v:false,spare:0},ring${count - 1}]`,
+            "let wrap={r:dead.first}",
+            "let peer={v:3.25,spare:0}",
+            "let outcome=[peer,wrap.r]",
           );
           add("cycle", `fed/${count}/${rejecting}/${memberseed}`, lines);
         }
@@ -196,11 +192,11 @@ export const cases = (() => {
             other = "base.meta";
           } else {
             if (form === "nested") {
-              lines.push(...["let box={inside:combined}", "let alias=box"]);
+              lines.push("let box={inside:combined}", "let alias=box");
               read = "alias.inside.meta";
               other = "base.meta";
             } else {
-              lines.push(...["let bad=[{meta:{v:false},stable:true},base]", "combined=bad.first"]);
+              lines.push("let bad=[{meta:{v:false},stable:true},base]", "combined=bad.first");
               read = "combined.meta";
               other = "base.meta";
             }
@@ -238,26 +234,24 @@ export const cases = (() => {
           for (peer of ["named", "alias", "fresh"]) {
             lines = ["let atom:integer | string=59", "let payload={detail:{v:atom},spare:0}"];
             if (outer === "list") {
-              lines.push(...["let matrix=[[{detail:{v:false},spare:0}],[payload]]"]);
+              lines.push("let matrix=[[{detail:{v:false},spare:0}],[payload]]");
               read = "matrix.first.first.detail";
             } else {
               if (outer === "dict") {
                 lines.push(
-                  ...["let matrix=[dict{first:{detail:{v:false},spare:0}},dict{last:payload}]"],
+                  "let matrix=[dict{first:{detail:{v:false},spare:0}},dict{last:payload}]",
                 );
                 read = "matrix.first.values.first.detail";
               } else {
-                lines.push(
-                  ...["let matrix=[{tray:[{detail:{v:false},spare:0}]},{tray:[payload]}]"],
-                );
+                lines.push("let matrix=[{tray:[{detail:{v:false},spare:0}]},{tray:[payload]}]");
                 read = "matrix.first.tray.first.detail";
               }
             }
             if (rejection) {
-              lines.push(...['let unrelated=["unrelated",false]']);
+              lines.push('let unrelated=["unrelated",false]');
             }
             if (peer === "alias") {
-              lines.push(...["let equivalent=payload", "let second=equivalent"]);
+              lines.push("let equivalent=payload", "let second=equivalent");
               other = "second.detail";
             } else {
               other = peer === "named" ? "payload.detail" : "{v:atom}";
@@ -276,19 +270,17 @@ export const cases = (() => {
       for (route of ["collection", "copies", "function"]) {
         lines = [`let atom:${domain}=${initial}`, "let item={v:atom}"];
         if (route === "collection") {
-          lines.push(...["let mixed=[{nest:[{v:false}]},{nest:[item]}]"]);
+          lines.push("let mixed=[{nest:[{v:false}]},{nest:[item]}]");
           read = "mixed.first.nest.first";
         } else {
           if (route === "copies") {
-            lines.push(...["let mixed={v:false}", "mixed=item", "let relay=mixed"]);
+            lines.push("let mixed={v:false}", "mixed=item", "let relay=mixed");
             read = "relay";
           } else {
             lines.push(
-              ...[
-                "function forward(x) { return x }",
-                "let mixed=[{nest:[{v:false}]},{nest:[item]}]",
-                "let relay=forward(mixed.first.nest.first)",
-              ],
+              "function forward(x) { return x }",
+              "let mixed=[{nest:[{v:false}]},{nest:[item]}]",
+              "let relay=forward(mixed.first.nest.first)",
             );
             read = "relay";
           }
@@ -296,7 +288,7 @@ export const cases = (() => {
         add("edge", `${domain}/${route}`, lines.concat(consume(read, "item", "list", false)));
       }
     }
-    allcases = Object.values(groups).flat();
+    _allcases = Object.values(groups).flat();
 
     result.push(
       ...Object.values(groups)

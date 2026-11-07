@@ -743,8 +743,8 @@ export class Consumers {
   /** Whether the receiving completion was asked for (`receive`), once. */
   #received = false;
 
-  /** Whether the capture ended where the program left the slice's depth (`captureContracts`). */
-  #leftSlice = false;
+  /** The site of the request at which the capture ended where the program left the slice's depth (`captureContracts`). */
+  #leftSlice: SourceSite | null = null;
 
   /** Phase B's capture (`#capture`). */
   #capturePhaseB(): void {
@@ -816,7 +816,7 @@ export class Consumers {
     };
     // (its work is the capture's, no consumer read's)
     this.reading = null;
-    this.#leftSlice = captureContracts(
+    const left = captureContracts(
       this.order(requests),
       reader,
       epochOf(this.pass),
@@ -824,6 +824,11 @@ export class Consumers {
       (error) => error instanceof BudgetExhausted,
       () => program.work.charge("checks", definitions.storeDefs.length + sites.size),
     );
+    if (left === null) return;
+    this.#leftSlice = left.site;
+    // (the candidate route ends here, at the refusal the capture established, before the walk: the lowering's check of
+    // that store would leave the slice at it; every other client hears nothing and has the whole analysis)
+    program.leftSlice?.(left.site);
   }
 
   /**
@@ -847,7 +852,7 @@ export class Consumers {
       !this.pass.contract.anyStopped ||
       this.#completion === null ||
       outsideSliceSyntax(this.pass.program) ||
-      this.#leftSlice
+      this.#leftSlice !== null
     )
       return null;
     this.#received = true;

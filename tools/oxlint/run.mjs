@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { checkChargedIteration } from "./check-charged-iteration.mjs";
+import { checkCommentForecasts } from "./check-comment-forecasts.mjs";
 import { checkEvidenceComments } from "./check-evidence.mjs";
 import { checkObligationInventory } from "./check-obligation-inventory.mjs";
 import { checkQuestionSources } from "./check-question-sources.mjs";
@@ -25,6 +26,7 @@ for (const file of files) {
 }
 for (const diagnostic of [
   ...checkChargedIteration(repositoryRoot),
+  ...checkCommentForecasts(repositoryRoot),
   ...checkObligationInventory(repositoryRoot),
   ...checkQuestionSources(repositoryRoot),
   ...checkSiteKeys(repositoryRoot),

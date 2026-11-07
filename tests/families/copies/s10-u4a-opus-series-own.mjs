@@ -3,10 +3,10 @@
 // compiled the repository's exported work families (tests/helpers/type-core-families), which the corpus does not copy.
 const rows = (k, f, sep = "\n") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
 const sel = (i) => ["first", "last", "random"][i % 3];
-const balancedSum = (lo, hi) =>
+const _balancedSum = (lo, hi) =>
   hi - lo === 1
     ? `a${lo}`
-    : `(${balancedSum(lo, (lo + hi) >> 1)} + ${balancedSum((lo + hi) >> 1, hi)})`;
+    : `(${_balancedSum(lo, (lo + hi) >> 1)} + ${_balancedSum((lo + hi) >> 1, hi)})`;
 const head = 'let choice = askBoolean "change?"';
 const own = {
   // one tested list of k elements, k stored selections of it: no read may scan its elements

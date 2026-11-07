@@ -1,6 +1,16 @@
 {
   "extends": "@vue/tsconfig/tsconfig.dom.json",
   "compilerOptions": {
+    // TypeScript 5.9, which `vue-tsc` runs on, has no `es2025` lib; these are its ES2025 parts.
+    "lib": [
+      "ES2024",
+      "ESNext.Collection",
+      "ESNext.Float16",
+      "ESNext.Iterator",
+      "ESNext.Promise",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "baseUrl": ".",
     "exactOptionalPropertyTypes": true,
     "noFallthroughCasesInSwitch": true,

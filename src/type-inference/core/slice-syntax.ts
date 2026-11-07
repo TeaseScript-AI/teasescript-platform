@@ -152,6 +152,10 @@ export function outsideSyntax(
           push(node.properties.map((property) => property.value));
           break;
         case "propertyAccessExpression":
+          // (a member of a literal that is no object, written as the receiver: its members are S9b's, as the route
+          // refuses any receiver that may be no object after the analysis, `outsideAnswers`)
+          if (NOT_OBJECT_LITERALS.has(unwrapped(node.object).kind))
+            return outside(node.span, "this member or element read");
           push([node.object]);
           break;
         case "binaryExpression":
@@ -184,8 +188,14 @@ export function outsideSyntax(
             key.kind === "stringLiteral" && key.parts.every((part) => part.kind === "stringText")
               ? key.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("")
               : null;
-          // (a computed key is external data, F19: no other load's key)
-          if (node.defaultValue === null || (name !== null && loaded.has(name)))
+          // (a computed key is external data, F19: no other load's key; a default written as `null` is only null, which
+          // the route refuses after the analysis wherever it finds one, `outsideAnswers`: without a declared type, the
+          // storage rules' error, S9b's)
+          if (
+            node.defaultValue === null ||
+            (name !== null && loaded.has(name)) ||
+            unwrapped(node.defaultValue).kind === "nullLiteral"
+          )
             return outside(node.span, "this load expression");
           if (name !== null) loaded.add(name);
           push([node.key, node.defaultValue]);
@@ -206,6 +216,16 @@ function nullTest(node: Extract<Expression, { kind: "binaryExpression" }>): bool
     (unwrapped(node.left).kind === "nullLiteral" || unwrapped(node.right).kind === "nullLiteral")
   );
 }
+
+/** The slice's literals that are no object (`outsideSyntax`'s literal cases). */
+const NOT_OBJECT_LITERALS: ReadonlySet<Expression["kind"]> = new Set([
+  "numberLiteral",
+  "booleanLiteral",
+  "nullLiteral",
+  "regexLiteral",
+  "stringLiteral",
+  "listLiteral",
+]);
 
 function unwrapped(expression: Expression): Expression {
   let current = expression;

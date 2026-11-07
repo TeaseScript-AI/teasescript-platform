@@ -3572,6 +3572,27 @@ test("a known value under a test reads the branch's narrowing, and a long copy c
   );
 });
 
+test("the route ends at the refusal its capture establishes, at the store whose contract leaves the slice's depth, and a deep program still plans (#1073)", () => {
+  // (graph/251 of the corpus behind a store whose contract the capture finds first: the capture's second request leaves
+  // the slice's depth at the store `a=b`, where the route now refuses, about 28 million units in, before the walk; the
+  // lowering would have refused at `let b=foreign`'s read after the whole analysis, about 58 million. In the first mode
+  // alone in CI: every mode is the PR's queue evidence)
+  const source =
+    'let n:integer=1\nn=hostValue\nlet typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nif hostValue is integer {a=b}\nb=a\nb=a\nlet out={p:c}\nexit\n';
+  assert.throws(
+    () => candidate(source),
+    (error) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === "a value whose structure the slice does not follow" &&
+      error.site.start === source.indexOf("a=b}") + 2,
+  );
+  // (no refusal at a work count: Sol's deep control, 169 syntax nodes, plans at about 1.4 million units, far past any
+  // proportional cap of its size, in every mode: in reverse order with its stop's warning)
+  const deep = `if hostValue is integer {}\nlet typed:integer${"[]".repeat(128)}=hostValue\nlet out=typed\n${"out=typed\n".repeat(8)}out=hostValue\nexit\n`;
+  for (const mode of MODES)
+    assert.notEqual(inMode(mode, () => candidate(deep)).plan, null, JSON.stringify(mode));
+});
+
 test("no production code selects the core: only tests reach the candidate entry", () => {
   const root = process.cwd();
   for (const directory of ["src", "playground", "player", "tools"])

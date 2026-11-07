@@ -1,7 +1,7 @@
 // forest-disjoint-deep, forest-overlap-prefix and related fixed cases; Astra review, r2
 // (R/astra-m4-f1-review-r2-evidence/overlap-cases.mjs).
 export const cases = (() => {
-  const { workShapes: workShapes } = (() => {
+  const { workShapes } = (() => {
     const rows = (n, f) => Array.from({ length: n }, (_, i) => f(i));
     const fields = (n, v, p = "f") =>
       rows(n, (i) => `${p}${i}:${typeof v === "function" ? v(i) : v}`).join(",");

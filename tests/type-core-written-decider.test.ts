@@ -1,48 +1,27 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { Admission } from "../src/type-inference/core/admission.js";
-import { drive } from "../src/type-inference/core/admission/inherited.js";
 import { spanRef } from "../src/type-inference/core/contract/key-ids.js";
-import { earliestDecider } from "../src/type-inference/core/admission/scan.js";
-import { analyseCore } from "../src/type-inference/core/answers.js";
-import { withEveryRecord } from "../src/type-inference/core/solver.js";
 import type { Definition } from "../src/type-inference/core/definitions.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
-import { inMode, MODES, type Mode } from "./helpers/type-core-oracles.js";
+import { MODES } from "./helpers/type-core-oracles.js";
+import {
+  atElements,
+  ownDisagreements,
+  routed,
+  scanned,
+  shown,
+  valued,
+  type Answer,
+  type Asked,
+} from "./helpers/type-core-written-decider.js";
 
 // #1444(b,c): outside every decision, a written decider is answered from its groups' summaries (`writtenDecider`), a
 // decision's own scan staying the stops'. The obligations: the summary answers as the scan does on the same admission;
 // no decision reads it; and after a stop it answers from what is current, as a scan with no memo of its own does.
-
-/** An answer by what a reader takes of it: the term's spelling, the site, the kinds, the join's facts. */
-type Answer = ReturnType<typeof earliestDecider> extends Generator<unknown, infer R> ? R : never;
-const shown = (answer: Answer): string =>
-  answer === null
-    ? "none"
-    : JSON.stringify([
-        answer.term === null ? null : JSON.stringify(answer.term),
-        answer.site?.start ?? null,
-        answer.tags ?? null,
-        answer.joined ?? null,
-        answer.joinedNull ?? null,
-      ]);
-
-/** `value`'s decider at `path` asked as `literalElements` asks it: the summary, outside every decision. */
-type Asked = Parameters<typeof earliestDecider>[3];
-const routed = (admission: Admission, d: Definition, path: Asked): Answer =>
-  drive(admission, earliestDecider(admission, d.value!, d.node, path, null));
-
-/** The same question as a decision asks it: the scan of its stops. */
-const scanned = (admission: Admission, d: Definition, path: Asked): Answer => {
-  admission.deciding += 1;
-  try {
-    return routed(admission, d, path);
-  } finally {
-    admission.deciding -= 1;
-  }
-};
 
 /** The scan with no memo of its own: each of the decider's derived maps empty for it, the admission's restored after. */
 const COLD = [
@@ -52,7 +31,6 @@ const COLD = [
   "chosenLinks",
   "snapshotLists",
   "joinedLists",
-  "stopDepths",
   "viaClassNames",
   "viaClassParts",
   "viaSignatures",
@@ -62,6 +40,10 @@ const COLD = [
 ] as const;
 const cold = (admission: Admission, d: Definition, path: Asked): Answer => {
   const saved = COLD.map((name) => ({ name, kept: admission[name] }));
+  // (the stops' depths are A4's receiving domain's, the pass's: empty for it too, restored after)
+  const domain = admission.pass.receivingDomain;
+  const depths = domain.stopDepths;
+  domain.stopDepths = new WeakMap();
   for (const { name, kept } of saved)
     Object.defineProperty(admission, name, {
       value: Array.isArray(kept)
@@ -84,39 +66,9 @@ const cold = (admission: Admission, d: Definition, path: Asked): Answer => {
     return scanned(admission, d, path);
   } finally {
     for (const { name, kept } of saved) Object.defineProperty(admission, name, { value: kept });
+    domain.stopDepths = depths;
     Object.defineProperty(admission, "deciderCaches", { value: bundle });
   }
-};
-
-/** Runs `inside` with each admission of the analysis of `source` as it checks literals' elements (rule 3). */
-function atElements(
-  source: string,
-  mode: Mode,
-  inside: (admission: Admission) => void,
-  everyRecord = false,
-): void {
-  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
-  assert.ok(request !== null);
-  const original = Admission.prototype.literalElements;
-  Admission.prototype.literalElements = function (this: Admission, ...args) {
-    inside(this);
-    return original.apply(this, args);
-  };
-  try {
-    inMode(mode, () =>
-      everyRecord ? withEveryRecord(() => analyseCore(request)) : analyseCore(request),
-    );
-  } finally {
-    Admission.prototype.literalElements = original;
-  }
-}
-
-/** The definitions whose value a decider may be asked of: the stores and the literals' cells. */
-const valued = (admission: Admission): Definition[] => {
-  const { definitions } = admission.pass;
-  return [...definitions.storeDefs, ...[...definitions.cellDefs.values()].flat()].filter(
-    (d) => d.value !== undefined,
-  );
 };
 
 const PATHS: readonly (readonly string[])[] = [
@@ -226,6 +178,68 @@ test("outside a decision the written decider's summary answers each question as 
         });
   assert.ok(asked > 1_000);
   assert.deepEqual(differ.slice(0, 5), []);
+});
+
+/**
+ * #1901's regressions, each a copy whose own level the summary once guessed by the asked path's geometry: an inferred
+ * binding of a join (its element below the joined copy's own level), and a property holding a scalar copy (its own
+ * level); each in both orders and as a join, beside a copy of a copy and a written copy read below its own level.
+ */
+const OWN: readonly string[] = [
+  'let d: integer?[] = [1]\nlet held = d + [2]\nlet xs = held + ["tail"]\nexit\n',
+  'let d: integer?[] = [1]\nlet held = d + [2]\nlet xs = ["tail"] + held\nexit\n',
+  'let d: integer[]?[] = [[1]]\nlet held = d + [[2]]\nlet xs = [held, [["x"]]]\nexit\n',
+  'let atom: string? = "x"\nlet h = {v: atom}\nlet xs = [{v: 1}, h]\nexit\n',
+  'let atom: string? = "x"\nlet h = {v: atom}\nlet xs = [h, {v: 1}]\nexit\n',
+  'let atom: string? = "x"\nlet h = {v: atom}\nlet xs = [[1]] + [h]\nexit\n',
+  'let atom: string? = "x"\nlet h = {v: atom}\nlet g = h\nlet xs = [{v: 1}, g]\nexit\n',
+  'let b: string?[] = ["x"]\nlet xs = [[1], b]\nexit\n',
+];
+
+/**
+ * #1901: the summary and the scan agree on whether a copy reads its type at its own level, on the regressions in four
+ * modes and on the mixed family's copies (a written binding `c` its side reads) sampled one case per value of each of
+ * its axes. The whole product of its copies is a queue job (`ownDisagreements` over every case, the owner's test-cost
+ * rule).
+ */
+test("the summary and the scan agree on a copy's own level across the regressions and the sampled family (#1901)", async () => {
+  // EVIDENCE: the family modules export `cases` (name and source) and `axes`, the families' module contract.
+  const { cases, axes } = (await import(
+    pathToFileURL(resolve(process.cwd(), "tests/families/messages/1765-mixed-family.mjs")).href
+  )) as {
+    cases: readonly (readonly [string, string])[];
+    axes: readonly (readonly [string, unknown])[];
+  };
+  const copies = cases.filter(([, source]) => source.includes("let c:"));
+  const value = (name: string, axis: string): string =>
+    name.split("/").find((part) => part.startsWith(`${axis}:`))!;
+  const sample = new Map<string, readonly [string, string]>();
+  for (const [axis] of axes)
+    for (const each of copies) {
+      const key = value(each[0], axis);
+      if (![...sample.values()].some(([name]) => value(name, axis) === key))
+        sample.set(each[0], each);
+    }
+  const differ: string[] = [];
+  let regressions = 0;
+  let family = 0;
+  for (const source of OWN)
+    for (const mode of MODES) {
+      const found = ownDisagreements(source, 2, mode);
+      regressions += found.copies;
+      differ.push(...found.differ);
+    }
+  for (const [name, source] of sample.values()) {
+    const found = ownDisagreements(
+      source,
+      Number(value(name, "depth").slice("depth:".length)),
+      MODES[0]!,
+    );
+    family += found.copies;
+    differ.push(...found.differ);
+  }
+  assert.deepEqual(differ.slice(0, 5), []);
+  assert.ok(regressions > 0 && family > 0, `${regressions} ${family}`);
 });
 
 test("a decision never reads the written decider's summary, so it charges what its scan charges (#1444)", () => {

@@ -20,19 +20,27 @@ const CORE = new URL("../../src/type-inference/core/", import.meta.url);
 
 /** The core's names for a path, its steps or its text, by which the scan knows a spread of one. */
 const PATH_NAMES = new Set([
-  ...["at", "path", "paths", "rest", "below", "before", "after", "strip", "steps", "prefix", "key"],
-  ...[
-    "projection",
-    "shift",
-    "along",
-    "collection",
-    "within",
-    "base",
-    "full",
-    "source",
-    "label",
-    "stand",
-  ],
+  "at",
+  "path",
+  "paths",
+  "rest",
+  "below",
+  "before",
+  "after",
+  "strip",
+  "steps",
+  "prefix",
+  "key",
+  "projection",
+  "shift",
+  "along",
+  "collection",
+  "within",
+  "base",
+  "full",
+  "source",
+  "label",
+  "stand",
 ]);
 
 /** The forms of a construction found per line, by name. */

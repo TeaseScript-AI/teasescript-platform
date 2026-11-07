@@ -569,7 +569,8 @@ export function captureDescriptors(
  * requests nothing more, so that request and every later one stay unrecorded, as outside the slice's syntax (no `Lost`,
  * no diagnostic; the second half of the one gate, `slice-syntax.ts` the first). A stop while it runs (`isStop`;
  * `charge` the work of finding the requests, charged first) leaves the request it cut and every later one lost with the
- * cause `extraction`, and is thrown on: nothing is reclassified. Whether it ended where the program left the slice.
+ * cause `extraction`, and is thrown on: nothing is reclassified. The request at which the program left the slice, or
+ * `null`.
  */
 export function captureContracts(
   requests: readonly ContractRequest[],
@@ -578,7 +579,7 @@ export function captureContracts(
   into: CapturedContract[],
   isStop: (error: unknown) => boolean,
   charge: () => void,
-): boolean {
+): ContractRequest | null {
   const descriptors = new ContractDescriptors<null>(reader, () => NO_RECORDS, epoch, false);
   let next = 0;
   try {
@@ -594,10 +595,10 @@ export function captureContracts(
       } catch (error) {
         if (!(error instanceof SliceDepth)) throw error;
         // (the program has left the slice: nothing more to capture)
-        return true;
+        return request;
       }
     }
-    return false;
+    return null;
   } catch (error) {
     if (isStop(error))
       for (; next < requests.length; next += 1) {

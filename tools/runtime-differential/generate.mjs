@@ -62,7 +62,7 @@ function replace { root = {v: 9, xs: [7, 8, 9], inner: {v: 6}}\nreturn 3 }
 function pair(first, second = tick()) { return first + second }
 function view(value) { return value }
 `;
-const finish = `say "\${root.v}:\${root.xs.join(\",\")}:\${copy.v}:\${copy.xs.join(\",\")}:\${total}", instant
+const finish = `say "\${root.v}:\${root.xs.join(",")}:\${copy.v}:\${copy.xs.join(",")}:\${total}", instant
 exit
 `;
 export function generate(seed, index, requested) {

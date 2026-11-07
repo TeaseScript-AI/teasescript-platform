@@ -1,7 +1,7 @@
 // original W27, W27leave and related inputs; Astra review, r2 (R/astra-m4-s10-part1-review-r2/work.mjs).
 export const cases = (() => {
   // Astra review.
-  const sizes = [4, 8];
+  const _sizes = [4, 8];
   const shapes = (() => {
     const rows = (k, f) => Array.from({ length: k }, (_, i) => f(i)).join("\n");
     const fields = (k, v) =>
@@ -52,7 +52,7 @@ export const cases = (() => {
     }
     return result;
   })();
-  const checks = ["publication", "stops"];
+  const _checks = ["publication", "stops"];
 
   const selected = [];
   for (const [name, sizes] of [

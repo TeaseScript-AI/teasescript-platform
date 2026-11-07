@@ -323,7 +323,10 @@ function reachable(start: number, successors: (index: number) => readonly number
   const work = [start];
   while (work.length > 0)
     for (const next of successors(work.pop()!))
-      if (!seen.has(next)) (seen.add(next), work.push(next));
+      if (!seen.has(next)) {
+        seen.add(next);
+        work.push(next);
+      }
   return seen;
 }
 
@@ -343,8 +346,14 @@ function planDominance(
       if (top[1] < next.length) {
         const target = next[top[1]]!;
         top[1] += 1;
-        if (!seen.has(target)) (seen.add(target), stack.push([target, 0]));
-      } else (order.push(top[0]), stack.pop());
+        if (!seen.has(target)) {
+          seen.add(target);
+          stack.push([target, 0]);
+        }
+      } else {
+        order.push(top[0]);
+        stack.pop();
+      }
     }
   }
   order.reverse();
@@ -370,8 +379,10 @@ function planDominance(
       for (const predecessor of predecessors.get(node) ?? [])
         if (idom.has(predecessor))
           candidate = candidate === null ? predecessor : intersect(predecessor, candidate);
-      if (candidate !== null && idom.get(node) !== candidate)
-        (idom.set(node, candidate), (changed = true));
+      if (candidate !== null && idom.get(node) !== candidate) {
+        idom.set(node, candidate);
+        changed = true;
+      }
     }
   }
   return (a: number, b: number): boolean => {
@@ -436,8 +447,10 @@ function leads(graph: FlowGraph, from: FlowNode, to: FlowNode, avoid: FlowNode):
     const node = work.pop()!;
     if (node === to) return true;
     for (const next of node.successors)
-      if (next !== avoid && !seen.has(next) && !graph.isDeadEdge(node, next))
-        (seen.add(next), work.push(next));
+      if (next !== avoid && !seen.has(next) && !graph.isDeadEdge(node, next)) {
+        seen.add(next);
+        work.push(next);
+      }
   }
   return false;
 }
@@ -476,7 +489,10 @@ export function flowDifferences(program: FlowProgram): string[] {
     while (work.length > 0) {
       const node = work.pop()!;
       for (const next of node.successors)
-        if (!seen.has(next) && !graph.isDeadEdge(node, next)) (seen.add(next), work.push(next));
+        if (!seen.has(next) && !graph.isDeadEdge(node, next)) {
+          seen.add(next);
+          work.push(next);
+        }
     }
     return seen;
   };

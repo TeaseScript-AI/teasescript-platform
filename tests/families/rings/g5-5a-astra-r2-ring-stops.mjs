@@ -1,7 +1,7 @@
 // i1339-many-fed/conflict-read-4, i1339-chord/quiet-read-4 and related fixed cases; #1394 G5 5a Astra review / builder
 // corpus, r2 (R/astra-m4-g5-5a-review-r2-evidence/builder-tools/ring-stop.mjs).
 export const cases = (() => {
-  const { families: families } = (() => {
+  const { families } = (() => {
     const rows = (n, f) => Array.from({ length: n }, (_, i) => f(i));
     const families = {};
     const reads = (k) => rows(k, (i) => `say "\${a${i}.p0}"`);

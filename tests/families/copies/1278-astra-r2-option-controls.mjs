@@ -90,9 +90,9 @@ const outputs = (() => {
   return { cases0, cases1, shapes2, cases3 };
 })();
 export const cases = [...outputs.cases0, ...outputs.cases1, ...outputs.cases3];
-export const shapes = Object.fromEntries([
-  ...Object.entries(outputs.shapes2).map(([name, make]) => ["shapes2/" + name, make]),
-]);
+export const shapes = Object.fromEntries(
+  Object.entries(outputs.shapes2).map(([name, make]) => ["shapes2/" + name, make]),
+);
 export const checks = ["publication"];
 
 for (const index of [30, 29]) cases.splice(index, 1);
