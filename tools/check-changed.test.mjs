@@ -17,7 +17,8 @@ const REPRESENTATIVES = {
   fixtures: ["tests/fixtures/type-core/cells.jsonl", ["typescript"]],
   documentation: ["docs/TESTING.md", []],
   // root configuration files, each needing the projects whose checks read it
-  "root tsconfig": ["tsconfig.json", ["typescript", "oxlint-rules"]],
+  "root tsconfig": ["tsconfig.json", ["typescript", "oxlint-rules", "design-lint"]],
+  "Player tsconfig": ["player/vue/tsconfig.json", ["player-vue", "design-lint"]],
   "knip config": ["knip.json", ["tools"]],
   formatting: [".prettierrc.json", ["formatting"]],
   "Prettier ignore file": [".prettierignore", ["formatting"]],

@@ -13,7 +13,8 @@ import { dirname, join, resolve } from "node:path";
 // --check`, the format check of the changed files, oxlint and knip, each as CI runs it. Then each project a changed
 // path belongs to (`projectsFor`): its type check and tests. A root configuration file belongs to the checks that read
 // it, and needs no project when only those that always run do. A changed path no project claims, other than
-// documentation, runs every project's checks.
+// documentation, runs every project's checks. It never builds the TypeScript or runs the compiled test suite, which
+// CI does: a change that shows only there, such as the root tsconfig's emit settings, passes here.
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
 // detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
@@ -45,7 +46,6 @@ export const PROJECTS = {
     claims: (path) => path.startsWith("tools/oxlint/") || path === "tsconfig.json",
     checks: ["test:lint"],
   },
-  // (`tools/knip-entries.test.mjs` reads `knip.json`)
   tools: {
     claims: (path) => /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path) || path === "knip.json",
     checks: ["test:verification"],
@@ -55,8 +55,12 @@ export const PROJECTS = {
     claims: (path) => path === ".prettierrc.json" || path === ".prettierignore",
     checks: ["format:check"],
   },
+  // (the shadcn rules resolve component imports through the root tsconfig's paths, then the Player's)
   "design-lint": {
-    claims: (path) => path === "eslint.design.config.mjs",
+    claims: (path) =>
+      path === "eslint.design.config.mjs" ||
+      path === "tsconfig.json" ||
+      path === "player/vue/tsconfig.json",
     checks: ["lint:design", "test:lint:design"],
   },
 };
