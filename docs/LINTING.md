@@ -14,6 +14,14 @@ without yielding). `no-unused-vars` ignores names that start with `_`, as `tsc`'
 `overrides` entry lists the files whose findings wait for another open pull request, or for the compiler's own cleanup;
 that list only shrinks, and each cleanup removes its files from it.
 
+## Comment forecasts
+
+`tools/oxlint/check-comment-forecasts.mjs` refuses a comment that forecasts later work, in the forms
+[Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead) lists (its
+`FORECASTS` table); a citation of a repository record passes. `comment-forecasts-allowed.json` lists the forecasts
+that stay for now, and each entry must still be found; `comment-citations.json` holds each file's exact counts of
+`TABLE r4` and `TABLE §` in comments, which may only fall.
+
 ## Type evidence
 
 Keep precise contracts through ordinary code. Do not erase a known value into `any`, `unknown`, broad `object`, or an
