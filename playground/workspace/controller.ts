@@ -27,7 +27,6 @@ import type {
   RuntimeChatPacingGateActionSnapshot,
   RuntimeInteractionActionSnapshot,
 } from "../../src/runtime/actions/model.js";
-import { completePlayerRuntimeAction } from "../../player/runtime-adapter.js";
 import {
   activePlayerRuntimeInteraction,
   activePlayerRuntimePacingGate,
@@ -364,7 +363,12 @@ function completeWorkspaceAction(
   action: RuntimeInteractionActionSnapshot | RuntimeChatPacingGateActionSnapshot,
   payload: Record<string, unknown>,
 ): WorkspaceControlResult {
-  const operation = completePlayerRuntimeAction(plan, snapshot, action, payload);
+  const operation = completeAction(plan, snapshot, {
+    actionId: action.actionId,
+    actionKind: action.kind,
+    ...(action.kind === "interaction" ? { interactionKind: action.interactionKind } : {}),
+    payload,
+  });
   return controlResult(operation.snapshot, operation.events, operation.outcome);
 }
 
