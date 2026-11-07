@@ -287,7 +287,7 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     [
       'let key = "k"\nlet v = load(key, default: null)\nv.add(2)\nexit\n',
       [
-        // (no check in code: 'v' may also lack the method there, which a null check does not rule out, TABLE r4.162;
+        // (no check in code: 'v' may also lack the method there, which a null check does not rule out, #1449;
         // the load's null reaches the call by a route without a check: the route rule's error, AD-1)
         `E TSV043 'v.add(2)': 'v' can be null here because of 'load(key, default: null)' on line 2. Check that 'v' is ` +
           "not null first.",

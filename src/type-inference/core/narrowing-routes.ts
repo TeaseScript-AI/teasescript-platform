@@ -57,7 +57,7 @@ import { propertyName } from "./program.js";
  *   stores, projected only for the one candidate examined; each with the reach of its writer side (the outermost block
  *   its open writer segments reach), so a consumer finds the nearest candidate whose writer side reaches it by one
  *   binary search over a tree of reaches, never a backward scan.
- * A consumer's query examines that one candidate: its certification (AD-1, TABLE r4.52: what its stored value holds,
+ * A consumer's query examines that one candidate: its certification (AD-1, #1073: what its stored value holds,
  * or a scalar copy whose source read has a witness by this same query, memoised per node and key; `#certificate`), then
  * the corridor's remaining segments (the middle and the consumer side), each one binary search per layer, and the
  * consumer's own statement's compulsory calls (the nearest call-in dominating n). An unsuitable candidate yields the
@@ -258,7 +258,7 @@ export class NarrowingRoutes {
   }
 
   /**
-   * AD-1 (TABLE r4.52, V30 §13) at a consumer's read of `value` whose items hold the offending `tag`: the writer of a
+   * AD-1 (#1073, V30 §13) at a consumer's read of `value` whose items hold the offending `tag`: the writer of a
    * route that brings it there without a check, or `null` where the compiler proves none, and the consumer warns with
    * its check. A stable read without element steps asks N3's witness, its D′'s stored value the writer; a call, a
    * `load`, an `otherwise` or a selection read where it is used is its own producer, the writer where its value produces
@@ -537,7 +537,7 @@ export class NarrowingRoutes {
    * compiler proves no such route (the consumer then warns with its check). The witness of a copy or an `otherwise`
    * asks this same query of its source, one memoised query per node and key, resolved without native recursion.
    * `others`: where `tag` is a member of the written union `key` declares, the union's other kinds the use does not
-   * take, which certify the route as `tag` does (r4.118 (1): the written domain proves itself).
+   * take, which certify the route as `tag` does (#1073: the written domain proves itself).
    */
   public *witness(
     key: Key,
@@ -640,7 +640,7 @@ export class NarrowingRoutes {
   }
 
   /**
-   * Whether a candidate certifies the offending item for `key` (N3 (iii), N3a, re-derived by AD-1, TABLE r4.52): `true`
+   * Whether a candidate certifies the offending item for `key` (N3 (iii), N3a, re-derived by AD-1, #1073): `true`
    * where its stored value produces the kind on some run, `false` where it does not, or the read whose own witness
    * certifies it (a scalar copy's source, a whole copy's source below the copied path, an `otherwise`'s left operand).
    * Every producer certifies by what its value holds (a literal, a default of any kind, a lookup, a parse, a

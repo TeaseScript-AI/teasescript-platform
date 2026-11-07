@@ -75,10 +75,10 @@ export function warning(
 }
 
 /**
- * The route rule's one required-check decision (AD-1, TABLE r4.52; V30 §13, "a use that needs a check has three
+ * The route rule's one required-check decision (AD-1, #1073; V30 §13, "a use that needs a check has three
  * outcomes"), asked of every warning before it is made, after the quiet path, the exact answers and G (§13.2): a
- * possible `null` owing its null-check, or a member of the read's written union that the use does not take (r4.118
- * (1): the written domain proves it), brought to the use by a route without a check (`NarrowingRoutes.required`), is a
+ * possible `null` owing its null-check, or a member of the read's written union that the use does not take (#1073:
+ * the written domain proves it), brought to the use by a route without a check (`NarrowingRoutes.required`), is a
  * compile error with N10's payload in place of that warning and its obligation; every other warning and check at the
  * site stays. No route proved, the warning stays: a check on every route that the compiler cannot keep, a stopped or an
  * external value, a member a receiver may lack. Whether the error was made.
@@ -109,7 +109,7 @@ function required(
   if (value === undefined || at === null) return false;
   const text = program.textAt(at);
   let tests: readonly string[];
-  // (a written union's other kinds the use does not take, null among them: each certifies the route, r4.118 (1))
+  // (a written union's other kinds the use does not take, null among them: each certifies the route, #1073)
   let others: readonly ItemTag[] = [];
   if (item.tag === "null") {
     // (a null owes its null-check, or at a store its destination's check: C1's and C10's)
@@ -161,7 +161,7 @@ function required(
 
 /**
  * The members of the written union a read's variable declares, at the variable itself, or, where `results`, a called
- * function's written result used where it stands (r4.118 (1): the written domain proves itself; a store's is C1's
+ * function's written result used where it stands (#1073: the written domain proves itself; a store's is C1's
  * copy rule), or `null`.
  */
 function writtenMembers(

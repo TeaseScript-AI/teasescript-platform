@@ -950,13 +950,13 @@ const routeTests = (record: string): readonly string[] => ROUTE_TESTS.get(record
 const INTENDED: readonly Intended[] = [
   {
     rule:
-      "AD-1 (TABLE r4.52, r4.118 (1), #1073 PR 4): a written union's member the use does not take, brought by a route " +
+      "AD-1 (#1073 PR 4): a written union's member the use does not take, brought by a route " +
       "without a check, is the route rule's error, whose fix is the test the route lacks (`if x is T`, its record's " +
       "N10 payload), not the current checker's conversion of a value it took as definite",
     matches: (pair) =>
       routeTests(pair.record).length > 0 &&
       /^'[^']+' can be [^.]+ here because of line \d+\./.test(pair.message),
-    // (the test its record's payload names: as code, or in words of its type where its code is not proved, r4.162)
+    // (the test its record's payload names: as code, or in words of its type where its code is not proved, #1449)
     replacement: (pair) => {
       const tests = routeTests(pair.record);
       const kind = /^if .+ is (\w+)$/.exec(tests[0] ?? "")?.[1] ?? "(?!)";
@@ -1086,7 +1086,7 @@ const INTENDED: readonly Intended[] = [
       / otherwise (?!\.\.\.$)\S/.test(current),
     replacement: () => exact(SAME_TYPE),
     // (0 since #1073 PR 4: these null fixes are the route rule's errors', in words where their code is not proved, the
-    // r4.162 entry's)
+    // #1449 entry's)
     count: 0,
   },
   {
