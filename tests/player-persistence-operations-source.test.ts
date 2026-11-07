@@ -124,7 +124,11 @@ function violations(source: ts.SourceFile, body: ts.Node): string[] {
     ) {
       const method = node.expression.name.text;
       if (method === "read") report(node, "the media store's read");
-      if (OWNED_MEDIA.has(method) && node.arguments.length < 2)
+      const owner = node.arguments[1];
+      if (
+        OWNED_MEDIA.has(method) &&
+        (owner === undefined || !ts.isIdentifier(owner) || !OWNERSHIP_NAMES.has(owner.text))
+      )
         report(node, "the media store without the ownership");
     }
     if (
@@ -140,7 +144,10 @@ function violations(source: ts.SourceFile, body: ts.Node): string[] {
   return found;
 }
 
-/** Whether the identifier `node` uses a raw resource other than to compare it, wait for it, or bind it to a handle. */
+/**
+ * Whether the identifier `node` uses a raw resource other than to compare it, bind it to a handle, or wait for the
+ * storage route as a statement of its own, whose result nothing takes.
+ */
 function rawUse(node: ts.Identifier): boolean {
   const parent = node.parent;
   // A property's name or a declared name is not the resource.
@@ -157,7 +164,13 @@ function rawUse(node: ts.Identifier): boolean {
     )
   )
     return false;
-  if (ts.isAwaitExpression(context)) return false;
+  if (
+    ts.isAwaitExpression(context) &&
+    ts.isIdentifier(use) &&
+    use.text === "storageRoute" &&
+    ts.isExpressionStatement(context.parent)
+  )
+    return false;
   if (
     ts.isCallExpression(context) &&
     context.arguments.includes(use) &&
@@ -170,18 +183,50 @@ function rawUse(node: ts.Identifier): boolean {
   return true;
 }
 
-test("every persistence operation reaches stores and the host only through its ownership", () => {
-  const path = resolve(process.cwd(), SOURCE);
-  const source = ts.createSourceFile(
-    path,
-    readFileSync(path, "utf8"),
-    ts.ScriptTarget.Latest,
-    true,
-  );
+/** Each use of a raw resource or an unowned call in the operations of `text`, as `name, line …`. */
+function check(text: string, path = "operations.ts"): { found: Set<string>; failures: string[] } {
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
   const found = operations(source);
-  for (const name of OPERATIONS) assert.ok(found.has(name), `${name} is in ${SOURCE}`);
   const failures = [...found].flatMap(([name, node]) =>
     violations(source, node).map((violation) => `${name}, line ${violation}`),
   );
+  return { found: new Set(found.keys()), failures };
+}
+
+test("every persistence operation reaches stores and the host only through its ownership", () => {
+  const path = resolve(process.cwd(), SOURCE);
+  const { found, failures } = check(readFileSync(path, "utf8"), path);
+  for (const name of OPERATIONS) assert.ok(found.has(name), `${name} is in ${SOURCE}`);
   assert.deepEqual(failures, []);
+});
+
+/** An operation of the host whose body is `body`. */
+const operation = (body: string) =>
+  `function host() {\n  async function keepIn(ctx: PersistenceOwnership) {\n${body}\n  }\n}`;
+
+test("the check fails a raw resource, an alias of one, an unowned media call and a host call outside admit", () => {
+  const refused = {
+    "a raw call": "await keptSessions.discard(scope);",
+    "a raw call in a nested closure":
+      "const later = async () => { await debugRooms.discardSession(scope); };",
+    "an alias": "const sessions = keptSessions;\nawait sessions.publish(scope, update);",
+    "an awaited alias": "const sessions = await keptSessions;\nawait sessions.discard(scope);",
+    "an awaited store": "const store = await keptStore();\nawait store.discard(scope);",
+    "the route's result": "const route = await storageRoute;\nawait route.provider.load();",
+    "a promotion without the ownership": "await capturedMedia.promote(references, undefined);",
+    "a lookup without the ownership": "await capturedMedia.storedReferences(references);",
+    "the media store's read": "await capturedMedia.read(reference);",
+    "a host call outside admit": "await host.restoreKept(plan, json, snapshot, events);",
+  };
+  for (const [what, body] of Object.entries(refused))
+    assert.notDeepEqual(check(operation(body)).failures, [], what);
+  const admitted = [
+    "await ctx.kept(keptSessions).discard(scope);",
+    "await ctx.rooms(debugRooms).discardSession(scope);",
+    "await storageRoute;",
+    "if (keptStore() === keptSessions) await ctx.kept(keptStore()).discard(scope);",
+    "await capturedMedia.promote(references, ctx);",
+    "await ctx.admit(() => host.restoreKept(plan, json, snapshot, events));",
+  ];
+  for (const body of admitted) assert.deepEqual(check(operation(body)).failures, [], body);
 });

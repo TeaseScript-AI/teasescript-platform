@@ -270,6 +270,18 @@ export const VARIANTS = {
     trace: ["host.captureKeep", "kept.discard"],
   },
   // A first save in the debug room: its session discarded alone, the photo stored in the room.
+  // Two photos only the session uses, promoted into the debug room one after the other.
+  "captureKeep debug twoPhotos": {
+    producer: "captureKeep",
+    route: "debug",
+    trace: [
+      "host.captureKeep",
+      "rooms.discardSession",
+      "rooms.media.add",
+      "rooms.media.add",
+      "rooms.publish",
+    ],
+  },
   "captureKeep debug first": {
     producer: "captureKeep",
     route: "debug",
@@ -292,6 +304,26 @@ export const POSTED = {
   "host.preparePlanText": "the lease's reservation (`settlePlanJson`)",
   "host.releasePlanText": "the lease's release of a replaced plan (`settlePlanJson`)",
   "host.release": "a stale restore's session, which nothing shows",
+} as const;
+
+/**
+ * The store writes a move makes itself, in its own context: none but those of the session it starts (its keep, in the
+ * room it plays in) and, for a room change, the debug room it makes. A write of a stale operation that went on in the
+ * move's context shows as one the table does not name.
+ */
+export const MOVE_WRITES = {
+  otherPlan: { still: [], starting: ["kept", "rooms"] },
+  samePlan: { still: [], starting: ["kept", "rooms"] },
+  room: { still: ["rooms.create"], starting: ["rooms"] },
+  disposed: { still: [], starting: [] },
+} as const satisfies Record<
+  Move,
+  { readonly still: readonly string[]; readonly starting: readonly string[] }
+>;
+/** The writes of a started session's keep, by the store it plays in. */
+export const KEEP_WRITES = {
+  kept: ["kept.discard", "kept.media.add", "kept.publish"],
+  rooms: ["rooms.create", "rooms.discardSession", "rooms.media.add", "rooms.publish"],
 } as const;
 
 /** Calls the page makes in no async context while an operation runs, and why: none of them reaches a store. */

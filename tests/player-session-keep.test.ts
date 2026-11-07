@@ -21,8 +21,10 @@ import { StaleOperation, persistenceOwnership } from "../player/persistence-owne
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import { answerWith, type Intent } from "./helpers/player-input.js";
 import {
+  KEEP_WRITES,
   KEPT_METHODS,
   LIFECYCLE,
+  MOVE_WRITES,
   MOVES,
   POSTED,
   PRODUCERS,
@@ -74,7 +76,11 @@ interface KeepHost {
   readonly bridge: Promise<PlayerBridge>;
   exportSession(): Promise<{ readonly transfer: ExportedSession }>;
   setDebugMode(enabled: boolean): void;
-  readonly rooms: { readonly current: Readonly<Ref<"normal" | "debug">> };
+  readonly rooms: {
+    readonly current: Readonly<Ref<"normal" | "debug">>;
+    readonly debugSessionExists: Readonly<Ref<boolean>>;
+    readonly debugHasData: Readonly<Ref<boolean>>;
+  };
   reviewSessionImport(transfer: ExportedSession): Promise<ImportReview>;
   importSession(review: ImportReview): Promise<void>;
   readonly savedDataRevision: Readonly<Ref<number>>;
@@ -871,13 +877,15 @@ test("the composable's family drives every producer of the shared family", () =>
  * (photos only the session uses, saved photos into a browser that has none, two of them, one another tab stored first,
  * a failed replacement over an older photo, each of the kept store's failures, the debug room). Unheld, each run makes
  * exactly its trace. Held at each call of it while the page moves on (`MOVES`), the calls up to the held one were
- * admitted before the move and may complete; no later one is admitted. One recorder takes every call of the kept
- * store, its photos, the saved values' provider, the media store, the debug rooms and the host, with the async
- * context that made it, and fails one no context owns. Every row also asserts that a stale operation changes nothing
- * of the page (activation, the loaded saved values, `savedDataRevision`, the notices, the importing mark, the room) but
- * releasing its own importing mark, that its failure is neither shown nor thrown, and that no rejection goes
- * unhandled; a current one goes on, and a current failure surfaces. Each read of the saved values gives values of its
- * own, so a stale read's values are seen if shown.
+ * admitted before the move and must complete; no later one is admitted. One recorder takes every call of the kept
+ * store, its photos, the saved values' provider, the media store, the debug rooms and the host: its admission, with the
+ * store it went to and the async context that made it, and its settlement apart. It fails a call no context owns, and a
+ * write in the move's context the move does not make itself (`MOVE_WRITES`). Every row also asserts that a stale
+ * operation changes nothing of the page (activation, the loaded saved values and the stored files they name,
+ * `savedDataRevision`, the notices, the importing mark, the room and the debug room's marks) but releasing its own
+ * importing mark, that its failure is neither shown nor thrown, and that no rejection goes unhandled; a current one
+ * goes on, and a current failure surfaces. Each read of the saved values gives values of its own, so a stale read's
+ * values are seen if shown.
  */
 test("an operation's handles admit each call while it is current, and none once it was stale", async () => {
   let current = true;
@@ -955,12 +963,22 @@ const TWO_PHOTOS_PLAN = compilePlayerProject(
   'let first: string = askImage(hint: "First")\nsave first as "first"\nlet second: string = askImage(hint: "Second")\nsave second as "second"\nlet a = askText(hint: "One")\nsay "Got ${a}.", instant\nexit',
 ).plan!;
 
-/** A call of a recorded store or of the host. */
+// Two photos only the session uses: a debug room's keep promotes both.
+const TWO_SESSION_PHOTOS_PLAN = compilePlayerProject(
+  'let first: string = askImage(hint: "First")\nlet second: string = askImage(hint: "Second")\nlet a = askText(hint: "One")\nsay "Got ${a}.", instant\nexit',
+).plan!;
+
+/**
+ * A call of a recorded store or of the host: its admission, as the store received it, with the store it went to and
+ * the async context that made it, fixed then; and its settlement, recorded apart once the store's promise settles.
+ */
 interface RecordedCall {
   readonly name: string;
-  /** The async context the call was made in: the operation's, the move's, or none. */
+  /** The store the call went to: the kept store, the debug rooms, a room's values, the provider, the media store. */
+  readonly destination: string;
   readonly by: string | undefined;
   readonly write: boolean;
+  settled: "resolved" | "rejected" | null;
 }
 
 /** The class of `key` of a store recorded as `surface`; a method no class names fails the run. */
@@ -1000,8 +1018,27 @@ function recorder(context: TestContext, at: FamilyBrowser) {
     reached();
     return gate;
   };
-  const record = (name: string, write: boolean) =>
-    calls.push({ name, by: contexts.getStore(), write });
+  const record = (name: string, write: boolean): RecordedCall => {
+    const made: RecordedCall = {
+      name,
+      destination: name.slice(0, name.lastIndexOf(".")),
+      by: contexts.getStore(),
+      write,
+      settled: null,
+    };
+    calls.push(made);
+    return made;
+  };
+  /** Records how `result`, the store's own promise, settles, and hands it on as it is. */
+  const settles = <T>(made: RecordedCall, result: T): T => {
+    if (result instanceof Promise)
+      result.then(
+        () => (made.settled = "resolved"),
+        () => (made.settled = "rejected"),
+      );
+    else made.settled = "resolved";
+    return result;
+  };
   const instrument = <T extends object>(target: T, surface: string): T => {
     const nested = new Map<string, unknown>();
     return new Proxy(target, {
@@ -1023,13 +1060,13 @@ function recorder(context: TestContext, at: FamilyBrowser) {
         assert.ok(typeof value === "function", `${surface}.${key} is a method`);
         const name = `${surface}.${key}`;
         return (...args: unknown[]) => {
-          record(name, kind === "write");
+          const made = record(name, kind === "write");
           const run = () => {
             const result: unknown = value.apply(object, args);
             // A debug room's saved values are a provider of their own.
             return kind === "store" && typeof result === "object" && result !== null
-              ? instrument(result, name)
-              : result;
+              ? settles(made, instrument(result, name))
+              : settles(made, result);
           };
           const held = take(name);
           return held === null ? run() : held.then(run);
@@ -1048,13 +1085,16 @@ function recorder(context: TestContext, at: FamilyBrowser) {
       const request = bridge.client.request.bind(bridge.client);
       context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
         const name = `host.${args[0]}`;
-        record(name, false);
+        const made = record(name, false);
         const by = contexts.getStore();
         const held = take(name);
         // The host's reply lost on the way, once, where the fixture asks for it.
-        const reply = failingHost.delete(args[0])
-          ? Promise.reject(new Error("The request failed."))
-          : request(...args);
+        const reply = settles(
+          made,
+          failingHost.delete(args[0])
+            ? Promise.reject(new Error("The request failed."))
+            : request(...args),
+        );
         if (args[0] === "restoreKept" && by === OPERATION)
           reply.then(
             (result) => {
@@ -1174,6 +1214,10 @@ function pageLog(host: KeepHost) {
     notices: host.notices.value.map((notice) => notice.key),
     importing: !host.canImportSavedData.value,
     room: host.rooms.current.value,
+    debugSession: host.rooms.debugSessionExists.value,
+    debugData: host.rooms.debugHasData.value,
+    // The stored files a Start names: the photos the page knows among its saved values.
+    storedFiles: host.scriptStorageOptions().storedFiles ?? null,
   });
   type Snapshot = ReturnType<typeof snapshot>;
   const changes: {
@@ -1314,13 +1358,16 @@ async function keepOn(
   { watchHost, hide }: Fixture,
   first: "first" | "incremental" | "forget",
   room?: "debug",
+  plan: InstructionPlan = PHOTO_PLAN,
+  photos = 1,
 ): Promise<Operation> {
-  const { host, scope } = await page(context, at, PHOTO_PLAN);
+  const { host, scope } = await page(context, at, plan);
   watchHost(await host.bridge);
   if (first !== "incremental") at.state.failing = Number.MAX_SAFE_INTEGER;
   await host.activate();
-  const reference = await answerPhoto(host);
-  await keptWith(at, [reference]);
+  const references: string[] = [];
+  for (let photo = 0; photo < photos; photo++) references.push(await answerPhoto(host));
+  await keptWith(at, references);
   if (room === "debug") {
     // Play goes on in the debug room, whose saves fail at their first step until the operation.
     at.state.roomsDiscardFailing = Number.MAX_SAFE_INTEGER;
@@ -1334,7 +1381,7 @@ async function keepOn(
   return {
     host,
     scope,
-    plan: PHOTO_PLAN,
+    plan,
     start: async () => {
       if (first === "forget") failNextSnapshot = true;
       hide();
@@ -1438,6 +1485,8 @@ const VARIANT_DRIVERS: Record<VariantName, Driver> = {
   "captureKeep captured forget": (context, at, fixture) => keepOn(context, at, fixture, "forget"),
   "captureKeep debug first": (context, at, fixture) =>
     keepOn(context, at, fixture, "first", "debug"),
+  "captureKeep debug twoPhotos": (context, at, fixture) =>
+    keepOn(context, at, fixture, "first", "debug", TWO_SESSION_PHOTOS_PLAN, 2),
 };
 
 /** What each failing import says when it is current, and what it offers then. */
@@ -1513,7 +1562,14 @@ async function ownershipRun(
   process.on("unhandledRejection", onUnhandled);
   context.after(() => process.off("unhandledRejection", onUnhandled));
   const shown = stubBrowser(context);
-  planWrites(context, PHOTO_PLAN, SAVED_PHOTO_PLAN, TWO_PHOTOS_PLAN, ASKS_OTHER);
+  planWrites(
+    context,
+    PHOTO_PLAN,
+    SAVED_PHOTO_PLAN,
+    TWO_PHOTOS_PLAN,
+    TWO_SESSION_PHOTOS_PLAN,
+    ASKS_OTHER,
+  );
   context.after(() => {
     failNextSnapshot = false;
     failPlanWrite = null;
@@ -1595,6 +1651,28 @@ async function ownershipRun(
     variant.trace.slice(0, at.index + 1),
     "the calls admitted before the move",
   );
+  // The held call, admitted before the move, completes as its store makes it.
+  const heldCall = recorded.calls
+    .slice(callsAtStart, callsAtMark)
+    .filter((made) => made.by === OPERATION)[at.index]!;
+  assert.notEqual(heldCall.settled, null, `the admitted ${at.name} did not complete`);
+  // The move writes only what it makes itself: nothing, or its started session's keep, or the debug room it opens.
+  if (move !== null) {
+    const allowed = new Set<string>(
+      (startsAnew ? MOVE_WRITES[move].starting : MOVE_WRITES[move].still).flatMap(
+        (name: string): readonly string[] =>
+          name === "kept" || name === "rooms" ? KEEP_WRITES[name] : [name],
+      ),
+    );
+    assert.deepEqual(
+      recorded.calls
+        .slice(callsAtStart)
+        .filter((made) => made.by === MOVE && made.write && !allowed.has(made.name))
+        .map((made) => made.name),
+      [],
+      "the move wrote what it does not make itself",
+    );
+  }
   const late = own(recorded.calls.slice(callsAtMark));
   if (!retires) {
     // Current, the operation goes on with the rest of its trace.
@@ -1627,6 +1705,18 @@ async function ownershipRun(
       },
       `the page after the stale ${producer}`,
     );
+  // Where the room change waited for the operation, the page ends in the debug room as the change leaves it, once both
+  // settled: its saved values, and its Start or Continue.
+  if (moveWaits) {
+    assert.equal(after.room, "debug");
+    assert.equal(after.importing, false);
+    assert.deepEqual(
+      after.savedValues,
+      await browserAt.rooms.values(SCOPE).load(),
+      "the page shows the debug room's saved values",
+    );
+    assert.equal(after.activation, after.debugSession ? "continue" : "start");
+  }
   // Its failure is neither shown nor thrown.
   assert.equal(outcome.rejected, false, `the stale ${producer} rejected`);
   const introduced = recorded.introduced();
