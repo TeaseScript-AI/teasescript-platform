@@ -136,13 +136,17 @@ function produces(items: readonly Item[], tag: ItemTag): boolean {
   );
 }
 
-/** The expressions that are their own value's producer at a use (AD-1): a call, a `load`, an `otherwise`. */
+/**
+ * The expressions that are their own value's producer at a use (AD-1): a call, a `load`, an `otherwise`, a selection
+ * (`.first`, `.last`, `.random`).
+ */
 function producerAt(expression: Expression, work: WorkLedger): boolean {
   const at = peel(expression, work);
   return (
     at.kind === "callExpression" ||
     at.kind === "loadExpression" ||
-    (at.kind === "binaryExpression" && at.operator === "otherwise")
+    (at.kind === "binaryExpression" && at.operator === "otherwise") ||
+    (at.kind === "propertyAccessExpression" && selectsElement(at.property.name))
   );
 }
 
@@ -188,16 +192,24 @@ export class NarrowingRoutes {
    * the kind, unless a condition around the use tests it. Any other read keeps its warning: an element step or a
    * reference member, which the route query does not follow (#1073 PR 4, decision (A)).
    */
-  public *required(value: PlaceId, tag: ItemTag, written = false): Work<SourceSite | null> {
+  public *required(
+    value: PlaceId,
+    tag: ItemTag,
+    others: readonly ItemTag[] = [],
+  ): Work<SourceSite | null> {
     this.#work.charge("exactQueries");
     const program = this.pass.program;
     const site = program.places[value]?.site ?? null;
     if (site === null) return null;
     const node = program.exprAt(site);
-    // (a value with no node of its own is no read: a call's, a `get`'s or a parse's result, its own producer)
-    if (node === null) return (yield* this.#valueProduces(value, null, [], tag)) ? site : null;
+    // (a value whose node reads no expression is no read: a call's, a `get`'s or a parse's result, its own producer)
+    if (node === null || node.expression === undefined)
+      return (node === null || program.live(node)) &&
+        (yield* this.#valueProduces(value, node, [], tag))
+        ? site
+        : null;
     const expression = node.expression;
-    if (expression === undefined || !program.live(node)) return null;
+    if (!program.live(node)) return null;
     const path = stablePath(program, node.file, expression);
     const last = path?.steps.at(-1);
     // (a selection, `.first`, `.last`, `.random`, is its own producer where it is read, as a call is)
@@ -209,7 +221,7 @@ export class NarrowingRoutes {
         : null;
     if (some(program.work, "exactQueries", path.steps, (step) => step.kind !== "property"))
       return null;
-    const d = yield* this.witness(pathKey(path, program.work), tag, node, written);
+    const d = yield* this.witness(pathKey(path, program.work), tag, node, others);
     const writer = d?.value === undefined ? null : (program.places[d.value]?.site ?? null);
     return writer;
   }
@@ -218,18 +230,19 @@ export class NarrowingRoutes {
    * N3 (iii): an exact definition D′ of `key` that certifies `tag` and reaches `node` without a check, or `null` when the
    * compiler proves no such route (the consumer then warns with its check). The witness of a copy or an `otherwise`
    * asks this same query of its source, one memoised query per node and key, resolved without native recursion.
-   * `written`: `tag` is a member of the written union `key` declares, which its declaration certifies (r4.118 (1)).
+   * `others`: where `tag` is a member of the written union `key` declares, the union's other kinds the use does not
+   * take, which certify the route as `tag` does (r4.118 (1): the written domain proves itself).
    */
   public *witness(
     key: Key,
     tag: ItemTag,
     node: FlowNode,
-    written = false,
+    others: readonly ItemTag[] = [],
   ): Work<Definition | null> {
     this.#work.charge("eventSteps");
     // a chain of copies: each query waits on its source's, the last first
     const waiting: { readonly memo: string; readonly found: Candidate }[] = [];
-    let memo = joinParts(key, node.id, tag, written ? "w" : "");
+    let memo = joinParts(key, node.id, tag, others.join("|"));
     let answer: Definition | null = null;
     for (const _ of steps(this.#work, "exactQueries", () => true)) {
       const known = this.#witnesses.get(memo);
@@ -240,8 +253,8 @@ export class NarrowingRoutes {
       // (a query met again on its own chain proves nothing)
       keepText(this.#work, memo.length);
       this.#witnesses.set(memo, null);
-      const found = yield* this.#examined(key, tag, node, written);
-      const source = found === null ? false : yield* this.#certificate(found, key, tag, written);
+      const found = yield* this.#examined(key, tag, node, others);
+      const source = found === null ? false : yield* this.#certificate(found, key, tag, others);
       if (found === null || source === false) {
         answer = null;
         break;
@@ -253,7 +266,7 @@ export class NarrowingRoutes {
       }
       waiting.push({ memo, found });
       ({ key, tag, node } = source);
-      written = false;
+      others = [];
       memo = joinParts(key, node.id, tag, "");
     }
     // each copy is certified exactly when its source's read is
@@ -269,7 +282,12 @@ export class NarrowingRoutes {
    * The one candidate a consumer examines, when its corridor is open: the nearest of the key's own certified
    * definitions and each prefix's whole stores whose writer side reaches the read, then the corridor checked whole.
    */
-  *#examined(key: Key, tag: ItemTag, node: FlowNode, written: boolean): Work<Candidate | null> {
+  *#examined(
+    key: Key,
+    tag: ItemTag,
+    node: FlowNode,
+    others: readonly ItemTag[],
+  ): Work<Candidate | null> {
     this.#work.charge("exactQueries");
     const { program, handlers, contract } = this.pass;
     if (!program.live(node) || program.blockReachable(node) || node.span === null) return null;
@@ -292,11 +310,16 @@ export class NarrowingRoutes {
       const found = candidates === undefined ? null : this.#last(candidates, at);
       if (found !== null && (best === null || found.start > best.start)) best = found;
     };
-    consider(yield* this.#ownCandidates(key, tag, written));
+    consider(yield* this.#ownCandidates(key, tag, others));
     for (const prefix of each(program.work, "eventSteps", keptPrefixes(program.work, key)))
       consider(this.#wholeStores(prefix));
-    const found: Candidate | null = best;
+    // (`consider` sets `best`, which the compiler's flow analysis does not see)
+    const found = best as Candidate | null;
     if (found === null) return null;
+    // (a store whose own statement holds the read takes effect after it, `n += 1`: it brings the read nothing)
+    const last = found.chain.at(-1)!;
+    const statement = last.index < 0 ? undefined : last.block.statements[last.index];
+    if (statement !== undefined && statement.start <= at && at < statement.end) return null;
     return this.#open(key, tag, found, chain, node) ? found : null;
   }
 
@@ -319,7 +342,7 @@ export class NarrowingRoutes {
     found: Candidate,
     key: Key,
     tag: ItemTag,
-    written: boolean,
+    others: readonly ItemTag[],
   ): Work<boolean | { readonly key: Key; readonly tag: ItemTag; readonly node: FlowNode }> {
     this.#work.charge("exactQueries");
     const { program, lists } = this.pass;
@@ -335,8 +358,6 @@ export class NarrowingRoutes {
       !lists.certain(d)
     )
       return false;
-    // (a written union's declaration certifies each of its members, r4.118 (1))
-    if (written && d.how === "initializer") return true;
     // a whole store of a prefix answers below it through its literal's properties, else through what its value holds
     // there (`keyPath` walks the key's text)
     const full = keyPath(key);
@@ -359,7 +380,7 @@ export class NarrowingRoutes {
     program.work.charge("exactQueries", left.length);
     if (left.length === 0) {
       const literal = literalTag(program, value);
-      if (literal !== null) return literal === tag;
+      if (literal !== null) return literal === tag || others.includes(literal);
       const c = program.opOf.get(value);
       // `a otherwise <literal>`: live, and selected where `a` is the literal `null` or its own `null` is certified at
       // that node
@@ -377,7 +398,9 @@ export class NarrowingRoutes {
     if (read !== null) return { key: read.key, tag, node: read.node };
     // any other producer, a whole copy below the copied path among them, by what its value holds there on some run,
     // neither stopped nor read under a failed test: one answer per read, never a route per field of each copy (W34)
-    return yield* this.#valueProduces(value, d.node, left, tag);
+    for (const kind of each(program.work, "exactQueries", [tag, ...others]))
+      if (yield* this.#valueProduces(value, d.node, left, kind)) return true;
+    return false;
   }
 
   /**
@@ -859,16 +882,16 @@ export class NarrowingRoutes {
   *#ownCandidates(
     key: Key,
     tag: ItemTag,
-    written: boolean,
+    others: readonly ItemTag[],
   ): Work<ReadonlyMap<TreeBlock, Candidates>> {
     this.#work.charge("indexSteps");
-    const memo = joinParts(key, tag, written ? "w" : "");
+    const memo = joinParts(key, tag, others.join("|"));
     const known = this.#candidates.get(memo);
     if (known !== undefined) return known;
     const layer = this.#testLayer(key, tag);
     const carrying: Definition[] = [];
     for (const d of each(this.#work, "indexSteps", this.pass.definitions.byKey.get(key) ?? []))
-      if (yield* this.#carries(d, tag, written)) carrying.push(d);
+      if (yield* this.#carries(d, tag, others)) carrying.push(d);
     const made = this.#candidateLists(carrying, layer, layer.calls);
     keepText(this.#work, memo.length);
     this.#candidates.set(memo, made);
@@ -880,15 +903,15 @@ export class NarrowingRoutes {
    * stored (a copy's source as read there, any other producer's value), neither stopped nor read under a failed test
    * (AD-1: no producer is refused as such).
    */
-  *#carries(d: Definition, tag: ItemTag, written: boolean): Work<boolean> {
+  *#carries(d: Definition, tag: ItemTag, others: readonly ItemTag[]): Work<boolean> {
     this.#work.charge("indexSteps");
     const program = this.pass.program;
     if (d.kind !== "whole" || d.weak || d.value === undefined) return false;
-    // (a written union's declaration certifies each of its members, r4.118 (1))
-    if (written && d.how === "initializer") return true;
     const literal = literalTag(program, d.value);
-    if (literal !== null) return literal === tag;
-    return yield* this.#valueProduces(d.value, d.node, [], tag);
+    if (literal !== null) return literal === tag || others.includes(literal);
+    for (const kind of each(program.work, "indexSteps", [tag, ...others]))
+      if (yield* this.#valueProduces(d.value, d.node, [], kind)) return true;
+    return false;
   }
 
   /** A prefix's whole stores, by callable body, their reach by the shared layer alone (checked whole when examined). */

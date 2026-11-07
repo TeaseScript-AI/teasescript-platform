@@ -1664,14 +1664,17 @@ test("an integer-only use of a written number place is the current checker's err
       );
     }
   // (a receiver that may be null: the current checker reports the receiver's null where the core reports the use, both
-  // an error at that site, the null contributing nothing to the removed value)
+  // an error at that site, the null contributing nothing to the removed value; since AD-1 the core also reports the
+  // receiver's null there, the route rule's error, so the sites are compared once each)
   for (const use of uses)
     for (const program of [
       `let ps: (number dict)?[] = [dict{a: 1}]\n${use('ps[0].remove("a")')}`,
       `function f: (number dict)? {\n  return dict{a: 1}\n}\n${use('f().remove("a")')}`,
     ]) {
       const source = `${program}\nexit\n`;
-      const sites = (found: readonly string[]) => found.map((error) => error.split("@")[1]);
+      const sites = (found: readonly string[]) => [
+        ...new Set(found.map((error) => error.split("@")[1])),
+      ];
       const current = sites(errors(compileSource(source, OPTIONS)));
       assert.ok(current.length > 0, source);
       assert.deepEqual(
