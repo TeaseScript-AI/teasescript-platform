@@ -32,3 +32,25 @@ contract if it has none. The contract states what the subject does, its defaults
 A filed line becomes an issue with the `friction` label and the first line `Friction class: <class>`. The open backlog
 per class is the open `friction` issues grouped by that first line. A line fixed in place needs no issue: its report is
 its record.
+
+## Priority
+
+A filed line is ranked by what deferring it costs, not by its date:
+
+- **At once:** it blocks a lane or keeps wasting compute. Its owner fixes it now.
+- **Next package:** it recurs, or a lane will soon change its code.
+  - A fix in an open lane's own files is that lane's next item, or part of the pull request that touches the file when
+    it is small.
+  - A fix in files no open lane owns, or in tooling, is the coordinator's light-route pull request between packages,
+    as a move is. A friction fix never waits behind a lane's queue.
+- **Backlog:** a single, cheap instance that no lane is near. It stays filed until the friction check promotes it.
+
+A friction issue is not `spare capacity` unless its triage shows that deferring it costs nothing more. A fix in the
+repository never enters another lane's open pull request. A backward-compatible fix in the agent environment may land at
+once, and every lane hears of it in the same turn.
+
+## Known friction
+
+Until an issue is fixed, each lane it affects is warned in one line, in its brief or its next regular message: the
+issue, its class, and what to watch for. The workaround is in the issue. A friction that affects every lane goes into
+the rules every builder reads.

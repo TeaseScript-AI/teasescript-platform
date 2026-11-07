@@ -7,9 +7,10 @@ environment's documentation, and live state in the coordinators' repository.
 
 ## State
 
-Keep a roster in the coordinators' repository: each lane, its current item and what it waits on, and one line per open
-pull request listing each review round's findings by their nouns. On resume, read the roster and the latest log lines,
-not the transcript, then re-establish each lane's state from GitHub before the next write, as `AGENTS.md` requires.
+Keep a roster in the coordinators' repository: each lane, its current item, what it waits on and the open
+[friction](FRICTION.md#known-friction) issues that touch its files or tools, and one line per open pull request
+listing each review round's findings by their nouns. On resume, read the roster and the latest log lines, not the
+transcript, then re-establish each lane's state from GitHub before the next write, as `AGENTS.md` requires.
 
 ## Messages
 
@@ -126,8 +127,9 @@ the package it arrived in, or at once when it blocks a lane or keeps wasting com
 - **a rule:** proposed like any other rule.
 
 Your own wrong turns are lines too. Keep the triage with your state. At each structure check, add the friction
-counts: lines per class since the last check, with their dispositions, and open issues per class, against the last
-check's counts.
+counts: lines per class since the last check, with their dispositions, and open issues per class with the age of the
+oldest, against the last check's counts. An issue open longer than two packages is triaged again: promoted, or closed
+with its reason. [`FRICTION.md`](FRICTION.md#priority) ranks the issues.
 
 ## Facts that cross lanes
 
