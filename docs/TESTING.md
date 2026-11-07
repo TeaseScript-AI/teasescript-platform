@@ -155,6 +155,22 @@ class or two classes take, a result outside the manifests, or a source recorded 
 the run (`gate: failed`, exit 1). An exclusion text or a changed diagnostic code that no taxonomy version decides needs
 a new version with a witness before the gate can pass. `--gate` exits 1 unless the verdict is `green`.
 
+## Checks and corpora by component
+
+Each row defines that component's [evidence levels](DEVELOPMENT-WORKFLOW.md#evidence); each level includes the ones
+before it. An empty cell has no corpus yet.
+
+| Component | Level 1: checks | Level 2: before/after comparison | Level 3: extended set |
+| --- | --- | --- | --- |
+| Compiler | `npm run check`, plus the `tests/families/` areas the change touches, base against head (for the type core, at least the fixture and messages areas) | level 1 plus the families' set (the `tests/families` corpus in its four modes), base against head, classified; the growth bar always applies when the change touches `layersOf`, the walk, admission or the contract; for changes outside the type core, `tools/compiler-differential.mjs` ([Normal and diagnostic verification](#normal-and-diagnostic-verification)) | level 2 plus all areas and the held set with stops, classified; `TEASESCRIPT_SWEEP=full` ([Sampled sweeps](#sampled-sweeps)) for the legacy checker |
+| Runtime | `npm run check` | the [conformance corpus](#source-to-runtime-conformance-corpus) run at base and at head, outcomes compared; once the runtime differential harness exists (#1797), its campaign | |
+| Backend | none yet: its checks, compatibility documents, and area label come when the backend exists | | |
+| Website front end | none yet: its checks and area label come when the front end exists | | |
+| Player | `npm run check`; the [scoped visual check](#player-browser-and-visual-verification) after a visible UI change; [`npm run test:player:browser`](#local-browser-smoke-and-future-host-e2e-gate) for a change to `player/` or its fixture packages | `npm run test:player:browser` plus [`npm run test:player:preview`](#player-browser-and-visual-verification) | a real-device check |
+
+The compiler's shadow gate (`tests/families/shadow.mjs`) is a campaign run from the tree after merges and reported on
+the tracker issue; it is not a per-pull-request level.
+
 ## Test admission and consolidation
 
 Give each maintained test family a distinct evidence obligation: accepted behavior, a real public/trusted boundary,
@@ -256,8 +272,10 @@ retained scratch directory with a screenshot and Playwright trace for the failin
 After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
 (computer use where available) and inspect the changed state plus its immediate responsive/interaction neighbors. This
 is a scoped visual check, not a full UI audit; it catches clipping, overlap, unreadable wrapping, misplaced popovers,
-and other failures that source assertions or DOM semantics do not prove. Use a real device when the behavior depends on
-mobile browser chrome, a software keyboard, safe areas, or input hardware that emulation cannot reproduce.
+and other failures that source assertions or DOM semantics do not prove. A timing defect's regression test uses
+deterministic delays or fakes, not a device. Use a real device only to judge feel, for the Player's level 3 evidence
+([Checks and corpora by component](#checks-and-corpora-by-component)), or when the behavior depends on mobile browser
+chrome, a software keyboard, safe areas, or input hardware that emulation cannot reproduce.
 
 ## Regression-test rule
 
@@ -782,6 +800,12 @@ These probes are diagnostic evidence, not capacity contracts. The largest passin
 accepted product or technical limit separately against its authoritative boundary. Do not require scale probes for
 every PR or create permanent benchmark infrastructure for a bounded question; use them when changed scalable code or
 inspection leaves a credible amplification, memory, representation, or native-failure risk unresolved.
+
+A full-route plan's [growth bar](DEVELOPMENT-WORKFLOW.md#evidence) compares head with base by this method: deterministic
+counters for both at doublings of the dimension at risk. The head/base ratio falls, or rises by less than a fraction
+the accepted plan states for that pull request, at each doubling rather than cumulatively. That fraction is an
+acceptance criterion of that pull request, not a project limit or capacity contract. Read each factor against the
+input's own growth: a factor near 4 per doubling of a linearly growing input is quadratic.
 
 ## Reproducibility requirements
 

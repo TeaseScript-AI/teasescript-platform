@@ -479,10 +479,36 @@ test("the candidate route's decline and the capture's skip read one syntax rule"
   const programs: readonly (readonly [string, boolean])[] = [
     ['let a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nsay "AFTER"\nexit\n', true],
     ['let a = {f: [[1]], g: ["s"]}\nlet b = a\nb = hostValue\nexit\n', true],
+    // (the narrowing's own test is inside since #1073 PR 2 phase 2; another comparison is not)
     [
       'let a = {f: [[1]]}\nlet b = a\nif hostValue is integer {say "x"}\nb.f = hostValue\nexit\n',
+      true,
+    ],
+    ['let a = {f: [[1]]}\nlet b = a\nif hostValue < 1 {say "x"}\nb.f = hostValue\nexit\n', false],
+    // (its operand walked, its written type the slice's, and only `null` the other side of `==` or `!=`)
+    [
+      'let a = {f: [[1]]}\nlet b = a\nif (askBoolean "?") is boolean {say "x"}\nb.f = hostValue\nexit\n',
       false,
     ],
+    [
+      'let a = {f: [[1]]}\nlet b = a\nif hostValue is integer | string {say "x"}\nb.f = hostValue\nexit\n',
+      false,
+    ],
+    [
+      'let a = {f: [[1]]}\nlet b = a\nif hostValue < null {say "x"}\nb.f = hostValue\nexit\n',
+      false,
+    ],
+    // (a default written as `null`, and a member of a literal that is no object, are outside by their shape; an object
+    // literal's member, an index and a method stay inside)
+    [
+      'let a = {f: [[1]]}\nlet b = a\nlet v = load("k", default: (null))\nb.f = hostValue\nexit\n',
+      false,
+    ],
+    ["let a = {f: [[1]]}\nlet b = a\nsay [1].first\nb.f = hostValue\nexit\n", false],
+    ['let a = {f: [[1]]}\nlet b = a\nsay ("ab").length\nb.f = hostValue\nexit\n', false],
+    ["let a = {f: [[1]]}\nlet b = a\nsay {g: 1}.g\nb.f = hostValue\nexit\n", true],
+    ["let a = {f: [[1]]}\nlet b = a\nsay [1][0]\nb.f = hostValue\nexit\n", true],
+    ['let a = {f: [[1]]}\nlet b = a\nsay ["a"].join(",")\nb.f = hostValue\nexit\n', true],
     ['let a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nsay "${hostOther}"\nexit\n', false],
     ["let n = 1\nn += hostOther\nlet a = {f: [[1]]}\nlet b = a\nb.f = hostValue\nexit\n", false],
   ];
@@ -510,7 +536,7 @@ test("outside the slice's syntax the capture requests nothing and charges nothin
   // (a program the route declines by its syntax: the analysis is main's, no extraction phase at any allowance and no
   // contract, also where a store's value is cyclic, which the capture would follow to the slice's depth)
   const source =
-    'let typed:integer[]=[1]\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\nif hostValue is integer {a=b}\nb=a\nb.q=a\nc=b\nlet out={p:c}\nexit\n';
+    'let typed:integer[]=[1]\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\nif hostValue < 1 {a=b}\nb=a\nb.q=a\nc=b\nlet out={p:c}\nexit\n';
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
   assert.notEqual(outsideSyntax(request.files, new Set(GLOBALS)), null);
   for (const mode of HELD_MODES) {
@@ -536,7 +562,8 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   // publication units in place of the 4 units of the walk it replaces), 295 fewer since #1251 makes no narrowing index for
   // it, 7 more since #1073 PR 2's consumers look up a descendant demand's narrowing, 38 more since #1822 finds a read signature's
   // prefixes by its charged trie walk (`rdWalk`), 48 more since #1790 asks whether the mixed error's later element may
-  // hold null at its leaf (`c=[a,b][0]`: #1765's walk one depth more). A regression oracle of this construction. In the first mode alone in CI: each mode walks one cyclic contract of about 23 million
+  // hold null at its leaf (`c=[a,b][0]`: #1765's walk one depth more), 6 fewer since #1901 reads a copy's own level from
+  // its decider, no longer asking its parent layer's term, and the earliest written element's leaf from that decider. A regression oracle of this construction. In the first mode alone in CI: each mode walks one cyclic contract of about 23 million
   // units, seconds; every mode is #1606's queue evidence)
   const source =
     'let typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nb.q=a\nc=[a,b][0]\nc=a\nlet out={p:c}\nexit\n';
@@ -545,7 +572,7 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   assert.equal(budget.exhausted, null);
   assert.equal(budget.stoppedIn, null);
   assert.deepEqual(contracts, []);
-  assert.equal(budget.total, 22_962_579);
+  assert.equal(budget.total, 22_962_573);
 });
 
 test("each analysis's captured contracts are its own final pass's", () => {

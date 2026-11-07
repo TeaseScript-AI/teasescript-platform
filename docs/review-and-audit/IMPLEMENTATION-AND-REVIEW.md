@@ -113,6 +113,98 @@ checker, lowering, plan, runtime and editor cannot drift apart.
 - When a second fix for the same kind of case is needed in one area, look for the shared cause before
   patching again (see Convergence).
 
+### Rules over an open set
+
+A rule that ranges over an open set, such as every option, every caller, every code form or every value that reaches a
+boundary, is built so that its completeness follows from the construction, before the first review:
+
+- One function in one place decides the rule, and every caller uses it.
+- Anything that function has not proved gets a conservative default: an unknown kind fails or is treated as unsafe. It
+  is never silently skipped or passed. The default under-offers and never over-offers: it may refuse what the rule
+  could admit until a row admits it, and it never admits what the function has not proved.
+- The rule is written as the closed set of forms it admits, never as a list of forms it rejects: a reject-list fails
+  open on every form it did not name, and each unnamed form becomes a sibling.
+- A generated test family covers the rule's axes (for example sites × forms × kinds, in both orders), with a check
+  that every combination is covered.
+
+A sibling a reviewer finds later is then a missing row in that family, or a case the default already refuses, not a
+new mechanism. Before each new review round, rerun the earlier rounds' reproductions and generators on the new head,
+and say so in the round's request.
+
+### Code that does not mislead
+
+Names, types, comments and documentation say what the code does. A large share of builders' and reviewers' wrong
+turns came from the code itself:
+
+- a helper whose name or type promised handling it did not do, so its callers stopped doing it;
+- a check that covered less than its name said, such as a guard that checked only on entry, a wait that covered one of
+  two queues, or a fake that counted one of three write methods;
+- documentation that still described an earlier design, architecture or language version;
+- two mechanisms for one job, or state with no single obvious owner;
+- a tool flag or default that silently overrides what the caller set;
+- names that differ by a letter, such as a file and its plural.
+
+When something misleads you, or would mislead the next builder:
+
+- Fix it at its source: rename it, make the misuse a type or runtime error, correct the comment or document, or fold
+  the two mechanisms into one. Fixing only your own call site is not enough.
+- Fix it in the current pull request when it is small and in code the change touches. Otherwise file an issue that
+  names the misleading thing, what it suggests, what it does, and where it led someone wrong. When the fix crosses
+  files another open pull request changes, file the issue and say so in READY rather than widening this one.
+- Report it as [friction](#report-what-cost-a-wrong-turn), class `misleading code`.
+
+### Code structure
+
+The code's architecture is right by construction, not repaired after someone notices. It covers:
+
+- **Ownership:** each piece of state or behavior has one owning module, and a module's folder names its owner.
+- **Direction:** dependencies run one way, without cycles.
+- **Granularity:** one job per file. A file that gains a second job is split at that seam.
+- **Folders:** grouped by feature or owner, typically 5 to 20 files, never a folder per file. A new file never lands at
+  the top level of a component that already has a folder for its concern; creating a missing folder is part of the
+  plan.
+- **Surfaces:** what a module exports is a deliberate, small interface.
+- **Names:** a file or folder name says what it owns, and no two names differ by a letter.
+
+The plan names where new code goes: its module and its folder. A change that brings a new responsibility gets its
+own module, or folder, from the start.
+
+These signals each ask, in the plan or the review, for the seam or for the reason there is none. They are not limits:
+
+- a file over 1,000 lines;
+- a pull request adding over 300 lines to one file;
+- a function over 150 lines;
+- a folder over 20 files, or a component's top level over 12.
+
+`node tools/structure-report.mjs` lists them, with `--diff <base>` for what a change adds.
+
+Moving or splitting files is its own pull request on the light route. It changes no behavior, and its build output
+is byte-identical where the build allows it. The coordinator schedules it between packages, so that no open pull
+request's hunks collide. A feature pull request never moves files another open pull request changes.
+
+Report a structure concern as [friction](#report-what-cost-a-wrong-turn), class `structure`. Each pull request can be
+reasonable while the whole drifts, so the coordinator also checks the whole
+([`ORCHESTRATION.md`](../ORCHESTRATION.md#structure-and-friction)).
+
+### Report what cost a wrong turn
+
+Some problems have no owner until they cost someone a wrong turn: misleading code, a tool whose default overrides its
+caller, a run that could not change the result, a status nobody sourced. Everyone who works on the repository reports
+them: builders, reviewers, researchers and coordinators.
+
+- **What:** anything that cost you a wrong turn, a wasted run or a question nobody owned, or would cost the next agent
+  one. That includes a tax that never felt like a wrong turn: anything you worked around, did by hand because a tool
+  did not, or repeated in more than one change.
+- **How:** one line in your next regular message (the plan, READY, a question, a review round or a report): its class
+  from [`FRICTION.md`](../FRICTION.md), what happened, and what you did: fixed here, the issue you filed, or the rule
+  you propose. A line that fits no class is tagged `other` with a proposed class name. READY and every review report
+  carry the line "Worked around or repeated by hand:", with "none" when there was nothing.
+- **At once** instead, in its own message, for a line that blocks you or keeps wasting compute.
+- **Before working around a missing tool or resource,** check the environment's documentation for it. If it is still
+  missing, report it at once instead of building the workaround silently.
+
+Fix what you can at its source, and report it even when fixed: the counts show where the next fix pays.
+
 ## Self-review and assigned review
 
 Before handoff, the implementer reviews the exact final diff. For each assigned review or re-review,
@@ -130,7 +222,11 @@ lenses below; not every lens applies equally, and preference alone is not a bloc
 paths, independently apply the input-driven scaling and native-JavaScript lens above; small fixtures and
 green CI do not by themselves prove that valid large or complex input avoids accidental amplification or
 native failure. On changes that encode a language rule or predict runtime behavior, apply the one-home
-lens above. Escalate uncertainty that cannot be bounded through a separately assigned
+lens above. On everything the change adds or touches, apply the [clarity lens](#code-that-does-not-mislead): a
+name, type, comment or document that promises a guarantee the code does not give, or hides one it needs, is a
+finding even when today's callers are correct. It blocks only when a caller is wrong today; otherwise it is fixed in
+the pull request when small, or filed. Apply the [structure lens](#code-structure) the same way: new code in the
+module and folder its owner names, and each signal it raises answered. Escalate uncertainty that cannot be bounded through a separately assigned
 [`AUDIT.md`](AUDIT.md).
 
 - **Requirements and paths:** accepted behavior, scope, failures, indirect effects, and real
@@ -153,19 +249,22 @@ lens above. Escalate uncertainty that cannot be bounded through a separately ass
 Run the applicable configured verification required by `AGENTS.md` and
 [`TESTING.md`](../TESTING.md), including `git diff --check`. Use focused temporary negative probes
 when test infrastructure is a substantial part of the change or material doubt remains about
-whether relied-on checks detect representative defects for the intended reason. Probe only in
-disposable local or isolated test state. Never commit, push, or expose probes to shared or
-operational state. Restore every temporary change and rerun affected clean checks.
+whether relied-on checks detect representative defects for the intended reason; a full-route plan
+also has one for each clause of its construction ([mutants](../DEVELOPMENT-WORKFLOW.md#evidence)).
+Probe only in disposable local or isolated test state. Never commit or push probes or expose them to
+operational state; a probe's patch may be kept in the route's evidence directory
+([Evidence](../DEVELOPMENT-WORKFLOW.md#evidence)). Restore every temporary change and rerun affected
+clean checks.
 
 ## Findings and outcome
 
 Use the existing finding classes and blocking-evidence rules. Each finding gives the governing
 requirement, supported path, real boundary, or class-appropriate rationale; evidence where
 applicable; practical impact; and the smallest complete repair or follow-up.
-The review comment records the exact head, comparison base, scope, blockers and non-blocking
-findings, checks and outcomes, including failures, warnings, skips, unavailable checks, remaining
-uncertainty, and whether the change can land. Landing requires no blocker and sufficient evidence
-for the complete result.
+The review comment records the exact head SHA, comparison base, scope, blockers and non-blocking
+findings, from the second round on whether each earlier finding is closed, checks and outcomes,
+including failures, warnings, skips, unavailable checks, remaining uncertainty, and whether the
+change can land. Landing requires no blocker and sufficient evidence for the complete result.
 
 ### Convergence
 
@@ -173,8 +272,9 @@ When sibling findings and isolated repairs stop reducing uncertainty, report non
 common invariant or coverage gap. The implementer adopts, or the reviewer recommends or requires,
 the smallest systematic repair or evidence method that can establish completeness. Material scope,
 redesign, issue split, or execution-strategy changes require the applicable owner or coordinator
-decision; unbounded uncertainty may require a separately assigned audit. No fixed count applies, and
-repeated one-off patches do not prove convergence.
+decision ([Review convergence](../DEVELOPMENT-WORKFLOW.md#review-convergence)); unbounded uncertainty
+may require a separately assigned audit. No fixed review count applies, and repeated one-off patches
+do not prove convergence.
 
 ## Compact working checklist
 
@@ -185,6 +285,9 @@ Non-authoritative memory aid; mark `N/A` only after considering the item.
 - [ ] Code, tests, documentation, workflows, and integrations form one result.
 - [ ] Language rules reused from their one home; analyses that predict runtime behavior derive it from
   the plan or shared helpers and are tested against the runtime.
+- [ ] Nothing the change adds or touches misleads; friction met on the way is fixed or filed, and reported with its
+  class.
+- [ ] New code sits in the module and folder its owner names; each structure signal is answered.
 - [ ] Supported behavior and failures proved through real paths.
 - [ ] Tests and oracles are sound and worth their run time; negative probes used when warranted.
 - [ ] Documentation is canonical, current, consolidated, and token-efficient without semantic loss.

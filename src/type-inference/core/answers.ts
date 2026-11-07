@@ -25,6 +25,7 @@ import { keyLabel } from "./consumers/names.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
 import { Closure, type ClosureCounts } from "./admission/closure.js";
 import type { ReceivingObligation, ReceivingResult } from "./admission/receiving.js";
+import { ReceivingDomain } from "./receiving-domain.js";
 import {
   compareDemandNames,
   exportNames,
@@ -129,6 +130,8 @@ export interface CorePass {
   readonly contract: Contract;
   readonly values: Values;
   readonly solver: Solver;
+  /** A4's receiving domain state (`ReceivingDomain`, TABLE r4.375): one per pass, made empty with its parts. */
+  readonly receivingDomain: ReceivingDomain;
   /** The receiving closure of a completion pass (#1526 phase C, `Consumers.#completeFor`), absent in any other pass. */
   readonly closure?: Closure | null;
 }
@@ -156,6 +159,7 @@ function createPass(
     handlers: HandlerIndex;
     guards: GuardIndex;
     solver: Solver;
+    receivingDomain: ReceivingDomain;
     closure: Closure | null;
   } = {
     program,
@@ -169,6 +173,7 @@ function createPass(
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
     solver: new Solver(program.scope),
+    receivingDomain: new ReceivingDomain(),
     // (#1526 phase C: a completion pass keeps its cells for the receiving closure from its start, the completion lease)
     closure: completion ? new Closure(program.work) : null,
   };
@@ -789,25 +794,33 @@ export function solveDemands(
     // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store); a key's
     // contract by its key in this pass's identity (a wrapper's family's its cursor's)
     const [kind, ...parts] = key.split("|");
+    // (a value demand whose path came back as text is named by its path's id where its steps are a record's, as a
+    // copy's are, #1857)
+    const byId = (path: string): string => `.${pass.contract.pathIdOf(splitPath(path))}`;
     const answer =
       pass.solver.answer(key) ??
       (kind === "c" || kind === "rc"
         ? pass.solver.answer(joinParts(kind, pass.contract.canonicalKey(parts.join("|"))))
-        : undefined);
+        : kind === "op" && parts[1] && !parts[1].startsWith(".")
+          ? pass.solver.answer(joinParts("op", parts[0]!, byId(parts[1])))
+          : kind === "lit" && parts[1] && !parts[1].startsWith(".")
+            ? pass.solver.answer(joinParts("lit", parts[0]!, byId(parts[1]), parts[2] ?? "-"))
+            : undefined);
     if (answer === undefined) throw new Error(`The demand '${key}' did not finish.`);
     return answer;
   });
 }
 
-/**
- * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`, `lit|`, `op|`,
- * `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write them).
- */
 /** A proof demand asked for its answer alone (`demandWork`). */
 function* asked(demand: ProofDemand<Proof>): Work<readonly Item[]> {
   return yield demand;
 }
 
+/**
+ * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`,
+ * `lit|`, `op|`, `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write
+ * them).
+ */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   const [kind, ...parts] = key.split("|");
   const { program, contract, values, exact } = pass;

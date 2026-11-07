@@ -108,7 +108,8 @@ edits; full-file creation or replacement is only for a new file or intentional
 total replacement. Inspect the changed hunks from each coherent edit batch, run
 `git diff --check`, and run proportionate focused checks. Before commit, handoff,
 or merge, review the complete diff for collateral or generated files, debug code,
-secrets, unrelated changes, and stale documentation. Follow
+secrets, unrelated changes, and stale documentation; at merge, the review route in
+`docs/DEVELOPMENT-WORKFLOW.md` says who does this. Follow
 `docs/DOCUMENTATION-OWNERSHIP.md` for non-trivial documentation edits and
 reviews.
 
@@ -143,8 +144,8 @@ combine unrelated work. Never force-push or rewrite `main`. Keep the
 pull-request description aligned with the final scope, deferred work,
 verification, documentation impact, and risks. Process review feedback on the
 same branch and pull request. Make small logical commits with concise English
-imperative messages. Prefer squash merge after approval and passing checks,
-then delete the branch.
+imperative messages. Prefer squash merge after approval and passing checks, as
+defined in `docs/DEVELOPMENT-WORKFLOW.md#merge`, then delete the branch.
 
 The owner or coordinator selects scheduling. Backlog, wish, and planning entries do not schedule themselves.
 Follow `docs/DEVELOPMENT-WORKFLOW.md` for universal issue, branch, pull-request,
