@@ -395,9 +395,11 @@ const savedData = computed(() =>
         import: {
           available: props.player.canImportSavedData.value,
           sessionInProgress: props.player.sessionInProgress.value,
+          read: props.player.readTransfer,
           review: props.player.reviewSavedDataImport,
           commit: props.player.importSavedData,
           reviewSession: props.player.reviewSessionImport,
+          discardSession: props.player.discardSessionReview,
           commitSession: props.player.importSession,
         },
         clear: props.player.hasScriptStorage

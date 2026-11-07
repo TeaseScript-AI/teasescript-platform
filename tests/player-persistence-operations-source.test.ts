@@ -24,6 +24,7 @@ const OPERATIONS = [
   "restoreKept",
   "importSession",
   "readScriptStorage",
+  "importSavedData",
 ];
 
 /** Where an ownership is made or bound to the raw resources: the boundary, which the check leaves out, and why. */
@@ -32,6 +33,17 @@ const BOUNDARY: Readonly<Record<string, string>> = {
     "makes an operation's ownership from the page's room, store, tenure and preparation",
   operationStorage: "binds the routed saved values to an operation's ownership",
   owned: "runs an operation and ends its registration; it touches no store",
+  replaceOwnInDebugRoom:
+    "binds the script's own saved values and photos to an operation while the debug room is shown",
+};
+
+/**
+ * Helpers an operation calls that write without its ownership, and why: none of this page's state retires them. Each
+ * must stay a helper of its own, taking no ownership, so the check sees where the operation hands work over.
+ */
+const UNBOUND: Readonly<Record<string, string>> = {
+  importOtherScript:
+    "another script's saved data in a saved-data import: the player's confirmed writes for a script this page does not show (L5h.2, orchestrator 2's decision (a))",
 };
 
 /** The page's raw resources, which an operation reaches only through its handles. */
@@ -153,6 +165,13 @@ function rawUse(node: ts.Identifier): boolean {
   // A property's name or a declared name is not the resource.
   if (ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
   if (ts.isPropertyAssignment(parent) && parent.name === node) return false;
+  // Its scope names the script: a field, not a call of the store.
+  if (
+    ts.isPropertyAccessExpression(parent) &&
+    parent.expression === node &&
+    parent.name.text === "scope"
+  )
+    return false;
   // `keptStore()` is used as its result is.
   const use: ts.Expression =
     ts.isCallExpression(parent) && parent.expression === node ? parent : node;
@@ -197,6 +216,11 @@ test("every persistence operation reaches stores and the host only through its o
   const path = resolve(process.cwd(), SOURCE);
   const { found, failures } = check(readFileSync(path, "utf8"), path);
   for (const name of OPERATIONS) assert.ok(found.has(name), `${name} is in ${SOURCE}`);
+  for (const name of Object.keys(UNBOUND))
+    assert.ok(
+      new RegExp(`async function ${name}\\((?![^)]*Ownership)`).test(readFileSync(path, "utf8")),
+      `${name} is a helper of ${SOURCE} that takes no ownership`,
+    );
   assert.deepEqual(failures, []);
 });
 
@@ -212,6 +236,7 @@ test("the check fails a raw resource, an alias of one, an unowned media call and
     "an alias": "const sessions = keptSessions;\nawait sessions.publish(scope, update);",
     "an awaited alias": "const sessions = await keptSessions;\nawait sessions.discard(scope);",
     "an awaited store": "const store = await keptStore();\nawait store.discard(scope);",
+    "the store's other fields": "await scriptStorage.load();",
     "the route's result": "const route = await storageRoute;\nawait route.provider.load();",
     "a promotion without the ownership": "await capturedMedia.promote(references, undefined);",
     "a lookup without the ownership": "await capturedMedia.storedReferences(references);",

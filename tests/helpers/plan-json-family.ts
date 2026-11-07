@@ -70,8 +70,12 @@ export function unclassifiedOps(ops: Readonly<Record<string, unknown>>): string[
 export const ROUTES = ["plain", "captured", "debug"] as const;
 export type Route = (typeof ROUTES)[number];
 
-/** A producer whose operation is a persistence operation of the composable, with its ownership. */
-export type Operated = Exclude<Producer, "preparePlanText">;
+/**
+ * The persistence operations of the composable, each with its ownership: the callers of the plan JSON's producers but
+ * the reservation, and the saved-data import, which reads no plan JSON (L5h.2, #1933).
+ */
+export const OPERATED = ["restoreKept", "planText", "captureKeep", "savedDataImport"] as const;
+export type Operated = (typeof OPERATED)[number];
 
 /**
  * One way an operation runs, as the composable's family (`player-session-keep.test.ts`) drives it: its producer, its
@@ -115,6 +119,7 @@ export const VARIANTS = {
     trace: [
       "provider.replace",
       "kept.discard",
+      "host.transferCommit",
       "kept.media.add",
       "host.planText",
       "kept.publish",
@@ -131,6 +136,7 @@ export const VARIANTS = {
     trace: [
       "provider.replace",
       "kept.discard",
+      "host.transferCommit",
       "kept.media.add",
       "host.planText",
       "kept.publish",
@@ -148,6 +154,7 @@ export const VARIANTS = {
       "repository.add",
       "provider.replace",
       "kept.discard",
+      "host.transferCommit",
       "host.planText",
       "kept.publish",
       "provider.load",
@@ -165,6 +172,7 @@ export const VARIANTS = {
       "repository.add",
       "provider.replace",
       "kept.discard",
+      "host.transferCommit",
       "host.planText",
       "kept.publish",
       "provider.load",
@@ -183,6 +191,7 @@ export const VARIANTS = {
       "repository.get",
       "provider.replace",
       "kept.discard",
+      "host.transferCommit",
       "host.planText",
       "kept.publish",
       "provider.load",
@@ -222,7 +231,14 @@ export const VARIANTS = {
   "planText captured photoAddFails": {
     producer: "planText",
     route: "captured",
-    trace: ["provider.replace", "kept.discard", "kept.media.add", "provider.load", "kept.session"],
+    trace: [
+      "provider.replace",
+      "kept.discard",
+      "host.transferCommit",
+      "kept.media.add",
+      "provider.load",
+      "kept.session",
+    ],
   },
   // The host's plan JSON does not arrive: Start is offered.
   "planText captured planTextFails": {
@@ -231,6 +247,7 @@ export const VARIANTS = {
     trace: [
       "provider.replace",
       "kept.discard",
+      "host.transferCommit",
       "kept.media.add",
       "host.planText",
       "provider.load",
@@ -244,6 +261,7 @@ export const VARIANTS = {
     trace: [
       "provider.replace",
       "kept.discard",
+      "host.transferCommit",
       "kept.media.add",
       "host.planText",
       "kept.publish",
@@ -287,6 +305,30 @@ export const VARIANTS = {
     route: "debug",
     trace: ["host.captureKeep", "rooms.discardSession", "rooms.media.add", "rooms.publish"],
   },
+  // A saved-data import of the shown script, its photo stored before its values, then its final read.
+  "savedDataImport captured shown": {
+    producer: "savedDataImport",
+    route: "captured",
+    trace: ["kept.discard", "repository.add", "provider.replace", "provider.load"],
+  },
+  // The shown script and another, whose writes this page does not own.
+  "savedDataImport captured shownAndOther": {
+    producer: "savedDataImport",
+    route: "captured",
+    trace: ["kept.discard", "repository.add", "provider.replace", "kept.discard", "provider.load"],
+  },
+  // The shown script's own saved data imported while the debug room is shown.
+  "savedDataImport debug ownScript": {
+    producer: "savedDataImport",
+    route: "debug",
+    trace: ["kept.discard", "repository.add", "provider.replace"],
+  },
+  // A photo a Player without durable media cannot keep: nothing is written, Start is offered again.
+  "savedDataImport plain photoNotStored": {
+    producer: "savedDataImport",
+    route: "plain",
+    trace: ["provider.load"],
+  },
 } as const satisfies Record<string, Variant>;
 export type VariantName = keyof typeof VARIANTS;
 
@@ -297,6 +339,16 @@ export const UNDRIVEN_ROUTES = {
   "planText debug": "the debug room refuses a session import",
   "captureKeep plain":
     "a keep reaches no saved values: the route of the values does not change its calls, which `captured` drives",
+} as const;
+
+/**
+ * Calls an operation makes without its ownership, by the scope they name, and why: a saved-data import writes another
+ * script's saved data, which this page does not show, as the player confirmed. No move of this page retires them, and
+ * they finish after it (L5h.2, orchestrator 2's decision (a)).
+ */
+export const OTHER_SCRIPT_WRITES = {
+  "development-package:other":
+    "another script's saved data and kept session, the player's confirmed writes for a script this page does not show",
 } as const;
 
 /** Calls these operations post without awaiting them, and why. */
@@ -382,13 +434,23 @@ export type Move = (typeof MOVES)[number];
  * Whether `move` makes `producer`'s operation on `route` stale. A keep belongs to its room and plan tenure, not to a
  * preparation: the same plan prepared anew keeps its save. A room change waits for a keep under way (the debug room's
  * drain), so a keep never meets one; a page in the debug room has no room to change to. The restore and the import own
- * their preparation, so every move retires them.
+ * their preparation, so every move retires them; so does a saved-data import of the shown script, while one in the
+ * debug room, which takes no preparation, belongs to its room and tenure as a keep does.
  */
-export function stale(producer: Producer, move: Move, route?: Route): boolean | "unreachable" {
+export function stale(
+  producer: Producer | Operated,
+  move: Move,
+  route?: Route,
+): boolean | "unreachable" {
   if (move === "room" && (producer === "captureKeep" || route === "debug")) return "unreachable";
   // A keep belongs to its room and tenure; a reservation to the page's plan, which neither a re-prepare nor a room
   // change replaces.
-  if (move === "samePlan") return producer !== "captureKeep" && producer !== "preparePlanText";
+  if (move === "samePlan")
+    return (
+      producer !== "captureKeep" &&
+      producer !== "preparePlanText" &&
+      !(producer === "savedDataImport" && route === "debug")
+    );
   if (move === "room") return producer !== "preparePlanText";
   return true;
 }

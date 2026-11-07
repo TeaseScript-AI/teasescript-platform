@@ -18,11 +18,7 @@ import { preparedPlan } from "./helpers/prepared-plan.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
-import {
-  readPlayerTransferFile,
-  sessionTransferFile,
-  type SessionTransfer,
-} from "../player/session-transfer.js";
+import type { SessionTransfer } from "../player/session-transfer.js";
 import {
   INSTRUCTION_PLAN_VERSION,
   RUNTIME_SNAPSHOT_VERSION,
@@ -31,6 +27,7 @@ import {
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
+import { readForImport, type SessionRead } from "./helpers/transfer-read.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { answerWith, type Intent } from "./helpers/player-input.js";
 import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
@@ -55,7 +52,11 @@ interface TransferHost {
   readonly sessionExportUnavailable: Readonly<Ref<string | null>>;
   readonly notices: Readonly<Ref<readonly { readonly key: string; readonly message: string }[]>>;
   exportSession(): Promise<SessionExport>;
-  reviewSessionImport(transfer: SessionTransfer): Promise<SessionImportReview>;
+  readTransfer(
+    input: { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string },
+  ): Promise<{ readonly kind: string }>;
+  reviewSessionImport(transfer: SessionRead): Promise<SessionImportReview>;
+  discardSessionReview(transfer: SessionRead): void;
   importSession(review: SessionImportReview): Promise<void>;
   resolveAsset(path: string): string | null;
   readonly images: {
@@ -216,10 +217,7 @@ async function exported(context: TestContext) {
     new Set(transfer.media.map((medium) => medium.reference)),
     new Set([saved, unsaved]),
   );
-  const file = new Uint8Array(await (await sessionTransferFile(transfer, true)).arrayBuffer());
-  const read = await readPlayerTransferFile(file);
-  assert.equal(read.kind, "session");
-  return { session: read.kind === "session" ? read.session : transfer, saved, unsaved };
+  return { session: transfer, saved, unsaved };
 }
 
 test("a session exported in one browser continues in another after the import, as Continue does after a reload", async (context) => {
@@ -231,7 +229,7 @@ test("a session exported in one browser continues in another after the import, a
   const second = browser();
   const importing = await page(context, second, SAVED_PHOTO);
   await importing.activate();
-  const review = await importing.reviewSessionImport(read.session);
+  const review = await importing.reviewSessionImport(await readForImport(importing, read.session));
   assert.equal(review.currentValues, 0);
   assert.equal(playerRuntimeForeground(importing.session.value!)?.kind, "ask-image");
   await importing.importSession(review);
@@ -242,7 +240,7 @@ test("a session exported in one browser continues in another after the import, a
   // The photo only the session uses is kept with it, as a kept session's.
   assert.deepEqual(await second.kept.media.listReferences(SCOPE), [unsaved]);
   // The same session is the same media again, but another photo under one of its references is refused.
-  await importing.reviewSessionImport(read.session);
+  await importing.reviewSessionImport(await readForImport(importing, read.session));
   const altered: SessionTransfer = {
     ...read.session,
     media: read.session.media.map((medium) =>
@@ -250,7 +248,7 @@ test("a session exported in one browser continues in another after the import, a
     ),
   };
   await assert.rejects(
-    importing.reviewSessionImport(altered),
+    importing.reviewSessionImport(await readForImport(importing, altered)),
     (error: unknown) =>
       error instanceof Error &&
       /keeps another photo or file under the reference/.test(error.message),
@@ -283,13 +281,13 @@ test("a session whose plan and saved value hold a list nested 2,048 deep is kept
   const exporting = await page(context, first, plan);
   await exporting.activate();
   await until(async () => (await first.kept.session(SCOPE)) !== null, "the session was not kept");
-  const file = await sessionTransferFile((await exporting.exportSession()).transfer, false);
-  const read = await readPlayerTransferFile(new Uint8Array(await file.arrayBuffer()));
-  assert.ok(read.kind === "session");
+  const { transfer } = await exporting.exportSession();
 
   const second = browser();
   const importing = await page(context, second, plan);
-  await importing.importSession(await importing.reviewSessionImport(read.session));
+  await importing.importSession(
+    await importing.reviewSessionImport(await readForImport(importing, transfer)),
+  );
   assert.ok(second.entries.has("deep"));
   const reloaded = await page(context, second, plan);
   assert.equal(reloaded.activation.value, "continue");
@@ -331,7 +329,7 @@ test("an import that cannot keep the session or its photos says so, and a reload
   const importRefused = async (message: RegExp) => {
     const host = await page(context, second, SAVED_PHOTO);
     await assert.rejects(
-      host.importSession(await host.reviewSessionImport(session)),
+      host.importSession(await host.reviewSessionImport(await readForImport(host, session))),
       (error: unknown) => error instanceof Error && message.test(error.message),
     );
     // The saved data is imported either way.
@@ -528,4 +526,36 @@ test("Start says why a kept session cannot continue only when a Player update ch
         source,
       );
   }
+});
+
+test("a file the host refuses is refused with the Player's own StorageTransferError and its words", async (context) => {
+  stubBrowser(context);
+  const host = await page(context, browser(), SAVED_PHOTO);
+  const error = await host.readTransfer({ text: "not json" }).then(
+    () => null,
+    (caught: unknown) => caught,
+  );
+  assert.ok(error instanceof Error);
+  assert.equal(error.name, "StorageTransferError");
+  // Rebuilt by the Player, as its import dialog tests the class: no bridge request's error.
+  assert.equal("kind" in error, false);
+  assert.match(error.message, /saved data or a session|not JSON|could not be read/i);
+});
+
+test("a session read for an import is let go of in the host when its review is refused or discarded", async (context) => {
+  stubBrowser(context);
+  const { session } = await exported(context);
+  const host = await page(context, browser(), SAVED_PHOTO);
+  const bridge = await host.bridge;
+  const committed = (read: SessionRead) =>
+    bridge.client.request("transferCommit", { ticket: read.ticket });
+  // Refused: a session of another script.
+  const elsewhere = await readForImport(host, { ...session, scope: "development-package:other" });
+  await assert.rejects(host.reviewSessionImport(elsewhere), /belongs to another script/);
+  await assert.rejects(committed(elsewhere), /No session read for an import/);
+  // Discarded, as the import dialog does when the player cancels.
+  const read = await readForImport(host, session);
+  await host.reviewSessionImport(read);
+  host.discardSessionReview(read);
+  await assert.rejects(committed(read), /No session read for an import/);
 });

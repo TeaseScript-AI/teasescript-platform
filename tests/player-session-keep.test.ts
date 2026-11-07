@@ -20,11 +20,17 @@ import { compilePlayerProject } from "../player/compile-project.js";
 import { StaleOperation, persistenceOwnership } from "../player/persistence-ownership.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import { answerWith, type Intent } from "./helpers/player-input.js";
+import type { CapturedMediaLocks } from "../player/captured-media-persistence.js";
+import type { SavedDataHost } from "../player/saved-data.js";
+import { createLocalScriptStorage } from "../player/script-storage.js";
+import type { StorageBundle } from "../player/storage-transfer.js";
 import {
   KEEP_WRITES,
   KEPT_METHODS,
   LIFECYCLE,
   MOVE_WRITES,
+  OPERATED,
+  OTHER_SCRIPT_WRITES,
   MOVES,
   POSTED,
   PRODUCERS,
@@ -40,7 +46,6 @@ import {
   type Move,
   familyCases,
   type FamilyCase,
-  type Operated,
   type Producer,
   type Variant,
   type VariantName,
@@ -51,6 +56,8 @@ import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { InstructionPlan } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
+import { readForImport, type SessionRead } from "./helpers/transfer-read.js";
+import type { SessionTransfer } from "../player/session-transfer.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
 
@@ -74,14 +81,17 @@ interface KeepHost {
   toStartPage(): Promise<void>;
   temporalCapture(): PlayerRuntimeSessionOptions;
   readonly bridge: Promise<PlayerBridge>;
-  exportSession(): Promise<{ readonly transfer: ExportedSession }>;
+  exportSession(): Promise<{ readonly transfer: SessionTransfer }>;
   setDebugMode(enabled: boolean): void;
   readonly rooms: {
     readonly current: Readonly<Ref<"normal" | "debug">>;
     readonly debugSessionExists: Readonly<Ref<boolean>>;
     readonly debugHasData: Readonly<Ref<boolean>>;
   };
-  reviewSessionImport(transfer: ExportedSession): Promise<ImportReview>;
+  readTransfer(input: {
+    readonly bytes: Uint8Array<ArrayBuffer>;
+  }): Promise<{ readonly kind: string }>;
+  reviewSessionImport(transfer: SessionRead): Promise<ImportReview>;
   importSession(review: ImportReview): Promise<void>;
   readonly savedDataRevision: Readonly<Ref<number>>;
   readonly notices: Readonly<Ref<readonly { readonly key: string }[]>>;
@@ -95,10 +105,12 @@ interface KeepHost {
   readonly imageCapture: { choose(reference: string): boolean; answer(input: "button"): Intent };
   readonly inputSection: unknown;
   readSavedData(): Promise<readonly { readonly key: string }[]>;
+  reviewSavedDataImport(bundle: StorageBundle): Promise<SavedDataReview>;
+  importSavedData(review: SavedDataReview, chosen: ReadonlySet<string>): Promise<void>;
 }
-/** An exported session, as this file passes it from an export to an import's review. */
-interface ExportedSession {
-  readonly scope: string;
+/** A saved-data import's review, as this file passes it to the import. */
+interface SavedDataReview {
+  readonly scripts: readonly { readonly scope: string }[];
 }
 /** An import's review, as this file passes it to the import. */
 interface ImportReview {
@@ -111,8 +123,15 @@ let usePlayerSession: (options: {
   keptSessions: KeptSessionStore;
   debugRooms?: KeptRoomStore;
   room?: "debug";
+  savedData?: SavedDataHost;
   decodeImage: (data: Blob) => Promise<{ width: number; height: number }>;
 }) => KeepHost;
+let browserSavedData: (
+  storage: Storage,
+  repository: FakeMediaRepository,
+  keptSessions: undefined,
+  locks: CapturedMediaLocks,
+) => SavedDataHost;
 
 // Every page captures the zone `TZ` names into one module cache, so the file starts from a known zone, which no test
 // below treats as one not seen before.
@@ -140,6 +159,10 @@ before(async () => {
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
+  const savedData: Record<string, unknown> = await loadPlayerModule("player/saved-data.ts");
+  assert.equal(typeof savedData.browserSavedData, "function");
+  // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
+  browserSavedData = savedData.browserSavedData as typeof browserSavedData;
 });
 
 /** The browser surface the Player host touches without a camera; `hide()` hides the page, which keeps the session. */
@@ -291,7 +314,10 @@ async function page(
 /** A page of the Player in `at` with its saved values loaded, before it prepares a plan. */
 async function mount(
   context: TestContext,
-  at: ReturnType<typeof browser> & { readonly rooms?: KeptRoomStore },
+  at: ReturnType<typeof browser> & {
+    readonly rooms?: KeptRoomStore;
+    readonly savedData?: SavedDataHost;
+  },
   delayMs?: number,
   room?: "debug",
 ) {
@@ -315,6 +341,7 @@ async function mount(
         : { capturedMedia: { repository: at.repository } }),
       keptSessions: at.kept,
       ...(at.rooms === undefined ? {} : { debugRooms: at.rooms }),
+      ...(at.savedData === undefined ? {} : { savedData: at.savedData }),
       ...(room === undefined ? {} : { room }),
       decodeImage: async () => ({ width: 2, height: 2 }),
     }),
@@ -791,8 +818,10 @@ const DRIVERS: Record<
     exporting.scope.stop();
     const { host, scope } = await page(context, at, ASKS);
     const beforeReview = await writesOn(host, ASKS);
-    const review = await host.reviewSessionImport(transfer);
+    const review = await host.reviewSessionImport(await readForImport(host, transfer));
+    // The review compares the plans in the host, with the plan's JSON the lease holds: it writes the plan no more.
     const reviewWrites = (await writesOn(host, ASKS)) - beforeReview;
+    assert.equal(reviewWrites, 0, "the review wrote the plan");
     const reply = holdReply(context, await host.bridge, "planText");
     if (c.outcome === "failed") at.state.failing = 1;
     const importing = host.importSession(review).catch(() => {});
@@ -1251,6 +1280,29 @@ function recorder(context: TestContext, at: FamilyBrowser) {
 /** The kept-store and saved-values calls the family can make fail once, as a full or refusing storage does. */
 type Failing = "kept.discard" | "kept.media.add" | "provider.replace" | "repository.add:exists";
 
+/** A browser's local storage, in memory. */
+class MemoryLocalStorage implements Storage {
+  readonly #items = new Map<string, string>();
+  get length() {
+    return this.#items.size;
+  }
+  clear(): void {
+    this.#items.clear();
+  }
+  getItem(key: string): string | null {
+    return this.#items.get(key) ?? null;
+  }
+  key(index: number): string | null {
+    return [...this.#items.keys()][index] ?? null;
+  }
+  removeItem(key: string): void {
+    this.#items.delete(key);
+  }
+  setItem(key: string, value: string): void {
+    this.#items.set(key, value);
+  }
+}
+
 /** A media store another tab of the browser may have stored a photo in first, which makes `add` refuse it. */
 class SharedTabRepository extends FakeMediaRepository {
   readonly #storedElsewhere: () => boolean;
@@ -1322,8 +1374,27 @@ function familyBrowser(route: "plain" | "captured" = "captured") {
       throw new DOMException("The storage is full.", "QuotaExceededError");
     return discardSession(scope);
   };
+  // Other scripts' saved data, in this browser's local storage, as the saved-data host keeps them.
+  const local = new MemoryLocalStorage();
+  const savedData = browserSavedData(local, new FakeMediaRepository(), undefined, {
+    holdLive: () => ({ granted: Promise.resolve("held"), release: () => {} }),
+    whenIdle: async (_scope, work) => (await work(), true),
+  });
+  const otherValues = async (scope: string) => createLocalScriptStorage(local, scope).load();
   // The kept store as it is, beside the recorder's: a control reads it without a call of its own.
-  return { ...base, provider, kept, rawKept: kept, repository, rooms, failing, state };
+  return {
+    ...base,
+    provider,
+    kept,
+    rawKept: kept,
+    rawProvider: provider,
+    repository,
+    rooms,
+    failing,
+    state,
+    savedData,
+    otherValues,
+  };
 }
 type FamilyBrowser = ReturnType<typeof familyBrowser>;
 
@@ -1460,12 +1531,12 @@ async function importOn(
   at: FamilyBrowser,
   { watchHost }: Fixture,
   plan: InstructionPlan,
-  transfer: ExportedSession,
+  transfer: SessionTransfer,
   before: () => void = () => {},
 ): Promise<Operation> {
   const { host, scope } = await page(context, at, plan);
   const stored = at.repository.size;
-  const review = await host.reviewSessionImport(transfer);
+  const review = await host.reviewSessionImport(await readForImport(host, transfer));
   // The review stores no photo: the import's own calls do.
   assert.equal(at.repository.size, stored, "the review stored a photo");
   watchHost(await host.bridge);
@@ -1508,6 +1579,46 @@ async function keepOn(
       if (first === "forget") failNextSnapshot = true;
       hide();
     },
+  };
+}
+
+/** Another script of the browser, which a saved-data import may write. */
+const OTHER_SCOPE = "development-package:other";
+/** An exported photo of a saved-data bundle, under the reference its values hold. */
+const BUNDLE_PHOTO = "captured-media:11111111-1111-4111-8111-111111111111:1";
+/** Saved data of `scopes` as an export of them holds it: each with a photo and a score. */
+function bundleOf(scopes: readonly string[]): StorageBundle {
+  return {
+    scripts: scopes.map((scope) => ({
+      scope,
+      name: null,
+      photos: [BUNDLE_PHOTO],
+      entries: [
+        { key: "photo", value: BUNDLE_PHOTO },
+        { key: "score", value: 3 },
+      ],
+    })),
+    images: [{ reference: BUNDLE_PHOTO, bytes: PNG }],
+  };
+}
+
+/** A saved-data import of `scopes` on a page of `at`, in its normal room or the debug room. */
+async function savedDataImportOn(
+  context: TestContext,
+  at: FamilyBrowser,
+  { watchHost }: Fixture,
+  scopes: readonly string[],
+  room?: "debug",
+): Promise<Operation> {
+  const { host, scope } = await mount(context, at, undefined, room);
+  await prepareOn(host, PHOTO_PLAN);
+  const review = await host.reviewSavedDataImport(bundleOf(scopes));
+  watchHost(await host.bridge);
+  return {
+    host,
+    scope,
+    plan: PHOTO_PLAN,
+    start: () => host.importSavedData(review, new Set(scopes)),
   };
 }
 
@@ -1609,6 +1720,14 @@ const VARIANT_DRIVERS: Record<VariantName, Driver> = {
     keepOn(context, at, fixture, "first", "debug"),
   "captureKeep debug twoPhotos": (context, at, fixture) =>
     keepOn(context, at, fixture, "first", "debug", TWO_SESSION_PHOTOS_PLAN, 2),
+  "savedDataImport captured shown": (context, at, fixture) =>
+    savedDataImportOn(context, at, fixture, [SCOPE]),
+  "savedDataImport captured shownAndOther": (context, at, fixture) =>
+    savedDataImportOn(context, at, fixture, [SCOPE, OTHER_SCOPE]),
+  "savedDataImport debug ownScript": (context, at, fixture) =>
+    savedDataImportOn(context, at, fixture, [SCOPE], "debug"),
+  "savedDataImport plain photoNotStored": (context, at, fixture) =>
+    savedDataImportOn(context, at, fixture, [SCOPE]),
 };
 
 /** What each failing import says when it is current, and what it offers then. */
@@ -1623,6 +1742,10 @@ const CURRENT_FAILURES: Partial<
   "planText captured photoAddFails": { message: /could not keep the session/, offers: "start" },
   "planText captured planTextFails": { message: /could not keep the session/, offers: "start" },
   "planText captured publishFails": { message: /could not keep the session/, offers: "start" },
+  "savedDataImport plain photoNotStored": {
+    message: /its photos could not be stored/,
+    offers: "start",
+  },
 };
 
 /** The page of `operation` moves on as `move` says. */
@@ -1723,14 +1846,16 @@ async function ownershipRun(
   // The page goes on with what the move prepared, where it can: its Start runs. An import under way holds Start back
   // until a room change takes the page over; a room change waits for the saved values' calls issued before it, so an
   // import held at one of them holds the room change too.
+  // An import holds Start back while it runs, the session's and the saved data's alike.
+  const anImport = producer === "planText" || producer === "savedDataImport";
   const moveWaits =
-    producer === "planText" &&
+    anImport &&
     move === "room" &&
     (at!.name.startsWith("provider.") || at!.name.startsWith("repository."));
   const startsAnew =
     move !== null &&
     move !== "disposed" &&
-    (producer === "restoreKept" || (producer === "planText" && move === "room" && !moveWaits));
+    (producer === "restoreKept" || (anImport && move === "room" && !moveWaits));
   if (move !== null)
     await contexts.run(MOVE, async () => {
       await moveOn(operation, move);
@@ -1794,7 +1919,10 @@ async function ownershipRun(
     // And each of its kept-store writes is one of the keeps of the session it started, by the host's own captures.
     assert.deepEqual(unledgered(since), [], "the move's kept-store writes are not its keeps");
   }
-  const late = own(recorded.calls.slice(callsAtMark));
+  // Another script's writes are no call of this page's operation: they finish after the move (`OTHER_SCRIPT_WRITES`).
+  const ofThisPage = (made: RecordedCall) =>
+    made.scope === undefined || !Object.hasOwn(OTHER_SCRIPT_WRITES, made.scope);
+  const late = own(recorded.calls.slice(callsAtMark).filter(ofThisPage));
   if (!retires) {
     // Current, the operation goes on with the rest of its trace.
     assert.deepEqual(late, variant.trace.slice(at.index + 1), "the current operation's calls");
@@ -1867,7 +1995,23 @@ for (const name of Object.keys(VARIANTS) as VariantName[]) {
       if (retires === "unreachable") continue;
       test(`continuation ownership: ${name} at ${point.name}#${point.skip + 1}, ${move}`, async (context) => {
         const row = await ownershipRun(context, name, point, move);
+        // Another script's saved data, which the player confirmed, are written also after this page moved on, while the
+        // page shows nothing of the import (`ownershipRun`'s checks).
+        if (name === "savedDataImport captured shownAndOther")
+          assert.deepEqual(
+            (await row.at.otherValues(OTHER_SCOPE)).map((entry) => entry.key).sort(),
+            ["photo", "score"],
+            "the other script's saved data were not written",
+          );
         if (retires) return;
+        // A saved-data import the move left current goes on: the script's own saved values are the imported ones.
+        if (variant.producer === "savedDataImport") {
+          const stored = new Map(
+            (await row.at.rawProvider.load()).map((entry) => [entry.key, entry.value]),
+          );
+          assert.equal(stored.get("score"), 3, "the current import did not store its values");
+          return;
+        }
         // A keep the move left current goes on: it saves, or after a state it cannot write, says so.
         if (name === "captureKeep captured forget")
           assert.ok(
@@ -2028,11 +2172,7 @@ test("continuation ownership covers its descriptor: each route driven or named, 
     assert.ok(!Object.hasOwn(POSTED, unheld), `${unheld} is both posted and named unheld`);
   assert.deepEqual(Object.keys(VARIANT_DRIVERS).sort(), Object.keys(VARIANTS).sort());
   const variants: Variant[] = Object.values(VARIANTS);
-  // EVIDENCE: invariant: the keys of `PRODUCERS`, declared literally in the descriptor.
-  const operated = (Object.keys(PRODUCERS) as Producer[]).filter(
-    (producer): producer is Operated => producer !== "preparePlanText",
-  );
-  for (const producer of operated)
+  for (const producer of OPERATED)
     for (const route of ROUTES) {
       const pair = `${producer} ${route}`;
       const driven = variants.some((v) => v.producer === producer && v.route === route);

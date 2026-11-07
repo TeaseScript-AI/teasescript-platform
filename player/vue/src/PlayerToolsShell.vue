@@ -41,9 +41,14 @@ import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
 import SavedDataExport from "./SavedDataExport.vue";
 import SavedDataImport from "./SavedDataImport.vue";
-import type { SavedDataImportReview, SessionExport, SessionImportReview } from "./usePlayerSession";
+import type {
+  PlayerTransferRead,
+  SavedDataImportReview,
+  SessionExport,
+  SessionImportReview,
+  SessionTransferRead,
+} from "./usePlayerSession";
 import type { SavedScript, StorageBundle } from "../../storage-transfer.js";
-import type { SessionTransfer } from "../../session-transfer.js";
 import {
   computed,
   nextTick,
@@ -78,7 +83,11 @@ const props = defineProps<{
       readonly sessionInProgress: boolean;
       readonly review: (bundle: StorageBundle) => Promise<SavedDataImportReview>;
       readonly commit: (review: SavedDataImportReview, chosen: ReadonlySet<string>) => Promise<void>;
-      readonly reviewSession: (transfer: SessionTransfer) => Promise<SessionImportReview>;
+      readonly read: (
+        input: { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string },
+      ) => Promise<PlayerTransferRead>;
+      readonly reviewSession: (transfer: SessionTransferRead) => Promise<SessionImportReview>;
+      readonly discardSession: (transfer: SessionTransferRead) => void;
       readonly commitSession: (review: SessionImportReview) => Promise<void>;
     };
     /** Clearing the shown script's saved data, when the host keeps it; possible only while no session runs. */
@@ -981,9 +990,11 @@ async function updateSidebarVisibility(open: boolean) {
                         <SavedDataImport
                           :available="savedData.import.available"
                           :session-in-progress="savedData.import.sessionInProgress"
+                          :read="savedData.import.read"
                           :review="savedData.import.review"
                           :commit="savedData.import.commit"
                           :review-session="savedData.import.reviewSession"
+                          :discard-session="savedData.import.discardSession"
                           :commit-session="savedData.import.commitSession"
                         />
                       </div>

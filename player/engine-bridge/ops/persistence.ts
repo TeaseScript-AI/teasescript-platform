@@ -1,3 +1,4 @@
+import type { InstructionPlan } from "../../../src/index.js";
 import type { InterpreterEvent } from "../../../src/playback.js";
 import { serializeValidatedRuntimeJson } from "../../../src/runtime/snapshot/checkpoint-json.js";
 import {
@@ -72,30 +73,36 @@ export function heldSession(sessions: HostSessions, id: string): HeldSession {
   return held;
 }
 
+/** The plan the connection holds under `token`. */
+function heldPlan(context: PlayerOpsContext, token: string): InstructionPlan {
+  const plan = context.plans.get(token);
+  if (plan === undefined) throw new Error(`No plan '${token}' is held.`);
+  return plan;
+}
+
+/** `slot`'s JSON, written now unless written; its waiting task, if any, then has nothing left to do. */
+function materialize(context: PlayerOpsContext, slot: PlanTextSlot, token: string): string {
+  if (slot.json !== null) return slot.json;
+  if (slot.timer !== null) clearTimeout(slot.timer);
+  slot.timer = null;
+  slot.json = serializeValidatedRuntimeJson(heldPlan(context, token));
+  return slot.json;
+}
+
+/**
+ * The held plan's canonical JSON, for a reader: the slot's, written now if its task has not run (once, for the slot),
+ * or, with no slot, written for this reader alone and kept nowhere. A reader never creates or removes a slot.
+ */
+export function readPlanText(context: PlayerOpsContext, token: string): string {
+  const slot = context.planTexts.get(token);
+  if (slot === undefined) return serializeValidatedRuntimeJson(heldPlan(context, token));
+  return materialize(context, slot, token);
+}
+
 export function persistenceOps(context: PlayerOpsContext): BridgeOps {
   const slots = context.planTexts;
-  const planOf = (token: string) => {
-    const plan = context.plans.get(token);
-    if (plan === undefined) throw new Error(`No plan '${token}' is held.`);
-    return plan;
-  };
-  /**
-   * The held plan's canonical JSON, for a reader: the slot's, written now if its task has not run (once, for the slot),
-   * or, with no slot, written for this reader alone and kept nowhere. A reader never creates or removes a slot.
-   */
-  const planText = (token: string): string => {
-    const slot = slots.get(token);
-    if (slot === undefined) return serializeValidatedRuntimeJson(planOf(token));
-    return materialize(slot, token);
-  };
-  /** `slot`'s JSON, written now unless written; its waiting task, if any, then has nothing left to do. */
-  const materialize = (slot: PlanTextSlot, token: string): string => {
-    if (slot.json !== null) return slot.json;
-    if (slot.timer !== null) clearTimeout(slot.timer);
-    slot.timer = null;
-    slot.json = serializeValidatedRuntimeJson(planOf(token));
-    return slot.json;
-  };
+  const planOf = (token: string) => heldPlan(context, token);
+  const planText = (token: string): string => readPlanText(context, token);
   const dropPlanText = (token: string) => {
     const slot = slots.get(token);
     if (slot?.timer != null) clearTimeout(slot.timer);
@@ -118,7 +125,7 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
           // A slot released or replaced meanwhile is no longer the plan's.
           if (slots.get(plan) !== slot) return;
           try {
-            materialize(slot, plan);
+            materialize(context, slot, plan);
           } catch {
             // The reader that needs it writes it then, and fails as it would have.
           }

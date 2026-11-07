@@ -53,6 +53,11 @@ test("the main realm reaches Worker-side code only through the imports RATCHET l
   );
 });
 
+test("the main realm loads no reader of an exported file: the engine host reads it (L5h.2)", () => {
+  assert.equal(graph.modules.includes("player/session-transfer-read.ts"), false);
+  assert.equal(graph.modules.includes("player/engine-bridge/ops/transfer.ts"), false);
+});
+
 test("the main realm loads exactly the src modules ALLOWED_SOURCE lists", () => {
   assert.equal(new Set(allowed).size, allowed.length, "ALLOWED_SOURCE lists a module twice");
   assert.deepEqual(

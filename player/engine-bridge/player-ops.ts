@@ -23,6 +23,7 @@ import { inputOps } from "./ops/input.js";
 import { mediaOps } from "./ops/media.js";
 import { persistenceOps, type PlanTextSlot } from "./ops/persistence.js";
 import { randomOps } from "./ops/random.js";
+import { transferOps, type TransferTicket } from "./ops/transfer.js";
 import { resourceOps } from "./ops/resources.js";
 import { sessionOps } from "./ops/session.js";
 import { traceOps } from "./ops/trace.js";
@@ -149,6 +150,10 @@ export interface PlayerOpsContext {
   traceIntent: number;
   /** The held plans' canonical JSON, per token, which `preparePlanText` alone keeps (`ops/persistence.ts`). */
   readonly planTexts: Map<string, PlanTextSlot>;
+  /** The sessions read for an import, by ticket, until released (`ops/transfer.ts`). */
+  readonly transfers: Map<string, TransferTicket>;
+  /** Counts the tickets this connection gave out. */
+  transferCount: number;
   /** Debug's random control on this connection (`alignRandom`); every session its owner holds runs with it. */
   readonly random: RandomState;
 }
@@ -304,6 +309,8 @@ export function playerOpsContext(): PlayerOpsContext {
     traceId: 0,
     traceIntent: 0,
     planTexts: new Map(),
+    transfers: new Map(),
+    transferCount: 0,
     random: {
       intent: 0,
       owner: 0,
@@ -394,6 +401,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
         for (const slot of context.planTexts.values())
           if (slot.timer !== null) clearTimeout(slot.timer);
         context.planTexts.clear();
+        context.transfers.clear();
         sessions.clear();
         return { result: null };
       },
@@ -404,6 +412,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     ...mediaOps(context),
     ...resourceOps(context),
     ...persistenceOps(context),
+    ...transferOps(context),
     ...traceOps(context),
     ...randomOps(context),
   };
