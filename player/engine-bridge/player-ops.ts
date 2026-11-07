@@ -391,6 +391,9 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
         return { result: plan === undefined ? null : planMetadata(plan) };
       },
     },
+    // Lets go of the connection's sessions and of everything held for its plans: the plans, their sources and Debug's
+    // caches of them, their JSON, and the sessions read for an import. The debug recorder and the value trace stay as
+    // they are, the last diagnostics of the connection; this is no reset of the whole context.
     teardown: {
       session: "none",
       checkArguments: (args) => args === null,
