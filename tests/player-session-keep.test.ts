@@ -1097,10 +1097,16 @@ for (const producer of Object.keys(SUSPENSIONS) as Producer[])
         const token = await held(operation.host, operation.plan);
         await moveOn(operation, move);
         // The page goes on with what the move prepared, where it can: its Start runs, so nothing should show a start page
-        // again. An import under way holds Start back until a room change takes the page over.
+        // again. An import under way holds Start back until a room change takes the page over; a room change waits for
+        // the saved values' writes, so an import held at one of them (`storageReplace`, `reload`) holds the room change
+        // too.
         const startsAnew =
           move !== "disposed" &&
-          (producer === "restoreKept" || (producer === "planText" && move === "room"));
+          (producer === "restoreKept" ||
+            (producer === "planText" &&
+              move === "room" &&
+              point !== "storageReplace" &&
+              point !== "reload"));
         if (startsAnew) {
           await operation.host.activate();
           await until(
