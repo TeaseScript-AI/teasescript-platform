@@ -168,7 +168,8 @@ const MEDIA_SAMPLE_MS = 100;
 export interface PlayerSessionOptions {
   /**
    * The engine's host; the in-process backend by default, until the L5 series activates the Worker. One live Player per
-   * bridge, which a later Player may reuse once that one ended; while another holds it, this Player never becomes ready.
+   * bridge, which a later Player may reuse after the previous Player scope is disposed; while another holds it, this
+   * Player never becomes ready.
    */
   bridge?: Promise<PlayerBridge>;
   /**

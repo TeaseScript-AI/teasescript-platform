@@ -132,7 +132,7 @@ export class PlayerBridge {
     if (this.#player === player) return this.#owner;
     if (this.#player !== null)
       throw new Error(
-        "One live Player per engine bridge: this bridge already serves a Player. Reuse it once that Player ended.",
+        "One live Player per engine bridge: this bridge already serves a Player. Reuse it after the previous Player scope is disposed.",
       );
     this.#player = player;
     this.#owners += 1;
