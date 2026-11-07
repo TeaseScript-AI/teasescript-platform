@@ -795,7 +795,6 @@ export function joinElements(
     readonly path: readonly string[];
     first: Decider | null;
     readonly kinds: Set<ItemTag>;
-    nulls: boolean;
   }
   interface Held {
     readonly entries: Map<string, Entry>;
@@ -924,15 +923,15 @@ export function joinElements(
     };
     // what an operand's elements are at a path, by `joinedDomain`: a written copy's type, a read's place's decision,
     // the earliest deciding value's kinds, else its own kinds of one family and no unknown (a type holding only `null`
-    // decides nothing, its `null` `nullAt`'s, never an empty domain no kind fits, but at a strict written destination:
-    // Astra r2's B1b on #1310)
+    // decides nothing, its `null` the sentence's walk's, never an empty domain no kind fits, but at a strict written
+    // destination: Astra r2's B1b on #1310)
     const decidedAt = (
       operand: PlaceId,
       node: FlowNode,
       path: readonly string[],
     ): JoinDecided | "open" | null => {
       const at = joinSteps(["element"], path);
-      const decider = drive(admission, earliestDecider(admission, operand, node, at, null));
+      const decider = joinDecider(admission, operand, node, at);
       if (decider !== null && decider.term !== null) {
         const domain = joinedDomain(typeTags(decider.term));
         if (domain === "open") return "open";
@@ -1034,16 +1033,6 @@ export function joinElements(
       levels.set(at, out);
       return out;
     };
-    // (a place's admitted type holds its null where a read of it, below F11's selection, says nothing)
-    const nullAt = (operand: PlaceId, node: FlowNode, path: readonly string[]): boolean => {
-      const steps = joinSteps(["element"], path);
-      if (admission.items(operand, node, steps).some((item) => item.tag === "null")) return true;
-      const read = placeOf(operand);
-      return (
-        read !== null &&
-        admission.admitted(read.place, joinSteps(read.path, steps)).includes("null")
-      );
-    };
     // (an operand's place in evaluation order: where its source starts, so an earlier tree's composed type keeps its
     // own operands' places inside the operand that reaches it, before every operand after it and after every one before)
     const startOf = (value: PlaceId): number => program.places[value]?.site?.start ?? 0;
@@ -1065,7 +1054,6 @@ export function joinElements(
           path,
           first: ruled === null ? null : { decided: ruled, position },
           kinds: new Set(ruled === null || ruled === "open" ? [] : ruled.own),
-          nulls: nullAt(operand, node, path),
         });
         if (ruled === "open") held.opens.add(at);
         if (path.every((step) => step === "element")) held.levels.add(at);
@@ -1089,25 +1077,24 @@ export function joinElements(
     // (a head's decisions at paths its structure does not give, each asked once)
     const asked = new Map<
       PlaceId,
-      Map<string, { readonly decided: JoinDecided | "open"; readonly nulls: boolean } | null>
+      Map<string, { readonly decided: JoinDecided | "open" } | null>
     >();
     const decisionOf = (
       held: Held,
       path: readonly string[],
       at: string,
-    ): { readonly decided: JoinDecided | "open"; readonly nulls: boolean } | null => {
+    ): { readonly decided: JoinDecided | "open" } | null => {
       // (open at the path or above it: each prefix's text one step longer than the last)
       if (held.opens.size > 0)
         for (let depth = 0, text = ""; depth <= path.length; depth += 1) {
           program.work.charge("checks");
           if (depth > 0) text = depth === 1 ? path[0]! : stepText(text, path[depth - 1]!);
           keepText(admission.work, text.length);
-          if (held.opens.has(text)) return { decided: "open", nulls: false };
+          if (held.opens.has(text)) return { decided: "open" };
         }
       const entry = held.entries.get(at);
       let first = entry?.first ?? null;
       let kinds: ReadonlySet<ItemTag> = entry?.kinds ?? new Set();
-      let nulls = entry?.nulls ?? false;
       const head = held.head;
       if (head !== null && (first === null || head.position < first.position)) {
         let mine = asked.get(head.operand);
@@ -1115,29 +1102,24 @@ export function joinElements(
         let found = mine.get(at);
         if (found === undefined) {
           const ruled = decidedAt(head.operand, head.node, path);
-          found =
-            ruled === null
-              ? null
-              : { decided: ruled, nulls: nullAt(head.operand, head.node, path) };
+          found = ruled === null ? null : { decided: ruled };
           mine.set(at, found);
         }
         if (found !== null) {
           const { decided: ruled } = found;
           first = { decided: ruled, position: head.position };
           if (ruled !== "open") kinds = new Set([...kinds, ...ruled.own]);
-          nulls ||= found.nulls;
         }
       }
       if (first === null) return null;
       const { decided: ruled } = first;
       if (ruled === "open" || ruled.typed || [...kinds].every((kind) => ruled.own.includes(kind)))
-        return { decided: ruled, nulls };
+        return { decided: ruled };
       // (a value's kinds, as `decidedAt` reads them: whole numbers beside numbers are numbers, ADR 0021 1.3; several
       // families each fit as itself)
       const own = kinds.has("number") ? [...new Set([...kinds].map(family))] : [...kinds];
       return {
         decided: { tags: own, written: new Set(own.map(family)).size > 1, typed: false, own },
-        nulls,
       };
     };
     // (a join's paths: the smaller operand's added to the larger one's, the earlier decider at each)
@@ -1156,7 +1138,6 @@ export function joinElements(
         )
           known.first = entry.first;
         for (const kind of entry.kinds) known.kinds.add(kind);
-        known.nulls ||= entry.nulls;
       }
       for (const at of from.opens) into.opens.add(at);
       for (const at of from.levels) into.levels.add(at);
@@ -1169,8 +1150,8 @@ export function joinElements(
     // (its paths are the earlier tree's, which grow with a chain: Codex r7's B3, #1383))
     const reaching = new Set<PlaceId>();
     // (an operand's parts in evaluation order, the earlier part `first`: the earliest deciding at a path decides alone, as
-    // `decidedAt`'s earliest decider does, a later part adding only the numbers that make whole numbers numbers and its
-    // `null`, and deciding where no earlier part does. The larger part's map is the result, by reference, and only the
+    // `decidedAt`'s earliest decider does, a later part adding only the numbers that make whole numbers numbers, and
+    // deciding where no earlier part does. The larger part's map is the result, by reference, and only the
     // smaller part's entries, opens and levels are visited, whichever of the two it is, so a growing earlier join is never
     // walked again whatever position it stands in (Codex r15's and r16's B1 on #1310: the lead's rule))
     const parted = (first: Held, later: Held): Held => {
@@ -1189,10 +1170,8 @@ export function joinElements(
           const known = first.entries.get(at);
           if (known !== undefined && known.first !== null) {
             numbers(known, entry);
-            known.nulls ||= entry.nulls;
             continue;
           }
-          if (known !== undefined) entry.nulls ||= known.nulls;
           first.entries.set(at, entry);
         }
         for (const at of later.levels) first.levels.add(at);
@@ -1204,13 +1183,9 @@ export function joinElements(
         const known = later.entries.get(at);
         if (entry.first === null) {
           if (known === undefined) later.entries.set(at, entry);
-          else known.nulls ||= entry.nulls;
           continue;
         }
-        if (known !== undefined) {
-          numbers(entry, known);
-          entry.nulls ||= known.nulls;
-        }
+        if (known !== undefined) numbers(entry, known);
         later.entries.set(at, entry);
         later.opens.delete(at);
       }
@@ -1291,15 +1266,34 @@ export function joinElements(
           )
             continue;
           // (#1765: the layers between the element and the leaf that may hold null, each side's by its form, as a
-          // literal's elements are: each operand walked down below its elements, Codex r5's B2)
+          // literal's elements are: each operand walked down below its elements, Codex r5's B2; #1790/#1828: and its
+          // leaf by the same walk one depth more, the sentence's null as this occurrence holds it, not as the decided
+          // domain allows it: `n: integer? = 1` joined names no null, a copied `integer?[]` its written leaf)
           const joinNode = program.exprAt(c.site) ?? program.flow.statementAt(c.site) ?? null;
           const below = joinSteps(["element"], path);
-          const depths = intermediateDepths(path).map((depth) => depth + 1);
+          const depths = [...intermediateDepths(path).map((depth) => depth + 1), below.length];
           const layers = (side: PlaceId): boolean[] =>
             joinNode === null
               ? depths.map(() => false)
               : layersAt(admission, side, joinNode, below, depths);
-          const optional = mixedOptional(layers(left), layers(right));
+          // (an operand whose occurrence says nothing at the leaf, as a compound assignment's target read through a
+          // property, names its place's admitted null there, as the sentence did before: the walk has nothing to read)
+          const leafOf = (side: PlaceId, walked: boolean[]): boolean[] => {
+            if (walked.at(-1)! || joinNode === null) return walked;
+            const read = placeOf(side);
+            if (
+              read === null ||
+              !admission.items(side, joinNode, below).every((item) => item.tag === "unknown") ||
+              !admission.admitted(read.place, joinSteps(read.path, below)).includes("null")
+            )
+              return walked;
+            return [...walked.slice(0, -1), true];
+          };
+          const [leftLayers, rightLayers] = [
+            leafOf(left, layers(left)),
+            leafOf(right, layers(right)),
+          ];
+          const optional = mixedOptional(leftLayers.slice(0, -1), rightLayers.slice(0, -1));
           // (#1762: each operand's layers are a dict's by the same walk below its elements, its contract's items, Astra
           // r1 on #1814)
           const dicts =
@@ -1320,11 +1314,8 @@ export function joinElements(
             c,
             path,
             ...shownOf(path, dicts(left), dicts(right)),
-            earliest:
-              ruled.nulls || ruled.decided.nullable === true
-                ? [...ruled.decided.own, "null"]
-                : ruled.decided.own,
-            kinds: own.nulls || own.decided.nullable === true ? [...kinds, "null"] : kinds,
+            earliest: leftLayers.at(-1)! ? [...ruled.decided.own, "null"] : ruled.decided.own,
+            kinds: rightLayers.at(-1)! ? [...kinds, "null"] : kinds,
             value: root.result,
             levels: levelsAt(path),
           };
@@ -1431,6 +1422,46 @@ export interface MixedOptional {
   readonly kinds: readonly boolean[];
 }
 
+/** The written decider's answer for a value at a node and path outside every decision (`earliestDecider`'s). */
+type JoinDecider =
+  ReturnType<typeof earliestDecider> extends Generator<unknown, infer R> ? R : never;
+// (per admission, while no stop forgot an answer: per node, value and path)
+const JOIN_DECIDERS = new WeakMap<
+  Admission,
+  {
+    readonly forgets: number;
+    readonly byNode: Map<FlowNode, Map<PlaceId, Map<string, JoinDecider>>>;
+  }
+>();
+
+/**
+ * #1828: `earliestDecider` of `value` at `node` and `steps` outside every decision, asked once while no stop forgot an
+ * answer. A mixed join's operand is asked it by `decidedAt` and again by its sentence's walk (`mayHoldNull`); the
+ * second ask takes the first's answer (Codex r2 on #1899).
+ */
+function joinDecider(
+  admission: Admission,
+  value: PlaceId,
+  node: FlowNode,
+  steps: readonly string[],
+): JoinDecider {
+  const forgets = admission.pass.solver.forgets;
+  let known = JOIN_DECIDERS.get(admission);
+  if (known === undefined || known.forgets !== forgets)
+    JOIN_DECIDERS.set(admission, (known = { forgets, byNode: new Map() }));
+  let byValue = known.byNode.get(node);
+  if (byValue === undefined) known.byNode.set(node, (byValue = new Map()));
+  let byPath = byValue.get(value);
+  if (byPath === undefined) byValue.set(value, (byPath = new Map()));
+  const at = pathText(steps);
+  if (byPath.has(at)) return byPath.get(at)!;
+  const answer = drive(admission, earliestDecider(admission, value, node, steps, null));
+  // (its key kept, charged as a structure's)
+  keepText(admission.work, at.length);
+  byPath.set(at, answer);
+  return answer;
+}
+
 /**
  * #1765: whether a value may hold null at a layer, by its own form, one case per form, never by what a written copy's
  * items hold (the lead's ruling (A) on #1789, after Codex r1–r11 and Astra r1–r2):
@@ -1464,9 +1495,7 @@ function mayHoldNull(
     return program.opOf.get(at)?.kind === "fallback"
       ? operandNull(admission, at, from)
       : occurrenceNull(admission, at, from);
-  const decided = holdsSource(admission, at)
-    ? drive(admission, earliestDecider(admission, at, from, steps, null))
-    : null;
+  const decided = holdsSource(admission, at) ? joinDecider(admission, at, from, steps) : null;
   // (a copy's term where the deciding copy stands above the layer, which lies below its own level: `b: string?[]` in
   // `[[1],b]`, `d`'s element in `held = d + [2]`; where the layer is the deciding copy's own level, `atom` in
   // `{v:atom}`, as it is read there, narrowed: Codex r1 on #1819, #1901)
