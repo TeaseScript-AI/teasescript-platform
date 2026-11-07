@@ -1,7 +1,14 @@
 import type { PlaceId } from "../../graph.js";
 import { joinParts, joinSteps, keptSteps } from "../budget.js";
 import type { Contract } from "../contract.js";
-import { keyOf, keyPlace, SELECTED_TEXT, SELECTED_VALUE, type Key } from "../definitions.js";
+import {
+  keyOf,
+  keyPlace,
+  SELECTED_TEXT,
+  SELECTED_VALUE,
+  sortCost,
+  type Key,
+} from "../definitions.js";
 import { firstWriter, type Writer } from "../items.js";
 import { stepName } from "../program.js";
 import type { ProofDemand, Proven, Work } from "../solver.js";
@@ -156,6 +163,8 @@ class Gathered {
 
   /** A query this one reads: its node among this one's, or this one declined. */
   public *from(demand: ProofDemand<ObjectsProof>): Work<void> {
+    // (every visit charged, one after a decline too: its callers stop at the first, `literalObjects`)
+    this.contract.pass.program.work.charge("invSteps");
     if (!this.complete) return;
     // #1668: K, a query this one reads, for its proof alone
     const { proof } = yield* this.contract.pass.solver.proven(demand);
@@ -179,8 +188,16 @@ class Gathered {
     const { contract } = this;
     // (its own parts and the queries it reads, by their names: equal for equal parts and readers, which a cycle of
     // queries reaches at once, each reader's support read through its own demand)
-    const names = [...this.#lists.keys(), ...this.#prior.keys(), ...this.#keys.keys()].sort();
-    const children = [...this.#children.keys()].sort();
+    const names = [...this.#lists.keys(), ...this.#prior.keys(), ...this.#keys.keys()];
+    const children = [...this.#children.keys()];
+    // (its parts sorted for the signature and copied into the proof, each charged)
+    contract.pass.program.work.charge(
+      "invSteps",
+      sortCost(names.length) + sortCost(children.length),
+    );
+    contract.keep(2 * (names.length + children.length));
+    names.sort();
+    children.sort();
     return {
       items: [],
       proof: {
@@ -214,7 +231,8 @@ const DECLINED: ObjectsProof = {
 };
 
 /** Whether a path holds a choice's selection step, which the query does not follow. */
-function selecting(rest: readonly string[]): boolean {
+function selecting(contract: Contract, rest: readonly string[]): boolean {
+  contract.pass.program.work.charge("invSteps", 1 + rest.length);
   return rest.some((step) => step === SELECTED_VALUE || step === SELECTED_TEXT);
 }
 
@@ -227,7 +245,7 @@ function* valueObjects(
   const { program } = contract.pass;
   program.work.charge("invSteps");
   const out = new Gathered(contract);
-  if (selecting(rest)) {
+  if (selecting(contract, rest)) {
     out.complete = false;
     return out.proven();
   }
@@ -311,18 +329,29 @@ function* literalObjects(
   for (let length = 0; ; length += 1) {
     program.work.charge("invSteps");
     const below = rest.slice(length);
+    // (each group and entry visited charged, and the walk stops at the first decline: nothing after it changes it)
     for (const group of readGroupsAt(contract, node.reads, false)) {
+      program.work.charge("invSteps");
       // (a mixed class reads its other members where their answers differ: that depends on the property)
       if (group.rest.length > 0 && group.mixed !== 0) out.complete = false;
-      for (const entry of group.read) yield* out.from(objectsAt(contract, entry.value, below));
+      for (const entry of group.read) {
+        if (!out.complete) return;
+        yield* out.from(objectsAt(contract, entry.value, below));
+      }
+      if (!out.complete) return;
     }
     const groups = othersAt(contract, node.others, false);
     for (const group of contract.othersBelowOf.get(groups) ?? groups) {
+      program.work.charge("invSteps");
       if (group === null || (group.rest.length > 0 && group.mixed !== 0)) {
         out.complete = false;
         return;
       }
-      for (const entry of group.read) yield* out.from(objectsAt(contract, entry.value, below));
+      for (const entry of group.read) {
+        if (!out.complete) return;
+        yield* out.from(objectsAt(contract, entry.value, below));
+      }
+      if (!out.complete) return;
     }
     // a reference here answers an opaque member below it (F19a), beside any `missing`
     if (node.reference) {
@@ -397,7 +426,7 @@ function* keyObjectsMade(contract: Contract, key: Key): Work<Proven<ObjectsProof
     program.isHost(place) ||
     program.speakerPlaces.has(place) ||
     memberStepOf(contract, path, 0) >= 0 ||
-    selecting(path)
+    selecting(contract, path)
   ) {
     out.complete = false;
     return out.proven();
@@ -426,8 +455,10 @@ function* keyObjectsMade(contract: Contract, key: Key): Work<Proven<ObjectsProof
       return out.proven();
     }
     const below = path.slice(length);
-    for (const entry of stores.list) yield* entryObjects(contract, out, entry, below);
-    if (!out.complete) return out.proven();
+    for (const entry of stores.list) {
+      yield* entryObjects(contract, out, entry, below);
+      if (!out.complete) return out.proven();
+    }
   }
   return out.proven();
 }
