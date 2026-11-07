@@ -14,6 +14,7 @@ import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.j
 import { DebugCaches, debugOps } from "./ops/debug.js";
 import { inputOps } from "./ops/input.js";
 import { mediaOps } from "./ops/media.js";
+import { persistenceOps } from "./ops/persistence.js";
 import { resourceOps } from "./ops/resources.js";
 import { sessionOps } from "./ops/session.js";
 import type { BridgeOps } from "./worker-host.js";
@@ -231,5 +232,6 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     ...inputOps(context),
     ...mediaOps(context),
     ...resourceOps(context),
+    ...persistenceOps(),
   };
 }

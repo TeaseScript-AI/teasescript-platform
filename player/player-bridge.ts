@@ -119,6 +119,24 @@ export class PlayerBridge {
     return this.open(reply.session!, reply.view as Introduction);
   }
 
+  /**
+   * Reads `session` in the host with the op `op` on the Worker itself, which names the session in its arguments, after
+   * the session's earlier requests (`ops/persistence.ts`). It changes no publication, so its reply applies nothing.
+   */
+  async read<R>(
+    session: PlayerSession,
+    op: string,
+    args: Record<string, unknown> = {},
+  ): Promise<R> {
+    const reply = await this.#client.request(
+      op,
+      { ...args, session: session.id },
+      { after: session.id },
+    );
+    // EVIDENCE: validation: the op's result comes from the same build as its caller expects it.
+    return reply.result as R;
+  }
+
   /** Sends one op of `session` from its store's revision (or `basis`); resolves with its result once applied. */
   async request<R = unknown>(
     session: PlayerSession,

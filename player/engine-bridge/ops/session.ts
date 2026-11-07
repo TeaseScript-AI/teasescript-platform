@@ -53,6 +53,11 @@ export class HeldSession implements HostSession {
     return this.#current.revision;
   }
 
+  /** How many of the session's events the host has handed out: the events a capture of its state goes with. */
+  get delivered(): number {
+    return this.#delivered;
+  }
+
   /** Whether an op made from `basis` may run, by the adapter's rule (`PlayerRuntimeEngine.accepts`). */
   accepts(basis: number | null): boolean {
     return basis === null || this.#current.engine.accepts(basis);

@@ -69,7 +69,11 @@ export type SectionSend = (
 ) => Promise<BridgeResult>;
 
 export interface BridgeClient {
-  /** Sends one request after every earlier request for the same session (or for the Worker itself) has its reply. */
+  /**
+   * Sends one request after every earlier request for the same session (or for the Worker itself) has its reply. With
+   * `after`, an op on the Worker itself waits instead for the earlier requests of session `after`, and holds that
+   * session's turn: a read of the session that follows what was posted before it.
+   */
   request(
     op: string,
     args: unknown,
@@ -77,6 +81,7 @@ export interface BridgeClient {
       readonly session?: string | null;
       readonly basis?: number | null;
       readonly onReply?: ReplyHook;
+      readonly after?: string;
     },
   ): Promise<BridgeResult>;
   /**
@@ -242,7 +247,7 @@ export function openBridge(
     const client: BridgeClient = {
       request: (op, args, options = {}) => {
         const session = options.session ?? null;
-        return exclusive(session ?? "", () =>
+        return exclusive(session ?? options.after ?? "", () =>
           send(op, args, session, options.basis ?? null, options.onReply),
         );
       },
