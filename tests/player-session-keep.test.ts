@@ -26,17 +26,17 @@ import { createLocalScriptStorage } from "../player/script-storage.js";
 import type { StorageBundle } from "../player/storage-transfer.js";
 import {
   KEEP_WRITES,
-  KEPT_METHODS,
   LIFECYCLE,
+  OWNERSHIP_MODES,
+  RECORDED_STORES,
+  SURFACES,
+  UNOPERATED,
   MOVE_WRITES,
   OPERATED,
   OTHER_SCRIPT_WRITES,
   MOVES,
   POSTED,
   PRODUCERS,
-  PROVIDER_METHODS,
-  REPOSITORY_METHODS,
-  ROOM_METHODS,
   ROUTES,
   UNDRIVEN_ROUTES,
   UNHELD_AWAITS,
@@ -92,6 +92,7 @@ interface KeepHost {
     readonly bytes: Uint8Array<ArrayBuffer>;
   }): Promise<{ readonly kind: string }>;
   reviewSessionImport(transfer: SessionRead): Promise<ImportReview>;
+  discardSessionReview(transfer: SessionRead): void;
   importSession(review: ImportReview): Promise<void>;
   readonly savedDataRevision: Readonly<Ref<number>>;
   readonly notices: Readonly<Ref<readonly { readonly key: string }[]>>;
@@ -837,6 +838,34 @@ const DRIVERS: Record<
       },
     };
   },
+  async reviewTransfer(context, at, c) {
+    // A session of the page's plan, or of another plan, which the review refuses after comparing the plans.
+    const exported = c.outcome === "refused" ? ASKS_OTHER : ASKS;
+    const exporting = await page(context, at, exported);
+    await exporting.host.activate();
+    await until(() => exporting.host.session.value !== null, "no session to export");
+    const { transfer } = await exporting.host.exportSession();
+    exporting.scope.stop();
+    const { host, scope } = await page(context, at, ASKS);
+    const read = await readForImport(host, transfer);
+    // A ticket let go of first: the review finds no session, and reads no plan JSON.
+    if (c.outcome === "released") host.discardSessionReview(read);
+    const reply = holdReply(context, await host.bridge, "reviewTransfer");
+    const reviewing = host.reviewSessionImport(read).then(
+      () => "reviewed",
+      () => "refused",
+    );
+    await reply.sent;
+    return {
+      host,
+      scope,
+      plan: ASKS,
+      finish: async () => {
+        reply.release();
+        assert.equal(await reviewing, c.outcome === "reviewed" ? "reviewed" : "refused");
+      },
+    };
+  },
   async captureKeep(context, at, c) {
     const { host, scope } = await page(context, at, ASKS);
     const reply = holdReply(context, await host.bridge, "captureKeep", (args, request) => {
@@ -1093,17 +1122,12 @@ function unledgered(calls: readonly RecordedCall[]): string[] {
   return stray;
 }
 
-/** The class of `key` of a store recorded as `surface`; a method no class names fails the run. */
+/** The class of `key` of a store recorded as `surface`; a surface or method no class names fails the run. */
 function methodClass(surface: string, key: string): string | undefined {
-  const classes: Readonly<Record<string, string>> = surface.endsWith(".media")
-    ? REPOSITORY_METHODS
-    : surface === "repository"
-      ? REPOSITORY_METHODS
-      : surface === "kept"
-        ? KEPT_METHODS
-        : surface === "rooms"
-          ? ROOM_METHODS
-          : PROVIDER_METHODS;
+  const classes: Readonly<Record<string, string>> | undefined = Object.entries(SURFACES).find(
+    ([name]) => name === surface,
+  )?.[1];
+  assert.ok(classes !== undefined, `the surface ${surface} is classified`);
   return classes[key];
 }
 
@@ -1729,6 +1753,8 @@ const VARIANT_DRIVERS: Record<VariantName, Driver> = {
     savedDataImportOn(context, at, fixture, [SCOPE, OTHER_SCOPE]),
   "savedDataImport debug ownScript": (context, at, fixture) =>
     savedDataImportOn(context, at, fixture, [SCOPE], "debug"),
+  "savedDataImport captured otherOnly": (context, at, fixture) =>
+    savedDataImportOn(context, at, fixture, [OTHER_SCOPE]),
   "savedDataImport plain photoNotStored": (context, at, fixture) =>
     savedDataImportOn(context, at, fixture, [SCOPE]),
 };
@@ -1845,7 +1871,7 @@ async function ownershipRun(
     );
   if (reached !== null) await reachedWithin(reached, at!.name, recorded.calls);
   const producer = variant.producer;
-  const retires = move !== null && stale(producer, move, variant.route) === true;
+  const retires = move !== null && stale(producer, move, variant.route, variant.ownership) === true;
   // The page goes on with what the move prepared, where it can: its Start runs. An import under way holds Start back
   // until a room change takes the page over; a room change waits for the saved values' calls issued before it, so an
   // import held at one of them holds the room change too.
@@ -1977,6 +2003,17 @@ async function ownershipRun(
   return result;
 }
 
+/** The saved-data imports whose bundle holds another script, and those that store the shown one's, as their drivers do. */
+const IMPORTS_OTHER = new Set<VariantName>([
+  "savedDataImport captured shownAndOther",
+  "savedDataImport captured otherOnly",
+]);
+const STORES_SHOWN = new Set<VariantName>([
+  "savedDataImport captured shown",
+  "savedDataImport captured shownAndOther",
+  "savedDataImport debug ownScript",
+]);
+
 // EVIDENCE: invariant: the keys of `VARIANTS`, declared literally in the descriptor.
 for (const name of Object.keys(VARIANTS) as VariantName[]) {
   const variant: Variant = VARIANTS[name];
@@ -1994,13 +2031,13 @@ for (const name of Object.keys(VARIANTS) as VariantName[]) {
   });
   for (const point of holdable(variant.trace))
     for (const move of MOVES) {
-      const retires = stale(variant.producer, move, variant.route);
+      const retires = stale(variant.producer, move, variant.route, variant.ownership);
       if (retires === "unreachable") continue;
       test(`continuation ownership: ${name} at ${point.name}#${point.skip + 1}, ${move}`, async (context) => {
         const row = await ownershipRun(context, name, point, move);
         // Another script's saved data, which the player confirmed, are written also after this page moved on, while the
         // page shows nothing of the import (`ownershipRun`'s checks).
-        if (name === "savedDataImport captured shownAndOther")
+        if (IMPORTS_OTHER.has(name))
           assert.deepEqual(
             (await row.at.otherValues(OTHER_SCOPE)).map((entry) => entry.key).sort(),
             ["photo", "score"],
@@ -2009,6 +2046,7 @@ for (const name of Object.keys(VARIANTS) as VariantName[]) {
         if (retires) return;
         // A saved-data import the move left current goes on: the script's own saved values are the imported ones.
         if (variant.producer === "savedDataImport") {
+          if (!STORES_SHOWN.has(name)) return;
           const stored = new Map(
             (await row.at.rawProvider.load()).map((entry) => [entry.key, entry.value]),
           );
@@ -2175,12 +2213,39 @@ test("continuation ownership covers its descriptor: each route driven or named, 
     assert.ok(!Object.hasOwn(POSTED, unheld), `${unheld} is both posted and named unheld`);
   assert.deepEqual(Object.keys(VARIANT_DRIVERS).sort(), Object.keys(VARIANTS).sort());
   const variants: Variant[] = Object.values(VARIANTS);
+  const named = new Set<string>();
   for (const producer of OPERATED)
-    for (const route of ROUTES) {
-      const pair = `${producer} ${route}`;
-      const driven = variants.some((v) => v.producer === producer && v.route === route);
-      assert.equal(driven, !Object.hasOwn(UNDRIVEN_ROUTES, pair), pair);
-    }
+    for (const ownership of OWNERSHIP_MODES[producer])
+      for (const route of ROUTES) {
+        const path = `${producer} ${route} ${ownership}`;
+        named.add(path);
+        const driven = variants.some(
+          (v) => v.producer === producer && v.route === route && v.ownership === ownership,
+        );
+        assert.equal(driven, !Object.hasOwn(UNDRIVEN_ROUTES, path), path);
+      }
+  for (const variant of variants)
+    assert.ok(
+      OWNERSHIP_MODES[variant.producer].some((mode) => mode === variant.ownership),
+      `${variant.producer} takes no ${variant.ownership} ownership`,
+    );
+  for (const path of Object.keys(UNDRIVEN_ROUTES)) assert.ok(named.has(path), `${path} is a path`);
+  // Every producer's caller is an operation, or named as none.
+  for (const producer of Object.keys(PRODUCERS))
+    assert.equal(
+      OPERATED.some((operated) => operated === producer),
+      !Object.hasOwn(UNOPERATED, producer),
+      producer,
+    );
+  // Every surface is a store the recorder installs or one a store method gives, and each such store is a surface.
+  const within = Object.entries(SURFACES).flatMap(([surface, methods]) =>
+    Object.entries(methods)
+      .filter(([, kind]) => kind === "store")
+      .map(([method]) => `${surface}.${method}`),
+  );
+  assert.deepEqual(Object.keys(SURFACES).sort(), [...RECORDED_STORES, ...within].sort());
+  for (const name of [...IMPORTS_OTHER, ...STORES_SHOWN])
+    assert.equal(VARIANTS[name].producer, "savedDataImport", name);
   let held = 0;
   for (const variant of variants) {
     assert.ok(holdable(variant.trace).length > 0, `a variant of ${variant.producer} holds nothing`);
