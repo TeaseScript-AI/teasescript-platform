@@ -265,7 +265,7 @@ export const all = [table, text, sum, size, number];
 });
 
 /** The lines the configured checker reports in an `objects.ts` holding `source`, the scope's other files empty. */
-function objectsLines(source) {
+function objectsLines(source, others = {}) {
   const project = new Project({
     useInMemoryFileSystem: true,
     compilerOptions: {
@@ -283,6 +283,8 @@ function objectsLines(source) {
   assert.ok(objects !== undefined, "objects.ts is in the configured scope");
   for (const file of CONFIGURED.files)
     if (file !== objects) project.createSourceFile(`/repo/${file}`, "export {};\n");
+  for (const [file, text] of Object.entries(others))
+    project.createSourceFile(`/repo/${file}`, text);
   project.createSourceFile(`/repo/${objects}`, source);
   return chargedIterationDiagnostics(project.getProgram().compilerObject, "/repo", CONFIGURED)
     .filter(({ fileName }) => fileName.endsWith("/objects.ts"))
@@ -313,10 +315,20 @@ export function charged(): number {
   assert.deepEqual(lines, [9]);
 });
 
-test("in objects.ts an object spread and an array part of `joinParts` are rejected, scalar parts accepted (#1747, Codex r5)", () => {
-  // (an `object` may be an array, and `joinParts` names an array part by walking it: both are input-sized)
-  const lines = objectsLines(`
+test("objects.ts calls only its own allowlist, and hands no collection of any size to an allowed call outside OBJECTS_COLLECTIONS (#1747, Codex r5, r6)", () => {
+  // (an `object` may be an array; `joinParts` and `keyOf` walk an array part; `keyBelow` is the narrowing modules')
+  const DEFINITIONS = `
+export function keyOf(place: number, path: readonly string[]): string {
+  return path.length === 0 ? String(place) : "|";
+}
+export function keyBelow(key: string, rest: readonly string[]): string {
+  return rest.length === 0 ? key : "|";
+}
+`;
+  const lines = objectsLines(
+    `
 import { joinParts, type WorkLedger } from "../budget.js";
+import { keyBelow, keyOf } from "../definitions.js";
 declare const work: WorkLedger;
 export function copy(input: object): object {
   work.charge("objectSteps");
@@ -330,7 +342,21 @@ export function scalar(kind: string, at: number): string {
   work.charge("objectSteps");
   return joinParts(kind, at);
 }
-`);
-  // (the spread's line and the array join's, and nothing in the scalar join)
-  assert.deepEqual(lines, [6, 10]);
+export function key(input: readonly string[]): string {
+  work.charge("objectSteps");
+  return keyOf(1, input);
+}
+export function fixed(): string {
+  work.charge("objectSteps");
+  return keyOf(1, []);
+}
+export function below(input: readonly string[]): string {
+  work.charge("objectSteps");
+  return keyBelow("1|", input);
+}
+`,
+    { "src/type-inference/core/definitions.ts": DEFINITIONS },
+  );
+  // (the spread, the array join, the array key and the narrowing modules' call; nothing in the scalar or literal ones)
+  assert.deepEqual(lines, [7, 11, 19, 27]);
 });
