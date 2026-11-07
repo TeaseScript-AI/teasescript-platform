@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { debugCountdownText } from "../player/presentation.js";
+import { debugCountdownText } from "../player/presentation/presentation.js";
 import {
   activatePlayerRuntimeButton,
   createPlayerRuntimeRestorePoint,
@@ -9,10 +9,10 @@ import {
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime/runtime-adapter.js";
 import { debugCountdown } from "./helpers/debug-readers.js";
-import { type PlayerRuntimeDebugCountdown } from "../player/runtime-view.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+import { type PlayerRuntimeDebugCountdown } from "../player/runtime/runtime-view.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 
 // Player Debug countdowns (DEBUGGER.md "Player Debug") name the current foreground wait from canonical state: an
 // authored `wait`, a presented timed `showButton`, or a message's reading time. Expected deadlines follow from the

@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test, { before } from "node:test";
 import { effectScope, ref, shallowRef, type Ref, type ShallowRef } from "vue";
 
-import { CapturedMediaStore } from "../player/captured-media.js";
-import { answerPlayerRuntimeImage, type PlayerRuntimeSession } from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import { playerRuntimeForeground, playerRuntimeMedia } from "../player/runtime-view.js";
+import { CapturedMediaStore } from "../player/media/captured-media.js";
+import {
+  answerPlayerRuntimeImage,
+  type PlayerRuntimeSession,
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import { playerRuntimeForeground, playerRuntimeMedia } from "../player/runtime/runtime-view.js";
 import { admissionOf, type HeldMedia } from "../player/engine-bridge/held-media.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
@@ -40,7 +43,7 @@ let useImageCapture: (host: unknown) => Capture;
 // Load the real composable through the existing build tool: its browser-source imports use Vite resolution.
 before(async () => {
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useImageCapture.ts",
+    "player/vue/src/stage/useImageCapture.ts",
   );
   assert.equal(typeof module.useImageCapture, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested API.

@@ -2,24 +2,27 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
-import { CapturedMediaStore } from "../player/captured-media.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+import { CapturedMediaStore } from "../player/media/captured-media.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import { BridgeLostError } from "../player/engine-bridge/client.js";
 import { loadAge, loadTlock } from "../player/encryption/lock.js";
 import type * as Client from "../player/engine-bridge/client.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
-import { LockService } from "../player/lock-service.js";
-import type { PlayerBridge, ServiceSection } from "../player/player-bridge.js";
+import { LockService } from "../player/encryption/lock-service.js";
+import type { PlayerBridge, ServiceSection } from "../player/runtime/player-bridge.js";
 import type {
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import type { PlayerSession } from "../player/runtime-view.js";
-import { CaptureService } from "../player/session-camera.js";
-import { FileStoreService } from "../player/stored-files.js";
+} from "../player/runtime/runtime-adapter.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
+import { CaptureService } from "../player/media/session-camera.js";
+import { FileStoreService } from "../player/media/stored-files.js";
 import { inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
-import { memoryKeptSessionStore, type KeptSessionStore } from "../player/kept-sessions.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+import {
+  memoryKeptSessionStore,
+  type KeptSessionStore,
+} from "../player/persistence/kept-sessions.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { serviceSection } from "./helpers/service-section.js";
@@ -261,7 +264,7 @@ let usePlayerSession: (options: {
 }) => LossHost;
 let facade: typeof InProcess;
 let client: typeof Client;
-let compiler: typeof import("../player/compile-project.js");
+let compiler: typeof import("../player/runtime/compile-project.js");
 /** What `prepareHostedScript` reads of the Player, as `startPage` gives it. */
 type StartPagePlayer = ReturnType<typeof startPage>["player"];
 let prepareHostedScript: (
@@ -284,7 +287,7 @@ let usePlanPhotoPreload: (
 ) => void;
 
 before(async () => {
-  const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
+  const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   // EVIDENCE: validation: Vite loaded the real source module; this is its host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
   // EVIDENCE: validation: the bundle's in-process backend, whose sessions the composable's facade reaches.
@@ -292,11 +295,11 @@ before(async () => {
   // EVIDENCE: validation: the bundle's client module, whose error classes the bundle's code tests for.
   client = (await loadPlayerModule("player/engine-bridge/client.ts")) as typeof client;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
-  compiler = (await loadPlayerModule("player/compile-project.ts")) as typeof compiler;
+  compiler = (await loadPlayerModule("player/runtime/compile-project.ts")) as typeof compiler;
   const hosted = await loadPlayerModule("player/vue/src/hostedScript.ts");
   // EVIDENCE: validation: the real module's export.
   prepareHostedScript = hosted.prepareHostedScript as typeof prepareHostedScript;
-  const photos = await loadPlayerModule("player/vue/src/stagePhotos.ts");
+  const photos = await loadPlayerModule("player/vue/src/stage/stagePhotos.ts");
   // EVIDENCE: validation: the real module's export.
   usePlanPhotoPreload = photos.usePlanPhotoPreload as typeof usePlanPhotoPreload;
 });

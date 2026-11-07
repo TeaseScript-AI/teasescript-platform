@@ -1,4 +1,4 @@
-import { compilePlayerProject } from "../../player/compile-project.js";
+import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 
 /** Two files, a draw in each, the second inside a function: the project of Debug's source-op tests. */

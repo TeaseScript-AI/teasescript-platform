@@ -7,21 +7,24 @@ import {
   restorePlayerRuntimeSessionAt,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import type { BuildIdentity } from "../player/engine-bridge/protocol.js";
-import type { CapturedMediaRepository } from "../player/captured-media.js";
+import type { CapturedMediaRepository } from "../player/media/captured-media.js";
 import {
   keptSession,
   memoryKeptRoomStore,
   memoryKeptSessionStore,
   type KeptRoomStore,
   type KeptSessionStore,
-} from "../player/kept-sessions.js";
-import type { DebugRecorder } from "../player/debug-recorder.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+} from "../player/persistence/kept-sessions.js";
+import type { DebugRecorder } from "../player/debug/debug-recorder.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import type {
   InstructionPlan,
   RuntimeScriptStorageEntrySnapshot,
@@ -87,9 +90,11 @@ let usePlayerDebug: (
 before(async () => {
   await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
-  const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/usePlayerDebug.ts");
+  const debug: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/debug/usePlayerDebug.ts",
+  );
   assert.equal(typeof module.usePlayerSession, "function");
   assert.equal(typeof debug.usePlayerDebug, "function");
   // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.

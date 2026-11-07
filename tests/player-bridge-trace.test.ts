@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject } from "../player/compile-project.js";
+import { compilePlayerProject } from "../player/runtime/compile-project.js";
 import {
   playerDebugImageOrigin,
   playerDebugLiveValue,
@@ -10,23 +10,23 @@ import {
   playerDebugVariables,
   type PlayerDebugLiveValue,
   type PlayerDebugTraceRow,
-} from "../player/debug-variables.js";
-import type { DebugView, DebugViewRequest } from "../player/debug-view.js";
+} from "../player/debug/debug-variables.js";
+import type { DebugView, DebugViewRequest } from "../player/debug/debug-view.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { heldTrace } from "../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
-import { PlayerBridge } from "../player/player-bridge.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
 import {
   playerRuntimeDebugVariables,
   playerRuntimeSnapshot,
   type PlayerRuntimeSession,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime/runtime-adapter.js";
 import {
   activePlayerRuntimeInteraction,
   playerRuntimeForeground,
   type PlayerSession,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";

@@ -1,0 +1,268 @@
+import { computed, ref, shallowRef, watch } from "vue";
+import { tryOnScopeDispose } from "@vueuse/core";
+import type { PlanMetadata } from "../../../../engine-bridge/player-ops.js";
+import type {
+  RandomControlOptions,
+  RandomDecision,
+  RandomDrawView,
+  RandomOutcome,
+  RandomSite,
+} from "../../../../../src/index.js";
+import { randomDrawAlternatives } from "../../../../../src/runtime/random/random-alternatives.js";
+import { randomOutcomeLabel, type CodeLine, type DrawCode } from "./randomDrawPresentation";
+import type { PlayerSessionHost } from "../../session/usePlayerSession";
+
+/** What a site does when it draws next: ask in the picker, go on naturally, or take its least-taken outcome. */
+export type DebugRandomNext = "ask" | "random" | "untried";
+
+/**
+ * Debug's random draws (DEBUGGER.md "Random draws"), in the debug room while the Debug features run. With **Choose
+ * outcomes** on, the session pauses at every random draw and the picker asks for its outcome, unless the draw's site is
+ * set to go on by itself next time: **Random**, its natural outcome, or **Prefer untried**, the outcome the site took
+ * least often while Debug chose them; **Least tried** in the picker does the same once. The settings and each site's
+ * outcomes, the last `KEPT_OUTCOMES` of them with their numbers and how often it took each, last as long as the Debug
+ * features run.
+ */
+export function useDebugRandom(player: PlayerSessionHost) {
+  const enabled = ref(false);
+  // A host without a debug room, such as one without script storage, offers none of it.
+  const available = computed(() => player.rooms.current.value === "debug");
+  const on = computed(() => enabled.value && available.value);
+  /** The sites set to something else than Ask, in the order they were set. */
+  const settings = shallowRef<ReadonlyMap<string, Exclude<DebugRandomNext, "ask">>>(new Map());
+  // Each site's outcomes while Debug decided its draws or the picker resolved them: how often it took each, by key, and
+  // the latest as the picker showed them then, since a list's items may change between draws, with how many came
+  // before.
+  const history = new Map<
+    string,
+    { readonly counts: Map<string, number>; readonly labels: string[]; dropped: number }
+  >();
+  const historyRevision = ref(0);
+  // What each site took, as `tried` gave it since the history last changed: the same object until then, so the picker,
+  // with all its outcomes, renders again only when the history changes.
+  let triedRevision = -1;
+  const triedSites = new Map<string, DebugRandomTried>();
+
+  /** Records that the draw's site took `outcome`; the returned function takes the record back. */
+  function record(draw: RandomDrawView, outcome: RandomOutcome): () => void {
+    let site = history.get(draw.site);
+    if (site === undefined)
+      history.set(draw.site, (site = { counts: new Map(), labels: [], dropped: 0 }));
+    const taken = site;
+    const key = outcomeKey(outcome);
+    taken.counts.set(key, (taken.counts.get(key) ?? 0) + 1);
+    taken.labels.push(randomOutcomeLabel(draw, outcome));
+    const dropped = taken.labels.length > KEPT_OUTCOMES ? taken.labels.shift() : undefined;
+    if (dropped !== undefined) taken.dropped += 1;
+    historyRevision.value += 1;
+    return () => {
+      const count = taken.counts.get(key)! - 1;
+      if (count === 0) taken.counts.delete(key);
+      else taken.counts.set(key, count);
+      taken.labels.pop();
+      if (dropped !== undefined) {
+        taken.labels.unshift(dropped);
+        taken.dropped -= 1;
+      }
+      historyRevision.value += 1;
+    };
+  }
+
+  /**
+   * The outcome the site took least often: of every outcome when the draw has few, the natural one first on a tie;
+   * otherwise of its representative alternatives, as a natural continuous value hardly ever repeats.
+   */
+  function leastTried(draw: RandomDrawView): RandomOutcome | null {
+    const { support } = draw;
+    const limit =
+      support.kind === "candidates" || support.kind === "weighted"
+        ? support.candidates.length
+        : undefined;
+    const { alternatives, complete } = randomDrawAlternatives(draw, limit);
+    const natural = draw.natural.kind === "failure" ? null : draw.natural;
+    const pool = complete && natural !== null ? [natural, ...alternatives] : alternatives;
+    const counts = history.get(draw.site)?.counts;
+    let least: RandomOutcome | null = null;
+    let leastCount = Infinity;
+    for (const outcome of pool) {
+      const times = counts?.get(outcomeKey(outcome)) ?? 0;
+      if (times < leastCount) [least, leastCount] = [outcome, times];
+    }
+    return least;
+  }
+
+  function decide(draw: RandomDrawView): RandomDecision {
+    const next = settings.value.get(draw.site) ?? "ask";
+    if (next === "ask") return { kind: "suspend" };
+    const natural = draw.natural.kind === "failure" ? null : draw.natural;
+    const outcome = next === "untried" ? leastTried(draw) : natural;
+    if (outcome === null || outcome === natural) {
+      if (natural !== null) record(draw, natural);
+      return { kind: "natural" };
+    }
+    record(draw, outcome);
+    return { kind: "choose", outcome };
+  }
+  const control: RandomControlOptions = Object.freeze({ decide });
+  watch(on, (active) => player.setRandomControl(active ? control : null), { immediate: true });
+  tryOnScopeDispose(() => player.setRandomControl(null));
+
+  // The plan's random sites, from its host by the plan's token, which is unique only within its connection. A reply is
+  // taken only while its connection and token still show.
+  const sites = shallowRef<ReadonlyMap<string, RandomSite>>(new Map());
+  watch(
+    [() => player.session.value?.connection ?? null, () => player.session.value?.planToken ?? null],
+    ([connection, plan]) => {
+      sites.value = new Map();
+      if (connection === null || plan === null) return;
+      connection.client.request("planMetadata", { plan }).then(
+        (reply) => {
+          const shown = player.session.value;
+          if (shown?.connection !== connection || shown.planToken !== plan) return;
+          // EVIDENCE: validation: `planMetadata` replies from the same build with the plan's metadata, or null.
+          const metadata = reply.result as PlanMetadata | null;
+          sites.value = new Map((metadata?.randomSites ?? []).map((site) => [site.id, site]));
+        },
+        // A lost Worker gives no sites.
+        () => {},
+      );
+    },
+    { immediate: true },
+  );
+  /** The draw the picker asks about, while Choose outcomes is on. */
+  const draw = computed(() => (on.value ? player.randomDraw.value : null));
+  // The code the picker shows for the draw, and its site's earlier outcomes as code, made in the engine's Worker. A reply
+  // is taken only while its draw, its plan and the outcomes it was made for still show.
+  const code = shallowRef<DrawCode | null>(null);
+  const historyLines = shallowRef<readonly CodeLine[]>([]);
+  watch(
+    [draw, sites, () => player.session.value?.planToken ?? null],
+    ([current, known, plan]) => {
+      code.value = null;
+      const site = current === null ? undefined : known.get(current.site);
+      const shown = player.session.value;
+      if (site === undefined || plan === null || shown === null) return;
+      shown.connection.client.request("drawCode", { plan, path: site.path, site }).then(
+        (reply) => {
+          if (draw.value !== current || player.session.value?.planToken !== plan) return;
+          // EVIDENCE: validation: `drawCode` replies from the same build with the draw's code, or null.
+          code.value = reply.result as DrawCode | null;
+        },
+        () => {},
+      );
+    },
+    { immediate: true },
+  );
+  watch(
+    [draw, historyRevision],
+    ([current], previous) => {
+      // Another draw's lines never show as this one's: they go before this draw's are asked for.
+      if (current !== previous?.[0]) historyLines.value = [];
+      const shown = player.session.value;
+      if (current === null || shown === null) return;
+      const tried = triedOf(current.site);
+      if (tried.history.length === 0) {
+        historyLines.value = [];
+        return;
+      }
+      shown.connection.client
+        .request("codeLines", { texts: tried.history, first: tried.first })
+        .then(
+          (reply) => {
+            if (draw.value !== current || triedOf(current.site) !== tried) return;
+            // EVIDENCE: validation: `codeLines` replies from the same build with the outcomes' code lines.
+            historyLines.value = reply.result as readonly CodeLine[];
+          },
+          () => {},
+        );
+    },
+    { immediate: true },
+  );
+
+  /** Resolves the paused draw with `outcome`, or naturally; `false` when the engine did not take it. */
+  function resolve(outcome: RandomOutcome | "natural"): boolean {
+    const current = draw.value;
+    if (current === null) return false;
+    // Recorded first: the session goes on at once, and the draws it meets next decide from it.
+    const resolved = outcome === "natural" ? current.natural : outcome;
+    const undo = resolved.kind === "failure" ? null : record(current, resolved);
+    const result = player.resolveRandomDraw(current.drawId, outcome);
+    if (result?.kind === "resolved") return true;
+    undo?.();
+    return false;
+  }
+  /** Resolves the paused draw once as Prefer untried would: Least tried. */
+  function resolveLeastTried(): boolean {
+    const current = draw.value;
+    if (current === null) return false;
+    const outcome = leastTried(current);
+    return resolve(outcome === null || outcome === current.natural ? "natural" : outcome);
+  }
+
+  /**
+   * What `site` took: its latest outcomes, oldest first, numbered from `first`, the number of its first draw; and how
+   * often it took each outcome, by `outcomeKey`.
+   */
+  function triedOf(site: string): DebugRandomTried {
+    if (triedRevision !== historyRevision.value) {
+      triedSites.clear();
+      triedRevision = historyRevision.value;
+    }
+    let tried = triedSites.get(site);
+    if (tried === undefined) {
+      const taken = history.get(site);
+      tried = {
+        history: taken === undefined ? [] : [...taken.labels],
+        first: (taken?.dropped ?? 0) + 1,
+        counts: new Map(taken?.counts),
+      };
+      triedSites.set(site, tried);
+    }
+    return tried;
+  }
+
+  function setNext(site: string, next: DebugRandomNext) {
+    const changed = new Map(settings.value);
+    if (next === "ask") changed.delete(site);
+    else changed.set(site, next);
+    settings.value = changed;
+  }
+
+  return {
+    /** Whether the debug room is shown, the only place the panel offers random draws. */
+    available,
+    /** The panel's Choose outcomes switch. */
+    enabled,
+    draw,
+    sites,
+    /** What `site` does next time it draws. */
+    next: (site: string): DebugRandomNext => settings.value.get(site) ?? "ask",
+    setNext,
+    /** The sites set to Random or Prefer untried, in the order they were set. */
+    settings: computed(() => [...settings.value].map(([site, next]) => ({ site, next }))),
+    resolve,
+    resolveLeastTried,
+    /** What `site` took; see `triedOf`. */
+    tried: triedOf,
+    /** The code the picker shows for the draw: its file with the draw marked, or `null` without the file's source. */
+    code,
+    /** The draw's site's earlier outcomes as code lines, as `tried` gives them. */
+    historyLines,
+  };
+}
+
+/** How many outcomes of a site the picker keeps for its Earlier outcomes; diagnostic tuning, not a script limit. */
+const KEPT_OUTCOMES = 1000;
+
+export interface DebugRandomTried {
+  readonly history: readonly string[];
+  readonly first: number;
+  readonly counts: ReadonlyMap<string, number>;
+}
+
+/** An outcome's identity: the same value, index, or order is the same outcome. */
+export function outcomeKey(outcome: RandomOutcome): string {
+  return JSON.stringify(outcome);
+}
+
+export type DebugRandom = ReturnType<typeof useDebugRandom>;

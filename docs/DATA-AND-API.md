@@ -122,7 +122,7 @@ the exact records, encryption, retention, synchronization, conflict, and migrati
 ### Script storage in the browser
 
 The Player persists TeaseScript `save`/`load`/`delete` values ([§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys))
-through a host-owned, asynchronous `ScriptStorageProvider` for one storage scope (`player/script-storage.ts`); the
+through a host-owned, asynchronous `ScriptStorageProvider` for one storage scope (`player/persistence/script-storage.ts`); the
 runtime boundary is [Runtime script storage](RUNTIME.md#script-storage). The host chooses a stable, opaque scope per
 script and player. Before each Start the Player loads the scope; during the session it persists every pending write
 through the provider and then reports it to the runtime, which keeps the previous value when the write failed. When
@@ -157,15 +157,26 @@ can be added there.
 
 A player moves the saved data of every script this browser has played, or of the scripts they tick, with its saved
 photos, by hand and offline to another browser or device through Player Settings
-([Player UI](ui/PLAYER-UI.md#player-settings)); `player/storage-transfer.ts` owns the format and `player/saved-data.ts`
+([Player UI](ui/PLAYER-UI.md#player-settings)); `player/persistence/storage-transfer.ts` owns the format and `player/persistence/saved-data.ts`
 lists and opens the scopes. It is not a session checkpoint and carries no session position, timers, transcript, or RNG
 state; a session moves with the [session transfer](#session-transfer). The document is UTF-8 JSON with exactly these fields:
 
 ```json
-{ "format": "teasescript-script-storage", "version": 2,
-  "scripts": [{ "scope": "<host storage scope>", "name": "<title or null>", "photos": ["captured-media:<uuid>:1"],
-                "entries": [{ "key": "player.photo", "value": "captured-media:<uuid>:1" }] }],
-  "images": [{ "reference": "captured-media:<uuid>:1", "byteLength": 68, "data": "<unpadded base64url>" }] }
+{
+  "format": "teasescript-script-storage",
+  "version": 2,
+  "scripts": [
+    {
+      "scope": "<host storage scope>",
+      "name": "<title or null>",
+      "photos": ["captured-media:<uuid>:1"],
+      "entries": [{ "key": "player.photo", "value": "captured-media:<uuid>:1" }]
+    }
+  ],
+  "images": [
+    { "reference": "captured-media:<uuid>:1", "byteLength": 68, "data": "<unpadded base64url>" }
+  ]
+}
 ```
 
 Each script's `entries` are its stored values in their `SerializableRuntimeValue` representation, one per line; its
@@ -204,19 +215,38 @@ later.
 ### Session transfer
 
 A player moves the session they play by hand and offline to another browser or device, where Continue goes on with it
-as after a reload, through Player Settings ([Player UI](ui/PLAYER-UI.md#player-settings)); `player/session-transfer.ts`
+as after a reload, through Player Settings ([Player UI](ui/PLAYER-UI.md#player-settings)); `player/persistence/session-transfer.ts`
 owns the format. The session travels as its canonical checkpoint, which the runtime exports and restores
 (`createPlayerRuntimeRestorePoint` and `restorePlayerRuntimeSession`), not in a second save format. The document is
 UTF-8 JSON with exactly these fields:
 
 ```json
-{ "format": "teasescript-session", "version": 1,
-  "scope": "<host storage scope>", "name": "<title or null>",
-  "checkpoint": { "format": "teasescript-checkpoint", "version": "<current revision>", "plan": {}, "snapshot": {} },
+{
+  "format": "teasescript-session",
+  "version": 1,
+  "scope": "<host storage scope>",
+  "name": "<title or null>",
+  "checkpoint": {
+    "format": "teasescript-checkpoint",
+    "version": "<current revision>",
+    "plan": {},
+    "snapshot": {}
+  },
   "events": [{ "sequence": 1, "kind": "say" }],
   "entries": [{ "key": "player.photo", "value": "captured-media:<uuid>:1" }],
-  "media": [{ "reference": "captured-media:<uuid>:1", "kind": "image", "type": "image/png", "width": 24,
-              "height": 16, "durationMs": null, "byteLength": 68, "data": "<unpadded base64url>" }] }
+  "media": [
+    {
+      "reference": "captured-media:<uuid>:1",
+      "kind": "image",
+      "type": "image/png",
+      "width": 24,
+      "height": 16,
+      "durationMs": null,
+      "byteLength": 68,
+      "data": "<unpadded base64url>"
+    }
+  ]
+}
 ```
 
 `checkpoint` is the checkpoint as the runtime writes it, at the current [revision](RUNTIME.md#format-evolution);

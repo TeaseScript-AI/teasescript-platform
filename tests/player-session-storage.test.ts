@@ -9,14 +9,14 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import {
   pendingPlayerRuntimeStorageWrite,
   playerRuntimePacingGate,
-} from "../player/runtime-view.js";
-import type { DebugRecorder } from "../player/debug-recorder.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+} from "../player/runtime/runtime-view.js";
+import type { DebugRecorder } from "../player/debug/debug-recorder.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import {
   compileSource,
   createCheckpoint,
@@ -87,7 +87,7 @@ let usePlayerSession: (options: {
 before(async () => {
   await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.

@@ -2,7 +2,7 @@ import type {
   CapturedMediaRecord,
   CapturedMediaRepository,
   StoredCapturedMedia,
-} from "../../player/captured-media.js";
+} from "../../player/media/captured-media.js";
 
 /** Durable storage stand-in with IndexedDB's insert-only `add`; `records` may hold arbitrary stored data. */
 export class FakeMediaRepository implements CapturedMediaRepository {

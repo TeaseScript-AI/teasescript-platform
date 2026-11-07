@@ -6,23 +6,26 @@ import {
   memoryKeptSessionStore,
   keptSession,
   type KeptSessionStore,
-} from "../player/kept-sessions.js";
+} from "../player/persistence/kept-sessions.js";
 import {
   activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
   submitPlayerRuntimeComposer as rawSubmitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import { playerRuntimeForeground } from "../player/runtime-view.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import { playerRuntimeForeground } from "../player/runtime/runtime-view.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import {
   readPlayerTransferFile,
   sessionTransferFile,
   type SessionTransfer,
-} from "../player/session-transfer.js";
+} from "../player/persistence/session-transfer.js";
 import {
   INSTRUCTION_PLAN_VERSION,
   RUNTIME_SNAPSHOT_VERSION,
@@ -87,7 +90,7 @@ let usePlayerSession: (options: {
 before(async () => {
   await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.

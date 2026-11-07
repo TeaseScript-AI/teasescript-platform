@@ -9,7 +9,7 @@ import { readFile } from "node:fs/promises";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import { gunzipSync } from "node:zlib";
 
-const exports = await import(new URL("../dist/player/debug-export.js", import.meta.url).href);
+const exports = await import(new URL("../dist/player/debug/debug-export.js", import.meta.url).href);
 const {
   DEBUG_EXPORT_MAX_JSON_BYTES,
   DebugExportError,

@@ -79,7 +79,7 @@ controlling source adopts it; remove this section and its router references when
   API names and author syntax remain open.
 - **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
   optional labeling. Authored timers carry visible/mystery/hidden display and optional labels (see
-  [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime-adapter.ts` derives presented timers and
+  [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime/runtime-adapter.ts` derives presented timers and
   observation deadlines from runtime state. The Player renders runtime timers in its right rail; its
   development preview shows timer fixtures only while no runtime timer is presented. Stable generic-label numbering across timer lifecycle changes remains unsynchronized.
 
@@ -123,17 +123,17 @@ present even when empty.
 ## Player conditions
 
 The Player combines independent conditions rather than choosing a phone, tablet, or desktop mode. The Player exposes
-them on its shell; [`usePlayerConditions.ts`](../../player/vue/src/usePlayerConditions.ts) owns their
+them on its shell; [`usePlayerConditions.ts`](../../player/vue/src/interaction/usePlayerConditions.ts) owns their
 shared browser signals. Add a responsive rule to the condition that describes its actual constraint; do not infer device
 identity or add a separate width breakpoint for touch or rounded corners.
 
-| Condition | Signal | Current behavior |
-| --- | --- | --- |
-| Horizontal space | Usable visual-viewport width compared with the greater of `900px` and the complete minimum dock composition, including the chosen menu width | The tool owner switches between a dock and an overlay drawer. A narrow desktop window can use the drawer; wider menu labels may require more than `900px`. |
-| Vertical space | Usable visual-viewport height; `<= 700px` is the current compact baseline | Timers use compact presentation when either the horizontal or vertical condition is constrained. Fullscreen is a separate state. |
-| Touch and hover | `any-pointer: coarse` and `any-hover: hover`, independently; each pointer event still identifies the pointer actually used | Touch taps, mouse hover, and keyboard focus retain their distinct menu behavior, including on hybrid devices. Primary coarse input without hover identifies the fallback corner-clearance case. |
-| Raised software keyboard | Composer input focused while the visual viewport shrinks by more than the current `120px` detection allowance on a touch-capable browser | The composer uses the normal reading width above the keyboard; Send keeps the existing focus behavior. |
-| Composer edge clearance | Browser safe-area inset; when it reports zero, a touch-first viewport spans the screen width and the composer is at the bottom near its sides | Only the composer receives up to `32px` side clearance. A narrow browser window on a touchscreen laptop keeps the normal composer width. This does not change the transcript, tool layout, or bottom spacing. |
+| Condition                | Signal                                                                                                                                                             | Current behavior                                                                                                                                                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Horizontal space         | Usable visual-viewport width compared with the greater of `900px` and the complete minimum dock composition, including the chosen menu width                       | The tool owner switches between a dock and an overlay drawer. A narrow desktop window can use the drawer; wider menu labels may require more than `900px`.                                                                                               |
+| Vertical space           | Usable visual-viewport height; `<= 700px` is the current compact baseline                                                                                          | Timers use compact presentation when either the horizontal or vertical condition is constrained. Fullscreen is a separate state.                                                                                                                         |
+| Touch and hover          | `any-pointer: coarse` and `any-hover: hover`, independently; each pointer event still identifies the pointer actually used                                         | Touch taps, mouse hover, and keyboard focus retain their distinct menu behavior, including on hybrid devices. Primary coarse input without hover identifies the fallback corner-clearance case.                                                          |
+| Raised software keyboard | Composer input focused while the visual viewport shrinks by more than the current `120px` detection allowance on a touch-capable browser                           | The composer uses the normal reading width above the keyboard; Send keeps the existing focus behavior.                                                                                                                                                   |
+| Composer edge clearance  | Browser safe-area inset; when it reports zero, a touch-first viewport spans the screen width and the composer is at the bottom near its sides                      | Only the composer receives up to `32px` side clearance. A narrow browser window on a touchscreen laptop keeps the normal composer width. This does not change the transcript, tool layout, or bottom spacing.                                            |
 | Fullscreen top clearance | Browser top safe-area inset; in fullscreen, a touch-first viewport reaching the display edge also needs a minimum when the browser reports zero at a camera cutout | The Player shell begins its usable rectangle below that clearance. Media, title controls, tools, transcript, and composer all stay inside it. The canvas background continues behind the clearance. Normal presentation uses the browser-reported inset. |
 
 These conditions can overlap. For example, a tablet in split screen can have constrained horizontal space, touch
@@ -159,19 +159,19 @@ available space.
 The Player shell itself does not normally scroll. Scrolling belongs to the specific region that owns the overflowing
 content. Major numerical values below are POC reconstruction/tuning baselines unless explicitly marked otherwise.
 
-| Item | POC baseline / intended rule |
-| --- | --- |
-| Player viewport | full viewport width and currently usable visual-viewport height; `100dvh` is the CSS baseline and the outer document is not the normal scroll owner |
-| Player chrome outer spacing | fixed `8px` for top controls, menu edges and right rail; independent of root font size |
-| Player chrome control size | compact controls use `calc(1rem + 16px)`; top controls share a size derived from icon/text size and padding |
-| top-control overlay | shared control size plus `8px` outer spacing above and below; it does not reserve a separate title row in the stage/conversation split |
-| content below top controls | one 16px visible gap from the controls' lower edge to the first tool-menu control or timer; no separate outer timer-halo space is reserved |
+| Item                          | POC baseline / intended rule                                                                                                                                                                           |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Player viewport               | full viewport width and currently usable visual-viewport height; `100dvh` is the CSS baseline and the outer document is not the normal scroll owner                                                    |
+| Player chrome outer spacing   | fixed `8px` for top controls, menu edges and right rail; independent of root font size                                                                                                                 |
+| Player chrome control size    | compact controls use `calc(1rem + 16px)`; top controls share a size derived from icon/text size and padding                                                                                            |
+| top-control overlay           | shared control size plus `8px` outer spacing above and below; it does not reserve a separate title row in the stage/conversation split                                                                 |
+| content below top controls    | one 16px visible gap from the controls' lower edge to the first tool-menu control or timer; no separate outer timer-halo space is reserved                                                             |
 | stage/conversation allocation | user-adjustable split, currently starting at 60% stage / 40% conversation; the starting ratio and panel minimums remain provisional. See [Stage and media presentation](#stage-and-media-presentation) |
-| tool panel | independent width presets, currently `14rem`, `18rem`, `24rem`, and `32rem`, with `18rem` as the default; available dock/drawer space may cap the rendered width. These values remain provisional |
-| readable conversation maximum | current `880px` reading width inside a `896px` outer column; keep a cap for ultrawide readability and visually retest, including browser zoom |
-| protected primary content | the current fit calculation protects a `380px` conversation baseline plus surrounding chrome/gutters; remeasure with the complete dock composition |
-| normal conversation side gap | current `8px` on each side of the reading width; the narrow composer has separate edge clearance |
-| constrained tools drawer | shows the menu or one active tool; the active tool's selected width is capped at `90%` of usable viewport width. Its saved wide-layout width is preserved |
+| tool panel                    | independent width presets, currently `14rem`, `18rem`, `24rem`, and `32rem`, with `18rem` as the default; available dock/drawer space may cap the rendered width. These values remain provisional      |
+| readable conversation maximum | current `880px` reading width inside a `896px` outer column; keep a cap for ultrawide readability and visually retest, including browser zoom                                                          |
+| protected primary content     | the current fit calculation protects a `380px` conversation baseline plus surrounding chrome/gutters; remeasure with the complete dock composition                                                     |
+| normal conversation side gap  | current `8px` on each side of the reading width; the narrow composer has separate edge clearance                                                                                                       |
+| constrained tools drawer      | shows the menu or one active tool; the active tool's selected width is capped at `90%` of usable viewport width. Its saved wide-layout width is preserved                                              |
 
 Keeping the stage roughly square when practical is a design goal, not a hard 1:1 layout invariant. The goal exists so
 both portrait and landscape media remain useful. Side panels should not casually crush the stage into a narrow strip,
@@ -211,24 +211,24 @@ The reading size is shared by transcript bubbles, loose prose, and composer inpu
 and authored `[size]` spans scale relative to their containing text, including inside headings. Changing the reading
 size therefore scales ordinary text, headings, and authored size spans together without changing Player chrome text.
 
-| Element | Current Player baseline |
-| --- | --- |
-| UI font stack | system stack `ui-sans-serif, system-ui, sans-serif`; the POC bundles no UI web font |
-| title | `14px`, weight `500` |
-| speaker name | current bubble attribution uses `0.75rem`, weight `500`; this remains a visual baseline |
-| speaker message and loose prose | shared reading size `1rem` (16px at the current browser base), line-height `1em + 8px`; authored speaker font may replace the UI font |
-| player-authored message | shared reading size, following the same transcript rhythm |
-| normal composer text / Send | composer uses the shared reading size; Send remains `14px`, weight `700` |
-| narrow composer text | composer keeps the shared reading size; Send remains `14px` |
-| timer time/value | tabular numerals; size follows timer diameter, with smaller text for visible times of one hour or more. Mystery typography does not expose duration; exact type proportions remain provisional |
-| Player action button label | `0.875rem` (14px at the current browser base), weight `600`, line-height `1.3` |
-| global controls | shared derived top-control size and corner radius (`--player-top-control-radius`), also for the truncating title pill and the sidebar's own controls, tool icons, and panel-header controls; display controls share a translucent group |
-| dialog close (X) | a `32px` button with a `20px` icon, centred `24px` from the dialog's top and right edges; its click target reaches `4px` further on each side (`40px`) |
-| tool panel | per-tool width presets capped by available allocation; see the global geometry table |
-| tool-panel header | shared chrome spacing/control sizes; a title, reordering grip, Panel settings, and pin control. Panel settings uses a compact trigger when its full label does not fit |
-| integrated composer shell (POC tuning candidate) | `42px` high for one line at the current reading size, `24px` corner radius, `2px` vertical padding, and `8px`/`4px` start/end padding |
-| composer input / Send (POC tuning candidate) | `36px` minimum height at the current reading size; input has `6px` vertical padding and grows upward for longer text; Send keeps its full button bounds while its fill is inset `2px` vertically |
-| right background control | wraps inside the current stage-rail allocation and uses the shared Player action-button material; exact rail sizing remains provisional |
+| Element                                          | Current Player baseline                                                                                                                                                                                                                 |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| UI font stack                                    | system stack `ui-sans-serif, system-ui, sans-serif`; the POC bundles no UI web font                                                                                                                                                     |
+| title                                            | `14px`, weight `500`                                                                                                                                                                                                                    |
+| speaker name                                     | current bubble attribution uses `0.75rem`, weight `500`; this remains a visual baseline                                                                                                                                                 |
+| speaker message and loose prose                  | shared reading size `1rem` (16px at the current browser base), line-height `1em + 8px`; authored speaker font may replace the UI font                                                                                                   |
+| player-authored message                          | shared reading size, following the same transcript rhythm                                                                                                                                                                               |
+| normal composer text / Send                      | composer uses the shared reading size; Send remains `14px`, weight `700`                                                                                                                                                                |
+| narrow composer text                             | composer keeps the shared reading size; Send remains `14px`                                                                                                                                                                             |
+| timer time/value                                 | tabular numerals; size follows timer diameter, with smaller text for visible times of one hour or more. Mystery typography does not expose duration; exact type proportions remain provisional                                          |
+| Player action button label                       | `0.875rem` (14px at the current browser base), weight `600`, line-height `1.3`                                                                                                                                                          |
+| global controls                                  | shared derived top-control size and corner radius (`--player-top-control-radius`), also for the truncating title pill and the sidebar's own controls, tool icons, and panel-header controls; display controls share a translucent group |
+| dialog close (X)                                 | a `32px` button with a `20px` icon, centred `24px` from the dialog's top and right edges; its click target reaches `4px` further on each side (`40px`)                                                                                  |
+| tool panel                                       | per-tool width presets capped by available allocation; see the global geometry table                                                                                                                                                    |
+| tool-panel header                                | shared chrome spacing/control sizes; a title, reordering grip, Panel settings, and pin control. Panel settings uses a compact trigger when its full label does not fit                                                                  |
+| integrated composer shell (POC tuning candidate) | `42px` high for one line at the current reading size, `24px` corner radius, `2px` vertical padding, and `8px`/`4px` start/end padding                                                                                                   |
+| composer input / Send (POC tuning candidate)     | `36px` minimum height at the current reading size; input has `6px` vertical padding and grows upward for longer text; Send keeps its full button bounds while its fill is inset `2px` vertically                                        |
+| right background control                         | wraps inside the current stage-rail allocation and uses the shared Player action-button material; exact rail sizing remains provisional                                                                                                 |
 
 Tool-panel header and body share one component surface. The header separator and shared controls provide hierarchy
 without adding a second chrome-colour band.
@@ -476,7 +476,7 @@ step.
 The Player keeps the session in this browser: at each interaction it newly presents, a lock's dialog or password field
 too, also one that asks again after a block, when it ends, and when the page
 is hidden, it stores the session's state, the events that led to it, and the photos only the session uses, which no
-save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/kept-sessions.ts`). Opening the script
+save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/persistence/kept-sessions.ts`). Opening the script
 again, after a reload or with the browser closed in between, shows **Continue** on the start page instead of Start; it
 goes on from the last kept point, with those photos as session media again; a stored photo the kept session uses
 stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
@@ -560,7 +560,7 @@ scrolls, and its rows and buttons are at least 44px tall.
 Player notices tell the player that something about the session's environment matters, such as blocked audio,
 unavailable storage, or a camera problem. They never stop the session and are separate from runtime developer warnings,
 which are creator diagnostics about a script location. Host features publish them through one Player-owned channel
-(`player/notices.ts`) with fixed Player wording per condition; a condition has one notice, which it replaces or
+(`player/presentation/notices.ts`) with fixed Player wording per condition; a condition has one notice, which it replaces or
 withdraws, so repeated causes do not stack.
 
 Notices belong to the Player, not the story, so they never appear in the conversation. A new or replaced notice shows

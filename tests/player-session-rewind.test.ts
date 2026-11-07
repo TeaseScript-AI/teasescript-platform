@@ -2,25 +2,25 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, type Ref } from "vue";
 
-import type { DebugHistoryPoint, DebugHistorySpill } from "../player/debug-history.js";
-import type { DebugRecorder } from "../player/debug-recorder.js";
+import type { DebugHistoryPoint, DebugHistorySpill } from "../player/debug/debug-history.js";
+import type { DebugRecorder } from "../player/debug/debug-recorder.js";
 import {
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice as rawSelectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import { playerRuntimeForeground, type PlayerSession } from "../player/runtime-view.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
-import { memoryKeptRoomStore, type KeptRoomStore } from "../player/kept-sessions.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import { playerRuntimeForeground, type PlayerSession } from "../player/runtime/runtime-view.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
+import { memoryKeptRoomStore, type KeptRoomStore } from "../player/persistence/kept-sessions.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../src/index.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { published } from "./helpers/debug-readers.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { hostTrace, loadHostFacade, onHost } from "./helpers/host-sessions.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 
 /** The value trace the host's session runs with, as the host holds it. */
 const traceOf = (session: PlayerRuntimeSession | null | undefined) =>
@@ -123,12 +123,14 @@ let usePlayerDebug: (
 before(async () => {
   await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const rewind: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDebugRewind.ts",
+    "player/vue/src/debug/history/useDebugRewind.ts",
   );
-  const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/usePlayerDebug.ts");
+  const debug: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/debug/usePlayerDebug.ts",
+  );
   assert.equal(typeof debug.usePlayerDebug, "function");
   // EVIDENCE: validation: as above.
   usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;

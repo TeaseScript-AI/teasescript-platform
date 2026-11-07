@@ -9,7 +9,7 @@ import {
   type PlanJsonEvent,
   type PlanJsonLease,
   type PlanJsonMessage,
-} from "../player/plan-json-lease.js";
+} from "../player/persistence/plan-json-lease.js";
 import {
   PRODUCERS,
   RETIREMENTS,
@@ -21,7 +21,7 @@ import {
 } from "./helpers/plan-json-family.js";
 
 /*
- * How long the host holds a plan's JSON (`player/plan-json-lease.ts`), over the generated family of
+ * How long the host holds a plan's JSON (`player/persistence/plan-json-lease.ts`), over the generated family of
  * `helpers/plan-json-family.ts`: `settle` against a model of the host's ops (`ops/persistence.ts`). The model keeps a
  * reservation apart from its write: `preparePlanText` reserves, its task writes (or fails to, leaving the write to the
  * first reader), `releasePlanText` cancels or removes, and a reader reads a written slot, writes a reserved one once,

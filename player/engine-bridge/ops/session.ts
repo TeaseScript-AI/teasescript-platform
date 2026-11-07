@@ -18,8 +18,8 @@ import {
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeCatchUp,
   type PlayerRuntimeSession,
-} from "../../runtime-adapter.js";
-import { playerRuntimePacingGate } from "../../runtime-view.js";
+} from "../../runtime/runtime-adapter.js";
+import { playerRuntimePacingGate } from "../../runtime/runtime-view.js";
 import { isValidEpochMilliseconds } from "../../../src/temporal.js";
 import { everyItem, exactly, isRecord, isStringArray, isTime } from "../argument-checks.js";
 import { instructionFacts } from "../instruction-facts.js";

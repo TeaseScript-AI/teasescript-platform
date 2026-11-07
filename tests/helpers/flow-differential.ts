@@ -8,7 +8,7 @@ import type { RuntimePlayerProfileInput } from "../../src/runtime/host-data/play
 import type { RuntimeLockActionSnapshot } from "../../src/runtime/actions/model.js";
 import { runtimeTimedWork } from "../../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSession, type RuntimeSessionView } from "../../src/runtime/session.js";
-import type { PlayerLockAnswer } from "../../player/runtime-adapter.js";
+import type { PlayerLockAnswer } from "../../player/runtime/runtime-adapter.js";
 import type { RuntimeStatus } from "../../src/runtime/snapshot/state.js";
 
 /*

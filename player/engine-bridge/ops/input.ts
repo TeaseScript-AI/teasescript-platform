@@ -1,4 +1,4 @@
-import type { DebugAnswerInput } from "../../debug-export.js";
+import type { DebugAnswerInput } from "../../debug/debug-export.js";
 import {
   activatePlayerRuntimeButton,
   answeredByPlayerInput,
@@ -19,8 +19,8 @@ import {
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
   type PlayerRuntimeSession,
-} from "../../runtime-adapter.js";
-import { activePlayerRuntimeInteraction } from "../../runtime-view.js";
+} from "../../runtime/runtime-adapter.js";
+import { activePlayerRuntimeInteraction } from "../../runtime/runtime-view.js";
 import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 import { exactly, isRecord } from "../argument-checks.js";
 import { admissionOf, isHeldMedia, type HeldMedia } from "../held-media.js";

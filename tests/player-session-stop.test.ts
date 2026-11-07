@@ -8,15 +8,19 @@ import {
   chooseDebugPhoto,
   NO_PERSONAL_CONTENT,
   type DebugExportCandidate,
-} from "../player/debug-export-assembly.js";
-import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
-import type { DebugRecorder, DebugRecording } from "../player/debug-recorder.js";
-import type * as CompileProject from "../player/compile-project.js";
+} from "../player/debug/debug-export-assembly.js";
+import {
+  debugExportFile,
+  parseDebugExport,
+  replayDebugExport,
+} from "../player/debug/debug-export.js";
+import type { DebugRecorder, DebugRecording } from "../player/debug/debug-recorder.js";
+import type * as CompileProject from "../player/runtime/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
-import type * as RuntimeAdapter from "../player/runtime-adapter.js";
-import type * as RuntimeView from "../player/runtime-view.js";
-import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+import type * as RuntimeAdapter from "../player/runtime/runtime-adapter.js";
+import type * as RuntimeView from "../player/runtime/runtime-view.js";
+import type { PlayerRuntimeSession } from "../player/runtime/runtime-adapter.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { published } from "./helpers/debug-readers.js";
@@ -87,19 +91,21 @@ let view: typeof RuntimeView;
 before(async () => {
   await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const rewind: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDebugRewind.ts",
+    "player/vue/src/debug/history/useDebugRewind.ts",
   );
   const time: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDevelopmentTime.ts",
+    "player/vue/src/debug/useDevelopmentTime.ts",
   );
   const adapter = {
-    ...(await loadPlayerModule("player/runtime-adapter.ts")),
-    ...(await loadPlayerModule("player/compile-project.ts")),
+    ...(await loadPlayerModule("player/runtime/runtime-adapter.ts")),
+    ...(await loadPlayerModule("player/runtime/compile-project.ts")),
   };
-  const viewModule: Record<string, unknown> = await loadPlayerModule("player/runtime-view.ts");
+  const viewModule: Record<string, unknown> = await loadPlayerModule(
+    "player/runtime/runtime-view.ts",
+  );
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof rewind.useDebugRewind, "function");
   assert.equal(typeof time.useDevelopmentTime, "function");

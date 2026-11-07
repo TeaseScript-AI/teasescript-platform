@@ -5,14 +5,14 @@ import test from "node:test";
 import ts from "typescript";
 
 /*
- * The persistence operations of the Player's session host (`player/vue/src/usePlayerSession.ts`: keep, the kept
+ * The persistence operations of the Player's session host (`player/vue/src/session/usePlayerSession.ts`: keep, the kept
  * session's restore, the session import) reach the page's stores and the host only through their ownership's handles
- * (`player/persistence-ownership.ts`), so a stale operation's call is refused wherever it is made. This check reads the
+ * (`player/persistence/persistence-ownership.ts`), so a stale operation's call is refused wherever it is made. This check reads the
  * operations' syntax tree, with every closure nested in them, and fails a use of a raw resource there. It covers the
  * operations' own code, not a helper they call: a new branch inside a helper still needs a source review.
  */
 
-const SOURCE = "player/vue/src/usePlayerSession.ts";
+const SOURCE = "player/vue/src/session/usePlayerSession.ts";
 
 /** The persistence operations, by name; any other function of the host that takes an ownership is checked too. */
 const OPERATIONS = [

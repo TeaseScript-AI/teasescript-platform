@@ -10,14 +10,17 @@ import {
   type KeptRoomStore,
   type KeptSessionStore,
   type KeptSessionUpdate,
-} from "../player/kept-sessions.js";
+} from "../player/persistence/kept-sessions.js";
 import {
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import { compilePlayerProject } from "../player/compile-project.js";
-import { StaleOperation, persistenceOwnership } from "../player/persistence-ownership.js";
+} from "../player/runtime/runtime-adapter.js";
+import { compilePlayerProject } from "../player/runtime/compile-project.js";
+import {
+  StaleOperation,
+  persistenceOwnership,
+} from "../player/persistence/persistence-ownership.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import { answerWith, type Intent } from "./helpers/player-input.js";
 import {
@@ -45,9 +48,9 @@ import {
   type Variant,
   type VariantName,
 } from "./helpers/plan-json-family.js";
-import { CapturedMediaStore, type CapturedMediaRecord } from "../player/captured-media.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+import { CapturedMediaStore, type CapturedMediaRecord } from "../player/media/captured-media.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import type { InstructionPlan } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
@@ -135,7 +138,7 @@ before(async () => {
   // EVIDENCE: validation: the bundle's backend factory, checked as a function above.
   createInProcessBackend = facade.createInProcessBackend as typeof createInProcessBackend;
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
@@ -871,7 +874,7 @@ test("the composable's family drives every producer of the shared family", () =>
 });
 
 /*
- * Continuation ownership (`player/persistence-ownership.ts`), closed at admission: an operation reaches its stores and
+ * Continuation ownership (`player/persistence/persistence-ownership.ts`), closed at admission: an operation reaches its stores and
  * the host only through its ownership's handles, which admit no call once it is stale. The family is generated from the
  * descriptor's variants (`VARIANTS`): each operation on each route it can take, with the fixtures that reach its calls
  * (photos only the session uses, saved photos into a browser that has none, two of them, one another tab stored first,

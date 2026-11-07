@@ -62,8 +62,8 @@ test("the main realm loads exactly the src modules ALLOWED_SOURCE lists", () => 
 });
 
 test("each export of runtime-adapter.ts and runtime-view.ts has its place in the inventory", async () => {
-  const adapter = await import("../player/runtime-adapter.js");
-  const view = await import("../player/runtime-view.js");
+  const adapter = await import("../player/runtime/runtime-adapter.js");
+  const view = await import("../player/runtime/runtime-view.js");
   assert.deepEqual(Object.keys(adapter).sort(), Object.keys(ADAPTER_EXPORTS).sort());
   assert.deepEqual(Object.keys(view).sort(), [...VIEW_READERS].sort());
 });

@@ -7,13 +7,19 @@ import {
   resumePlayerRuntimeRandomDraw,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
-import { playerRuntimeAwaitsHost } from "../player/runtime-view.js";
-import { memoryKeptRoomStore, memoryKeptSessionStore } from "../player/kept-sessions.js";
-import type { DebugRecorder } from "../player/debug-recorder.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+import { playerRuntimeAwaitsHost } from "../player/runtime/runtime-view.js";
+import {
+  memoryKeptRoomStore,
+  memoryKeptSessionStore,
+} from "../player/persistence/kept-sessions.js";
+import type { DebugRecorder } from "../player/debug/debug-recorder.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import {
   listRandomSites,
   type InstructionPlan,
@@ -24,8 +30,8 @@ import {
   type RuntimeScriptStorageEntrySnapshot,
 } from "../src/index.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import { drawCode, fileCode, outcomeLines } from "../player/random-draw-code.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import { drawCode, fileCode, outcomeLines } from "../player/debug/random-draw-code.js";
 import { loadSourceDebugSidecar } from "../src/runtime/debug/source-sidecar.js";
 import { createSourceDebugSidecar } from "../src/index.js";
 
@@ -115,13 +121,13 @@ let presentation: Presentation;
 
 before(async () => {
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const random: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDebugRandom.ts",
+    "player/vue/src/debug/random/useDebugRandom.ts",
   );
   const shown: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/randomDrawPresentation.ts",
+    "player/vue/src/debug/random/randomDrawPresentation.ts",
   );
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof random.useDebugRandom, "function");

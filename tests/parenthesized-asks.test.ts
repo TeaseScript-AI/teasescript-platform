@@ -7,9 +7,9 @@ import {
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import { playerRuntimeForeground } from "../player/runtime-view.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import { playerRuntimeForeground } from "../player/runtime/runtime-view.js";
 import { compileSource } from "../src/compiler.js";
 import { parse } from "../src/parser.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
