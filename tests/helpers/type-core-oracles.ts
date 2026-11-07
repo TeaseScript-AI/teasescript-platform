@@ -482,9 +482,12 @@ export function occurrences(answers: Answers, order: (items: string[]) => string
 
 /**
  * What a program publishes with two orders set aside (TABLE r4.185, G5's stops whose own entries merge into one): the
- * order of the items in an answer and of the kinds in a decided admitted type. Every binding's admitted type and decider
- * site at its root, its element and each known property two levels down; every occurrence's answer (`occurrences`, its
- * items sorted). Its questions spend the analysis's allowance and stop there (`asked`).
+ * order of the items in an answer and of the kinds in a decided admitted type. Every binding's admitted type and
+ * decider site at its root, its element and each known property two levels down; every occurrence's answer
+ * (`occurrences`, its items sorted). Test-only, for small sources (`type-core-oracles.test.ts`,
+ * `type-core-contract.test.ts`), never a publication the families runner reads; their questions are not under the
+ * oracle's own bound (`Questions`): past the finished analysis's allowance they are asked again on the stopped analysis
+ * (`asked`), so the text holds the stopped answers with no mark of the stop.
  */
 export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[]): string {
   return asked(answers, (answers) => upToOrder(answers, bindings));
@@ -518,8 +521,9 @@ function upToOrder(answers: Answers, bindings: readonly PlaceId[]): string {
 /**
  * #1610's identity, the order of property names being author-facing (an absent property's message lists them as the
  * search finds them, `toJson` walks them so): each binding's property names two levels down in that order, the bindings
- * in the order given, and every diagnostic's message. Its questions spend the analysis's allowance and stop there
- * (`asked`).
+ * in the order given, and every diagnostic's message. For small sources: their questions are not under the oracle's own
+ * bound (`Questions`): past the finished analysis's allowance they are asked again on the stopped analysis (`asked`),
+ * so the text holds the stopped answers with no mark of the stop.
  */
 export function orderedNames(
   answers: Answers,
@@ -547,8 +551,9 @@ export function orderedNames(
 
 /**
  * A program's outcome, diagnostics and checks, and every expression occurrence's answer (its offset, route, place,
- * obligations and items whole, each with its ingress leaves), in their order. Its questions spend the analysis's
- * allowance and stop there (`asked`).
+ * obligations and items whole, each with its ingress leaves), in their order. For small sources: their questions are
+ * not under the oracle's own bound (`Questions`): past the finished analysis's allowance they are asked again on the
+ * stopped analysis (`asked`), so the text holds the stopped answers with no mark of the stop.
  */
 export function everyAnswer(answers: Answers): string {
   return asked(answers, allAnswers);
@@ -570,8 +575,9 @@ function allAnswers(answers: Answers): string {
 
 /**
  * Every occurrence's items with their writers and their ingress leaves sorted (#1196: each ingress names its own leaf,
- * whatever order the leaves are found in), one line per node. Its questions spend the analysis's allowance and stop
- * there (`asked`).
+ * whatever order the leaves are found in), one line per node. For small sources: their questions are not under the
+ * oracle's own bound (`Questions`): past the finished analysis's allowance they are asked again on the stopped analysis
+ * (`asked`), so the text holds the stopped answers with no mark of the stop.
  */
 export function ingressAnswers(answers: Answers): string {
   return asked(answers, ingressLines);
