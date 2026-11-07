@@ -486,7 +486,8 @@ export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource
     alone,
     // (a warning whose facts were not asked, as after a stop, proves no plain kept `let` where its text holds an
     // askChoice, whose answer reaches it only through its own operands: #1352)
-    ...(diagnostic.class !== "warning-runtime-check"
+    ...(diagnostic.class !== "warning-runtime-check" &&
+    !(diagnostic.class === "compile-error" && diagnostic.requiredCheck !== undefined)
       ? {}
       : diagnostic.keeps !== undefined
         ? { keeps: diagnostic.keeps }
@@ -510,7 +511,8 @@ export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource
         source,
         diagnostic.site,
         diagnostic.expects,
-        diagnosed,
+        // (its fix is the warning's, whose own reads its program performs where they stand, TABLE r4.168)
+        { ...diagnosed, severity: "warning" },
       ),
     ]
       .filter((sentence) => sentence !== "")

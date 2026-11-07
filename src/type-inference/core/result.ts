@@ -480,6 +480,8 @@ export type CoreDiagnostic =
       readonly present?: Presence;
       /** N10: the required check a route to the use lacks (AD-1), where the error is the route rule's. */
       readonly requiredCheck?: RequiredCheck;
+      /** The route rule's error: what a new variable keeping its subject declares, as the warning's (`keeps`). */
+      readonly keeps?: readonly ItemTag[] | "unproved";
     }
   | WrittenTypeError
   | {

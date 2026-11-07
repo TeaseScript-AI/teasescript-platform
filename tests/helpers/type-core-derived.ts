@@ -1856,7 +1856,14 @@ export function derive(
       const path = check.target === store.name ? [] : check.target.slice(prefix.length).split(".");
       owed.set(statement, [...(owed.get(statement) ?? []), { path, against: check.against }]);
       discharges.push({ statement });
-    } else if (check.kind === "integer-check") {
+    } else if (
+      check.kind === "integer-check" ||
+      // (a count's or an index's possible null that a check on every route the compiler cannot keep leaves to the run,
+      // V30 §13, #1073 PR 4: the runtime's own check of the count or the index takes it at the use, as an integer's)
+      (check.kind === "null-check" &&
+        check.against.length > 0 &&
+        check.against.every((kind) => kind === "integer"))
+    ) {
       const get = all.find(
         (expression) =>
           expression.kind === "callExpression" &&
