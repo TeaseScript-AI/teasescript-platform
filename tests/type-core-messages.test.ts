@@ -3866,12 +3866,13 @@ test("a mixed join names its leaf null as the occurrence holds it (#1828)", () =
 });
 
 /**
- * #1828's known limit, #2009: a `+=` target read through an object property named like a collection member (`first`,
- * `last`, `random`) has no occurrence items in admission, which takes the read as a member read; the sentence then names
- * the admitted null, as main does, where the current checker names none. Pinned with that reason, beside a property of
- * another name, which the occurrence reads right. In four modes.
+ * #1828's known limit: the sentence names the null as admission's occurrence items hold it. Where those items are
+ * `unknown` (#2009: a `+=` target read through a property named like a collection member, `first`, `last`, `random`,
+ * which admission takes as a member read) or keep a null the value cannot hold (#2011: an index into a list of a copied
+ * object), it follows them, as main does, where the current checker names none. Pinned with those reasons, beside a
+ * property of another name, which the occurrence reads right. In four modes.
  */
-test("a join target read through a property named like a collection member keeps the admitted null (#1828, #2009)", () => {
+test("a join target whose occurrence items are unknown or keep a stale null names that null (#1828, #2009, #2011)", () => {
   const DECLARE = "A list holds one type. To allow both, declare the list with the type";
   const cases: readonly (readonly [source: string, message: string])[] = [
     // (known wrong, #2009: the checker says `a whole number (integer) and text (string)`)
@@ -3887,6 +3888,11 @@ test("a join target read through a property named like a collection member keeps
     [
       'let n:integer?=1\nlet box={first:{items:[[n]]}}\nbox.first.items += [["x"]]\nexit\n',
       `'+=' would mix a list (integer?[]) and a list (string[]). ${DECLARE} '(integer | string | null)[][]'.`,
+    ],
+    // (known wrong, #2011: the items through the index keep `n`'s null; the checker says `a whole number (integer) and text`)
+    [
+      'let n:integer?=1\nlet origin={alpha:{items:[n]}}\nlet box=[origin]\nbox[0].alpha.items += ["x"]\nexit\n',
+      `'+=' would mix a whole number (integer) or null and text (string). ${DECLARE} '(integer | string | null)[]'.`,
     ],
     // (the boundary: a property of another name, read right, as the checker)
     [
