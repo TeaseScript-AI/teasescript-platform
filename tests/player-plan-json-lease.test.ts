@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { playerBridgeOps, playerOpsContext } from "../player/engine-bridge/player-ops.js";
+import { READ_OPS } from "../player/engine-bridge/session-protocol.js";
 import {
   EMPTY_PLAN_JSON_LEASE,
   settle,
@@ -19,6 +20,7 @@ import {
   type FamilyCase,
   type Producer,
 } from "./helpers/plan-json-family.js";
+import { HOST_OPS, type HostOp } from "./helpers/host-ops.js";
 
 /*
  * How long the host holds a plan's JSON (`player/plan-json-lease.ts`), over the generated family of
@@ -176,11 +178,28 @@ function run(c: LayerCase) {
 
 const CASES = [...layerCases()];
 
-test("every op of the host is classified: a producer of the family, or named as none", () => {
-  const composed = Object.keys(playerBridgeOps(playerOpsContext()));
+test("every op of the host is classified once: its plan JSON role and whether it is a session-free read", () => {
+  const composed = Object.keys(playerBridgeOps(playerOpsContext())).sort();
+  assert.deepEqual(
+    Object.keys(HOST_OPS).sort(),
+    composed,
+    "the inventory is the composed host's ops",
+  );
   assert.deepEqual(unclassifiedOps(Object.fromEntries(composed.map((op) => [op, null]))), []);
-  for (const op of [...Object.keys(PRODUCERS), ...Object.keys(NOT_PRODUCERS)])
-    assert.ok(composed.includes(op), `${op} is an op of the composed host`);
+  const facet = (has: (op: HostOp) => boolean) =>
+    Object.entries(HOST_OPS)
+      .filter(([, op]) => has(op))
+      .map(([name]) => name)
+      .sort();
+  assert.deepEqual(
+    facet((op) => op.planJson === "producer"),
+    Object.keys(PRODUCERS).sort(),
+  );
+  assert.deepEqual(
+    facet((op) => op.read),
+    Object.keys(READ_OPS).sort(),
+  );
+  for (const op of Object.keys(NOT_PRODUCERS)) assert.ok(composed.includes(op), op);
 });
 
 test("the generated family holds every declared obligation and every pair of values that can meet", () => {

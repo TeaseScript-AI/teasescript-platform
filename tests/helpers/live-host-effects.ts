@@ -84,7 +84,7 @@ const CAPTURE_STORE = {
   discard: "mutating",
   holds: "read-only",
   knows: "read-only",
-  storedReferences: "read-only",
+  knownReferences: "read-only",
   promote: "mutating",
   sessionRecords: "read-only",
   restoreSessionMedia: "mutating",
@@ -465,7 +465,7 @@ export class LiveHostEffects {
 
   /** A fake `Audio` class whose elements keep `MediaDeviceElement`'s state, every mutating member counted. */
   audio(): new () => FakeMedium {
-    const effects = this;
+    const count = (member: string) => this.count("Audio", member);
     const elements = this.#elements;
     return class FakeAudio extends EventTarget {
       #state = {
@@ -481,7 +481,7 @@ export class LiveHostEffects {
       #listeners = new Map<string, number>();
       constructor() {
         super();
-        effects.count("Audio", "construct");
+        count("construct");
         // EVIDENCE: validation: the element is this fake, with every member `MediaDeviceElement` declares.
         elements.push(this);
       }
@@ -490,7 +490,7 @@ export class LiveHostEffects {
       }
       set src(value: string) {
         // A set counts only when it changes the value: a no-op set is no effect, and the state shows any real change.
-        if (value !== this.#state.src) effects.count("Audio", "src");
+        if (value !== this.#state.src) count("src");
         this.#state.src = value;
       }
       get preload() {
@@ -498,7 +498,7 @@ export class LiveHostEffects {
       }
       set preload(value: string) {
         // A set counts only when it changes the value: a no-op set is no effect, and the state shows any real change.
-        if (value !== this.#state.preload) effects.count("Audio", "preload");
+        if (value !== this.#state.preload) count("preload");
         this.#state.preload = value;
       }
       get volume() {
@@ -506,7 +506,7 @@ export class LiveHostEffects {
       }
       set volume(value: number) {
         // A set counts only when it changes the value: a no-op set is no effect, and the state shows any real change.
-        if (value !== this.#state.volume) effects.count("Audio", "volume");
+        if (value !== this.#state.volume) count("volume");
         this.#state.volume = value;
       }
       get currentTime() {
@@ -514,7 +514,7 @@ export class LiveHostEffects {
       }
       set currentTime(value: number) {
         // A set counts only when it changes the value: a no-op set is no effect, and the state shows any real change.
-        if (value !== this.#state.currentTime) effects.count("Audio", "currentTime");
+        if (value !== this.#state.currentTime) count("currentTime");
         this.#state.currentTime = value;
       }
       get duration() {
@@ -527,19 +527,19 @@ export class LiveHostEffects {
         return this.#state.ended;
       }
       play = async () => {
-        effects.count("Audio", "play");
+        count("play");
         // A play leaves the medium playing, as a real element does.
         this.#state.paused = false;
       };
       pause() {
-        effects.count("Audio", "pause");
+        count("pause");
         this.#state.paused = true;
       }
       load() {
-        effects.count("Audio", "load");
+        count("load");
       }
       removeAttribute(name: string) {
-        effects.count("Audio", "removeAttribute");
+        count("removeAttribute");
         if (name === "src") this.#state.src = "";
       }
       override addEventListener(
@@ -547,7 +547,7 @@ export class LiveHostEffects {
         listener: EventListenerOrEventListenerObject | null,
         options?: AddEventListenerOptions | boolean,
       ) {
-        effects.count("Audio", "addEventListener");
+        count("addEventListener");
         this.#listeners.set(type, (this.#listeners.get(type) ?? 0) + 1);
         super.addEventListener(type, listener, options);
       }
@@ -556,12 +556,12 @@ export class LiveHostEffects {
         listener: EventListenerOrEventListenerObject | null,
         options?: EventListenerOptions | boolean,
       ) {
-        effects.count("Audio", "removeEventListener");
+        count("removeEventListener");
         this.#listeners.set(type, (this.#listeners.get(type) ?? 0) - 1);
         super.removeEventListener(type, listener, options);
       }
       override dispatchEvent(event: Event): boolean {
-        effects.count("Audio", "dispatchEvent");
+        count("dispatchEvent");
         if (event.type === "loadedmetadata") this.#state.loaded = true;
         return super.dispatchEvent(event);
       }
@@ -586,7 +586,7 @@ export class LiveHostEffects {
 
   /** An `EventTarget` standing in for `document` or `window`, its listeners and dispatches counted. */
   eventTarget<T extends object>(name: string, extra: T): EventTarget & T {
-    const effects = this;
+    const count = (member: string) => this.count(name, member);
     const listeners = new Map<string, number>();
     this.#listeners.set(name, listeners);
     class Recorded extends EventTarget {
@@ -595,7 +595,7 @@ export class LiveHostEffects {
         listener: EventListenerOrEventListenerObject | null,
         options?: AddEventListenerOptions | boolean,
       ) {
-        effects.count(name, "addEventListener");
+        count("addEventListener");
         listeners.set(type, (listeners.get(type) ?? 0) + 1);
         super.addEventListener(type, listener, options);
       }
@@ -604,12 +604,12 @@ export class LiveHostEffects {
         listener: EventListenerOrEventListenerObject | null,
         options?: EventListenerOptions | boolean,
       ) {
-        effects.count(name, "removeEventListener");
+        count("removeEventListener");
         listeners.set(type, (listeners.get(type) ?? 0) - 1);
         super.removeEventListener(type, listener, options);
       }
       override dispatchEvent(event: Event): boolean {
-        effects.count(name, "dispatchEvent");
+        count("dispatchEvent");
         return super.dispatchEvent(event);
       }
     }
@@ -628,7 +628,9 @@ export class LiveHostEffects {
       Object.getOwnPropertyNames(prototype).filter((name) => name !== "constructor"),
       CAPTURE_STORE,
     );
-    const effects = this;
+    const stores = this.#stores;
+    const references = this.#references;
+    const count = (member: string) => this.count("CapturedMediaStore", member);
     for (const [name, kind] of Object.entries(CAPTURE_STORE)) {
       const descriptor = Object.getOwnPropertyDescriptor(prototype, name)!;
       if (typeof descriptor.value !== "function") continue;
@@ -637,9 +639,9 @@ export class LiveHostEffects {
       Object.defineProperty(prototype, name, {
         ...descriptor,
         value: function (this: CapturedMediaStore, ...args: unknown[]) {
-          effects.#stores.add(this);
-          if (kind === "mutating") effects.count("CapturedMediaStore", name);
-          for (const arg of args) if (typeof arg === "string") effects.#references.add(arg);
+          stores.add(this);
+          if (kind === "mutating") count(name);
+          for (const arg of args) if (typeof arg === "string") references.add(arg);
           const result: unknown = method.apply(this, args);
           if (
             name === "add" &&
@@ -647,7 +649,7 @@ export class LiveHostEffects {
             typeof result === "object" &&
             "reference" in result
           )
-            effects.#references.add(String(result.reference));
+            references.add(String(result.reference));
           return result;
         },
       });
@@ -656,13 +658,13 @@ export class LiveHostEffects {
     const { createObjectURL, revokeObjectURL } = URL;
     const urls = this.#urls;
     URL.createObjectURL = (data: Blob | MediaSource) => {
-      effects.count("URL", "create");
+      this.count("URL", "create");
       const url = `blob:live-host/${urls.size + 1}`;
       if (data instanceof Blob) urls.set(url, data);
       return url;
     };
     URL.revokeObjectURL = (url: string) => {
-      effects.count("URL", "revoke");
+      this.count("URL", "revoke");
       urls.delete(url);
     };
     assertClassified("CapturedMediaUrls", ["create", "revoke"], URLS);
@@ -676,11 +678,11 @@ export class LiveHostEffects {
       configurable: true,
       value: new Proxy(real, {
         has: (target, key) => {
-          if (key === "mediaDevices") effects.#captureProbes++;
+          if (key === "mediaDevices") this.#captureProbes++;
           return Reflect.has(target, key);
         },
         get: (target, key) => {
-          if (key === "mediaDevices") effects.#captureProbes++;
+          if (key === "mediaDevices") this.#captureProbes++;
           // EVIDENCE: validation: `navigator` is an object; a missing member reads as `undefined`, as on the real one.
           return (target as Record<PropertyKey, unknown>)[key];
         },

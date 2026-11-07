@@ -202,11 +202,12 @@ export class CapturedMediaStore {
   }
 
   /**
-   * Of `candidates`, the references of media this store holds or has stored durably: one read of the stored references,
-   * none of their media. Text that only has the shape of a reference is not among them. For a persistence operation,
-   * `owner` admits the read (`persistence-ownership.ts`).
+   * Of `candidates`, the references this store knows: held here, session-only records included, or listed by its
+   * repository. One read of the repository's references, none of their media; it proves neither that a record's bytes
+   * are valid nor that it is durable. Text that only has the shape of a reference is not among them. For a persistence
+   * operation, `owner` admits the read (`persistence-ownership.ts`).
    */
-  async storedReferences(
+  async knownReferences(
     candidates: Iterable<string>,
     owner?: PersistenceOwnership,
   ): Promise<Set<string>> {
@@ -233,10 +234,10 @@ export class CapturedMediaStore {
         throw new CapturedMediaNotStoredError("No durable media storage is available.");
       if (this.#durable.has(reference)) continue;
       if (owner === undefined) {
-        await insertOrConfirm(this.#repository, record);
+        await insertOrAcceptExisting(this.#repository, record);
         this.#durable.add(reference);
       } else {
-        await insertOrConfirm(owner.photos(this.#repository), record);
+        await insertOrAcceptExisting(owner.photos(this.#repository), record);
         owner.commit(() => this.#durable.add(reference));
       }
     }
@@ -379,11 +380,11 @@ export class CapturedMediaStore {
 }
 
 /**
- * Stores `record` in `repository`, insert-only: when the insert fails, a valid record already stored under its reference
- * counts as stored, such as one an earlier attempt committed before failing later; nothing is overwritten. Rejects with
- * `CapturedMediaNotStoredError` otherwise.
+ * Stores `record` in `repository`, insert-only: when the insert fails, any valid record already stored under its
+ * reference is accepted as stored, such as one an earlier attempt committed before failing later. Its contents are not
+ * compared with `record`'s, and nothing is overwritten. Rejects with `CapturedMediaNotStoredError` otherwise.
  */
-export async function insertOrConfirm(
+export async function insertOrAcceptExisting(
   repository: CapturedMediaRepository,
   record: CapturedMediaRecord,
 ): Promise<void> {

@@ -17,7 +17,9 @@ import { OWNERSHIP_MODES, type Operated, type Ownership } from "./helpers/plan-j
  * of a raw resource, the media store, a member of the host, or a member it cannot read; the check fails a place with
  * one that no table below classifies, and in an operation, with every closure nested in it, each use the one deciding
  * function (`refusal`) does not admit. It covers the operations' own code, not a helper they call: a new branch inside a
- * helper still needs a source review.
+ * helper still needs a source review. Its raw resources are the names `RAW` lists; every binding of the host's body made
+ * from one is checked to be one of them or classified (`DERIVED`), but a store the host would build from nothing it
+ * lists is outside the check's reach, as is a binding it cannot resolve lexically.
  */
 
 /** The host's modules, under this folder: the composable and every module of its `session/` folder. */
@@ -129,6 +131,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     readTransfer: TRANSFER,
     discardSessionReview: TRANSFER,
     adoptShown: EDIT,
+    settleAdoption: EDIT,
     applySavedDataEdit: EDIT,
     clearScriptStorage: EDIT,
     storeImageFile: EDIT,
@@ -159,6 +162,21 @@ const RAW = new Set([
   "debugRoomStorage",
   "options",
 ]);
+/**
+ * The other bindings of the host's body made from a raw resource, and why each is none: the check finds them from `RAW`
+ * (`derivedBindings`), and a new one fails until it is a raw resource or named here (#1963 L4).
+ */
+const DERIVED: Readonly<Record<string, string>> = {
+  resolvePackageAsset: "the host's asset resolver, from the options: no store",
+  bridge: "the engine bridge, from the options: its requests are checked as host members",
+  bridgeReady: "the bridge once ready, from the options: its requests are checked as host members",
+  capturedMedia: "the media store, from the options: checked by `MEDIA`",
+  room: "the room shown, from the options and the saved values: a value, no store",
+  resolveTemporalContext: "the host's time zone source, from the options: no store",
+  decodeImage: "the host's image decoder, from the options: no store",
+  keptScope: "the saved values' scope, a name: no store",
+};
+
 /** The handles an ownership binds a raw resource with. */
 const HANDLES = new Set(["kept", "rooms", "values", "photos"]);
 /** Names an operation's ownership goes by. */
@@ -178,7 +196,7 @@ const MEDIA = {
   sessionRecords: "memory",
   restoreSessionMedia: "memory",
   size: "memory",
-  storedReferences: "owned",
+  knownReferences: "owned",
   promote: "owned",
   read: "refused",
   readDurable: "refused",
@@ -448,11 +466,57 @@ function insideAdmit(node: ts.Node): boolean {
       ts.isCallExpression(current.parent) &&
       ts.isPropertyAccessExpression(current.parent.expression) &&
       current.parent.expression.name.text === "admit" &&
-      ts.isIdentifier(current.parent.expression.expression) &&
-      OWNERSHIP_NAMES.has(current.parent.expression.expression.text)
+      isOwnership(current.parent.expression.expression)
     )
       return true;
   return false;
+}
+
+/**
+ * Whether `node` names an operation's ownership: an identifier of `OWNERSHIP_NAMES` whose nearest declaration is a
+ * parameter of the type `PersistenceOwnership`, or a parameter or variable that `persistenceOwnership(...)` initializes.
+ * An alias of anything else under such a name (`const owner = unrelated`) is none (#1963 L4).
+ */
+function isOwnership(node: ts.Node): boolean {
+  if (!ts.isIdentifier(node) || !OWNERSHIP_NAMES.has(node.text)) return false;
+  const declaration = nearestDeclaration(node);
+  if (declaration === null) return false;
+  const made =
+    declaration.initializer !== undefined &&
+    ts.isCallExpression(declaration.initializer) &&
+    ts.isIdentifier(declaration.initializer.expression) &&
+    declaration.initializer.expression.text === "persistenceOwnership";
+  return (
+    made ||
+    (ts.isParameter(declaration) &&
+      declaration.type !== undefined &&
+      ts.isTypeReferenceNode(declaration.type) &&
+      declaration.type.typeName.getText() === "PersistenceOwnership")
+  );
+}
+
+/** The nearest parameter or variable declaring `node`'s name in the scopes around it, or `null` for none. */
+function nearestDeclaration(
+  node: ts.Identifier,
+): ts.ParameterDeclaration | ts.VariableDeclaration | null {
+  for (let scope: ts.Node | undefined = node.parent; scope !== undefined; scope = scope.parent) {
+    if (ts.isFunctionLike(scope)) {
+      const parameter = scope.parameters.find(
+        (candidate) => ts.isIdentifier(candidate.name) && candidate.name.text === node.text,
+      );
+      if (parameter !== undefined) return parameter;
+    }
+    if (ts.isBlock(scope) || ts.isSourceFile(scope)) {
+      for (const statement of scope.statements) {
+        if (!ts.isVariableStatement(statement)) continue;
+        const variable = statement.declarationList.declarations.find(
+          (candidate) => ts.isIdentifier(candidate.name) && candidate.name.text === node.text,
+        );
+        if (variable !== undefined) return variable;
+      }
+    }
+  }
+  return null;
 }
 
 /** Why `use`, in an operation, is not admitted, or `null` where it is: the one deciding function of the check. */
@@ -488,9 +552,7 @@ function mediaUse(node: ts.Identifier): string | null {
       ts.isCallExpression(call) && call.expression === wrapped(parent)
         ? call.arguments[1]
         : undefined;
-    return owner !== undefined && ts.isIdentifier(owner) && OWNERSHIP_NAMES.has(owner.text)
-      ? null
-      : WHY.mediaOwner;
+    return owner !== undefined && isOwnership(owner) ? null : WHY.mediaOwner;
   }
   if (
     ts.isCallExpression(parent) &&
@@ -539,8 +601,7 @@ function rawUse(node: ts.Identifier): boolean {
     context.arguments.includes(use) &&
     ts.isPropertyAccessExpression(context.expression) &&
     HANDLES.has(context.expression.name.text) &&
-    ts.isIdentifier(context.expression.expression) &&
-    OWNERSHIP_NAMES.has(context.expression.expression.text)
+    isOwnership(context.expression.expression)
   )
     return false;
   return true;
@@ -580,6 +641,35 @@ function consumers(source: ts.SourceFile, checked: ReadonlySet<string>): Map<str
     ts.forEachChild(node, visit);
   };
   visit(source);
+  return found;
+}
+
+/**
+ * The bindings declared directly in the host's body (`usePlayerSession`) whose value is made from a raw resource,
+ * functions apart: each binding's name.
+ */
+function derivedBindings(source: ts.SourceFile): string[] {
+  let host: ts.FunctionDeclaration | undefined;
+  ts.forEachChild(source, (node) => {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === "usePlayerSession") host = node;
+  });
+  const found: string[] = [];
+  for (const statement of host?.body?.statements ?? []) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      const value = declaration.initializer;
+      if (!ts.isIdentifier(declaration.name) || value === undefined) continue;
+      if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) continue;
+      let made = false;
+      const visit = (node: ts.Node) => {
+        if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return;
+        if (ts.isIdentifier(node) && RAW.has(node.text) && !declared(node)) made = true;
+        ts.forEachChild(node, visit);
+      };
+      visit(value);
+      if (made) found.push(declaration.name.text);
+    }
+  }
   return found;
 }
 
@@ -735,6 +825,148 @@ test("every place of the host that reaches a store or the host is an operation, 
   assert.equal(new Set(main).size, main.length, "a place in two tables");
 });
 
+/**
+ * Each read of an adoption's saved values (`captureStorage`) in `source`, and how its settlement is wired: a `.then`
+ * whose reply and rejection callbacks each call `settleAdoption` and nothing else, awaited as it is, with nothing chained
+ * after it; `settleAdoption` referenced nowhere else; and `settleAdoption`'s first statement returning unless
+ * `ownsShown(...)` holds. What a settlement says is not seen here: that no stale failure notice shows once the page moved
+ * on is the rewind read family's (`player-session-rewind.test.ts`).
+ */
+function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: string[] } {
+  const problems: string[] = [];
+  let reads = 0;
+  const line = (node: ts.Node) =>
+    source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+  const settles = (callback: ts.Expression | undefined) =>
+    callback !== undefined &&
+    ts.isArrowFunction(callback) &&
+    ts.isCallExpression(callback.body) &&
+    ts.isIdentifier(callback.body.expression) &&
+    callback.body.expression.text === "settleAdoption";
+  // The `settleAdoption` references the admitted reads' callbacks make; any other is a second settlement.
+  const admitted = new Set<ts.Node>();
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isIdentifier(node) &&
+      node.text === "settleAdoption" &&
+      !(ts.isFunctionDeclaration(node.parent) && node.parent.name === node) &&
+      !admitted.has(node)
+    )
+      problems.push(
+        `${line(node)}: settleAdoption is reached outside the adoption read's settlement`,
+      );
+    if (ts.isStringLiteralLike(node) && node.text === "captureStorage") {
+      const read = node.parent;
+      const access = read.parent;
+      const then = access?.parent;
+      if (
+        ts.isCallExpression(read) &&
+        read.arguments[1] === node &&
+        ts.isPropertyAccessExpression(read.expression) &&
+        read.expression.name.text === "read" &&
+        ts.isPropertyAccessExpression(access) &&
+        access.name.text === "then" &&
+        ts.isCallExpression(then) &&
+        then.arguments.length === 2 &&
+        settles(then.arguments[0]) &&
+        settles(then.arguments[1]) &&
+        ts.isAwaitExpression(then.parent)
+      ) {
+        reads += 1;
+        for (const callback of then.arguments)
+          if (ts.isArrowFunction(callback) && ts.isCallExpression(callback.body))
+            admitted.add(callback.body.expression);
+      } else
+        problems.push(
+          `${line(node)}: a captureStorage read that does not settle only through settleAdoption`,
+        );
+    }
+    if (ts.isFunctionDeclaration(node) && node.name?.text === "settleAdoption") {
+      const first = node.body?.statements[0];
+      const guarded =
+        first !== undefined &&
+        ts.isIfStatement(first) &&
+        ts.isPrefixUnaryExpression(first.expression) &&
+        ts.isCallExpression(first.expression.operand) &&
+        ts.isIdentifier(first.expression.operand.expression) &&
+        first.expression.operand.expression.text === "ownsShown" &&
+        ts.isReturnStatement(first.thenStatement);
+      if (!guarded)
+        problems.push(`${line(node)}: settleAdoption does not begin with its ownership check`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return { reads, problems };
+}
+
+test("an adoption's read reaches settleAdoption only from its two callbacks, with nothing chained after it, and settleAdoption begins with its ownership check", () => {
+  const { reads, problems } = adoptionSettlements(
+    ts.createSourceFile(
+      MAIN,
+      readFileSync(resolve(process.cwd(), HOST_ROOT, MAIN), "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+    ),
+  );
+  assert.deepEqual(problems, []);
+  assert.equal(reads, 1, "the adoption's one read");
+  const of = (text: string) =>
+    adoptionSettlements(ts.createSourceFile("a.ts", text, ts.ScriptTarget.Latest, true)).problems;
+  // A rejection that skips it, a read awaited on its own, and an unguarded settlement are each found.
+  assert.deepEqual(
+    of(
+      'host.read(s, "captureStorage").then((c) => settleAdoption(o, s, { capture: c }), () => false);',
+    ),
+    [
+      "1: a captureStorage read that does not settle only through settleAdoption",
+      "1: settleAdoption is reached outside the adoption read's settlement",
+    ],
+  );
+  assert.equal(of('const c = await host.read(s, "captureStorage");').length, 1);
+  assert.equal(of("async function settleAdoption() { await write(); }").length, 1);
+  // A second settlement chained after the read's, which calls settleAdoption again, is found.
+  const read =
+    'await host.read(s, "captureStorage").then((c) => settleAdoption(o, s, { capture: c }), (e) => settleAdoption(o, s, { error: e }))';
+  assert.deepEqual(of(`async function f() { ${read}; }`), []);
+  assert.deepEqual(
+    of(
+      `async function f() { ${read.replace("await ", "await (")}).then((a) => a ? settleAdoption(o, s, { capture: c }) : false); }`,
+    ),
+    [
+      "1: a captureStorage read that does not settle only through settleAdoption",
+      "1: settleAdoption is reached outside the adoption read's settlement",
+      "1: settleAdoption is reached outside the adoption read's settlement",
+      "1: settleAdoption is reached outside the adoption read's settlement",
+    ],
+  );
+});
+
+test("every binding of the host made from a raw resource is one, the media store, or classified", () => {
+  const source = ts.createSourceFile(
+    MAIN,
+    readFileSync(resolve(process.cwd(), HOST_ROOT, MAIN), "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const derived = derivedBindings(source);
+  assert.deepEqual(
+    derived.filter((name) => !RAW.has(name) && !Object.hasOwn(DERIVED, name)),
+    [],
+    "bindings made from a raw resource, unclassified",
+  );
+  for (const name of Object.keys(DERIVED))
+    assert.ok(derived.includes(name), `${name} is no binding made from a raw resource`);
+  // An alias of a raw resource is found.
+  const alias = ts.createSourceFile(
+    "alias.ts",
+    "function usePlayerSession(options) {\n  const sessions = options.keptSessions;\n  const newStore = keptSessions;\n}",
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  assert.deepEqual(derivedBindings(alias), ["sessions", "newStore"]);
+});
+
 test("each ownership the host makes belongs to an operation of the family, with the modes the family drives", () => {
   const modes = new Map<Operated, Set<Ownership>>();
   const failures: string[] = [];
@@ -786,6 +1018,8 @@ const CONTEXTS = {
   plain: (body: string) => body,
   admitted: (body: string) => `await ctx.admit(async () => { ${body} });`,
   otherAdmit: (body: string) => `await unrelated.admit(async () => { ${body} });`,
+  aliasedAdmit: (body: string) =>
+    `const owner = unrelated; await owner.admit(async () => { ${body} });`,
 } as const;
 
 // EVIDENCE: invariant: the keys of `FORMS` and `CONTEXTS`, declared literally above.
@@ -860,6 +1094,20 @@ function formCases(): FormCase[] {
       `const scope = ${raw}.scope;`,
     );
   }
+  // An ownership is one by its declaration, not by its name (#1963 L4).
+  add(
+    "ownership binding",
+    true,
+    "const owner = unrelated;\nawait owner.kept(keptSessions).discard(scope);",
+    "const owner = unrelated;\nawait capturedMedia.promote(references, owner);",
+    'let ownership = unrelated;\nawait ownership.admit(() => host.client.request("planText", { plan }));',
+  );
+  add(
+    "ownership binding",
+    false,
+    "const owner = persistenceOwnership();\nawait owner.kept(keptSessions).discard(scope);",
+    'const owner = persistenceOwnership(null);\nawait owner.admit(() => host.client.request("planText", { plan }));',
+  );
   // The storage route is awaited as a statement of its own, whose result nothing takes.
   add("raw storageRoute shapes", false, "await storageRoute;");
   add(

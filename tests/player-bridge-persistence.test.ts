@@ -15,6 +15,7 @@ import {
 import type { PlayerSession } from "../player/runtime-view.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
+import { formObligations, malformedArguments } from "./helpers/argument-forms.js";
 import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
@@ -64,7 +65,7 @@ async function keepOf(
   session: PlayerSession,
   plan: string | null,
 ): Promise<Captured> {
-  const keep = await bridge.read<KeepCapture>(session, "captureKeep", { plan });
+  const keep = await bridge.read(session, "captureKeep", { plan });
   if (keep.kind !== "captured") assert.fail(`The capture gave ${keep.kind}.`);
   return keep;
 }
@@ -90,7 +91,7 @@ async function captureTape(bridge: PlayerBridge) {
   const tape: { readonly keep: Captured; readonly checkpoint: CheckpointCapture }[] = [];
   const capture = async (withPlan: boolean) => {
     const keep = await keepOf(bridge, session, withPlan ? plan : null);
-    const point = await bridge.read<CheckpointCapture>(session, "captureCheckpoint");
+    const point = await bridge.read(session, "captureCheckpoint");
     session = bridge.latest(session)!;
     // The events a capture goes with are compared by their count: its cursor.
     tape.push({ keep, checkpoint: point });
@@ -121,7 +122,7 @@ test("a capture's bytes are what the adapter writes of the host's session, and i
   await bridge.request(session, "observeTime", { atMs: 2_500, media: [] });
   const shown = bridge.latest(session)!;
   const keep = await keepOf(bridge, shown, null);
-  const point = await bridge.read<CheckpointCapture>(shown, "captureCheckpoint");
+  const point = await bridge.read(shown, "captureCheckpoint");
   assert.equal(
     keep.snapshotJson,
     hatch(shown, (held) => playerRuntimeSnapshotJson(held)),
@@ -288,4 +289,52 @@ test("only a reservation keeps the plan's JSON: written once in its task, read b
   } finally {
     JSON.stringify = stringify;
   }
+});
+
+test("a session-free read names an op of ReadOps, with that op's arguments, and resolves to its result", () => {
+  const typed = async (bridge: PlayerBridge, session: PlayerSession) => {
+    const keep: KeepCapture = await bridge.read(session, "captureKeep", { plan: null });
+    const checkpoint: CheckpointCapture = await bridge.read(session, "captureCheckpoint");
+    // @ts-expect-error -- no read op of that name.
+    await bridge.read(session, "planText", { plan: "p1" });
+    // @ts-expect-error -- `captureKeep` takes its plan.
+    await bridge.read(session, "captureKeep", {});
+    return [keep, checkpoint];
+  };
+  assert.equal(typeof typed, "function");
+});
+
+test("captureStorage reads the shown state's saved values in the host, at its revision, in-process and in a Worker", async () => {
+  const [inProcess, remote] = await onBoth(async (bridge) => {
+    const plan = await prepared(bridge);
+    const session = await bridge.start(
+      plan,
+      { ...START, scriptStorage: [{ key: "score", value: 3 }], persistentScriptStorage: true },
+      false,
+    );
+    await bridge.request(session, "observeTime", { atMs: 2_500, media: [] });
+    const shown = bridge.latest(session)!;
+    const capture = await bridge.read(shown, "captureStorage");
+    assert.equal(capture.revision, shown.revision);
+    // Malformed arguments, each form the op's one form gives, are refused before it runs.
+    const refused: string[] = [];
+    const forms = [{ required: { session: "string" } }] as const;
+    const malformed = malformedArguments(forms);
+    assert.deepEqual(
+      malformed.map(({ id }) => id),
+      formObligations(forms),
+    );
+    for (const { id, args } of malformed)
+      await bridge.client.request("captureStorage", args).then(
+        () => refused.push(`${id}: accepted`),
+        (error: unknown) => {
+          if (!(error instanceof BridgeRequestError) || error.code !== "arguments")
+            refused.push(`${id}: ${String(error)}`);
+        },
+      );
+    assert.deepEqual(refused, []);
+    return { entries: capture.entries, persistent: capture.persistent };
+  });
+  assert.deepEqual(remote, inProcess);
+  assert.deepEqual(inProcess, { entries: [{ key: "score", value: 3 }], persistent: true });
 });

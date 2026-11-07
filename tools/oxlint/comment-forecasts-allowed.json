@@ -1,10 +1,5 @@
 [
   {
-    "file": "player/vue/src/usePlayerSession.ts",
-    "form": "which replaces this",
-    "text": "which replaces this"
-  },
-  {
     "file": "src/type-inference/core/answers.ts",
     "form": "until a package or stage",
     "text": "until stage 3b"
