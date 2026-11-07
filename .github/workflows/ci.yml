@@ -17,8 +17,9 @@ concurrency:
 jobs:
   # The check runs as two jobs side by side (#1638): each installs and builds, then runs one half of the compiled tests
   # (`--shard=i/2`, shared out by measured seconds, `tools/test-shards.mjs`); check-2 also runs the checks before the
-  # tests (`check:pretest`), once. Together they run what `npm run check` runs; `check`, the required check, passes only
-  # where both passed.
+  # tests (`check:pretest`), once, and check-1 the runtime oracle comparison after them; the sharing counts both. The
+  # measurement finds those two steps by their names. Together they run what `npm run check` runs; `check`, the required
+  # check, passes only where both passed.
   check-1:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

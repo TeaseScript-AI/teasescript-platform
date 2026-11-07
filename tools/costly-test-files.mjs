@@ -83,6 +83,9 @@ export const otherTestSeconds = 1.4;
 /** The seconds of the checks CI's last test job runs before its tests (`check:pretest`). */
 export const pretestSeconds = 66;
 
+/** The seconds of the runtime oracle comparison CI's first test job runs after its tests (`oracle:test`). */
+export const oracleSeconds = 103;
+
 /** The test files one CI test job runs at once: `node --test`'s default on CI's four CPUs. */
 export const testFilesAtOnce = 3;
 
