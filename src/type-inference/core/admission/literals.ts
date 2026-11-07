@@ -931,7 +931,7 @@ export function joinElements(
       path: readonly string[],
     ): JoinDecided | "open" | null => {
       const at = joinSteps(["element"], path);
-      const decider = drive(admission, earliestDecider(admission, operand, node, at, null));
+      const decider = joinDecider(admission, operand, node, at);
       if (decider !== null && decider.term !== null) {
         const domain = joinedDomain(typeTags(decider.term));
         if (domain === "open") return "open";
@@ -1422,6 +1422,44 @@ export interface MixedOptional {
   readonly kinds: readonly boolean[];
 }
 
+/** The written decider's answer for a value at a node and path outside every decision (`earliestDecider`'s). */
+type JoinDecider =
+  ReturnType<typeof earliestDecider> extends Generator<unknown, infer R> ? R : never;
+// (per admission, while no stop forgot an answer: per node, value and path)
+const JOIN_DECIDERS = new WeakMap<
+  Admission,
+  {
+    readonly forgets: number;
+    readonly byNode: Map<FlowNode, Map<PlaceId, Map<string, JoinDecider>>>;
+  }
+>();
+
+/**
+ * #1828: `earliestDecider` of `value` at `node` and `steps` outside every decision, asked once while no stop forgot an
+ * answer. A mixed join's operand is asked it by `decidedAt` and again by its sentence's walk (`mayHoldNull`); the
+ * second ask takes the first's answer (Codex r2 on #1899).
+ */
+function joinDecider(
+  admission: Admission,
+  value: PlaceId,
+  node: FlowNode,
+  steps: readonly string[],
+): JoinDecider {
+  const forgets = admission.pass.solver.forgets;
+  let known = JOIN_DECIDERS.get(admission);
+  if (known === undefined || known.forgets !== forgets)
+    JOIN_DECIDERS.set(admission, (known = { forgets, byNode: new Map() }));
+  let byValue = known.byNode.get(node);
+  if (byValue === undefined) known.byNode.set(node, (byValue = new Map()));
+  let byPath = byValue.get(value);
+  if (byPath === undefined) byValue.set(value, (byPath = new Map()));
+  const at = pathText(steps);
+  if (byPath.has(at)) return byPath.get(at)!;
+  const answer = drive(admission, earliestDecider(admission, value, node, steps, null));
+  byPath.set(at, answer);
+  return answer;
+}
+
 /**
  * #1765: whether a value may hold null at a layer, by its own form, one case per form, never by what a written copy's
  * items hold (the lead's ruling (A) on #1789, after Codex r1–r11 and Astra r1–r2):
@@ -1455,9 +1493,7 @@ function mayHoldNull(
     return program.opOf.get(at)?.kind === "fallback"
       ? operandNull(admission, at, from)
       : occurrenceNull(admission, at, from);
-  const decided = holdsSource(admission, at)
-    ? drive(admission, earliestDecider(admission, at, from, steps, null))
-    : null;
+  const decided = holdsSource(admission, at) ? joinDecider(admission, at, from, steps) : null;
   // (a copy's term where the deciding copy stands above the layer, which lies below its own level: `b: string?[]` in
   // `[[1],b]`, `d`'s element in `held = d + [2]`; where the layer is the deciding copy's own level, `atom` in
   // `{v:atom}`, as it is read there, narrowed: Codex r1 on #1819, #1901)
