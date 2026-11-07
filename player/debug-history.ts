@@ -7,6 +7,7 @@ import type {
   PlayerTranscriptEntryPresentation,
 } from "./model.js";
 import { hatch } from "./engine-bridge/in-process.js";
+import { bridgeOf } from "./player-bridge.js";
 import { playerRuntimeSnapshotJson } from "./runtime-adapter.js";
 import type { PlayerSession } from "./runtime-view.js";
 import {
@@ -294,7 +295,9 @@ export class DebugHistory {
   /**
    * Restores the point at `index`, which must lead to the state shown; the state left stays for Forward. `current` gives
    * the session shown once the snapshot is read, which the first Back parks for Return; it gives `null` when the session
-   * cannot be left now, and nothing changes.
+   * cannot be left now, and nothing changes. The parked state is read from the host (`captureKeep`); it must be the shown
+   * publication's, and after that read the history, the point, the inspection and the shown session must be as before,
+   * else nothing changes either.
    */
   async back(
     index: number,
@@ -312,14 +315,35 @@ export class DebugHistory {
     if (shown === null) throw new Error("The session cannot go back now.");
     const left = inspection === null ? shown : inspection.parked;
     if (inspection === null) {
+      const parked = await parkedState(left.session);
+      const again = current();
+      if (
+        this.#inspection !== inspection ||
+        this.#points[index] !== point ||
+        parked === null ||
+        again === null ||
+        again.session.lineage !== left.session.lineage ||
+        again.session.revision !== parked.revision ||
+        left.session.revision !== parked.revision
+      )
+        throw new Error("The session cannot go back now.");
       const id = this.#nextId++;
-      this.#store.add(id, hatch(left.session, playerRuntimeSnapshotJson), true);
+      this.#store.add(id, parked.snapshotJson, true);
       this.#inspection = {
         parked: left,
         parkedScanned: this.#scanned,
         shown: point,
         points: index + 1,
-        forward: [{ position: this.#position(id, left.session, left.marks), points: leading }],
+        forward: [
+          {
+            // The events the captured state follows, not the session's events since.
+            position: {
+              ...this.#position(id, left.session, left.marks),
+              eventCount: parked.eventsThrough,
+            },
+            points: leading,
+          },
+        ],
       };
     } else {
       inspection.forward.push({ position: inspection.shown, points: inspection.points });
@@ -462,6 +486,20 @@ export function rewindFutureTranscript(
       ),
     speakers: later.speakers,
   };
+}
+
+/** The parked state of `session` as the host holds it (`captureKeep`, session-free), or `null` when it has none. */
+async function parkedState(
+  session: PlayerSession,
+): Promise<{
+  readonly revision: number;
+  readonly eventsThrough: number;
+  readonly snapshotJson: string;
+} | null> {
+  const capture = await bridgeOf(session)
+    .read(session, "captureKeep", { plan: null })
+    .catch(() => null);
+  return capture?.kind === "captured" ? capture : null;
 }
 
 /** The session's state as JSON, or `null` when it is too large to save (`TSK004`). */
