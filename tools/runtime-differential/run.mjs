@@ -7,9 +7,8 @@
 // It runs in ordered phases: usage, load, run, output, decide. Terminal handlers, installed before anything that can
 // fail, turn any failure in a phase, any output-stream error, any uncaught exception or unhandled rejection, and SIGPIPE
 // into exit 2. The decision (`exit.mjs`: 0 identity, an unsupported route, or censored at the step limit; 1 a decided
-// difference, a one-sided rejection included; 2 a harness failure or an unknown verdict) is made only once stdout has
-// finished, and only then does the process exit with it. A summary of the verdicts, censored ones counted, goes to
-// standard error.
+// difference, a one-sided rejection included; 2 a harness failure or an unknown verdict) is final only once stdout and
+// standard error (its verdict summary, censored pairs counted) have finished, and only through `process.exitCode`.
 // The accepted residual: a module in this process that calls `process.exit(1)` or sets `process.exitCode` itself
 // bypasses the decision. The engine never does; a fatal abort exits 134.
 
@@ -144,16 +143,15 @@ function run({ seed, first, count, route, shrink: shrinking }, harness) {
   return { reports, lines };
 }
 
-/** Writes `lines` with backpressure, each write's callback awaited, then ends stdout and awaits `finish`. */
-async function output(lines) {
-  const stdout = process.stdout;
+/** Writes `lines` to `stream` with backpressure, each write's callback awaited, then ends it and awaits `finish`. */
+async function output(stream, lines) {
   for (const line of lines)
     await new Promise((resolve, reject) => {
-      stdout.write(line, (error) => (error ? reject(error) : resolve()));
+      stream.write(line, (error) => (error ? reject(error) : resolve()));
     });
   await new Promise((resolve, reject) => {
-    stdout.once("error", reject);
-    stdout.end(resolve);
+    stream.once("error", reject);
+    stream.end(resolve);
   });
 }
 
@@ -161,12 +159,17 @@ async function main() {
   const options = usage(process.argv.slice(2));
   const harness = await load();
   const { reports, lines } = run(options, harness);
-  await output(lines);
-  process.stderr.write(`${JSON.stringify({ summary: verdictCounts(reports) })}\n`);
+  await output(process.stdout, lines);
+  await output(process.stderr, [`${JSON.stringify({ summary: verdictCounts(reports) })}\n`]);
   return exitStatus(reports);
 }
 
+// The decision is final only after both streams have finished, and only through `process.exitCode`: the process then
+// ends on its own, so a failure still pending (a rejection, a stream error, a throw at exit) reaches the terminal
+// handlers, which exit 2.
 main().then(
-  (status) => process.exit(status),
+  (status) => {
+    process.exitCode = status;
+  },
   (error) => fail(describe(error)),
 );

@@ -14,8 +14,10 @@ import {
   runtimeTimedWork,
   type FreshRuntimeOptions,
   type ProjectSourceFile,
+  type RandomDecision,
   type RandomDrawView,
   type RuntimeDebugContext,
+  type RuntimeSessionOptions,
   type RuntimeSession,
   type RuntimeSessionView,
   type SerializableRuntimeValue,
@@ -632,6 +634,27 @@ const SESSION_MEMBERS = [
 /** The session members whose returned object the harness reads, and the field a result fault throws at. */
 const RESULT_MEMBERS = new Set(["view", "executeInstruction"]);
 
+/**
+ * A callable as the fixture hands it out: it refuses a call without its own `receiver`, and any read of its `call`,
+ * `apply` or `bind`, so that the driver's one `invoke` is shown to keep receivers and to read nothing of a callable.
+ */
+function strict<A extends unknown[], T>(
+  receiver: RuntimeSession | PipelineAdapter | PipelineAdapter["sessions"] | HostDriver,
+  body: (...args: A) => T,
+): (...args: A) => T {
+  const callable = function (this: unknown, ...args: A): T {
+    if (this !== receiver) throw new Error("test-only: a callable was called without its receiver");
+    return body(...args);
+  };
+  for (const key of ["call", "apply", "bind"])
+    Object.defineProperty(callable, key, {
+      get: () => {
+        throw new Error(`test-only: the driver read ${key} of a callable`);
+      },
+    });
+  return callable;
+}
+
 /** This build, its objects counting each use and throwing at `fault`'s. */
 class Fixture {
   public readonly counts = new Map<string, number>();
@@ -679,14 +702,14 @@ class Fixture {
         configurable: true,
         get: () => {
           this.use(side, origin, member, "access");
-          return (...args: unknown[]) => {
+          return strict(session, (...args: unknown[]) => {
             this.use(side, origin, member, "invocation");
-            const value = method.apply(session, args);
+            const value = method.call(session, ...args);
             if (member === "fork")
               // EVIDENCE: validation: `fork` returns a session of the same engine.
               return this.session(side, "fork", value as RuntimeSession);
             return RESULT_MEMBERS.has(member) ? this.result(side, origin, member, value) : value;
-          };
+          });
         },
       });
     }
@@ -717,94 +740,95 @@ class Fixture {
     const sessions: PipelineAdapter["sessions"] = {
       get createFreshRuntimeSession() {
         use("sessions", "createFreshRuntimeSession", "access");
-        return (...args: Parameters<typeof real.createFreshRuntimeSession>) => {
+        return strict(sessions, (...args: Parameters<typeof real.createFreshRuntimeSession>) => {
           use("sessions", "createFreshRuntimeSession", "invocation");
           return fixture.session(side, "fresh", real.createFreshRuntimeSession(...args));
-        };
+        });
       },
       get createRuntimeSession() {
         use("sessions", "createRuntimeSession", "access");
-        return (...args: Parameters<typeof real.createRuntimeSession>) => {
+        return strict(sessions, (...args: Parameters<typeof real.createRuntimeSession>) => {
           use("sessions", "createRuntimeSession", "invocation");
           return fixture.session(side, "createRuntimeSession", real.createRuntimeSession(...args));
-        };
+        });
       },
       get createTaggedRuntimeSession() {
         use("sessions", "createTaggedRuntimeSession", "access");
-        return (...args: Parameters<typeof real.createTaggedRuntimeSession>) => {
+        return strict(sessions, (...args: Parameters<typeof real.createTaggedRuntimeSession>) => {
           use("sessions", "createTaggedRuntimeSession", "invocation");
           return fixture.session(
             side,
             "createTaggedRuntimeSession",
             real.createTaggedRuntimeSession(...args),
           );
-        };
+        });
       },
       get restoreRuntimeSession() {
         use("sessions", "restoreRuntimeSession", "access");
-        return (...args: Parameters<typeof real.restoreRuntimeSession>) => {
+        return strict(sessions, (...args: Parameters<typeof real.restoreRuntimeSession>) => {
           use("sessions", "restoreRuntimeSession", "invocation");
           return fixture.session(
             side,
             "restoreRuntimeSession",
             real.restoreRuntimeSession(...args),
           );
-        };
+        });
       },
       get deserializeRuntimeSession() {
         use("sessions", "deserializeRuntimeSession", "access");
-        return (...args: Parameters<typeof real.deserializeRuntimeSession>) => {
+        return strict(sessions, (...args: Parameters<typeof real.deserializeRuntimeSession>) => {
           use("sessions", "deserializeRuntimeSession", "invocation");
           return fixture.session(
             side,
             "deserializeRuntimeSession",
             real.deserializeRuntimeSession(...args),
           );
-        };
+        });
       },
       get serializeCheckpoint() {
         use("sessions", "serializeCheckpoint", "access");
-        return (...args: Parameters<typeof real.serializeCheckpoint>) => {
+        return strict(sessions, (...args: Parameters<typeof real.serializeCheckpoint>) => {
           use("sessions", "serializeCheckpoint", "invocation");
           return real.serializeCheckpoint(...args);
-        };
+        });
       },
       get runtimeTimedWork() {
         use("sessions", "runtimeTimedWork", "access");
-        return (...args: Parameters<typeof real.runtimeTimedWork>) => {
+        return strict(sessions, (...args: Parameters<typeof real.runtimeTimedWork>) => {
           use("sessions", "runtimeTimedWork", "invocation");
           return real.runtimeTimedWork(...args);
-        };
+        });
       },
       get RuntimeDebugContext() {
         use("sessions", "RuntimeDebugContext", "access");
         return Context;
       },
     };
-    return {
+    const adapter: PipelineAdapter = {
       label: side,
       get compile() {
         use("adapter", "compile", "access");
-        return (input: DifferentialInput, route: Route) => {
+        return strict(adapter, (input: DifferentialInput, route: Route) => {
           use("adapter", "compile", "invocation");
           return build.compile(input, route);
-        };
+        });
       },
       get sessions() {
         use("adapter", "sessions", "access");
         return sessions;
       },
     };
+    return adapter;
   }
 
   /** A host that observes each delay's deadline, its factory, `next` and returned calls counted. */
   public host(side: SideName): HostDriver {
     const fixture = this;
     fixture.use(side, "host", "factory", "invocation");
-    return {
+    const host: HostDriver = {
       get next() {
         fixture.use(side, "host", "next", "access");
-        return (view: RuntimeSessionView) => {
+        return strict(host, (view: RuntimeSessionView) => {
           fixture.use(side, "host", "next", "invocation");
           const work = runtimeTimedWork(view);
           if (work.length === 0) return null;
@@ -812,9 +836,10 @@ class Fixture {
             kind: "observeTime" as const,
             nowMs: Math.min(...work.map((item) => item.deadlineMs)),
           });
-        };
+        });
       },
     };
+    return host;
   }
 }
 
@@ -830,12 +855,15 @@ function faulted(fixture: Fixture, hosted: boolean): DifferentialReport {
   });
 }
 
+/** The clean runs' verdicts, which the inventory test requires to be `equivalent`. */
+const CLEAN_VERDICTS: DifferentialReport["verdict"][] = [];
+
 /** The fault rows: every use the clean runs count, at its first and last occurrence, and whether it needs the host. */
 const FAULT_ROWS = (() => {
   const rows: { readonly fault: Fault; readonly hosted: boolean }[] = [];
   for (const hosted of [false, true]) {
     const clean = new Fixture(null);
-    assert.deepEqual(faulted(clean, hosted).verdict, { kind: "equivalent" });
+    CLEAN_VERDICTS.push(faulted(clean, hosted).verdict);
     for (const [key, count] of clean.counts) {
       // EVIDENCE: validation: `keyOf` joins a side, an origin, a member and a kind, none of which has a space.
       const [side, origin, member, kind] = key.split(" ") as [SideName, string, string, FaultKind];
@@ -981,6 +1009,9 @@ function expectation(
 }
 
 test("the injected-fault family reaches every member of the public APIs on both sides", () => {
+  // Every callable the fixture hands out refuses a call without its receiver and a read of its own members, so these
+  // clean runs show that every call into a side keeps its receiver and reads nothing of the callable.
+  assert.deepEqual(CLEAN_VERDICTS, [{ kind: "equivalent" }, { kind: "equivalent" }]);
   const counted = new Set(FAULT_ROWS.map((row) => keyOf(row.fault)));
   for (const side of ["left", "right"] as const)
     for (const placement of INVENTORY)
@@ -1107,6 +1138,157 @@ test("a callback failure inside a public restore call is the side's harness fail
   );
 });
 
+/** A test-only draw whose every read throws, as an engine bug might hand one over. */
+const unreadableDraw = (): RandomDrawView =>
+  // EVIDENCE: validation: the proxy stands in for a draw; the harness's decision callback reads it and fails.
+  new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error("test-only unreadable draw");
+      },
+    },
+  ) as RandomDrawView;
+
+type Decide = (draw: RandomDrawView) => RandomDecision;
+
+/** Calls `decide` with an unreadable draw and swallows what it throws, as a buggy engine might. */
+const swallow = (decide: Decide) => {
+  try {
+    decide(unreadableDraw());
+  } catch {
+    // Swallowed.
+  }
+};
+
+/**
+ * This build on the right side, the `view` of its fresh sessions (or of the sessions its checkpoint JSON restores)
+ * replaced by `view`, given the real view and the harness's decision callback.
+ */
+function rightWithView(
+  view: (real: RuntimeSessionView, decide: Decide) => RuntimeSessionView,
+  origin: "fresh" | "deserialize" = "fresh",
+): PipelineAdapter {
+  const build = thisBuild("right");
+  const wrap = (session: RuntimeSession, decide: Decide) => {
+    const real = session.view.bind(session);
+    session.view = () => view(real(), decide);
+    return session;
+  };
+  const decideOf = (options?: RuntimeSessionOptions): Decide =>
+    options?.randomControl?.decide ?? ((): RandomDecision => ({ kind: "natural" }));
+  const sessions: PipelineAdapter["sessions"] =
+    origin === "fresh"
+      ? {
+          ...build.sessions,
+          createFreshRuntimeSession: (plan, fresh, options) =>
+            wrap(build.sessions.createFreshRuntimeSession(plan, fresh, options), decideOf(options)),
+        }
+      : {
+          ...build.sessions,
+          deserializeRuntimeSession: (json, options) =>
+            wrap(build.sessions.deserializeRuntimeSession(json, options), decideOf(options)),
+        };
+  return { ...build, sessions };
+}
+
+test("a callback failure swallowed while a returned view is read is the side's harness failure, never a discrepancy", () => {
+  // The right side's terminal view says it failed, and its `status` read swallows a decision-callback failure.
+  const right = rightWithView((real, decide) => {
+    if (real.status !== "halted") return real;
+    return {
+      ...real,
+      get status() {
+        swallow(decide);
+        return "failed" as const;
+      },
+    };
+  });
+  const report = differentialRun({ ...FAULT_INPUT, random: "natural" }, { ...CUTS, right });
+  assert.deepEqual(report.verdict, {
+    kind: "not-compared",
+    side: "right",
+    because: "harness-failure",
+  });
+  const outcome = report.outcomes.right;
+  assert.equal(
+    outcome?.kind === "harness-failure" ? outcome.member : outcome?.kind,
+    "decision.decide",
+  );
+});
+
+test("a callback failure swallowed during a comparison takes priority over the discrepancy it is compared into", () => {
+  // The right side's first emitted event reads differently from the left's, and its second read, during comparison
+  // and outside any operation, swallows a decision-callback failure.
+  const build = thisBuild("right");
+  let changed = false;
+  const right: PipelineAdapter = {
+    ...build,
+    sessions: {
+      ...build.sessions,
+      createFreshRuntimeSession: (plan, fresh, options) => {
+        const session = build.sessions.createFreshRuntimeSession(plan, fresh, options);
+        const decide: Decide =
+          options?.randomControl?.decide ?? ((): RandomDecision => ({ kind: "natural" }));
+        const execute = session.executeInstruction.bind(session);
+        session.executeInstruction = (traced) => {
+          const result = execute(traced);
+          if (changed || result.events.length === 0) return result;
+          changed = true;
+          const event = { ...result.events[0]! };
+          let reads = 0;
+          Object.defineProperty(event, "text", {
+            enumerable: true,
+            get: () => {
+              reads += 1;
+              if (reads === 2) swallow(decide);
+              return "changed";
+            },
+          });
+          // EVIDENCE: validation: a test-only result whose first event is a changed copy of the engine's own.
+          return { ...result, events: [event, ...result.events.slice(1)] } as typeof result;
+        };
+        return session;
+      },
+    },
+  };
+  const report = differentialRun({ ...FAULT_INPUT, random: "natural" }, { ...CUTS, right });
+  assert.equal(changed, true);
+  assert.deepEqual(report.verdict, {
+    kind: "not-compared",
+    side: "right",
+    because: "harness-failure",
+  });
+  const outcome = report.outcomes.right;
+  assert.equal(
+    outcome?.kind === "harness-failure" ? outcome.member : outcome?.kind,
+    "decision.decide",
+  );
+});
+
+test("a callback failure in the last restore of a run is the side's harness failure, never equivalent", () => {
+  // One cut, so the checkpoint JSON route's restored session is the run's last; its terminal view swallows a failure.
+  const right = rightWithView((real, decide) => {
+    if (real.status === "halted") swallow(decide);
+    return real;
+  }, "deserialize");
+  const report = differentialRun(
+    { ...single("exit", "exit\n", { seed: 5 }), random: "natural" },
+    { ...CUTS, right },
+  );
+  assert.deepEqual(report.cuts, [0]);
+  assert.deepEqual(report.verdict, {
+    kind: "not-compared",
+    side: "right",
+    because: "harness-failure",
+  });
+  const outcome = report.outcomes.right;
+  assert.deepEqual(
+    outcome?.kind === "harness-failure" ? [outcome.member, outcome.stage] : outcome,
+    ["decision.decide", "restore"],
+  );
+});
+
 test("a throwing injection is that side's harness failure at the injection", () => {
   const report = differentialRun(FAULT_INPUT, {
     ...CUTS,
@@ -1210,6 +1392,9 @@ export function differentialRun(input, options) {
   if (mode === "late") queueMicrotask(() => Promise.reject(new Error("test-only late rejection")));
   if (mode === "exit") process.on("exit", () => { throw new Error("test-only exit-time throw"); });
   if (mode === "uncaught") queueMicrotask(() => { throw new Error("test-only uncaught exception"); });
+  if (mode === "finish") process.stdout.once("finish", () => Promise.reject(new Error("test-only rejection at finish")));
+  if (mode === "stderr-finish") process.stderr.once("finish", () => Promise.reject(new Error("test-only rejection at the summary's finish")));
+  if (mode === "before-exit") process.once("beforeExit", () => { throw new Error("test-only throw before exit"); });
   return { name: input.name, route: options.route, outcomes: { left: null, right: null }, verdict: verdicts[mode] ?? verdicts.identity, plans: { left: null, right: null }, steps: 0, cuts: [], cutsOverCap: false, tailSteps: 0, cpuMs: 0 };
 }
 `;
@@ -1222,10 +1407,14 @@ test("the campaign CLI runs its phases in order, and any phase's failure exits 2
       path.join(work, "runtime-state-comparison.js"),
       'export const canonicalDigest = () => "digest";\nexport const renderPath = () => "$";\n',
     );
-    const cli = (mode: string, args: readonly string[], toFull = false) => {
-      const marks = path.join(work, `marks-${mode}-${toFull}`);
+    const cli = (
+      mode: string,
+      args: readonly string[],
+      full: "stdout" | "stderr" | null = null,
+    ) => {
+      const marks = path.join(work, `marks-${mode}-${full}`);
       fs.writeFileSync(marks, "");
-      const full = toFull ? fs.openSync("/dev/full", "w") : null;
+      const sink = full === null ? null : fs.openSync("/dev/full", "w");
       try {
         const ran = spawnSync(process.execPath, [path.join(tools, "run.mjs"), ...args], {
           encoding: "utf8",
@@ -1235,7 +1424,11 @@ test("the campaign CLI runs its phases in order, and any phase's failure exits 2
             CLI_MODE: mode,
             CLI_MARKS: marks,
           },
-          stdio: ["ignore", full ?? "pipe", "pipe"],
+          stdio: [
+            "ignore",
+            full === "stdout" && sink !== null ? sink : "pipe",
+            full === "stderr" && sink !== null ? sink : "pipe",
+          ],
         });
         return {
           status: ran.status,
@@ -1244,7 +1437,7 @@ test("the campaign CLI runs its phases in order, and any phase's failure exits 2
           marks: fs.readFileSync(marks, "utf8"),
         };
       } finally {
-        if (full !== null) fs.closeSync(full);
+        if (sink !== null) fs.closeSync(sink);
       }
     };
     const args = ["--seed", "3", "--count", "1"];
@@ -1254,8 +1447,11 @@ test("the campaign CLI runs its phases in order, and any phase's failure exits 2
     assert.match(usage.stderr, /--count must be a whole number/u);
     assert.deepEqual([cli("load", args).status, cli("load", args).marks], [2, "L"]);
     assert.deepEqual([cli("run", args).status, cli("run", args).marks], [2, "LR"]);
-    const output = cli("identity", args, true);
-    assert.deepEqual([output.status, output.marks], [2, "LR"]);
+    // Output: either stream failing is a failed output, and the decision waits for both.
+    for (const stream of ["stdout", "stderr"] as const) {
+      const output = cli("identity", args, stream);
+      assert.deepEqual([output.status, output.marks], [2, "LR"], stream);
+    }
     const decide = cli("unknown", args);
     assert.deepEqual([decide.status, decide.marks], [2, "LR"]);
     assert.equal(decide.stdout.trim().split("\n").length, 1, "the decision comes after the output");
@@ -1273,6 +1469,14 @@ test("the campaign CLI runs its phases in order, and any phase's failure exits 2
     assert.equal(cli("late", args).status, 2);
     assert.equal(cli("exit", args).status, 2);
     assert.equal(cli("uncaught", args).status, 2);
+    assert.equal(cli("finish", args).status, 2, "a rejection raised when stdout finishes");
+    // After the decision: the process ends on its own, so what is still pending reaches the handlers.
+    assert.equal(
+      cli("stderr-finish", args).status,
+      2,
+      "a rejection raised when the summary finishes",
+    );
+    assert.equal(cli("before-exit", args).status, 2, "a throw as the process is about to exit");
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
