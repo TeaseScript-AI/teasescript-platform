@@ -31,14 +31,20 @@ export interface PlanTextSlot {
 }
 
 /** What a capture of a held session gives the Player: the publication it read, and its state as JSON. */
-export interface KeepCapture {
-  readonly revision: number;
-  /** How many of the session's events the capture covers: the store's events up to here go with it. */
-  readonly eventsThrough: number;
-  readonly snapshotJson: string;
-  /** The plan's canonical JSON, when the capture was asked for it. */
-  readonly planJson: string | null;
-}
+export type KeepCapture =
+  | {
+      readonly kind: "captured";
+      readonly revision: number;
+      /** How many of the session's events the capture covers: the store's events up to here go with it. */
+      readonly eventsThrough: number;
+      readonly snapshotJson: string;
+      /** The plan's canonical JSON, when the capture was asked for it. */
+      readonly planJson: string | null;
+    }
+  /** A state this browser cannot write, such as one with a list too long to save; the plan's JSON still comes back. */
+  | { readonly kind: "unkeepable"; readonly planJson: string | null }
+  /** The host no longer holds the session; the plan's JSON comes back if the host had written it. */
+  | { readonly kind: "gone"; readonly planJson: string | null };
 
 /** What a capture of a held session's checkpoint gives the Player. */
 export interface CheckpointCapture {
@@ -133,30 +139,42 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
         return { result: planText(plan) };
       },
     },
-    // The session's state as JSON, from the trusted export, and with `withPlan` its plan's JSON, which the save then
+    // The session's state as JSON, from the trusted export, and with `plan` that plan's JSON, which the page then
     // holds: the host lets go of it.
     captureKeep: {
       session: "none",
       checkArguments: (args) =>
         isRecord(args) &&
-        exactly(args, ["session", "withPlan"]) &&
+        exactly(args, ["session", "plan"]) &&
         isSessionId(args.session) &&
-        typeof args.withPlan === "boolean",
+        (args.plan === null || typeof args.plan === "string"),
       run: (args, sessions) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { session, withPlan } = args as {
+        const { session, plan } = args as {
           readonly session: string;
-          readonly withPlan: boolean;
+          readonly plan: string | null;
         };
-        const held = heldSession(sessions, session);
+        // A capture asked for the plan's JSON takes it from the host whatever its outcome, so the page holds the only
+        // copy from then on (`plan-json-lease.ts`).
+        const held = sessions.get(session);
+        if (!(held instanceof HeldSession)) {
+          const written = plan === null ? null : (slots.get(plan)?.json ?? null);
+          if (plan !== null) dropPlanText(plan);
+          const result: KeepCapture = { kind: "gone", planJson: written };
+          return { result };
+        }
+        const planJson = plan === null ? null : planText(plan);
+        if (plan !== null) dropPlanText(plan);
         const current = held.current;
-        const snapshotJson = playerRuntimeSnapshotJson(current);
-        let planJson: string | null = null;
-        if (withPlan) {
-          planJson = planText(held.planToken);
-          dropPlanText(held.planToken);
+        let snapshotJson: string;
+        try {
+          snapshotJson = playerRuntimeSnapshotJson(current);
+        } catch {
+          const result: KeepCapture = { kind: "unkeepable", planJson };
+          return { result };
         }
         const result: KeepCapture = {
+          kind: "captured",
           revision: current.revision,
           eventsThrough: held.delivered,
           snapshotJson,

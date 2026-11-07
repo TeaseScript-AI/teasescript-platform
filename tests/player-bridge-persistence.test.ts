@@ -56,6 +56,19 @@ async function prepared(bridge: PlayerBridge, text = PLAN_JSON): Promise<string>
   return result.kind === "prepared" ? result.plan : "";
 }
 
+type Captured = Extract<KeepCapture, { readonly kind: "captured" }>;
+
+/** A keep's capture of `session`, with the held plan `plan`'s JSON when given; it must capture the state. */
+async function keepOf(
+  bridge: PlayerBridge,
+  session: PlayerSession,
+  plan: string | null,
+): Promise<Captured> {
+  const keep = await bridge.read<KeepCapture>(session, "captureKeep", { plan });
+  if (keep.kind !== "captured") assert.fail(`The capture gave ${keep.kind}.`);
+  return keep;
+}
+
 const worker = async () =>
   new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
 
@@ -74,9 +87,9 @@ async function onBoth<T>(body: (bridge: PlayerBridge) => Promise<T>): Promise<[T
 async function captureTape(bridge: PlayerBridge) {
   const plan = await prepared(bridge);
   let session: PlayerSession = await bridge.start(plan, START, false);
-  const tape: { readonly keep: KeepCapture; readonly checkpoint: CheckpointCapture }[] = [];
+  const tape: { readonly keep: Captured; readonly checkpoint: CheckpointCapture }[] = [];
   const capture = async (withPlan: boolean) => {
-    const keep = await bridge.read<KeepCapture>(session, "captureKeep", { withPlan });
+    const keep = await keepOf(bridge, session, withPlan ? plan : null);
     const point = await bridge.read<CheckpointCapture>(session, "captureCheckpoint");
     session = bridge.latest(session)!;
     // The events a capture goes with are compared by their count: its cursor.
@@ -107,7 +120,7 @@ test("a capture's bytes are what the adapter writes of the host's session, and i
   const session = await bridge.start(plan, START, false);
   await bridge.request(session, "observeTime", { atMs: 2_500, media: [] });
   const shown = bridge.latest(session)!;
-  const keep = await bridge.read<KeepCapture>(shown, "captureKeep", { withPlan: false });
+  const keep = await keepOf(bridge, shown, null);
   const point = await bridge.read<CheckpointCapture>(shown, "captureCheckpoint");
   assert.equal(
     keep.snapshotJson,
@@ -132,7 +145,7 @@ test("a read waits for the session's earlier requests, so it shows what was post
     // Posted together: an observation, Debug's storage edit waiting for its reply, then the read, which follows both.
     const observed = bridge.request(session, "observeTime", { atMs: 1_000, media: [] });
     const edited = bridge.request(session, "applyStorageEdit", { key: "edited", value: 7 });
-    const read = bridge.read<KeepCapture>(session, "captureKeep", { withPlan: false });
+    const read = keepOf(bridge, session, null);
     await Promise.all([observed, edited]);
     const keep = await read;
     const shown = bridge.latest(session)!;
@@ -150,7 +163,7 @@ test("a read works after a Player error stop, at the stop line, which the sessio
   await bridge.request(session, "observeTime", { atMs: 1_000, media: [] });
   await bridge.halt(session);
   const shown = bridge.latest(session)!;
-  const keep = await bridge.read<KeepCapture>(shown, "captureKeep", { withPlan: false });
+  const keep = await keepOf(bridge, shown, null);
   assert.deepEqual([keep.revision, keep.eventsThrough], [shown.revision, shown.events.length]);
   await assert.rejects(
     bridge.request(shown, "observeTime", { atMs: 2_000, media: [] }),
@@ -158,14 +171,17 @@ test("a read works after a Player error stop, at the stop line, which the sessio
   );
 });
 
-test("a read of a released session fails as one the host no longer holds", async () => {
+test("a read of a released session finds none: a keep's capture says so and returns the plan's JSON it took", async () => {
   const bridge = await inProcessBridge();
   const plan = await prepared(bridge);
   const session = await bridge.start(plan, START, false);
+  await bridge.client.request("planText", { plan });
   bridge.release(session);
-  const error = await bridge
-    .read(session, "captureKeep", { withPlan: false })
-    .catch((caught: unknown) => caught);
+  assert.deepEqual(await bridge.read(session, "captureKeep", { plan }), {
+    kind: "gone",
+    planJson: PLAN_JSON,
+  });
+  const error = await bridge.read(session, "captureCheckpoint").catch((caught: unknown) => caught);
   assert.ok(error instanceof BridgeRequestError);
   assert.deepEqual([error.kind, error.name], ["engine", "SessionGoneError"]);
 });
@@ -176,7 +192,7 @@ test("a kept session restores against the held plan; another plan, an ended sess
     const session = await bridge.start(plan, START, false);
     await bridge.request(session, "observeTime", { atMs: 2_500, media: [] });
     const shown = bridge.latest(session)!;
-    const keep = await bridge.read<KeepCapture>(shown, "captureKeep", { withPlan: true });
+    const keep = await keepOf(bridge, shown, plan);
     const events = shown.events.slice(0, keep.eventsThrough);
     const restored = await bridge.restoreKept(plan, keep.planJson!, keep.snapshotJson, events);
     assert.ok(typeof restored === "object");
@@ -196,7 +212,7 @@ test("a kept session restores against the held plan; another plan, an ended sess
       serializeValidatedRuntimeJson(compilePlayerProject('say "x", instant\nexit').plan!),
     );
     const ended = await bridge.start(ending, START, false);
-    const endedKeep = await bridge.read<KeepCapture>(ended, "captureKeep", { withPlan: true });
+    const endedKeep = await keepOf(bridge, ended, ending);
     const endedOutcome = await bridge.restoreKept(
       ending,
       endedKeep.planJson!,
@@ -209,7 +225,7 @@ test("a kept session restores against the held plan; another plan, an ended sess
         state: restored.state,
         events: [...restored.events],
       },
-      restoredJson: await bridge.read<KeepCapture>(restored, "captureKeep", { withPlan: false }),
+      restoredJson: await keepOf(bridge, restored, null),
       otherPlan,
       damaged: [damaged.name, damaged.code, damaged.info],
       endedOutcome,
@@ -242,7 +258,7 @@ test("the plan's JSON is written once per held plan: prepared in a task, taken b
     assert.equal(writes, 1);
     await bridge.client.request("preparePlanText", { plan });
     const session = await bridge.start(plan, START, false);
-    const keep = await bridge.read<KeepCapture>(session, "captureKeep", { withPlan: true });
+    const keep = await keepOf(bridge, session, plan);
     assert.equal(keep.planJson, PLAN_JSON);
     assert.equal(writes, 1, "the save took the prepared JSON");
     // Taken, the next one is written anew; released before its task, none is.

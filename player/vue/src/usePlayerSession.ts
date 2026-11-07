@@ -61,6 +61,13 @@ import type { StartOptions } from "../../engine-bridge/ops/session.js";
 import type { TracingIntent } from "../../engine-bridge/player-ops.js";
 import type { CheckpointCapture, KeepCapture } from "../../engine-bridge/ops/persistence.js";
 import {
+  EMPTY_PLAN_JSON_LEASE,
+  settle,
+  type PlanJsonEvent,
+  type PlanJsonLease,
+  type PlanJsonSettled,
+} from "../../plan-json-lease.js";
+import {
   bridgeOf,
   endsQuietly,
   refusalCode,
@@ -1159,10 +1166,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     bridge?.unclaim(claim);
     disposed = true;
     supersede();
-    unsavedPlanJson = null;
-    preparedPlanJson = null;
     // The host's JSON of the plans this page prepared, written or waiting for its task, is not needed any more.
-    for (const plan of [...askedPlanJson]) releasePlanJson(plan);
+    settlePlanJson({ kind: "dispose" });
     loads.clear();
     device.reset();
     for (const element of audioElements.splice(0)) {
@@ -1721,39 +1726,21 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   } = { plan: false, count: 0, last: null };
   let keeping: Promise<void> | null = null;
   let keepAgain = false;
-  // The plan's JSON a save took from the host and has not yet stored, so that a retry after a failed write writes it again
-  // as it is. The host writes a plan's JSON for a new session's first save in a task of its own before Start, so that
-  // Start does not write it (#1707; `ops/persistence.ts`).
-  let unsavedPlanJson: { readonly plan: string; readonly json: string } | null = null;
-  // The JSON a save still held when a Start of the same plan was prepared, which that Start's first save stores.
-  let preparedPlanJson: { readonly plan: string; readonly json: string } | null = null;
-  // The capture taking a plan's JSON from the host, while its reply is out: a Start of that plan prepared meanwhile
-  // takes the same JSON once it arrives (`prepareAfter`).
-  let planCapture: { readonly plan: string; prepareAfter: boolean } | null = null;
-  // The plans whose JSON this page asked the host to write, which it lets go of once no preparation of it needs it.
-  const askedPlanJson = new Set<string>();
-  /** Lets go of the host's JSON of `plan`, written or waiting, unless a capture is taking it. */
-  function releasePlanJson(plan: string) {
-    if (!askedPlanJson.delete(plan) || planCapture?.plan === plan || bridge === null) return;
-    void bridge.client.request("releasePlanText", { plan }).catch(() => {});
-  }
-  /**
-   * Has the host write the held plan `plan`'s JSON in a later task for a new session's first save, unless a save still
-   * holds it, whose JSON that save then stores too.
-   */
-  function preparePlanJson(plan: string) {
-    if (unsavedPlanJson?.plan === plan) {
-      preparedPlanJson = unsavedPlanJson;
-      return;
+  // Who holds the JSON of the script's plan, which a new session's first save stores: the host, which writes it in a task
+  // of its own before Start (#1707), or this page, from a capture until its save is stored (`plan-json-lease.ts`).
+  // Only `settlePlanJson` changes it.
+  let planJsonLease: PlanJsonLease = EMPTY_PLAN_JSON_LEASE;
+  /** Settles `event` in the lease and posts the host messages it implies. */
+  function settlePlanJson(event: PlanJsonEvent): PlanJsonSettled {
+    const settled = settle(planJsonLease, event);
+    planJsonLease = settled.lease;
+    for (const message of settled.messages) {
+      const op = message.kind === "write" ? "preparePlanText" : "releasePlanText";
+      void bridgeReady
+        .then((host) => host.client.request(op, { plan: message.plan }))
+        .catch(() => {});
     }
-    if (planCapture?.plan === plan) {
-      planCapture.prepareAfter = true;
-      return;
-    }
-    askedPlanJson.add(plan);
-    void bridgeReady
-      .then((host) => host.client.request("preparePlanText", { plan }))
-      .catch(() => {});
+    return settled;
   }
   /**
    * Keeps the shown session, where a reload continues it, together with the photos only it uses. One write runs at a
@@ -1777,7 +1764,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   async function keepOnce() {
     const current = session.value;
     // Only a script a host prepared with `prepareScript` keeps its session.
-    if (keptScope === null || scriptPlan === null || current === null) return;
+    if (keptScope === null || scriptPlan === null || current === null || disposed) return;
     if (inspecting.value || activation.value !== null) return;
     // The session's events: its store's, which a capture's events end in.
     const events = current.events;
@@ -1787,52 +1774,50 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         : 0;
     const withPlan = !(kept.plan && from > 0);
     const token = current.planToken;
-    const retry = !withPlan
-      ? null
-      : unsavedPlanJson?.plan === token
-        ? unsavedPlanJson
-        : preparedPlanJson?.plan === token
-          ? preparedPlanJson
-          : null;
-    if (retry !== null && retry === preparedPlanJson) preparedPlanJson = null;
+    // The plan's JSON for a first save: this page's copy, or the host's, which the capture takes.
+    const source = withPlan ? settlePlanJson({ kind: "captureStart", plan: token }).source! : null;
+    const fromHost = source?.kind === "host";
     // The room the session is kept in is the one it plays in now; a switch while the capture is out drops it.
     const inDebugRoom = room.value === "debug";
     const store = keptStore();
-    const capturing = withPlan && retry === null ? { plan: token, prepareAfter: false } : null;
-    planCapture = capturing;
     // The state the host holds now, after the session's earlier requests; later operations change the session.
     let capture: KeepCapture;
     try {
       capture = await bridgeOf(current).read<KeepCapture>(current, "captureKeep", {
-        withPlan: capturing !== null,
+        plan: fromHost ? token : null,
       });
     } catch (error) {
-      if (planCapture === capturing) planCapture = null;
-      // A Start prepared while the capture was out has the host write the plan's JSON after all.
-      if (capturing?.prepareAfter === true) preparePlanJson(capturing.plan);
-      // A request the Worker's loss ended, and a read of a session the host no longer holds, keep the point kept before.
-      if (
-        endsQuietly(error) ||
-        (error instanceof BridgeRequestError && error.name === "SessionGoneError")
-      )
-        return;
-      if (disposed || (room.value === "debug") !== inDebugRoom) return;
-      // A state this browser cannot write, such as one holding a list too long to save, cannot be kept, and the point kept
-      // before must not stand in for it: a reload would go on from an earlier state as if it were this one.
+      if (fromHost) settlePlanJson({ kind: "captureLost", plan: token });
+      // A request the Worker's loss ended keeps the point kept before.
+      if (endsQuietly(error) || disposed || (room.value === "debug") !== inDebugRoom) return;
       await forgetKeptSession(current, inDebugRoom);
       return;
     }
-    if (planCapture === capturing) planCapture = null;
+    const saving = fromHost
+      ? settlePlanJson({
+          kind: "captureReply",
+          plan: token,
+          json: capture.planJson,
+          saved: capture.kind === "captured",
+        }).saving
+      : source?.kind === "page"
+        ? source.entry
+        : null;
+    // The host no longer holds the session: the point kept before stays.
+    if (capture.kind === "gone") return;
+    if (capture.kind === "unkeepable") {
+      // A state this browser cannot write, such as one holding a list too long to save, cannot be kept, and the point kept
+      // before must not stand in for it: a reload would go on from an earlier state as if it were this one.
+      if (!disposed && (room.value === "debug") === inDebugRoom)
+        await forgetKeptSession(current, inDebugRoom);
+      return;
+    }
     const { snapshotJson } = capture;
     const count = capture.eventsThrough;
     if (count > events.length) return;
     const added = events.slice(from, count);
     const last = events[count - 1] ?? null;
-    const planJson = !withPlan
-      ? null
-      : (unsavedPlanJson = retry ?? { plan: token, json: capture.planJson! });
-    // A Start of the plan prepared while the capture was out takes the same JSON.
-    if (capturing?.prepareAfter === true) preparedPlanJson = unsavedPlanJson;
+    if (withPlan && saving == null) return;
     const marks = { editedWhileDebugging: debugEdits.value, rewoundWhileDebugging: rewound.value };
     // Written once, for the photos they show and for the store.
     const eventsJson = added.map(serializeValidatedRuntimeJson);
@@ -1854,14 +1839,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           await insertOrConfirm(store.media, photo);
       }
       await store.publish(keptScope, {
-        planJson: planJson?.json ?? null,
+        planJson: withPlan ? saving!.json : null,
         snapshotJson,
         eventsFrom: from,
         events: added,
         eventsJson,
         marks,
       });
-      if (unsavedPlanJson === planJson) unsavedPlanJson = null;
+      if (withPlan) settlePlanJson({ kind: "stored", entry: saving! });
       kept = { plan: true, count, last };
       if (inDebugRoom) debugRoom.value = { session: true };
       notices.dismiss(playerNoticeKeys.sessionNotKept);
@@ -1932,7 +1917,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     await bridgeReady;
     if (disposed || owner !== preparation) return;
     // A plan this one replaces needs no JSON for a first save any more.
-    if (scriptPlan !== null && scriptPlan !== plan) releasePlanJson(scriptPlan);
+    settlePlanJson({ kind: "replace", plan });
     scriptPlan = plan;
     lastStart.value = create;
     if (sources !== undefined) scriptSources = sources;
@@ -1962,7 +1947,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       return;
     }
     // Unless the session goes on, a new session's first save stores the plan's JSON, which the host wrote to compare it.
-    if (plan !== null) preparePlanJson(plan);
+    if (plan !== null) settlePlanJson({ kind: "prepare", plan });
     if (lastStart.value !== null) prepareStart(lastStart.value, found.outdated);
   }
   /**
@@ -2634,7 +2619,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * browser's settings name, which Start and Continue still capture anew, and a Start's plan JSON for its first save.
    */
   function prepareActivation(kind: Activation["kind"]) {
-    if (kind === "start" && keptScope !== null && scriptPlan !== null) preparePlanJson(scriptPlan);
+    if (kind === "start" && keptScope !== null && scriptPlan !== null)
+      settlePlanJson({ kind: "prepare", plan: scriptPlan });
     if (options.temporalContext !== undefined) return;
     const token = activationToken;
     setTimeout(() => {

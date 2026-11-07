@@ -549,3 +549,127 @@ test("a plan another preparation replaced, and the page's last one when it close
   await bridge.client.request("planText", { plan: ends });
   assert.deepEqual([writes(ASKS), writes(ENDS)], [2, 2]);
 });
+
+/*
+ * The plan JSON's lifetime through the real composable and its in-process host: a sample of the generated family of
+ * `player-plan-json-lease.test.ts` that keeps every value and every pair of values of its axes, with the capture's
+ * reply held until the case retires the plan. "lost" is the loss family's (`player-bridge-loss.test.ts`).
+ */
+const LIFETIME_AXES = {
+  preparation: ["current", "replaced", "disposed"],
+  capture: ["captured", "unkeepable", "gone"],
+  startDuringCapture: ["no", "yes"],
+  retire: ["beforeReply", "afterReply"],
+} as const;
+type LifetimeCase = {
+  readonly [A in keyof typeof LIFETIME_AXES]: (typeof LIFETIME_AXES)[A][number];
+};
+const LIFETIME_CASES: LifetimeCase[] = [];
+for (const preparation of LIFETIME_AXES.preparation)
+  for (const capture of LIFETIME_AXES.capture)
+    for (const startDuringCapture of LIFETIME_AXES.startDuringCapture)
+      for (const retire of LIFETIME_AXES.retire)
+        if (preparation !== "current" || retire === "beforeReply")
+          LIFETIME_CASES.push({ preparation, capture, startDuringCapture, retire });
+const lifetimeName = (c: LifetimeCase) =>
+  `${c.preparation} ${c.capture} start:${c.startDuringCapture} retire:${c.retire}`;
+
+test("the composable's plan JSON sample covers every value and pair of its axes", () => {
+  // EVIDENCE: invariant: the keys of the axes object, declared literally above.
+  const axes = Object.keys(LIFETIME_AXES) as (keyof typeof LIFETIME_AXES)[];
+  for (const [i, left] of axes.entries())
+    for (const right of axes.slice(i + 1))
+      for (const a of LIFETIME_AXES[left])
+        for (const b of LIFETIME_AXES[right]) {
+          const possible = !(
+            left === "preparation" &&
+            right === "retire" &&
+            a === "current" &&
+            b === "afterReply"
+          );
+          assert.equal(
+            LIFETIME_CASES.some((c) => c[left] === a && c[right] === b),
+            possible,
+            `${left} = ${a} with ${right} = ${b}`,
+          );
+        }
+});
+
+for (const c of LIFETIME_CASES)
+  test(`the composable's plan JSON: ${lifetimeName(c)}`, async (context) => {
+    stubBrowser(context);
+    const writes = planWrites(context, ASKS);
+    const at = browser();
+    const { host, scope } = await page(context, at, ASKS);
+    await until(() => writes() === 1, "the plan's JSON was not prepared");
+    const bridge = await host.bridge;
+    const asks = await held(host, ASKS);
+    // The capture's state fails to write once, as a state too long to save does (`TSK004`).
+    const stringify = JSON.stringify;
+    let failSnapshot = false;
+    JSON.stringify = new Proxy(JSON.stringify, {
+      apply(target, _self, args) {
+        const value: unknown = args[0];
+        if (
+          failSnapshot &&
+          typeof value === "object" &&
+          value !== null &&
+          "format" in value &&
+          value.format === "teasescript-runtime-snapshot"
+        ) {
+          failSnapshot = false;
+          throw new RangeError("Invalid string length");
+        }
+        return target(args[0], args[1], args[2]);
+      },
+    });
+    context.after(() => (JSON.stringify = stringify));
+    let disposed = false;
+    const afterClosing: string[] = [];
+    let announce!: () => void;
+    const replied = new Promise<void>((resolve) => (announce = resolve));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let settled: Promise<unknown> = Promise.resolve();
+    const request = bridge.client.request.bind(bridge.client);
+    context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+      const [op, body] = args;
+      if (disposed && op === "preparePlanText") afterClosing.push(op);
+      if (op !== "captureKeep") return request(...args);
+      failSnapshot = c.capture === "unkeepable";
+      const session =
+        typeof body === "object" && body !== null && "session" in body ? body.session : null;
+      // A session the host no longer holds: released just before the capture runs.
+      if (c.capture === "gone" && typeof session === "string")
+        void request("release", null, { session });
+      const sent = request(...args).then(async (reply) => {
+        announce();
+        await gate;
+        return reply;
+      });
+      settled = sent.catch(() => {});
+      return sent;
+    });
+    const retire = async () => {
+      if (c.preparation === "replaced") await prepareAgain(host, ENDS);
+      else if (c.preparation === "disposed") {
+        scope.stop();
+        disposed = true;
+      }
+    };
+    await host.activate();
+    await replied;
+    if (c.startDuringCapture === "yes") await prepareAgain(host, ASKS);
+    if (c.retire === "beforeReply") await retire();
+    release();
+    await settled;
+    await tasks();
+    if (c.retire === "afterReply") await retire();
+    await tasks();
+    assert.ok(writes() <= 1, `${lifetimeName(c)}: the plan's JSON was written ${writes()} times`);
+    assert.deepEqual(afterClosing, [], "nothing is prepared once the page closed");
+    // The host holds no copy now: asked for it, it writes it anew.
+    const before = writes();
+    await request("planText", { plan: asks });
+    assert.equal(writes() - before, 1, `${lifetimeName(c)}: the host still held the plan's JSON`);
+  });
