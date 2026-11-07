@@ -1,0 +1,11 @@
+// Completed file operations (#1797, F-work), by the file-store contract (V30 §33): two files stored from Base64, one
+// read back and hashed, and both read for `toJson`'s data URLs, which `fromJson` keeps as text, since plain bytes are no
+// recognized type. Each completed file operation counts. No converted package outside the holdouts stores a file.
+let first = fileFromBase64("SGVsbG8sIGZpbGUh", default: null) otherwise ""
+let second = fileFromBase64("U2Vjb25kIGZpbGU=", default: null) otherwise ""
+let bytes = fileToBase64(first)
+let hash = hashFile(first)
+let text = toJson({ files: [first, second] })
+let back = fromJson(text, default: { files: [""] })
+say "files:${bytes}:${hash}:${text.length}:${back["files"].length}", instant
+exit

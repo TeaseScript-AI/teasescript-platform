@@ -1,0 +1,21 @@
+// Committed storage writes (#1797, F-work), after Domme2's progress saving: each round saves its score and the running
+// total, then one key is deleted, and the script reads everything back. With persistent storage each write waits for
+// the host's acknowledgement; each committed write counts.
+let rounds = 4
+let total = load("total", default: 0)
+let i = 0
+while i < rounds {
+  i += 1
+  let score = i * 3
+  save score as "round.${i}"
+  total += score
+  save total as "total"
+}
+delete "round.1"
+let back = 0
+for k in 1..=rounds {
+  let stored: integer = load("round.${k}", default: -100)
+  back += stored
+}
+say "storage:${total}:${back}:${load("total", default: -1)}", instant
+exit

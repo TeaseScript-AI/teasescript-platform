@@ -1,0 +1,23 @@
+// Text tail (#1797, F-work), after ShockYourselfMacroMaker's progressive text growth: a text grown by `chunks` chunks
+// of 64 code points (65 UTF-16 units: each ends with an astral emoji and an e with a combining acute), read at every
+// 64th chunk, rewritten at every 256th from the 101st, and said whole.
+let chunks = 4688
+let text = ""
+let checks = 0
+let i = 0
+while i < chunks {
+  text += "${i % 10}abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567😀é"
+  if i % 64 == 63 {
+    let tail = text.substring(text.length - 64, text.length)
+    checks += tail.indexOf("😀") otherwise -1000
+    checks += text.lastIndexOf("é") otherwise -1000
+    checks += text.count("Z0")
+  }
+  if i % 256 == 100 {
+    text = text.replace("Z0", "z0")
+  }
+  i += 1
+}
+say "text:${text.length}:${text.count("😀")}:${text.count("é")}:${text.count("Z0")}:${checks}", instant
+say text, instant
+exit

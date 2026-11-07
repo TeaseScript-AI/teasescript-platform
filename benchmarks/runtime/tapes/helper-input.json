@@ -1,0 +1,13 @@
+[
+  {"kind":"completeAction","args":[{"actionId":1,"actionKind":"interaction","interactionKind":"number","payload":{"kind":"submittedText","submittedText":"3"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":2,"actionKind":"interaction","interactionKind":"number","payload":{"kind":"submittedText","submittedText":"42"}}]},
+  {"kind":"completeAction","args":[{"actionId":3,"actionKind":"interaction","interactionKind":"number","payload":{"kind":"submittedText","submittedText":"7"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":4,"actionKind":"interaction","interactionKind":"number","payload":{"kind":"submittedText","submittedText":"many"}}]},
+  {"kind":"completeAction","args":[{"actionId":4,"actionKind":"interaction","interactionKind":"number","payload":{"kind":"submittedText","submittedText":"5"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":5,"actionKind":"interaction","interactionKind":"number","payload":{"kind":"submittedText","submittedText":"1"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":6,"actionKind":"interaction","interactionKind":"number","payload":{"kind":"submittedText","submittedText":"10"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":7,"actionKind":"interaction","interactionKind":"number","payload":{"kind":"submittedText","submittedText":"2"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":8,"actionKind":"interaction","interactionKind":"choice","payload":{"kind":"selectedOption","optionIndex":1}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":9,"actionKind":"interaction","interactionKind":"text","payload":{"kind":"submittedText","submittedText":"Someone with a long name"}}]},
+  {"kind":"completeAction","args":[{"actionId":10,"actionKind":"interaction","interactionKind":"text","payload":{"kind":"submittedText","submittedText":"Ada"}}],"unit":true}
+]
