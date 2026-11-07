@@ -23,7 +23,13 @@ import { writtenTypeErrors } from "../src/type-inference/core/written.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { plannedContent, plannedStores, runGlobals } from "./helpers/type-core-route.js";
-import { inMode, MODES, publishedAnswers, publishedRoute } from "./helpers/type-core-oracles.js";
+import {
+  inMode,
+  MODES,
+  publication,
+  publishedAnswers,
+  publishedRoute,
+} from "./helpers/type-core-oracles.js";
 import {
   DEFAULT_CHAIN_MATRIX,
   INFERRED_COPY_MATRIX,
@@ -1387,10 +1393,12 @@ test("a cycle of copies inherits the same written types whichever of its places 
       v: NUMBER,
       x: "none",
     });
-  // the analysis publishes the same in each mode: only v is decided by its copy of a written type
+  // the analysis decides so in each mode (only v by its copy of a written type), and publishes one record, diagnostics
+  // and plan in all four (`publication`)
   const witness = ring("x = v\nv = u\nu = v\nu = x\nv = w");
   const { request, ids } = prepare(witness);
-  for (const mode of MODES)
+  const published = new Set<string | null>();
+  for (const mode of MODES) {
     assert.deepEqual(
       inMode(mode, () => {
         const answers = analyseCore(request);
@@ -1402,6 +1410,10 @@ test("a cycle of copies inherits the same written types whichever of its places 
       ["u decided", "v copied", "x decided"],
       JSON.stringify(mode),
     );
+    published.add(publication([{ path: "main.tease", source: witness }], mode, GLOBALS));
+  }
+  assert.equal(published.size, 1);
+  assert.notEqual([...published][0], null);
   // controls: a copy back after the first value decides waits on nothing; a cycle fed late cuts only its copies
   const W = "let w: number = 1\n";
   assert.deepEqual(
