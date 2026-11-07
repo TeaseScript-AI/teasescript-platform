@@ -394,8 +394,12 @@ function perCell(
 const rises = (series: readonly number[]) =>
   series.slice(1).map((value, index) => value / series[index]! - 1);
 
-test("the oracle's questions cost per cell they return rises by a falling step on W24-varied, r3-root-copies and W32-own-test, a log factor, below K (#1837, #1941)", async () => {
+test("the oracle's questions cost per cell they return is flat on W19-record, and on W24-varied, r3-root-copies and W32-own-test rises by a falling step, a log factor, below K (#1837, #1941)", async () => {
   const gates = "tests/families/copies/3a-spike14-gates.mjs";
+  // (flat: under 1 % a step either way, 24.224 / 24.204 / 24.140 / 24.087)
+  const flat = perCell(await family(gates, "W19-record", [16, 32, 64, 128]));
+  for (const rise of rises(flat)) assert.ok(Math.abs(rise) < 0.01, JSON.stringify(flat));
+  for (const cost of flat) assert.ok(cost < QUESTION_UNITS_PER_CELL, JSON.stringify(flat));
   for (const [module, shape] of [
     [gates, "W24-varied"],
     ["tests/families/copies/f1-astra-r3-field-families.mjs", "r3-root-copies"],
