@@ -100,7 +100,10 @@ test(
       ].join("\n");
       const { status, out } = check(text, [directory]);
       assert.equal(status, 0, out);
-      assert.match(out, /9 tokens: 0 resolved, 0 ambiguous, 0 unresolved, 9 skipped/u);
+      assert.match(
+        out,
+        /9 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 9 skipped/u,
+      );
       // A commit URL is checked; a path that holds a real SHA still reports it.
       const url = check("https://github.com/o/r/commit/0123abc4567", [directory]);
       assert.equal(url.status, 1, url.out);
@@ -176,11 +179,11 @@ test(
       for (const [text, line] of [
         [
           "",
-          "0 tokens: 0 resolved, 0 ambiguous, 0 unresolved, 0 skipped (ids, words, paths); 0 placeholders",
+          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths); 0 placeholders",
         ],
         [
           `at ${shas[0].slice(0, 9)}, <sha>`,
-          "1 tokens: 1 resolved, 0 ambiguous, 0 unresolved, 0 skipped (ids, words, paths); 1 placeholders",
+          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths); 1 placeholders",
         ],
       ]) {
         const { out } = check(text, [directory]);
@@ -189,6 +192,112 @@ test(
       assert.equal(check("", [directory]).status, 0);
     } finally {
       rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+/** A repository whose `main` is pushed to a bare `origin`, and one commit after it that is not: their SHAs. */
+function withRemote() {
+  const { directory, shas } = repository(1);
+  const origin = mkdtempSync(join(tmpdir(), "check-shas-origin-"));
+  const git = (...args) => spawnSync("git", ["-C", directory, ...args], { encoding: "utf8" });
+  spawnSync("git", ["init", "-q", "--bare", origin]);
+  git("remote", "add", "origin", origin);
+  git("push", "-q", "origin", "main");
+  git("fetch", "-q", "origin");
+  const tree = git("rev-parse", "main^{tree}").stdout.trim();
+  const local = spawnSync(
+    "git",
+    [
+      "-C",
+      directory,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit-tree",
+      tree,
+      "-p",
+      "main",
+      "-m",
+      "local",
+    ],
+    { encoding: "utf8" },
+  ).stdout.trim();
+  git("update-ref", "refs/heads/main", local);
+  return { directory, origin, pushed: shas[0], local };
+}
+
+test(
+  "a commit a remote-tracking ref contains resolves; one only this clone has fails as local only",
+  { timeout: 30_000 },
+  () => {
+    const { directory, origin, pushed, local } = withRemote();
+    try {
+      const on = check(`at ${pushed.slice(0, 9)}`, [directory]);
+      assert.equal(on.status, 0, on.out);
+      assert.match(on.out, /resolved +\w+ +\w+ in /u);
+      assert.doesNotMatch(on.out, /no remote refs/u);
+      const off = check(`at ${local.slice(0, 9)}`, [directory]);
+      assert.equal(off.status, 1, off.out);
+      assert.match(
+        off.out,
+        new RegExp(
+          `local only +${local.slice(0, 9)} +${local} in .*: push it, or cite one on origin; for exact pre-rebase heads, push one archive ref whose parents are the cited heads`,
+          "u",
+        ),
+      );
+      assert.match(
+        off.out.trim().split("\n").at(-1),
+        /1 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 1 local only, 0 skipped/u,
+      );
+    } finally {
+      for (const path of [directory, origin]) rmSync(path, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "a repository without remote-tracking refs is named once, and its commits resolve as before",
+  { timeout: 30_000 },
+  () => {
+    const { directory, shas } = repository(2);
+    try {
+      const { status, out } = check(`${shas[0]} and ${shas[1]}`, [directory]);
+      assert.equal(status, 0, out);
+      assert.equal(out.match(/no remote refs in .*: reachability not checked/gu)?.length, 1, out);
+      assert.match(out, /2 tokens: 2 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "a tree hash resolves as a tree, without the remote check; a commit is never taken for its tree",
+  { timeout: 30_000 },
+  () => {
+    const { directory, origin, pushed } = withRemote();
+    try {
+      const tree = spawnSync("git", ["-C", directory, "rev-parse", `${pushed}^{tree}`], {
+        encoding: "utf8",
+      }).stdout.trim();
+      const { status, out } = check(
+        `baseline tree ${tree.slice(0, 9)}, head ${pushed.slice(0, 9)}`,
+        [directory],
+      );
+      assert.equal(status, 0, out);
+      assert.match(
+        out,
+        new RegExp(
+          `tree +${tree.slice(0, 9)} +${tree} in .*: a tree, not checked on a remote`,
+          "u",
+        ),
+      );
+      assert.match(out, new RegExp(`resolved +${pushed.slice(0, 9)} +${pushed}`, "u"));
+      assert.match(out.trim().split("\n").at(-1), /2 tokens: 1 resolved, 1 trees,/u);
+    } finally {
+      for (const path of [directory, origin]) rmSync(path, { recursive: true, force: true });
     }
   },
 );
