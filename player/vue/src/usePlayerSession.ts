@@ -253,8 +253,8 @@ export type PlayerSessionStart =
   | {
       /** The host's token for the plan. */
       readonly plan: string;
-      /** The Start's data options, read at activation. */
-      readonly options: () => StartOptions;
+      /** The Start's data options, read at activation; Player Debug supplies `debugMode` (`setDebugMode`). */
+      readonly options: () => Omit<StartOptions, "debugMode">;
     }
   | ((recording: {
       readonly recorder: DebugRecorder;
