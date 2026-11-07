@@ -13,7 +13,13 @@ import {
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import { BRIDGE_VERSION, type BuildIdentity } from "../player/engine-bridge/protocol.js";
 import { decodeMessage, encodeMessage, NATIVE_NESTING } from "../player/engine-bridge/transport.js";
-import { cloneGraphDifference, cloneKind, KIND_OF_TYPE } from "./helpers/clone-graph.js";
+import {
+  cloneGraphDifference,
+  cloneKind,
+  INTRINSIC_READS,
+  KIND_OF_TYPE,
+  type IntrinsicRead,
+} from "./helpers/clone-graph.js";
 
 /*
  * The bridge's depth-safe transport (#1877): which path a message takes, that every path carries what native clone
@@ -274,7 +280,18 @@ test("the comparator tells apart what native clone keeps, and refuses every kind
   const apart = { a: new Uint8Array(one, 0, 4), b: new Uint8Array(two, 4, 4) };
   const [atThree, atZero] = twin();
   // Other pairs that must differ.
+  const functions = {
+    "a function": () => 1,
+    "an async function": async () => 1,
+    "a generator": function* () {},
+  };
   const differing: [label: string, actual: unknown, expected: unknown][] = [
+    // Native clone refuses a function, so not even the same one compares equal (`cloneKind` calls it unsupported).
+    ...Object.entries(functions).map(([label, value]): [string, unknown, unknown] => [
+      `${label} against itself`,
+      value,
+      value,
+    ]),
     ["a view at another offset over the same bytes", atZero, atThree],
     [
       "a view of another length",
@@ -316,6 +333,167 @@ test("the comparator tells apart what native clone keeps, and refuses every kind
   assert.deepEqual(new Set(kinds.map(([kind]) => kind)), compared);
   // The kind table names exactly the predicates this Node has, so a new kind of object cannot pass as a record.
   assert.deepEqual(Object.keys(KIND_OF_TYPE).sort(), Object.keys(types).sort());
+});
+
+/** Each read's expected value and one that differs from it in that slot alone, as source evaluated in either realm. */
+const TWIN = "new Uint8Array([5, 6, 5, 5, 6, 5, 6, 5]).buffer";
+const READ_FIXTURES: Record<IntrinsicRead, readonly [expected: string, differing: string]> = {
+  "typed array type": ["new Uint16Array([1])", "new Uint8Array([1, 0])"],
+  "typed array buffer": ["new Uint8Array([1])", "new Uint8Array([2])"],
+  "typed array offset": [`new Uint8Array(${TWIN}, 3, 2)`, `new Uint8Array(${TWIN}, 0, 2)`],
+  "typed array length": [`new Uint8Array(${TWIN}, 0, 2)`, `new Uint8Array(${TWIN}, 0, 3)`],
+  "DataView buffer": [
+    "new DataView(new Uint8Array([1]).buffer)",
+    "new DataView(new Uint8Array([2]).buffer)",
+  ],
+  "DataView offset": [`new DataView(${TWIN}, 3, 2)`, `new DataView(${TWIN}, 0, 2)`],
+  "DataView length": [`new DataView(${TWIN}, 0, 2)`, `new DataView(${TWIN}, 0, 3)`],
+  "buffer length": ["new ArrayBuffer(1)", "new ArrayBuffer(2)"],
+  "buffer resizable": ["new ArrayBuffer(1)", "new ArrayBuffer(1, { maxByteLength: 2 })"],
+  "RegExp source": ["/x/g", "/y/g"],
+  "RegExp hasIndices": ["/x/", "/x/d"],
+  "RegExp global": ["/x/", "/x/g"],
+  "RegExp ignoreCase": ["/x/", "/x/i"],
+  "RegExp multiline": ["/x/", "/x/m"],
+  "RegExp dotAll": ["/x/", "/x/s"],
+  "RegExp unicode": ["/x/", "/x/u"],
+  "RegExp unicodeSets": ["/x/", "/x/v"],
+  "RegExp sticky": ["/x/", "/x/y"],
+  "Date time": ["new Date(0)", "new Date(1)"],
+  "Map entries": ["new Map([[1, 1]])", "new Map([[1, 2]])"],
+  "Set entries": ["new Set([1])", "new Set([2])"],
+};
+
+/** A representative of each kind the kind table admits, as source evaluated in either realm. */
+const KIND_SURFACES: readonly [kind: string, source: string][] = [
+  ["date", "new Date(3)"],
+  ["regexp", "/x+/gi"],
+  ["view", "new Uint16Array([1, 2])"],
+  ["view", "new DataView(new ArrayBuffer(2))"],
+  ["buffer", "new Uint8Array([1, 2]).buffer"],
+  ["map", "new Map([[1, { a: 2 }]])"],
+  ["set", "new Set([1, 2])"],
+  ["array", "[1, { a: 2 }]"],
+  ["record", "({ a: 1, b: [2] })"],
+];
+
+const REALMS = {
+  "this realm": (source: string): object => vm.runInThisContext(source),
+  "another realm": (source: string): object => vm.runInNewContext(source),
+};
+
+/** The prototypes `INTRINSIC_READS` names as owners, found from this realm's constructors. */
+const OWNER_PROTOTYPES = {
+  TypedArray: Object.getPrototypeOf(Uint8Array.prototype),
+  DataView: DataView.prototype,
+  ArrayBuffer: ArrayBuffer.prototype,
+  RegExp: RegExp.prototype,
+  Date: Date.prototype,
+  Map: Map.prototype,
+  Set: Set.prototype,
+} as const;
+
+/** `key` as this realm's getter or method of `owner` reads it on `value`: a value, or for a method its result. */
+// oxlint-disable-next-line anti-slop/no-object-parameters, anti-slop/no-unknown-returns -- EVIDENCE: fixture: reads any slot of a fixture object, whatever its kind.
+function readThrough(owner: object, key: string | symbol, value: object): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(owner, key)!;
+  return (descriptor.get ?? descriptor.value).call(value);
+}
+
+/** Gives `value` an own property `key` that claims `claim`: as a value, or for a method a method that returns it. */
+// oxlint-disable-next-line anti-slop/no-object-parameters -- EVIDENCE: fixture: shadows a slot of any fixture object, whatever its kind.
+function shadow(value: object, owner: object, key: string | symbol, claim: unknown): void {
+  const method = typeof Object.getOwnPropertyDescriptor(owner, key)!.value === "function";
+  Object.defineProperty(value, key, { value: method ? () => claim : claim, configurable: true });
+}
+
+test("no own property can change what the comparator reads of a built-in object, in either realm", () => {
+  const verdict = (actual: unknown, expected: unknown) => {
+    try {
+      return cloneGraphDifference(actual, expected, RECORD_CLASSES) === null ? "equal" : "differs";
+    } catch (error) {
+      return `threw ${String(error)}`;
+    }
+  };
+  const generated = new Set<string>();
+
+  // Each slot the comparator reads: a shadow that claims the other value's slot keeps the verdict, on either side.
+  assert.deepEqual(Object.keys(READ_FIXTURES).sort(), Object.keys(INTRINSIC_READS).sort());
+  for (const [read, [expectedSource, differingSource]] of Object.entries(READ_FIXTURES))
+    for (const [realm, make] of Object.entries(REALMS))
+      for (const position of ["expected", "actual"])
+        for (const outcome of ["equal", "differs"]) {
+          const name = `${read} × ${position} × ${outcome} × ${realm}`;
+          // EVIDENCE: validation: the fixtures' keys were just checked to be `INTRINSIC_READS`'s.
+          const { owner, key } = INTRINSIC_READS[read as IntrinsicRead];
+          const prototype: object = OWNER_PROTOTYPES[owner];
+          const expected = make(expectedSource);
+          const differing = make(differingSource);
+          const actual: object = structuredClone(outcome === "equal" ? expected : differing);
+          const lied = position === "actual" ? actual : expected;
+          // The claim makes equal values look different, and different values look equal.
+          const claimFrom =
+            outcome === "equal" ? differing : position === "actual" ? expected : differing;
+          const slot = readThrough(prototype, key, claimFrom);
+          // (a collection's entries are claimed as an array, which spreads as its iterator would)
+          // EVIDENCE: invariant: `entries` returns an iterator of the collection's entries.
+          const claim = key === "entries" ? [...(slot as Iterable<unknown>)] : slot;
+          shadow(lied, prototype, key, claim);
+          assert.equal(verdict(actual, expected), outcome, name);
+          generated.add(name);
+        }
+
+  // Every other own key of each admitted kind's prototype chain: a shadow that throws when read is never read.
+  const enumerated = new Set<string>();
+  const surfaced = new Set<string>();
+  const readsOnSurface = new Set<string>();
+  const reads = new Set(
+    Object.values(INTRINSIC_READS).map(({ owner, key }) => `${owner} ${String(key)}`),
+  );
+  for (const [kind, source] of KIND_SURFACES) {
+    surfaced.add(kind);
+    for (
+      let prototype: object | null = Object.getPrototypeOf(vm.runInThisContext(source));
+      prototype !== null;
+      prototype = Object.getPrototypeOf(prototype)
+    ) {
+      const owner = Object.entries(OWNER_PROTOTYPES).find(([, value]) => value === prototype)?.[0];
+      for (const key of Reflect.ownKeys(prototype)) {
+        if (key === "constructor") continue;
+        const surface = `${kind} ${source} ${String(key)}`;
+        enumerated.add(surface);
+        if (owner !== undefined && reads.has(`${owner} ${String(key)}`)) {
+          // A slot the comparator reads, which the cases above shadowed.
+          readsOnSurface.add(`${owner} ${String(key)}`);
+          generated.add(surface);
+          continue;
+        }
+        for (const [realm, make] of Object.entries(REALMS))
+          for (const position of ["expected", "actual"]) {
+            const expected = make(source);
+            const actual: object = structuredClone(expected);
+            const lied = position === "actual" ? actual : expected;
+            const descriptor = Object.getOwnPropertyDescriptor(lied, key);
+            if (descriptor !== undefined && !descriptor.configurable) continue; // an own slot, such as an array's `length`
+            Object.defineProperty(lied, key, {
+              get: () => {
+                throw new Error(`read ${String(key)}`);
+              },
+              configurable: true,
+            });
+            assert.equal(verdict(actual, expected), "equal", `${surface} × ${position} × ${realm}`);
+          }
+        generated.add(surface);
+      }
+    }
+  }
+  // Every kind the kind table admits has its prototype surface enumerated, and every enumerated key has its case.
+  const admitted = new Set([...Object.values(KIND_OF_TYPE), "array", "record"]);
+  admitted.delete("unsupported");
+  assert.deepEqual(surfaced, admitted);
+  for (const surface of enumerated) assert.ok(generated.has(surface), surface);
+  // And every slot the comparator reads lies on an admitted kind's surface.
+  assert.deepEqual(readsOnSurface, reads);
 });
 
 test("what native clone refuses is refused at every depth it can read, also inside a Proxy", () => {

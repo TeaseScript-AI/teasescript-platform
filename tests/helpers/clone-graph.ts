@@ -57,6 +57,140 @@ export const KIND_OF_TYPE: Readonly<Record<string, ContentKind | "unsupported">>
   isCryptoKey: "unsupported",
 };
 
+/** A prototype whose own getters and methods read a built-in object's slots. */
+type Owner = "TypedArray" | "DataView" | "ArrayBuffer" | "RegExp" | "Date" | "Map" | "Set";
+
+const OWNERS = {
+  // EVIDENCE: invariant: a typed array constructor's prototype inherits from `%TypedArray%.prototype`.
+  TypedArray: Object.getPrototypeOf(Uint8Array.prototype) as object,
+  DataView: DataView.prototype,
+  ArrayBuffer: ArrayBuffer.prototype,
+  RegExp: RegExp.prototype,
+  Date: Date.prototype,
+  Map: Map.prototype,
+  Set: Set.prototype,
+} as const;
+
+/**
+ * Every slot of a built-in object the comparator reads: its owner prototype and the key of the getter or method there
+ * that reads it. Each is read through that getter or method (`intrinsic`), never as a property of the object, so an own
+ * property cannot shadow it. `tests/player-engine-bridge-transport.test.ts` shadows each on both sides.
+ */
+export const INTRINSIC_READS = {
+  "typed array type": { owner: "TypedArray", key: Symbol.toStringTag },
+  "typed array buffer": { owner: "TypedArray", key: "buffer" },
+  "typed array offset": { owner: "TypedArray", key: "byteOffset" },
+  "typed array length": { owner: "TypedArray", key: "byteLength" },
+  "DataView buffer": { owner: "DataView", key: "buffer" },
+  "DataView offset": { owner: "DataView", key: "byteOffset" },
+  "DataView length": { owner: "DataView", key: "byteLength" },
+  "buffer length": { owner: "ArrayBuffer", key: "byteLength" },
+  "buffer resizable": { owner: "ArrayBuffer", key: "resizable" },
+  "RegExp source": { owner: "RegExp", key: "source" },
+  // `RegExp.prototype.flags` reads these as properties, so each flag is read through its own getter.
+  "RegExp hasIndices": { owner: "RegExp", key: "hasIndices" },
+  "RegExp global": { owner: "RegExp", key: "global" },
+  "RegExp ignoreCase": { owner: "RegExp", key: "ignoreCase" },
+  "RegExp multiline": { owner: "RegExp", key: "multiline" },
+  "RegExp dotAll": { owner: "RegExp", key: "dotAll" },
+  "RegExp unicode": { owner: "RegExp", key: "unicode" },
+  "RegExp unicodeSets": { owner: "RegExp", key: "unicodeSets" },
+  "RegExp sticky": { owner: "RegExp", key: "sticky" },
+  "Date time": { owner: "Date", key: "getTime" },
+  "Map entries": { owner: "Map", key: "entries" },
+  "Set entries": { owner: "Set", key: "entries" },
+} as const satisfies Readonly<
+  Record<string, { readonly owner: Owner; readonly key: string | symbol }>
+>;
+
+/** The name of a slot the comparator reads. */
+export type IntrinsicRead = keyof typeof INTRINSIC_READS;
+
+/** A getter or method that reads a slot of the object it is called on. */
+// oxlint-disable-next-line anti-slop/no-object-parameters, anti-slop/no-unknown-returns -- EVIDENCE: fixture: called on any built-in object of its kind; the typed readers below check what it returns.
+type SlotReader = (this: object) => unknown;
+
+/** Each read's getter or method, taken from its owner prototype once. */
+const INTRINSICS = new Map<string, SlotReader>(
+  Object.entries(INTRINSIC_READS).map(([name, { owner, key }]) => {
+    const descriptor = Object.getOwnPropertyDescriptor(OWNERS[owner], key);
+    const reader: unknown = descriptor?.get ?? descriptor?.value;
+    if (typeof reader !== "function")
+      throw new Error(`${owner} has no ${String(key)} to read ${name} with`);
+    // EVIDENCE: invariant: a built-in prototype's own getter or method, called on an object of its kind, reads its slot.
+    return [name, reader as SlotReader];
+  }),
+);
+
+/** `value`'s slot `name`, read through its owner's own getter or method, which no own property of `value` shadows. */
+// oxlint-disable-next-line anti-slop/no-object-parameters, anti-slop/no-unknown-returns -- EVIDENCE: fixture: a slot's value is checked by the typed readers below.
+function intrinsic(name: IntrinsicRead, value: object): unknown {
+  return INTRINSICS.get(name)!.call(value);
+}
+
+// oxlint-disable-next-line anti-slop/no-object-parameters -- EVIDENCE: fixture: reads a slot of an object `cloneKind` classified.
+function intrinsicNumber(name: IntrinsicRead, value: object): number {
+  const read = intrinsic(name, value);
+  if (typeof read !== "number") throw new TypeError(`${name} read ${typeof read}`);
+  return read;
+}
+
+// oxlint-disable-next-line anti-slop/no-object-parameters -- EVIDENCE: fixture: reads a slot of an object `cloneKind` classified.
+function intrinsicObject(name: IntrinsicRead, value: object): object {
+  const read = intrinsic(name, value);
+  if (typeof read !== "object" || read === null) throw new TypeError(`${name} read ${typeof read}`);
+  return read;
+}
+
+/** A regular expression's flags, in `RegExp.prototype.flags`'s order, each read through its getter. */
+const FLAGS: readonly [IntrinsicRead, string][] = [
+  ["RegExp hasIndices", "d"],
+  ["RegExp global", "g"],
+  ["RegExp ignoreCase", "i"],
+  ["RegExp multiline", "m"],
+  ["RegExp dotAll", "s"],
+  ["RegExp unicode", "u"],
+  ["RegExp unicodeSets", "v"],
+  ["RegExp sticky", "y"],
+];
+
+// oxlint-disable-next-line anti-slop/no-object-parameters -- EVIDENCE: fixture: reads the slots of a regular expression `cloneKind` classified.
+function regExpText(value: object): string {
+  const flags = FLAGS.filter(([name]) => intrinsic(name, value) === true).map(([, flag]) => flag);
+  return `/${String(intrinsic("RegExp source", value))}/${flags.join("")}`;
+}
+
+/** A view's type, offset, length and buffer: a typed array's by its name, a `DataView`'s otherwise. */
+// oxlint-disable-next-line anti-slop/no-object-parameters -- EVIDENCE: fixture: reads the slots of a view `cloneKind` classified.
+function viewSlots(value: object): {
+  readonly type: string;
+  readonly offset: number;
+  readonly length: number;
+  readonly buffer: object;
+} {
+  const name = intrinsic("typed array type", value);
+  if (typeof name === "string")
+    return {
+      type: name,
+      offset: intrinsicNumber("typed array offset", value),
+      length: intrinsicNumber("typed array length", value),
+      buffer: intrinsicObject("typed array buffer", value),
+    };
+  return {
+    type: "DataView",
+    offset: intrinsicNumber("DataView offset", value),
+    length: intrinsicNumber("DataView length", value),
+    buffer: intrinsicObject("DataView buffer", value),
+  };
+}
+
+/** A map's or set's entries, in order, read through its own `entries`. */
+// oxlint-disable-next-line anti-slop/no-object-parameters -- EVIDENCE: fixture: reads the entries of a collection `cloneKind` classified.
+function collectionEntries(name: "Map entries" | "Set entries", value: object): unknown[] {
+  // EVIDENCE: invariant: `Map.prototype.entries` and `Set.prototype.entries` return an iterator of their entries.
+  return [...(intrinsic(name, value) as Iterable<unknown>)];
+}
+
 /** A class whose instances a test lists as records. */
 export type RecordClass = abstract new (...args: never) => object;
 
@@ -74,8 +208,9 @@ export interface CloneGraphOptions {
  * How `actual`, a value that crossed a structured-clone port, differs from `expected` under structured-clone semantics,
  * or `null` when it does not. Iterative, so values of any depth compare: `assert.deepEqual` recurses and overflows.
  *
- * Each object of either side is classified by `cloneKind`, and both sides must be of one kind:
- * - a primitive compares with `Object.is`;
+ * Each object of either side is classified by `cloneKind`, and both sides must be of one kind. A built-in object's
+ * contents are read through its intrinsic getters and methods (`INTRINSIC_READS`), so no own property can change them:
+ * - a primitive compares with `Object.is`; a function, which native clone refuses, fails;
  * - a `Date` compares by its time value, a `RegExp` by its source and flags;
  * - a typed array or `DataView` compares by its type, offset and length, and its fixed-length `ArrayBuffer` as an object
  *   of the graph, which compares by its length and bytes, so two views over one buffer must cross over one buffer;
@@ -105,6 +240,9 @@ export function cloneGraphDifference(
     const fail = (reason: string) => `${pathText(pair.path)}: ${reason}`;
     const a = pair.actual;
     const e = pair.expected;
+    // A function is no primitive, and native clone refuses it, as `cloneKind` does.
+    if (typeof a === "function" || typeof e === "function")
+      return fail("a function, which native clone refuses");
     if (typeof e !== "object" || e === null || typeof a !== "object" || a === null) {
       if (!Object.is(a, e)) return fail(`${String(a)} is not ${String(e)}`);
       continue;
@@ -130,33 +268,29 @@ export function cloneGraphDifference(
     switch (kind) {
       case "date":
         if (Object.getPrototypeOf(a) !== Date.prototype) return fail("another leaf type");
-        if (!Object.is(Date.prototype.getTime.call(a), Date.prototype.getTime.call(e)))
+        if (!Object.is(intrinsic("Date time", a), intrinsic("Date time", e)))
           return fail("another time");
         continue;
       case "regexp": {
         if (Object.getPrototypeOf(a) !== RegExp.prototype) return fail("another leaf type");
-        // EVIDENCE: validation: `cloneKind` classified both as regular expressions.
-        const [left, right] = [a as RegExp, e as RegExp];
-        if (left.source !== right.source || left.flags !== right.flags)
-          return fail("another pattern");
+        if (regExpText(a) !== regExpText(e)) return fail("another pattern");
         continue;
       }
       case "view": {
-        // EVIDENCE: validation: `cloneKind` classified both as views.
-        const [left, right] = [a as ArrayBufferView, e as ArrayBufferView];
-        const type = Object.prototype.toString.call(right);
-        if (Object.prototype.toString.call(left) !== type || !ownPrototype(left, type))
+        const [left, right] = [viewSlots(a), viewSlots(e)];
+        if (left.type !== right.type || !ownPrototype(a, right.type))
           return fail("another view type");
-        if (left.byteOffset !== right.byteOffset) return fail("another offset");
-        if (left.byteLength !== right.byteLength) return fail("another length");
+        if (left.offset !== right.offset) return fail("another offset");
+        if (left.length !== right.length) return fail("another length");
         push("buffer", left.buffer, right.buffer);
         continue;
       }
       case "buffer": {
         if (Object.getPrototypeOf(a) !== ArrayBuffer.prototype) return fail("another leaf type");
+        if (intrinsicNumber("buffer length", a) !== intrinsicNumber("buffer length", e))
+          return fail("another buffer length");
         // EVIDENCE: validation: `cloneKind` classified both as fixed-length `ArrayBuffer`s.
         const [left, right] = [new Uint8Array(a as ArrayBuffer), new Uint8Array(e as ArrayBuffer)];
-        if (left.length !== right.length) return fail("another buffer length");
         for (let index = 0; index < left.length; index += 1)
           if (left[index] !== right[index]) return fail(`another byte at ${index}`);
         continue;
@@ -165,10 +299,9 @@ export function cloneGraphDifference(
       case "set": {
         if (Object.getPrototypeOf(a) !== (kind === "map" ? Map.prototype : Set.prototype))
           return fail("another collection type");
-        // EVIDENCE: validation: `cloneKind` classified both as maps or both as sets.
-        const actualEntries = [...(a as Map<unknown, unknown>).entries()];
-        // EVIDENCE: validation: as above, for the expected side.
-        const expectedEntries = [...(e as Map<unknown, unknown>).entries()];
+        const entries = kind === "map" ? "Map entries" : "Set entries";
+        const actualEntries = collectionEntries(entries, a);
+        const expectedEntries = collectionEntries(entries, e);
         if (actualEntries.length !== expectedEntries.length) return fail("another collection size");
         for (let index = expectedEntries.length - 1; index >= 0; index -= 1)
           push(`entry ${index}`, actualEntries[index], expectedEntries[index]);
@@ -213,10 +346,8 @@ export function cloneKind(value: object, classes: readonly RecordClass[] = []): 
   if (kinds.has("unsupported") || kinds.size > 1) return "unsupported";
   const [kind] = kinds;
   if (kind === "buffer") {
-    // (ES2024's `resizable`, which this project's ES2023 types do not declare, is `true` on a resizable buffer.)
-    // EVIDENCE: validation: `isArrayBuffer` held, and a shared buffer was refused above.
-    const buffer = value as { readonly resizable?: boolean };
-    return buffer.resizable === true ? "unsupported" : "buffer";
+    // (a shared buffer was refused above: it is also an `isSharedArrayBuffer`)
+    return intrinsic("buffer resizable", value) === false ? "buffer" : "unsupported";
   }
   if (kind !== undefined) return kind;
   if (Array.isArray(value)) return "array";
@@ -252,9 +383,9 @@ function isObjectPrototype(prototype: object): boolean {
   );
 }
 
-/** Whether `view`'s prototype is this realm's prototype of the view type `type` names (`[object Uint8Array]`). */
-function ownPrototype(view: ArrayBufferView, type: string): boolean {
-  const name = type.slice("[object ".length, -1);
+/** Whether `view`'s prototype is this realm's prototype of the view type `name` (`Uint8Array`, `DataView`). */
+// oxlint-disable-next-line anti-slop/no-object-parameters -- EVIDENCE: fixture: checks the prototype of a view `cloneKind` classified.
+function ownPrototype(view: object, name: string): boolean {
   const constructor: unknown = Object.getOwnPropertyDescriptor(globalThis, name)?.value;
   return typeof constructor === "function" && Object.getPrototypeOf(view) === constructor.prototype;
 }
