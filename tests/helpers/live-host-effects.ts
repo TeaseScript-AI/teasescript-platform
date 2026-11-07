@@ -179,8 +179,14 @@ function declaredSessionOptions(): string[] {
   const membersOf = (
     declaration: ts.InterfaceDeclaration | ts.TypeLiteralNode,
     seen: Set<string>,
-  ): ts.PropertySignature[] => {
-    const own = declaration.members.filter(ts.isPropertySignature);
+  ): (ts.PropertySignature | ts.MethodSignature)[] => {
+    // A property or a method (`hook?(): void`) is an option; any other member kind fails, never skipped.
+    const own = declaration.members.map((member) => {
+      if (ts.isPropertySignature(member) || ts.isMethodSignature(member)) return member;
+      return assert.fail(
+        `${ts.isInterfaceDeclaration(declaration) ? declaration.name.text : "an option's type"} has a ${ts.SyntaxKind[member.kind]} member, which tests/helpers/live-host-effects.ts cannot classify`,
+      );
+    });
     if (!ts.isInterfaceDeclaration(declaration)) return own;
     const inherited = (declaration.heritageClauses ?? []).flatMap((clause) =>
       clause.types.flatMap((type) => {
@@ -203,7 +209,7 @@ function declaredSessionOptions(): string[] {
   for (const member of membersOf(root, new Set(["PlayerSessionOptions"]))) {
     const name = member.name.getText(source);
     names.push(name);
-    const type = member.type;
+    const type = ts.isPropertySignature(member) ? member.type : undefined;
     const nested =
       type !== undefined && ts.isTypeLiteralNode(type)
         ? type

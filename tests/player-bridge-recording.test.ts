@@ -448,14 +448,16 @@ for (const inProcess of [true, false])
   });
 
 /*
- * Replay, over a declared family: three replay kinds × three backends. The cut is a call that throws. Every kind but
- * the frozen one is judged by one oracle: the adapter restored at the publication before the cut, given the same steps
- * (`adapterTrace`). Live recovery is judged by the complete trace of the publications after the cut, by value, from the
- * cut's cursor (`tapPublications`, #1919). The frozen tape matches no publication, so it keeps its own oracle, its
- * recorded successful prefix replayed, plus facts the publication before the cut fixes independently. Where the
- * composable runs, it observes every publication of the steps and settles before the next; its storage writes, media
- * and capture answers are sampled from the publication before the cut and after every step, and must not grow; and every
- * judgment runs while it lives (`withLiveHost`).
+ * Replay, over a declared family: three replay kinds × three backends. The cut is a call that throws. Live recovery is
+ * judged by the complete trace of the publications after the cut, by value, from the cut's cursor (`tapPublications`,
+ * #1919), against one oracle: the adapter restored at the publication before the cut, given the live run's requests
+ * after it (`adapterReplay`). The frozen tape matches no publication, so it keeps its own oracle, its recorded
+ * successful prefix replayed, plus facts the publication before the cut fixes independently. Where the composable runs,
+ * it observes every publication of the steps and settles before the next, and every session it shows through the last
+ * sample must equal the oracle's. Its host effects are sampled at the cut, after every step and after the judgments,
+ * and each must equal the control run's sample at the same point, which took the same steps without the cut, so the
+ * steps' own effects (the script's end releasing its medium) are in both (`LiveHostEffects`). Every judgment runs while
+ * the composable lives (`withLiveHost`).
  */
 const KINDS = ["successful replay", "frozen failure replay", "live recovery"] as const;
 const BACKENDS = ["in-process", "a Worker", "the composable"] as const;
@@ -538,10 +540,10 @@ interface ReplayRun {
   /** The composable's effects at the cut and after each step since; `null` without the composable. */
   readonly effects: readonly EffectSample[] | null;
   /**
-   * What the composable showed after the cut, each by value: its revision relative to the cut's, its state, and every
-   * event it held since the cut; `null` without the composable.
+   * What the composable has shown since the cut, read when it is judged, each by value: its revision relative to the
+   * cut's, its state, and every event it held since the cut; `null` without the composable.
    */
-  readonly observed: readonly ShownSession[] | null;
+  readonly observed: (() => readonly ShownSession[]) | null;
 }
 
 /**
@@ -733,21 +735,27 @@ const JUDGE: Record<Kind, (run: ReplayRun) => void> = {
     assertTrace(run.trace, oracle.entries);
     if (run.suffix.snapshot !== null)
       assert.deepEqual(plainOf(run.suffix.snapshot), plainOf(oracle.snapshot));
-    // The live host showed every one of them, in order, each once, as the oracle has it: its state and every event since
-    // the cut, by value.
-    if (run.observed !== null) {
-      const expected = oracle.entries.map((entry) => ({ revision: entry.revision, ...entry.held }));
-      const comparison = compareStructures(expected, run.observed);
-      const first = comparison.mismatches[0];
-      assert.ok(
-        comparison.equal,
-        first === undefined
-          ? "the composable showed otherwise than the oracle"
-          : `the composable showed otherwise than the oracle at ${renderPath(first.path)}: oracle ${first.oracle}, shown ${first.candidate}`,
-      );
-    }
+    assertShown(run);
   },
 };
+
+/**
+ * The live host showed every publication after the cut, in order, each once, as the oracle has it: its state and every
+ * event since the cut, by value, as far as it has shown them when this runs.
+ */
+function assertShown(run: ReplayRun): void {
+  if (run.observed === null) return;
+  const oracle = afterCut(run.before, run.requests);
+  const expected = oracle.entries.map((entry) => ({ revision: entry.revision, ...entry.held }));
+  const comparison = compareStructures(expected, run.observed());
+  const first = comparison.mismatches[0];
+  assert.ok(
+    comparison.equal,
+    first === undefined
+      ? "the composable showed otherwise than the oracle"
+      : `the composable showed otherwise than the oracle at ${renderPath(first.path)}: oracle ${first.oracle}, shown ${first.candidate}`,
+  );
+}
 
 /** A run with its kinds' verdicts, each judged while the run's host lived: `null` for a pass, else what failed. */
 interface JudgedRun {
@@ -758,7 +766,8 @@ interface JudgedRun {
 /**
  * Judges every kind on `run` through `judge`, which runs a judgment only while the host lives. A kind not judged, as
  * when the run failed first, stays failed. With `last`, the host's effects are sampled once more after the judgments,
- * their work settled, while it still lives: no sample after the cut, that one included, may differ from the cut's.
+ * their work settled, while it still lives: every sample, that one included, must equal the control run's at the same
+ * point. Then what the composable showed is judged again, through that last sample.
  */
 async function judged(
   run: ReplayRun,
@@ -806,6 +815,13 @@ async function judged(
       effects = error;
     }
     for (const kind of KINDS) verdicts[kind] ??= effects;
+    // What the composable showed, judged again through the last sample: nothing it showed during the judgments goes
+    // unseen.
+    try {
+      judge(() => assertShown(run));
+    } catch (error) {
+      verdicts["live recovery"] ??= error;
+    }
   }
   return { run, verdicts };
 }
@@ -1049,13 +1065,14 @@ async function composableRun(control: ControlRun): Promise<JudgedRun> {
           },
           trace: cut.trace,
           effects: cut.effects,
-          observed: host.observed
-            .filter((shown) => shown.revision > cutRevision)
-            .map((shown) => ({
-              revision: shown.revision - cutRevision,
-              state: shown.state,
-              events: shown.events.slice(cutEvents),
-            })),
+          observed: () =>
+            host.observed
+              .filter((shown) => shown.revision > cutRevision)
+              .map((shown) => ({
+                revision: shown.revision - cutRevision,
+                state: shown.state,
+                events: shown.events.slice(cutEvents),
+              })),
         },
         host.judge,
         async () => {
