@@ -229,10 +229,10 @@ const turn = () => new Promise((resolve) => setImmediate(resolve));
 const shownSessions = new Map<string, PlayerSession>();
 
 /**
- * Settles the connection: its queue, and each shown session's turn, hold nothing before a request sent now, twice, as
- * work that settles may send more; and the replies' continuations ran.
+ * Drains the fixture's queues: the connection's, and each shown session's turn (where random intents travel, `after`
+ * it), twice, as work that drains may send more; then the replies' continuations ran. It drains nothing else.
  */
-async function settle(bridge: PlayerBridge) {
+async function settleFixtureQueues(bridge: PlayerBridge) {
   for (let round = 0; round < 2; round += 1) {
     await bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
     for (const session of shownSessions.values())
@@ -449,7 +449,7 @@ async function lived(
   const { player, end } = mounted(context, Promise.resolve(bridge));
   await player.bridge;
   for (const on of changes) setting.set(player, on);
-  await settle(bridge);
+  await settleFixtureQueues(bridge);
   end();
 }
 
@@ -518,7 +518,7 @@ async function play(context: TestContext, each: Case) {
     if (handedOver !== null) {
       // The ended Player's Start still waits for its bridge.
       await handedOver;
-      await settle(bridge);
+      await settleFixtureQueues(bridge);
       before = { value: setting.snapshot(bridge) };
     }
     const ready = minted();
@@ -533,7 +533,7 @@ async function play(context: TestContext, each: Case) {
   }
   await Promise.all(activations);
   await holding;
-  await settle(bridge);
+  await settleFixtureQueues(bridge);
   if (lifecycle === "waiting/dispose" || lifecycle === "waiting/handover")
     assert.equal(minted(), mintedBefore, `${each.name}: a Player that ended sends nothing`);
   assert.deepEqual(
@@ -595,7 +595,7 @@ for (const name of SETTING_NAMES)
       const before = mounted(context, Promise.resolve(bridge));
       await before.player.bridge;
       setting.set(before.player, true);
-      await settle(bridge);
+      await settleFixtureQueues(bridge);
       before.end();
       const { player } = mounted(context, Promise.resolve(bridge));
       await player.bridge;
@@ -604,7 +604,7 @@ for (const name of SETTING_NAMES)
       await ended.player.bridge;
       const changes = SEQUENCES[sequence];
       for (const on of changes) setting.set(player, on);
-      await settle(bridge);
+      await settleFixtureQueues(bridge);
       if (name === "tracing")
         assert.equal(player.traceId.value !== null, changes.at(-1) ?? false, sequence);
       bridge.client.terminate();
@@ -642,13 +642,13 @@ for (const settingName of SETTING_NAMES)
             for (const on of changes) setting.set(live.player, on);
             live.player.prepare(starting(starts, live.player, setting.script));
             await live.player.activate();
-            await settle(bridge);
+            await settleFixtureQueues(bridge);
             const sent = minted();
             const second = mounted(context, Promise.resolve(bridge));
             await assert.rejects(second.player.bridge, ONE_PLAYER);
             setting.set(second.player, !asked);
             second.end();
-            await settle(bridge);
+            await settleFixtureQueues(bridge);
             assert.equal(minted(), sent, `${name}: the refused Player sends nothing`);
             await setting.holds(
               name,
@@ -661,7 +661,7 @@ for (const settingName of SETTING_NAMES)
             live.end();
             const next = mounted(context, Promise.resolve(bridge));
             await next.player.bridge;
-            await settle(bridge);
+            await settleFixtureQueues(bridge);
             await setting.holds(name, bridge, null, null, starts);
           } else {
             const gate = deferred<PlayerBridge>();
@@ -672,11 +672,11 @@ for (const settingName of SETTING_NAMES)
             setting.set(live.player, !asked);
             live.player.prepare(starting(starts, live.player, setting.script));
             await live.player.activate();
-            await settle(bridge);
+            await settleFixtureQueues(bridge);
             const sent = minted();
             gate.resolve(bridge);
             await assert.rejects(late.player.bridge, ONE_PLAYER);
-            await settle(bridge);
+            await settleFixtureQueues(bridge);
             assert.equal(minted(), sent, `${name}: the refused Player sends nothing`);
             await setting.holds(
               name,
