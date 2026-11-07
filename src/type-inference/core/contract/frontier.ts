@@ -163,13 +163,23 @@ class Frontier {
    * where the build ends (`floors`); and their receivers as interned sets of nodes, per set and step the set one step
    * below, per set whether its kinds hold a structure a step below can be read from.
    */
-  chains: (readonly [number, readonly string[]])[] = [];
+  chains: Chain[] = [];
+  /** Per node, the receivers with no structure that hold it (`floors`): what is read below them is checked too. */
+  readonly floorNodes = new Map<number, number[]>();
   /** Whether the graph holds a marked node (`markNode`). */
   marks = false;
   readonly floorNext = new Map<number, Map<string, number>>();
+  readonly floorSeen = new Set<number>();
   readonly structured = new Map<number, boolean>();
 
   public constructor(readonly contract: Contract) {}
+}
+
+/** #1784: a composition a build makes (`composed`), and whether it reached a marked or held node. */
+interface Chain {
+  readonly root: number;
+  readonly steps: readonly string[];
+  held: boolean;
 }
 
 const FRONTIERS = new WeakMap<Contract, Frontier>();
@@ -592,9 +602,15 @@ function composed(
   steps: readonly string[],
   then: (node: number) => void,
 ): void {
-  // (its steps already kept by the caller; a graph without marks reads none of them, `floors`)
-  if (steps.length > 0) frontier.chains.push([root, steps]);
-  below(frontier, root, steps, 0, then);
+  if (steps.length === 0) return below(frontier, root, steps, 0, then);
+  // (its steps already kept by the caller; checked only where it reaches a marked or held node, `floors`)
+  const chain: Chain = { root, steps, held: false };
+  frontier.chains.push(chain);
+  below(frontier, root, steps, 0, (node) => {
+    const kind = frontier.nodes[node]!.kind;
+    if (kind === "mark" || kind === "hold") chain.held = true;
+    then(node);
+  });
 }
 
 /** Declines a path with a step no property read takes (a selection, a member a built-in answers, an index). */
@@ -869,17 +885,62 @@ function floors(frontier: Frontier): void {
   const chains = frontier.chains;
   frontier.chains = [];
   if (!frontier.marks && frontier.pendingSets.length === 0) return;
-  keep(frontier.contract.work, chains.length);
-  for (const [root, steps] of chains) {
+  for (const { root, steps, held } of chains) {
+    // (a composition that reaches no marked or held node gains no mark anywhere on its way)
+    if (!held) continue;
+    step(frontier, 1 + steps.length);
     let set = intern(frontier, [root]);
     for (const each of steps) {
-      step(frontier);
+      floorAt(frontier, set);
       set = floorStep(frontier, set, each);
     }
+    floorAt(frontier, set);
+  }
+  // (and what this build read below a receiver with no structure, as a read of the key past it)
+  for (const goal of frontier.pending) {
+    const floorsAt = frontier.floorNodes.get(goal.node);
+    if (floorsAt === undefined) continue;
+    for (const set of floorsAt) floorBelow(frontier, set, goal.step);
   }
 }
 
-/** A receiver one step below, interned, once per set and step: declines where a floor's set gains a mark below it. */
+/**
+ * A receiver with no structure on a composition's way, once: kept for its members, so a read below it the next build
+ * makes is checked as one past it; and every read below it already made, checked now.
+ */
+function floorAt(frontier: Frontier, set: number): void {
+  if (structured(frontier, set) || frontier.floorSeen.has(set)) return;
+  frontier.floorSeen.add(set);
+  keep(frontier.contract.work, 1);
+  const steps = new Set<string>();
+  for (const node of setMembers(frontier, set)) {
+    step(frontier);
+    let list = frontier.floorNodes.get(node);
+    if (list === undefined) frontier.floorNodes.set(node, (list = []));
+    keep(frontier.contract.work, 1);
+    list.push(set);
+    for (const each of frontier.goals.get(node)?.keys() ?? []) steps.add(each);
+  }
+  for (const each of steps) floorBelow(frontier, set, each);
+}
+
+/** What the members of a receiver with no structure give one step below: none of them a mark the receiver lacks. */
+function floorBelow(frontier: Frontier, set: number, s: string): void {
+  const marks = new Set<number>();
+  for (const node of setMembers(frontier, set)) {
+    step(frontier);
+    const at = frontier.nodes[node]!;
+    if (at.kind === "mark") marks.add(at.inner);
+  }
+  for (const node of setMembers(frontier, set))
+    for (const found of frontier.goals.get(node)?.get(s)?.value ?? []) {
+      step(frontier);
+      const at = frontier.nodes[found]!;
+      if (at.kind === "mark" && !marks.has(at.inner)) throw new Decline("marks-floor");
+    }
+}
+
+/** A receiver one step below, interned, once per set and step. */
 function floorStep(frontier: Frontier, set: number, s: string): number {
   let bySteps = frontier.floorNext.get(set);
   const known = bySteps?.get(s);
@@ -892,19 +953,6 @@ function floorStep(frontier: Frontier, set: number, s: string): number {
     for (const found of goal.value) into.add(found);
   }
   const next = intern(frontier, into);
-  if (!structured(frontier, set)) {
-    // (below a floor its own marks go on, and none is new)
-    const marks = new Set<number>();
-    for (const node of setMembers(frontier, set)) {
-      const at = frontier.nodes[node]!;
-      if (at.kind === "mark") marks.add(at.inner);
-    }
-    for (const node of setMembers(frontier, next)) {
-      step(frontier);
-      const at = frontier.nodes[node]!;
-      if (at.kind === "mark" && !marks.has(at.inner)) throw new Decline("marks-floor");
-    }
-  }
   if (bySteps === undefined) frontier.floorNext.set(set, (bySteps = new Map()));
   keep(frontier.contract.work, 2);
   bySteps.set(s, next);
@@ -1378,9 +1426,14 @@ export function pushedSlot(contract: Contract, entry: PrefixEntry, ref: PathRef)
     for (const each of path) set = star(frontier, set, each);
     for (const each of steps) set = star(frontier, set, each);
     // (#1784: the read's own receivers, its path's prefixes, as its compositions' are: `floors`)
-    frontier.chains.push([root, keptSteps(contract.work, path, steps)]);
+    const members = setMembers(frontier, set);
+    frontier.chains.push({
+      root,
+      steps: keptSteps(contract.work, path, steps),
+      held: members.some((node) => ["mark", "hold"].includes(frontier.nodes[node]!.kind)),
+    });
     floors(frontier);
-    return setMembers(frontier, set);
+    return members;
   });
 }
 
