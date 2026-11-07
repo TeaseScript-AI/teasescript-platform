@@ -69,8 +69,8 @@ export function keyObjects(contract: Contract, asked: Key): ProofDemand<ObjectsP
 /**
  * #1747: the pure `missing` writer of `value`'s contract read at `rest.s` (the earliest, F28), from its objects at
  * `rest` (`objectsAt`): the writers met on the way and, of each object list there, its first object lacking `s`
- * (F11, `lackingAt`); `covered` false where the query declines or `s` is stored or typed below a key it reads, or an
- * entry stands at `s` below a list. Each support node of the proof once.
+ * (F11, `lackingAt`); `covered` false where the query declines, `s` is stored or typed below a key it reads or that
+ * key's read at `s` stopped, or an entry stands at `s` below a list. Each support node of the proof once.
  */
 export function* absentWriterAt(
   contract: Contract,
@@ -90,8 +90,13 @@ export function* absentWriterAt(
     program.work.charge("invSteps");
     for (const { key, place, path } of node.keys) {
       program.work.charge("invSteps");
-      const stored = definitions.byKey.get(keyBelowIn(contract, key, [step])) ?? [];
-      if (stored.some((d) => lists.live(d))) return UNCOVERED;
+      // (the read at the property is a key's own demand: stopped there, it answers no `missing` the query names)
+      const below = keyBelowIn(contract, key, [step]);
+      if (contract.keyStopped(below)) return UNCOVERED;
+      for (const d of definitions.byKey.get(below) ?? []) {
+        program.work.charge("invSteps");
+        if (lists.live(d)) return UNCOVERED;
+      }
       const written = writtenOf(program.place(place).kind);
       if (written !== null && termAt(written, joinSteps(path, [step])) !== null) return UNCOVERED;
     }
