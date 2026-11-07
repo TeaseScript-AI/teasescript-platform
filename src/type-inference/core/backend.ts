@@ -18,9 +18,10 @@ import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
 /*
  * The coarse core as a type analysis backend (the port plan's S5): complete for a stated slice of the language and
  * reached only through the test-only candidate compile route (`compileSourceWithBackend` in `src/compiler.ts`), never
- * by a production compile. A program outside the slice throws `CandidateOutsideSlice` at its first construct outside
- * it, before, during or after the analysis: a test-time signal, never a diagnostic, since no author can reach the route; the
- * slice grows step by step until the consumer is complete (S9b).
+ * by a production compile. A program outside the slice throws `CandidateOutsideSlice` at the first refusal the route
+ * establishes, before, during or after the analysis (its syntax's first construct outside the slice, the capture's
+ * depth exit, then the answers' first, below): a test-time signal, never a diagnostic, since no author can reach the
+ * route; the slice grows step by step until the consumer is complete (S9b).
  *
  * The slice: `let` with or without a written type (a named type, `T?` and `T[]` of them; no written union, whose
  * required checks come with narrowing, S10), assignment of a variable or of a property, `if` and `else`, `repeat` with
@@ -44,7 +45,7 @@ import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
  * condition 1, `consumer.ts` `lostCheck`).
  */
 
-/** Test-only: a program outside the candidate's slice, at its first construct outside it (see above). */
+/** Test-only: a program outside the candidate's slice, at the first refusal the route establishes (see above). */
 export class CandidateOutsideSlice extends Error {
   public constructor(
     /** The project path of the construct's file. */
