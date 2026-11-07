@@ -8,23 +8,32 @@ import { markerOf } from "./retention-child.js";
 
 /*
  * The retention witness: what a child (`retention-child.ts`) still holds after its connections' teardown, found
- * without naming the holder. Each case gets a marker that its fixture writes on every line (in names, texts, comments
- * and a path), and the child's heap snapshot must hold no string with it: neither a flat string, nor a concatenated
- * one read whole through its leaves, nor a slice's parent. The child adds what a connection reached as objects.
+ * without naming the holder. Its guarantee: after teardown, no original object the connection reached survives, and no
+ * string holding a case's marker survives. Each case gets a marker that its fixture writes on every line (in names,
+ * texts, comments and a path). The child's heap snapshot must hold no string that is, or could be, a string with it:
+ * one string reader gives every string node its content, whole or, for a slice, "some part of its parent", and a
+ * concatenated string is read through its leaves; a node whose content could form the marker counts (it fails
+ * closed). The child adds the connection's reach as objects.
  *
- * Its limits, by design: a copy held only as bytes (a `TextEncoder` result, an `ArrayBuffer`, a `Blob`) that the
- * connection never held has no string to find, and a result returned unmarked (an outcome `true`) carries no session's
- * identity. A route that keeps bytes brings its own evidence of their lifetime.
+ * Its limits, by design:
+ * - a copy of marker-free data (a cloned token array, numbers, spans): copies are not originals, and carry no marker;
+ * - an object without a marker kept where the object walk cannot see (a private field, a closure's environment, a
+ *   `WeakMap` entry, a promise's result); the marker scan still sees marked strings there;
+ * - a copy held only as bytes (a `TextEncoder` result, an `ArrayBuffer`, a `Blob`) that the connection never held;
+ * - a result returned unmarked (an outcome `true`), which carries no session's identity.
+ * A route that keeps bytes brings its own evidence of their lifetime.
  */
 
 /** A node of the snapshot that holds a marker, and the shortest path that keeps it alive. */
 export interface RetentionHit {
   readonly type: string;
+  /** Whether its content was read with some part of a slice's parent: a hit by failing closed. */
+  readonly partial: boolean;
   readonly path: readonly string[];
 }
 
-/** A long enough limit that a snapshot keeps a fixture's strings whole. */
-const STRING_LIMIT = 1 << 16;
+/** No limit: a snapshot keeps every string whole (V8 cuts names at 1024 characters by default). */
+const STRING_LIMIT = 2 ** 32 - 1;
 
 /**
  * Runs `script` with `cases`, each with a fresh seed, and returns its report and, per case, the snapshot's hits of
@@ -58,6 +67,42 @@ export function runRetentionChild(
   } finally {
     rmSync(dirname(snapshot), { recursive: true, force: true });
   }
+}
+
+/** A part of a string's content: a known text, or some part of `within`, a slice's parent (`null`: anything). */
+type Segment = string | { readonly within: string | null };
+
+/**
+ * Whether content made of `read` holds, or could hold, `marker`: a known text must match exactly where the marker
+ * crosses it, and a part of a parent may be any stretch of the parent. Matched prefixes of the marker are carried from
+ * segment to segment.
+ */
+function couldHold(read: readonly Segment[], marker: string): boolean {
+  // Known throughout: the content itself.
+  if (read.every((segment) => typeof segment === "string")) return read.join("").includes(marker);
+  let open = new Set<number>([0]);
+  for (const segment of read) {
+    const next = new Set<number>([0]);
+    for (const matched of open) {
+      const rest = marker.slice(matched);
+      if (typeof segment === "string") {
+        if (matched === 0) {
+          if (segment.includes(marker)) return true;
+          for (let end = 1; end < marker.length; end += 1)
+            if (segment.endsWith(marker.slice(0, end))) next.add(end);
+        } else if (segment.startsWith(rest)) return true;
+        else if (rest.startsWith(segment)) next.add(matched + segment.length);
+        continue;
+      }
+      const { within } = segment;
+      if (within === null || within.includes(rest)) return true;
+      // The part ends inside the marker: it holds the marker's next stretch, perhaps empty.
+      for (let end = matched; end < marker.length; end += 1)
+        if (within.includes(marker.slice(matched, end))) next.add(end);
+    }
+    open = next;
+  }
+  return false;
 }
 
 /** The heap snapshot's JSON, as V8 writes it. */
@@ -115,38 +160,56 @@ function retentionHits(
     }
   };
 
-  // A concatenated string's text, read through its `first` and `second` leaves, so that a marker split across
-  // them shows; a sliced string's text is its parent's, which is a node of its own.
-  const texts = new Map<number, string>();
-  const textOf = (node: number): string => {
+  // The string reader: a string node's content as segments, each a known text or some part of a slice's parent
+  // (`null`: a parent not read, so anything). A concatenated string is its leaves', in order.
+  const segments = new Map<number, readonly Segment[]>();
+  const segmentsOf = (node: number): readonly Segment[] => {
     const type = typeOf(node);
-    if (type !== "concatenated string") return type === "string" ? nameOf(node) : "";
-    let text = texts.get(node);
-    if (text === undefined) {
-      texts.set(node, "");
-      const parts: Record<string, number> = {};
-      for (const { name, to } of edgesOf(node)) parts[name] = to;
-      text =
-        (parts.first === undefined ? "" : textOf(parts.first)) +
-        (parts.second === undefined ? "" : textOf(parts.second));
-      texts.set(node, text);
+    if (type === "string") {
+      const text = nameOf(node);
+      if (text.length >= STRING_LIMIT)
+        throw new Error("A snapshot string reached the string limit");
+      return [text];
     }
-    return text;
+    let read = segments.get(node);
+    if (read !== undefined) return read;
+    segments.set(node, [{ within: null }]);
+    const parts: Record<string, number> = {};
+    for (const { name, to } of edgesOf(node)) parts[name] = to;
+    if (type === "concatenated string")
+      read = [parts.first, parts.second].flatMap((part) =>
+        part === undefined ? [] : segmentsOf(part),
+      );
+    else {
+      // A slice: its parent is a flat string, so its text is some part of the parent's.
+      const parent = parts.parent === undefined ? null : segmentsOf(parts.parent);
+      read = [{ within: parent?.length === 1 && typeof parent[0] === "string" ? parent[0] : null }];
+    }
+    segments.set(node, read);
+    return read;
   };
+  const strings = new Set(["string", "concatenated string", "sliced string"]);
 
+  // Every marker starts with the same letters, so a known text without them holds none.
+  const lead = markers[0]?.slice(0, 2) ?? "";
+  const known = (read: readonly Segment[]) => read.every((segment) => typeof segment === "string");
   const found = new Map<string, number[]>();
   for (let node = 0; node < count; node += 1) {
-    const text = typeOf(node) === "concatenated string" ? textOf(node) : nameOf(node);
+    const read = strings.has(typeOf(node)) ? segmentsOf(node) : [nameOf(node)];
+    if (known(read) && !read.join("").includes(lead)) continue;
     for (const marker of markers)
-      if (text.includes(marker)) found.set(marker, [...(found.get(marker) ?? []), node]);
+      if (couldHold(read, marker)) found.set(marker, [...(found.get(marker) ?? []), node]);
   }
   if (found.size === 0) return new Map();
 
   // The retainers of each node, over strong edges, for the path of each hit.
   const retainers: [number, string][][] = Array.from({ length: count }, () => []);
-  for (let node = 0; node < count; node += 1)
+  for (let node = 0; node < count; node += 1) {
+    // The string table holds its strings weakly; a string it alone holds is collected.
+    if (typeOf(node) === "synthetic" && nameOf(node) === "(Internalized strings)") continue;
     for (const { type, name, to } of edgesOf(node))
       if (type !== "weak") retainers[to]!.push([node, name]);
+  }
   const label = (node: number) => `${typeOf(node)} ${nameOf(node).slice(0, 60)}`;
   const pathOf = (node: number): readonly string[] => {
     // Breadth first from the hit to the snapshot's root, node 0.
@@ -173,7 +236,11 @@ function retentionHits(
   return new Map(
     [...found].map(([marker, nodes]) => [
       marker,
-      nodes.map((node) => ({ type: typeOf(node), path: pathOf(node) })),
+      nodes.map((node) => ({
+        type: typeOf(node),
+        partial: strings.has(typeOf(node)) && !known(segmentsOf(node)),
+        path: pathOf(node),
+      })),
     ]),
   );
 }
