@@ -164,7 +164,8 @@ function withReason(hashes) {
  */
 function questionGrant(oracle) {
   const perCell = oracle.QUESTION_UNITS_PER_CELL;
-  const cells = typeof oracle.questionWork === "function" ? oracle.questionWork()?.cells : undefined;
+  const cells =
+    typeof oracle.questionWork === "function" ? oracle.questionWork()?.cells : undefined;
   return Number.isInteger(perCell) && perCell > 0 && Number.isInteger(cells) && cells > 0
     ? perCell * cells
     : 0;
@@ -292,7 +293,10 @@ if (process.argv[2] === "--child") {
         allowance = this.allowance;
         limit = multiple * allowance;
       }
-      if (spent > limit && (running.check !== "publication" || spent > limit + questionGrant(trees[running.tree])))
+      if (
+        spent > limit &&
+        (running.check !== "publication" || spent > limit + questionGrant(trees[running.tree]))
+      )
         over();
       if (spent >= next) {
         next = spent + STEP;

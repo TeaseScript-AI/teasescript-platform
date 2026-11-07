@@ -175,8 +175,9 @@ const bindingsOf = (request: NonNullable<ReturnType<typeof coreRequest>>) =>
 
 /** An occurrence answer's cells, as the oracle's questions count them: its own, its element's, each property's. */
 const cellsOf = (answer: unknown): number => {
-  const [, , , , , element, properties] = answer as unknown[];
-  return 1 + (element === null ? 0 : 1) + (properties === null ? 0 : (properties as unknown[]).length);
+  assert.ok(Array.isArray(answer));
+  const [, , , , , element, properties] = answer;
+  return 1 + (element === null ? 0 : 1) + (Array.isArray(properties) ? properties.length : 0);
 };
 
 test("the oracle's own questions stop past their bound, leaving the occurrences from there on unanswered, apart from the parts (#1499, #1837)", () => {
@@ -190,7 +191,10 @@ test("the oracle's own questions stop past their bound, leaving the occurrences 
   const answered = analyseCore(request);
   assert.equal(answered.budget.exhausted, null);
   const asked = inMode(MODES[0]!, () => occurrences(analyseCore(request), (items) => items));
-  assert.equal(cells, 2 * bindingsOf(request).length + asked.map(cellsOf).reduce((a, b) => a + b, 0));
+  assert.equal(
+    cells,
+    2 * bindingsOf(request).length + asked.map(cellsOf).reduce((a, b) => a + b, 0),
+  );
   assert.ok(units > 0);
   // (with no units per cell, the least allowance that answers it all is exactly what they spent)
   const at = (allowance: number) =>
@@ -283,9 +287,7 @@ test("an analysis that finished past the nesting limit leaves its later question
   const full = publicationParts(files, MODES[0]!, GLOBALS);
   assert.ok(full !== null && full.unanswered === 0);
   const { units } = questionWork();
-  const parts = withQuestionBound(units - 1, 0, () =>
-    publicationParts(files, MODES[0]!, GLOBALS),
-  );
+  const parts = withQuestionBound(units - 1, 0, () => publicationParts(files, MODES[0]!, GLOBALS));
   assert.ok(parts !== null && parts.unanswered > 0);
   assert.equal(parts.unansweredBy?.reason, "questions");
 });
@@ -297,7 +299,10 @@ test("a question past the read-depth limit after a finished analysis leaves its 
   const request = coreRequest(files, GLOBALS);
   assert.ok(request !== null);
   const reasons = MODES.map((mode) => {
-    assert.equal(inMode(mode, () => analyseCore(request).budget.stoppedIn), null);
+    assert.equal(
+      inMode(mode, () => analyseCore(request).budget.stoppedIn),
+      null,
+    );
     const parts = publicationParts(files, mode, GLOBALS);
     assert.ok(parts !== null);
     return parts.unanswered === 0 ? null : parts.unansweredBy?.reason;
@@ -311,6 +316,8 @@ test("a question past the read-depth limit after a finished analysis leaves its 
 
 /** A family's sources at `sizes` (`shape` of the generator at `module`), with the generator's globals. */
 async function family(module: string, shape: string, sizes: readonly number[]) {
+  // EVIDENCE: a generator exports `shapes`, each a function of a size to a source or its files, and its `globals`
+  // (tests/families/README.md).
   const generator = (await import(pathToFileURL(resolve(module)).href)) as {
     readonly shapes: Record<string, (size: number) => string | SourceFile[]>;
     readonly globals?: readonly string[];
@@ -328,7 +335,9 @@ async function family(module: string, shape: string, sizes: readonly number[]) {
  * The occurrences' questions' units per cell they return (`Questions`' measure), at the family's natural allowance in
  * the first mode, each source answered whole.
  */
-function perCell(sources: readonly { files: SourceFile[]; globals: readonly string[] }[]): number[] {
+function perCell(
+  sources: readonly { files: SourceFile[]; globals: readonly string[] }[],
+): number[] {
   return sources.map(({ files, globals }) => {
     const request = coreRequest(files, globals);
     assert.ok(request !== null);
@@ -345,7 +354,8 @@ function perCell(sources: readonly { files: SourceFile[]; globals: readonly stri
 }
 
 /** Each step's relative rise of a series. */
-const rises = (series: readonly number[]) => series.slice(1).map((value, index) => value / series[index]! - 1);
+const rises = (series: readonly number[]) =>
+  series.slice(1).map((value, index) => value / series[index]! - 1);
 
 test("the oracle's questions cost per cell they return is flat on W24-varied, and on r3-root-copies and W32-own-test rises by a falling step, a log factor (#1837, #1941)", async () => {
   const sizes = [16, 32, 64, 128];
@@ -362,7 +372,8 @@ test("the oracle's questions cost per cell they return is flat on W24-varied, an
     for (const [index, step] of steps.entries())
       if (index > 0) assert.ok(step < steps[index - 1]!, `${shape}: ${JSON.stringify(series)}`);
     // (within K at every size)
-    for (const cost of series) assert.ok(cost < QUESTION_UNITS_PER_CELL, `${shape}: ${JSON.stringify(series)}`);
+    for (const cost of series)
+      assert.ok(cost < QUESTION_UNITS_PER_CELL, `${shape}: ${JSON.stringify(series)}`);
   }
 });
 

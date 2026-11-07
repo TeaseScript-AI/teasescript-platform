@@ -179,7 +179,11 @@ export function publishedAnswers(
         admitted.push(
           questions.ask(
             answers,
-            () => [place, answers.place(place, []).admitted, answers.place(place, ["element"]).admitted],
+            () => [
+              place,
+              answers.place(place, []).admitted,
+              answers.place(place, ["element"]).admitted,
+            ],
             () => 2,
           ),
         );
@@ -403,7 +407,7 @@ function stopOf(answers: Answers, error: unknown): QuestionStop {
 const cellsOf = (answer: unknown[] | null): number =>
   answer === null
     ? 0
-    : 1 + (answer[5] === null ? 0 : 1) + (answer[6] === null ? 0 : (answer[6] as unknown[]).length);
+    : 1 + (answer[5] === null ? 0 : 1) + (Array.isArray(answer[6]) ? answer[6].length : 0);
 
 /**
  * Every occurrence's answer (`occurrenceAnswer`, its items in their order), each mapped by `each` as it is made, up to
@@ -777,11 +781,7 @@ function publishedElements<Occurrence>(
       };
     }
     const route = publishedRoute(files, globals);
-    const { occurrences, unanswered, unansweredBy } = answeredOccurrences(
-      answers,
-      questions,
-      each,
-    );
+    const { occurrences, unanswered, unansweredBy } = answeredOccurrences(answers, questions, each);
     return {
       answers: JSON.stringify(published.text),
       record: JSON.stringify(published.record),

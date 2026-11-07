@@ -4085,7 +4085,9 @@ test("the check and the baselines take one set of areas: each folder of tests/fa
  * 4 × 1,000: `granted` charges 9,000 more in its publication (within the grant), `past` 11,000 (past it), `stops` 9,000
  * more in its stop runs alone, which no grant reaches.
  */
-const grantLibrary = (reports: boolean): string => `import { WorkLedger } from "../../src/type-inference/core/budget.js";
+const grantLibrary = (
+  reports: boolean,
+): string => `import { WorkLedger } from "../../src/type-inference/core/budget.js";
 export const MODES = [false, true].flatMap((reversed) =>
   [false, true].map((unshared) => ({ reversed, unshared })),
 );
@@ -4116,7 +4118,10 @@ test("a publication run's unit limit grants its oracle's units per cell its ques
       mkdirSync(join(tree, "dist", "src", "type-inference", "core"), { recursive: true });
       writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
       writeFileSync(join(tree, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
-      writeFileSync(join(tree, "dist", "tests", "helpers", "type-core-oracles.js"), grantLibrary(reports));
+      writeFileSync(
+        join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
+        grantLibrary(reports),
+      );
       return tree;
     };
     const folder = join(directory, "area");
@@ -4133,8 +4138,15 @@ test("a publication run's unit limit grants its oracle's units per cell its ques
         [runner, folder, tree, tree, "--allowances", "natural", "--work", work],
         { encoding: "utf8" },
       );
-      const lines = readFileSync(work, "utf8").trim().split("\n").slice(1, -1).map((line) => JSON.parse(line));
-      return [ran.status, lines.filter((line) => line.stalled !== undefined).map((line) => line.source)];
+      const lines = readFileSync(work, "utf8")
+        .trim()
+        .split("\n")
+        .slice(1, -1)
+        .map((line) => JSON.parse(line));
+      return [
+        ran.status,
+        lines.filter((line) => line.stalled !== undefined).map((line) => line.source),
+      ];
     };
     // (the grant: `granted` ends; `past` passes it, `stops` is no publication run)
     assert.deepEqual(stalled(built("reports", true)), [1, ["past", "stops"]]);
