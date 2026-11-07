@@ -200,7 +200,7 @@ async function pieceOf(context: PlayerOpsContext, token: string, kind: string): 
     case "sidecarFile":
       return sidecar.files[0]!;
     case "renderedLines":
-      return context.sourceViews.latestFile!.lines;
+      return context.sourceViews.latestFile.value!.lines;
     case "plan":
       return context.plans.get(token)!;
     case "sourceElement":

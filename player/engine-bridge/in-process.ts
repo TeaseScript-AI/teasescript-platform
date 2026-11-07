@@ -27,6 +27,7 @@ import {
 } from "./ops/session.js";
 import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
 import type { RandomControlOptions } from "../../src/runtime/random/random-control.js";
+import type { Delivery } from "./delivery.js";
 import { decodeMessage } from "./transport.js";
 import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host.js";
 
@@ -199,8 +200,8 @@ export interface HostFactoryInput {
  * random control. A restore begins without ownership, until an explicit adoption (`adoptRandom`).
  *
  * Its plan and session are owned by a delivery of the facade's own (`delivery.ts`) until the bridge took the session: a
- * fault before that undoes them, and a closed connection admits neither. It never borrows an op's delivery, also not one
- * still running.
+ * fault before that undoes them, and a closed connection admits neither. They are bound to that delivery by name, so an
+ * op's delivery that is open meanwhile (one still running, or one a request the factory began opened) never owns them.
  */
 export function introduceNow(
   bridge: PlayerBridge,
@@ -214,7 +215,7 @@ export function introduceNow(
   const { context } = backend;
   const delivery = context.delivery.begin();
   try {
-    const opened = introduceIn(backend, make, tracing, random);
+    const opened = introduceIn(backend, delivery, make, tracing, random);
     context.delivery.commit(delivery);
     return opened;
   } catch (error) {
@@ -226,6 +227,7 @@ export function introduceNow(
 /** `introduceNow`'s body, inside its delivery. */
 function introduceIn(
   backend: Backend,
+  delivery: Delivery,
   make: Parameters<typeof introduceNow>[1],
   tracing: TracingIntent | undefined,
   random: StartRandom | undefined,
@@ -254,7 +256,8 @@ function introduceIn(
           ...(control === null ? {} : { randomControl: control }),
         });
   const known = [...context.plans].find(([, held]) => held === created.plan)?.[0];
-  const token = known ?? context.hold(created.plan);
+  // Bound to the facade's delivery: a request the factory began may have opened one inside it, still running.
+  const token = known ?? context.hold(created.plan, delivery);
   // A factory may not have installed the control it was given; its first read attaches it in any case.
   const held = new HeldSession(
     created,
@@ -263,7 +266,7 @@ function introduceIn(
     random?.owner ?? null,
     typeof make === "function" ? null : control,
   );
-  const id = backend.sessions.add(held);
+  const id = backend.sessions.add(held, delivery);
   return bridge.open(id, introduction(held, context, known === undefined));
 }
 

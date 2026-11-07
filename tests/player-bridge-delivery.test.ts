@@ -1,17 +1,21 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
 import test from "node:test";
-import ts from "typescript";
 
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
-import { openBridge, type BridgeResult, type ClientPort } from "../player/engine-bridge/client.js";
+import {
+  BridgeRequestError,
+  openBridge,
+  type BridgeResult,
+  type ClientPort,
+} from "../player/engine-bridge/client.js";
 import {
   advanceDelivery,
-  type Delivery,
   type DeliveryEvent,
   deliveryOwner,
+  type Delivery,
   DeliveryRefusedError,
+  OwnedCell,
+  OwnedMap,
 } from "../player/engine-bridge/delivery.js";
 import {
   createInProcessBackend,
@@ -169,8 +173,9 @@ test("the delivery owner's cases are every feasible coordinate of its declaratio
   assert.deepEqual(coverageGaps(all, ownerCases(), { tuples: true }), []);
 });
 
-test("an undo that throws does not keep the others from running; a second abort or close undoes nothing", () => {
-  const owner = deliveryOwner();
+test("an undo that throws is reported and keeps neither the others nor the caller from going on; a second abort or close undoes nothing", () => {
+  const reported: unknown[] = [];
+  const owner = deliveryOwner((error) => reported.push(error));
   const undone: string[] = [];
   const delivery = owner.begin();
   owner.own(delivery, () => undone.push("first"));
@@ -178,12 +183,17 @@ test("an undo that throws does not keep the others from running; a second abort 
     throw new Error("injected");
   });
   owner.own(delivery, () => undone.push("third"));
-  assert.throws(() => owner.rollback(delivery), /injected/);
+  owner.rollback(delivery);
   assert.deepEqual(undone, ["third", "first"]);
+  assert.deepEqual(
+    reported.map((error) => (error instanceof Error ? error.message : error)),
+    ["injected"],
+  );
   owner.rollback(delivery);
   owner.close();
   owner.close();
   assert.deepEqual(undone, ["third", "first"]);
+  assert.equal(reported.length, 1);
   // An unknown event is refused, and leaves an open delivery as it was.
   const open = deliveryOwner();
   const kept = open.begin();
@@ -198,282 +208,111 @@ test("an undo that throws does not keep the others from running; a second abort 
   assert.throws(() => advanceDelivery({ ...owner }, null, { kind: "begin" }), DeliveryRefusedError);
 });
 
+test("an owned registry adds only inside a delivery, and its undo restores what the key held before", () => {
+  const owner = deliveryOwner();
+  const retired: string[] = [];
+  const map = new OwnedMap<string, string>(owner, (value, key) => retired.push(`${key}=${value}`));
+  assert.throws(() => map.set("k", "outside"), DeliveryRefusedError);
+  assert.equal(map.size, 0, "a refused add installs nothing");
+  const first = owner.begin();
+  map.set("k", "one");
+  owner.commit(first);
+  const second = owner.begin();
+  map.set("k", "two");
+  map.set("new", "three");
+  owner.rollback(second);
+  assert.deepEqual([...map], [["k", "one"]], "the replaced entry restored, the new one gone");
+  assert.deepEqual(retired, ["new=three"]);
+  // A facade names its own delivery, whatever is innermost.
+  const facade = owner.begin();
+  const inner = owner.begin();
+  map.set("facade", "four", facade);
+  owner.rollback(inner);
+  assert.equal(map.get("facade"), "four", "the inner delivery did not own it");
+  owner.rollback(facade);
+  assert.equal(map.has("facade"), false);
+  const cell = new OwnedCell<string>(owner);
+  const third = owner.begin();
+  cell.set("x");
+  owner.rollback(third);
+  assert.equal(cell.value, null);
+});
+
 // ---------------------------------------------------------------------------------------------------------------------
-// The census: every write of the host's modules to what a connection retains, classified.
+// The census: what a connection retains is held only in owned registries, whose one way to add registers first.
 
-const ENGINE_BRIDGE = resolve(process.cwd(), "player/engine-bridge");
-/** Modules of the main side, or of a message's encoding, which retain nothing for a connection. */
-const NOT_HOST = new Set(["client.ts", "node-client.ts", "node-port.ts", "transport.ts"]);
-
-type WriteClass =
-  /** A new allocation: its undo is registered (`ownNow`) before the write, in the same block. */
-  | "register"
-  /** An allocation through a helper that registers it (`HostSessions.add`, `hold`). */
-  | "through a registering helper"
-  /** The undo of a registered allocation. */
-  | "undo"
-  /** A write to a resource an established owner holds, checked by identity: a slot, a ticket, a session, a cache. */
-  | "existing owner"
-  /** A release, or the connection's cleanup. */
-  | "release"
-  /** Diagnostic or scalar state of the connection, kept by design (trace, random, counters). */
-  | "connection state"
-  /** The delivery owner's own state, or a module's weak or per-call table. */
-  | "owner or local";
-
-/**
- * Every write site, by `module › place › target`, with its class and how often it occurs. A write no row names fails,
- * so does a row no write has; an alias of a registry is a new target, so it fails until classified.
- */
-const CENSUS: Readonly<Record<string, readonly [WriteClass, number]>> = {
-  "delivery.ts › advanceDelivery › state.next ++": ["owner or local", 1],
-  "delivery.ts › advanceDelivery › state.closed =": ["owner or local", 1],
-  "delivery.ts › deliveryOwner › states.set()": ["owner or local", 1],
-  "held-media.ts › admissionOf › kinds.set()": ["owner or local", 1],
-  "held-media.ts › admissionOf › known.add()": ["owner or local", 1],
-  "in-process.ts › terminate › transit.length =": ["release", 1],
-  "in-process.ts › createInProcessBackend › bridge.deliverInTransit =": ["owner or local", 1],
-  "in-process.ts › createInProcessBackend › backends.set()": ["owner or local", 1],
-  "in-process.ts › introduceIn › backend.sessions.add()": ["through a registering helper", 1],
-  "instruction-facts.ts › factOf › cache.set()": ["owner or local", 1],
-  "instruction-facts.ts › factOf › facts.set()": ["owner or local", 1],
-  "instruction-facts.ts › name › facts[index] =": ["owner or local", 1],
-  "ops/persistence.ts › materialize › slot.timer =": ["existing owner", 1],
-  "ops/persistence.ts › materialize › slot.json =": ["existing owner", 1],
-  "ops/persistence.ts › dropPlanText › slots.delete()": ["release", 1],
-  "ops/persistence.ts › preparePlanText › undo › slots.delete()": ["undo", 1],
-  "ops/persistence.ts › preparePlanText › slot.timer =": ["existing owner", 2],
-  "ops/persistence.ts › preparePlanText › slots.set()": ["register", 1],
-  "ops/persistence.ts › restoreKept › sessions.add()": ["through a registering helper", 1],
-  "ops/session.ts › constructor › this.#current =": ["existing owner", 1],
-  "ops/session.ts › constructor › this.#connection =": ["existing owner", 1],
-  "ops/session.ts › constructor › this.#owner =": ["existing owner", 1],
-  "ops/session.ts › constructor › this.#control =": ["existing owner", 1],
-  "ops/session.ts › sessionForOperation › this.#current =": ["existing owner", 1],
-  "ops/session.ts › sessionForOperation › this.#control =": ["existing owner", 1],
-  "ops/session.ts › adopt › this.#owner =": ["existing owner", 1],
-  "ops/session.ts › beginCatchUp › this.#catchUp =": ["existing owner", 1],
-  "ops/session.ts › endCatchUp › this.#catchUp =": ["existing owner", 1],
-  "ops/session.ts › keep › this.#current =": ["existing owner", 1],
-  "ops/session.ts › publish › this.#current =": ["existing owner", 1],
-  "ops/session.ts › publish › this.#delivered =": ["existing owner", 1],
-  "ops/session.ts › introduce › this.#delivered =": ["existing owner", 1],
-  "ops/session.ts › start › sessions.add()": ["through a registering helper", 1],
-  "ops/session.ts › sessionOps › held.viewingCalls =": ["existing owner", 1],
-  "ops/source-views.ts › clear › this.texts.clear()": ["release", 1],
-  "ops/source-views.ts › clear › this.sidecars.clear()": ["release", 1],
-  "ops/source-views.ts › clear › this.latestFile =": ["release", 1],
-  "ops/source-views.ts › textOf › undo › caches.texts.delete()": ["undo", 1],
-  "ops/source-views.ts › textOf › caches.texts.set()": ["register", 1],
-  "ops/source-views.ts › sidecarOf › undo › caches.sidecars.delete()": ["undo", 1],
-  "ops/source-views.ts › sidecarOf › caches.sidecars.set()": ["register", 1],
-  "ops/source-views.ts › drawCode › undo › caches.latestFile =": ["undo", 1],
-  "ops/source-views.ts › drawCode › caches.latestFile =": ["register", 1],
-  "ops/transfer.ts › readTransfer › context.transferCount +=": ["connection state", 1],
-  "ops/transfer.ts › readTransfer › undo › context.transfers.delete()": ["undo", 1],
-  "ops/transfer.ts › readTransfer › context.transfers.set()": ["register", 1],
-  "ops/transfer.ts › reviewTransfer › held.snapshotJson =": ["existing owner", 1],
-  "ops/transfer.ts › releaseTransfer › context.transfers.delete()": ["release", 1],
-  "player-ops.ts › alignRandom › random.intent =": ["connection state", 1],
-  "player-ops.ts › alignRandom › random.history.clear()": ["connection state", 1],
-  "player-ops.ts › alignRandom › random.forgotAt =": ["connection state", 1],
-  "player-ops.ts › alignRandom › random.settings =": ["connection state", 1],
-  "player-ops.ts › alignRandom › random.control =": ["connection state", 2],
-  "player-ops.ts › alignRandom › random.owner =": ["connection state", 1],
-  "player-ops.ts › alignTrace › context.traceIntent =": ["connection state", 1],
-  "player-ops.ts › alignTrace › context.trace =": ["connection state", 1],
-  "player-ops.ts › alignTrace › context.traceId +=": ["connection state", 1],
-  "player-ops.ts › hold › undo › plans.delete()": ["undo", 1],
-  "player-ops.ts › hold › plans.set()": ["register", 1],
-  "player-ops.ts › compile › undo › context.sources.delete()": ["undo", 1],
-  "player-ops.ts › compile › context.sources.set()": ["register", 1],
-  "player-ops.ts › releaseConnection › context.plans.clear()": ["release", 1],
-  "player-ops.ts › releaseConnection › context.sources.clear()": ["release", 1],
-  "player-ops.ts › releaseConnection › context.sourceViews.clear()": ["release", 1],
-  "player-ops.ts › releaseConnection › context.planTexts.clear()": ["release", 1],
-  "player-ops.ts › releaseConnection › context.transfers.clear()": ["release", 1],
-  "player-ops.ts › releaseConnection › sessions.clear()": ["release", 1],
-  "worker-host.ts › release › sessions.delete()": ["release", 1],
-  "worker-host.ts › add › undo › held.delete()": ["undo", 1],
-  "worker-host.ts › add › undo › halted.delete()": ["undo", 1],
-  "worker-host.ts › add › held.set()": ["register", 1],
-  "worker-host.ts › delete › held.delete()": ["release", 1],
-  "worker-host.ts › delete › halted.delete()": ["release", 1],
-  "worker-host.ts › clear › held.clear()": ["release", 1],
-  "worker-host.ts › clear › halted.clear()": ["release", 1],
-  "worker-host.ts › fail › held.delete()": ["release", 1],
-  "worker-host.ts › halt › halted.add()": ["existing owner", 1],
-};
-
-const WRITES = new Set(["set", "add", "delete", "clear"]);
-const ASSIGNMENTS = new Set([
-  ts.SyntaxKind.EqualsToken,
-  ts.SyntaxKind.PlusEqualsToken,
-  ts.SyntaxKind.MinusEqualsToken,
+/** The context's fields that hold diagnostics or scalar state the connection keeps by design, not registries. */
+const CONNECTION_STATE = new Set([
+  "delivery",
+  "recorder",
+  "trace",
+  "traceId",
+  "traceIntent",
+  "transferCount",
+  "random",
 ]);
 
-/** Whether `node` is inside the undo an allocation registers: a function passed to `ownNow` or `own`. */
-function inUndo(node: ts.Node): boolean {
-  for (let at = node.parent; at !== undefined; at = at.parent)
-    if ((ts.isArrowFunction(at) || ts.isFunctionExpression(at)) && inUndoCall(at)) return true;
-  return false;
-}
-
-/** The place a write is in: its named function, or an op's name for its `run`, or the constructor. */
-function placeOf(node: ts.Node): string {
-  for (let at = node.parent; at !== undefined; at = at.parent) {
-    if (ts.isConstructorDeclaration(at)) return "constructor";
-    if ((ts.isFunctionDeclaration(at) || ts.isMethodDeclaration(at)) && at.name)
-      return at.name.getText();
-    if ((ts.isArrowFunction(at) || ts.isFunctionExpression(at)) && !inUndoCall(at)) {
-      const holder = at.parent;
-      if (ts.isPropertyAssignment(holder) && holder.name.getText() === "run") {
-        const op = holder.parent.parent;
-        if (ts.isPropertyAssignment(op)) return op.name.getText();
-      }
-      if (ts.isVariableDeclaration(holder) || ts.isPropertyAssignment(holder))
-        return holder.name.getText();
-    }
-  }
-  return "(module)";
-}
-
-/** Whether `call` registers an undo: `ownNow(owner, undo)` or `owner.own(delivery, undo)`. */
-function isRegistration(call: ts.Node): call is ts.CallExpression {
-  return (
-    ts.isCallExpression(call) &&
-    ((ts.isIdentifier(call.expression) && call.expression.text === "ownNow") ||
-      (ts.isPropertyAccessExpression(call.expression) && call.expression.name.text === "own"))
-  );
-}
-
-/** Whether `fn` is the undo a registration passes. */
-function inUndoCall(fn: ts.Node): boolean {
-  return isRegistration(fn.parent) && fn.parent.arguments.some((argument) => argument === fn);
-}
-
-/** Whether a statement before `write`, in its block, registers an undo. */
-function registeredBefore(write: ts.Node): boolean {
-  let statement: ts.Node = write;
-  while (statement.parent !== undefined && !ts.isBlock(statement.parent))
-    statement = statement.parent;
-  const block = statement.parent;
-  if (block === undefined || !ts.isBlock(block)) return false;
-  const index = block.statements.findIndex((each) => each === statement);
-  return block.statements.slice(0, index).some((earlier) => {
-    let found = false;
-    const visit = (node: ts.Node) => {
-      if (isRegistration(node)) found = true;
-      if (!found) ts.forEachChild(node, visit);
-    };
-    visit(earlier);
-    return found;
+/** Every field of `holder` that is a raw collection, by name: none may be reachable on a connection's context. */
+function rawCollections(holder: Readonly<Record<string, unknown>>, prefix: string): string[] {
+  return Object.entries(holder).flatMap(([name, value]) => {
+    if (CONNECTION_STATE.has(name) || typeof value === "function") return [];
+    if (
+      value instanceof Map ||
+      value instanceof Set ||
+      value instanceof WeakMap ||
+      value instanceof WeakSet ||
+      Array.isArray(value)
+    )
+      return [`${prefix}${name}`];
+    if (value instanceof OwnedMap || value instanceof OwnedCell) return [];
+    if (typeof value === "object" && value !== null)
+      return rawCollections(Object.fromEntries(Object.entries(value)), `${prefix}${name}.`);
+    return [`${prefix}${name}: neither owned nor classified`];
   });
 }
 
-/** Every write site of `text` (module `module`): its key, and whether a `register` write registered first. */
-function writesOf(module: string, text: string): { key: string; registered: boolean }[] {
-  const source = ts.createSourceFile(module, text, ts.ScriptTarget.Latest, true);
-  const found: { key: string; registered: boolean }[] = [];
-  const add = (node: ts.Node, target: string) =>
-    found.push({
-      key: `${module} › ${placeOf(node)}${inUndo(node) ? " › undo" : ""} › ${target}`,
-      registered: registeredBefore(node),
-    });
-  const visit = (node: ts.Node) => {
-    if (
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      WRITES.has(node.expression.name.text)
-    )
-      add(node, `${node.expression.expression.getText(source)}.${node.expression.name.text}()`);
-    if (
-      ts.isBinaryExpression(node) &&
-      ASSIGNMENTS.has(node.operatorToken.kind) &&
-      (ts.isPropertyAccessExpression(node.left) || ts.isElementAccessExpression(node.left))
-    )
-      add(node, `${node.left.getText(source)} ${node.operatorToken.getText(source)}`);
-    if (
-      (ts.isPostfixUnaryExpression(node) || ts.isPrefixUnaryExpression(node)) &&
-      (node.operator === ts.SyntaxKind.PlusPlusToken ||
-        node.operator === ts.SyntaxKind.MinusMinusToken) &&
-      ts.isPropertyAccessExpression(node.operand)
-    )
-      add(node, `${node.operand.getText(source)} ++`);
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
-  return found;
-}
+/** The context's top-level fields whose type is a raw collection: `never` while every registry is owned. */
+type RawRegistries = {
+  [Field in keyof PlayerOpsContext]: PlayerOpsContext[Field] extends
+    Map<unknown, unknown> | Set<unknown> | WeakMap<WeakKey, unknown> | readonly unknown[]
+    ? Field
+    : never;
+}[keyof PlayerOpsContext];
+const NO_RAW_REGISTRY: [RawRegistries] extends [never] ? true : false = true;
 
-function hostModules(): string[] {
-  const modules: string[] = [];
-  const walk = (folder: string) => {
-    for (const name of readdirSync(folder)) {
-      const path = join(folder, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else if (path.endsWith(".ts")) modules.push(relative(ENGINE_BRIDGE, path));
-    }
-  };
-  walk(ENGINE_BRIDGE);
-  return modules.filter((module) => !NOT_HOST.has(module)).sort();
-}
-
-/** What the census finds wrong with `writes`: unclassified writes, missing ones, miscounts, unregistered allocations. */
-function censusProblems(writes: readonly { key: string; registered: boolean }[]): string[] {
-  const problems: string[] = [];
-  const counts = new Map<string, number>();
-  for (const { key, registered } of writes) {
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-    const row = CENSUS[key];
-    if (row === undefined) problems.push(`unclassified write: ${key}`);
-    else if (row[0] === "register" && !registered)
-      problems.push(`an allocation published before its undo was registered: ${key}`);
-  }
-  for (const [key, [, count]] of Object.entries(CENSUS))
-    if ((counts.get(key) ?? 0) !== count)
-      problems.push(`${key}: ${counts.get(key) ?? 0} writes, the census says ${count}`);
-  return problems;
-}
-
-test("every write of the host to what a connection retains is classified, and every allocation registers first", () => {
-  const writes = hostModules().flatMap((module) =>
-    writesOf(module, readFileSync(join(ENGINE_BRIDGE, module), "utf8")),
-  );
-  assert.deepEqual(censusProblems(writes), []);
-  // A registry reached through an alias is a new target, and a write before its registration is found.
-  const aliased = writesOf(
-    "ops/transfer.ts",
-    "function readTransfer(context) { const tickets = context.transfers; tickets.set(t, held); }",
-  );
-  assert.deepEqual(
-    censusProblems(aliased).filter((problem) => problem.startsWith("unclassified")),
-    ["unclassified write: ops/transfer.ts › readTransfer › tickets.set()"],
-  );
-  const unregistered = writesOf(
-    "player-ops.ts",
-    "const hold = (plan) => { plans.set(token, plan); ownNow(delivery, () => plans.delete(token)); };",
-  );
-  assert.ok(
-    censusProblems(unregistered).includes(
-      "an allocation published before its undo was registered: player-ops.ts › hold › plans.set()",
-    ),
-  );
+test("every registry a connection's context retains is owned by its deliveries, and nothing else on it is a raw collection", () => {
+  assert.equal(NO_RAW_REGISTRY, true);
+  assert.deepEqual(rawCollections({ ...playerOpsContext() }, ""), []);
+  // A raw map put on the context is found, as is a field no class names.
+  assert.deepEqual(rawCollections({ ...playerOpsContext(), extra: new Map() }, ""), ["extra"]);
+  assert.deepEqual(rawCollections({ ...playerOpsContext(), count: 1 }, ""), [
+    "count: neither owned nor classified",
+  ]);
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The family: what the host retains, over allocation class × what happens to its delivery or owner.
 
-/** What happens to the delivery of the case's request, injected into its op or its port. */
-type Injection = "throwBeforeOutcome" | "throwInAnswer" | "failedEncoding" | "failedPost";
+/**
+ * What happens to the delivery of the case's request, injected into its op or its port: `holdOpen` keeps its real op's
+ * outcome back, with its allocation made and its delivery open, until released.
+ */
+type Injection =
+  "holdOpen" | "throwBeforeOutcome" | "throwInAnswer" | "failedEncoding" | "failedPost";
 
 /** A connection assembled from production parts: the client, the host and the Player's ops, over a test port. */
 interface Connection {
   readonly context: PlayerOpsContext;
   readonly sessions: HostSessions;
-  request(op: string, args: unknown): Promise<BridgeResult>;
+  request(op: string, args: unknown, session?: string): Promise<BridgeResult>;
   /** Makes `injection` happen to the next request of `op`, and to it alone. */
   arm(op: string, injection: Injection): void;
+  /** Lets an op `holdOpen` kept back go on to its reply. */
+  releaseHeld(): void;
+  /** Fails the client's port, as a lost Worker does: the client loses the connection. */
+  lose(): void;
+  /** How often the client reported its loss to a listener. */
+  losses(): number;
   /** Replies posted and not yet delivered to the client. */
   readonly transit: unknown[];
   deliver(): void;
@@ -495,6 +334,9 @@ function assembled(): Connection {
   const successes = new Map<string, number>();
   const transit: unknown[] = [];
   let armed: { readonly op: string; readonly injection: Injection } | null = null;
+  let releaseHeld = () => {};
+  const held = new Promise<void>((resolve) => (releaseHeld = resolve));
+  let fail: (reason: unknown) => void = () => {};
   /** The armed injection for a request of `op`, used up. */
   const take = (op: string, kinds: readonly Injection[]): Injection | null => {
     if (armed === null || armed.op !== op || !kinds.includes(armed.injection)) return null;
@@ -526,8 +368,9 @@ function assembled(): Connection {
       toHost?.(request);
     },
     listen: (listener) => void (toClient = listener),
-    onFailure: () => {},
-    terminate: () => {},
+    onFailure: (listener) => void (fail = listener),
+    // As the in-process backend's: the client ends its port first, which closes the connection directly.
+    terminate: () => closeConnection(context, sessions),
   };
   const ops = playerBridgeOps(context);
   // Each op runs as it is, but for an armed injection into the outcome of its next request.
@@ -537,8 +380,18 @@ function assembled(): Connection {
       {
         ...op,
         run: (...args: Parameters<BridgeOp["run"]>) => {
-          const injection = take(name, ["throwBeforeOutcome", "throwInAnswer", "failedEncoding"]);
+          const injection = take(name, [
+            "holdOpen",
+            "throwBeforeOutcome",
+            "throwInAnswer",
+            "failedEncoding",
+          ]);
           if (injection === null) return op.run(...args);
+          if (injection === "holdOpen")
+            return Promise.resolve(op.run(...args)).then(async (outcome) => {
+              await held;
+              return outcome;
+            });
           return Promise.resolve(op.run(...args)).then((outcome): OpOutcome => {
             if (injection === "throwBeforeOutcome")
               throw new Error("injected: after the allocation");
@@ -557,11 +410,17 @@ function assembled(): Connection {
   );
   const { client } = openBridge(clientPort, BUILD);
   const sessions = startBridgeHost(hostPort, wrapped, BUILD, context.delivery);
+  let losses = 0;
+  client.onLoss(() => (losses += 1));
   const connection: Connection = {
     context,
     sessions,
-    request: (op, args) => client.request(op, args),
+    request: (op, args, session) =>
+      client.request(op, args, session === undefined ? {} : { session }),
     arm: (op, injection) => void (armed = { op, injection }),
+    releaseHeld: () => releaseHeld(),
+    lose: () => fail(new Error("injected: the Worker failed")),
+    losses: () => losses,
     transit,
     deliver: () => {
       for (const data of transit.splice(0)) toClient?.(data);
@@ -607,7 +466,7 @@ function retained({ context, sessions }: Connection): string[] {
     ...[...context.transfers.keys()].map((ticket) => `transfer ${ticket}`),
     ...[...context.sourceViews.texts.keys()].map((token) => `sidecar text ${token}`),
     ...[...context.sourceViews.sidecars.keys()].map((token) => `sidecar ${token}`),
-    ...(context.sourceViews.latestFile === null ? [] : ["latest file"]),
+    ...(context.sourceViews.latestFile.value === null ? [] : ["latest file"]),
     ...Array.from({ length: 20 }, (_, index) => `s${index + 1}`)
       .filter((id) => sessions.get(id) !== undefined)
       .map((id) => `session ${id}`),
@@ -632,7 +491,7 @@ const AWAITING = new Set(
 );
 
 /**
- * What happens to the delivery or its owner: nothing (its reply first held in transit: the live delivery), a reusable
+ * What happens to the delivery or its owner: its whole life (`lifecycle`: open, posted, received, retired), a reusable
  * teardown after receipt, an injection (`Injection`), or the connection closed while the op runs, with its reply in
  * transit, or after receipt.
  */
@@ -646,7 +505,7 @@ const FAMILY_AXES = {
     "cache",
   ] satisfies readonly AllocationClass[],
   event: [
-    "none",
+    "lifecycle",
     "teardown",
     "throwBeforeOutcome",
     "throwInAnswer",
@@ -657,16 +516,14 @@ const FAMILY_AXES = {
     "closeAfterReceipt",
   ],
 } as const;
-type FamilyCase = {
-  readonly allocation: AllocationClass;
-  readonly event: (typeof FAMILY_AXES.event)[number];
-};
+type FamilyEvent = (typeof FAMILY_AXES.event)[number];
+type FamilyCase = { readonly allocation: AllocationClass; readonly event: FamilyEvent };
 
 /**
  * Why a combination is no case: an op with no await (production `start`, a plan's `prepare`, `preparePlanText`)
  * allocates and replies in one step, so nothing happens while it runs. (Encoding cannot fail after the reply was posted,
  * and a failed post is not that reply delivered: each is its own event, before the post. An ID-based release needs the
- * ID received: `teardown` stands for release after receipt.)
+ * ID received, so it is the lifecycle's last point.)
  */
 const familyInfeasible = ({ allocation, event }: Coordinates) =>
   event === "closeWhileRunning" && !AWAITING.has(allocation!);
@@ -676,6 +533,55 @@ function familyCases(): FamilyCase[] {
   // EVIDENCE: fixture: `product` gives each axis one value of its declared domain.
   return feasible as FamilyCase[];
 }
+
+/** What every allocation class owes, declared on its own: the events of an op that allocates at once, or after an await. */
+const AT_ONCE: readonly FamilyEvent[] = [
+  "lifecycle",
+  "teardown",
+  "throwBeforeOutcome",
+  "throwInAnswer",
+  "failedEncoding",
+  "failedPost",
+  "closeInTransit",
+  "closeAfterReceipt",
+];
+const AFTER_AWAIT: readonly FamilyEvent[] = [...AT_ONCE, "closeWhileRunning"];
+const OBLIGATIONS: Readonly<Record<AllocationClass, readonly FamilyEvent[]>> = {
+  plan: AT_ONCE,
+  sources: AFTER_AWAIT,
+  session: AT_ONCE,
+  transfer: AFTER_AWAIT,
+  slot: AT_ONCE,
+  cache: AFTER_AWAIT,
+};
+
+/** What each class's op adds to the controls, exactly. */
+const ADDED: Readonly<Record<AllocationClass, readonly string[]>> = {
+  plan: ["plan p4"],
+  sources: ["plan p4", "sources p4"],
+  session: ["session s2"],
+  transfer: ["transfer transfer-2"],
+  slot: ["slot p2"],
+  cache: ["latest file", "sidecar p3", "sidecar text p3"],
+};
+
+/**
+ * How the owner of what each class's op added lets go of it once received: an op of its own, with its arguments and
+ * session; `null` where the connection owns it until it closes (plans, their sources, the source-view caches).
+ */
+const RETIRE: Readonly<
+  Record<
+    AllocationClass,
+    { readonly op: string; readonly args: unknown; readonly session?: string } | null
+  >
+> = {
+  plan: null,
+  sources: null,
+  session: { op: "release", args: null, session: "s2" },
+  transfer: { op: "releaseTransfer", args: { ticket: "transfer-2" } },
+  slot: { op: "releasePlanText", args: { plan: "p2" } },
+  cache: null,
+};
 
 /**
  * The controls, which exist before the case's request and which no failure of it may undo: a plan `p1` with its slot,
@@ -725,6 +631,14 @@ async function argumentsOf(
 
 const PLAN_REQUEST = { source: { kind: "plan", text: PLAN_JSON } };
 
+/** Waits, delivering nothing, until `ready` holds. */
+async function until(ready: () => boolean, what: string): Promise<void> {
+  for (let turn = 0; !ready(); turn += 1) {
+    assert.ok(turn < 1000, what);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 for (const each of familyCases())
   test(`a host allocation: ${each.allocation}, ${each.event}`, async () => {
     const { op } = CLASSES[each.allocation];
@@ -732,7 +646,9 @@ for (const each of familyCases())
     await withControls(connection);
     const args = await argumentsOf(connection, each.allocation);
     const controls = retained(connection);
+    const withAdded = [...controls, ...ADDED[each.allocation]].sort();
     const postsBefore = connection.successPosts(op);
+    if (each.event === "lifecycle") connection.arm(op, "holdOpen");
     if (
       each.event === "throwBeforeOutcome" ||
       each.event === "throwInAnswer" ||
@@ -747,18 +663,34 @@ for (const each of familyCases())
       await inTransit(connection);
       closeConnection(connection.context, connection.sessions);
     }
-    if (each.event === "none") {
+    if (each.event === "lifecycle") {
+      // Open: the allocation made, its delivery not posted. The delivery owns it.
+      await until(() => retained(connection).length === withAdded.length, "the op allocated");
+      assert.deepEqual(
+        retained(connection),
+        withAdded,
+        "open: the controls and exactly what it added",
+      );
+      assert.equal(connection.transit.length, 0, "open: nothing posted");
+      // Posted: its reply in transit, not yet received; the connection owns it.
+      connection.releaseHeld();
       await inTransit(connection);
-      // The live delivery's allocation: the host holds it, and the client has no reply yet.
-      assert.ok(retained(connection).length > controls.length, "held for its reply");
+      assert.deepEqual(retained(connection), withAdded, "posted");
     }
     const result = await settled(connection, pending);
     switch (each.event) {
-      case "none": {
+      case "lifecycle": {
         assert.equal(result.status, "fulfilled");
-        const after = retained(connection);
-        assert.ok(after.length > controls.length, "the op allocated");
-        for (const one of controls) assert.ok(after.includes(one), `${one} stays`);
+        assert.deepEqual(retained(connection), withAdded, "received");
+        const retire = RETIRE[each.allocation];
+        if (retire !== null) {
+          const released = await settled(
+            connection,
+            connection.request(retire.op, retire.args, retire.session),
+          );
+          assert.equal(released.status, "fulfilled");
+          assert.deepEqual(retained(connection), controls, "retired: that allocation alone gone");
+        }
         break;
       }
       case "teardown":
@@ -767,7 +699,11 @@ for (const each of familyCases())
         assert.deepEqual(retained(connection), [], "the teardown let go of everything");
         // The connection stays open: a later op allocates as before.
         await settled(connection, connection.request("prepare", PLAN_REQUEST));
-        assert.equal(retained(connection).length, 1);
+        // Tokens go on from wherever the connection's count stood.
+        assert.deepEqual(
+          retained(connection).map((one) => one.replace(/\d+$/u, "N")),
+          ["plan pN"],
+        );
         break;
       case "throwBeforeOutcome":
       case "throwInAnswer":
@@ -799,9 +735,58 @@ for (const each of familyCases())
     }
   });
 
-test("the host allocation cases are every feasible coordinate of their declaration", () => {
-  const all = product(FAMILY_AXES).filter((each) => !familyInfeasible(each));
-  assert.deepEqual(coverageGaps(all, familyCases(), { tuples: true }), []);
+test("the host allocation cases are every obligation declared for each class, and no other", () => {
+  const owed = Object.entries(OBLIGATIONS).flatMap(([allocation, events]) =>
+    events.map((event) => ({ allocation, event })),
+  );
+  assert.deepEqual(coverageGaps(owed, familyCases(), { tuples: true }), []);
+});
+
+test("closing twice, and closing with an undo that throws, leaves nothing; the client's loss still completes", async (context) => {
+  const errors = context.mock.method(console, "error", () => {});
+  const connection = assembled();
+  await withControls(connection);
+  assert.ok(retained(connection).length > 0);
+  // An allocation of a delivery still open, whose undo throws.
+  const open = connection.context.delivery.begin();
+  connection.context.delivery.own(open, () => {
+    throw new Error("injected: the undo fails");
+  });
+  const pending = connection.request("readTransfer", { text: TRANSFER_TEXT });
+  connection.lose();
+  const result = await settled(connection, pending);
+  assert.equal(result.status, "rejected", "the pending request was rejected");
+  assert.equal(connection.losses(), 1, "the loss listener ran");
+  assert.deepEqual(retained(connection), [], "everything committed was released all the same");
+  assert.equal(errors.mock.callCount(), 1, "the failed undo was reported once");
+  closeConnection(connection.context, connection.sessions);
+  assert.deepEqual(retained(connection), []);
+  assert.equal(errors.mock.callCount(), 1, "a second close undoes nothing more");
+});
+
+test("a committed slot's waiting task, run under another delivery that then fails, stays the slot's", async () => {
+  const ops = playerOpsContext();
+  const run = playerBridgeOps(ops);
+  const sessions: HostSessions = {
+    get: () => undefined,
+    add: () => "none",
+    delete: () => {},
+    clear: () => {},
+  };
+  const inDelivery = async (op: string, args: unknown) => {
+    const delivery = ops.delivery.begin();
+    await run[op]!.run(args, sessions, null);
+    ops.delivery.commit(delivery);
+  };
+  await inDelivery("prepare", PLAN_REQUEST);
+  await inDelivery("preparePlanText", { plan: "p1" });
+  const slot = ops.planTexts.get("p1")!;
+  assert.equal(slot.json, null, "its task waits");
+  const other = ops.delivery.begin();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.notEqual(slot.json, null, "its task ran meanwhile");
+  ops.delivery.rollback(other);
+  assert.equal(ops.planTexts.get("p1"), slot, "the slot stays, with what its task wrote");
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -826,17 +811,45 @@ test("terminating the in-process backend's client closes its connection: plans a
   );
 });
 
-test("a facade call while an op is pending owns its plan and session itself: the op's failure leaves them", async () => {
-  const bridge = createInProcessBackend(BUILD);
-  // Valid JSON that is no transfer: the read fails after its first await, with the facade's work done meanwhile.
-  const pending = bridge.client.request("readTransfer", { text: "{}" });
-  const session = introduceNow(bridge, () => createPlayerRuntimeSession(PLAN));
-  await assert.rejects(pending);
-  assert.ok(
-    hatch(session, (held) => held.plan),
-    "the facade's session stays",
-  );
-  assert.ok(heldPlan(bridge, session.planToken), "and its plan");
+/**
+ * The facade's delivery and a request's, nested both ways: the request pending when the facade runs, or begun by the
+ * facade's own factory (the in-process client posts at once, so the host opens its delivery inside the facade's).
+ */
+const SCOPE_AXES = {
+  order: ["requestThenFacade", "facadeThenRequest"],
+  request: ["fails", "succeeds"],
+} as const;
+
+for (const each of product(SCOPE_AXES))
+  test(`a facade call and a request, nested: ${each.order}, the request ${each.request}`, async () => {
+    const bridge = createInProcessBackend(BUILD);
+    // Valid JSON that is no transfer fails after the read's first await; a transfer is read.
+    const text = each.request === "fails" ? "{}" : TRANSFER_TEXT;
+    let pending: Promise<BridgeResult> | null = null;
+    if (each.order === "requestThenFacade")
+      pending = bridge.client.request("readTransfer", { text });
+    const session = introduceNow(bridge, () => {
+      if (each.order === "facadeThenRequest")
+        pending = bridge.client.request("readTransfer", { text });
+      return createPlayerRuntimeSession(PLAN);
+    });
+    const settledRequest = await Promise.allSettled([pending!]);
+    assert.equal(settledRequest[0]!.status, each.request === "fails" ? "rejected" : "fulfilled");
+    assert.ok(
+      hatch(session, (held) => held.plan),
+      "the facade's session stays",
+    );
+    assert.ok(heldPlan(bridge, session.planToken), "and its plan");
+  });
+
+test("the facade nesting cases are every coordinate of their declaration", () => {
+  const owed = [
+    { order: "requestThenFacade", request: "fails" },
+    { order: "requestThenFacade", request: "succeeds" },
+    { order: "facadeThenRequest", request: "fails" },
+    { order: "facadeThenRequest", request: "succeeds" },
+  ];
+  assert.deepEqual(coverageGaps(owed, product(SCOPE_AXES), { tuples: true }), []);
 });
 
 test("a facade call whose handoff fails undoes what it allocated, and keeps what existed before", async () => {
@@ -858,6 +871,10 @@ test("a facade call whose handoff fails undoes what it allocated, and keeps what
   bridge.open = open;
   assert.ok(heldPlan(bridge, before), "the plan held before stays");
   assert.throws(() => heldPlan(bridge, "p2"), /No plan 'p2' is held/);
-  const next = introduceNow(bridge, () => createPlayerRuntimeSession(other));
-  assert.equal(next.id, "s2", "the session the failed handoff added is gone; IDs go on");
+  // The session it added, `s1`, is gone: the host refuses to release a session it does not hold.
+  await assert.rejects(
+    bridge.client.request("release", null, { session: "s1" }),
+    (error: unknown) =>
+      error instanceof BridgeRequestError && error.kind === "bridge" && error.code === "session",
+  );
 });

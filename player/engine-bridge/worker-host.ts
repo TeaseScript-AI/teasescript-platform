@@ -7,7 +7,7 @@ import {
   readRequest,
   refusal,
 } from "./protocol.js";
-import { type Delivery, type DeliveryOwner, deliveryOwner, ownNow } from "./delivery.js";
+import { type Delivery, type DeliveryOwner, deliveryOwner, OwnedMap } from "./delivery.js";
 import { decodeMessage, encodeMessage } from "./transport.js";
 
 /** How the Worker side sends and receives messages, whatever runs it: a browser Worker, a Node worker or a test port. */
@@ -40,8 +40,11 @@ export interface OpOutcome {
 
 export interface HostSessions {
   get(id: string): HostSession | undefined;
-  /** Keeps `session` under a new ID, which it returns. */
-  add(session: HostSession): string;
+  /**
+   * Keeps `session` under a new ID, which it returns, owned by `delivery` (the innermost open one by default) until it
+   * is posted (`delivery.ts`).
+   */
+  add(session: HostSession, delivery?: Delivery): string;
   delete(id: string): void;
   clear(): void;
 }
@@ -141,28 +144,22 @@ export function startBridgeHost(
   owner: DeliveryOwner = deliveryOwner(),
 ): HostSessions {
   const table: BridgeOps = { ...ops, ...HOST_OPS };
-  const held = new Map<string, HostSession>();
   const halted = new Set<string>();
+  // A session leaving, however it leaves, takes its stop with it.
+  const held = new OwnedMap<string, HostSession>(owner, (_session, id) => halted.delete(id));
   let nextSession = 1;
   const sessions: HostSessions = {
     get: (id) => held.get(id),
-    add: (session) => {
+    add: (session, delivery) => {
       const id = `s${nextSession++}`;
-      ownNow(owner, () => {
-        if (held.get(id) !== session) return;
-        held.delete(id);
-        halted.delete(id);
-      });
-      held.set(id, session);
+      held.set(id, session, delivery);
       return id;
     },
     delete: (id) => {
       held.delete(id);
-      halted.delete(id);
     },
     clear: () => {
       held.clear();
-      halted.clear();
     },
   };
   let lastId = 0;
@@ -275,13 +272,9 @@ export function startBridgeHost(
     answer(request, session, outcome, delivery);
   }
 
-  /** Undoes `delivery`; a failing undo still lets the error reply go. */
+  /** Undoes `delivery`; an undo that fails is reported by the owner (`delivery.ts`), and the error reply still goes. */
   function abort(delivery: Delivery): void {
-    try {
-      owner.rollback(delivery);
-    } catch {
-      // Every undo was attempted; what one could not undo, the connection's cleanup still clears.
-    }
+    owner.rollback(delivery);
   }
 
   /**

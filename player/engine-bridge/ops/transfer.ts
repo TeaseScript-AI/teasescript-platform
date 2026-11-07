@@ -8,7 +8,6 @@ import {
 } from "../../session-transfer-read.js";
 import { exactly, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
-import { ownNow } from "../delivery.js";
 import type { BridgeOps } from "../worker-host.js";
 import { readPlanText } from "./persistence.js";
 
@@ -58,9 +57,6 @@ export function transferOps(context: PlayerOpsContext): BridgeOps {
         context.transferCount += 1;
         const ticket = `transfer-${context.transferCount}`;
         const held: TransferTicket = { transfer, snapshotJson: null };
-        ownNow(context.delivery, () => {
-          if (context.transfers.get(ticket) === held) context.transfers.delete(ticket);
-        });
         context.transfers.set(ticket, held);
         return {
           result: {

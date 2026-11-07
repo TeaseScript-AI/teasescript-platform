@@ -18,7 +18,12 @@ import type {
 } from "../../src/runtime/random/random-control.js";
 import { decideDraw, RandomHistory, type RandomNext } from "../random-decisions.js";
 import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
-import { type DeliveryOwner, deliveryOwner, ownNow } from "./delivery.js";
+import {
+  type Delivery,
+  type DeliveryOwner,
+  deliveryOwner,
+  OwnedMap,
+} from "./delivery.js";
 import { SourceViewCaches, sourceViewOps } from "./ops/source-views.js";
 import { historyOps } from "./ops/history.js";
 import { inputOps } from "./ops/input.js";
@@ -137,13 +142,13 @@ export interface PlayerOpsContext {
    * registers its undo with the open one first. Its host must be started with it (`startBridgeHost`).
    */
   readonly delivery: DeliveryOwner;
-  readonly plans: Map<string, InstructionPlan>;
-  /** Keeps `plan` under a new token, which it returns; owned by the open delivery until it is posted. */
-  hold(plan: InstructionPlan): string;
+  readonly plans: OwnedMap<string, InstructionPlan>;
+  /** Keeps `plan` under a new token, which it returns, owned by `delivery` (the innermost open one by default). */
+  hold(plan: InstructionPlan, delivery?: Delivery): string;
   /** Records the connection's sessions for a debug export; see `DebugRecorder`. */
   readonly recorder: DebugRecorder;
   /** The source files of each plan this Worker compiled, by the plan's token: what Debug's source views show. */
-  readonly sources: Map<string, readonly { readonly path: string; readonly source: string }[]>;
+  readonly sources: OwnedMap<string, readonly { readonly path: string; readonly source: string }[]>;
   /** The source-view ops' caches; `teardown` clears them with the plans. */
   readonly sourceViews: SourceViewCaches;
   /**
@@ -156,9 +161,9 @@ export interface PlayerOpsContext {
   /** The serial of the newest tracing intent the host applied (`alignTrace`); `0` before any. */
   traceIntent: number;
   /** The held plans' canonical JSON, per token, which `preparePlanText` alone keeps (`ops/persistence.ts`). */
-  readonly planTexts: Map<string, PlanTextSlot>;
+  readonly planTexts: OwnedMap<string, PlanTextSlot>;
   /** The sessions read for an import, by ticket, until released (`ops/transfer.ts`). */
-  readonly transfers: Map<string, TransferTicket>;
+  readonly transfers: OwnedMap<string, TransferTicket>;
   /** Counts the tickets this connection gave out. */
   transferCount: number;
   /** Debug's random control on this connection (`alignRandom`); every session its owner holds runs with it. */
@@ -300,28 +305,28 @@ export function alignTrace(
 }
 
 export function playerOpsContext(): PlayerOpsContext {
-  const plans = new Map<string, InstructionPlan>();
   const delivery = deliveryOwner();
+  const plans = new OwnedMap<string, InstructionPlan>(delivery);
   let nextPlan = 1;
   return {
     delivery,
     plans,
-    hold: (plan) => {
+    hold: (plan, by) => {
       const token = `p${nextPlan++}`;
-      ownNow(delivery, () => {
-        if (plans.get(token) === plan) plans.delete(token);
-      });
-      plans.set(token, plan);
+      plans.set(token, plan, by);
       return token;
     },
     recorder: new DebugRecorder(),
-    sources: new Map(),
-    sourceViews: new SourceViewCaches(),
+    sources: new OwnedMap(delivery),
+    sourceViews: new SourceViewCaches(delivery),
     trace: null,
     traceId: 0,
     traceIntent: 0,
-    planTexts: new Map(),
-    transfers: new Map(),
+    // A slot leaving, however it leaves, stops its waiting task (`ops/persistence.ts`).
+    planTexts: new OwnedMap(delivery, (slot) => {
+      if (slot.timer !== null) clearTimeout(slot.timer);
+    }),
+    transfers: new OwnedMap(delivery),
     transferCount: 0,
     random: {
       intent: 0,
@@ -369,9 +374,6 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     const plan = hold(compilation.plan);
     const files =
       typeof script === "string" ? [{ path: MAIN_FILE_PATH, source: script }] : script.files;
-    ownNow(context.delivery, () => {
-      if (context.sources.get(plan) === files) context.sources.delete(plan);
-    });
     context.sources.set(plan, files);
     return {
       kind: "prepared",
@@ -437,7 +439,6 @@ function releaseConnection(context: PlayerOpsContext, sessions: HostSessions): v
   context.plans.clear();
   context.sources.clear();
   context.sourceViews.clear();
-  for (const slot of context.planTexts.values()) if (slot.timer !== null) clearTimeout(slot.timer);
   context.planTexts.clear();
   context.transfers.clear();
   sessions.clear();
@@ -446,7 +447,8 @@ function releaseConnection(context: PlayerOpsContext, sessions: HostSessions): v
 /**
  * Ends the connection for good, as its transport ends: its deliveries are closed first, so work still running can
  * allocate nothing more, then what it holds is let go of (`releaseConnection`). Called directly by the backend whose
- * host outlives its client, never through that client.
+ * host outlives its client, never through that client. It never throws: an undo that fails is reported by the owner
+ * (`delivery.ts`), and the release runs in any case.
  */
 export function closeConnection(context: PlayerOpsContext, sessions: HostSessions): void {
   context.delivery.close();

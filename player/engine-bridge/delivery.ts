@@ -52,23 +52,29 @@ export interface DeliveryOwner {
 /** An owner's state: whether it is closed, and its open deliveries, innermost last, with their undos. */
 interface OwnerState {
   closed: boolean;
+  readonly report: (error: unknown) => void;
   readonly open: { readonly delivery: Delivery; readonly undos: (() => void)[] }[];
   next: number;
 }
 
 const states = new WeakMap<DeliveryOwner, OwnerState>();
 
-/** Runs every undo, the latest first, also when one throws; then throws the first failure. */
-function undoAll(undos: readonly (() => void)[]): void {
-  const failures: unknown[] = [];
+/**
+ * Runs every undo, the latest first, also when one throws; each failure goes to `report`, never to the caller, so the
+ * cleanup that follows an abort or a close always runs.
+ */
+function undoAll(undos: readonly (() => void)[], report: (error: unknown) => void): void {
   for (const undo of [...undos].reverse())
     try {
       undo();
     } catch (error) {
-      failures.push(error);
+      report(error);
     }
-  if (failures.length === 1) throw failures[0];
-  if (failures.length > 1) throw new AggregateError(failures, "Undoing a delivery failed.");
+}
+
+/** Where an undo's failure goes by default: the host's console, as a host error (there is no client to tell). */
+export function reportUndoFailure(error: unknown): void {
+  console.error("[engine host] an allocation could not be undone", error);
 }
 
 /**
@@ -103,14 +109,17 @@ export function advanceDelivery(
     case "abort": {
       if (at < 0) return delivery;
       const [ended] = state.open.splice(at, 1);
-      undoAll(ended!.undos);
+      undoAll(ended!.undos, state.report);
       return delivery;
     }
     case "close": {
       if (state.closed) return null;
       state.closed = true;
       const ended = state.open.splice(0);
-      undoAll(ended.flatMap((each) => each.undos));
+      undoAll(
+        ended.flatMap((each) => each.undos),
+        state.report,
+      );
       return null;
     }
     default:
@@ -118,8 +127,8 @@ export function advanceDelivery(
   }
 }
 
-/** A connection's delivery owner, open. */
-export function deliveryOwner(): DeliveryOwner {
+/** A connection's delivery owner, open; an undo that fails is reported to `report` (`reportUndoFailure` by default). */
+export function deliveryOwner(report: (error: unknown) => void = reportUndoFailure): DeliveryOwner {
   const owner: DeliveryOwner = {
     begin: () => advanceDelivery(owner, null, { kind: "begin" })!,
     own: (delivery, undo) => void advanceDelivery(owner, delivery, { kind: "own", undo }),
@@ -137,14 +146,102 @@ export function deliveryOwner(): DeliveryOwner {
       return states.get(owner)!.closed;
     },
   };
-  states.set(owner, { closed: false, open: [], next: 0 });
+  states.set(owner, { closed: false, report, open: [], next: 0 });
   return owner;
 }
 
 /**
- * Registers `undo` with the innermost open delivery of `owner`, then returns: the caller publishes its allocation only
- * after. Refused, before anything is installed, when no delivery is open or the connection is closed.
+ * A registry a connection retains, owned by its deliveries: the only way to add an entry (`set`) registers its undo with
+ * a delivery first, the innermost open one unless the caller names its own (as the facade does). Undoing restores what
+ * the key held before, if the entry is still the one it added. Removing an entry is a release (`delete`, `clear`), which
+ * registers nothing. The map it keeps is reachable only through it, so no entry can be added unregistered.
  */
-export function ownNow(owner: DeliveryOwner, undo: () => void): void {
-  owner.own(owner.scope(), undo);
+export class OwnedMap<K, V> {
+  readonly #entries = new Map<K, V>();
+  readonly #owner: DeliveryOwner;
+  readonly #retire: ((value: V, key: K) => void) | undefined;
+
+  /** `retire`, if given, runs for every entry that leaves: undone, deleted or cleared. */
+  constructor(owner: DeliveryOwner, retire?: (value: V, key: K) => void) {
+    this.#owner = owner;
+    this.#retire = retire;
+  }
+
+  get size(): number {
+    return this.#entries.size;
+  }
+  get(key: K): V | undefined {
+    return this.#entries.get(key);
+  }
+  has(key: K): boolean {
+    return this.#entries.has(key);
+  }
+  keys(): MapIterator<K> {
+    return this.#entries.keys();
+  }
+  values(): MapIterator<V> {
+    return this.#entries.values();
+  }
+  entries(): MapIterator<[K, V]> {
+    return this.#entries.entries();
+  }
+  [Symbol.iterator](): MapIterator<[K, V]> {
+    return this.#entries.entries();
+  }
+
+  /** Adds `value` under `key`, owned by `delivery` until it is posted; refused, before anything changes, without one. */
+  set(key: K, value: V, delivery: Delivery = this.#owner.scope()): void {
+    const had = this.#entries.has(key);
+    const before = this.#entries.get(key);
+    this.#owner.own(delivery, () => {
+      if (this.#entries.get(key) !== value) return;
+      if (had) this.#entries.set(key, before!);
+      else this.delete(key);
+    });
+    this.#entries.set(key, value);
+  }
+
+  /** Releases the entry under `key`. */
+  delete(key: K): boolean {
+    if (!this.#entries.has(key)) return false;
+    const value = this.#entries.get(key)!;
+    this.#entries.delete(key);
+    this.#retire?.(value, key);
+    return true;
+  }
+
+  /** Releases every entry. */
+  clear(): void {
+    const entries = [...this.#entries];
+    this.#entries.clear();
+    for (const [key, value] of entries) this.#retire?.(value, key);
+  }
+}
+
+/** One value a connection retains, owned by its deliveries as an `OwnedMap`'s entries are. */
+export class OwnedCell<T> {
+  #value: T | null = null;
+  readonly #owner: DeliveryOwner;
+
+  constructor(owner: DeliveryOwner) {
+    this.#owner = owner;
+  }
+
+  get value(): T | null {
+    return this.#value;
+  }
+
+  /** Holds `value`, owned by `delivery` until it is posted: undoing restores the value before, if it is still this one. */
+  set(value: T, delivery: Delivery = this.#owner.scope()): void {
+    const before = this.#value;
+    this.#owner.own(delivery, () => {
+      if (this.#value === value) this.#value = before;
+    });
+    this.#value = value;
+  }
+
+  /** Releases the value. */
+  clear(): void {
+    this.#value = null;
+  }
 }
