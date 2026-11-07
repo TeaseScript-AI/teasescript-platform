@@ -213,6 +213,8 @@ const OBJECTS_COLLECTIONS = new Set([
   ...core("type-inference/core/contract/key-ids.ts", ["isPathSteps", "stepsRest", "restRef"]),
   // charged as they build: each entry of a list once (`invSteps`), the list's groups kept per list
   ...core("type-inference/core/contract/others.ts", ["readGroupsAt", "othersAt"]),
+  // no walk, the array kept whole and charged by its length (`keepArray`)
+  ...core("type-inference/core/budget.ts", ["keptArray"]),
   // charged by the text it scans (`invSteps`)
   ...core("type-inference/core/contract/key-ids.ts", ["memberStepOf"]),
   // the pushed slot's text charged as kept (`keptParts`)
