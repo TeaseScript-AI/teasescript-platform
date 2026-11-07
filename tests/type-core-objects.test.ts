@@ -435,18 +435,22 @@ test("a declined objects query charges each entry it visits, and stops at the fi
       let visits = 0;
       const restore: (() => void)[] = [];
       for (const group of readGroupsAt(contract, element.reads, false)) {
-        const read = group.read as ReadEntry[];
-        const own = Object.hasOwn(read, Symbol.iterator);
-        const prior = read[Symbol.iterator];
-        read[Symbol.iterator] = function* (this: ReadEntry[]) {
-          for (let at = 0; at < this.length; at += 1) {
-            visits += 1;
-            yield this[at]!;
-          }
-        };
+        // (the group's own list, its iterator counting each entry taken, put back after)
+        const read: { [Symbol.iterator]: () => Iterator<ReadEntry> } & ArrayLike<ReadEntry> =
+          group.read;
+        const prior = Object.getOwnPropertyDescriptor(read, Symbol.iterator);
+        Object.defineProperty(read, Symbol.iterator, {
+          configurable: true,
+          value: function* (this: ArrayLike<ReadEntry>) {
+            for (let at = 0; at < this.length; at += 1) {
+              visits += 1;
+              yield this[at]!;
+            }
+          },
+        });
         restore.push(() => {
-          if (own) read[Symbol.iterator] = prior;
-          else delete (read as Partial<ReadEntry[]>)[Symbol.iterator];
+          if (prior === undefined) Reflect.deleteProperty(read, Symbol.iterator);
+          else Object.defineProperty(read, Symbol.iterator, prior);
         });
       }
       try {
