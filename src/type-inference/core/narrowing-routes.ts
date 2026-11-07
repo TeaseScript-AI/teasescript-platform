@@ -182,8 +182,8 @@ export class NarrowingRoutes {
   readonly #conditions = new Map<
     TreeStatement,
     {
-      readonly holding: ReadonlyMap<string, number>;
-      readonly failing: ReadonlyMap<string, number>;
+      readonly holding: Map<string, number>;
+      readonly failing: Map<string, number>;
       readonly failed: readonly string[];
     } | null
   >();
@@ -520,8 +520,8 @@ export class NarrowingRoutes {
     statement: TreeStatement,
     file: number,
   ): {
-    readonly holding: ReadonlyMap<string, number>;
-    readonly failing: ReadonlyMap<string, number>;
+    readonly holding: Map<string, number>;
+    readonly failing: Map<string, number>;
     readonly failed: readonly string[];
   } | null {
     this.#work.charge("exactQueries");
