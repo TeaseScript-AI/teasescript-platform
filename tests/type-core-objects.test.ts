@@ -406,7 +406,7 @@ test("an objects query charges each writer it meets and each edge it reads, a se
     rows.push('say "${b0.zz}"', "exit");
     return work(
       rows.join("\n") + "\n",
-      (pass) => Math.max(...[...pass.program.occurrenceOf.keys()]),
+      (pass) => Math.max(...pass.program.occurrenceOf.keys()),
       [],
     );
   };
