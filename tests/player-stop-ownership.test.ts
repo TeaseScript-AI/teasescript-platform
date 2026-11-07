@@ -51,7 +51,7 @@ interface StopHost {
   readonly traceId: Readonly<Ref<number | null>>;
   debugView(request: DebugViewRequest): Promise<DebugView | null>;
   reportHostError(error: unknown): void;
-  observe(): { readonly id: string } | null;
+  observe(): Promise<{ readonly id: string } | null>;
   update(next: PlayerSession): void;
   publishJump(next: PlayerSession): void;
 }
@@ -530,7 +530,7 @@ test("a Start that replaces an error stop pending on a Start the host rejects ru
   assert.equal(player.hostError.value, null);
   assert.equal(bridge.frozen(shown!), false);
   assert.equal(player.stopped.value, false, "the replacement's input runs");
-  assert.notEqual(player.observe(), null, "the replacement's clock runs");
+  assert.notEqual(await player.observe(), null, "the replacement's clock runs");
 });
 
 /*

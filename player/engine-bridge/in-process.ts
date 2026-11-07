@@ -176,7 +176,10 @@ export function hatch<R>(
   return result as Hatched<R>;
 }
 
-/** **Facade.** An ordinary observation of scene time, synchronously, for an observing chain not yet converted. */
+/**
+ * **Facade.** An ordinary observation of scene time, synchronously, for tests that drive the in-process host directly;
+ * the Player observes over the bridge (`useRuntimeSceneClock`).
+ */
 export function observeNow(
   session: PlayerSession,
   atMs: number,

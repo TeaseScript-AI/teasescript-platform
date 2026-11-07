@@ -787,7 +787,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       loads.add(mediaId, report);
       pendingLoadCount.value = loads.size;
     },
-    requestObservation: () => clock.observe(),
+    requestObservation: () => clock.before("audioEnded"),
     blockedChanged: (blocked) =>
       blocked
         ? notices.publish(playerNotices.audioBlocked(() => device.retryBlocked()))
@@ -818,18 +818,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   );
   // Input and the work that continues it take their session from here when they run: a session a Player error stopped
   // gives none, so what was admitted before the stop and runs only now does nothing. The observation's own publish can
-  // cause the error, so the stop is checked again after it.
-  const observeForInput = () => {
+  // cause the error, so the stop is checked again after it. `null` is no observation: stopped, no longer shown, or
+  // refused twice at its turn (`clock.observe`).
+  const observeForInput = async (): Promise<PlayerSession | null> => {
     if (stopped.value) return null;
-    const current = clock.observe();
+    const current = await clock.observe();
     return stopped.value ? null : current;
   };
   /**
-   * A section of `current`, which runs `body` while `current` owns the UI, as `publishOwned` decides it, with an
-   * observation inside it as `observeForInput` makes one: the clock's now and media samples, observed over the bridge
-   * with `observeOp`, and `null` once `current` no longer owns the UI, before and after. While the clock is paused (an
-   * inspected state, a waiting draw) nothing is observed, as `clock.observe()` observes nothing then. `null` without
-   * `current`, or once a Player error stopped it.
+   * A section of `current`, with an observation inside it as `observeForInput` makes one: the clock's now and media
+   * samples, observed over the bridge with `observeOp`, and `null` once `current` no longer owns the UI, before and
+   * after. While the clock is paused (an inspected state, a waiting draw) nothing is observed, as `clock.observe()`
+   * observes nothing then. The body receives liveness checks (`owned`); it rechecks them after each await, as what it
+   * sends is applied to the session's store and shown only while `current` owns the UI (`publishOwned`). `null`
+   * without `current`, or once a Player error stopped it.
    */
   function ownedSection<T>(
     current: PlayerSession | null,
@@ -2027,7 +2029,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     () => (typeof document === "undefined" ? undefined : document),
     "visibilitychange",
     () => {
-      if (document.visibilityState === "hidden") keepSessionLater();
+      if (document.visibilityState !== "hidden") return;
+      // Time passed while the page was visible is observed before the keep's capture, which follows it in the session's
+      // queue: the session kept is current.
+      clock.before("keepCapture");
+      keepSessionLater();
     },
   );
   /**
@@ -2488,7 +2494,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function setDebugMode(enabled: boolean) {
     if (enabled === debugMode) return;
     // A catch-up under way finishes first, as one observation, so the change comes no earlier than without it.
-    clock.settle();
+    clock.before("debugMode");
     debugMode = enabled;
     if (enabled && room.value === "normal" && normalStorage !== undefined) void copyToDebugRoom();
     else applyDebugMode();
@@ -2545,8 +2551,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     control: { readonly sites: readonly (readonly [string, RandomNext])[] } | null,
   ) {
     if (disposed) return;
-    // A catch-up under way finishes first, as one observation, with the draws it started with.
-    const current = clock.settle();
+    // A catch-up under way finishes first, as one observation, with the draws it started with. The change follows the
+    // shown session's queue whether or not that observation succeeds.
+    clock.before("randomControl");
+    const current = session.value;
     // Off while nothing is on and no reset is asked: the host has nothing to change.
     const changed = control !== null || desiredRandom !== null || resetRequested;
     desiredRandom = control;
@@ -3459,8 +3467,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     permanentButtons,
     pressPermanentButton,
     /**
-     * Observes elapsed time and media progress, runs the session, and returns the published session; `null` once a Player
-     * error stopped it, so input and its continuations take none.
+     * Observes elapsed time and media progress, runs the session, and resolves with the published session; `null` when
+     * there was no observation, as once a Player error stopped it, so input and its continuations take none.
      */
     observe: observeForInput,
     /** A section of the shown session for input (`runtime-input.ts`). */

@@ -322,12 +322,6 @@ export const RATCHET: readonly RatchetEntry[] = [
     name: "introduceNow",
     family: "L5i",
   },
-  {
-    importer: "player/vue/src/useRuntimeSceneClock.ts",
-    target: "player/engine-bridge/in-process.ts",
-    name: "observeNow",
-    family: "L5i",
-  },
   // activation
   {
     importer: "player/vue/src/usePlayerSession.ts",

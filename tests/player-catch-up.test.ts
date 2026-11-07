@@ -107,7 +107,7 @@ interface SessionHost {
     }) => PlayerRuntimeSession,
   ): void;
   activate(): Promise<void>;
-  observe(): PlayerRuntimeSession | null;
+  observe(): Promise<PlayerRuntimeSession | null>;
   update(next: PlayerRuntimeSession): void;
   setDebugTracing(on: boolean): void;
   setRandomControl(control: { readonly sites: readonly [] } | null): void;
@@ -239,7 +239,7 @@ test("input during a catch-up lands at the scene time it arrives at, after the w
   late(1_000);
   assert.ok(host.session.value!.state.observedSessionTimeMs < 1_000, "a catch-up is under way");
   // As the Player's interaction does: observe, then answer what is presented.
-  const observed = host.observe()!;
+  const observed = (await host.observe())!;
   const atMs = observed.state.observedSessionTimeMs;
   assert.ok(atMs >= 1_000);
   host.update(activatePlayerRuntimeButton(observed)!.session);

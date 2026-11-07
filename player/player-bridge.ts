@@ -62,8 +62,8 @@ export interface ServiceSection {
   /** The clock's now and media samples, observed (`observeTime`), with the stop checked before and after. */
   observe(): Promise<PlayerSession | null>;
   /**
-   * One op of the section's session from `basis`; resolves with its result once its publication applied and shows
-   * (`publishOwned`).
+   * One op of the section's session from `basis`; resolves with its result once its publication is applied to the
+   * session's store. It shows only while this session owns the UI (`publishOwned`), so recheck that after the await.
    */
   send<R>(op: string, args: unknown, basis: number): Promise<R>;
 }
