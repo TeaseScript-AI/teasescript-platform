@@ -22,37 +22,27 @@ interface ClassedRange {
   readonly end: number;
 }
 
-/** What every draw in a file shows alike: its lines, unmarked, and the spans "Show whole" fits. */
-interface FileCode {
+/** What every draw in a file shows alike: its lines, unmarked. The caller keeps it while the file's draws follow. */
+export interface FileCode {
   readonly file: SourceDebugFile;
   readonly starts: readonly number[];
   readonly lines: readonly CodeLine[];
 }
 
-// The file of the latest draw: a file's draws often follow each other, as in a loop.
-let latestFile: FileCode | null = null;
-
-function fileCode(file: SourceDebugFile): FileCode {
-  if (latestFile?.file !== file) {
-    const starts = lineStarts(file.source);
-    latestFile = {
-      file,
-      starts,
-      lines: renderLines(file.source, starts, file.tokens, 1, starts.length),
-    };
-  }
-  return latestFile;
+export function fileCode(file: SourceDebugFile): FileCode {
+  const starts = lineStarts(file.source);
+  return { file, starts, lines: renderLines(file.source, starts, file.tokens, 1, starts.length) };
 }
 
 /**
- * The code of the file a draw at `site` is in, highlighted with the compiler's own token classes: every line, with the
+ * The code of the file a draw at `site` is in (`code`, from `fileCode`), highlighted with the compiler's own token classes: every line, with the
  * draw marked; `enclosing` is the range "Show whole" fits: the default lines around the draw together with the function
  * the draw is in, or for code outside functions, the smallest statement or block of several lines around it that the
  * default lines do not show whole, or the whole file when none of several lines is around it. `enclosing` is `null`
  * when the default lines already show it. `null` for a site outside the file.
  */
-export function drawCode(file: SourceDebugFile, site: RandomSite): DrawCode | null {
-  const { starts, lines: shown } = fileCode(file);
+export function drawCode(code: FileCode, site: RandomSite): DrawCode | null {
+  const { file, starts, lines: shown } = code;
   const { source } = file;
   if (site.line < 1 || site.line > starts.length) return null;
   const mark = {

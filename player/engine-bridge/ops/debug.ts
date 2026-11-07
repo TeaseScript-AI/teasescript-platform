@@ -4,6 +4,7 @@ import {
   type SourceDebugFile,
   type SourceDebugSidecar,
 } from "../../../src/runtime/debug/source-sidecar.js";
+import type { FileCode } from "../../random-draw-code.js";
 import type { DrawCode } from "../../vue/src/randomDrawPresentation.js";
 import { exactly, isRecord, isStringArray } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
@@ -13,26 +14,41 @@ import type { BridgeOps } from "../worker-host.js";
  * The ops of family L5i (the L5 series) for Debug's source views: the code of a random draw's file, and earlier outcomes
  * as code. Both are made here, in the Worker, from the source it compiled, so the Player's page holds no parser.
  */
+/**
+ * What Debug's source ops keep between requests: every one of the connection's, owned by its ops context, which clears
+ * them on `teardown`. Nothing else holds a plan, its sources or its debug files.
+ */
+export class DebugCaches {
+  /** The sidecar text made from each compiled plan's sources, by token; `null` for one it could not make. */
+  readonly texts = new Map<string, Promise<string | null>>();
+  /** The sidecar bound to each plan Debug asked about, by token, once found. */
+  readonly sidecars = new Map<string, SourceDebugSidecar>();
+  /** The file of the latest draw: a file's draws often follow each other, as in a loop. */
+  latestFile: FileCode | null = null;
+
+  clear(): void {
+    this.texts.clear();
+    this.sidecars.clear();
+    this.latestFile = null;
+  }
+}
+
 export function debugOps(context: PlayerOpsContext): BridgeOps {
-  // The sidecar text made from each plan's sources, once Debug asks; `null` for one it could not make. Keyed by the
-  // sources themselves and the plans the connection holds, so what `teardown` drops the caches drop with it.
-  const texts = new WeakMap<object, Promise<string | null>>();
+  const caches = context.debug;
   const textOf = (token: string): Promise<string | null> | null => {
     const files = context.sources.get(token);
     const plan = context.plans.get(token);
     if (files === undefined || plan === undefined) return null;
-    let text = texts.get(files);
+    let text = caches.texts.get(token);
     if (text === undefined) {
       text = import("../../../src/index.js").then(
         ({ createSourceDebugSidecar }) => createSourceDebugSidecar(files, plan),
         () => null,
       );
-      texts.set(files, text);
+      caches.texts.set(token, text);
     }
     return text;
   };
-  // The sidecar bound to each plan Debug asked about, once found.
-  const bound = new WeakMap<object, SourceDebugSidecar>();
   /**
    * The sidecar for plan `token`, read as playback reads one: its own, or, for a plan the Worker did not compile itself,
    * such as a restored session's, one made for another plan; the loader accepts a sidecar only for the plan it is bound
@@ -41,7 +57,7 @@ export function debugOps(context: PlayerOpsContext): BridgeOps {
   async function sidecarOf(token: string): Promise<SourceDebugSidecar | null> {
     const plan = context.plans.get(token);
     if (plan === undefined) return null;
-    const known = bound.get(plan);
+    const known = caches.sidecars.get(token);
     if (known !== undefined) return known;
     const candidates = context.sources.has(token) ? [token] : [...context.sources.keys()];
     for (const candidate of candidates) {
@@ -51,7 +67,7 @@ export function debugOps(context: PlayerOpsContext): BridgeOps {
       if (text === null) continue;
       const load = loadSourceDebugSidecar(text, plan);
       if (load.kind !== "valid") continue;
-      bound.set(plan, load.sidecar);
+      caches.sidecars.set(token, load.sidecar);
       return load.sidecar;
     }
     return null;
@@ -72,11 +88,15 @@ export function debugOps(context: PlayerOpsContext): BridgeOps {
           readonly path: string;
           readonly site: RandomSite;
         };
+        const held = context.plans.get(plan);
         const sidecar = await sidecarOf(plan);
         const file: SourceDebugFile | undefined = sidecar?.files.find((each) => each.path === path);
         if (file === undefined) return { result: null };
-        const { drawCode } = await import("../../random-draw-code.js");
-        const code: DrawCode | null = drawCode(file, site);
+        const { drawCode, fileCode } = await import("../../random-draw-code.js");
+        // A teardown during the import leaves nothing to keep.
+        if (context.plans.get(plan) !== held) return { result: null };
+        if (caches.latestFile?.file !== file) caches.latestFile = fileCode(file);
+        const code: DrawCode | null = drawCode(caches.latestFile, site);
         return { result: code };
       },
     },

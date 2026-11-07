@@ -11,7 +11,7 @@ import { planLockNeeds, playerRuntimeStageImages } from "../plan-metadata.js";
 import { DebugRecorder } from "../debug-recorder.js";
 import { MAIN_FILE_PATH } from "../../src/project-paths.js";
 import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
-import { debugOps } from "./ops/debug.js";
+import { DebugCaches, debugOps } from "./ops/debug.js";
 import { inputOps } from "./ops/input.js";
 import { mediaOps } from "./ops/media.js";
 import { resourceOps } from "./ops/resources.js";
@@ -114,7 +114,10 @@ export function planMetadata(plan: InstructionPlan): PlanMetadata {
   };
 }
 
-/** What the Player's ops share on one connection: its plans under their tokens, and its debug recorder. */
+/**
+ * What the Player's ops share on one connection: its plans under their tokens, their sources, Debug's caches, and its debug
+ * recorder.
+ */
 export interface PlayerOpsContext {
   readonly plans: Map<string, InstructionPlan>;
   /** Keeps `plan` under a new token, which it returns. */
@@ -123,6 +126,8 @@ export interface PlayerOpsContext {
   readonly recorder: DebugRecorder;
   /** The source files of each plan this Worker compiled, by the plan's token: what Debug's source views show. */
   readonly sources: Map<string, readonly { readonly path: string; readonly source: string }[]>;
+  /** Debug's source caches; `teardown` clears them with the plans. */
+  readonly debug: DebugCaches;
 }
 
 export function playerOpsContext(): PlayerOpsContext {
@@ -137,6 +142,7 @@ export function playerOpsContext(): PlayerOpsContext {
     },
     recorder: new DebugRecorder(),
     sources: new Map(),
+    debug: new DebugCaches(),
   };
 }
 
@@ -215,6 +221,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
       run: (_args, sessions) => {
         plans.clear();
         context.sources.clear();
+        context.debug.clear();
         sessions.clear();
         return { result: null };
       },

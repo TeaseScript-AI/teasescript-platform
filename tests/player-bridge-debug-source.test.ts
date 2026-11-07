@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { compilePlayerProject } from "../player/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult, PrepareSource } from "../player/engine-bridge/player-ops.js";
 import { PlayerBridge } from "../player/player-bridge.js";
-import { drawCode, outcomeLines } from "../player/random-draw-code.js";
+import { drawCode, fileCode, outcomeLines } from "../player/random-draw-code.js";
 import { createSourceDebugSidecar, listRandomSites } from "../src/index.js";
 import { loadSourceDebugSidecar } from "../src/runtime/debug/source-sidecar.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
@@ -59,10 +61,7 @@ function oracle() {
   const files = load.kind === "valid" ? load.sidecar.files : [];
   return listRandomSites(plan).map((site) => ({
     site,
-    code: drawCode(
-      files.find((file) => file.path === site.path)!,
-      site,
-    ),
+    code: drawCode(fileCode(files.find((file) => file.path === site.path)!), site),
   }));
 }
 
@@ -137,4 +136,64 @@ test("a published plan with no sources gives no code", async () => {
   const [site] = listRandomSites(compilePlayerProject(OTHER).plan!);
   const reply = await bridge.client.request("drawCode", { plan, path: site!.path, site });
   assert.equal(reply.result, null);
+});
+
+test("after teardown nothing the source ops touched stays held: no plan, its sources or a debug file", () => {
+  const url = (path: string) => JSON.stringify(new URL(path, import.meta.url).href);
+  // In a child with a forced collection: a weak reference to each value stored under a plan token, wherever its cache
+  // is, and to each debug file the excerpt is made from, wherever it is kept.
+  const script = [
+    'import { registerHooks } from "node:module";',
+    "const held = [];",
+    "const keep = (kind, value) => held.push({ kind, ref: new WeakRef(value) });",
+    "const set = Map.prototype.set;",
+    "Map.prototype.set = function (key, value) {",
+    '  if (typeof key === "string" && /^p[0-9]+$/.test(key) && typeof value === "object" && value !== null) keep(key, value);',
+    "  return set.call(this, key, value);",
+    "};",
+    'globalThis.__keepFile = (file) => keep("file", file);',
+    `const drawModule = ${url("../player/random-draw-code.js")};`,
+    "registerHooks({ load(target, context, next) {",
+    "  const result = next(target, context);",
+    "  if (target !== drawModule) return result;",
+    '  const anchor = "export function fileCode(file) {";',
+    "  const source = String(result.source);",
+    '  if (!source.includes(anchor)) throw new Error("fileCode moved");',
+    '  return { ...result, source: source.replace(anchor, anchor + " globalThis.__keepFile(file);") };',
+    "} });",
+    `const { createInProcessBackend } = await import(${url("../player/engine-bridge/in-process.js")});`,
+    "const { client } = createInProcessBackend({ commit: null, dirty: null, mode: null, appVersion: null });",
+    `const project = ${JSON.stringify(PROJECT)};`,
+    'const source = (await client.request("prepare", { source: { kind: "source", script: project } })).result;',
+    `const text = ${JSON.stringify(serializeValidatedRuntimeJson(compilePlayerProject(PROJECT).plan!))};`,
+    'const restored = (await client.request("prepare", { source: { kind: "plan", text } })).result;',
+    "for (const { plan } of [source, restored]) {",
+    '  const { randomSites } = (await client.request("planMetadata", { plan })).result;',
+    "  for (const site of randomSites)",
+    '    if ((await client.request("drawCode", { plan, path: site.path, site })).result === null) throw new Error("no code");',
+    "}",
+    'await client.request("codeLines", { texts: ["true"], first: 1 });',
+    'await client.request("teardown", null);',
+    "for (let round = 0; round < 8; round += 1) {",
+    "  await new Promise((resolve) => setImmediate(resolve));",
+    "  globalThis.gc();",
+    "}",
+    "const kinds = (list) => list.map(({ kind }) => kind);",
+    "process.stdout.write(JSON.stringify({ touched: kinds(held), retained: kinds(held.filter(({ ref }) => ref.deref() !== undefined)) }));",
+    "client.terminate();",
+  ].join("\n");
+  const child = spawnSync(process.execPath, ["--expose-gc", "--input-type=module", "-e", script], {
+    encoding: "utf8",
+    cwd: fileURLToPath(new URL(".", import.meta.url)),
+  });
+  assert.equal(child.status, 0, child.stderr);
+  // EVIDENCE: fixture: the child script writes the JSON of what it touched and what stayed held.
+  const { touched, retained } = JSON.parse(child.stdout) as {
+    readonly touched: readonly string[];
+    readonly retained: readonly string[];
+  };
+  // Both plans, the compiled one's sources, and the debug files the excerpts were made from were seen.
+  assert.ok(touched.includes("p1") && touched.includes("p2"), touched.join());
+  assert.ok(touched.filter((kind) => kind === "file").length >= 2, touched.join());
+  assert.deepEqual(retained, []);
 });

@@ -24,7 +24,7 @@ import {
 } from "../src/index.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
-import { drawCode, outcomeLines } from "../player/random-draw-code.js";
+import { drawCode, fileCode, outcomeLines } from "../player/random-draw-code.js";
 import { loadSourceDebugSidecar } from "../src/runtime/debug/source-sidecar.js";
 import { createSourceDebugSidecar } from "../src/index.js";
 
@@ -137,7 +137,7 @@ before(async () => {
         plan,
       );
       assert.equal(load.kind, "valid");
-      return load.kind === "valid" ? drawCode(load.sidecar.files[0]!, site) : null;
+      return load.kind === "valid" ? drawCode(fileCode(load.sidecar.files[0]!), site) : null;
     },
     outcomeLines,
     // EVIDENCE: validation: as above.
