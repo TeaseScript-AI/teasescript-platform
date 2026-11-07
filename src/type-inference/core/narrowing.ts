@@ -83,7 +83,7 @@ function readsElement(step: PathStep, work: WorkLedger): boolean {
 }
 
 /** An expression without the parentheses around it, each one walked charged (they nest as deep as written). */
-function peel(expression: Expression, work: WorkLedger): Expression {
+export function peel(expression: Expression, work: WorkLedger): Expression {
   work.charge("eventSteps");
   let current = expression;
   for (const _ of steps(work, "eventSteps", () => current.kind === "parenthesizedExpression"))
@@ -450,6 +450,28 @@ function formOf(
         },
         element: null,
       };
+}
+
+/**
+ * A test's forms (N1, `testForm`): the expression it tests, the form its truth proves, and the form its falsity proves;
+ * `null` for an expression that is no test.
+ */
+export function testForms(
+  expression: Expression,
+  work: WorkLedger,
+): {
+  readonly tested: Expression;
+  readonly holding: NarrowingForm;
+  readonly failing: NarrowingForm;
+} | null {
+  work.charge("indexSteps");
+  const fact = testForm(expression, work);
+  if (fact === null) return null;
+  return {
+    tested: fact.tested,
+    holding: formOf(fact, work).form,
+    failing: formOf({ ...fact, holds: !fact.holds }, work).form,
+  };
 }
 
 /**
