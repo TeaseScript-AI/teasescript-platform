@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
-// Checks the commit SHAs a report or pull-request body names, before it is sent:
+// Checks that the commit SHAs a report or pull-request body names exist, before it is sent:
 //
 //   node tools/check-shas.mjs [--repo <path>]... [<file>]     (the text from <file>, else from standard input)
 //
@@ -9,7 +9,8 @@ import { existsSync, readFileSync } from "node:fs";
 // `git rev-parse --verify --quiet <token>^{commit}` in each `--repo` (default: the current repository) and reported as
 // resolved (in which repository, to which full SHA), ambiguous (a short token several commits share), or unresolved.
 // An unresolved token may be a commit not fetched yet: the message says to fetch it; this tool never fetches.
-// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too.
+// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too. Every run that completes ends
+// with one line counting the tokens by result and the placeholders, so no output means it did not run.
 //
 // Tokens that need not be commits are checked, and skipped when no repository resolves them, so no rule hides a SHA:
 // - only digits: a CI run, comment or issue id;
@@ -118,7 +119,7 @@ function main() {
   const text = readFileSync(files.length === 1 ? files[0] : 0, "utf8");
 
   let failed = false;
-  let skipped = 0;
+  const counts = { resolved: 0, ambiguous: 0, unresolved: 0, skipped: 0 };
   for (const [token, why] of tokensOf(text)) {
     const answers = repositories.map((repository) => ({
       repository,
@@ -126,6 +127,9 @@ function main() {
     }));
     const resolved = answers.find(({ answer }) => answer?.sha);
     const ambiguous = answers.find(({ answer }) => answer?.ambiguous);
+    counts[
+      resolved ? "resolved" : ambiguous ? "ambiguous" : why !== null ? "skipped" : "unresolved"
+    ] += 1;
     if (resolved)
       process.stdout.write(
         `resolved    ${token}  ${resolved.answer.sha} in ${resolved.repository}\n`,
@@ -135,22 +139,24 @@ function main() {
       process.stdout.write(
         `ambiguous   ${token}  ${ambiguous.answer.ambiguous} commits in ${ambiguous.repository} start with it: give more characters\n`,
       );
-    } else if (why !== null) skipped += 1;
-    else {
+    } else if (why === null) {
       failed = true;
       process.stdout.write(
         `unresolved  ${token}  no commit in ${repositories.join(", ")}: fetch it (git fetch origin <branch>), or correct it\n`,
       );
     }
   }
-  for (const placeholder of placeholdersOf(text)) {
+  const placeholders = placeholdersOf(text);
+  for (const placeholder of placeholders) {
     failed = true;
     process.stdout.write(`placeholder ${placeholder}  unfilled\n`);
   }
-  if (skipped > 0)
-    process.stdout.write(
-      `check-shas: ${skipped} unresolved tokens skipped as ids, words or paths\n`,
-    );
+  const tokens = Object.values(counts).reduce((sum, n) => sum + n, 0);
+  process.stdout.write(
+    `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.ambiguous} ambiguous, ` +
+      `${counts.unresolved} unresolved, ${counts.skipped} skipped (ids, words, paths); ` +
+      `${placeholders.length} placeholders\n`,
+  );
   process.exitCode = failed ? 1 : 0;
 }
 

@@ -100,7 +100,7 @@ test(
       ].join("\n");
       const { status, out } = check(text, [directory]);
       assert.equal(status, 0, out);
-      assert.match(out, /9 unresolved tokens skipped/u);
+      assert.match(out, /9 tokens: 0 resolved, 0 ambiguous, 0 unresolved, 9 skipped/u);
       // A commit URL is checked; a path that holds a real SHA still reports it.
       const url = check("https://github.com/o/r/commit/0123abc4567", [directory]);
       assert.equal(url.status, 1, url.out);
@@ -163,6 +163,32 @@ test(
     } finally {
       for (const { directory } of [first, second])
         rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "every completed run ends with its count line, also for empty input",
+  { timeout: 30_000 },
+  () => {
+    const { directory, shas } = repository();
+    try {
+      for (const [text, line] of [
+        [
+          "",
+          "0 tokens: 0 resolved, 0 ambiguous, 0 unresolved, 0 skipped (ids, words, paths); 0 placeholders",
+        ],
+        [
+          `at ${shas[0].slice(0, 9)}, <sha>`,
+          "1 tokens: 1 resolved, 0 ambiguous, 0 unresolved, 0 skipped (ids, words, paths); 1 placeholders",
+        ],
+      ]) {
+        const { out } = check(text, [directory]);
+        assert.equal(out.trim().split("\n").at(-1), `check-shas: ${line}`, JSON.stringify(text));
+      }
+      assert.equal(check("", [directory]).status, 0);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   },
 );
