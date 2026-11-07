@@ -221,47 +221,49 @@ test("shared objects and cycles stay shared, at every path", () => {
 const twinBytes = () => new Uint8Array([5, 6, 5, 5, 6, 5, 6, 5]).buffer;
 
 test("the comparator tells apart what native clone keeps, and refuses every kind it does not compare", () => {
-  const kinds = {
-    date: [new Date(0), new Date(1)],
-    regexp: [/x+/gu, /x+/giu],
-    "typed array": [new Uint16Array([1, 2]), new Uint16Array([1, 3])],
-    "data view": [new DataView(new ArrayBuffer(4)), new DataView(new ArrayBuffer(5))],
-    buffer: [new Uint8Array([1, 2]).buffer, new Uint8Array([1, 3]).buffer],
-    map: [new Map([["a", 1]]), new Map([["a", 2]])],
-    set: [new Set([1]), new Set([2])],
-    array: [
-      [1, 2],
-      [1, 3],
-    ],
-    record: [{ a: 1 }, { a: 2 }],
-    "comma keys": [
+  // Each kind the comparator compares, by `cloneKind`'s name: a value, and one that differs from it.
+  const kinds: [kind: string, label: string, value: object, other: object][] = [
+    ["date", "a Date", new Date(0), new Date(1)],
+    ["regexp", "a RegExp", /x+/gu, /x+/giu],
+    ["view", "a typed array", new Uint16Array([1, 2]), new Uint16Array([1, 3])],
+    ["view", "a DataView", new DataView(new ArrayBuffer(4)), new DataView(new ArrayBuffer(5))],
+    ["buffer", "an ArrayBuffer", new Uint8Array([1, 2]).buffer, new Uint8Array([1, 3]).buffer],
+    ["map", "a Map", new Map([["a", 1]]), new Map([["a", 2]])],
+    ["set", "a Set", new Set([1]), new Set([2])],
+    ["array", "an array", [1, 2], [1, 3]],
+    ["record", "a record", { a: 1 }, { a: 2 }],
+    [
+      "record",
+      "comma keys",
       { "a,b": undefined, c: undefined },
       { a: undefined, "b,c": undefined },
     ],
-  } as const;
-  const unsupported = {
-    "an ArrayBuffer": new ArrayBuffer(1),
+  ];
+  // Objects the comparator does not compare, on either side.
+  const unsupported: [label: string, value: object][] = [
     // (made by another realm's code: this project's ES2023 types have no resizable buffer)
-    "a resizable buffer": vm.runInNewContext("new ArrayBuffer(1, { maxByteLength: 2 })"),
-    "a shared buffer": new SharedArrayBuffer(1),
-    "a boxed number": Object(1),
-    "an Error": new Error("e"),
-    "a Blob": new Blob(["x"]),
-    "a File": new File(["x"], "x.txt"),
-    "an unlisted class": new (class Unlisted {})(),
-  } as const;
-  const admitted = {
-    plain: { a: 1 },
-    "a listed class": new Entry("a", 1),
-    "a listed tagged class": new TaggedEntry("a", 1),
-    "another realm's object": vm.runInNewContext("({ a: 1 })"),
-    "another realm's listed class": new ForeignEntry("a", 1),
-    "a null prototype": Object.assign(Object.create(null), { a: 1 }),
-    "another realm's Date": vm.runInNewContext("new Date(5)"),
-    "another realm's Map": vm.runInNewContext("new Map([[1, 2]])"),
-    "another realm's Set": vm.runInNewContext("new Set([1])"),
-  };
-  const offset = () => {
+    ["a resizable buffer", vm.runInNewContext("new ArrayBuffer(1, { maxByteLength: 2 })")],
+    ["a shared buffer", new SharedArrayBuffer(1)],
+    ["a boxed number", Object(1)],
+    ["an Error", new Error("e")],
+    ["a Blob", new Blob(["x"])],
+    ["a File", new File(["x"], "x.txt")],
+    ["an unlisted class", new (class Unlisted {})()],
+  ];
+  // Expected objects whose native clone compares equal: records of every admitted form, other realms' kinds.
+  const admitted: [label: string, value: unknown][] = [
+    ["a listed class", new Entry("a", 1)],
+    ["a listed tagged class", new TaggedEntry("a", 1)],
+    ["another realm's object", vm.runInNewContext("({ a: 1 })")],
+    ["another realm's listed class", new ForeignEntry("a", 1)],
+    ["a null prototype", Object.assign(Object.create(null), { a: 1 })],
+    ["another realm's array", vm.runInNewContext("[1, 2]")],
+    ["an Array subclass", Object.assign(new (class List extends Array {})(), [1, 2])],
+    ["another realm's Date", vm.runInNewContext("new Date(5)")],
+    ["another realm's Map", vm.runInNewContext("new Map([[1, 2]])")],
+    ["another realm's Set", vm.runInNewContext("new Set([1])")],
+  ];
+  const twin = () => {
     const [left, right] = [twinBytes(), twinBytes()];
     return [new Uint8Array(left, 3, 2), new Uint8Array(right, 0, 2)];
   };
@@ -269,45 +271,50 @@ test("the comparator tells apart what native clone keeps, and refuses every kind
   const split = { a: new Uint8Array(shared, 0, 4), b: new Uint8Array(shared, 4, 4) };
   const [one, two] = [twinBytes(), twinBytes()];
   const apart = { a: new Uint8Array(one, 0, 4), b: new Uint8Array(two, 4, 4) };
-  const cases: [name: string, actual: unknown, expected: unknown, equal: boolean][] = [];
-  for (const [kind, [value, other]] of Object.entries(kinds)) {
-    cases.push([`kind ${kind}: equal`, structuredClone(value), value, true]);
-    cases.push([`kind ${kind}: differs`, structuredClone(other), value, false]);
-  }
-  for (const [kind, value] of Object.entries(unsupported)) {
-    cases.push([`unsupported ${kind}: expected`, {}, value, false]);
-    cases.push([`unsupported ${kind}: actual`, value, {}, false]);
-  }
-  for (const [form, value] of Object.entries(admitted))
-    cases.push([`admitted ${form}: equal`, structuredClone(value), value, true]);
-  const [atThree, atZero] = offset();
-  cases.push(["view offset: differs", atZero, atThree, false]);
-  cases.push([
-    "view length: differs",
-    new Uint8Array(twinBytes(), 0, 3),
-    new Uint8Array(twinBytes(), 0, 2),
-    false,
-  ]);
-  cases.push(["aliasing one buffer: equal", structuredClone(split), split, true]);
-  cases.push(["aliasing one buffer as two: differs", structuredClone(apart), split, false]);
-  cases.push(["aliasing two buffers as one: differs", structuredClone(split), apart, false]);
-  // A fixed buffer must not stand for a shared one, though both are `isAnyArrayBuffer`.
-  cases.push(["veto shared buffer: differs", new ArrayBuffer(8), new SharedArrayBuffer(8), false]);
-  for (const [name, actual, expected, equal] of cases)
-    assert.equal(cloneGraphDifference(actual, expected, RECORD_CLASSES) === null, equal, name);
+  const [atThree, atZero] = twin();
+  // Pairs that must differ although each side is of a compared kind.
+  const differing: [label: string, actual: unknown, expected: unknown][] = [
+    ["a view at another offset over the same bytes", atZero, atThree],
+    [
+      "a view of another length",
+      new Uint8Array(twinBytes(), 0, 3),
+      new Uint8Array(twinBytes(), 0, 2),
+    ],
+    ["two views over one buffer, crossed over two", structuredClone(apart), split],
+    ["two buffers, crossed as one", structuredClone(split), apart],
+    // A fixed buffer must not stand for a shared one, though both are `isAnyArrayBuffer`.
+    ["a fixed buffer for a shared one", new ArrayBuffer(8), new SharedArrayBuffer(8)],
+    ["an ArrayBuffer for a record", new ArrayBuffer(1), {}],
+    ["a record for an ArrayBuffer", {}, new ArrayBuffer(1)],
+    ["another realm's array, not cloned", vm.runInNewContext("[1]"), [1]],
+    ["an Array subclass, not cloned", Object.assign(new (class List extends Array {})(), [1]), [1]],
+    ["an array without a prototype", Object.setPrototypeOf([1], null), [1]],
+  ];
 
-  // Every axis value was generated: each kind both ways, each unsupported kind in both positions, each admitted form.
-  const names = new Set(cases.map(([name]) => name));
-  for (const kind of Object.keys(kinds))
-    for (const outcome of ["equal", "differs"]) assert.ok(names.has(`kind ${kind}: ${outcome}`));
-  for (const kind of Object.keys(unsupported))
-    for (const position of ["expected", "actual"])
-      assert.ok(names.has(`unsupported ${kind}: ${position}`));
-  for (const form of Object.keys(admitted)) assert.ok(names.has(`admitted ${form}: equal`));
+  const differs = (actual: unknown, expected: unknown) =>
+    cloneGraphDifference(actual, expected, RECORD_CLASSES) !== null;
+  for (const [kind, label, value, other] of kinds) {
+    assert.equal(cloneKind(value, RECORD_CLASSES.classes), kind, label);
+    assert.equal(differs(structuredClone(value), value), false, `${label}: its clone is equal`);
+    assert.equal(differs(structuredClone(other), value), true, `${label}: another differs`);
+  }
+  for (const [label, value] of unsupported) {
+    assert.equal(cloneKind(value, RECORD_CLASSES.classes), "unsupported", label);
+    assert.equal(differs({}, value), true, `${label}, expected`);
+    assert.equal(differs(value, {}), true, `${label}, actual`);
+  }
+  for (const [label, value] of admitted)
+    assert.equal(differs(structuredClone(value), value), false, label);
+  assert.equal(differs(structuredClone(split), split), false, "two views over one buffer");
+  for (const [label, actual, expected] of differing)
+    assert.equal(differs(actual, expected), true, label);
+
+  // Every kind the comparator's own table and its object rule name has a case: the table is the obligation.
+  const compared = new Set([...Object.values(KIND_OF_TYPE), "array", "record"]);
+  compared.delete("unsupported");
+  assert.deepEqual(new Set(kinds.map(([kind]) => kind)), compared);
   // The kind table names exactly the predicates this Node has, so a new kind of object cannot pass as a record.
   assert.deepEqual(Object.keys(KIND_OF_TYPE).sort(), Object.keys(types).sort());
-  assert.equal(cloneKind(new SharedArrayBuffer(1)), "unsupported");
-  assert.equal(cloneKind(new Float64Array(1)), "view");
 });
 
 test("what native clone refuses is refused at every depth it can read, also inside a Proxy", () => {

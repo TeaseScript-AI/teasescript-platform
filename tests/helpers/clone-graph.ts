@@ -177,6 +177,7 @@ export function cloneGraphDifference(
       case "array":
       case "record": {
         if (kind === "array") {
+          if (Object.getPrototypeOf(a) !== Array.prototype) return fail("not this realm's array");
           // EVIDENCE: validation: `cloneKind` classified both as arrays.
           if ((a as unknown[]).length !== (e as unknown[]).length) return fail("another length");
         } else if (Object.getPrototypeOf(a) !== Object.prototype) return fail("not a plain object");
