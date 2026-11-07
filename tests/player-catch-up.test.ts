@@ -339,6 +339,8 @@ test("turning Debug's random draws on during a catch-up finishes it first with n
   assert.ok(host.session.value!.state.observedSessionTimeMs < 1_000, "a catch-up is under way");
   // Choose outcomes with every site asking: a draw the catch-up made under the control would pause.
   host.setRandomControl({ sites: [] });
+  // The catch-up's one observation comes first in the session's queue (`before`), then the control.
+  await caughtUp(host, 1_000);
   assert.ok(host.session.value!.state.observedSessionTimeMs >= 1_000);
   assert.equal(host.session.value!.state.randomDraw, null);
   replays(host);

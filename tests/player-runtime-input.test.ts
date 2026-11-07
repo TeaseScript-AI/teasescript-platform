@@ -456,7 +456,9 @@ for (const target of ["an answer", "the pacing skip"] as const)
             (session) => playerRuntimePacingGate(session)?.actionId,
             input.intents.pacing,
           );
-    const changed = facade.observeNow(shown, 20, []);
+    const changed = facade.hatch(shown, (current) =>
+      adapter.observePlayerRuntimeTime(current, 20, []),
+    );
     assert.notEqual(
       changed.session.revision,
       shown.revision,
@@ -467,7 +469,8 @@ for (const target of ["an answer", "the pacing skip"] as const)
     await settle();
     assert.equal(result.kind, "answered");
     assert.equal(host.hostError.value, null);
-    assert.equal(posted.ops().filter((op) => op !== "observeInput").length, 1);
+    const ops = posted.ops().filter((op) => op !== "observeInput");
+    assert.equal(ops.length, 1, `one op besides the input's observations: ${ops.join(", ")}`);
   });
 
 /** A provider that keeps what it stored, records each write, and settles each as `settle` decides. */

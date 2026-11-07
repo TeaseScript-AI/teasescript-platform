@@ -532,6 +532,10 @@ const RANDOM_SENDERS: readonly (readonly [string, string])[] = [
   ['"randomControl",', "not adopting: the Player's teardown"],
   ['"adoptRandom",', "adopting: `adoptRandom`, the one adoption"],
   ['.request("releaseRandom",', "releasing: Continue before its kept draw went on"],
+  [
+    'clock.before("randomControl");',
+    "no sender: the clock's work kind before a settings change (`before`)",
+  ],
 ];
 
 test("every random-op sender in the composable is classified as adopting or not", () => {
