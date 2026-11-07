@@ -1456,6 +1456,8 @@ function joinDecider(
   const at = pathText(steps);
   if (byPath.has(at)) return byPath.get(at)!;
   const answer = drive(admission, earliestDecider(admission, value, node, steps, null));
+  // (its key kept, charged as a structure's)
+  keepText(admission.work, at.length);
   byPath.set(at, answer);
   return answer;
 }
