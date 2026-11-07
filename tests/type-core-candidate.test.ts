@@ -3594,6 +3594,27 @@ test("the route ends at the refusal its capture establishes, at the store whose 
     assert.notEqual(inMode(mode, () => candidate(deep)).plan, null, JSON.stringify(mode));
 });
 
+test("the route rule's error stands where a run can bring the null unchecked, and a check the compiler cannot keep warns (AD-1, #1073 PR 4)", () => {
+  // (functions are outside the candidate's slice: the core's analysis answers)
+  const errs = (source: string): boolean => {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    return analyseCore(request).diagnostics.some((d) => d.class === "compile-error");
+  };
+  for (const [source, error] of [
+    // (a parameter's default is selected only where some call omits the argument)
+    ["function use(n = null) { repeat n {} }\nuse(2)\nexit\n", false],
+    ["function use(n = null) { repeat n {} }\nuse()\nuse(2)\nexit\n", true],
+    // (a call's result is its own producer; a test of the same call around it is a check the compiler cannot keep)
+    ['function read { if askBoolean("v") { return null }\n return 2 }\nrepeat read() {}\nexit\n', true],
+    [
+      'function read { if askBoolean("v") { return null }\n return 2 }\nif read() != null { repeat read() {} }\nexit\n',
+      false,
+    ],
+  ] as const)
+    assert.equal(inBothOrders(() => errs(source)), error, source);
+});
+
 test("no production code selects the core: only tests reach the candidate entry", () => {
   const root = process.cwd();
   for (const directory of ["src", "playground", "player", "tools"])

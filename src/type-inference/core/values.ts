@@ -427,7 +427,7 @@ export class Values {
     // (U5: a check on every route that the compiler cannot keep names what dropped it, the failing event's word, V30 §13)
     if (fails !== null) {
       const worded = read.items.map((item): Item =>
-        item.tag === "empty" ? item : { ...item, context: fails, tested: true },
+        item.tag === "empty" ? item : { ...item, context: fails },
       );
       return contract.entered(
         root,
