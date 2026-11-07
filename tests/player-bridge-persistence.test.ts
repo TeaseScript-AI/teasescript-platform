@@ -171,12 +171,18 @@ test("a read works after a Player error stop, at the stop line, which the sessio
   );
 });
 
-test("a read of a released session finds none: a keep's capture says so and returns the plan's JSON it took", async () => {
+test("a read of a released session finds none: a keep's capture says so, with the plan's JSON if it was written", async () => {
   const bridge = await inProcessBridge();
   const plan = await prepared(bridge);
   const session = await bridge.start(plan, START, false);
-  await bridge.client.request("planText", { plan });
+  // Not written yet: nothing comes back. Written by its reservation: the written JSON comes back, and stays.
   bridge.release(session);
+  assert.deepEqual(await bridge.read(session, "captureKeep", { plan }), {
+    kind: "gone",
+    planJson: null,
+  });
+  await bridge.client.request("preparePlanText", { plan });
+  await new Promise((resolve) => setTimeout(resolve, 5));
   assert.deepEqual(await bridge.read(session, "captureKeep", { plan }), {
     kind: "gone",
     planJson: PLAN_JSON,

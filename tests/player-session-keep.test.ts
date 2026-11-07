@@ -166,6 +166,17 @@ function planWrites(context: TestContext, ...plans: InstructionPlan[]) {
   const counts = new Map<unknown, number>();
   JSON.stringify = new Proxy(stringify, {
     apply(target, _self, args) {
+      const value: unknown = args[0];
+      if (
+        failNextSnapshot &&
+        typeof value === "object" &&
+        value !== null &&
+        "format" in value &&
+        value.format === "teasescript-runtime-snapshot"
+      ) {
+        failNextSnapshot = false;
+        throw new RangeError("Invalid string length");
+      }
       // The host holds its own plan, prepared from this plan's text: its writes count as this plan's.
       const plan = heldAs.get(args[0]) ?? args[0];
       if (heldAs.has(args[0])) graphWrites.set(args[0], (graphWrites.get(args[0]) ?? 0) + 1);
@@ -179,6 +190,8 @@ function planWrites(context: TestContext, ...plans: InstructionPlan[]) {
 
 /** The plans the hosts hold, each as the test's plan it was prepared from (`planWrites`). */
 const heldAs = new Map<unknown, InstructionPlan>();
+/** Whether `planWrites`'s writer fails the next snapshot, as a state too long to save does (`TSK004`). */
+let failNextSnapshot = false;
 /** How often each host's own plan was written while `planWrites` counted. */
 const graphWrites = new Map<unknown, number>();
 /** How often `host`'s host wrote its plan of `plan` while `planWrites` counted. */
@@ -335,7 +348,7 @@ test("a save the store refused is kept again with the same plan JSON, written on
   assert.equal(at.published[2]!.planJson, null);
 });
 
-test("a session that ended starts anew with the plan JSON its restore wrote, and a closed page prepares nothing", async (context) => {
+test("a session that ended starts anew with the plan JSON its restore read, and a closed page prepares nothing", async (context) => {
   stubBrowser(context);
   const expected = planJson(ENDS);
   const writes = planWrites(context, ENDS);
@@ -346,15 +359,15 @@ test("a session that ended starts anew with the plan JSON its restore wrote, and
   assert.equal(host.session.value?.state.status, "halted");
   await host.toStartPage();
   assert.equal(host.activation.value, "start");
-  // The prepared JSON and the restore's comparison; the next Start's first save writes none.
-  assert.equal(writes(), 2);
+  // The prepared JSON, which the restore's comparison read; the next Start's first save writes none.
+  assert.equal(writes(), 1);
   await host.activate();
   await until(
     () => at.published.filter((update) => update.planJson !== null).length > 1,
     "the new session was not kept",
   );
   await tasks();
-  assert.equal(writes(), 2);
+  assert.equal(writes(), 1);
   for (const update of at.published.filter((update) => update.planJson !== null))
     assert.equal(update.planJson, expected);
 
@@ -362,7 +375,7 @@ test("a session that ended starts anew with the plan JSON its restore wrote, and
   const { scope } = await page(context, closing, ENDS);
   scope.stop();
   await tasks();
-  assert.equal(writes(), 2);
+  assert.equal(writes(), 1);
 });
 
 test("Start and Continue record the zone and clock at the click, not those prepared before it", async (context) => {
@@ -638,30 +651,6 @@ async function seedKept(
   await tasks();
 }
 
-/** Arms a failure of the next snapshot's JSON, as a state too long to save gives (`TSK004`). */
-function snapshotFailure(context: TestContext) {
-  const stringify = JSON.stringify;
-  let armed = false;
-  JSON.stringify = new Proxy(JSON.stringify, {
-    apply(target, _self, args) {
-      const value: unknown = args[0];
-      if (
-        armed &&
-        typeof value === "object" &&
-        value !== null &&
-        "format" in value &&
-        value.format === "teasescript-runtime-snapshot"
-      ) {
-        armed = false;
-        throw new RangeError("Invalid string length");
-      }
-      return target(args[0], args[1], args[2]);
-    },
-  });
-  context.after(() => (JSON.stringify = stringify));
-  return () => void (armed = true);
-}
-
 interface Driven {
   readonly host: KeepHost;
   readonly scope: EffectScope;
@@ -669,6 +658,8 @@ interface Driven {
   readonly plan: InstructionPlan;
   /** Lets the producer's reply arrive, and resolves once its caller is done with it. */
   readonly finish: () => Promise<void>;
+  /** Writes of the plan that are not the lease's: an import's review compares the plans on the main side (L5h.2). */
+  readonly reviewWrites?: number;
 }
 
 /** Each producer on its real path, its reply held; a new producer needs its driver here (the type requires it). */
@@ -732,7 +723,9 @@ const DRIVERS: Record<
     const { transfer } = await exporting.host.exportSession();
     exporting.scope.stop();
     const { host, scope } = await page(context, at, ASKS);
+    const beforeReview = await writesOn(host, ASKS);
     const review = await host.reviewSessionImport(transfer);
+    const reviewWrites = (await writesOn(host, ASKS)) - beforeReview;
     const reply = holdReply(context, await host.bridge, "planText");
     if (c.outcome === "failed") at.state.failing = 1;
     const importing = host.importSession(review).catch(() => {});
@@ -741,6 +734,7 @@ const DRIVERS: Record<
       host,
       scope,
       plan: ASKS,
+      reviewWrites,
       finish: async () => {
         reply.release();
         await importing;
@@ -748,10 +742,9 @@ const DRIVERS: Record<
     };
   },
   async captureKeep(context, at, c) {
-    const fail = snapshotFailure(context);
     const { host, scope } = await page(context, at, ASKS);
     const reply = holdReply(context, await host.bridge, "captureKeep", (args, request) => {
-      if (c.outcome === "unkeepable") fail();
+      if (c.outcome === "unkeepable") failNextSnapshot = true;
       const session =
         typeof args === "object" && args !== null && "session" in args ? args.session : null;
       // A session the host no longer holds: released just before the capture runs.
@@ -790,7 +783,10 @@ for (const c of familyCases()) {
     await driven.finish();
     for (let turn = 0; turn < 4; turn++) await tasks();
     const written = await writesOn(driven.host, driven.plan);
-    assert.ok(written <= 1, `${caseName(c)}: written ${written} times`);
+    assert.ok(
+      written - (driven.reviewWrites ?? 0) <= 1,
+      `${caseName(c)}: written ${written} times`,
+    );
     // Asked for it twice now: held, it is not written again; let go of, each read writes it and keeps nothing.
     await bridge.client.request("planText", { plan: token });
     await bridge.client.request("planText", { plan: token });
