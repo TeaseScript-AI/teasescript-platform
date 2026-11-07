@@ -4,8 +4,7 @@ import { defineConfig } from "vite";
 /**
  * The Player browser-source modules that compiled Node tests load through `tests/helpers/player-modules.ts`. Knip cannot
  * follow that loader, so `knip.json` lists the same modules as entries, and by default Knip reports none of their exports
- * as unused. `tools/knip-entries.test.mjs` fails unless `knip.json` lists each of them by its literal path, within the
- * convention that test states.
+ * as unused. `tools/knip-entries.test.mjs` checks that the two lists match.
  */
 const modules = [
   "player/runtime-adapter.ts",
