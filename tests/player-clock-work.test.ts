@@ -7,12 +7,12 @@ import type { BridgeClient } from "../player/engine-bridge/client.js";
 import type { StartOptions } from "../player/engine-bridge/ops/session.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
-import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
+import { observePlayerRuntimeTime, type PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import { memoryKeptSessionStore } from "../player/kept-sessions.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { coverageGaps, product } from "./helpers/family-coverage.js";
-import { loadHostFacade } from "./helpers/host-sessions.js";
+import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
 /*
@@ -38,6 +38,8 @@ interface SessionHost {
   setRandomControl(control: { readonly sites: readonly [] } | null): void;
 }
 let usePlayerSession: (options: Record<string, unknown>) => SessionHost;
+/** An observation the host runs at once on a session it holds, past the session's queue (the facade). */
+const observeOnHost = onHost(observePlayerRuntimeTime);
 /** The bundle's refusal, which the composable's `refusalCode` recognizes. */
 let refusal: (code: string) => Error;
 
@@ -389,9 +391,15 @@ for (const { work, state, name } of CASES)
     await settle();
     player.gate.release();
     await settle(40);
-    const after = player.posts.slice(from).map((post) => post.op);
-    const want = expected(work, state);
     const own = OWN_OP[work];
+    // Of what the host receives, the clock's ops and the work's own: other work the trigger causes, such as the debug
+    // room's keep when Debug mode turns on, is no part of the clock's policy.
+    const counted = new Set(["dropCatchUp", "observeTime", ...(own === null ? [] : [own])]);
+    const after = player.posts
+      .slice(from)
+      .map((post) => post.op)
+      .filter((op) => counted.has(op));
+    const want = expected(work, state);
     // What the work needs comes first, then its own op; what follows is no part of it.
     const upTo = own === null ? want.length : after.indexOf(own) + 1;
     assert.deepEqual(after.slice(0, upTo), want, `${name}: ${after.join(", ")}`);
@@ -432,7 +440,8 @@ test("an observation behind an earlier section that published succeeds, at its o
   // EVIDENCE: fixture: the shown session is a publication of this bridge.
   const earlier = bridge.section(shown as never, async (section) => {
     await opened;
-    await section.send("observeTime", { atMs: shown.state.observedSessionTimeMs + 5, media: [] });
+    // A publication that moves the revision, not the time.
+    await section.send("setDebugMode", { on: true });
   });
   const observing = player.host.observe();
   open();
@@ -489,16 +498,11 @@ test("a newer publication of the session during an observation is what the obser
   player.gate.hold("observeTime");
   const observing = player.host.observe();
   await settle();
-  // Meanwhile the host publishes the session again, past the observation's own reply.
+  // Meanwhile the host publishes the session again, past the session's queue (the facade), after the observation ran.
   const shown = player.host.session.value!;
-  // EVIDENCE: fixture: the shown session is a publication of this bridge.
-  const pressed = bridge.request(shown as never, "observeTime", {
-    atMs: shown.state.observedSessionTimeMs + 50_000,
-    media: [],
-  });
+  observeOnHost(shown, shown.state.observedSessionTimeMs + 50_000, []);
   player.gate.release();
   const observed = await observing;
-  await pressed;
   await settle();
   assert.equal(observed, player.host.session.value, "the newest shown");
   // EVIDENCE: fixture: as above.
