@@ -140,7 +140,7 @@ export interface PlayerOpsContext {
   traceId: number;
   /** The serial of the newest tracing intent the host applied (`alignTrace`); `0` before any. */
   traceIntent: number;
-  /** The held plans' canonical JSON, per token, while a save or a Continue may need it (`ops/persistence.ts`). */
+  /** The held plans' canonical JSON, per token, which `preparePlanText` alone keeps (`ops/persistence.ts`). */
   readonly planTexts: Map<string, PlanTextSlot>;
 }
 

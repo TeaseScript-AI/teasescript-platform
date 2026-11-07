@@ -20,8 +20,9 @@ import { HeldSession, introduction } from "./session.js";
  * `after`), so a read follows what was posted before it.
  *
  * A plan's canonical JSON, which a new session's first save stores and a Continue compares, is written here, in a task
- * of its own once the Player asks, so that neither Start nor the Player's thread writes it (#1707). It is held per plan
- * token until a save takes it or a matching Continue no longer needs it.
+ * of its own once the Player asks, so that neither Start nor the Player's thread writes it (#1707). Only the page's
+ * lease decides how long it is held (`plan-json-lease.ts`): `preparePlanText` alone keeps a plan's JSON, and
+ * `releasePlanText` alone lets go of it. Every other op reads it, or writes it for itself and keeps nothing.
  */
 
 /** The canonical JSON of one held plan: written, or waiting for its task. */
@@ -78,14 +79,22 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
     if (plan === undefined) throw new Error(`No plan '${token}' is held.`);
     return plan;
   };
-  /** The held plan's canonical JSON, written now unless its task did; it stays held. */
+  /**
+   * The held plan's canonical JSON, for a reader: the slot's, written now if its task has not run (once, for the slot),
+   * or, with no slot, written for this reader alone and kept nowhere. A reader never creates or removes a slot.
+   */
   const planText = (token: string): string => {
     const slot = slots.get(token);
-    if (slot?.json != null) return slot.json;
-    const json = serializeValidatedRuntimeJson(planOf(token));
-    if (slot?.timer != null) clearTimeout(slot.timer);
-    slots.set(token, { json, timer: null });
-    return json;
+    if (slot === undefined) return serializeValidatedRuntimeJson(planOf(token));
+    return materialize(slot, token);
+  };
+  /** `slot`'s JSON, written now unless written; its waiting task, if any, then has nothing left to do. */
+  const materialize = (slot: PlanTextSlot, token: string): string => {
+    if (slot.json !== null) return slot.json;
+    if (slot.timer !== null) clearTimeout(slot.timer);
+    slot.timer = null;
+    slot.json = serializeValidatedRuntimeJson(planOf(token));
+    return slot.json;
   };
   const dropPlanText = (token: string) => {
     const slot = slots.get(token);
@@ -106,10 +115,12 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
         const slot: PlanTextSlot = { json: null, timer: null };
         slot.timer = setTimeout(() => {
           slot.timer = null;
+          // A slot released or replaced meanwhile is no longer the plan's.
+          if (slots.get(plan) !== slot) return;
           try {
-            slot.json = serializeValidatedRuntimeJson(planOf(plan));
+            materialize(slot, plan);
           } catch {
-            // The save or comparison that needs it writes it then, and fails as it would have.
+            // The reader that needs it writes it then, and fails as it would have.
           }
         }, 0);
         slots.set(plan, slot);
@@ -128,7 +139,7 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
         return { result: null };
       },
     },
-    // The plan's canonical JSON, which stays held: what an import's save stores.
+    // The plan's canonical JSON, read: what an import's save stores. It keeps nothing the page did not reserve.
     planText: {
       session: "none",
       checkArguments: (args) =>
@@ -139,8 +150,7 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
         return { result: planText(plan) };
       },
     },
-    // The session's state as JSON, from the trusted export, and with `plan` that plan's JSON, which the page then
-    // holds: the host lets go of it.
+    // The session's state as JSON, from the trusted export, and with `plan` that plan's JSON, read.
     captureKeep: {
       session: "none",
       checkArguments: (args) =>
@@ -154,17 +164,14 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
           readonly session: string;
           readonly plan: string | null;
         };
-        // A capture asked for the plan's JSON takes it from the host whatever its outcome, so the page holds the only
-        // copy from then on (`plan-json-lease.ts`).
+        // A capture asked for the plan's JSON reads it; the slot stays the page's (`plan-json-lease.ts`).
         const held = sessions.get(session);
         if (!(held instanceof HeldSession)) {
           const written = plan === null ? null : (slots.get(plan)?.json ?? null);
-          if (plan !== null) dropPlanText(plan);
           const result: KeepCapture = { kind: "gone", planJson: written };
           return { result };
         }
         const planJson = plan === null ? null : planText(plan);
-        if (plan !== null) dropPlanText(plan);
         const current = held.current;
         let snapshotJson: string;
         try {
@@ -229,8 +236,6 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
           const result: KeptRestore = { kind: "ended" };
           return { result };
         }
-        // The session goes on, so a first save will not need the plan's JSON.
-        dropPlanText(plan);
         const held = new HeldSession(restored, plan, context);
         const id = sessions.add(held);
         const view = introduction(held, context, false);

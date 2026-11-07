@@ -240,9 +240,10 @@ test("a kept session restores against the held plan; another plan, an ended sess
   assert.equal(inProcess.restoredJson.snapshotJson, inProcess.keptJson);
 });
 
-test("the plan's JSON is written once per held plan: prepared in a task, taken by a save, released by a page", async () => {
+test("only a reservation keeps the plan's JSON: written once in its task, read by every reader, let go of by its release", async () => {
   const bridge = await inProcessBridge();
   const plan = await prepared(bridge);
+  const session = await bridge.start(plan, START, false);
   const stringify = JSON.stringify;
   let writes = 0;
   JSON.stringify = new Proxy(stringify, {
@@ -252,20 +253,32 @@ test("the plan's JSON is written once per held plan: prepared in a task, taken b
     },
   });
   try {
+    // No reservation: each reader writes it for itself, and nothing keeps it.
+    await bridge.client.request("planText", { plan });
+    await keepOf(bridge, session, plan);
+    assert.equal(writes, 2);
+    // Reserved: written in a task of its own, then read by the capture, the comparison and the import's save alike.
     await bridge.client.request("preparePlanText", { plan });
-    assert.equal(writes, 0, "written in a task of its own, not in the op");
+    assert.equal(writes, 2, "written in a task of its own, not in the op");
     await new Promise((resolve) => setTimeout(resolve, 5));
-    assert.equal(writes, 1);
+    assert.equal(writes, 3);
     await bridge.client.request("preparePlanText", { plan });
-    const session = await bridge.start(plan, START, false);
     const keep = await keepOf(bridge, session, plan);
     assert.equal(keep.planJson, PLAN_JSON);
-    assert.equal(writes, 1, "the save took the prepared JSON");
-    // Taken, the next one is written anew; released before its task, none is.
+    assert.equal(
+      await bridge.restoreKept(plan, PLAN_JSON, keep.snapshotJson, []).then(() => "read"),
+      "read",
+    );
+    assert.equal((await bridge.client.request("planText", { plan })).result, PLAN_JSON);
+    assert.equal(writes, 3, "every reader read the one written JSON");
+    // Released, it is gone; released before its task, it is never written.
+    await bridge.client.request("releasePlanText", { plan });
+    await bridge.client.request("planText", { plan });
+    assert.equal(writes, 4);
     await bridge.client.request("preparePlanText", { plan });
     await bridge.client.request("releasePlanText", { plan });
     await new Promise((resolve) => setTimeout(resolve, 5));
-    assert.equal(writes, 1);
+    assert.equal(writes, 4);
   } finally {
     JSON.stringify = stringify;
   }

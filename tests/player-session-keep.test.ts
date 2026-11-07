@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test, { after, before, type TestContext } from "node:test";
-import { effectScope, type Ref } from "vue";
+import { effectScope, type EffectScope, type Ref } from "vue";
 
 import {
+  keptSession,
   memoryKeptSessionStore,
   type KeptSessionStore,
   type KeptSessionUpdate,
@@ -14,6 +15,13 @@ import {
 } from "../player/runtime-adapter.js";
 import { compilePlayerProject } from "../player/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
+import {
+  PRODUCERS,
+  caseName,
+  familyCases,
+  type FamilyCase,
+  type Producer,
+} from "./helpers/plan-json-family.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { InstructionPlan } from "../src/index.js";
@@ -42,6 +50,17 @@ interface KeepHost {
   toStartPage(): Promise<void>;
   temporalCapture(): PlayerRuntimeSessionOptions;
   readonly bridge: Promise<PlayerBridge>;
+  exportSession(): Promise<{ readonly transfer: ExportedSession }>;
+  reviewSessionImport(transfer: ExportedSession): Promise<ImportReview>;
+  importSession(review: ImportReview): Promise<void>;
+}
+/** An exported session, as this file passes it from an export to an import's review. */
+interface ExportedSession {
+  readonly scope: string;
+}
+/** An import's review, as this file passes it to the import. */
+interface ImportReview {
+  readonly snapshotJson: string;
 }
 let usePlayerSession: (options: {
   bridge?: Promise<PlayerBridge>;
@@ -149,6 +168,7 @@ function planWrites(context: TestContext, ...plans: InstructionPlan[]) {
     apply(target, _self, args) {
       // The host holds its own plan, prepared from this plan's text: its writes count as this plan's.
       const plan = heldAs.get(args[0]) ?? args[0];
+      if (heldAs.has(args[0])) graphWrites.set(args[0], (graphWrites.get(args[0]) ?? 0) + 1);
       if (plans.includes(plan)) counts.set(plan, (counts.get(plan) ?? 0) + 1);
       return target(args[0], args[1], args[2]);
     },
@@ -159,6 +179,12 @@ function planWrites(context: TestContext, ...plans: InstructionPlan[]) {
 
 /** The plans the hosts hold, each as the test's plan it was prepared from (`planWrites`). */
 const heldAs = new Map<unknown, InstructionPlan>();
+/** How often each host's own plan was written while `planWrites` counted. */
+const graphWrites = new Map<unknown, number>();
+/** How often `host`'s host wrote its plan of `plan` while `planWrites` counted. */
+async function writesOn(host: KeepHost, plan: InstructionPlan): Promise<number> {
+  return graphWrites.get(heldPlan(await host.bridge, await held(host, plan))) ?? 0;
+}
 /** Each page's host token of a test plan: preparing a plan again on a page reuses it, as the plan is the same. */
 const tokens = new WeakMap<KeepHost, Map<InstructionPlan, string>>();
 let heldPlan: (bridge: PlayerBridge, token: string) => object;
@@ -193,6 +219,13 @@ async function page(
   plan: InstructionPlan,
   delayMs?: number,
 ) {
+  const opened = await mount(context, at, delayMs);
+  await prepareOn(opened.host, plan);
+  return opened;
+}
+
+/** A page of the Player in `at` with its saved values loaded, before it prepares a plan. */
+async function mount(context: TestContext, at: ReturnType<typeof browser>, delayMs?: number) {
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
@@ -214,7 +247,6 @@ async function page(
   assert.ok(host);
   context.after(() => scope.stop());
   await host.loadScriptStorage();
-  await prepareOn(host, plan);
   return { host, scope };
 }
 
@@ -551,125 +583,225 @@ test("a plan another preparation replaced, and the page's last one when it close
 });
 
 /*
- * The plan JSON's lifetime through the real composable and its in-process host: a sample of the generated family of
- * `player-plan-json-lease.test.ts` that keeps every value and every pair of values of its axes, with the capture's
- * reply held until the case retires the plan. "lost" is the loss family's (`player-bridge-loss.test.ts`).
+ * The plan JSON's lifetime through the real composable and its in-process host: the family of
+ * `helpers/plan-json-family.ts`, each producer driven on its real path, its reply held while the page's plan retires
+ * (or does not). At the end, the host holds the plan's JSON while it is the live page's current plan and lets go of it
+ * otherwise, and it was written at most once while the page held the plan.
  */
-const LIFETIME_AXES = {
-  preparation: ["current", "replaced", "disposed"],
-  capture: ["captured", "unkeepable", "gone"],
-  startDuringCapture: ["no", "yes"],
-  retire: ["beforeReply", "afterReply"],
-} as const;
-type LifetimeCase = {
-  readonly [A in keyof typeof LIFETIME_AXES]: (typeof LIFETIME_AXES)[A][number];
-};
-const LIFETIME_CASES: LifetimeCase[] = [];
-for (const preparation of LIFETIME_AXES.preparation)
-  for (const capture of LIFETIME_AXES.capture)
-    for (const startDuringCapture of LIFETIME_AXES.startDuringCapture)
-      for (const retire of LIFETIME_AXES.retire)
-        if (preparation !== "current" || retire === "beforeReply")
-          LIFETIME_CASES.push({ preparation, capture, startDuringCapture, retire });
-const lifetimeName = (c: LifetimeCase) =>
-  `${c.preparation} ${c.capture} start:${c.startDuringCapture} retire:${c.retire}`;
+const ASKS_OTHER = compilePlayerProject(
+  'let b = askText(hint: "Other")\nsay "Got ${b}.", instant\nexit',
+).plan!;
 
-test("the composable's plan JSON sample covers every value and pair of its axes", () => {
-  // EVIDENCE: invariant: the keys of the axes object, declared literally above.
-  const axes = Object.keys(LIFETIME_AXES) as (keyof typeof LIFETIME_AXES)[];
-  for (const [i, left] of axes.entries())
-    for (const right of axes.slice(i + 1))
-      for (const a of LIFETIME_AXES[left])
-        for (const b of LIFETIME_AXES[right]) {
-          const possible = !(
-            left === "preparation" &&
-            right === "retire" &&
-            a === "current" &&
-            b === "afterReply"
-          );
-          assert.equal(
-            LIFETIME_CASES.some((c) => c[left] === a && c[right] === b),
-            possible,
-            `${left} = ${a} with ${right} = ${b}`,
-          );
-        }
-});
-
-for (const c of LIFETIME_CASES)
-  test(`the composable's plan JSON: ${lifetimeName(c)}`, async (context) => {
-    stubBrowser(context);
-    const writes = planWrites(context, ASKS);
-    const at = browser();
-    const { host, scope } = await page(context, at, ASKS);
-    await until(() => writes() === 1, "the plan's JSON was not prepared");
-    const bridge = await host.bridge;
-    const asks = await held(host, ASKS);
-    // The capture's state fails to write once, as a state too long to save does (`TSK004`).
-    const stringify = JSON.stringify;
-    let failSnapshot = false;
-    JSON.stringify = new Proxy(JSON.stringify, {
-      apply(target, _self, args) {
-        const value: unknown = args[0];
-        if (
-          failSnapshot &&
-          typeof value === "object" &&
-          value !== null &&
-          "format" in value &&
-          value.format === "teasescript-runtime-snapshot"
-        ) {
-          failSnapshot = false;
-          throw new RangeError("Invalid string length");
-        }
-        return target(args[0], args[1], args[2]);
-      },
+/** Holds `op`'s reply on `bridge` until `release`; `sent` resolves once it was posted, `before` sees its arguments. */
+function holdReply(
+  context: TestContext,
+  bridge: PlayerBridge,
+  op: string,
+  before?: (args: unknown, request: PlayerBridge["client"]["request"]) => void,
+) {
+  let posted!: () => void;
+  const sent = new Promise<void>((resolve) => (posted = resolve));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const request = bridge.client.request.bind(bridge.client);
+  let first = true;
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    if (args[0] !== op || !first) return request(...args);
+    first = false;
+    before?.(args[1], request);
+    const reply = request(...args).then(async (result) => {
+      await gate;
+      return result;
     });
-    context.after(() => (JSON.stringify = stringify));
-    let disposed = false;
-    const afterClosing: string[] = [];
-    let announce!: () => void;
-    const replied = new Promise<void>((resolve) => (announce = resolve));
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => (release = resolve));
-    let settled: Promise<unknown> = Promise.resolve();
-    const request = bridge.client.request.bind(bridge.client);
-    context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
-      const [op, body] = args;
-      if (disposed && op === "preparePlanText") afterClosing.push(op);
-      if (op !== "captureKeep") return request(...args);
-      failSnapshot = c.capture === "unkeepable";
-      const session =
-        typeof body === "object" && body !== null && "session" in body ? body.session : null;
-      // A session the host no longer holds: released just before the capture runs.
-      if (c.capture === "gone" && typeof session === "string")
-        void request("release", null, { session });
-      const sent = request(...args).then(async (reply) => {
-        announce();
-        await gate;
-        return reply;
-      });
-      settled = sent.catch(() => {});
-      return sent;
-    });
-    const retire = async () => {
-      if (c.preparation === "replaced") await prepareAgain(host, ENDS);
-      else if (c.preparation === "disposed") {
-        scope.stop();
-        disposed = true;
-      }
-    };
-    await host.activate();
-    await replied;
-    if (c.startDuringCapture === "yes") await prepareAgain(host, ASKS);
-    if (c.retire === "beforeReply") await retire();
-    release();
-    await settled;
-    await tasks();
-    if (c.retire === "afterReply") await retire();
-    await tasks();
-    assert.ok(writes() <= 1, `${lifetimeName(c)}: the plan's JSON was written ${writes()} times`);
-    assert.deepEqual(afterClosing, [], "nothing is prepared once the page closed");
-    // The host holds no copy now: asked for it, it writes it anew.
-    const before = writes();
-    await request("planText", { plan: asks });
-    assert.equal(writes() - before, 1, `${lifetimeName(c)}: the host still held the plan's JSON`);
+    posted();
+    return reply;
   });
+  return { sent, release: () => release() };
+}
+
+/** A kept session in `at` of `plan`: at its first question, or at its end. */
+async function seedKept(
+  context: TestContext,
+  at: ReturnType<typeof browser>,
+  plan: InstructionPlan,
+  ended: boolean,
+) {
+  const { host, scope } = await page(context, at, plan);
+  await host.activate();
+  if (ended)
+    await until(
+      () => at.published.some((update) => update.events.some((event) => event.kind === "exit")),
+      "the seed's end was not kept",
+    );
+  else await until(() => at.published.length > 0, "the seed was not kept");
+  scope.stop();
+  await tasks();
+}
+
+/** Arms a failure of the next snapshot's JSON, as a state too long to save gives (`TSK004`). */
+function snapshotFailure(context: TestContext) {
+  const stringify = JSON.stringify;
+  let armed = false;
+  JSON.stringify = new Proxy(JSON.stringify, {
+    apply(target, _self, args) {
+      const value: unknown = args[0];
+      if (
+        armed &&
+        typeof value === "object" &&
+        value !== null &&
+        "format" in value &&
+        value.format === "teasescript-runtime-snapshot"
+      ) {
+        armed = false;
+        throw new RangeError("Invalid string length");
+      }
+      return target(args[0], args[1], args[2]);
+    },
+  });
+  context.after(() => (JSON.stringify = stringify));
+  return () => void (armed = true);
+}
+
+interface Driven {
+  readonly host: KeepHost;
+  readonly scope: EffectScope;
+  /** The plan under test, which the page holds until it retires. */
+  readonly plan: InstructionPlan;
+  /** Lets the producer's reply arrive, and resolves once its caller is done with it. */
+  readonly finish: () => Promise<void>;
+}
+
+/** Each producer on its real path, its reply held; a new producer needs its driver here (the type requires it). */
+const DRIVERS: Record<
+  Producer,
+  (context: TestContext, at: ReturnType<typeof browser>, c: FamilyCase) => Promise<Driven>
+> = {
+  async preparePlanText(context, at, c) {
+    const { host, scope } = await mount(context, at);
+    const token = await held(host, ASKS);
+    // Prepared without waiting: a retirement right after cancels the reservation before its task runs.
+    const preparing = host.prepareScript(token, {
+      plan: token,
+      options: () => ({ ...host.scriptStorageOptions(), ...host.temporalCapture() }),
+    });
+    if (c.outcome === "materialized") {
+      await preparing;
+      for (let turn = 0; (await writesOn(host, ASKS)) === 0; turn++) {
+        assert.ok(turn < 200, "the reservation was not written");
+        await tasks();
+      }
+    }
+    return { host, scope, plan: ASKS, finish: async () => void (await preparing) };
+  },
+  async restoreKept(context, at, c) {
+    const seeded = c.outcome === "otherPlan" ? ASKS_OTHER : c.outcome === "ended" ? ENDS : ASKS;
+    await seedKept(context, at, seeded, c.outcome === "ended");
+    if (c.outcome === "rejected") {
+      const stored = await at.kept.session(SCOPE);
+      assert.ok(stored !== null);
+      const entry = keptSession(stored);
+      assert.ok(entry !== null);
+      await at.kept.publish(SCOPE, {
+        planJson: entry.planJson,
+        snapshotJson: '{"damaged":true}',
+        eventsFrom: 0,
+        events: entry.events,
+        eventsJson: entry.events.map(serializeValidatedRuntimeJson),
+        marks: { editedWhileDebugging: null, rewoundWhileDebugging: null },
+      });
+    }
+    const plan = c.outcome === "ended" ? ENDS : ASKS;
+    const { host, scope } = await mount(context, at);
+    const reply = holdReply(context, await host.bridge, "restoreKept");
+    const preparing = prepareOn(host, plan);
+    await reply.sent;
+    return {
+      host,
+      scope,
+      plan,
+      finish: async () => {
+        reply.release();
+        await preparing;
+      },
+    };
+  },
+  async planText(context, at, c) {
+    const exporting = await page(context, at, ASKS);
+    await exporting.host.activate();
+    await until(() => exporting.host.session.value !== null, "no session to export");
+    const { transfer } = await exporting.host.exportSession();
+    exporting.scope.stop();
+    const { host, scope } = await page(context, at, ASKS);
+    const review = await host.reviewSessionImport(transfer);
+    const reply = holdReply(context, await host.bridge, "planText");
+    if (c.outcome === "failed") at.state.failing = 1;
+    const importing = host.importSession(review).catch(() => {});
+    await reply.sent;
+    return {
+      host,
+      scope,
+      plan: ASKS,
+      finish: async () => {
+        reply.release();
+        await importing;
+      },
+    };
+  },
+  async captureKeep(context, at, c) {
+    const fail = snapshotFailure(context);
+    const { host, scope } = await page(context, at, ASKS);
+    const reply = holdReply(context, await host.bridge, "captureKeep", (args, request) => {
+      if (c.outcome === "unkeepable") fail();
+      const session =
+        typeof args === "object" && args !== null && "session" in args ? args.session : null;
+      // A session the host no longer holds: released just before the capture runs.
+      if (c.outcome === "gone" && typeof session === "string")
+        void request("release", null, { session });
+    });
+    const activating = host.activate();
+    await reply.sent;
+    return {
+      host,
+      scope,
+      plan: ASKS,
+      finish: async () => {
+        reply.release();
+        await activating;
+        await tasks();
+      },
+    };
+  },
+};
+
+for (const c of familyCases()) {
+  if (c.producer === "preparePlanText" && c.outcome === "cancelled" && c.retirement === "current")
+    continue;
+  test(`the composable's plan JSON: ${caseName(c)}`, async (context) => {
+    stubBrowser(context);
+    const at = browser();
+    planWrites(context, ASKS, ENDS, ASKS_OTHER);
+    const driven = await DRIVERS[c.producer](context, at, c);
+    const bridge = await driven.host.bridge;
+    const token = await held(driven.host, driven.plan);
+    // The page's plan retires while the producer's reply is held, or stays.
+    if (c.retirement === "replaced")
+      await prepareAgain(driven.host, driven.plan === ASKS_OTHER ? ASKS : ASKS_OTHER);
+    else if (c.retirement === "disposed") driven.scope.stop();
+    await driven.finish();
+    for (let turn = 0; turn < 4; turn++) await tasks();
+    const written = await writesOn(driven.host, driven.plan);
+    assert.ok(written <= 1, `${caseName(c)}: written ${written} times`);
+    // Asked for it twice now: held, it is not written again; let go of, each read writes it and keeps nothing.
+    await bridge.client.request("planText", { plan: token });
+    await bridge.client.request("planText", { plan: token });
+    assert.equal(
+      (await writesOn(driven.host, driven.plan)) - written,
+      c.retirement === "current" ? 0 : 2,
+      `${caseName(c)}: the host's plan JSON after the case`,
+    );
+  });
+}
+
+test("the composable's family drives every producer of the shared family", () => {
+  assert.deepEqual(Object.keys(DRIVERS).sort(), Object.keys(PRODUCERS).sort());
+});

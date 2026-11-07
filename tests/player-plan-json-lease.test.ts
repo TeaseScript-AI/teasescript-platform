@@ -1,219 +1,255 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { persistenceOps } from "../player/engine-bridge/ops/persistence.js";
+import { playerOpsContext } from "../player/engine-bridge/player-ops.js";
 import {
   EMPTY_PLAN_JSON_LEASE,
   settle,
-  type PlanJson,
   type PlanJsonEvent,
   type PlanJsonLease,
+  type PlanJsonMessage,
 } from "../player/plan-json-lease.js";
+import {
+  PRODUCERS,
+  RETIREMENTS,
+  caseName,
+  familyCases,
+  unclassifiedOps,
+  type FamilyCase,
+  type Producer,
+} from "./helpers/plan-json-family.js";
 
 /*
- * Who holds a plan's JSON (`player/plan-json-lease.ts`), over a generated family of event orders: `settle` against a
- * model of the host, which writes a plan's JSON when asked, lets a capture take it, and lets go of it when released.
- * After every event of every case: the host holds a plan's JSON only while the page is live and the plan is current; a
- * write happens only where no copy exists, in the host, in a capture's reply or on the page; nothing is posted once
- * the page closed.
+ * How long the host holds a plan's JSON (`player/plan-json-lease.ts`), over the generated family of
+ * `helpers/plan-json-family.ts`: `settle` against a model of the host's ops (`ops/persistence.ts`). The model keeps a
+ * reservation apart from its write: `preparePlanText` reserves, its task writes, `releasePlanText` cancels or removes,
+ * and a reader reads a written slot, writes a reserved one once, and writes for itself alone where none is reserved.
+ * After every step of every case: the host holds a plan's JSON only for the live page's current plan; it is written at
+ * most once per plan tenure; nothing is posted once the page closed.
  */
 
-/** The axes, declared once; a case is built from its values alone and named by them. */
-const AXES = {
-  // Where the capture's plan stands when the case ends: still the page's, replaced by another, or the page closed.
-  preparation: ["current", "replaced", "disposed"],
-  // What the keep's capture does: none at all, a saved state, an unkeepable state, a session the host no longer
-  // holds, or a request the Worker's loss ended.
-  capture: ["none", "captured", "unkeepable", "gone", "lost"],
-  // Whether a Start of the same plan is prepared while the capture is out.
-  startDuringCapture: ["no", "yes"],
-  // Whether the replacement or closing comes before the capture's reply or after it.
-  retire: ["beforeReply", "afterReply"],
-} as const;
-type Axis = keyof typeof AXES;
-type Case = { readonly [A in Axis]: (typeof AXES)[A][number] };
-
-/** Whether a combination is a case: a capture's axes need a capture, and a retirement order needs a retirement. */
-function valid(c: Case): boolean {
-  if (c.capture === "none" && c.startDuringCapture === "yes") return false;
-  if ((c.capture === "none" || c.preparation === "current") && c.retire === "afterReply")
-    return false;
-  return true;
+/** The host's plan JSON as the model holds it: reserved and waiting for its task, or written. */
+class HostModel {
+  readonly slots = new Map<string, "pending" | "ready">();
+  /** Writes into a slot, per plan and tenure. */
+  readonly writes = new Map<string, number>();
+  /** Writes for one reader alone, which nothing keeps. */
+  transient = 0;
+  readonly #tenureOf: () => number;
+  constructor(tenureOf: () => number) {
+    this.#tenureOf = tenureOf;
+  }
+  #written(plan: string) {
+    const key = `${plan}#${this.#tenureOf()}`;
+    this.writes.set(key, (this.writes.get(key) ?? 0) + 1);
+  }
+  receive(message: PlanJsonMessage) {
+    if (message.kind === "release") this.slots.delete(message.plan);
+    else if (!this.slots.has(message.plan)) this.slots.set(message.plan, "pending");
+  }
+  /** The reservation's own task. */
+  task(plan: string) {
+    if (this.slots.get(plan) !== "pending") return;
+    this.slots.set(plan, "ready");
+    this.#written(plan);
+  }
+  /** A reader of `plan`'s JSON: it never creates or removes a slot. */
+  read(plan: string) {
+    const slot = this.slots.get(plan);
+    if (slot === "ready") return;
+    if (slot === "pending") {
+      this.slots.set(plan, "ready");
+      this.#written(plan);
+    } else this.transient += 1;
+  }
 }
 
-function* product(): Generator<Case> {
-  for (const preparation of AXES.preparation)
-    for (const capture of AXES.capture)
-      for (const startDuringCapture of AXES.startDuringCapture)
-        for (const retire of AXES.retire) {
-          const c: Case = { preparation, capture, startDuringCapture, retire };
+/** The page's lease and the host, stepped together, with the invariants checked after each step. */
+function harness(name: string) {
+  let lease: PlanJsonLease = EMPTY_PLAN_JSON_LEASE;
+  let tenure = 0;
+  let closed = false;
+  const host = new HostModel(() => tenure);
+  const check = (after: string) => {
+    for (const plan of host.slots.keys())
+      assert.ok(
+        lease.live && plan === lease.current,
+        `${name}: the host holds ${plan} after ${after}`,
+      );
+    for (const [key, count] of host.writes)
+      assert.ok(count <= 1, `${name}: ${key} was written ${count} times`);
+  };
+  return {
+    host,
+    lease: () => lease,
+    event(event: PlanJsonEvent) {
+      const settled = settle(lease, event);
+      if (settled.lease.current !== lease.current) tenure += 1;
+      lease = settled.lease;
+      if (closed) assert.deepEqual(settled.messages, [], `${name}: posted after closing`);
+      for (const message of settled.messages) host.receive(message);
+      if (event.kind === "dispose") closed = true;
+      check(event.kind);
+    },
+    onHost(step: (host: HostModel) => void, label: string) {
+      step(host);
+      check(label);
+    },
+  };
+}
+
+/** Where the producer's plan JSON stands when it starts. */
+const SLOTS = ["absent", "pending", "ready"] as const;
+/** When the plan retires, relative to the producer's request and reply. */
+const POINTS = ["beforeRequest", "whileOut", "afterReply"] as const;
+/** Whether a Start of the same plan is prepared again while the producer's reply is out. */
+const REPREPARE = ["no", "yes"] as const;
+
+interface LayerCase extends FamilyCase {
+  readonly slot: (typeof SLOTS)[number];
+  readonly point: (typeof POINTS)[number] | "none";
+  readonly reprepare: (typeof REPREPARE)[number];
+}
+
+/** A combination is a case unless its values cannot meet. */
+function valid(c: LayerCase): boolean {
+  if (c.producer === "preparePlanText") {
+    // The reservation is the producer: it starts with none, and a cancelled one needs a retirement before its task.
+    if (c.slot !== "absent" || c.point !== "none") return false;
+    return !(c.outcome === "cancelled" && c.retirement === "current");
+  }
+  return (c.retirement === "current") === (c.point === "none");
+}
+
+function* layerCases(): Generator<LayerCase> {
+  for (const base of familyCases())
+    for (const slot of SLOTS)
+      for (const point of [...POINTS, "none"] as const)
+        for (const reprepare of REPREPARE) {
+          const c: LayerCase = { ...base, slot, point, reprepare };
           if (valid(c)) yield c;
         }
 }
-const nameOf = (c: Case) =>
-  `${c.preparation} ${c.capture} start:${c.startDuringCapture} retire:${c.retire}`;
+const layerName = (c: LayerCase) =>
+  `${caseName(c)} slot:${c.slot} at:${c.point} reprepare:${c.reprepare}`;
 
-/** The host as the lease sees it: which plans' JSON it holds, and how often it wrote one. */
-class HostModel {
-  readonly slots = new Set<string>();
-  writes = 0;
-  /** Whether the host is gone, with the Worker. */
-  lost = false;
-  apply(message: { readonly kind: "write" | "release"; readonly plan: string }) {
-    if (this.lost) return;
-    if (message.kind === "release") this.slots.delete(message.plan);
-    else if (!this.slots.has(message.plan)) {
-      this.writes += 1;
-      this.slots.add(message.plan);
-    }
-  }
-  /** A capture taking `plan`'s JSON: written now if not held, except for a session the host no longer holds. */
-  take(plan: string, gone: boolean): string | null {
-    const held = this.slots.delete(plan);
-    if (held) return `json of ${plan}`;
-    if (gone) return null;
-    this.writes += 1;
-    return `json of ${plan}`;
-  }
-}
+/** Whether the producer's outcome reads the plan's JSON in the host. */
+const reads = (producer: Producer, outcome: string) =>
+  !(producer === "captureKeep" && outcome === "gone");
 
-/** Runs `c` against `settle` and the host model, checking the invariants after every event. */
-function run(c: Case) {
-  const host = new HostModel();
-  let lease: PlanJsonLease = EMPTY_PLAN_JSON_LEASE;
-  let closed = false;
-  /** Every copy of `plan`'s JSON, at the time of a write: none may exist. */
-  let inFlight: string | null = null;
-  const copies = (plan: string) =>
-    [
-      host.slots.has(plan),
-      lease.unsaved?.plan === plan,
-      lease.prepared?.plan === plan,
-      inFlight === plan,
-    ].filter(Boolean).length;
-  const step = (event: PlanJsonEvent) => {
-    const settled = settle(lease, event);
-    lease = settled.lease;
-    if (closed) assert.deepEqual(settled.messages, [], `${nameOf(c)}: posted after closing`);
-    for (const message of settled.messages) {
-      if (message.kind === "write")
-        assert.equal(copies(message.plan), 0, `${nameOf(c)}: wrote ${message.plan} with a copy`);
-      host.apply(message);
-    }
-    if (event.kind === "dispose") closed = true;
-    for (const plan of host.slots)
-      assert.ok(
-        lease.live && plan === lease.current,
-        `${nameOf(c)}: the host holds ${plan} after ${event.kind}`,
-      );
-    return settled;
-  };
+function run(c: LayerCase) {
+  const h = harness(layerName(c));
   const retire = () => {
-    if (c.preparation === "replaced") {
-      step({ kind: "replace", plan: "B" });
-      step({ kind: "prepare", plan: "B" });
-    } else if (c.preparation === "disposed") step({ kind: "dispose" });
+    if (c.retirement === "replaced") {
+      h.event({ kind: "replace", plan: "B" });
+      h.event({ kind: "prepare", plan: "B" });
+    } else if (c.retirement === "disposed") h.event({ kind: "dispose" });
   };
-  step({ kind: "replace", plan: "A" });
-  step({ kind: "prepare", plan: "A" });
-  if (c.capture === "none") {
-    retire();
-    return { host, lease };
+  h.event({ kind: "replace", plan: "A" });
+  if (c.producer === "preparePlanText") {
+    h.event({ kind: "prepare", plan: "A" });
+    if (c.reprepare === "yes") h.event({ kind: "prepare", plan: "A" });
+    if (c.outcome === "cancelled") retire();
+    h.onHost((host) => host.task("A"), "the reservation's task");
+    if (c.outcome === "materialized") retire();
+    return h;
   }
-  const { source } = step({ kind: "captureStart", plan: "A" });
-  assert.equal(source?.kind, "host", `${nameOf(c)}: the first save takes the host's JSON`);
-  // The capture reaches the host: it takes the JSON, except where the Worker is lost first.
-  let json: string | null = null;
-  if (c.capture === "lost") {
-    host.lost = true;
-    host.slots.clear();
-  } else {
-    const before = host.writes;
-    json = host.take("A", c.capture === "gone");
-    if (host.writes > before)
-      assert.equal(copies("A"), 0, `${nameOf(c)}: the capture wrote A with a copy`);
-    inFlight = json === null ? null : "A";
-  }
-  if (c.startDuringCapture === "yes") step({ kind: "prepare", plan: "A" });
-  if (c.retire === "beforeReply") retire();
-  if (c.capture === "lost") step({ kind: "captureLost", plan: "A" });
-  else {
-    inFlight = null;
-    const { saving } = step({
-      kind: "captureReply",
-      plan: "A",
-      json,
-      saved: c.capture === "captured",
-    });
-    if (saving != null) step({ kind: "stored", entry: saving });
-  }
-  if (c.retire === "afterReply") retire();
-  // A later Start of A, while A is still the page's plan, needs a write only if no copy is held.
-  if (lease.live && lease.current === "A") step({ kind: "prepare", plan: "A" });
-  return { host, lease };
+  if (c.slot !== "absent") h.event({ kind: "prepare", plan: "A" });
+  if (c.slot === "ready") h.onHost((host) => host.task("A"), "the reservation's task");
+  if (c.point === "beforeRequest") retire();
+  // The producer reaches the host.
+  if (reads(c.producer, c.outcome)) h.onHost((host) => host.read("A"), `${c.producer} reading`);
+  if (c.reprepare === "yes") h.event({ kind: "prepare", plan: "A" });
+  if (c.point === "whileOut") retire();
+  // Its reply arrives: no lease event, for a reader keeps nothing; a waiting task may still run.
+  h.onHost((host) => host.task("A"), "a late task");
+  if (c.point === "afterReply") retire();
+  return h;
 }
 
-const CASES = [...product()];
+const CASES = [...layerCases()];
 
-test("the generated family covers every value of every axis and every pair of values", () => {
-  const names = new Set(CASES.map(nameOf));
+test("every op of the host is classified: a producer of the family, or named as none", () => {
+  const ops = persistenceOps(playerOpsContext());
+  assert.deepEqual(unclassifiedOps(ops), []);
+  for (const producer of Object.keys(PRODUCERS)) assert.ok(producer in ops, `${producer} is an op`);
+});
+
+test("the generated family holds every declared obligation and every pair of values that can meet", () => {
+  const names = new Set(CASES.map(layerName));
   assert.equal(names.size, CASES.length, "each case has its own name");
-  // EVIDENCE: invariant: the keys of the axes object, declared literally above.
-  const axes = Object.keys(AXES) as Axis[];
-  for (const axis of axes)
-    for (const value of AXES[axis])
-      assert.ok(
-        CASES.some((c) => c[axis] === value),
-        `no case for ${axis} = ${value}`,
-      );
-  // Every pair of values that a case can hold together is in some case.
-  for (const [i, left] of axes.entries())
-    for (const right of axes.slice(i + 1))
-      for (const a of AXES[left])
-        for (const b of AXES[right]) {
-          const possible = [...product()].some((c) => c[left] === a && c[right] === b);
-          const present = CASES.some((c) => c[left] === a && c[right] === b);
-          assert.equal(present, possible, `${left} = ${a} with ${right} = ${b}`);
-        }
+  // Every producer and outcome, at every retirement it can meet.
+  for (const base of familyCases()) {
+    const possible =
+      base.producer !== "preparePlanText" ||
+      base.outcome !== "cancelled" ||
+      base.retirement !== "current";
+    assert.equal(
+      CASES.some((c) => caseName(c) === caseName(base)),
+      possible,
+      caseName(base),
+    );
+  }
+  // Every reader at every slot state and retirement point, with and without a re-prepare.
+  for (const producer of Object.keys(PRODUCERS)) {
+    if (producer === "preparePlanText") continue;
+    for (const slot of SLOTS)
+      for (const point of POINTS)
+        for (const reprepare of REPREPARE)
+          assert.ok(
+            CASES.some(
+              (c) =>
+                c.producer === producer &&
+                c.slot === slot &&
+                c.point === point &&
+                c.reprepare === reprepare,
+            ),
+            `${producer} slot:${slot} at:${point} reprepare:${reprepare}`,
+          );
+  }
+  for (const retirement of RETIREMENTS) assert.ok(CASES.some((c) => c.retirement === retirement));
 });
 
 for (const c of CASES)
-  test(`plan JSON lifetime: ${nameOf(c)}`, () => {
-    const { host, lease } = run(c);
-    // At the end: a closed page holds nothing and leaves nothing in the host; a replaced plan leaves nothing either.
-    if (c.preparation === "disposed") {
-      assert.deepEqual([...host.slots], []);
-      assert.deepEqual([lease.unsaved, lease.prepared], [null, null]);
-    }
-    if (c.preparation === "replaced") assert.ok(!host.slots.has("A"));
-    // A's JSON is written at most once in the case, unless the Worker was lost and the page wrote it again after.
-    assert.ok(host.writes <= 2, `${nameOf(c)}: ${host.writes} writes`);
+  test(`plan JSON lifetime: ${layerName(c)}`, () => {
+    const h = run(c);
+    // At the end the host holds the JSON of the live page's current plan alone, written once for this tenure.
+    if (c.retirement === "current") {
+      const reserved =
+        c.producer === "preparePlanText" || c.slot !== "absent" || c.reprepare === "yes";
+      assert.equal(h.host.slots.get("A"), reserved ? "ready" : undefined, layerName(c));
+    } else assert.equal(h.host.slots.has("A"), false, layerName(c));
+    if (c.retirement === "disposed") assert.equal(h.host.slots.size, 0);
+    assert.equal(h.lease().live, c.retirement !== "disposed");
   });
 
-test("a retry stores the same bytes, and a Start prepared while a save holds the JSON takes them", () => {
-  let lease: PlanJsonLease = EMPTY_PLAN_JSON_LEASE;
-  const apply = (event: PlanJsonEvent) => {
-    const settled = settle(lease, event);
-    lease = settled.lease;
-    return settled;
-  };
-  apply({ kind: "replace", plan: "A" });
-  assert.deepEqual(apply({ kind: "prepare", plan: "A" }).messages, [{ kind: "write", plan: "A" }]);
-  apply({ kind: "captureStart", plan: "A" });
-  const saving: PlanJson | null | undefined = apply({
-    kind: "captureReply",
-    plan: "A",
-    json: "bytes",
-    saved: true,
-  }).saving;
-  assert.deepEqual(saving, { plan: "A", json: "bytes" });
-  // The store refused the save: the retry takes the page's copy.
-  const retry = apply({ kind: "captureStart", plan: "A" }).source;
-  assert.deepEqual(retry, { kind: "page", entry: saving });
-  // A Start prepared while that save still holds it takes the same JSON, and asks the host for nothing.
-  assert.deepEqual(apply({ kind: "prepare", plan: "A" }).messages, []);
-  apply({ kind: "stored", entry: saving! });
-  assert.deepEqual(apply({ kind: "captureStart", plan: "A" }).source, {
-    kind: "page",
-    entry: saving,
-  });
+test("A, then B, then A again: each tenure of A writes its JSON once, and B's is let go", () => {
+  const h = harness("A B A");
+  for (const plan of ["A", "B", "A"]) {
+    h.event({ kind: "replace", plan });
+    h.event({ kind: "prepare", plan });
+    h.onHost((host) => host.task(plan), `${plan}'s task`);
+    h.onHost((host) => host.read(plan), `a read of ${plan}`);
+  }
+  assert.deepEqual([...h.host.slots.keys()], ["A"]);
+  assert.equal(h.host.transient, 0);
+  assert.equal(
+    [...h.host.writes.values()].reduce((sum, count) => sum + count, 0),
+    3,
+  );
+});
+
+test("a restore racing a Start of the same plan reads the one reservation, which neither removes", () => {
+  const h = harness("restore racing Start");
+  h.event({ kind: "replace", plan: "A" });
+  h.event({ kind: "prepare", plan: "A" });
+  // The comparison reads while the task waits; the Start prepares again meanwhile; a keep's capture reads it too.
+  h.onHost((host) => host.read("A"), "the comparison");
+  h.event({ kind: "prepare", plan: "A" });
+  h.onHost((host) => host.task("A"), "the reservation's task");
+  h.onHost((host) => host.read("A"), "the first save's capture");
+  assert.equal(h.host.slots.get("A"), "ready");
+  assert.equal(h.host.writes.get("A#1"), 1);
+  assert.equal(h.host.transient, 0);
 });
