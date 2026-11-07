@@ -26,6 +26,8 @@ import { createLocalScriptStorage } from "../player/script-storage.js";
 import type { StorageBundle } from "../player/storage-transfer.js";
 import {
   KEEP_WRITES,
+  SAVED_DATA_SCRIPTS,
+  type ImportedScript,
   LIFECYCLE,
   OWNERSHIP_MODES,
   RECORDED_STORES,
@@ -1131,7 +1133,8 @@ function methodClass(surface: string, key: string): string | undefined {
     ([name]) => name === surface,
   )?.[1];
   assert.ok(classes !== undefined, `the surface ${surface} is classified`);
-  return classes[key];
+  // Its own entries alone: a name every object inherits, such as `toString`, is no class.
+  return Object.hasOwn(classes, key) ? classes[key] : undefined;
 }
 
 /**
@@ -1632,6 +1635,22 @@ function bundleOf(scopes: readonly string[]): StorageBundle {
   };
 }
 
+const SCOPE_OF: Readonly<Record<ImportedScript, string>> = { shown: SCOPE, other: OTHER_SCOPE };
+/** The saved-data import `name` on a page of `at`: the scripts it declares, in the room its route names. */
+const savedDataImportOf = (
+  context: TestContext,
+  at: FamilyBrowser,
+  fixture: Fixture,
+  name: keyof typeof SAVED_DATA_SCRIPTS,
+) =>
+  savedDataImportOn(
+    context,
+    at,
+    fixture,
+    SAVED_DATA_SCRIPTS[name].imports.map((script) => SCOPE_OF[script]),
+    VARIANTS[name].route === "debug" ? "debug" : undefined,
+  );
+
 /** A saved-data import of `scopes` on a page of `at`, in its normal room or the debug room. */
 async function savedDataImportOn(
   context: TestContext,
@@ -1751,15 +1770,15 @@ const VARIANT_DRIVERS: Record<VariantName, Driver> = {
   "captureKeep debug twoPhotos": (context, at, fixture) =>
     keepOn(context, at, fixture, "first", "debug", TWO_SESSION_PHOTOS_PLAN, 2),
   "savedDataImport captured shown": (context, at, fixture) =>
-    savedDataImportOn(context, at, fixture, [SCOPE]),
+    savedDataImportOf(context, at, fixture, "savedDataImport captured shown"),
   "savedDataImport captured shownAndOther": (context, at, fixture) =>
-    savedDataImportOn(context, at, fixture, [SCOPE, OTHER_SCOPE]),
+    savedDataImportOf(context, at, fixture, "savedDataImport captured shownAndOther"),
   "savedDataImport debug ownScript": (context, at, fixture) =>
-    savedDataImportOn(context, at, fixture, [SCOPE], "debug"),
+    savedDataImportOf(context, at, fixture, "savedDataImport debug ownScript"),
   "savedDataImport captured otherOnly": (context, at, fixture) =>
-    savedDataImportOn(context, at, fixture, [OTHER_SCOPE]),
+    savedDataImportOf(context, at, fixture, "savedDataImport captured otherOnly"),
   "savedDataImport plain photoNotStored": (context, at, fixture) =>
-    savedDataImportOn(context, at, fixture, [SCOPE]),
+    savedDataImportOf(context, at, fixture, "savedDataImport plain photoNotStored"),
 };
 
 /** What each failing import says when it is current, and what it offers then. */
@@ -2006,22 +2025,39 @@ async function ownershipRun(
   return result;
 }
 
-/** The saved-data imports whose bundle holds another script, and those that store the shown one's, as their drivers do. */
-const IMPORTS_OTHER = new Set<VariantName>([
-  "savedDataImport captured shownAndOther",
-  "savedDataImport captured otherOnly",
-]);
-const STORES_SHOWN = new Set<VariantName>([
-  "savedDataImport captured shown",
-  "savedDataImport captured shownAndOther",
-  "savedDataImport debug ownScript",
-]);
+/** The saved-data import `name`'s declared scripts, or `null` for another variant. */
+const savedDataScripts = (name: VariantName) =>
+  Object.entries(SAVED_DATA_SCRIPTS).find(([variant]) => variant === name)?.[1] ?? null;
+
+/**
+ * The scripts a saved-data import wrote, as `SAVED_DATA_SCRIPTS` declares: another script's, written also after the page
+ * moved on, and, when it ran to its end (`ranToEnd`), the shown one's; a script it does not write keeps no imported value.
+ */
+async function assertWrites(name: VariantName, at: FamilyBrowser, ranToEnd: boolean) {
+  const scripts = savedDataScripts(name);
+  if (scripts === null) return;
+  const writes: readonly ImportedScript[] = scripts.writes;
+  const other = (await at.otherValues(OTHER_SCOPE)).map((entry) => entry.key).sort();
+  assert.deepEqual(
+    other,
+    writes.includes("other") ? ["photo", "score"] : [],
+    "the other script's saved data",
+  );
+  if (!ranToEnd) return;
+  const stored = new Map((await at.rawProvider.load()).map((entry) => [entry.key, entry.value]));
+  assert.equal(
+    stored.get("score") === 3,
+    writes.includes("shown"),
+    "the shown script's saved data",
+  );
+}
 
 // EVIDENCE: invariant: the keys of `VARIANTS`, declared literally in the descriptor.
 for (const name of Object.keys(VARIANTS) as VariantName[]) {
   const variant: Variant = VARIANTS[name];
   test(`continuation ownership: ${name}, unheld`, async (context) => {
-    const { outcome, log } = await ownershipRun(context, name, null, null);
+    const { outcome, log, at } = await ownershipRun(context, name, null, null);
+    await assertWrites(name, at, true);
     const failure = CURRENT_FAILURES[name];
     if (failure === undefined) {
       assert.equal(outcome.rejected, false, `${name} rejected`);
@@ -2039,23 +2075,9 @@ for (const name of Object.keys(VARIANTS) as VariantName[]) {
       test(`continuation ownership: ${name} at ${point.name}#${point.skip + 1}, ${move}`, async (context) => {
         const row = await ownershipRun(context, name, point, move);
         // Another script's saved data, which the player confirmed, are written also after this page moved on, while the
-        // page shows nothing of the import (`ownershipRun`'s checks).
-        if (IMPORTS_OTHER.has(name))
-          assert.deepEqual(
-            (await row.at.otherValues(OTHER_SCOPE)).map((entry) => entry.key).sort(),
-            ["photo", "score"],
-            "the other script's saved data were not written",
-          );
-        if (retires) return;
-        // A saved-data import the move left current goes on: the script's own saved values are the imported ones.
-        if (variant.producer === "savedDataImport") {
-          if (!STORES_SHOWN.has(name)) return;
-          const stored = new Map(
-            (await row.at.rawProvider.load()).map((entry) => [entry.key, entry.value]),
-          );
-          assert.equal(stored.get("score"), 3, "the current import did not store its values");
-          return;
-        }
+        // page shows nothing of the import (`ownershipRun`'s checks); a current import writes the shown one's too.
+        await assertWrites(name, row.at, retires !== true);
+        if (retires || variant.producer === "savedDataImport") return;
         // A keep the move left current goes on: it saves, or after a state it cannot write, says so.
         if (name === "captureKeep captured forget")
           assert.ok(
@@ -2247,8 +2269,31 @@ test("continuation ownership covers its descriptor: each route driven or named, 
       .map(([method]) => `${surface}.${method}`),
   );
   assert.deepEqual(Object.keys(SURFACES).sort(), [...RECORDED_STORES, ...within].sort());
-  for (const name of [...IMPORTS_OTHER, ...STORES_SHOWN])
-    assert.equal(VARIANTS[name].producer, "savedDataImport", name);
+  // Each saved-data import declares its scripts, and writes only scripts it imports.
+  // EVIDENCE: invariant: the keys of `VARIANTS`, declared literally in the descriptor.
+  for (const name of Object.keys(VARIANTS) as VariantName[])
+    assert.equal(
+      savedDataScripts(name) !== null,
+      VARIANTS[name].producer === "savedDataImport",
+      name,
+    );
+  for (const [name, { imports, writes }] of Object.entries(SAVED_DATA_SCRIPTS))
+    for (const script of writes)
+      assert.ok(
+        imports.some((imported) => imported === script),
+        `${name} writes ${script}`,
+      );
+  // No surface classifies a method it does not name: an unknown name, or one every object inherits.
+  for (const surface of Object.keys(SURFACES))
+    for (const key of [
+      "unknownMethod",
+      "toString",
+      "constructor",
+      "hasOwnProperty",
+      "valueOf",
+      "__proto__",
+    ])
+      assert.equal(methodClass(surface, key), undefined, `${surface}.${key}`);
   let held = 0;
   for (const variant of variants) {
     assert.ok(holdable(variant.trace).length > 0, `a variant of ${variant.producer} holds nothing`);

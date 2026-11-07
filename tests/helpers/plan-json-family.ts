@@ -442,6 +442,29 @@ export const VARIANTS = {
 } as const satisfies Record<string, Variant>;
 export type VariantName = keyof typeof VARIANTS;
 
+/** A script of a saved-data import: the one the page shows, or another. */
+export type ImportedScript = "shown" | "other";
+type SavedDataVariant = {
+  [K in VariantName]: (typeof VARIANTS)[K]["producer"] extends "savedDataImport" ? K : never;
+}[VariantName];
+/**
+ * Each saved-data import's scripts: those its bundle holds, all chosen, and those whose saved data it writes when it runs
+ * to its end, none included. Another script's are written also after the page moved on (`OTHER_SCRIPT_WRITES`).
+ */
+export const SAVED_DATA_SCRIPTS = {
+  "savedDataImport captured shown": { imports: ["shown"], writes: ["shown"] },
+  "savedDataImport captured shownAndOther": {
+    imports: ["shown", "other"],
+    writes: ["shown", "other"],
+  },
+  "savedDataImport debug ownScript": { imports: ["shown"], writes: ["shown"] },
+  "savedDataImport captured otherOnly": { imports: ["other"], writes: ["other"] },
+  "savedDataImport plain photoNotStored": { imports: ["shown"], writes: [] },
+} as const satisfies Record<
+  SavedDataVariant,
+  { readonly imports: readonly ImportedScript[]; readonly writes: readonly ImportedScript[] }
+>;
+
 /**
  * Each operation's route and ownership no variant drives (`producer route ownership`, for each ownership of
  * `OWNERSHIP_MODES`), and why: a supported path cannot go undriven unless named here.
