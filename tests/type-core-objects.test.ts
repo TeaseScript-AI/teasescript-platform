@@ -5,7 +5,7 @@ import type { CorePass } from "../src/type-inference/core/answers.js";
 import { analyseCore, solveDemands } from "../src/type-inference/core/answers.js";
 import { Consumers } from "../src/type-inference/core/consumers.js";
 import { indexPaths, stepsOf } from "../src/type-inference/core/contract/literal-index.js";
-import { exportNames } from "../src/type-inference/core/contract/key-ids.js";
+import { exportNames, keyBelowIn } from "../src/type-inference/core/contract/key-ids.js";
 import { absentWriterAt, objectsAt } from "../src/type-inference/core/contract/objects.js";
 import {
   DemandExhausted,
@@ -13,6 +13,8 @@ import {
   withTestDemandAllowance,
 } from "../src/type-inference/core/budget.js";
 import { firstWriter, REASON, type Writer } from "../src/type-inference/core/items.js";
+import type { ObjectsProof } from "../src/type-inference/core/contract/model.js";
+import type { ProofDemand } from "../src/type-inference/core/solver.js";
 import { stepName } from "../src/type-inference/core/program.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
@@ -434,4 +436,53 @@ test("a declined objects query charges each entry it visits, and stops at the fi
   });
   // (it stops at the first decline: the work does not grow with the entries after it)
   assert.ok(units[1]! <= units[0]! + 8, units.join(", "));
+});
+
+/**
+ * The visits `absentWriterAt` makes over a covered query's proof graph, counted from the proofs themselves: each node,
+ * each key and each store at the property below it, each writer, each list and each child edge, a seen one too.
+ */
+function queryVisits(pass: CorePass, first: ProofDemand<ObjectsProof>, step: string): number {
+  const { contract, solver, definitions } = pass;
+  let visits = 0;
+  const seen = new Set<string>([first.key]);
+  const open = [first];
+  while (open.length > 0) {
+    const { proof } = solver.run(solver.proven(open.pop()!));
+    visits += 1;
+    for (const { key } of proof!.keys)
+      visits += 1 + (definitions.byKey.get(keyBelowIn(contract, key, [step])) ?? []).length;
+    visits += proof!.prior.length + proof!.lists.length + proof!.children.length;
+    for (const child of proof!.children)
+      if (!seen.has(child.key)) {
+        seen.add(child.key);
+        open.push(child);
+      }
+  }
+  return visits;
+}
+
+test("a covered objects query charges exactly the visits its proof graph holds, over the families and the controls (#1747)", () => {
+  // (the lead's invariant after three uncharged loops: the module's own counter against an independent count, so a
+  // fourth loop cannot pass by a bound)
+  const sources = [...SHAPES.map((shape) => family(shape, 8, true)), ...CONTROLS];
+  let checked = 0;
+  for (const source of sources) {
+    const pass = passesOf(source, MODES[0]!, 30_000_000).at(-1)!;
+    const { program, contract, solver } = pass;
+    inMode(MODES[0]!, () => {
+      for (const literal of program.hasOf.keys())
+        for (const step of ["zz", "a", "p"]) {
+          const ask = () => absentWriterAt(contract, literal, [], step);
+          // (warmed: every proof built, so the second ask is the traversal alone)
+          if (!solver.run(ask()).covered) continue;
+          const before = program.work.counts().get("objectSteps") ?? 0;
+          solver.run(ask());
+          const charged = (program.work.counts().get("objectSteps") ?? 0) - before;
+          assert.equal(charged, queryVisits(pass, objectsAt(contract, literal, []), step), source);
+          checked += 1;
+        }
+    });
+  }
+  assert.ok(checked > 20, String(checked));
 });
