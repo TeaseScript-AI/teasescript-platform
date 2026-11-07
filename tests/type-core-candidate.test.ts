@@ -3726,6 +3726,25 @@ test("the route rule's error stands where a run can bring the null unchecked, an
       `${source}: ${failure} ${JSON.stringify(derived.discharges)}`,
     );
   }
+  // (S7: C1's check of a copied integer that may be null is its store's, and the predicted run fails where the plan's
+  // does: Sol's classification F1 on #1937)
+  const copied =
+    "let t:integer=7\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:null,nest:{n:null,keep:1},spare:1}\n" +
+    "let a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n";
+  const copiedRequest = coreRequest([{ path: "main.tease", source: copied }]);
+  assert.ok(copiedRequest !== null);
+  const syntax = syntaxOf(copied);
+  const derived = derive(syntax, compactAnalysis(copiedRequest));
+  assert.ok(
+    derived.discharges.some((d) => d.by === "store"),
+    JSON.stringify(derived.discharges),
+  );
+  const compiled = candidate(copied);
+  assert.ok(compiled.plan !== null);
+  assert.deepEqual(
+    runGlobals(compiled.plan, {}),
+    evaluate(syntax, derived.stores, {}, false, derived.content).run,
+  );
 });
 
 test("the tested-producer rule admits its closed set of forms over every axis, and anything else is the route rule's error (AD-1, #1073 PR 4)", () => {
@@ -3850,6 +3869,67 @@ test("the tested-producer rule admits its closed set of forms over every axis, a
     0,
   );
   assert.equal(covered.size, expected);
+});
+
+test("a route through an arm its entry narrowing leaves no kind does not promote, and keeps the warning (AD-1, #1938)", () => {
+  // (Sol's F2 on #1937: the expected outcome from the guard's own table, never the engine's. A writer of a possible
+  // null; an `if` whose one arm overwrites the key and whose other arm is the route; its test of `other` makes the
+  // route's arm infeasible only where `other` holds no kind its entry's narrowing keeps. Unknown forms count as runs)
+  const FEASIBILITY = {
+    // (`other` may be an object, null or text: every arm of every form is entered on some run)
+    feasible:
+      'let other = {k: 1}\nif askBoolean("o") { other = null }\nif askBoolean("p") { other = "s" }\n',
+    // (`other` is an object on every run)
+    "infeasible by entry narrowing": "let other = {k: 1}\n",
+    // (a comparison, not N1's form: the guard proves nothing, and the arm counts as a run, #1938's residual)
+    unknown: "let other = {k: 1}\n",
+  } as const;
+  // (each form: whether its truth, and its falsity, leaves an object no kind)
+  const FORMS: readonly (readonly [string, boolean, boolean])[] = [
+    ["other != null", false, true],
+    ["other == null", true, false],
+    ["other is string", true, false],
+  ];
+  const covered = new Set<string>();
+  const wrong: string[] = [];
+  for (const [feasibility, declare] of Object.entries(FEASIBILITY))
+    for (const [test, holds, fails] of FORMS)
+      for (const negated of [false, true])
+        for (const killIn of ["then", "else"] as const) {
+          const plain = feasibility === "unknown" ? "other.k == 1" : test;
+          const condition = negated ? `not (${plain})` : plain;
+          const kill = "n = 1";
+          const statement =
+            killIn === "then"
+              ? `if ${condition} { ${kill} }`
+              : `if ${condition} { say "y" } else { ${kill} }`;
+          const source =
+            'let c = askBoolean "c"\nlet n = 1\nif c { n = null }\n' +
+            declare +
+            statement +
+            "\nrepeat n {}\nexit\n";
+          // (the route runs through the arm without the overwrite: its truth's arm where the else arm overwrites)
+          const truth = negated ? fails : holds;
+          const falsity = negated ? holds : fails;
+          const routeArmDead =
+            feasibility === "infeasible by entry narrowing" &&
+            (killIn === "then" ? falsity : truth);
+          const request = coreRequest([{ path: "main.tease", source }]);
+          assert.ok(request !== null, source);
+          const [error, warning] = inBothOrders(() => {
+            const diagnostics = analyseCore(request).diagnostics;
+            return [
+              diagnostics.some((d) => d.class === "compile-error"),
+              diagnostics.some((d) => d.class === "warning-runtime-check"),
+            ] as const;
+          });
+          if (error === routeArmDead || (routeArmDead && !warning))
+            wrong.push(`${routeArmDead ? "warning" : "error"} expected: ${source}`);
+          covered.add([feasibility, test, negated, killIn].join(" | "));
+        }
+  assert.deepEqual(wrong, []);
+  // (the coverage check: every feasibility, form, polarity and position, each once)
+  assert.equal(covered.size, Object.keys(FEASIBILITY).length * FORMS.length * 2 * 2);
 });
 
 test("no production code selects the core: only tests reach the candidate entry", () => {
