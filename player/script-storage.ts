@@ -10,7 +10,12 @@ import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoin
  */
 export interface ScriptStorageProvider {
   readonly scope: string;
-  /** A complete, fresh view of the scope; it rejects when storage cannot be used and never reports that as empty. */
+  /**
+   * A fresh view of the scope's readable values. It rejects when storage cannot be used, and never reports that as
+   * empty. An item it cannot read or validate is left out, as the browser's local provider does, so a successful load
+   * proves only the values it returns: a consumer that needs every stored item, such as one reclaiming what no value
+   * references, treats an unreadable item's value, and its media, as gone.
+   */
   load(): Promise<readonly RuntimeScriptStorageEntrySnapshot[]>;
   /** Resolves once the write is persisted; a `null` value removes the key, like `save null`. Rejects otherwise. */
   write(key: string, value: SerializableRuntimeValue): Promise<void>;
