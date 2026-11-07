@@ -18,6 +18,9 @@ import type { PlayerSession } from "../player/runtime-view.js";
 import { CaptureService } from "../player/session-camera.js";
 import { FileStoreService } from "../player/stored-files.js";
 import { inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
+import { memoryKeptSessionStore, type KeptSessionStore } from "../player/kept-sessions.js";
+import type { ScriptStorageProvider } from "../player/script-storage.js";
+import { preparedPlan } from "./helpers/prepared-plan.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { serviceSection } from "./helpers/service-section.js";
 
@@ -42,6 +45,8 @@ const CHANGED = [
   "the hosted script's preparation",
   "the start page's preparation",
   "a call view request",
+  "a keep's capture",
+  "Continue's restore",
 ] as const;
 /** Consumers that were already safe, as controls. */
 const CONTROLS = [
@@ -230,7 +235,13 @@ test("a lock answer in flight when the Worker is lost ends quietly", async () =>
 interface LossHost {
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly hostError: Readonly<Ref<string | null>>;
+  readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   readonly bridge: Promise<PlayerBridge>;
+  loadScriptStorage(): Promise<void>;
+  prepareScript(
+    plan: string,
+    create: { readonly plan: string; readonly options: () => PlayerRuntimeSessionOptions },
+  ): Promise<void>;
   prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
   activate(): Promise<void>;
   demandCallView(): { release(): void };
@@ -245,6 +256,8 @@ let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
   readonly debugHistorySpill: () => Promise<null>;
   readonly resolveAsset?: (path: string) => string | null;
+  readonly scriptStorage?: ScriptStorageProvider;
+  readonly keptSessions?: KeptSessionStore;
 }) => LossHost;
 let facade: typeof InProcess;
 let client: typeof Client;
@@ -438,6 +451,100 @@ test("a call view request in flight when the Worker is lost ends quietly, and th
   assert.deepEqual(unhandled, []);
   assert.equal(player.hostError.value, "BridgeLostError");
   assert.equal(hostErrors(), 1);
+});
+
+/** A page whose script keeps its session, on its in-process engine with replies after `delayMs`, and a loss to inject. */
+async function keepingPage(context: TestContext, kept: KeptSessionStore, delayMs: number) {
+  for (const [name, value] of Object.entries({
+    document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
+    window: new EventTarget(),
+  })) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+    context.after(() => {
+      if (previous) Object.defineProperty(globalThis, name, previous);
+      else Reflect.deleteProperty(globalThis, name);
+    });
+  }
+  const scriptStorage: ScriptStorageProvider = {
+    scope: "loss",
+    load: async () => [],
+    write: async () => {},
+    replace: async () => {},
+    clear: async () => {},
+  };
+  const bridge = facade.createInProcessBackend(BUILD, { delayMs });
+  const lose = injectLoss(bridge, client.BridgeLostError);
+  const scope = effectScope();
+  const player = scope.run(() =>
+    usePlayerSession({
+      bridge: Promise.resolve(bridge),
+      debugHistorySpill: async () => null,
+      scriptStorage,
+      keptSessions: kept,
+    }),
+  )!;
+  context.after(() => scope.stop());
+  await player.loadScriptStorage();
+  const plan = compiler.compilePlayerProject(
+    'let pick = askChoice "Go"\nsay "x", instant\nexit',
+  ).plan!;
+  const token = await preparedPlan(player.bridge, plan);
+  return { bridge, player, lose, token };
+}
+
+test("a keep's capture in flight when the Worker is lost keeps the session kept before, and ends quietly", async (context) => {
+  covered.add("a keep's capture");
+  const kept = memoryKeptSessionStore();
+  const { player, lose, token } = await keepingPage(context, kept, 50);
+  await player.prepareScript(token, { plan: token, options: () => ({ wallClockMs: 0 }) });
+  await player.activate();
+  // The session is kept at the question it presents.
+  for (let turn = 0; (await kept.session("loss")) === null; turn++) {
+    assert.ok(turn < 100, "the session was not kept");
+    await turns(1);
+  }
+  const before = await kept.session("loss");
+  const unhandled = await unhandledDuring(async () => {
+    // Hiding the page keeps the session again; its capture is posted, its reply 50 ms away.
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await turns(2);
+    lose();
+  });
+  assert.deepEqual(unhandled, []);
+  assert.deepEqual(await kept.session("loss"), before, "the session kept before stays");
+  assert.equal(player.hostError.value, "BridgeLostError");
+});
+
+test("Continue's restore in flight when the Worker is lost ends quietly, and offers no Continue", async (context) => {
+  covered.add("Continue's restore");
+  const kept = memoryKeptSessionStore();
+  {
+    const first = await keepingPage(context, kept, 0);
+    await first.player.prepareScript(first.token, {
+      plan: first.token,
+      options: () => ({ wallClockMs: 0 }),
+    });
+    await first.player.activate();
+    for (let turn = 0; (await kept.session("loss")) === null; turn++) {
+      assert.ok(turn < 100, "the session was not kept");
+      await turns(1);
+    }
+  }
+  const { player, lose, token } = await keepingPage(context, kept, 50);
+  const unhandled = await unhandledDuring(async () => {
+    const preparing = player.prepareScript(token, {
+      plan: token,
+      options: () => ({ wallClockMs: 0 }),
+    });
+    // The restore is posted, its reply 50 ms away.
+    await turns(2);
+    lose();
+    await preparing;
+  });
+  assert.deepEqual(unhandled, []);
+  assert.notEqual(player.activation.value, "continue");
 });
 
 test("the Worker's readiness that fails leaves no rejection unhandled", async () => {

@@ -1788,15 +1788,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         withPlan: withPlan && retry === null,
       });
     } catch (error) {
+      // A request the Worker's loss ended, and a read of a session the host no longer holds, keep the point kept before.
+      if (
+        endsQuietly(error) ||
+        (error instanceof BridgeRequestError && error.name === "SessionGoneError")
+      )
+        return;
       // A state this browser cannot write, such as one holding a list too long to save, cannot be kept, and the point kept
       // before must not stand in for it: a reload would go on from an earlier state as if it were this one.
-      if (
-        error instanceof BridgeRequestError &&
-        error.kind === "engine" &&
-        error.name !== "SessionGoneError"
-      )
-        await forgetKeptSession(current);
-      // A host that is gone, or no longer holds the session, keeps the point kept before.
+      await forgetKeptSession(current);
       return;
     }
     const { snapshotJson } = capture;
