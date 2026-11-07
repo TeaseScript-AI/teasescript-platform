@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
 import { compilePlayerProject } from "../player/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
@@ -13,6 +11,7 @@ import { createSourceDebugSidecar, listRandomSites } from "../src/index.js";
 import { loadSourceDebugSidecar } from "../src/runtime/debug/source-sidecar.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
+import { runRetentionChild } from "./helpers/retention-witness.js";
 import { PROJECT } from "./helpers/source-ops-project.js";
 
 /*
@@ -125,8 +124,9 @@ test("a published plan with no sources gives no code", async () => {
 
 /*
  * Session data held beyond teardown, as an invariant over a generated family: every route a plan's code comes by, and
- * every point a `drawCode` can complete at, against a teardown. Nothing the ops stored under a plan token, nor any
- * object reachable from it or a debug file an excerpt was made from, stays held after it, wherever it was kept.
+ * every point a `drawCode` can complete at, against a teardown. Through the retention witness: no string with the
+ * case's marker stays anywhere, the torn-down connection reaches no more than a fresh one, and nothing it reached
+ * before stays alive elsewhere.
  */
 const AXES = {
   route: ["source", "restored"],
@@ -137,23 +137,16 @@ const CASES = AXES.route.flatMap((route) =>
 );
 
 test("after teardown nothing the source ops touched stays held, however a request completes", () => {
-  const child = spawnSync(
-    process.execPath,
-    [
-      "--expose-gc",
-      fileURLToPath(new URL("./helpers/source-ops-lifecycle.js", import.meta.url)),
-      JSON.stringify(CASES),
-    ],
-    { encoding: "utf8" },
+  const { report, hits } = runRetentionChild(
+    new URL("./helpers/source-ops-lifecycle.js", import.meta.url),
+    CASES,
   );
-  assert.equal(child.status, 0, child.stderr);
-  // EVIDENCE: fixture: the child writes one report per case it was given.
-  const reports = JSON.parse(child.stdout) as readonly {
+  // EVIDENCE: fixture: the child reports one entry per case it was given.
+  const reports = report as readonly {
     readonly name: string;
     readonly late: "none" | "code" | "no code";
-    readonly touched: readonly string[];
-    readonly retained: readonly string[];
-    readonly context: number;
+    readonly extra: number;
+    readonly held: number;
   }[];
   // Coverage, from the names the child reports: every axis value, and every pair of them.
   const names = reports.map(({ name }) => name.split("/"));
@@ -169,15 +162,11 @@ test("after teardown nothing the source ops touched stays held, however a reques
         names.some(([r, c]) => r === route && c === completion),
         `${route}/${completion}`,
       );
-  for (const report of reports) {
-    assert.deepEqual(
-      report.touched,
-      ["file", "plan or sidecar", "sources", "text"],
-      `${report.name} watches what the ops keep`,
-    );
-    assert.deepEqual(report.retained, [], `${report.name} keeps nothing past teardown`);
-    assert.equal(report.context, 0);
+  for (const { name, late, extra, held } of reports) {
+    assert.deepEqual(hits.get(name), [], `${name}: no string with its marker stays`);
+    assert.equal(extra, 0, `${name}: the torn-down connection reaches what a fresh one does`);
+    assert.equal(held, 0, `${name}: nothing the connection reached stays alive`);
     // A request torn down under it answers no code.
-    assert.equal(report.late, report.name.endsWith("/settled") ? "none" : "no code", report.name);
+    assert.equal(late, name.endsWith("/settled") ? "none" : "no code", name);
   }
 });
