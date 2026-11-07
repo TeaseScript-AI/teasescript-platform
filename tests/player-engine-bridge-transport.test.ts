@@ -241,7 +241,8 @@ test("the comparator tells apart what native clone keeps, and refuses every kind
   } as const;
   const unsupported = {
     "an ArrayBuffer": new ArrayBuffer(1),
-    "a resizable buffer": new ArrayBuffer(1, { maxByteLength: 2 }),
+    // (made by another realm's code: this project's ES2023 types have no resizable buffer)
+    "a resizable buffer": vm.runInNewContext("new ArrayBuffer(1, { maxByteLength: 2 })"),
     "a shared buffer": new SharedArrayBuffer(1),
     "a boxed number": Object(1),
     "an Error": new Error("e"),

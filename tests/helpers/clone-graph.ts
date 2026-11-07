@@ -212,8 +212,10 @@ export function cloneKind(value: object, classes: readonly RecordClass[] = []): 
   if (kinds.has("unsupported") || kinds.size > 1) return "unsupported";
   const [kind] = kinds;
   if (kind === "buffer") {
-    // EVIDENCE: validation: `isArrayBuffer` or `isAnyArrayBuffer` held, and a shared buffer was refused above.
-    return (value as ArrayBuffer).resizable ? "unsupported" : "buffer";
+    // (ES2024's `resizable`, which this project's ES2023 types do not declare, is `true` on a resizable buffer.)
+    // EVIDENCE: validation: `isArrayBuffer` held, and a shared buffer was refused above.
+    const buffer = value as { readonly resizable?: boolean };
+    return buffer.resizable === true ? "unsupported" : "buffer";
   }
   if (kind !== undefined) return kind;
   if (Array.isArray(value)) return "array";
