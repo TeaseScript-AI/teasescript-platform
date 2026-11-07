@@ -58,6 +58,9 @@ A brief is a file the assignment points to. What it asks for follows the workflo
   by the scope and the job limits instead; a fixed number of cases to construct is a different thing and stays allowed.
 - Before sending, read the brief as its receiver would. Would it stop early, miss part of the scope (the code, its
   documentation, similar names), or not know what "done" means? Fix the brief rather than following up.
+- State the environment facts the builder will rely on: where its dependencies come from, which checks run locally and
+  which elsewhere, and how to format. Point to the environment's documentation for the details. A builder then never
+  works around a tool it only believed missing.
 - A final-review brief is also bounded: named cases, campaigns of a stated size, and evidence the reviewer samples
   rather than every run. The final reviewer's only write stays one comment on the pull request.
 - To complete a deliverable an agent left incomplete, continue that same session: it has read the material and knows
@@ -130,6 +133,10 @@ Your own wrong turns are lines too. Keep the triage with your state. At each str
 counts: lines per class since the last check, with their dispositions, and open issues per class with the age of the
 oldest, against the last check's counts. An issue open longer than two packages is triaged again: promoted, or closed
 with its reason. [`FRICTION.md`](FRICTION.md#priority) ranks the issues.
+
+Count the tax as well as the reports. Beside the structure report, count across the repository the lint disables,
+`@ts-expect-error` and `@ts-ignore` directives, and skipped tests, and compare them with the last check. The number
+rises visibly even when nobody reports it. A count that rises two packages running is a `tool contract` item.
 
 ## Facts that cross lanes
 

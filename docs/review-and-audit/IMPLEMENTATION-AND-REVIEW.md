@@ -193,11 +193,15 @@ caller, a run that could not change the result, a status nobody sourced. Everyon
 them: builders, reviewers, researchers and coordinators.
 
 - **What:** anything that cost you a wrong turn, a wasted run or a question nobody owned, or would cost the next agent
-  one.
+  one. That includes a tax that never felt like a wrong turn: anything you worked around, did by hand because a tool
+  did not, or repeated in more than one change.
 - **How:** one line in your next regular message (the plan, READY, a question, a review round or a report): its class
   from [`FRICTION.md`](../FRICTION.md), what happened, and what you did: fixed here, the issue you filed, or the rule
-  you propose. A line that fits no class is tagged `other` with a proposed class name.
+  you propose. A line that fits no class is tagged `other` with a proposed class name. READY and every review report
+  carry the line "Worked around or repeated by hand:", with "none" when there was nothing.
 - **At once** instead, in its own message, for a line that blocks you or keeps wasting compute.
+- **Before working around a missing tool or resource,** check the environment's documentation for it. If it is still
+  missing, report it at once instead of building the workaround silently.
 
 Fix what you can at its source, and report it even when fixed: the counts show where the next fix pays.
 

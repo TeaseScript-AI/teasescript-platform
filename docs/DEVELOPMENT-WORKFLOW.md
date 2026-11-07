@@ -576,7 +576,10 @@ READY contains:
 - every review round so far, as a link to its comment, with its verdict;
 - departures from the accepted plan;
 - friction met, one line each with its class and what was done (fixed here, the issue, or the proposed rule), as in
-  [Report what cost a wrong turn](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#report-what-cost-a-wrong-turn);
+  [Report what cost a wrong turn](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#report-what-cost-a-wrong-turn),
+  and the line "Worked around or repeated by hand:", with "none" when there was nothing;
+- each lint disable, `@ts-expect-error` or `@ts-ignore`, skipped test and allowlist entry the change adds, with its
+  reason;
 - on the full route, what the final review should cover.
 
 After any repair, the builder sends READY again at the new head.
