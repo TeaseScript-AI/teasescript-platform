@@ -152,9 +152,9 @@ import { serializableEquals } from "../../../src/runtime/values/serializable-val
 import { silence } from "./generatedAudio";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 import { useScreenWakeLock } from "./useScreenWakeLock";
-import { useCallView } from "./useCallView.js";
-import { usePlayerCameraLifecycle, useSessionCamera } from "./usePlayerCameras.js";
-import { usePlayerSessionServices } from "./usePlayerSessionServices.js";
+import { useCallView } from "./session/useCallView.js";
+import { usePlayerCameraLifecycle, useSessionCamera } from "./session/usePlayerCameras.js";
+import { usePlayerSessionServices } from "./session/usePlayerSessionServices.js";
 
 const PRIMED_AUDIO_ELEMENTS = 2;
 const SILENCE = silence(50);
