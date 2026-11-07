@@ -685,15 +685,17 @@ for (const [area, row] of rows) {
   for (const key of Object.keys(total)) total[key] += row[key];
 }
 // the runner artefacts (#1837): each run a tree's oracle left unanswered, by why (`run.mjs`'s `unansweredBy`:
-// `questions`, `stopped`, else `unknown`) or left alike, with its runs, sources and first witness; they stay apart from
+// `questions`, `memory`, `read-depth`, `stopped`, else `unknown`; its witness the node, or the binding, left) or left alike, with its runs, sources and first witness; they stay apart from
 // agreement as before, so that no round classifies them again
 const GROUPS = [
   "unanswered: questions",
+  "unanswered: memory",
+  "unanswered: read-depth",
   "unanswered: stopped",
   "unanswered: unknown",
   "unansweredAlike",
 ];
-const ISSUES = { "unanswered: questions": "#1837" };
+const ISSUES = { "unanswered: questions": "#1941" };
 const artefacts = new Map(
   GROUPS.map((group) => [group, { runs: 0, sources: new Set(), witness: null }]),
 );
@@ -728,6 +730,7 @@ for (const [place, was] of replay) {
         mode: left.mode,
         check: left.check,
         node: tree?.node ?? null,
+        ...(tree?.binding === undefined ? {} : { binding: tree.binding }),
       };
       const text = (w) => `${w.area} ${w.generator}/${w.source} ${w.mode} ${w.check}`;
       if (row.witness === null || text(witness) < text(row.witness)) row.witness = witness;

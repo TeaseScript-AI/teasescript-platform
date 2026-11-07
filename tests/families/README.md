@@ -42,15 +42,24 @@ descendant holding its stderr delays the next source (no compiler or oracle code
 either tree is an exception, never compared, because identical exceptions on both trees are not agreement (#1439): the
 runner prints it on stderr with its source, mode and check, writes it with each stack to `--out` and counts it apart
 from stalls, in a source that stalls later too (`tests/families-runner.test.ts`, in CI). A publication is had only up to
-the oracle's own stop: where its questions after a finished analysis pass the allowance, the nodes from that one on stay
-unanswered (`publicationHashes`'s `unanswered`, #1499). A run with any on either tree agrees only where both trees left
-the same count unanswered and published the same parts up to them (#1592): the allowance is the same on both trees, so
+the oracle's own stop. Its own questions (each binding's admitted types, then the occurrences) run apart from the
+analysis's allowance and stop after the one whose units pass the program's allowance plus 64 per cell returned (an
+occurrence's answer, its element's and each property's; two a binding), where 640 bytes per cell returned pass
+their room in the heap (the process's V8 heap limit less 1.5 GiB, which the analysis's own heap with sharing off
+needs, #1603: at the default heap, `W19-sources`, `W24-alias-group`, `W24-exit` and `W24-varied` at k = 1,024 end as
+`memory` in all four modes, #1945), or past the read-depth limit (#1837); the
+nodes from there on stay unanswered (`publicationHashes`'s `unanswered`, #1499), after the bindings left where the
+admitted types stopped. A publication run's unit limit grants the same 64 per cell its tree's oracle reports so far
+(`questionWork`), so the oracle's stop comes first wherever a question reports its cells before the runner's limit; one
+question's own cost is the runner's to bound. A run with any on either tree agrees only where both trees left
+the same count unanswered and published the same parts up to them (#1592): the bound is the same on both trees, so
 what it leaves unanswered is too. Such a run is counted apart (`unansweredAlike`); any other is neither agreement nor an
 exception: the runner writes it to `--out` and counts it apart (`unanswered`). Each such run records why on each tree
-(`by`, on `--out` and the source's `--work` line, and on a stored run): `questions` (the analysis finished and the
-oracle's later questions passed the allowance; their cost is #1837's), `stopped` (the analysis's own budget stopped it;
-today's oracle answers a stopped analysis whole, so this does not occur), or `unknown` where the tree's oracle or a run
-stored before this names none. `stalls.mjs` counts them as runner artefacts, one group a reason and `unansweredAlike`,
+(`by`, on `--out` and the source's `--work` line, and on a stored run), with the first node or the binding left:
+`questions` (the analysis finished and the oracle's questions passed their bound; their per-cell cost rises by a log
+factor, #1941), `memory` (their room in the heap passed: the core keeps its answers, about 450 bytes a cell, so the
+oracle ends before V8 runs out of heap), `read-depth` (the analysis finished and a question passed the read-depth limit), `stopped` (the
+analysis's own budget stopped it), or `unknown` where the tree's oracle or a run stored before this names none. `stalls.mjs` counts them as runner artefacts, one group a reason and `unansweredAlike`,
 each with its runs, sources and first witness, on a line of its own where any group has runs and always in `--index`.
 It prints one JSON line per generator and
 a total (sources, unparsed, stalled, exceptions, unanswered, unansweredAlike, uncompared, uncharged, modes, runs,
