@@ -19,7 +19,8 @@ import type { RuntimeSnapshot, SerializableRuntimeValue } from "../src/index.js"
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { published } from "./helpers/debug-readers.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
-import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
+import { hostTrace, loadHostFacade, onHost } from "./helpers/host-sessions.js";
+import type { PlayerBridge } from "../player/player-bridge.js";
 
 /** The value trace the host's session runs with, as the host holds it. */
 const traceOf = (session: PlayerRuntimeSession | null | undefined) =>
@@ -72,7 +73,7 @@ interface RewindHost {
     readonly images: readonly never[];
   }): Promise<ImportReview>;
   importSavedData(review: ImportReview, chosen: ReadonlySet<string>): Promise<void>;
-  readonly debugTrace: Readonly<Ref<{ status(): { readonly epoch: number } } | null>>;
+  readonly bridge: Promise<PlayerBridge>;
   editSavedData(edit: {
     key: string;
     value: SerializableRuntimeValue;
@@ -599,7 +600,7 @@ test("every restored state begins a new epoch of the value trace, which may turn
   host.setDebugTracing(true);
   await start(context, host);
   await choose(context, host, "One");
-  const trace = host.debugTrace.value!;
+  const trace = hostTrace(await host.bridge)!;
   const epoch = trace.status().epoch;
   assert.equal(await rewind.back(0), true);
   assert.equal(traceOf(host.session.value), trace);

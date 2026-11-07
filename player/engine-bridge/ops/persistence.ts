@@ -28,8 +28,8 @@ class SessionGoneError extends Error {
   override readonly name = "SessionGoneError";
 }
 
-/** The session the host holds under `id`. */
-function heldSession(sessions: HostSessions, id: string): HeldSession {
+/** The session the host holds under `id`, for a read that names it. */
+export function heldSession(sessions: HostSessions, id: string): HeldSession {
   const held = sessions.get(id);
   if (!(held instanceof HeldSession)) throw new SessionGoneError("The host holds no such session.");
   return held;

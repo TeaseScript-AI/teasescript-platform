@@ -19,6 +19,7 @@ const modules = [
   "player/vue/src/transcriptPresentation.ts",
   "player/vue/src/useDebugRandom.ts",
   "player/vue/src/useDebugRewind.ts",
+  "player/vue/src/useDebugView.ts",
   "player/vue/src/useDevelopmentTime.ts",
   "player/vue/src/useImageCapture.ts",
   "player/vue/src/useMessageUpdateAnnouncements.ts",

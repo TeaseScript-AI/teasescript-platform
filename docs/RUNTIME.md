@@ -1969,7 +1969,9 @@ options of `run`, `stepToEvent`, `executeInstruction`, `runValidatedState`, `com
 `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, `applyExternalStorageEdit`, `setDebugMode`, and
 `updateInteraction`, and of the matching [runtime session](#runtime-sessions) methods. A Player session
 carries it as `debugTrace`, like its debug recorder: `createPlayerRuntimeSession` and `restorePlayerRuntimeSession`
-take it, `withPlayerRuntimeDebugTrace` turns it on or off, and every session operation passes it on. The trace is not
+take it, `withPlayerRuntimeDebugTrace` turns it on or off, and every session operation passes it on. The Player's
+engine host keeps one trace per connection while Debug runs, which every session it holds runs with from its next
+operation on. The trace is not
 part of plans, snapshots, events, checkpoints, restore points, or recorded calls and changes no format: an operation
 returns the same snapshot, events, random state, and checkpoint with or without it, and without it records nothing.
 

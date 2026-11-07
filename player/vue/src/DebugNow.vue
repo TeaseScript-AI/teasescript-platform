@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
 import CollapsibleDisclosure from "@/components/ui/collapsible/CollapsibleDisclosure.vue";
-import { playerDebugImageOrigin } from "../../debug-variables.js";
+import { useDebugView } from "./useDebugView";
 import type { DebugStageImageStatus } from "../../presentation.js";
 import {
   playerRuntimeDebugNow,
@@ -140,15 +140,21 @@ const media = computed(() =>
   })),
 );
 const seconds = (milliseconds: number) => `${Math.ceil(milliseconds / 1000)} s`;
-// The statement that set the Stage image, from the value trace, or why the trace does not know it, as for a message.
+// The statement that set the Stage image, from the value trace, or why the trace does not know it, as for a message:
+// the host reads it from its trace (`debugView`), and it shows from the first reply on.
+const imageView = useDebugView(props.player, () => ({
+  messages: null,
+  selected: null,
+  variables: null,
+  image: true,
+  trees: {},
+}));
 const imageOrigin = computed(() => {
-  const trace = props.player.debugTrace.value;
-  if (trace === null || props.player.session.value === null) return null;
-  const origin = playerDebugImageOrigin(trace);
-  if (origin.kind === "unavailable")
-    return stage.value.path === null ? null : { location: null, reason: origin.reason };
-  const location = trace.record(origin.id)?.location ?? null;
-  return location === null ? null : { location: at(location), reason: null };
+  const image = imageView.value?.image ?? null;
+  if (image === null || props.player.session.value === null) return null;
+  if (image.origin.kind === "unavailable")
+    return stage.value.path === null ? null : { location: null, reason: image.origin.reason };
+  return image.location === null ? null : { location: at(image.location), reason: null };
 });
 </script>
 

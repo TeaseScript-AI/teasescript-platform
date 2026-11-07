@@ -23,8 +23,9 @@ This is a local inspection route, not the production cross-origin Player/host pr
 - `engine-bridge/` is the bridge to the engine's host (the L5 series of Runtime 2): its protocol, host, client and ops,
   which run the adapter's sessions where the host is. The main realm holds a `PlayerSession` (`runtime-view.ts`), the
   published state with its transcript, which `session-store.ts` builds from each reply; `player-bridge.ts` sends the
-  requests. Until the Worker is activated, the host runs in the page (`engine-bridge/in-process.ts`), whose transition
-  facade the families not yet converted use; `engine-bridge/inventory.ts` lists what still moves.
+  requests; it serves one live Player at a time (`claim`), and a later Player may reuse it. Until the Worker is
+  activated, the host runs in the page (`engine-bridge/in-process.ts`), whose transition facade the families not yet
+  converted use; `engine-bridge/inventory.ts` lists what still moves.
   The player's input reaches the host from one section of the shown session (`vue/src/runtime-input.ts`): it observes,
   checks that the session still owns the UI and that the action the player acted on is still presented, then posts the
   control's op. Input's ops read no basis; an answer to another action is refused by its action ID.
@@ -187,13 +188,17 @@ the provider first, then applies it with the recorded `applyPlayerRuntimeStorage
 while a script write waits for the host; a script write issued meanwhile settles first, and the session then follows
 the value the provider kept (`overtaken` when that is the script's). `debugEdits` holds the Edited-while-debugging mark,
 which `debugExportCandidate` passes to the debug export's `editedWhileDebugging`. While Debug runs, `usePlayerDebug`
-turns the session host's value trace on (`setDebugTracing`), which every session operation then records into; the
-Variables tab (`DebugVariables.vue`,
-`DebugTraceRows.vue`) projects it with `player/debug-variables.ts`: `playerDebugVariables` groups live variables, and
-`playerDebugTraceRows` builds the visible derivation rows iteratively from the rows the player opened. `PlayerApp`
+turns the value trace on (`setDebugTracing`): the engine's host keeps it as the connection's state (`debugTracing`),
+and every session operation there records into it. A setting made before the host is reachable waits as the Player's,
+and only its latest goes once the host is reachable, while the Player lives. The Variables tab (`DebugVariables.vue`, `DebugTraceRows.vue`) and
+the Now tab's Stage image origin show views the host makes from its session and trace (`debugView`,
+`player/debug-view.ts`), with `player/debug-variables.ts`: `playerDebugVariables` groups live variables, and
+`playerDebugTraceRows` builds the visible derivation rows iteratively from the rows the player opened. The tabs keep
+the selection, the opened rows, the pages and the filter, send them with each request (`useDebugView.ts`), and show a
+reply only while it is of the shown publication and trace, from the first reply on. `PlayerApp`
 provides Explain values (`explainValues.ts`) to the transcript: a message offers it while Debug runs if
 `playerRuntimeTranscriptEventSequence` reads a runtime event sequence from its entry ID, and choosing it stores the
-selection in `usePlayerDebug` with the trace and epoch it belongs to, selects the Variables tab, and opens the panel
+selection in `usePlayerDebug` with the host's trace and epoch it belongs to (`traceId`, `epoch`), selects the Variables tab, and opens the panel
 through `PlayerToolsShell`'s exposed `showTool`. The tab finds the selected message with
 `playerRuntimeTranscriptMessage` in each published session and explains its `contentSequence`, the event whose content
 it shows; `playerDebugMessageOrigin` gives that event's output record or why there is none, from the trace status's

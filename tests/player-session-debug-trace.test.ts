@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
-import { effectScope, type Ref } from "vue";
+import { effectScope, nextTick, ref, watch, type Ref } from "vue";
 
 import type { RuntimeDebugContext } from "../src/index.js";
 import type * as Adapter from "../player/runtime-adapter.js";
@@ -8,7 +8,10 @@ import type * as CompileProject from "../player/compile-project.js";
 import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
-import { loadHostFacade, onHost, onHostAll } from "./helpers/host-sessions.js";
+import type { PlayerBridge } from "../player/player-bridge.js";
+import type { DebugView, DebugViewRequest } from "../player/debug-view.js";
+import type * as InProcess from "../player/engine-bridge/in-process.js";
+import { hostTrace, loadHostFacade, onHost, onHostAll } from "./helpers/host-sessions.js";
 
 /** The value trace the host's session runs with, as the host holds it. */
 const sessionTrace = (session: PlayerRuntimeSession | null | undefined) =>
@@ -23,7 +26,7 @@ const sessionTrace = (session: PlayerRuntimeSession | null | undefined) =>
 
 interface TraceHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
-  readonly debugTrace: Readonly<Ref<RuntimeDebugContext | null>>;
+  readonly bridge: Promise<PlayerBridge>;
   setDebugTracing(on: boolean): void;
   prepare(
     create: (recording: {
@@ -34,8 +37,16 @@ interface TraceHost {
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): void;
   update(session: PlayerRuntimeSession): void;
+  reportHostError(error: unknown): void;
+  readonly traceId: Readonly<Ref<number | null>>;
+  debugView(request: DebugViewRequest): Promise<DebugView | null>;
 }
-let usePlayerSession: (options: Record<string, never>) => TraceHost;
+let usePlayerSession: (options: { readonly bridge?: Promise<PlayerBridge> }) => TraceHost;
+let useDebugView: (
+  player: TraceHost,
+  request: () => DebugViewRequest | null,
+) => Readonly<Ref<DebugView | null>>;
+let createInProcessBackend: typeof InProcess.createInProcessBackend;
 // The adapter from the same module graph as the host, whose trace and recorder it must recognize.
 let adapter: {
   createPlayerRuntimeSession: typeof CompileProject.createPlayerRuntimeSession;
@@ -56,6 +67,12 @@ before(async () => {
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
+  const views = await loadPlayerModule("player/vue/src/useDebugView.ts");
+  // EVIDENCE: validation: Vite loaded the real source module; this is its composable.
+  useDebugView = views.useDebugView as typeof useDebugView;
+  const facade = await loadPlayerModule("player/engine-bridge/in-process.ts");
+  // EVIDENCE: validation: the bundle's backend factory, whose host the composable then uses.
+  createInProcessBackend = facade.createInProcessBackend as typeof createInProcessBackend;
   const loaded = {
     ...(await loadPlayerModule("player/runtime-adapter.ts")),
     ...(await loadPlayerModule("player/compile-project.ts")),
@@ -86,11 +103,12 @@ before(async () => {
   });
 });
 
-function traceOf(host: TraceHost): RuntimeDebugContext | null {
-  return host.debugTrace.value;
+/** The value trace the host holds now (L5i.3: the connection's, in the engine's host). */
+async function traceOf(host: TraceHost): Promise<RuntimeDebugContext | null> {
+  return hostTrace(await host.bridge);
 }
 
-function createHost(context: TestContext): TraceHost {
+function createHost(context: TestContext, makeBridge?: () => PlayerBridge): TraceHost {
   // Event targets are the only browser surface these scripts use, with the silent audio elements Start primes.
   const surface = {
     document: new EventTarget(),
@@ -113,7 +131,12 @@ function createHost(context: TestContext): TraceHost {
   }
   context.mock.timers.enable({ apis: ["setTimeout"] });
   const scope = effectScope();
-  const host = scope.run(() => usePlayerSession({}));
+  // A bridge made after the mock timers, so that its replies wait for them.
+  const bridge = makeBridge?.();
+  if (bridge !== undefined) context.after(() => bridge.client.terminate());
+  const host = scope.run(() =>
+    usePlayerSession(bridge === undefined ? {} : { bridge: Promise.resolve(bridge) }),
+  );
   assert.ok(host);
   context.after(() => scope.stop());
   return host;
@@ -129,7 +152,7 @@ const SOURCE = [
 test("Start traces from the first statement, off drops the trace, and on again attaches", async (context) => {
   const host = createHost(context);
   host.setDebugTracing(true);
-  const trace = host.debugTrace.value;
+  const trace = await traceOf(host);
   assert.ok(trace);
   host.prepare((recording) => adapter.createPlayerRuntimeSession(SOURCE, { ...recording }));
   await host.activate();
@@ -141,12 +164,11 @@ test("Start traces from the first statement, off drops the trace, and on again a
   );
 
   host.setDebugTracing(false);
-  assert.equal(host.debugTrace.value, null);
+  assert.equal(await traceOf(host), null);
   assert.equal(sessionTrace(host.session.value), null);
 
   host.setDebugTracing(true);
-  // Read through a call: the assertion above narrowed the property itself to null.
-  const again = traceOf(host);
+  const again = await traceOf(host);
   assert.ok(again && again !== trace);
   host.update(adapter.submitPlayerRuntimeComposer(host.session.value!, "yes")!.session);
   assert.equal(again.status().origin, "attach");
@@ -157,7 +179,7 @@ test("Start traces from the first statement, off drops the trace, and on again a
 test("Continue of a restored session begins a new trace epoch", async (context) => {
   const host = createHost(context);
   host.setDebugTracing(true);
-  const trace = host.debugTrace.value!;
+  const trace = (await traceOf(host))!;
   host.prepare((recording) => adapter.createPlayerRuntimeSession(SOURCE, { ...recording }));
   await host.activate();
   const epoch = trace.status().epoch;
@@ -179,4 +201,108 @@ test("Continue of a restored session begins a new trace epoch", async (context) 
   assert.ok(
     reasons.some((detail) => detail?.kind === "unrecorded" && detail.reason === "restored"),
   );
+});
+
+const VIEWED = [
+  'let mood = "calm"',
+  'say "${mood} now", instant',
+  'let answer = askText "Ready?"',
+  'say "${mood} ${answer}", instant',
+  'let again = askText "More?"',
+  "exit",
+].join("\n");
+
+/** Recent chat, with the newest message closed and the tree state `trees`. */
+const recent = (trees: DebugViewRequest["trees"] = {}): DebugViewRequest => ({
+  messages: { limit: 20, openNewest: false },
+  selected: null,
+  variables: null,
+  image: false,
+  trees,
+});
+
+/**
+ * A host on a backend whose replies wait 50 ms of mock time, traced, with a view of recent chat that records every view
+ * it shows.
+ */
+async function viewed(context: TestContext) {
+  const host = createHost(context, () =>
+    createInProcessBackend(
+      { commit: null, dirty: null, mode: null, appVersion: null },
+      { delayMs: 50 },
+    ),
+  );
+  const settle = async () => {
+    for (let round = 0; round < 4; round += 1) {
+      for (let turn = 0; turn < 5; turn += 1) await nextTick();
+      context.mock.timers.tick(50);
+    }
+    for (let turn = 0; turn < 5; turn += 1) await nextTick();
+  };
+  host.setDebugTracing(true);
+  host.prepare((recording) => adapter.createPlayerRuntimeSession(VIEWED, { ...recording }));
+  host.activate();
+  await settle();
+  const request = ref(recent());
+  const scope = effectScope();
+  const view = scope.run(() => useDebugView(host, () => request.value))!;
+  context.after(() => scope.stop());
+  const shown: DebugView[] = [];
+  watch(view, (next) => next !== null && shown.push(next), { flush: "sync" });
+  await settle();
+  assert.ok(view.value !== null, "the first view arrived");
+  return { host, view, request, shown, settle };
+}
+
+test("a view's reply that a newer publication overtook never shows", async (context) => {
+  const { host, view, request, shown, settle } = await viewed(context);
+  const before = view.value!;
+  const root = before.messages!.rows.find((row) => row.kind === "record" && row.expandable)!;
+  // The player opens a message: its view is asked for, and its reply is in transit.
+  request.value = recent({ recent: { choices: { [root.key]: true }, pages: {} } });
+  await nextTick();
+  const asked = shown.length;
+  // A newer publication shows first, through the transition facade, which delivers the replies in transit before it.
+  host.update(adapter.submitPlayerRuntimeComposer(host.session.value!, "yes")!.session);
+  const newer = host.session.value!.revision;
+  assert.ok(newer > before.revision);
+  await settle();
+  // The opened view of the older publication never showed; the newer publication's did, opened.
+  const later = shown.slice(asked);
+  assert.ok(
+    later.every((made) => made.revision === newer),
+    JSON.stringify(later.map((made) => made.revision)),
+  );
+  assert.equal(view.value?.revision, newer);
+  const opened = view.value!.messages!.rows.find((row) => row.key === root.key);
+  assert.ok(opened?.kind === "record" && opened.expanded);
+});
+
+test("a view's reply of a trace turned off and on again never shows", async (context) => {
+  const { host, view, request, shown, settle } = await viewed(context);
+  const first = view.value!.traceId;
+  assert.notEqual(first, null);
+  request.value = recent({ recent: { choices: {}, pages: {} } });
+  await nextTick();
+  host.setDebugTracing(false);
+  host.setDebugTracing(true);
+  const asked = shown.length;
+  await settle();
+  assert.ok(shown.slice(asked).every((made) => made.traceId !== first));
+  assert.notEqual(view.value?.traceId, first);
+  assert.equal(view.value?.traceId, host.traceId.value);
+});
+
+test("a session a Player error stopped is still viewed as it stopped", async (context) => {
+  const { host, view, request, settle } = await viewed(context);
+  const before = view.value!;
+  host.reportHostError(new TypeError("A component failed."));
+  await settle();
+  // Its view is asked for again, from the stopped session, and shows what it showed.
+  request.value = recent({ recent: { choices: {}, pages: { none: 2 } } });
+  await settle();
+  assert.deepEqual(view.value?.messages, before.messages);
+  const direct = host.debugView(recent());
+  await settle();
+  assert.deepEqual(await direct, { ...before, revision: view.value!.revision });
 });

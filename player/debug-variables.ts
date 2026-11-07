@@ -196,6 +196,10 @@ const CARRIERS: ReadonlySet<RuntimeDebugRecord["kind"]> = new Set([
 /** Children shown per page under one row. */
 export const PLAYER_DEBUG_TRACE_PAGE = 20;
 
+/** The key of a live variable's origin tree in Debug's Variables view. */
+export const debugVariableTree = (variable: Pick<PlayerDebugVariable, "scope" | "name">) =>
+  `variable:${variable.scope}:${variable.name}`;
+
 export interface PlayerDebugTraceView {
   /**
    * Whether a row is expanded: the player's choice, else the default for its depth and kind. `carried` is whether the

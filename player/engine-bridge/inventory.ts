@@ -134,6 +134,7 @@ export const WORKER_MODULES: readonly string[] = [
   "player/engine-bridge/player-ops.ts",
   "player/compile-project.ts",
   "player/debug-recorder.ts",
+  "player/debug-view.ts",
   "player/engine-bridge/in-process.ts",
 ];
 
@@ -291,24 +292,6 @@ export const RATCHET: readonly RatchetEntry[] = [
     family: "L5i",
   },
   {
-    importer: "player/vue/src/DebugVariables.vue",
-    target: "player/engine-bridge/in-process.ts",
-    name: "hatch",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/DebugVariables.vue",
-    target: "player/engine-bridge/in-process.ts",
-    name: "heldPlan",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/DebugVariables.vue",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeDebugVariables",
-    family: "L5i",
-  },
-  {
     importer: "player/vue/src/DevelopmentPreview.vue",
     target: "player/compile-project.ts",
     name: "createPlayerRuntimeSession",
@@ -323,12 +306,6 @@ export const RATCHET: readonly RatchetEntry[] = [
   {
     importer: "player/vue/src/useDebugRewind.ts",
     target: "player/engine-bridge/in-process.ts",
-    name: "hatch",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/useDebugRewind.ts",
-    target: "player/engine-bridge/in-process.ts",
     name: "heldPlan",
     family: "L5i",
   },
@@ -336,12 +313,6 @@ export const RATCHET: readonly RatchetEntry[] = [
     importer: "player/vue/src/useDebugRewind.ts",
     target: "player/runtime-adapter.ts",
     name: "restorePlayerRuntimeSessionAt",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/useDebugRewind.ts",
-    target: "player/runtime-adapter.ts",
-    name: "withPlayerRuntimeDebugTrace",
     family: "L5i",
   },
   {
@@ -383,25 +354,7 @@ export const RATCHET: readonly RatchetEntry[] = [
   {
     importer: "player/vue/src/usePlayerSession.ts",
     target: "player/runtime-adapter.ts",
-    name: "setPlayerRuntimeDebugMode",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
     name: "setPlayerRuntimeRandomControl",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "player/runtime-adapter.ts",
-    name: "withPlayerRuntimeDebugTrace",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/usePlayerSession.ts",
-    target: "src/index.ts",
-    name: "RuntimeDebugContext",
     family: "L5i",
   },
   {

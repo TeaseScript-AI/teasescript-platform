@@ -6,12 +6,8 @@ import {
   type DebugHistoryMarks,
   type DebugHistoryRestore,
 } from "../../debug-history.js";
-import {
-  restorePlayerRuntimeSessionAt,
-  withPlayerRuntimeDebugTrace,
-  type PlayerRuntimeSession,
-} from "../../runtime-adapter.js";
-import { beginRecordingNow, hatch, heldPlan } from "../../engine-bridge/in-process.js";
+import { restorePlayerRuntimeSessionAt } from "../../runtime-adapter.js";
+import { beginRecordingNow, heldPlan } from "../../engine-bridge/in-process.js";
 import type { PlayerSession } from "../../runtime-view.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
@@ -60,22 +56,19 @@ export function useDebugRewind(player: PlayerSessionHost) {
     revision.value++;
   });
 
-  function publish(
-    restored: DebugHistoryRestore,
-    debugTrace: PlayerRuntimeSession["debugTrace"],
-    plan: DebugHistory["plan"],
-  ) {
+  function publish(restored: DebugHistoryRestore, plan: DebugHistory["plan"]) {
     const { position, snapshotJson, marks: restoredMarks } = restored;
     publishing = true;
     try {
+      // Restored in the host, with its recorder and its value trace, which begin anew at the state.
       rewind.publish(
-        ({ recorder }) =>
+        ({ recorder, debugTrace }) =>
           restorePlayerRuntimeSessionAt(
             plan,
             snapshotJson,
             position.events.slice(0, position.eventCount),
             recorder,
-            debugTrace,
+            debugTrace ?? null,
           ),
         { paused: true, marks: restoredMarks },
       );
@@ -97,7 +90,7 @@ export function useDebugRewind(player: PlayerSessionHost) {
     try {
       const restored = await restore(current);
       if (history.value !== current) return false;
-      publish(restored, player.debugTrace.value, current.plan);
+      publish(restored, current.plan);
       return true;
     } catch (error) {
       if (history.value === current)
@@ -131,14 +124,12 @@ export function useDebugRewind(player: PlayerSessionHost) {
   function reinstate(parked: DebugHistoryCurrent) {
     publishing = true;
     try {
-      // The parked session is the host's still: it shows again, its recording begun anew there.
+      // The parked session is the host's still: it shows again, its recording and its trace's epoch begun anew there.
       rewind.publish(
         {
           session: () => {
             beginRecordingNow(parked.session);
-            const trace = player.debugTrace.value;
-            trace?.reset("restore");
-            return hatch(parked.session, (held) => withPlayerRuntimeDebugTrace(held, trace));
+            return parked.session.connection.latest(parked.session) ?? parked.session;
           },
         },
         { paused: false, marks: parked.marks },

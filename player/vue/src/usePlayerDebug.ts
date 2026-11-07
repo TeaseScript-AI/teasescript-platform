@@ -5,7 +5,6 @@ import {
   playerRuntimeDebugCountdown,
   playerRuntimeTranscriptEventSequence,
 } from "../../runtime-view.js";
-import type { RuntimeDebugContext } from "../../../src/index.js";
 import { useDebugLog, type DebugLog } from "./useDebugLog";
 import { useDebugRandom, type DebugRandom } from "./useDebugRandom";
 import { useDebugRewind, type DebugRewind } from "./useDebugRewind";
@@ -90,24 +89,30 @@ export function usePlayerDebug(
   let requests = 0;
   /** Whether a message offers Explain values: Debug traces and the entry came from a runtime event. */
   function offers(entryId: string): boolean {
-    return (
-      player.debugTrace.value !== null && playerRuntimeTranscriptEventSequence(entryId) !== null
-    );
+    return player.debugTracing.value && playerRuntimeTranscriptEventSequence(entryId) !== null;
   }
-  /** Selects a message for the Variables tab and shows that tab; `false` if the message does not offer it. */
+  /**
+   * Selects a message for the Variables tab and shows that tab; `false` if the message does not offer it. The selection
+   * holds the host's trace and epoch now, which it asks for: it shows once the host answered.
+   */
   function explain(entryId: string): boolean {
-    const trace = player.debugTrace.value;
     const sequence = playerRuntimeTranscriptEventSequence(entryId);
-    if (trace === null || sequence === null) return false;
-    requests += 1;
-    explained.value = Object.freeze({
-      trace,
-      epoch: trace.status().epoch,
-      sequence,
-      entryId,
-      request: requests,
-    });
+    if (!player.debugTracing.value || sequence === null) return false;
+    const request = ++requests;
     tab.value = "variables";
+    void player
+      .debugView({ messages: null, selected: null, variables: null, image: false, trees: {} })
+      .then((view) => {
+        if (request !== requests || view === null || view.traceId === null || view.status === null)
+          return;
+        explained.value = Object.freeze({
+          traceId: view.traceId,
+          epoch: view.status.epoch,
+          sequence,
+          entryId,
+          request,
+        });
+      });
     return true;
   }
 
@@ -153,9 +158,9 @@ export function usePlayerDebug(
   };
 }
 
-/** A message Explain values selected, valid only while `trace` is the session's trace and still in `epoch`. */
+/** A message Explain values selected, valid only while the host's trace is `traceId` and still in `epoch`. */
 export interface PlayerDebugExplained {
-  readonly trace: RuntimeDebugContext;
+  readonly traceId: number;
   readonly epoch: number;
   /** The event sequence of the `say` event that created it. */
   readonly sequence: number;

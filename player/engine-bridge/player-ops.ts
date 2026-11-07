@@ -10,6 +10,7 @@ import type { ScriptIdentity } from "../script-identity.js";
 import { planLockNeeds, playerRuntimeStageImages } from "../plan-metadata.js";
 import { DebugRecorder } from "../debug-recorder.js";
 import { MAIN_FILE_PATH } from "../../src/project-paths.js";
+import { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
 import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
 import { DebugCaches, debugOps } from "./ops/debug.js";
 import { inputOps } from "./ops/input.js";
@@ -17,6 +18,7 @@ import { mediaOps } from "./ops/media.js";
 import { persistenceOps } from "./ops/persistence.js";
 import { resourceOps } from "./ops/resources.js";
 import { sessionOps } from "./ops/session.js";
+import { traceOps } from "./ops/trace.js";
 import type { BridgeOps } from "./worker-host.js";
 
 /** What the Player reads from a plan the Worker holds, sent with the plan's token instead of the plan. */
@@ -129,6 +131,54 @@ export interface PlayerOpsContext {
   readonly sources: Map<string, readonly { readonly path: string; readonly source: string }[]>;
   /** Debug's source caches; `teardown` clears them with the plans. */
   readonly debug: DebugCaches;
+  /**
+   * Debug's value trace on this connection while Debug runs, else `null` (`debugTracing`): every session the host holds
+   * runs with it, from its next operation on.
+   */
+  trace: RuntimeDebugContext | null;
+  /** Counts the traces this connection made, so that a reply names the one it read. */
+  traceId: number;
+  /** The serial of the newest tracing intent the host applied (`alignTrace`); `0` before any. */
+  traceIntent: number;
+}
+
+/**
+ * One tracing change a live Player sent: on or off, with its serial, which the connection counts up across the Players
+ * that use it (`PlayerBridge.nextTracingIntent`). Every op that sets the connection's trace carries one, through
+ * whichever channel it arrives.
+ */
+export interface TracingIntent {
+  readonly on: boolean;
+  readonly intent: number;
+}
+
+/** Whether `value` is a `TracingIntent`. */
+export const isTracingIntent = (value: unknown): value is TracingIntent =>
+  isRecord(value) &&
+  exactly(value, ["on", "intent"]) &&
+  typeof value.on === "boolean" &&
+  typeof value.intent === "number" &&
+  Number.isSafeInteger(value.intent) &&
+  value.intent >= 1;
+
+/**
+ * Makes the connection's value trace follow the Player's newest tracing intent: a new trace with no history, or none.
+ * The intent arrives through the connection's queue (`debugTracing`) or with the work that begins an epoch (a Start in
+ * the host, Continue's `restartTrace`), in any order; one older than the newest applied does nothing, so a change still
+ * queued never undoes a newer one. Returns the trace's ID now, or `null`.
+ */
+export function alignTrace(
+  context: PlayerOpsContext,
+  { on, intent }: TracingIntent,
+): number | null {
+  if (intent > context.traceIntent) {
+    context.traceIntent = intent;
+    if (on !== (context.trace !== null)) {
+      context.trace = on ? new RuntimeDebugContext() : null;
+      if (on) context.traceId += 1;
+    }
+  }
+  return context.trace === null ? null : context.traceId;
 }
 
 export function playerOpsContext(): PlayerOpsContext {
@@ -144,6 +194,9 @@ export function playerOpsContext(): PlayerOpsContext {
     recorder: new DebugRecorder(),
     sources: new Map(),
     debug: new DebugCaches(),
+    trace: null,
+    traceId: 0,
+    traceIntent: 0,
   };
 }
 
@@ -233,5 +286,6 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     ...mediaOps(context),
     ...resourceOps(context),
     ...persistenceOps(),
+    ...traceOps(context),
   };
 }

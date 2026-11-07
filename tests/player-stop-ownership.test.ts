@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
-import { effectScope, watch, type Ref } from "vue";
+import { effectScope, nextTick, watch, type Ref } from "vue";
 
 import type * as CompileProject from "../player/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
@@ -9,6 +9,7 @@ import type { StartOptions } from "../player/engine-bridge/ops/session.js";
 import { startBridgeHost, type HostSession } from "../player/engine-bridge/worker-host.js";
 import { BRIDGE_VERSION } from "../player/engine-bridge/protocol.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
+import type { DebugView, DebugViewRequest } from "../player/debug-view.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type {
   PlayerRuntimeSession,
@@ -16,7 +17,6 @@ import type {
 } from "../player/runtime-adapter.js";
 import type * as RuntimeView from "../player/runtime-view.js";
 import type { PlayerSession } from "../player/runtime-view.js";
-import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
@@ -31,7 +31,6 @@ interface StopHost {
   readonly hostError: Readonly<Ref<string | null>>;
   readonly stopped: Readonly<Ref<boolean>>;
   readonly bridge: Promise<PlayerBridge>;
-  readonly debugTrace: Readonly<Ref<RuntimeDebugContext | null>>;
   prepare(
     create:
       | { readonly plan: string; readonly options: () => StartOptions }
@@ -47,6 +46,9 @@ interface StopHost {
     readonly session: { readonly transcriptEntries: readonly { readonly text: string }[] } | null;
   }>;
   setDebugTracing(on: boolean): void;
+  setDebugMode(enabled: boolean): void;
+  readonly traceId: Readonly<Ref<number | null>>;
+  debugView(request: DebugViewRequest): Promise<DebugView | null>;
   reportHostError(error: unknown): void;
   observe(): { readonly id: string } | null;
   update(next: PlayerSession): void;
@@ -61,6 +63,10 @@ let usePlayerSession: (options: {
   readonly capabilities?: { readonly camera: boolean };
 }) => StopHost;
 let facade: typeof InProcess;
+let useDebugView: (
+  player: StopHost,
+  request: () => DebugViewRequest | null,
+) => Readonly<Ref<DebugView | null>>;
 let compiler: typeof CompileProject;
 let adapter: typeof RuntimeAdapter;
 let view: typeof RuntimeView;
@@ -78,6 +84,9 @@ before(async () => {
   adapter = (await loadPlayerModule("player/runtime-adapter.ts")) as typeof adapter;
   // EVIDENCE: validation: the bundle's session view module, from the same module graph.
   view = (await loadPlayerModule("player/runtime-view.ts")) as typeof view;
+  const views = await loadPlayerModule("player/vue/src/useDebugView.ts");
+  // EVIDENCE: validation: Vite loaded the real source module; this is its composable.
+  useDebugView = views.useDebugView as typeof useDebugView;
 });
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
@@ -227,13 +236,13 @@ test("a Start queued behind prepare that a factory Start replaced leaves the rec
 });
 
 test("a Continue a Start replaced while its reply was in transit leaves the replacement's trace as it is", async (context) => {
-  const { player } = await mount(context);
+  const { player, bridge } = await mount(context);
   player.setDebugTracing(true);
   player.prepareRestore(compiler.createPlayerRuntimeSession('showButton "Old"\nexit'));
   const continuing = player.activate();
   player.prepare(factory('let fresh = 123\nsay "fresh ${fresh}", instant\nshowButton "New"\nexit'));
   await player.activate();
-  const trace = player.debugTrace.value!;
+  const trace = facade.heldTrace(bridge)!;
   const before = trace.status();
   assert.ok(before.records > 0);
   await continuing;
@@ -247,6 +256,127 @@ test("a Continue a Start replaced while its reply was in transit leaves the repl
     player.session.value!.transcriptEntries.map((entry) => entry.text),
     ["fresh 123"],
   );
+});
+
+/** Calls `then` once `bridge` posts `op`, as the host runs it at once in-process; its reply then is in transit. */
+function onceAsked(bridge: PlayerBridge, op: string, then: () => void) {
+  const request = bridge.request.bind(bridge);
+  let done = false;
+  bridge.request = <R>(...args: Parameters<PlayerBridge["request"]>) => {
+    const reply = request<R>(...args);
+    if (args[1] === op && !done) {
+      done = true;
+      then();
+    }
+    return reply;
+  };
+}
+
+// L5i.3 moved the trace into the host: a Continue's new epoch is asked for only once the Continue owns the UI, as it
+// began before, so one whose recording began in the host but that a Start replaced or a stop ended leaves the trace.
+for (const ending of ["replaced", "stopped"] as const)
+  test(`a Continue ${ending} after its recording began in the host leaves the trace as it was`, async (context) => {
+    const { player, bridge } = await mount(context);
+    player.setDebugTracing(true);
+    player.prepare(factory('let first = 1\nsay "first ${first}", instant\nshowButton "Go"\nexit'));
+    await player.activate();
+    const trace = facade.heldTrace(bridge)!;
+    const before = trace.status();
+    assert.ok(before.records > 0);
+    let ended = false;
+    onceAsked(bridge, "beginRecording", () => {
+      ended = true;
+      if (ending === "stopped") player.reportHostError(new TypeError("A component failed."));
+    });
+    player.prepareRestore(compiler.createPlayerRuntimeSession('showButton "Old"\nexit'));
+    const continuing = player.activate();
+    for (let index = 0; index < 5 && !ended; index += 1) await turn();
+    assert.ok(ended, "the Continue's recording began in the host");
+    if (ending === "replaced") {
+      // A Start replaces it while that reply is in transit; it begins its own epoch.
+      player.prepare(
+        factory('let fresh = 2\nsay "fresh ${fresh}", instant\nshowButton "New"\nexit'),
+      );
+      await player.activate();
+    }
+    await continuing.catch(() => {});
+    for (let index = 0; index < 10; index += 1) await turn();
+    const after = trace.status();
+    if (ending === "stopped")
+      assert.deepEqual(
+        [after.epoch, after.origin, after.records],
+        [before.epoch, before.origin, before.records],
+        "the stopped session's history stays",
+      );
+    else {
+      // Only the replacing Start's epoch: one more than before, from Start, as without the Continue.
+      assert.deepEqual([after.epoch, after.origin], [before.epoch + 1, "start"]);
+      assert.deepEqual(
+        player.session.value!.transcriptEntries.map((entry) => entry.text),
+        ["fresh 2"],
+      );
+    }
+  });
+
+const pause = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+// L5i.3, Sol r1 R1: Debug mode turned on and off again while the first change waits for its reply ends off, as the
+// script then reads it.
+test("Debug mode turned on and off again before the host answered ends as last asked", async (context) => {
+  const { player } = await mount(context, 80);
+  player.prepare(
+    factory(
+      'let answer = askText "Ready?"\nsay "mode ${debugMode}", instant\nshowButton "Done"\nexit',
+    ),
+  );
+  await player.activate();
+  player.setDebugMode(true);
+  player.setDebugMode(false);
+  await pause(400);
+  assert.equal(player.session.value!.state.debugMode, false);
+  player.update(
+    facade.hatch(player.session.value!, (held) => adapter.submitPlayerRuntimeComposer(held, "yes")!)
+      .session,
+  );
+  assert.equal(player.session.value!.transcriptEntries.at(-1)?.text, "mode false");
+});
+
+// L5i.3, Sol r1 R3: a view of an older publication does not stay shown once a newer one shows.
+test("a shown view of an older publication goes once a newer one shows, until its own view arrives", async (context) => {
+  const { player } = await mount(context, 80);
+  player.setDebugTracing(true);
+  await pause(160);
+  player.prepare(
+    factory(
+      'let mood = "calm"\nsay "${mood}", instant\nlet answer = askText "Ready?"\nsay "${answer}", instant\nshowButton "Done"\nexit',
+    ),
+  );
+  await player.activate();
+  const scope = effectScope();
+  context.after(() => scope.stop());
+  const shown = scope.run(() =>
+    useDebugView(player, () => ({
+      messages: { limit: 20, openNewest: true },
+      selected: null,
+      variables: null,
+      image: false,
+      trees: {},
+    })),
+  )!;
+  await pause(240);
+  const before = shown.value!.revision;
+  player.update(
+    facade.hatch(player.session.value!, (held) => adapter.submitPlayerRuntimeComposer(held, "yes")!)
+      .session,
+  );
+  const newer = player.session.value!.revision;
+  assert.ok(newer > before);
+  await nextTick();
+  assert.equal(shown.value, null, "nothing of the older publication shows");
+  await pause(240);
+  // Read through a call: the assertion above narrowed the property itself to null.
+  const current = () => shown.value;
+  assert.equal(current()?.revision, newer);
 });
 
 test("a session op still awaited does not delay the halt fence: a request behind it is refused", async () => {
@@ -360,7 +490,7 @@ for (const kind of [
     for (let index = 0; index < 10; index += 1) await turn();
     const shown = player.session.value;
     const recordingAtStop = facade.heldRecording(bridge)?.operations.length ?? null;
-    const traceAtStop = player.debugTrace.value?.status() ?? null;
+    const traceAtStop = facade.heldTrace(bridge)?.status() ?? null;
     for (let index = 0; index < 10; index += 1) await turn();
     assert.deepEqual(afterStop, [], "nothing shows after the stop line");
     assert.equal(player.hostError.value, "TypeError");
@@ -375,7 +505,7 @@ for (const kind of [
     }
     // Nothing of the activation runs after the stop: the recording and trace stay as they stood.
     assert.equal(facade.heldRecording(bridge)?.operations.length ?? null, recordingAtStop);
-    assert.deepEqual(player.debugTrace.value?.status() ?? null, traceAtStop);
+    assert.deepEqual(facade.heldTrace(bridge)?.status() ?? null, traceAtStop);
   });
 
 test("a Start that replaces an error stop pending on a Start the host rejects runs unstopped", async (context) => {

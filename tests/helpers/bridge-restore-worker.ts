@@ -56,6 +56,7 @@ startBridgeHost(
         const held = new HeldSession(
           restorePlayerRuntimeSessionAt(instructions, snapshotJson, []),
           plan,
+          context,
         );
         const id = sessions.add(held);
         const view = introduction(held, context, false);
