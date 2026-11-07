@@ -14,12 +14,8 @@ import { cn } from "@/lib/utils";
 import type { RandomDrawView, RandomOutcome, RandomSite } from "../../../src/index.js";
 import CodeBlock from "./CodeBlock.vue";
 import PathBreadcrumb from "./PathBreadcrumb.vue";
-import {
-  CONTEXT_ROWS,
-  randomDrawChoices,
-  type CodeLine,
-  type DrawCode,
-} from "./randomDrawPresentation";
+import { CONTEXT_ROWS, type CodeLine, type DrawCode } from "./randomDrawPresentation";
+import { useRandomDrawPickerState } from "./useRandomDrawPickerState";
 import { outcomeKey } from "../../random-outcomes.js";
 import type { DebugRandomNext, DebugRandomTried } from "./useDebugRandom";
 
@@ -31,6 +27,8 @@ import type { DebugRandomNext, DebugRandomTried } from "./useDebugRandom";
 // meanwhile.
 const props = defineProps<{
   draw: RandomDrawView;
+  /** The draw's identity (`useDebugRandom`'s `drawKey`): the picker's state of one draw starts anew when it changes. */
+  drawKey: string;
   /** The draw's site in the plan, or `null` when the plan does not list it. */
   site: RandomSite | null;
   /** The code of the draw's file with the draw marked, or `null` when the host did not supply its source. */
@@ -49,7 +47,8 @@ const emit = defineEmits<{ resolve: [outcome: RandomOutcome | "natural"]; untrie
 const history = computed(() => props.history);
 const historyRows = ref(Math.min(4, Math.max(1, props.tried.history.length)));
 
-const choices = computed(() => randomDrawChoices(props.draw));
+// The typed value and the shuffle's order, which start anew for each draw (`drawKey`).
+const { choices, typed, order, move } = useRandomDrawPickerState(props);
 // Each outcome is an outline Button as a plain element: thousands of components take seconds to mount and update.
 const outcomeClass = cn(
   buttonVariants({ variant: "outline" }),
@@ -68,7 +67,8 @@ const sourceFocus = computed(() => {
 function toggleExpanded() {
   const range = code.value?.enclosing;
   expanded.value = !expanded.value && range != null;
-  sourceRows.value = expanded.value && range ? Math.min(range.to - range.from + 1, 40) : CONTEXT_ROWS;
+  sourceRows.value =
+    expanded.value && range ? Math.min(range.to - range.from + 1, 40) : CONTEXT_ROWS;
 }
 const expandLabels = {
   function: "Show whole function",
@@ -76,7 +76,6 @@ const expandLabels = {
   file: "Show whole file",
 } as const;
 
-const typed = ref("");
 const typedNumber = computed(() =>
   choices.value.kind !== "number" || typed.value.trim() === "" ? null : Number(typed.value),
 );
@@ -88,24 +87,6 @@ const typedRefusal = computed(() => {
     : null;
 });
 const typedValue = computed(() => (typedRefusal.value === null ? typedNumber.value : null));
-// The shuffle's items in the order shown, as their old indexes.
-const order = ref<number[]>([]);
-watch(
-  () => props.draw.drawId,
-  () => {
-    typed.value = "";
-    const items = choices.value.kind === "order" ? choices.value.items : [];
-    order.value = items.map((_, index) => index);
-  },
-  { immediate: true },
-);
-function move(position: number, direction: -1 | 1) {
-  const destination = position + direction;
-  if (destination < 0 || destination >= order.value.length) return;
-  const moved = [...order.value];
-  [moved[position], moved[destination]] = [moved[destination]!, moved[position]!];
-  order.value = moved;
-}
 const list = ref<HTMLElement | null>(null);
 watch(
   list,

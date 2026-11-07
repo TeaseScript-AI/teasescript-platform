@@ -697,7 +697,8 @@ async function toggleFullscreen() {
           />
           <RandomDrawPicker
             v-if="randomPicker"
-            :key="randomPicker.draw.drawId"
+            :key="randomPicker.random.drawKey.value ?? ''"
+            :draw-key="randomPicker.random.drawKey.value ?? ''"
             :draw="randomPicker.draw"
             :site="randomPicker.site"
             :code="randomPicker.random.code.value"

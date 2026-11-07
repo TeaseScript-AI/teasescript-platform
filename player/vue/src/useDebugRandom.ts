@@ -3,7 +3,7 @@ import { tryOnScopeDispose } from "@vueuse/core";
 import type { PlanMetadata } from "../../engine-bridge/player-ops.js";
 import type { RandomOutcome, RandomSite } from "../../../src/index.js";
 import type { CodeLine, DrawCode } from "./randomDrawPresentation";
-import type { PlayerSession } from "../../runtime-view.js";
+import { drawIdentity, drawKey, sameDraw, type DrawIdentity } from "../../random-draw-identity.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 /** What a site does when it draws next: ask in the picker, go on naturally, or take its least-taken outcome. */
@@ -189,40 +189,16 @@ export function useDebugRandom(player: PlayerSessionHost) {
     resolveLeastTried,
     /** What `site` took; see `triedOf`. */
     tried: triedOf,
+    /** The shown draw's identity (`drawKey`), or `null` without one. */
+    drawKey: computed(() => {
+      const identity = drawIdentity(draw.value, player.session.value);
+      return identity === null ? null : drawKey(identity);
+    }),
     /** The code the picker shows for the draw: its file with the draw marked, or `null` without the file's source. */
     code,
     /** The draw's site's earlier outcomes as code lines, as `tried` gives them. */
     historyLines,
   };
-}
-
-/**
- * A draw's identity: the session it waits in (its lineage), its site and its ID. Draw IDs repeat across sessions, so
- * the picker's history cache, its replies and its resolution guard all decide a draw's sameness here.
- */
-interface DrawIdentity {
-  readonly lineage: PlayerSession["lineage"];
-  readonly site: string;
-  readonly drawId: number;
-}
-
-function drawIdentity(
-  draw: { readonly drawId: number; readonly site: string } | null,
-  session: PlayerSession | null,
-): DrawIdentity | null {
-  return draw === null || session === null
-    ? null
-    : { lineage: session.lineage, site: draw.site, drawId: draw.drawId };
-}
-
-function sameDraw(one: DrawIdentity | null, other: DrawIdentity | null): boolean {
-  return (
-    one !== null &&
-    other !== null &&
-    one.lineage === other.lineage &&
-    one.site === other.site &&
-    one.drawId === other.drawId
-  );
 }
 
 export interface DebugRandomTried {
