@@ -224,6 +224,13 @@ test(
   },
 );
 
+test("a patch cut inside a hunk, even after a newline, is not read as complete", () => {
+  // the last deletion's line is gone, the newline before it kept: the empty string after it is the end, not a line
+  const cut = "@@ -1 +1 @@\n-old\n+new\n@@ -3,2 +2,0 @@ keep\n-remove1\n";
+  assert.throws(() => addedLinesOfPatch(cut), /a hunk ends before its counts/u);
+  assert.deepEqual(addedLinesOfPatch(`${cut.slice(0, -1)}\n-remove2\n`), [1]);
+});
+
 test("a hunk's added lines are its `+` lines, read inside the header's counts", () => {
   // two changed lines with two unchanged ones between them, as `diff.interHunkContext` makes one hunk of them
   assert.deepEqual(
@@ -335,14 +342,14 @@ test("--diff places a function by Git's lines, and keeps a name's leading U+FEFF
   }
 });
 
-test("a name that is not UTF-8, and hunks that --numstat does not count, stop the report", () => {
+test("a name that is not UTF-8 stops the report; a file whose hunks --numstat does not count is reported, and the report goes on", () => {
   const named = history(
     { "src/x.ts": "export const x = 1;\n" },
     { "src/x.ts": "export const x = 2;\n" },
   );
   const counted = history(
-    { "src/x.ts": "export const x = 1;\n" },
-    { "src/x.ts": "export const x = 2;\n" },
+    { "src/a.ts": "export const x = 1;\n", "src/big.ts": "export const big = 0;\n" },
+    { "src/a.ts": "export const x = 2;\n", "src/big.ts": `export const big = 0;\n${lines(301)}\n` },
   );
   try {
     writeFileSync(
@@ -360,22 +367,20 @@ test("a name that is not UTF-8, and hunks that --numstat does not count, stop th
       refused.stderr,
       "structure-report: Git names a file that is not UTF-8 (bytes 7372632f626164ff2e7473): the report reads UTF-8 names only\n",
     );
-    // a stand-in Git whose --numstat counts 99 lines: the hunks add one, so the report stops
+    // a stand-in Git whose --numstat counts 99 lines for src/a.ts, whose hunks add one: that file, read first, is
+    // reported as not measured, and src/big.ts after it, which Git counts as its hunks do, is still measured
     const bin = join(counted.root, "bin");
     const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
     write(counted.root, {
-      "bin/git": `#!/bin/sh\ncase " $* " in *" --numstat "*) printf '99\\t0\\tsrc/x.ts\\0'; exit 0;; esac\nexec ${realGit} "$@"\n`,
+      "bin/git": `#!/bin/sh\ncase " $* " in *" --numstat "*) printf '99\\t0\\tsrc/a.ts\\000'; printf '301\\t0\\tsrc/big.ts\\000'; exit 0;; esac\nexec ${realGit} "$@"\n`,
     });
     execFileSync("chmod", ["+x", join(bin, "git")]);
-    const mismatch = spawnSync(process.execPath, [tool, "--diff", counted.base], {
-      cwd: counted.root,
-      encoding: "utf8",
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-    });
-    assert.equal(mismatch.status, 2, mismatch.stdout + mismatch.stderr);
-    assert.equal(
-      mismatch.stderr,
-      "structure-report: the hunks of src/x.ts add 1 lines, but git diff --numstat counts 99: the patch was not read as Git wrote it\n",
+    assert.deepEqual(
+      changeOf(counted.root, counted.base, { ...process.env, PATH: `${bin}:${process.env.PATH}` }),
+      [
+        "file whose change the report could not read as Git wrote it, not measured: src/a.ts (its hunks add 1 lines, git diff --numstat counts 99)",
+        "file gaining over 300 lines: +301 src/big.ts",
+      ],
     );
   } finally {
     rmSync(named.root, { recursive: true, force: true });
@@ -405,6 +410,20 @@ const REFUSED = [
   [["--compare", "a.json", "--compare", "b.json"], "--compare is given twice"],
   [["--diff", "HEAD", "--diff", "HEAD"], "--diff is given twice"],
   [["--top", "2", "--top", "3"], "--top is given twice"],
+  [["--json=first.json", "--json", "second.json"], "--json is given twice"],
+  // --top's value is a whole number (#2090)
+  [["--top", "abc"], "--top takes a whole number, not abc"],
+  [["--top", "1.5"], "--top takes a whole number, not 1.5"],
+  [["--top=abc"], "--top takes a whole number, not abc"],
+  [["--top", "-1"], "--top takes a value"],
+  // after `=`, the value is what follows it, and there must be one (#2090)
+  [["--json="], "--json takes a value"],
+  [["--diff="], "--diff takes a value"],
+  // an argument that starts with `-` and is no option is refused by name, not read as a root (#2090)
+  [["--jsn", "out.json"], "unknown option --jsn"],
+  [["src", "--jsn=out.json"], "unknown option --jsn"],
+  [["-j", "out.json"], "unknown option -j"],
+  [["--"], "unknown option --"],
 ];
 
 test("an option without its value, or given twice, stops the report with the usage, and writes nothing", () => {
@@ -447,6 +466,109 @@ test("in a repository, a refused command line stops with the usage and writes no
       );
     }
     assert.equal(readFileSync(join(root, "src/sample.ts"), "utf8"), "export const x = 2;\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an option's value after `=` reads as the next argument does, and a root that starts with `-` is written ./-name", () => {
+  const { root, base } = history(
+    { "src/x.ts": "export const x = 1;\n", "-odd/y.ts": "export const y = 1;\n" },
+    {
+      "src/x.ts": `export const x = 1;\n${lines(301)}\n`,
+      "-odd/y.ts": `export const y = 1;\n${lines(301)}\n`,
+    },
+  );
+  try {
+    const report = (...args) => {
+      const result = spawnSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+      assert.equal(result.status, 0, args.join(" ") + result.stdout + result.stderr);
+      return result.stdout;
+    };
+    assert.equal(
+      report("src", "--top=1", "--json=one.json"),
+      report("src", "--top", "1", "--json", "two.json"),
+    );
+    assert.equal(
+      readFileSync(join(root, "one.json"), "utf8"),
+      readFileSync(join(root, "two.json"), "utf8"),
+    );
+    assert.equal(report(`--diff=${base}`), report("--diff", base));
+    assert.match(
+      report("./-odd", "--diff", base),
+      /file gaining over 300 lines: \+301 -odd\/y\.ts/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * #2091's edge, in neutral text: a line of `[indent, id, length]` is `line<id> ` padded with `x` and cut to `length`.
+ * The new side's lone `}` lines can match the old side's at zero context and not at another, because Git enables a
+ * common-tail optimization at zero context only, and this common tail (27 lines) is over 1 KB.
+ */
+const fixtureLine = (spec) =>
+  typeof spec === "string"
+    ? spec
+    : " ".repeat(spec[0]) + `line${spec[1]} `.padEnd(spec[2], "x").slice(0, spec[2]);
+const EDGE_TAIL = [
+  [8, 5, 73],
+  [8, 6, 8],
+  [8, 7, 5],
+  "      });",
+  "    }",
+  [4, 8, 12],
+  "  }",
+  "",
+  [2, 9, 109],
+  [2, 10, 61],
+  [4, 11, 32],
+  [4, 12, 24],
+  [4, 13, 55],
+  [4, 14, 37],
+  [4, 15, 65],
+  [4, 16, 69],
+  [6, 17, 26],
+  [6, 18, 52],
+  [6, 19, 33],
+  [6, 20, 33],
+  [6, 21, 49],
+  [6, 22, 58],
+  [4, 23, 2],
+  [4, 24, 33],
+  [4, 25, 50],
+  "  }",
+  "}",
+];
+const EDGE_OLD = [
+  [6, 0, 74],
+  [6, 1, 32],
+  "    }",
+  [4, 2, 61],
+  [6, 3, 50],
+  [4, 4, 59],
+  "  }",
+  "",
+  ...EDGE_TAIL,
+];
+const EDGE_NEW = ["    }", "    }", "    }", "    }", ...EDGE_TAIL];
+const edgeText = (specs) => `${specs.map(fixtureLine).join("\n")}\n`;
+
+test("--diff counts a line Git places differently at another context as its own patch does (#2091)", () => {
+  const { root, git, base } = history(
+    { "src/edge.ts": edgeText(EDGE_OLD) },
+    { "src/edge.ts": edgeText(EDGE_NEW) },
+  );
+  try {
+    // the fixture holds the edge: Git's default context counts one line fewer than -U0 does
+    const counts = (...context) =>
+      git("diff", "--numstat", ...context, base, "HEAD")
+        .split("\t")
+        .slice(0, 2);
+    assert.deepEqual(counts(), ["3", "7"]);
+    assert.deepEqual(counts("-U0", "--inter-hunk-context=0"), ["4", "8"]);
+    assert.deepEqual(changeOf(root, base), []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
