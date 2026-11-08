@@ -14,8 +14,9 @@ What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise;
     grant added (below);
   - `--timeout 1800` seconds a run (`FAMILIES_TIMEOUT`; 60 in CI), the safety net;
   - `--memory 2048` MB of heap for each source's process. It is the process's own `--max-old-space-size`, so it holds
-    whatever heap `NODE_OPTIONS` sets: the central queue sets one on every job, and the total line names that heap
-    beside `memory` where it differs (`nodeOptions`, #1956);
+    whatever heap `NODE_OPTIONS` sets, which is the runner's own process's only. The usual source of a difference is the
+    central queue, which sets `--max-old-space-size` in `NODE_OPTIONS` on every job: the runner then says both on one
+    stderr line at its start (`memory`, `nodeOptions`), and the total line and the work record carry `memory` (#1956);
   - `--allowances natural,16,256` for the stop runs.
 
   A stored baseline is made at these defaults: its PLAN records them, and `--store` refuses others.
@@ -27,8 +28,7 @@ What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise;
     questions returned, kept with the run as `questions`. A store writes and reads every run by the same limit.
 - **The total line** (stdout's last; `--work`'s last): sources, unparsed, stalled, exceptions, unanswered,
   unansweredAlike, uncompared, uncharged, runs, differences, `crashed: {base, head}` (stalls that ended the process, not
-  the unit limit), the unit multiple, the safety net in seconds, `memory` (with `nodeOptions` where `NODE_OPTIONS` asked
-  another heap) and the Node version.
+  the unit limit), the unit multiple, the safety net in seconds, `memory` and the Node version.
 - **A stall's record** (`--out`, and the source's `--work` line): its reason (`units`, or how the process ended), the
   run it cut as `at: {tree, mode, check}` (`null` between runs, #1965), with `--store` the cut run's certificate, and,
   where the base's process ended, the head's own outcome on each later run (`afterBase`).
