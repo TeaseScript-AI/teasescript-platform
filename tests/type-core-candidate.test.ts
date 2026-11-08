@@ -4023,6 +4023,12 @@ test("in a program holding an arm its entry narrowing leaves no kind no route pr
       false,
     ],
     [
+      "a tested read with an empty answer (Codex r9)",
+      `${realRoute}let xs = []\nlet q = xs[0].k\nif q != null { say "y" }\nrepeat n {}\nexit\n`,
+      null,
+      false,
+    ],
+    [
       "a tested read of external data, the control",
       `${realRoute}if hostValue != null { say "y" }\nrepeat n {}\nexit\n`,
       null,
