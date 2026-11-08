@@ -1,21 +1,23 @@
 import { writeFileSync } from "node:fs";
-import { availableParallelism } from "node:os";
 import { basename, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { run } from "node:test";
 import { spec } from "node:test/reporters";
+import { filesAtOnce } from "./test-files-at-once.mjs";
 
-// Runs the test files given as arguments in that order, each in its own process, with the concurrency, reporter and
-// exit status of `node --test`, whose command line sorts the files instead. A signal cancels the run as it cancels
+// Runs the test files given as arguments in that order, each in its own process, with the reporter and exit status of
+// `node --test`, whose command line sorts the files instead, and as many at once as `node --test` runs, fewer where a
+// cgroup memory limit holds fewer (`tools/test-files-at-once.mjs`). A signal cancels the run as it cancels
 // `node --test`, which stops the files' processes instead of leaving them running. Where `TEST_FILE_SECONDS` names a
 // file, it receives each file's seconds from its process's start to its end, as CI's test jobs keep them for
 // `tools/measure-test-files.mjs`.
 const controller = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => controller.abort());
 
+const atOnce = filesAtOnce();
 const tests = run({
   files: process.argv.slice(2),
-  concurrency: true,
+  concurrency: atOnce,
   isolation: "process",
   signal: controller.signal,
 });
@@ -40,5 +42,5 @@ await pipeline(tests, spec(), process.stdout).catch((error) => {
 if (process.env.TEST_FILE_SECONDS)
   writeFileSync(
     process.env.TEST_FILE_SECONDS,
-    `${JSON.stringify({ filesAtOnce: availableParallelism() - 1, seconds })}\n`,
+    `${JSON.stringify({ filesAtOnce: atOnce, seconds })}\n`,
   );

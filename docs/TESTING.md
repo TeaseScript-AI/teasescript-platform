@@ -46,8 +46,10 @@ sources, the packages each area may import with their reasons, the generated-com
 declares. `npm run lint:design` and `npm run test:lint:design` check the [Player design
 contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
-TypeScript compilation precedes UI work; compiled tests run only after all builds pass. Each command's output is
-printed together, including warnings. A failure stops the group and subsequent stages; SIGINT/SIGTERM also terminate
+TypeScript compilation precedes UI work; compiled tests run only after all builds pass, as many files at once as
+`node --test` runs, fewer under a cgroup memory limit: as many as fit at 3 GiB plus 640 MiB a file
+(`tools/test-files-at-once.mjs`). Each command's output is printed together, including warnings. A failure stops the
+group and subsequent stages; SIGINT/SIGTERM also terminate
 child process groups, escalating after a grace period. A command stopped this way is labelled `ABORTED`, not `FAIL`,
 and prints after the failed one. `npm run test:verification` checks scheduling, diagnostics and
 process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`).

@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } fro
 import { availableParallelism, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { run } from "node:test";
+import { filesAtOnce } from "./test-files-at-once.mjs";
 import { shardFiles } from "./test-shards.mjs";
 
 // Measures what `tools/costly-test-files.mjs` records: each compiled test file's seconds, from its process's start to its
@@ -131,7 +132,8 @@ if (fromCi !== null) {
   const fileSeconds = {};
   const testSeconds = {};
   const failed = [];
-  for await (const event of run({ files: paths, concurrency: true, isolation: "process" })) {
+  const atOnce = filesAtOnce();
+  for await (const event of run({ files: paths, concurrency: atOnce, isolation: "process" })) {
     if (event.data?.nesting !== 0 || event.data.file === undefined) continue;
     const file = event.data.file.slice(event.data.file.lastIndexOf("/") + 1);
     if (event.type === "test:fail") failed.push(`${file}: ${event.data.name}`);
@@ -151,7 +153,7 @@ if (fromCi !== null) {
   measured = {
     source: "",
     from: `a local run at ${commit.slice(0, 9)}, Node ${process.version}, ${availableParallelism()} CPUs`,
-    filesAtOnce: availableParallelism() - 1,
+    filesAtOnce: atOnce,
     pretestSeconds: null,
     fileSeconds,
     testSeconds,
