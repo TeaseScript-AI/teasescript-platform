@@ -212,7 +212,7 @@ export function executeSayAtomically(
   // Trace records made while staging commit or vanish with the staged state.
   const stage = evaluator.trace?.stage() ?? null;
   try {
-    executeSay(instruction, stagedSnapshot, stagedEvaluator, stagedEvents);
+    executeSay(instruction, stagedSnapshot, stagedEvaluator, stagedEvents, snapshot);
   } catch (error) {
     evaluator.trace?.rollback(stage);
     throw error;
@@ -321,11 +321,13 @@ function executeSpeakerAtomically(
   events.push(...stagedEvents);
 }
 
+/** Executes a say on `snapshot`, a staged copy of `session`, the session's own state. */
 function executeSay(
   instruction: Extract<Instruction, { kind: "say" }>,
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
   events: InterpreterEvent[],
+  session: RuntimeSnapshot,
 ): void {
   const preparedSpeaker =
     instruction.speakerTemporary === undefined
@@ -372,7 +374,7 @@ function executeSay(
     );
   }
   const textCauses = outer === null ? null : evaluator.trace!.pop(outer);
-  const content = sayMarkup(instruction, authoredText);
+  const content = sayMarkup(instruction, authoredText, session);
   const text = content.visibleText;
   const pacingValue =
     typeof instruction.pacing === "object"
@@ -499,24 +501,44 @@ function effectiveSaySkippable(
   return configured.value;
 }
 
-/**
- * The markup of each say's most recent text, keyed by its plan instruction: a say that shows the same text again, as
- * in a loop or another session of the plan, parses it once. Each say keeps one entry, replaced when its text changes;
- * the markup is deeply frozen and holds nothing of a session.
- */
-const lastSayMarkup = new WeakMap<
-  object,
-  { readonly text: string; readonly markup: MessageMarkup }
->();
+type SayInstruction = Extract<Instruction, { kind: "say" }>;
 
+/** A say's most recent text and its deeply frozen markup. */
+interface SayMarkupMemo {
+  readonly text: string;
+  readonly markup: MessageMarkup;
+}
+
+/*
+ * Parse caches of a say's text, so that a say showing the same text again, as in a loop, parses it once. Neither is
+ * state: neither is serialized or part of a checkpoint, and neither changes output, for a hit needs the same text.
+ * - `literalSayMarkup`, keyed by the plan instruction of a say whose text is a literal of the plan: it holds the plan's
+ *   text and its markup, shared by every session of the plan, and goes with the plan.
+ * - `computedSayMarkup`, keyed by a session's state object (`RuntimeSession`'s, which its operations update in place, so
+ *   it lives exactly as long as the session; a restore or a capture makes a new one), then by the say's instruction: it
+ *   holds the most recent text that session computed for that say, and goes with the session.
+ */
+const literalSayMarkup = new WeakMap<SayInstruction, SayMarkupMemo>();
+const computedSayMarkup = new WeakMap<RuntimeSnapshot, WeakMap<SayInstruction, SayMarkupMemo>>();
+
+/** The markup of `text`, shown by `instruction` in the session whose state is `session`. */
 function sayMarkup(
-  instruction: Extract<Instruction, { kind: "say" }>,
+  instruction: SayInstruction,
   text: string,
+  session: RuntimeSnapshot,
 ): MessageMarkup {
-  const last = lastSayMarkup.get(instruction);
+  let memo: WeakMap<SayInstruction, SayMarkupMemo>;
+  if (instruction.textTemporary === undefined && instruction.value.kind === "literal")
+    memo = literalSayMarkup;
+  else {
+    const known = computedSayMarkup.get(session);
+    memo = known ?? new WeakMap();
+    if (known === undefined) computedSayMarkup.set(session, memo);
+  }
+  const last = memo.get(instruction);
   if (last !== undefined && last.text === text) return last.markup;
   const markup = parseMessageMarkup(text);
-  lastSayMarkup.set(instruction, { text, markup });
+  memo.set(instruction, { text, markup });
   return markup;
 }
 
