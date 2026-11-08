@@ -5,7 +5,7 @@ import {
 } from "../../src/playback.js";
 import type { PlayerProject, PlayerScriptDiagnostic } from "../runtime-adapter.js";
 import type { ScriptIdentity } from "../script-identity.js";
-import { planMetadata, type PlanMetadata } from "../plan-metadata.js";
+import { planMetadata, type PlanMetadata } from "./plan-facts.js";
 import { DebugRecorder } from "../debug-recorder.js";
 import { MAIN_FILE_PATH } from "../../src/project-paths.js";
 import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
@@ -25,9 +25,9 @@ import { traceOps } from "./ops/trace.js";
 import type { BridgeOps, HostSessions } from "./worker-host.js";
 import type { RandomState } from "./connection-state.js";
 
-// These live in their leaves (`plan-metadata.ts`, `connection-state.ts`); new imports, especially from `ops/`, take
+// These live in their leaves (`plan-facts.ts`, `connection-state.ts`); new imports, especially from `ops/`, take
 // them from there, so that no op imports a value from this composition.
-export type { PlanMetadata } from "../plan-metadata.js";
+export type { PlanMetadata } from "./plan-facts.js";
 export {
   alignRandom,
   alignTrace,

@@ -39,7 +39,7 @@ import {
   ownedRandom,
   type RandomIntent,
 } from "../connection-state.js";
-import { planMetadata, type PlanMetadata } from "../../plan-metadata.js";
+import { planMetadata, type PlanMetadata } from "../plan-facts.js";
 import type { CallViewReply, Introduction, Publication } from "../session-protocol.js";
 import type { BridgeOp, BridgeOps, HostSession, OpOutcome } from "../worker-host.js";
 
