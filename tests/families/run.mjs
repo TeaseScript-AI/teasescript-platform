@@ -20,8 +20,8 @@
 // check, and kept with its stack in `--out`, as is a difference, also where the source stalls later. A publication
 // whose oracle left nodes unanswered on either tree is judged as the README's contract says (`judged`: a difference
 // where what both answered differs, else `unansweredAlike` or `unanswered`). With `--baseline`, the head alone runs,
-// and each run is judged against the stored base result of the same source, mode and check (a source with each run it does not hold is kept in `--out` as `uncompared`, never
-// agreement); `--store` runs one tree of a commit (sx-tree's, with `src/` and `.sha`) at the runner's defaults and
+// and each run is judged against the stored base result of the same source, mode and check (a source with each run
+// it does not hold is kept in `--out` as `uncompared`, never agreement); `--store` runs one tree of a commit (sx-tree's, with `src/` and `.sha`) at the runner's defaults and
 // stores one shard of each source's results, one JSON line each, in the baseline of its `src/` tree (`baselines.mjs`),
 // whose area folder `--baseline` then reads, only where the area is complete under the rule status shares
 // (`storedRuns`); it is refused as status refuses it otherwise (exit 1 or 2).
