@@ -2269,15 +2269,21 @@ for (const gateA of ["succeeds", "fails"] as const)
     reportsInto(context, reported);
     const made = createHost(context, memoryStorage().provider);
     const { host } = made;
-    // Every restart gate held, in the order asked.
+    // The reinstatement gates held, in the order asked; a step's gate goes through as it is.
     const gates: { readonly resolve: () => void; readonly reject: (error: Error) => void }[] = [];
+    const original = host.rewind.beforeRestart.bind(host.rewind);
+    let holding = false;
     host.rewind.beforeRestart = () =>
-      new Promise<void>((resolve, reject) => void gates.push({ resolve, reject }));
+      holding
+        ? new Promise<void>((resolve, reject) => void gates.push({ resolve, reject }))
+        : original();
     await start(context, host);
     await choose(context, host, "One");
     assert.equal(await backTo(made.rewind, 0), true);
     // Debug off: gate A waits.
+    holding = true;
     made.debug.stop();
+    holding = false;
     await settle(context);
     assert.equal(gates.length, 1);
     // A replacement session, Debug on again, and a later inspection of the new history.
@@ -2296,7 +2302,9 @@ for (const gateA of ["succeeds", "fails"] as const)
     await settle(context);
     const inspected = shownView(host);
     // Debug off again: gate B waits.
+    holding = true;
     again.stop();
+    holding = false;
     await settle(context);
     assert.equal(gates.length, 2);
     // A settles: obsolete, it decides nothing, its failure is not reported, and the later inspection stands.
