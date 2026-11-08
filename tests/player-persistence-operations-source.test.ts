@@ -107,7 +107,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "usePlayerSession.rememberScriptName": EDIT,
     "usePlayerSession.images.discard": EDIT,
   },
-  "session/useActivationRun.ts": { "useActivationRun.retire": READ },
+  "session/activation/useActivationRun.ts": { "useActivationRun.retire": READ },
   "session/useCallView.ts": { viewCalls: SESSION },
   "session/useDebugModeAndTrace.ts": {
     issueTracing: SESSION,
@@ -175,7 +175,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     randomTried: SESSION,
     "useRandomControl.dispose": SETUP,
   },
-  "session/useExportCandidate.ts": {
+  "session/activation/useExportCandidate.ts": {
     useExportCandidate: READ,
     lives: READ,
     release: READ,
@@ -184,7 +184,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     debugExportCandidate: READ,
     capture: READ,
   },
-  "session/useFailureRecording.ts": {
+  "session/activation/useFailureRecording.ts": {
     settle: READ,
     "useFailureRecording.stopped": READ,
     "useFailureRecording.retire": READ,

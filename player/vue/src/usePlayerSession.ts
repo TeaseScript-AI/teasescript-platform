@@ -57,7 +57,7 @@ import { useScreenWakeLock } from "./useScreenWakeLock";
 import { useCallView } from "./session/useCallView.js";
 import { usePlayerCameraLifecycle, useSessionCamera } from "./session/usePlayerCameras.js";
 import { usePlayerSessionServices } from "./session/usePlayerSessionServices.js";
-import { useExportCandidate } from "./session/useExportCandidate.js";
+import { useExportCandidate } from "./session/activation/useExportCandidate.js";
 import { useRandomControl } from "./session/useRandomControl.js";
 import { useDebugModeAndTrace } from "./session/useDebugModeAndTrace.js";
 import { useSessionMedia } from "./session/useSessionMedia.js";

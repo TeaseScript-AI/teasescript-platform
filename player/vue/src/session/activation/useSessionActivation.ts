@@ -11,7 +11,7 @@ import type { TemporalContext } from "../../../../../src/index.js";
 import type { Problem } from "../../ProblemCard.vue";
 import type { PlayerSessionOptions, PlayerSessionStart } from "../../usePlayerSession.js";
 import type { useKeptSession } from "../persistence/useKeptSession.js";
-import { stopArguments, useActivationRun, type ActivationRun } from "../useActivationRun.js";
+import { stopArguments, useActivationRun, type ActivationRun } from "./useActivationRun.js";
 
 /*
  * The activation under way, moved from `usePlayerSession` unchanged: its preparation as Start or Continue, the click

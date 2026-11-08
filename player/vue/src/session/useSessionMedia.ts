@@ -19,7 +19,7 @@ import { BridgeRequestError } from "../../../engine-bridge/client.js";
 import type { MediaReportOutcome } from "../../../../src/index.js";
 import { silence } from "../generatedAudio";
 import type { SectionWork, useRuntimeSceneClock } from "../useRuntimeSceneClock";
-import type { ActivationRun } from "./useActivationRun.js";
+import type { ActivationRun } from "./activation/useActivationRun.js";
 
 /*
  * The shown session's media on browser elements, moved from `usePlayerSession` unchanged: the audio device and its load

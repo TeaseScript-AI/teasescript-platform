@@ -81,7 +81,7 @@ test("the restart gate's hook is read only by the rewind owner, and the host res
   assert.deepEqual(
     callers([
       {
-        file: "player/vue/src/session/useFailureRecording.ts",
+        file: "player/vue/src/session/activation/useFailureRecording.ts",
         path: "useFailureRecording > beforeRestart",
       },
       {
@@ -90,12 +90,12 @@ test("the restart gate's hook is read only by the rewind owner, and the host res
       },
     ]),
     [
+      "player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > beforeRestart <- player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart",
       // The activation owner's seam: its returned member, and the composable's destructuring of it.
       "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart",
       "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/usePlayerSession.ts usePlayerSession",
       // The rewind API's `beforeRestart`, which the rewind owner's gate reads before each host restart.
       "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/usePlayerSession.ts usePlayerSession > beforeRestart",
-      "player/vue/src/session/useFailureRecording.ts useFailureRecording > beforeRestart <- player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart",
     ],
   );
   const owner = readFileSync(resolve(process.cwd(), "player/vue/src/rewindOwner.ts"), "utf8");
@@ -117,25 +117,25 @@ test("the failure capture's and the export capture's replies each reach one sett
   assert.deepEqual(
     callers([
       {
-        file: "player/vue/src/session/useFailureRecording.ts",
+        file: "player/vue/src/session/activation/useFailureRecording.ts",
         path: "useFailureRecording > settle",
       },
       { file: "player/player-bridge.ts", path: "PlayerBridge > captureExport" },
       {
-        file: "player/vue/src/session/useExportCandidate.ts",
+        file: "player/vue/src/session/activation/useExportCandidate.ts",
         path: "useExportCandidate > deliver",
       },
     ]),
     [
-      "player/player-bridge.ts PlayerBridge > captureExport <- player/vue/src/session/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture",
-      "player/vue/src/session/useExportCandidate.ts useExportCandidate > deliver <- player/vue/src/session/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture > captureExport:callback",
-      "player/vue/src/session/useFailureRecording.ts useFailureRecording > settle <- player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped > then:callback.1",
-      "player/vue/src/session/useFailureRecording.ts useFailureRecording > settle <- player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped > then:callback.2",
+      "player/player-bridge.ts PlayerBridge > captureExport <- player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture",
+      "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > deliver <- player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture > captureExport:callback",
+      "player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > settle <- player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped > then:callback.1",
+      "player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > settle <- player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped > then:callback.2",
     ],
   );
   // Nothing is chained after the capture's settlement: its handlers only settle.
   const failure = readFileSync(
-    resolve(process.cwd(), "player/vue/src/session/useFailureRecording.ts"),
+    resolve(process.cwd(), "player/vue/src/session/activation/useFailureRecording.ts"),
     "utf8",
   );
   assert.match(
@@ -152,12 +152,12 @@ test("the page's diagnostic senders each check their activation's admission, and
   const SESSION = "player/vue/src/usePlayerSession.ts usePlayerSession";
   const ACTIVATION =
     "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation";
-  const OWNER = "player/vue/src/session/useActivationRun.ts";
+  const OWNER = "player/vue/src/session/activation/useActivationRun.ts";
   const senders = callers([
     { file: "player/player-bridge.ts", path: "PlayerBridge > commitIncident" },
     { file: OWNER, path: "stopArguments" },
     {
-      file: "player/vue/src/session/useFailureRecording.ts",
+      file: "player/vue/src/session/activation/useFailureRecording.ts",
       path: "useFailureRecording > stopped",
     },
   ]);
@@ -165,7 +165,7 @@ test("the page's diagnostic senders each check their activation's admission, and
     `player/player-bridge.ts PlayerBridge > commitIncident <- ${ACTIVATION} > reportHostError > incident`,
     `${OWNER} stopArguments <- ${ACTIVATION} > reportHostError > incident`,
     `${OWNER} stopArguments <- ${ACTIVATION} > stopAt`,
-    `player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped <- ${ACTIVATION} > stopAt`,
+    `player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped <- ${ACTIVATION} > stopAt`,
   ]);
   const admitting = new Set(
     callers([{ file: OWNER, path: "useActivationRun > admits" }]).map(
@@ -261,9 +261,9 @@ const SESSION_FILES: readonly string[] = [
 ];
 const ACTIVATION_FILES = [
   ...SESSION_FILES,
-  "player/vue/src/session/useExportCandidate.ts",
-  "player/vue/src/session/useFailureRecording.ts",
-  "player/vue/src/session/useActivationRun.ts",
+  "player/vue/src/session/activation/useExportCandidate.ts",
+  "player/vue/src/session/activation/useFailureRecording.ts",
+  "player/vue/src/session/activation/useActivationRun.ts",
   "player/vue/src/useDebugExport.ts",
   // `ownedSection`'s member call `clock.section`, followed into the clock's section and its observation (#1983).
   "player/vue/src/useRuntimeSceneClock.ts",

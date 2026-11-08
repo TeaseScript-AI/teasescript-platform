@@ -512,14 +512,10 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "clock scheduling",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped > then:callback.1": [
-    "lifecycle",
-    ["BridgeClient.request"],
-  ],
-  "player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped > then:callback.2": [
-    "lifecycle",
-    ["BridgeClient.request"],
-  ],
+  "player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped > then:callback.1":
+    ["lifecycle", ["BridgeClient.request"]],
+  "player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped > then:callback.2":
+    ["lifecycle", ["BridgeClient.request"]],
   "player/vue/src/useDebugExport.ts useDebugExport > onScopeDispose:callback": [
     "lifecycle",
     ["BridgeClient.request"],
@@ -528,7 +524,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "read",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/session/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture > captureExport:callback":
+  "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture > captureExport:callback":
     ["lifecycle", ["BridgeClient.request"]],
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportHostError > then:callback.2":
     ["lifecycle", ["BridgeClient.request"]],
@@ -571,8 +567,8 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerDebug.ts usePlayerDebug > explain {explain}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > activate {activate}",
   "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > debugView {debugView}",
-  "player/vue/src/session/useExportCandidate.ts useExportCandidate > debugExportCandidate {debugExportCandidate}",
-  "player/vue/src/session/useExportCandidate.ts useExportCandidate > deliver > release {release}",
+  "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > debugExportCandidate {debugExportCandidate}",
+  "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > deliver > release {release}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > debugExportCandidate {debugExportCandidate}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > demandCallView {demandCallView}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > editSavedData {editSavedData}",

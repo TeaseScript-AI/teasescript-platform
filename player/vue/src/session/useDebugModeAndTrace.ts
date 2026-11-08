@@ -5,7 +5,7 @@ import type { DebugView, DebugViewRequest } from "../../../debug-view.js";
 import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../player-bridge.js";
 import type { PlayerSession } from "../../../runtime-view.js";
 import type { useRuntimeSceneClock } from "../useRuntimeSceneClock";
-import type { ActivationRun, useActivationRun } from "./useActivationRun.js";
+import type { ActivationRun, useActivationRun } from "./activation/useActivationRun.js";
 
 /*
  * Debug's two switches as the host holds them, moved from `usePlayerSession` unchanged: the value trace, with its

@@ -4,11 +4,11 @@ import test from "node:test";
 import type { RecordingCaptureReply } from "../player/engine-bridge/session-protocol.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
 import type { PlayerSession } from "../player/runtime-view.js";
-import { useFailureRecording } from "../player/vue/src/session/useFailureRecording.js";
+import { useFailureRecording } from "../player/vue/src/session/activation/useFailureRecording.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
 
 /*
- * L5h.3b's failure recording family (`session/useFailureRecording.ts`): the recording up to a Player error, captured
+ * L5h.3b's failure recording family (`session/activation/useFailureRecording.ts`): the recording up to a Player error, captured
  * under a ticket as the stop is sent. The domain: the capture's settlement × what comes before it settles. Each case
  * checks, apart: the first-error rule (a later stop captures nothing more), what a restart waits for and that it never
  * rejects, the ticket the export selects, and that every ticket a retired or later capture got is released.
