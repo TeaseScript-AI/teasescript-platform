@@ -62,8 +62,8 @@ import extractTSConfig from "dependency-cruiser/config-utl/extract-ts-config";
 //
 // Exit status: 0 when nothing is refused; 1 when a boundary is crossed, an unlisted cycle exists, an imported code file
 // is not among Git's files or a listed entry is gone; 2 when it cannot run, as when the waiting list is malformed or has
-// an entry of another shape, or a cruise's result is not JSON. It installs no signal handler: interrupted, it stops by the signal, and a cruise left
-// running only reads files and ends by itself.
+// an entry of another shape, or a cruise's result is not JSON. It installs no signal handler: interrupted, it stops by
+// the signal, and a cruise left running only reads files and ends by itself.
 
 const CODE = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|vue)$/u;
 

@@ -20,7 +20,9 @@ import { cycleGroups, isGeneratedComponentGroup } from "./imports.mjs";
 
 // The wrapper's own part: Git's file list, the two cruises' ownership, the cycle groups, the generated-component
 // exception, the waiting list, the messages and exit status, and ending on a signal. dependency-cruiser's own suite
-// covers how it reads and resolves imports.
+// covers how it reads and resolves imports. Not told apart here (Sol r3's R3-1), though the wrapper handles each: a
+// regular-file filter from an existence one (a dangling symlink), an unread file that is not code (a `.json`), and an
+// unread file that only erased imports reach.
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const tool = fileURLToPath(new URL("./imports.mjs", import.meta.url));
