@@ -197,11 +197,23 @@ const representatives = [
     " ",
   ),
 ];
-/** Every pair of representatives, in both orders: 88 × 88 = 7,744 rows. */
+// The composition matrix is every pair of representatives, in both orders: 88 × 88 = 7,744 rows. A run checks a seeded
+// sample of it, as the property campaign does (docs/LINTING.md): DESIGN_LINT_MATRIX_SEED picks another sample, and
+// DESIGN_LINT_MATRIX=full checks every row.
+const matrixSeed = Number(process.env.DESIGN_LINT_MATRIX_SEED ?? 2102);
+const matrixSize = process.env.DESIGN_LINT_MATRIX === "full" ? Infinity : 500;
+/** The matrix rows this run checks: `matrixSize` of them, chosen by `matrixSeed`, or all. */
 function matrixRows() {
-  return representatives.flatMap((first) =>
+  const rows = representatives.flatMap((first) =>
     representatives.map((second) => `${first}:${second}:opacity-50`),
   );
+  let state = matrixSeed >>> 0 || 1;
+  const next = () => (state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0) / 2 ** 32;
+  for (let index = rows.length - 1; index > 0; index--) {
+    const other = Math.floor(next() * (index + 1));
+    [rows[index], rows[other]] = [rows[other], rows[index]];
+  }
+  return rows.slice(0, matrixSize);
 }
 // Rows named by the reviews of #2071 and this rule's design rounds, and one per admitted form; `kind` is the decision
 // the rule must take.
@@ -389,13 +401,14 @@ test("Tailwind's output agrees with the rule over the family, the named rows and
     ...matrixRows(),
   ];
   const verdicts = compile(tokens);
+  const sample = `(matrix seed ${matrixSeed}, ${matrixSize} rows)`;
   tokens.forEach((token, index) => {
     const { refusal, kinds } = decision(token);
     const verdict = verdicts[index];
     if (verdict === "own" || verdict === "unknown")
-      assert.notEqual(refusal, null, `${token} compiles to ${verdict} but is admitted`);
+      assert.notEqual(refusal, null, `${token} compiles to ${verdict} but is admitted ${sample}`);
     if (refusal === null && !kinds.includes("no opacity"))
-      assert.equal(verdict, "clean", `${token} is admitted but compiles to ${verdict}`);
+      assert.equal(verdict, "clean", `${token} is admitted but compiles to ${verdict} ${sample}`);
   });
 });
 

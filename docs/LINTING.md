@@ -205,7 +205,9 @@ The rule's tests check it against Tailwind's own output (`tools/design-lint/orac
   functional pseudo-class with another argument than the admitted variants emit. Every admitted tested class must
   compile cleanly.
 - **What the tests cover.** A generated family of spellings × variant order × utility spellings, a matrix of 88
-  admitted representatives in both orders, and each route.
+  admitted representatives in both orders, and each route. A run checks a seeded sample of 500 matrix rows (default
+  seed 2102), as the property campaign samples its cases; `DESIGN_LINT_MATRIX_SEED=<n>` picks another sample and
+  `DESIGN_LINT_MATRIX=full node --test tools/design-lint/test.mjs` checks all 7,744. A failure names its seed.
 
 Named residuals:
 - a class the grammar reads but Tailwind reads differently, with the oracle rows as its check (an admitted class for
