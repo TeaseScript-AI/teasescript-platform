@@ -36,6 +36,10 @@ raw-HTML links and ids are refused. Links in source comments, and absolute URLs 
 checked. A broken link fails `check:pretest` wherever it sits, so its fix belongs to whoever moved the file or renamed
 the heading, also in a file they did not touch. `tools/repository-checks/doc-links.mjs` lists the forms, and records
 its two dependencies.
+`npm run check:imports` refuses an import that crosses a boundary the architecture documents declare (`src/` imports
+no `player/`, `playground/` or UI framework; the framework-independent `player/` no `player/vue/`), and a cycle of value
+imports; type-only cycles are counted, not refused. `tools/repository-checks/imports.mjs` lists the boundaries with their
+sources, the packages each area may import with their reasons, and what no document declares.
 `npm run lint:design` and `npm run test:lint:design` check the
 [Player design contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in
 `npm run check`.
