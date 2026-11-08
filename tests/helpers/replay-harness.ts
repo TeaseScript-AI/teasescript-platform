@@ -5,14 +5,34 @@ import type { BridgeResult, SectionSend } from "../../player/engine-bridge/clien
 import type { Publication } from "../../player/engine-bridge/session-protocol.js";
 import type { PlayerBridge, PublishHook } from "../../player/runtime/player-bridge.js";
 import {
+  activatePlayerRuntimeButton,
   answeredByPlayerInput,
+  answerPlayerRuntimeCapture,
+  answerPlayerRuntimeFileStore,
+  answerPlayerRuntimeLock,
+  cancelPlayerRuntimeForm,
+  closePlayerRuntimeExport,
+  closePlayerRuntimePopup,
+  completePlayerRuntimeStorageWrite,
   observePlayerRuntimeTime,
+  openPlayerRuntimeUrl,
   playerRuntimeSnapshot,
+  pressPlayerRuntimePermanentButton,
+  reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
+  skipPlayerRuntimeImage,
+  stepPlayerRuntimeTime,
+  submitPlayerRuntimeComposer,
+  submitPlayerRuntimeForm,
+  type PlayerCaptureAnswer,
+  type PlayerFileStoreAnswer,
+  type PlayerLockAnswer,
   type PlayerRuntimeSession,
-} from "../../player/runtime/runtime-adapter.js";
-import type { DebugAnswerInput } from "../../player/debug/debug-export.js";
+} from "../../player/runtime-adapter.js";
+import { activePlayerRuntimeInteraction } from "../../player/runtime-view.js";
+import type { MediaLoadReport } from "../../src/runtime/operations/media-reports.js";
+import type { DebugAnswerInput } from "../../player/debug-export.js";
 import type { MediaProgressReport } from "../../src/playback.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import type { CapturedMediaStore } from "../../player/media/captured-media.js";
@@ -262,7 +282,23 @@ export interface ReplayStep {
  * The adapter's call for each op a live run sends after the cut, as the host's op makes it from the same arguments
  * (`ops/session.ts`, `ops/input.ts`). An op without an entry fails the oracle: it is added here.
  */
-const ADAPTER_OPS: Readonly<
+type AdapterCall = (
+  session: PlayerRuntimeSession,
+  args: Record<string, unknown>,
+) => { readonly session: PlayerRuntimeSession; readonly outcome: unknown } | null;
+
+/**
+ * An interaction op as the host's `interactionOp` makes it (`ops/input.ts`): another presented action is refused as
+ * `staleAction` without effect, else `answer` runs on the session.
+ */
+const presented =
+  (answer: (session: PlayerRuntimeSession, args: Record<string, unknown>) => ReturnType<AdapterCall>): AdapterCall =>
+  (session, args) =>
+    activePlayerRuntimeInteraction(session.state)?.actionId !== args["actionId"]
+      ? { session, outcome: { kind: "staleAction", actionId: args["actionId"] } }
+      : answer(session, args);
+
+export const ADAPTER_OPS: Readonly<
   Record<
     string,
     (
@@ -287,6 +323,41 @@ const ADAPTER_OPS: Readonly<
     return input === null
       ? select(session)
       : answeredByPlayerInput(session, input, () => select(session));
+  },
+  // The ops the L5 gate's K/F tapes send (`tests/gate/candidates.ts`), each as its host op calls the adapter. The tapes
+  // send no `input`, so none is recorded as how the player answered.
+  // EVIDENCE: validation: the host accepted `text` as a string (`ops/input.ts`).
+  submitComposer: presented((session, args) => submitPlayerRuntimeComposer(session, args["text"] as string)),
+  activateButton: presented((session) => activatePlayerRuntimeButton(session)),
+  // EVIDENCE: validation: the host accepted `draft` as a string or null (`ops/input.ts`).
+  submitForm: presented((session, args) => submitPlayerRuntimeForm(session, (args["draft"] as string | null) ?? undefined)),
+  cancelForm: presented((session) => cancelPlayerRuntimeForm(session)),
+  skipImage: presented((session) => skipPlayerRuntimeImage(session)),
+  openUrl: presented((session) => openPlayerRuntimeUrl(session)),
+  closePopup: presented((session) => closePlayerRuntimePopup(session)),
+  closeExport: presented((session) => closePlayerRuntimeExport(session)),
+  // EVIDENCE: validation: the host accepted `buttonId` as a number (`ops/input.ts`).
+  pressPermanentButton: (session, args) => pressPlayerRuntimePermanentButton(session, args["buttonId"] as number),
+  completeStorageWrite: (session, args) =>
+    // EVIDENCE: validation: the host accepted `actionId` as a number and `stored` as a boolean (`ops/input.ts`).
+    completePlayerRuntimeStorageWrite(session, args["actionId"] as number, args["stored"] as boolean),
+  // The tapes' resource answers carry `held: null`, so no captured media is admitted (`ops/resources.ts`).
+  answerCapture: (session, args) =>
+    // EVIDENCE: validation: the host accepted `actionId` and a capture answer (`ops/resources.ts`).
+    answerPlayerRuntimeCapture(session, args["actionId"] as number, args["answer"] as PlayerCaptureAnswer),
+  answerFileStore: (session, args) =>
+    // EVIDENCE: validation: the host accepted `actionId` and a file-store answer (`ops/resources.ts`).
+    answerPlayerRuntimeFileStore(session, args["actionId"] as number, args["answer"] as PlayerFileStoreAnswer),
+  answerLock: (session, args) =>
+    // EVIDENCE: validation: the host accepted `actionId` and a lock answer (`ops/resources.ts`).
+    answerPlayerRuntimeLock(session, args["actionId"] as number, args["answer"] as PlayerLockAnswer),
+  reportMediaLoad: (session, args) =>
+    // EVIDENCE: validation: the host accepted `mediaId` as a number and `report` as a record (`ops/media.ts`).
+    reportPlayerRuntimeMediaLoad(session, args["mediaId"] as number, args["report"] as MediaLoadReport),
+  stepTime: (session, args) => {
+    // EVIDENCE: validation: the host accepted `targetMs` as a scene time (`ops/session.ts`).
+    const next = stepPlayerRuntimeTime(session, args["targetMs"] as number);
+    return { session: next, outcome: { moved: next !== session } };
   },
 };
 
@@ -343,7 +414,11 @@ export function adapterReplay(
       continue;
     }
     const made = call(session, args);
-    assert.ok(made !== null, `request ${index} (${request.op}) has no effect on the adapter`);
+    // An op that does nothing (a mandatory image's skip) returns `null` on both sides: a recorded decline, no publication.
+    if (made === null) {
+      assert.equal(ended.result, null, `request ${index} (${request.op}) did nothing on the adapter`);
+      continue;
+    }
     assert.deepEqual(
       ended.result,
       structuredClone(made.outcome),
