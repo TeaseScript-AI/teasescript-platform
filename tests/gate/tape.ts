@@ -1,4 +1,8 @@
-import { BridgeRequestError, type BridgeClient, type BridgeResult } from "../../player/engine-bridge/client.js";
+import {
+  BridgeRequestError,
+  type BridgeClient,
+  type BridgeResult,
+} from "../../player/engine-bridge/client.js";
 
 /*
  * A K/F tape: every request a client sent and the reply it received, in order, as plain JSON. It is recorded on the
@@ -35,7 +39,9 @@ export interface TapeEntry {
 }
 
 /** As JSON keeps it: what a tape stores and what a replay compares. */
-const asJson = <T>(value: T): T => JSON.parse(JSON.stringify(value ?? null)) as T;
+const asJson = <T>(value: T): T =>
+  // EVIDENCE: validation: the round trip keeps `value`'s plain-data shape; JSON drops only what a tape does not keep.
+  JSON.parse(JSON.stringify(value ?? null)) as T;
 
 function replyOf(result: BridgeResult): TapeReply {
   return asJson({
@@ -50,7 +56,14 @@ function replyOf(result: BridgeResult): TapeReply {
 
 function refusalOf(error: unknown): TapeReply {
   if (error instanceof BridgeRequestError)
-    return { ok: false, name: error.name, kind: error.kind, code: error.code, message: error.message, ended: error.ended };
+    return {
+      ok: false,
+      name: error.name,
+      kind: error.kind,
+      code: error.code,
+      message: error.message,
+      ended: error.ended,
+    };
   return {
     ok: false,
     name: error instanceof Error ? error.name : "Error",
@@ -65,7 +78,10 @@ function refusalOf(error: unknown): TapeReply {
  * Records every request `client` sends from now on into `entries`, in the order they were sent, each with its reply
  * once it arrives. `stop()` restores the client's own `request`.
  */
-export function recordClient(client: BridgeClient): { readonly entries: TapeEntry[]; stop(): void } {
+export function recordClient(client: BridgeClient): {
+  readonly entries: TapeEntry[];
+  stop(): void;
+} {
   const entries: TapeEntry[] = [];
   const request = client.request.bind(client);
   const recording: BridgeClient["request"] = async (op, args, options = {}) => {
@@ -77,7 +93,10 @@ export function recordClient(client: BridgeClient): { readonly entries: TapeEntr
       basis: options.basis ?? null,
       after: options.after ?? null,
     };
-    entries.push({ ...base, reply: { ok: false, name: "pending", kind: null, code: null, message: "", ended: null } });
+    entries.push({
+      ...base,
+      reply: { ok: false, name: "pending", kind: null, code: null, message: "", ended: null },
+    });
     try {
       const result = await request(op, args, options);
       entries[index] = { ...base, reply: replyOf(result) };
@@ -87,10 +106,19 @@ export function recordClient(client: BridgeClient): { readonly entries: TapeEntr
       throw error;
     }
   };
-  Object.defineProperty(client, "request", { value: recording, configurable: true, writable: true });
+  Object.defineProperty(client, "request", {
+    value: recording,
+    configurable: true,
+    writable: true,
+  });
   return {
     entries,
-    stop: () => Object.defineProperty(client, "request", { value: request, configurable: true, writable: true }),
+    stop: () =>
+      Object.defineProperty(client, "request", {
+        value: request,
+        configurable: true,
+        writable: true,
+      }),
   };
 }
 
@@ -119,7 +147,10 @@ function canonical(reply: TapeReply, seen: Map<string, string>): string {
  * Sends `entries` through `client` one at a time, in order, with their recorded session, basis and `after`, and compares
  * each reply with the recorded one as JSON, history keys by their order (`canonical`). Stops at the first difference.
  */
-export async function replayTape(client: BridgeClient, entries: readonly TapeEntry[]): Promise<ReplayDifference | null> {
+export async function replayTape(
+  client: BridgeClient,
+  entries: readonly TapeEntry[],
+): Promise<ReplayDifference | null> {
   const recorded = new Map<string, string>();
   const replayed = new Map<string, string>();
   for (const [index, entry] of entries.entries()) {
@@ -135,7 +166,8 @@ export async function replayTape(client: BridgeClient, entries: readonly TapeEnt
     } catch (error) {
       actual = refusalOf(error);
     }
-    if (canonical(actual, replayed) !== canonical(entry.reply, recorded)) return { index, op: entry.op, expected: entry.reply, actual };
+    if (canonical(actual, replayed) !== canonical(entry.reply, recorded))
+      return { index, op: entry.op, expected: entry.reply, actual };
   }
   return null;
 }

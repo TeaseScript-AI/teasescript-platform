@@ -34,14 +34,19 @@ function published(session: PlayerRuntimeSession, from: number) {
 }
 
 /** Judges `entries` (a tape of `project` started with `options`) against the adapter; `null` when all agree. */
-export function judgeTape(project: PlayerProject, options: StartOptions, entries: readonly TapeEntry[]): OracleDifference | null {
+export function judgeTape(
+  project: PlayerProject,
+  options: StartOptions,
+  entries: readonly TapeEntry[],
+): OracleDifference | null {
   const plan = compilePlayerProject(project).plan;
   let session: PlayerRuntimeSession | null = null;
   for (const [index, entry] of entries.entries()) {
     const differ = (what: string): OracleDifference => ({ index, op: entry.op, what });
     const reply = entry.reply;
     if (entry.op === "prepare") {
-      if (reply.ok !== (plan !== null)) return differ("the adapter's compile and the bridge's prepare disagree");
+      if (reply.ok !== (plan !== null))
+        return differ("the adapter's compile and the bridge's prepare disagree");
       continue;
     }
     if (entry.op === "start") {
@@ -50,8 +55,10 @@ export function judgeTape(project: PlayerProject, options: StartOptions, entries
       // EVIDENCE: validation: a Start's reply view is its introduction, a publication from event 0.
       const view = reply.view as { state: unknown; events: unknown };
       const expected = published(session, 0);
-      if (json(view.state) !== expected.state) return differ("Start's state differs from the adapter's");
-      if (json(view.events) !== expected.events) return differ("Start's events differ from the adapter's");
+      if (json(view.state) !== expected.state)
+        return differ("Start's state differs from the adapter's");
+      if (json(view.events) !== expected.events)
+        return differ("Start's events differ from the adapter's");
       continue;
     }
     if (session === null) return differ("a request before Start");
@@ -69,7 +76,11 @@ export function judgeTape(project: PlayerProject, options: StartOptions, entries
     if (!reply.ok) {
       // A thrown op must throw the same on the adapter, on a copy the throw leaves unusable; a refused request changed nothing.
       if (reply.kind !== "engine") continue;
-      const copy = restorePlayerRuntimeSessionAt(session.plan, JSON.stringify(playerRuntimeSnapshot(session)), []);
+      const copy = restorePlayerRuntimeSessionAt(
+        session.plan,
+        JSON.stringify(playerRuntimeSnapshot(session)),
+        [],
+      );
       try {
         call(copy, args);
       } catch (error) {
@@ -82,14 +93,18 @@ export function judgeTape(project: PlayerProject, options: StartOptions, entries
       if (reply.result !== null) return differ("the adapter did nothing but the bridge answered");
       continue;
     }
-    if (json(reply.result) !== json(made.outcome)) return differ("its result differs from the adapter's");
+    if (json(reply.result) !== json(made.outcome))
+      return differ("its result differs from the adapter's");
     if (made.session === session) continue;
     // EVIDENCE: validation: a reply that published carries the publication's view from the same build.
     const view = reply.view as { state: unknown; from: number; events: unknown } | null;
-    if (view === null) return differ("the adapter changed the session but the bridge published nothing");
+    if (view === null)
+      return differ("the adapter changed the session but the bridge published nothing");
     const expected = published(made.session, view.from);
-    if (json(view.state) !== expected.state) return differ("the publication's state differs from the adapter's");
-    if (json(view.events) !== expected.events) return differ("the publication's events differ from the adapter's");
+    if (json(view.state) !== expected.state)
+      return differ("the publication's state differs from the adapter's");
+    if (json(view.events) !== expected.events)
+      return differ("the publication's events differ from the adapter's");
     session = made.session;
   }
   return null;

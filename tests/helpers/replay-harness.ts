@@ -293,7 +293,12 @@ type AdapterCall = (
  * `staleAction` without effect, else `answer` runs on the session.
  */
 const presented =
-  (answer: (session: PlayerRuntimeSession, args: Record<string, unknown>) => ReturnType<AdapterCall>): AdapterCall =>
+  (
+    answer: (
+      session: PlayerRuntimeSession,
+      args: Record<string, unknown>,
+    ) => ReturnType<AdapterCall>,
+  ): AdapterCall =>
   (session, args) =>
     activePlayerRuntimeInteraction(session.state)?.actionId !== args["actionId"]
       ? { session, outcome: { kind: "staleAction", actionId: args["actionId"] } }
@@ -325,42 +330,75 @@ export const ADAPTER_OPS: Readonly<
       ? select(session)
       : answeredByPlayerInput(session, input, () => select(session));
   },
-  // The ops the L5 gate's K/F tapes send (`tests/gate/candidates.ts`), each as its host op calls the adapter. The tapes
-  // send no `input`, so none is recorded as how the player answered.
-  // EVIDENCE: validation: the host accepted `text` as a string (`ops/input.ts`).
-  submitComposer: presented((session, args) => submitPlayerRuntimeComposer(session, args["text"] as string)),
+  // The ops the L5 gate's K/F tapes send (`tests/gate/candidates.ts`), each as its host op calls the adapter, from the
+  // arguments the host accepted (`ops/input.ts`, `ops/resources.ts`, `ops/media.ts`, `ops/session.ts`). The tapes send
+  // no `input`, so none is recorded as how the player answered.
+  submitComposer: presented((session, args) => {
+    // EVIDENCE: validation: the host accepted `text` as a string.
+    const text = args["text"] as string;
+    return submitPlayerRuntimeComposer(session, text);
+  }),
   activateButton: presented((session) => activatePlayerRuntimeButton(session)),
-  // EVIDENCE: validation: the host accepted `draft` as a string or null (`ops/input.ts`).
-  submitForm: presented((session, args) => submitPlayerRuntimeForm(session, (args["draft"] as string | null) ?? undefined)),
+  submitForm: presented((session, args) => {
+    // EVIDENCE: validation: the host accepted `draft` as a string or null.
+    const draft = args["draft"] as string | null;
+    return submitPlayerRuntimeForm(session, draft ?? undefined);
+  }),
   cancelForm: presented((session) => cancelPlayerRuntimeForm(session)),
-  stepFormField: presented((session, args) =>
-    // EVIDENCE: validation: the host accepted `fieldId` as a string and `draft` as a string or null (`ops/input.ts`).
-    stepPlayerRuntimeFormField(session, args["fieldId"] as string, (args["draft"] as string | null) ?? undefined),
-  ),
+  stepFormField: presented((session, args) => {
+    // EVIDENCE: validation: the host accepted `fieldId` as a string.
+    const fieldId = args["fieldId"] as string;
+    // EVIDENCE: validation: the host accepted `draft` as a string or null.
+    const draft = args["draft"] as string | null;
+    return stepPlayerRuntimeFormField(session, fieldId, draft ?? undefined);
+  }),
   skipImage: presented((session) => skipPlayerRuntimeImage(session)),
   openUrl: presented((session) => openPlayerRuntimeUrl(session)),
   closePopup: presented((session) => closePlayerRuntimePopup(session)),
   closeExport: presented((session) => closePlayerRuntimeExport(session)),
-  // EVIDENCE: validation: the host accepted `buttonId` as a number (`ops/input.ts`).
-  pressPermanentButton: (session, args) => pressPlayerRuntimePermanentButton(session, args["buttonId"] as number),
-  completeStorageWrite: (session, args) =>
-    // EVIDENCE: validation: the host accepted `actionId` as a number and `stored` as a boolean (`ops/input.ts`).
-    completePlayerRuntimeStorageWrite(session, args["actionId"] as number, args["stored"] as boolean),
-  // The tapes' resource answers carry `held: null`, so no captured media is admitted (`ops/resources.ts`).
-  answerCapture: (session, args) =>
-    // EVIDENCE: validation: the host accepted `actionId` and a capture answer (`ops/resources.ts`).
-    answerPlayerRuntimeCapture(session, args["actionId"] as number, args["answer"] as PlayerCaptureAnswer),
-  answerFileStore: (session, args) =>
-    // EVIDENCE: validation: the host accepted `actionId` and a file-store answer (`ops/resources.ts`).
-    answerPlayerRuntimeFileStore(session, args["actionId"] as number, args["answer"] as PlayerFileStoreAnswer),
-  answerLock: (session, args) =>
-    // EVIDENCE: validation: the host accepted `actionId` and a lock answer (`ops/resources.ts`).
-    answerPlayerRuntimeLock(session, args["actionId"] as number, args["answer"] as PlayerLockAnswer),
-  reportMediaLoad: (session, args) =>
-    // EVIDENCE: validation: the host accepted `mediaId` as a number and `report` as a record (`ops/media.ts`).
-    reportPlayerRuntimeMediaLoad(session, args["mediaId"] as number, args["report"] as MediaLoadReport),
+  pressPermanentButton: (session, args) => {
+    // EVIDENCE: validation: the host accepted `buttonId` as a number.
+    const buttonId = args["buttonId"] as number;
+    return pressPlayerRuntimePermanentButton(session, buttonId);
+  },
+  completeStorageWrite: (session, args) => {
+    // EVIDENCE: validation: the host accepted `actionId` as a number.
+    const actionId = args["actionId"] as number;
+    // EVIDENCE: validation: the host accepted `stored` as a boolean.
+    const stored = args["stored"] as boolean;
+    return completePlayerRuntimeStorageWrite(session, actionId, stored);
+  },
+  // The tapes' resource answers carry `held: null`, so no captured media is admitted.
+  answerCapture: (session, args) => {
+    // EVIDENCE: validation: the host accepted `actionId` as a number.
+    const actionId = args["actionId"] as number;
+    // EVIDENCE: validation: the host accepted a capture answer.
+    const answer = args["answer"] as PlayerCaptureAnswer;
+    return answerPlayerRuntimeCapture(session, actionId, answer);
+  },
+  answerFileStore: (session, args) => {
+    // EVIDENCE: validation: the host accepted `actionId` as a number.
+    const actionId = args["actionId"] as number;
+    // EVIDENCE: validation: the host accepted a file-store answer record; the engine validates it.
+    const answer = args["answer"] as PlayerFileStoreAnswer;
+    return answerPlayerRuntimeFileStore(session, actionId, answer);
+  },
+  answerLock: (session, args) => {
+    // EVIDENCE: validation: the host accepted `actionId` as a number.
+    const actionId = args["actionId"] as number;
+    // EVIDENCE: validation: the host accepted a lock answer record; the engine validates it.
+    const answer = args["answer"] as PlayerLockAnswer;
+    return answerPlayerRuntimeLock(session, actionId, answer);
+  },
+  reportMediaLoad: (session, args) => {
+    // EVIDENCE: validation: the host accepted `mediaId` as a number.
+    const mediaId = args["mediaId"] as number;
+    // EVIDENCE: validation: the host accepted `report` as a record; the engine validates it.
+    const report = args["report"] as MediaLoadReport;
+    return reportPlayerRuntimeMediaLoad(session, mediaId, report);
+  },
   stepTime: (session, args) => {
-    // EVIDENCE: validation: the host accepted `targetMs` as a scene time (`ops/session.ts`).
+    // EVIDENCE: validation: the host accepted `targetMs` as a scene time.
     const next = stepPlayerRuntimeTime(session, args["targetMs"] as number);
     return { session: next, outcome: { moved: next !== session } };
   },
@@ -421,7 +459,11 @@ export function adapterReplay(
     const made = call(session, args);
     // An op that does nothing (a mandatory image's skip) returns `null` on both sides: a recorded decline, no publication.
     if (made === null) {
-      assert.equal(ended.result, null, `request ${index} (${request.op}) did nothing on the adapter`);
+      assert.equal(
+        ended.result,
+        null,
+        `request ${index} (${request.op}) did nothing on the adapter`,
+      );
       continue;
     }
     assert.deepEqual(

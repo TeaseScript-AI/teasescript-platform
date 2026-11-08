@@ -84,43 +84,80 @@ interface Shown {
 /** The ops that record how the player answered (`input`); the form's field steps do not (`ops/input.ts`). */
 const NO_INPUT: ReadonlySet<CandidateOp> = new Set(["stepFormField"]);
 
-const interaction = (op: CandidateOp, shown: Shown, row: string, extra: Record<string, unknown> = {}): Candidate => ({
+const interaction = (
+  op: CandidateOp,
+  shown: Shown,
+  row: string,
+  extra: Record<string, unknown> = {},
+): Candidate => ({
   op,
   args: { actionId: shown.actionId, ...extra, ...(NO_INPUT.has(op) ? {} : { input: null }) },
   group: "foreground",
   row,
 });
-const typed = (shown: Shown, row: string, answers: readonly string[], prefill: string | undefined) =>
-  [...new Set([...(prefill === undefined ? [] : [prefill]), ...answers])].map((text) =>
-    interaction("submitComposer", shown, `${row}:${text}`, { text }),
-  );
+const typed = (
+  shown: Shown,
+  row: string,
+  answers: readonly string[],
+  prefill: string | undefined,
+) => [
+  ...(prefill === undefined
+    ? []
+    : [interaction("submitComposer", shown, `${row}:prefill`, { text: prefill })]),
+  ...answers
+    .filter((text) => text !== prefill)
+    .map((text) => interaction("submitComposer", shown, `${row}:answer`, { text })),
+];
 
-/** The answers a form's value field gets, in order: by its editor's input, a number field's bounds last. */
-function fieldAnswers(session: PlayerSessionView, fieldId: string, inputType: string, inputMode: string): string[] {
-  if (inputType === "date") return [PINNED_DATE];
-  if (inputType === "time") return [PINNED_TIME];
-  if (inputType === "datetime-local") return [`${PINNED_DATE}T${PINNED_TIME}`];
-  if (inputMode === "text") return TEXT_ANSWERS;
+/** The answers a form's value field gets, in order, each with its row: by its editor's input, a number field's bounds last. */
+function fieldAnswers(
+  session: PlayerSessionView,
+  fieldId: string,
+  inputType: string,
+  inputMode: string,
+): { readonly text: string; readonly row: string }[] {
+  const answers = (texts: readonly string[]) => texts.map((text) => ({ text, row: "form:answer" }));
+  if (inputType === "date") return answers([PINNED_DATE]);
+  if (inputType === "time") return answers([PINNED_TIME]);
+  if (inputType === "datetime-local") return answers([`${PINNED_DATE}T${PINNED_TIME}`]);
+  if (inputMode === "text") return answers(TEXT_ANSWERS);
   const ui = activeInteraction(session.state)?.ui;
-  const field = ui?.kind === "form" ? ui.fields.find((candidate) => candidate.id === fieldId) : undefined;
-  const bounds = field !== undefined && "min" in field ? [field.min, field.max].filter((bound) => bound !== null) : [];
-  return [...new Set([...NUMBER_ANSWERS, ...bounds.map(String)])];
+  const field =
+    ui?.kind === "form" ? ui.fields.find((candidate) => candidate.id === fieldId) : undefined;
+  const bounds =
+    field !== undefined && "min" in field
+      ? [field.min, field.max].filter((bound) => bound !== null)
+      : [];
+  const bounded = bounds.map(String).filter((text) => !NUMBER_ANSWERS.includes(text));
+  return [
+    ...answers(NUMBER_ANSWERS),
+    ...[...new Set(bounded)].map((text) => ({ text, row: "form:bound" })),
+  ];
 }
 
 /** The foreground rows: one per kind of `PlayerForegroundPresentation`; a new kind fails `tsc` here. */
-export const FOREGROUND_ROWS: { readonly [K in ForegroundKind]: (shown: Shown, presented: Foreground<K>, accepted: number) => Candidate[] } = {
+export const FOREGROUND_ROWS: {
+  readonly [K in ForegroundKind]: (
+    shown: Shown,
+    presented: Foreground<K>,
+    accepted: number,
+  ) => Candidate[];
+} = {
   choose: (shown, presented, accepted) => {
     const count = presented.options.length;
     return presented.options.map((_, index) => {
       const option = (accepted + index) % count;
-      return interaction("selectChoice", shown, `choose:${option}`, { optionId: choiceOptionId(shown.actionId, option) });
+      return interaction("selectChoice", shown, "choose", {
+        optionId: choiceOptionId(shown.actionId, option),
+      });
     });
   },
   "ask-text": (shown, presented) => typed(shown, "ask-text", TEXT_ANSWERS, presented.prefill),
   "ask-number": (shown, presented) => typed(shown, "ask-number", NUMBER_ANSWERS, presented.prefill),
   "ask-date": (shown, presented) => typed(shown, "ask-date", [PINNED_DATE], presented.prefill),
   "ask-time": (shown, presented) => typed(shown, "ask-time", [PINNED_TIME], presented.prefill),
-  "ask-datetime": (shown, presented) => typed(shown, "ask-datetime", [`${PINNED_DATE}T${PINNED_TIME}`], presented.prefill),
+  "ask-datetime": (shown, presented) =>
+    typed(shown, "ask-datetime", [`${PINNED_DATE}T${PINNED_TIME}`], presented.prefill),
   "ask-password": (shown) => typed(shown, "ask-password", ["gate"], undefined),
   "show-button": (shown) => [interaction("activateButton", shown, "show-button")],
   "open-url": (shown) => [interaction("openUrl", shown, "open-url")],
@@ -132,31 +169,52 @@ export const FOREGROUND_ROWS: { readonly [K in ForegroundKind]: (shown: Shown, p
     const editor = form?.editor ?? null;
     // A required value field without a value is opened in the editor first, where its answers are drafted.
     for (const field of form?.fields ?? [])
-      if (field.kind === "value" && !field.optional && field.state === null && editor?.fieldId !== field.id)
-        candidates.push(interaction("stepFormField", shown, `form:open ${field.id}`, { fieldId: field.id, draft: null }));
+      if (
+        field.kind === "value" &&
+        !field.optional &&
+        field.state === null &&
+        editor?.fieldId !== field.id
+      )
+        candidates.push(
+          interaction("stepFormField", shown, "form:open field", {
+            fieldId: field.id,
+            draft: null,
+          }),
+        );
     // Whatever the editor holds: a refused draft stays in it (and is published), and the next answers still follow.
     if (editor !== null && !editor.optional)
-      for (const answer of fieldAnswers(shown.session, editor.fieldId, editor.inputType, editor.inputMode))
-        candidates.push(interaction("submitForm", shown, `form:${editor.fieldId}=${answer}`, { draft: answer }));
+      for (const answer of fieldAnswers(
+        shown.session,
+        editor.fieldId,
+        editor.inputType,
+        editor.inputMode,
+      ))
+        candidates.push(interaction("submitForm", shown, answer.row, { draft: answer.text }));
     if (form?.cancel) candidates.push(interaction("cancelForm", shown, "form:cancel"));
     return candidates;
   },
   // This policy represents no image answer: a mandatory image has no candidate (unsupported by this policy).
-  "ask-image": (shown, presented) => (presented.skip === null ? [] : [interaction("skipImage", shown, "ask-image:skip")]),
+  "ask-image": (shown, presented) =>
+    presented.skip === null ? [] : [interaction("skipImage", shown, "ask-image:skip")],
 };
 
-const resource = (op: CandidateOp, actionId: number, row: string, answer: Record<string, unknown>): Candidate => ({
-  op,
-  args: { actionId, answer, held: null },
-  group: "host",
-  row,
-});
+const resource = (
+  op: CandidateOp,
+  actionId: number,
+  row: string,
+  answer: Record<string, unknown>,
+): Candidate => ({ op, args: { actionId, answer, held: null }, group: "host", row });
 
 /**
  * The pending rows: one per kind of `RuntimePendingActionSnapshot`; a new kind fails `tsc` here. A row gives the host
  * requests that action asks for now; an interaction is the foreground's, and timed work only waits for time.
  */
-export const PENDING_ROWS: { readonly [K in PendingKind]: (session: PlayerSessionView, action: Extract<RuntimePendingActionSnapshot, { kind: K }>) => Candidate[] } = {
+export const PENDING_ROWS: {
+  readonly [K in PendingKind]: (
+    session: PlayerSessionView,
+    action: Extract<RuntimePendingActionSnapshot, { kind: K }>,
+  ) => Candidate[];
+} = {
   interaction: () => [],
   delay: () => [],
   chatPacingGate: () => [],
@@ -166,14 +224,36 @@ export const PENDING_ROWS: { readonly [K in PendingKind]: (session: PlayerSessio
   media: (_, action) =>
     action.media.loaded
       ? []
-      : [{ op: "reportMediaLoad", args: { mediaId: action.media.mediaId, report: { kind: "loaded", durationMs: MEDIA_DURATION_MS } }, group: "host", row: "media:load" }],
+      : [
+          {
+            op: "reportMediaLoad",
+            args: {
+              mediaId: action.media.mediaId,
+              report: { kind: "loaded", durationMs: MEDIA_DURATION_MS },
+            },
+            group: "host",
+            row: "media:load",
+          },
+        ],
   storageWrite: (session, action) =>
     pendingPlayerRuntimeStorageWrite(session.state)?.actionId === action.actionId
-      ? [{ op: "completeStorageWrite", args: { actionId: action.actionId, stored: true }, group: "host", row: "storageWrite" }]
+      ? [
+          {
+            op: "completeStorageWrite",
+            args: { actionId: action.actionId, stored: true },
+            group: "host",
+            row: "storageWrite",
+          },
+        ]
       : [],
   capture: (session, action) =>
     activePlayerRuntimeCapture(session.state)?.actionId === action.actionId
-      ? [resource("answerCapture", action.actionId, "capture:unavailable", { kind: "unavailable", reason: "unconfigured" })]
+      ? [
+          resource("answerCapture", action.actionId, "capture:unavailable", {
+            kind: "unavailable",
+            reason: "unconfigured",
+          }),
+        ]
       : [],
   fileStore: (session, action) =>
     activePlayerRuntimeFileStore(session.state)?.actionId === action.actionId
@@ -182,7 +262,12 @@ export const PENDING_ROWS: { readonly [K in PendingKind]: (session: PlayerSessio
   lock: (session, action) => {
     if (activePlayerRuntimeLock(session.state)?.actionId !== action.actionId) return [];
     return action.phase === "work"
-      ? [resource("answerLock", action.actionId, "lock:work failed", { kind: "failed", reason: "unavailable" })]
+      ? [
+          resource("answerLock", action.actionId, "lock:work failed", {
+            kind: "failed",
+            reason: "unavailable",
+          }),
+        ]
       : [
           resource("answerLock", action.actionId, "lock:ask submitted", { kind: "submitted" }),
           resource("answerLock", action.actionId, "lock:ask cancelled", { kind: "cancelled" }),
@@ -198,7 +283,10 @@ function pendingActions(session: PlayerSessionView): readonly RuntimePendingActi
 
 function pendingRow(session: PlayerSessionView, action: RuntimePendingActionSnapshot): Candidate[] {
   // EVIDENCE: validation: the row is the one of `action.kind`, so `action` is that row's action.
-  const row = PENDING_ROWS[action.kind] as (view: PlayerSessionView, pending: RuntimePendingActionSnapshot) => Candidate[];
+  const row = PENDING_ROWS[action.kind] as (
+    view: PlayerSessionView,
+    pending: RuntimePendingActionSnapshot,
+  ) => Candidate[];
   return row(session, action);
 }
 
@@ -211,15 +299,25 @@ export function candidatesFor(session: PlayerSessionView, accepted: number): rea
   for (const action of pendingActions(session)) candidates.push(...pendingRow(session, action));
   if (accepted > 0 && accepted % BUTTON_CADENCE === 0)
     for (const button of playerRuntimePermanentButtons(session.state))
-      candidates.push({ op: "pressPermanentButton", args: { buttonId: button.buttonId }, group: "button", row: "permanentButton" });
+      candidates.push({
+        op: "pressPermanentButton",
+        args: { buttonId: button.buttonId },
+        group: "button",
+        row: "permanentButton",
+      });
   const presented = playerRuntimeForeground(session);
   const action = activeInteraction(session.state);
   if (presented !== null && action !== null) {
     // EVIDENCE: validation: the row is the one of `presented.kind`, so `presented` is that row's presentation.
-    const row = FOREGROUND_ROWS[presented.kind] as (shown: Shown, view: PlayerForegroundPresentation, count: number) => Candidate[];
+    const row = FOREGROUND_ROWS[presented.kind] as (
+      shown: Shown,
+      view: PlayerForegroundPresentation,
+      count: number,
+    ) => Candidate[];
     candidates.push(...row({ session, actionId: action.actionId }, presented, accepted));
   }
   const next = nextPlayerRuntimeEventMs(session.state);
-  if (next !== null) candidates.push({ op: "stepTime", args: { targetMs: next }, group: "time", row: "time" });
+  if (next !== null)
+    candidates.push({ op: "stepTime", args: { targetMs: next }, group: "time", row: "time" });
   return candidates;
 }

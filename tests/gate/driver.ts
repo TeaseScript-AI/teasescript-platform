@@ -42,7 +42,8 @@ export interface TapeRun {
   };
 }
 
-const count = (counts: Record<string, number>, key: string) => (counts[key] = (counts[key] ?? 0) + 1);
+const count = (counts: Record<string, number>, key: string) =>
+  (counts[key] = (counts[key] ?? 0) + 1);
 
 /**
  * Records one tape on `bridge`, a fresh host: `source` as `prepare` takes it, then a Start with `options`. Its census
@@ -57,7 +58,11 @@ export async function driveTape(
     cut = TAPE_CUT,
     candidates = candidatesFor,
     outcomes = OUTCOMES,
-  }: { readonly cut?: number; readonly candidates?: typeof candidatesFor; readonly outcomes?: typeof OUTCOMES } = {},
+  }: {
+    readonly cut?: number;
+    readonly candidates?: typeof candidatesFor;
+    readonly outcomes?: typeof OUTCOMES;
+  } = {},
 ): Promise<TapeRun> {
   const recorder = recordClient(bridge.client);
   const accepted: Record<string, number> = {};
@@ -72,19 +77,32 @@ export async function driveTape(
       entries: recorder.entries,
       outcome,
       plan,
-      census: { accepted, declined, rows, status: shown?.state.status ?? null, observedMs: shown?.state.observedSessionTimeMs ?? null },
+      census: {
+        accepted,
+        declined,
+        rows,
+        status: shown?.state.status ?? null,
+        observedMs: shown?.state.observedSessionTimeMs ?? null,
+      },
     };
   };
   try {
-    const prepared = (await bridge.client.request("prepare", { source })).result as { kind: string; plan?: string };
-    if (prepared.kind !== "prepared" || prepared.plan === undefined) return finish({ kind: "notPrepared", reason: prepared.kind });
+    // EVIDENCE: validation: `prepare` replies from the same build with a `PrepareResult`.
+    const prepared = (await bridge.client.request("prepare", { source })).result as {
+      kind: string;
+      plan?: string;
+    };
+    if (prepared.kind !== "prepared" || prepared.plan === undefined)
+      return finish({ kind: "notPrepared", reason: prepared.kind });
     plan = prepared.plan;
     session = await bridge.start(plan, options, true);
     let total = 0;
     for (;;) {
       const shown = bridge.latest(session) ?? session;
-      if (shown.state.status === "halted") return await captured(bridge, shown, finish({ kind: "halted" }));
-      if (shown.state.status === "failed") return await captured(bridge, shown, finish({ kind: "failed" }));
+      if (shown.state.status === "halted")
+        return await captured(bridge, shown, finish({ kind: "halted" }));
+      if (shown.state.status === "failed")
+        return await captured(bridge, shown, finish({ kind: "failed" }));
       if (total >= cut) return await captured(bridge, shown, finish({ kind: "cut" }));
       const tried = new Set<string>();
       let lastDeclined: { candidate: Candidate; reason: string } | null = null;
@@ -119,13 +137,32 @@ export async function driveTape(
       if (progressed) continue;
       const latest = bridge.latest(session) ?? session;
       if (lastDeclined?.candidate.op === "stepTime")
-        return await captured(bridge, latest, finish({ kind: "refused", reason: `the deadline at ${String(lastDeclined.candidate.args["targetMs"])} ms: ${lastDeclined.reason}` }));
+        return await captured(
+          bridge,
+          latest,
+          finish({
+            kind: "refused",
+            reason: `the deadline at ${String(lastDeclined.candidate.args["targetMs"])} ms: ${lastDeclined.reason}`,
+          }),
+        );
       if (tried.size === 0 && latest.state.foregroundAction?.kind === "interaction")
-        return await captured(bridge, latest, finish({ kind: "unsupported", reason: `no candidate for the shown ${latest.state.foregroundAction.ui.kind}` }));
-      return await captured(bridge, latest, finish({ kind: "stalled", reason: `tried ${[...tried].join(", ") || "nothing"}` }));
+        return await captured(
+          bridge,
+          latest,
+          finish({
+            kind: "unsupported",
+            reason: `no candidate for the shown ${latest.state.foregroundAction.ui.kind}`,
+          }),
+        );
+      return await captured(
+        bridge,
+        latest,
+        finish({ kind: "stalled", reason: `tried ${[...tried].join(", ") || "nothing"}` }),
+      );
     }
   } catch (error) {
-    if (error instanceof UnfamiliarResult) return finish({ kind: "harnessError", reason: error.message });
+    if (error instanceof UnfamiliarResult)
+      return finish({ kind: "harnessError", reason: error.message });
     recorder.stop();
     throw error;
   }
@@ -134,7 +171,11 @@ export async function driveTape(
 const key = (candidate: Candidate) => `${candidate.op} ${JSON.stringify(candidate.args)}`;
 
 /** The tape's final capture, recorded as an entry: the session's checkpoint, read session-free after its requests. */
-async function captured(bridge: PlayerBridge, session: PlayerSession, run: TapeRun): Promise<TapeRun> {
+async function captured(
+  bridge: PlayerBridge,
+  session: PlayerSession,
+  run: TapeRun,
+): Promise<TapeRun> {
   const entries = [...run.entries];
   const recorder = recordClient(bridge.client);
   try {
