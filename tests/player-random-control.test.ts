@@ -513,12 +513,13 @@ test("every session op is classified, and only adoptCatchUp reads a session past
 });
 
 // The caller inventory of Continue's boundary (Sol plan P5, code r1 C3): the calls that introduce or restore a session
-// in `usePlayerSession.ts`, `useDebugRewind.ts` and `rewindOwner.ts`, by these callee spellings (`startedSession`,
+// in the session composable's files, `useDebugRewind.ts` and `rewindOwner.ts`, by these callee spellings (`startedSession`,
 // `introduceNow`, `prepareRestore`, `host.start`, `showRewound`, `host.show`), each classified. Only a Start carries its Player's
 // random ownership (`startRandom()`); a restore takes it at its adoption. A new such call in those files fails until it
 // is classified. A new module, or an indirection under another name, needs adding here.
 const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string, string])[]>> = {
-  "player/vue/src/usePlayerSession.ts": [
+  "player/vue/src/usePlayerSession.ts": [],
+  "player/vue/src/session/activation/useSessionActivation.ts": [
     [
       "begin: (origin) => startedSession(create, { debugMode: debugModeOn() }, origin)",
       "start: Start",
@@ -557,6 +558,7 @@ const COMPOSABLE_FILES = [
   "player/vue/src/session/persistence/useKeptSession.ts",
   "player/vue/src/session/persistence/useSavedDataTransfer.ts",
   "player/vue/src/session/persistence/useSessionTransfer.ts",
+  "player/vue/src/session/activation/useSessionActivation.ts",
 ] as const;
 /** The text of the session composable's files, one after another. */
 function composableText(): string {
@@ -599,11 +601,12 @@ test("every random-op sender in the composable is classified as adopting or not"
   assert.deepEqual(
     calls.map((line) => line.trim()),
     [
-      // The rewind owner's dependency, which forwards its adoption to the random control's.
+      // The activation owner's and the rewind owner's dependencies, which forward their adoption to the random control's.
+      "adoptRandom: (next, origin) => adoptRandom(next, origin),",
       "adoptRandom: (next) => adoptRandom(next),",
       "if (!paused) adoptRandom(next);",
-      "adoptRandom(continued, origin);",
       "if (session.value !== null) adoptRandom(session.value);",
+      "adoptRandom(continued, origin);",
     ],
   );
 });
@@ -628,10 +631,12 @@ test("every session introduction in the composable and rewind is classified as a
       left.splice(at, 1);
     }
   }
-  // `startedSession` carries `startRandom()` for a Start only.
+  // `startedSession` carries `startRandom()` for a Start only; the activation owner's dependency forwards it.
   const composable = composableText();
-  assert.equal(composable.match(/startRandom\(\)/gu)?.length, 1);
-  assert.match(composable, /const random = startRandom\(\);/u);
+  assert.deepEqual(
+    composable.match(/.*startRandom\(\).*/gu)?.map((line) => line.trim()),
+    ["startRandom: () => startRandom(),", "const random = startRandom();"],
+  );
 });
 
 test("malformed random arguments are refused before anything runs", async () => {

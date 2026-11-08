@@ -85,14 +85,17 @@ test("the restart gate's hook is read only by the rewind owner, and the host res
         path: "useFailureRecording > beforeRestart",
       },
       {
-        file: "player/vue/src/usePlayerSession.ts",
-        path: "usePlayerSession > beforeRewindRestart",
+        file: "player/vue/src/session/activation/useSessionActivation.ts",
+        path: "useSessionActivation > beforeRewindRestart",
       },
     ]),
     [
-      "player/vue/src/session/useFailureRecording.ts useFailureRecording > beforeRestart <- player/vue/src/usePlayerSession.ts usePlayerSession > beforeRewindRestart",
+      // The activation owner's seam: its returned member, and the composable's destructuring of it.
+      "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart",
+      "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/usePlayerSession.ts usePlayerSession",
       // The rewind API's `beforeRestart`, which the rewind owner's gate reads before each host restart.
-      "player/vue/src/usePlayerSession.ts usePlayerSession > beforeRewindRestart <- player/vue/src/usePlayerSession.ts usePlayerSession > beforeRestart",
+      "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/usePlayerSession.ts usePlayerSession > beforeRestart",
+      "player/vue/src/session/useFailureRecording.ts useFailureRecording > beforeRestart <- player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart",
     ],
   );
   const owner = readFileSync(resolve(process.cwd(), "player/vue/src/rewindOwner.ts"), "utf8");
@@ -147,6 +150,8 @@ test("the failure capture's and the export capture's replies each reach one sett
 // activation sends nothing is the completion-lifetime family's runtime claim (`player-session-rewind.test.ts`).
 test("the page's diagnostic senders each check their activation's admission, and only Start and disposal change it", () => {
   const SESSION = "player/vue/src/usePlayerSession.ts usePlayerSession";
+  const ACTIVATION =
+    "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation";
   const OWNER = "player/vue/src/session/useActivationRun.ts";
   const senders = callers([
     { file: "player/player-bridge.ts", path: "PlayerBridge > commitIncident" },
@@ -157,10 +162,10 @@ test("the page's diagnostic senders each check their activation's admission, and
     },
   ]);
   assert.deepEqual(senders, [
-    `player/player-bridge.ts PlayerBridge > commitIncident <- ${SESSION} > reportHostError > incident`,
-    `${OWNER} stopArguments <- ${SESSION} > reportHostError > incident`,
-    `${OWNER} stopArguments <- ${SESSION} > stopAt`,
-    `player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped <- ${SESSION} > stopAt`,
+    `player/player-bridge.ts PlayerBridge > commitIncident <- ${ACTIVATION} > reportHostError > incident`,
+    `${OWNER} stopArguments <- ${ACTIVATION} > reportHostError > incident`,
+    `${OWNER} stopArguments <- ${ACTIVATION} > stopAt`,
+    `player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped <- ${ACTIVATION} > stopAt`,
   ]);
   const admitting = new Set(
     callers([{ file: OWNER, path: "useActivationRun > admits" }]).map(
@@ -177,7 +182,7 @@ test("the page's diagnostic senders each check their activation's admission, and
       { file: OWNER, path: "useActivationRun > retire" },
     ]),
     [
-      `${OWNER} useActivationRun > begin <- ${SESSION} > startFrom`,
+      `${OWNER} useActivationRun > begin <- ${ACTIVATION} > startFrom`,
       `${OWNER} useActivationRun > retire <- ${SESSION} > tryOnScopeDispose:callback`,
     ],
   );
@@ -252,6 +257,7 @@ const SESSION_FILES: readonly string[] = [
   "player/vue/src/session/persistence/useKeptSession.ts",
   "player/vue/src/session/persistence/useSavedDataTransfer.ts",
   "player/vue/src/session/persistence/useSessionTransfer.ts",
+  "player/vue/src/session/activation/useSessionActivation.ts",
 ];
 const ACTIVATION_FILES = [
   ...SESSION_FILES,
@@ -300,22 +306,24 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useDebugExport.ts: useDebugExport > watch:callback: await assembleDebugExport":
     "assembles a handed-over candidate, which stays valid",
   "useDebugExport.ts: useDebugExport > watch:callback: await measuredDebugExportFile": "as above",
-  "usePlayerSession.ts: usePlayerSession > activate: await begunInFlight":
+  "useSessionActivation.ts: useSessionActivation > activate: await begunInFlight":
     "before the activation's record begins (`startFrom`); the click's token decides",
-  "usePlayerSession.ts: usePlayerSession > activate: await startFrom": "the activation itself",
-  "usePlayerSession.ts: usePlayerSession > activate: await camera.open":
+  "useSessionActivation.ts: useSessionActivation > activate: await startFrom":
+    "the activation itself",
+  "useSessionActivation.ts: useSessionActivation > activate: await camera.open":
     "before the activation's record begins; the click's token decides",
-  "usePlayerSession.ts: usePlayerSession > activate: await loadScriptStorage":
+  "useSessionActivation.ts: useSessionActivation > activate: await loadScriptStorage":
     "before the activation's record begins; the click's token decides",
-  "usePlayerSession.ts: usePlayerSession > startFrom: then bridgeReady":
+  "useSessionActivation.ts: useSessionActivation > startFrom: then bridgeReady":
     "before the activation's record begins; the click's token decides",
-  "usePlayerSession.ts: usePlayerSession > startFrom: then begun": READMITS,
-  "usePlayerSession.ts: usePlayerSession > prepareRestore > begin: await host.request": READMITS,
-  "usePlayerSession.ts: usePlayerSession > prepareRestore > begin: catch host.request":
+  "useSessionActivation.ts: useSessionActivation > startFrom: then begun": READMITS,
+  "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: await host.request":
+    READMITS,
+  "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: catch host.request":
     "the trace restart's rejection, which reports with the Continue's own activation, admitted there (`reportHostError`)",
-  "usePlayerSession.ts: usePlayerSession > prepareRestore > begin: catch host.client.request":
+  "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: catch host.client.request":
     "drops the random release's refusal; nothing follows",
-  "usePlayerSession.ts: usePlayerSession > reportHostError > incident: catch origin.bridge.commitIncident":
+  "useSessionActivation.ts: useSessionActivation > reportHostError > incident: catch origin.bridge.commitIncident":
     "drops the incident's refusal; nothing follows",
   "useActivationRun.ts: useActivationRun > retire: catch ended.bridge.retireRun":
     "drops the retirement's refusal: the record retired already, and nothing follows",
@@ -325,8 +333,8 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "drops a release's refusal; nothing follows",
   "useFailureRecording.ts: useFailureRecording > settle: catch bridge.releaseRecording":
     "drops a release's refusal; nothing follows",
-  "usePlayerSession.ts: usePlayerSession > reportHostError: then starting": READMITS,
-  "usePlayerSession.ts: usePlayerSession > stopAt: then acknowledged": READMITS,
+  "useSessionActivation.ts: useSessionActivation > reportHostError: then starting": READMITS,
+  "useSessionActivation.ts: useSessionActivation > stopAt: then acknowledged": READMITS,
   // Reached from the activation bodies through the functions they call.
   "useRandomControl.ts: useRandomControl > sendRandomRequest: then host.client.request": READMITS,
   // The clock's section (#1983): its observation, then the caller's body, which re-admits first (checked below).
@@ -337,7 +345,7 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useRandomControl.ts: useRandomControl > resolveRandomDraw > ownedSection:callback: await section.send":
     READMITS,
   "useRandomControl.ts: useRandomControl > resolveRandomDraw: catch ownedSection": READMITS,
-  "usePlayerSession.ts: usePlayerSession > startFrom: finally settled":
+  "useSessionActivation.ts: useSessionActivation > startFrom: finally settled":
     "clears the in-flight markers it set, only while they are still its own",
   "useDebugModeAndTrace.ts: useDebugModeAndTrace > applyDebugMode: finally bridgeOf.request":
     "clears the Debug mode asked, only while it is still this request's",
@@ -366,8 +374,7 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useKeptSession.ts: useKeptSession > keepIn: await store.publish": KEPT_SESSION,
   "useKeptSession.ts: useKeptSession > forgetKeptSession: await discardKeptSession.then":
     KEPT_SESSION,
-  "useKeptSession.ts: useKeptSession > forgetKeptSession: then discardKeptSession":
-    KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > forgetKeptSession: then discardKeptSession": KEPT_SESSION,
 };
 /** Calls that re-admit an activation, and calls that request or act for one. */
 const ADMITS = /^(?:goesOn|lives|owned|activationRun\.admits)$/u;

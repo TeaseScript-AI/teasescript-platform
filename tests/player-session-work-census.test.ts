@@ -432,16 +432,14 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
   "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > prepareKept > owned:callback > commit:callback#2":
     ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > prepareRestore > begin > catch:callback#2":
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > prepareRestore > begin > catch:callback#2":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > pressPermanentButton": [
     "own observation",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > reportHostError > then:callback.1": [
-    "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
-  ],
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportHostError > then:callback.1":
+    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/useRandomControl.ts useRandomControl > resolveRandomDraw > catch:callback":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > restoreKept > admit:callback":
@@ -460,18 +458,12 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "creation",
     ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > startFrom > then:callback#1": [
-    "creation",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
-  ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > startFrom > then:callback#2.1": [
-    "creation",
-    ["BridgeClient.request", "BridgeClient.signal"],
-  ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > startFrom > then:callback#2.2": [
-    "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
-  ],
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#1":
+    ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#2.1":
+    ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#2.2":
+    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > then:callback": [
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
@@ -538,10 +530,8 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture > captureExport:callback":
     ["lifecycle", ["BridgeClient.request"]],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > reportHostError > then:callback.2": [
-    "lifecycle",
-    ["BridgeClient.request"],
-  ],
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportHostError > then:callback.2":
+    ["lifecycle", ["BridgeClient.request"]],
 };
 
 /** The escapes that are not followed (a value passed as a callback): each is an entry point too, with its policy. */
@@ -594,10 +584,8 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerSession.ts usePlayerSession > observe {observeForInput}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > prepare {prepare}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > prepareInput {prepareInput}",
-  "player/vue/src/usePlayerSession.ts usePlayerSession > prepareRestore > begin {begin}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > prepareRestore {prepareRestore}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > prepareScript {prepareScript}",
-  "player/vue/src/usePlayerSession.ts usePlayerSession > prepareStart > begin {begin}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > pressPermanentButton {pressPermanentButton}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > publishJump {publishJump}",
   "player/vue/src/session/useRandomControl.ts useRandomControl > randomTried {randomTried}",
@@ -710,6 +698,23 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerSession.ts usePlayerSession {importSession}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {readTransfer}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {reviewSessionImport}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > activate {activate}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > prepare {prepare}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > prepareRestore > begin {begin}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > prepareRestore {prepareRestore}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > prepareStart > begin {begin}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > prepareStart {prepareStart}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportHostError {reportHostError}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > supersede {supersede}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation {adoptRandom}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation {settlePlanJson}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation {showSession}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {activate}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {prepareRestore}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {prepareStart}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {prepare}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {reportHostError}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {supersede}",
 ];
 
 /**
