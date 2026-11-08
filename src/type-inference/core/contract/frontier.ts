@@ -1535,6 +1535,8 @@ interface Product {
   /** Per state, whether it accepts through its epsilon edges. */
   readonly accepts: Map<number, boolean>;
   floors: number;
+  /** Per floor shape and step, the shape below it (`shapeStep`). */
+  readonly floorSteps: Map<number, Map<string, number>>;
 }
 
 /** #2005: a node's terms as a floor reads them: its leaves and native values, found as goals are (`termsAt`). */
@@ -1561,6 +1563,7 @@ function productOf(frontier: Frontier): Product {
     safe: new WeakMap(),
     accepts: new Map(),
     floors: 0,
+    floorSteps: new Map(),
   });
 }
 
@@ -1664,9 +1667,37 @@ function shapesOf(frontier: Frontier, roots: readonly number[]): number {
   );
 }
 
-/** #2005: a shape one step `s` below, the receiver-shape graph's (`next(S, s)`). */
+/**
+ * #2005: a shape one step `s` below (`next(S, s)`): a structured one's, the receiver-shape graph's step; a floor's,
+ * native's below a floor (`receiverWalk`): its keys' direct children with stores and its unknown leaves, the graph
+ * not walked below it. Once per shape and step.
+ */
 function shapeStep(frontier: Frontier, shape: number, s: string): number {
-  return star(productOf(frontier).shapes, shape, s);
+  const product = productOf(frontier);
+  const { shapes } = product;
+  if (structured(frontier, shape)) return star(shapes, shape, s);
+  let bySteps = product.floorSteps.get(shape);
+  const known = bySteps?.get(s);
+  if (known !== undefined) return known;
+  const members = setMembers(shapes, shape);
+  const out: number[] = [];
+  for (const member of members) {
+    step(frontier);
+    const at = shapes.nodes[member]!;
+    if (at.kind !== "key") continue;
+    const path = keptSteps(frontier.contract.work, at.path, [s]);
+    for (const place of at.members)
+      if (holds(frontier.contract, place, path)) out.push(keyNode(shapes, place, path));
+  }
+  for (const leaf of leavesOf(shapes, members)) {
+    step(frontier);
+    const at = shapes.nodes[leaf]!;
+    if (at.kind === "leaf" && at.item.tag === "unknown") out.push(leaf);
+  }
+  const id = intern(shapes, out);
+  if (bySteps === undefined) product.floorSteps.set(shape, (bySteps = new Map()));
+  bySteps.set(s, id);
+  return id;
 }
 
 /**
@@ -1716,18 +1747,19 @@ function compose(
     for (const node of roots) fastBelow(frontier, node, steps, from, then);
     return;
   }
-  let shape = shapesOf(frontier, roots);
-  const shapes = [shape];
-  for (let at = from; at < steps.length; at += 1) {
-    step(frontier);
-    shape = shapeStep(frontier, shape, steps[at]!);
-    shapes.push(shape);
-  }
+  // (each prefix's shape made when a node first reaches it)
+  const shapes = [shapesOf(frontier, roots)];
+  const shapeAt = (at: number): number => {
+    for (let index = shapes.length; index <= at - from; index += 1) {
+      step(frontier);
+      shapes.push(shapeStep(frontier, shapes[index - 1]!, steps[from + index - 1]!));
+    }
+    return shapes[at - from]!;
+  };
   const walk = (node: number, at: number): void => {
     if (at === steps.length) return then(node);
-    const next = shapes[at - from + 1]!;
-    const use = (found: number): void => walk(constrain(frontier, found, next), at + 1);
-    if (structured(frontier, shapes[at - from]!)) plainBelow(frontier, node, steps[at]!, use);
+    const use = (found: number): void => walk(constrain(frontier, found, shapeAt(at + 1)), at + 1);
+    if (structured(frontier, shapeAt(at))) plainBelow(frontier, node, steps[at]!, use);
     else floorBelow(frontier, node, steps[at]!, use);
   };
   for (const node of roots) walk(node, from);
