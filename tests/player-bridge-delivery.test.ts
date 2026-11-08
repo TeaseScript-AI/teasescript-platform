@@ -239,6 +239,7 @@ function retained({ context, sessions }: Connection): string[] {
     ...[...context.sources.keys()].map((token) => `sources ${token}`),
     ...[...context.planTexts.keys()].map((token) => `slot ${token}`),
     ...[...context.transfers.keys()].map((ticket) => `transfer ${ticket}`),
+    ...[...context.recordings].map(([ticket, held]) => `${held.kind} ${ticket}`),
     ...[...context.sourceViews.texts.keys()].map((token) => `sidecar text ${token}`),
     ...[...context.sourceViews.sidecars.keys()].map((token) => `sidecar ${token}`),
     ...(context.sourceViews.latestFile.value === null ? [] : ["latest file"]),
@@ -256,6 +257,8 @@ const CLASSES = {
   transfer: { op: "readTransfer", async: true },
   slot: { op: "preparePlanText", async: false },
   cache: { op: "drawCode", async: true },
+  recording: { op: "captureRecording", async: false },
+  export: { op: "captureExport", async: false },
 } as const;
 type AllocationClass = keyof typeof CLASSES;
 /** The classes whose op awaits before it allocates. */
@@ -278,6 +281,8 @@ const FAMILY_AXES = {
     "transfer",
     "slot",
     "cache",
+    "recording",
+    "export",
   ] satisfies readonly AllocationClass[],
   event: [
     "lifecycle",
@@ -328,6 +333,8 @@ const OBLIGATIONS: Readonly<Record<AllocationClass, readonly FamilyEvent[]>> = {
   transfer: AFTER_AWAIT,
   slot: AT_ONCE,
   cache: AFTER_AWAIT,
+  recording: AT_ONCE,
+  export: AT_ONCE,
 };
 
 /** What each class's op adds to the controls, exactly. */
@@ -338,6 +345,8 @@ const ADDED: Readonly<Record<AllocationClass, readonly string[]>> = {
   transfer: ["transfer transfer-2"],
   slot: ["slot p2"],
   cache: ["latest file", "sidecar p3", "sidecar text p3"],
+  recording: ["recording r1"],
+  export: ["export r1"],
 };
 
 /**
@@ -356,18 +365,21 @@ const RETIRE: Readonly<
   transfer: { op: "releaseTransfer", args: { ticket: "transfer-2" } },
   slot: { op: "releasePlanText", args: { plan: "p2" } },
   cache: null,
+  recording: { op: "releaseRecording", args: { ticket: "r1" } },
+  export: { op: "releaseRecording", args: { ticket: "r1" } },
 };
 
 /**
  * The controls, which exist before the case's request and which no failure of it may undo: a plan `p1` with its slot,
- * a session `s1` on it, a transfer, a second plan `p2` (for a new slot), and a compiled plan `p3` (for the source views).
+ * a session `s1` on it, which the recorder records, a transfer, a second plan `p2` (for a new slot), and a compiled plan `p3` (for the source views).
  */
 async function withControls(connection: Connection): Promise<void> {
   const send = async (op: string, args: unknown) =>
     assert.equal((await settled(connection, connection.request(op, args))).status, "fulfilled");
   await send("prepare", { source: { kind: "plan", text: PLAN_JSON } });
   await send("preparePlanText", { plan: "p1" });
-  await send("start", { plan: "p1", options: START, recording: false });
+  // Recorded, so that a recording capture and an export of it have a recording to hold.
+  await send("start", { plan: "p1", options: START, recording: true });
   await send("readTransfer", { text: TRANSFER_TEXT });
   await send("prepare", { source: { kind: "plan", text: PLAN_JSON } });
   await send("prepare", { source: { kind: "source", script: SCRIPT } });
@@ -389,6 +401,10 @@ async function argumentsOf(
       return { text: TRANSFER_TEXT };
     case "slot":
       return { plan: "p2" };
+    case "recording":
+      return { session: "s1" };
+    case "export":
+      return { session: "s1", recording: "current" };
     case "cache": {
       const metadata = await settled(
         connection,
