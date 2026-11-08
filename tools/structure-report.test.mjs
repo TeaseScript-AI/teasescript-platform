@@ -224,6 +224,13 @@ test(
   },
 );
 
+test("a patch cut inside a hunk, even after a newline, is not read as complete", () => {
+  // the last deletion's line is gone, the newline before it kept: the empty string after it is the end, not a line
+  const cut = "@@ -1 +1 @@\n-old\n+new\n@@ -3,2 +2,0 @@ keep\n-remove1\n";
+  assert.throws(() => addedLinesOfPatch(cut), /a hunk ends before its counts/u);
+  assert.deepEqual(addedLinesOfPatch(`${cut.slice(0, -1)}\n-remove2\n`), [1]);
+});
+
 test("a hunk's added lines are its `+` lines, read inside the header's counts", () => {
   // two changed lines with two unchanged ones between them, as `diff.interHunkContext` makes one hunk of them
   assert.deepEqual(
@@ -341,8 +348,8 @@ test("a name that is not UTF-8 stops the report; a file whose hunks --numstat do
     { "src/x.ts": "export const x = 2;\n" },
   );
   const counted = history(
-    { "src/x.ts": "export const x = 1;\n", "src/big.ts": "export const big = 0;\n" },
-    { "src/x.ts": "export const x = 2;\n", "src/big.ts": `export const big = 0;\n${lines(301)}\n` },
+    { "src/a.ts": "export const x = 1;\n", "src/big.ts": "export const big = 0;\n" },
+    { "src/a.ts": "export const x = 2;\n", "src/big.ts": `export const big = 0;\n${lines(301)}\n` },
   );
   try {
     writeFileSync(
@@ -360,19 +367,19 @@ test("a name that is not UTF-8 stops the report; a file whose hunks --numstat do
       refused.stderr,
       "structure-report: Git names a file that is not UTF-8 (bytes 7372632f626164ff2e7473): the report reads UTF-8 names only\n",
     );
-    // a stand-in Git whose --numstat counts 99 lines for src/x.ts, whose hunks add one: that file is reported as not
-    // measured, and src/big.ts, which Git counts as its hunks do, is still measured
+    // a stand-in Git whose --numstat counts 99 lines for src/a.ts, whose hunks add one: that file, read first, is
+    // reported as not measured, and src/big.ts after it, which Git counts as its hunks do, is still measured
     const bin = join(counted.root, "bin");
     const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
     write(counted.root, {
-      "bin/git": `#!/bin/sh\ncase " $* " in *" --numstat "*) printf '301\\t0\\tsrc/big.ts\\000'; printf '99\\t0\\tsrc/x.ts\\000'; exit 0;; esac\nexec ${realGit} "$@"\n`,
+      "bin/git": `#!/bin/sh\ncase " $* " in *" --numstat "*) printf '99\\t0\\tsrc/a.ts\\000'; printf '301\\t0\\tsrc/big.ts\\000'; exit 0;; esac\nexec ${realGit} "$@"\n`,
     });
     execFileSync("chmod", ["+x", join(bin, "git")]);
     assert.deepEqual(
       changeOf(counted.root, counted.base, { ...process.env, PATH: `${bin}:${process.env.PATH}` }),
       [
+        "file whose change the report could not read as Git wrote it, not measured: src/a.ts (its hunks add 1 lines, git diff --numstat counts 99)",
         "file gaining over 300 lines: +301 src/big.ts",
-        "file whose change the report could not read as Git wrote it, not measured: src/x.ts (its hunks add 1 lines, git diff --numstat counts 99)",
       ],
     );
   } finally {
@@ -498,8 +505,8 @@ test("an option's value after `=` reads as the next argument does, and a root th
 
 /**
  * #2091's edge, in neutral text: a line of `[indent, id, length]` is `line<id> ` padded with `x` and cut to `length`.
- * The new side's lone `}` lines can match the old side's at one context and not at another, because Git trims the
- * common tail (27 lines, over 1 KB) to the context before it diffs.
+ * The new side's lone `}` lines can match the old side's at zero context and not at another, because Git enables a
+ * common-tail optimization at zero context only, and this common tail (27 lines) is over 1 KB.
  */
 const fixtureLine = (spec) =>
   typeof spec === "string"

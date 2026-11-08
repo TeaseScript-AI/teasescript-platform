@@ -28,11 +28,11 @@
 // (exit 2). The lines it adds, by file and position, are the `+` lines of each file's own `git diff -M -U0
 // --inter-hunk-context=0`, each hunk's body read inside its header's counts, with `GIT_DIFF_OPTS` removed from Git's
 // environment; their count per file is `git diff -M -U0 --inter-hunk-context=0 --numstat`'s, which the tool checks. The
-// two run with the same context because Git trims a common tail to the context before it diffs, so a line it can
-// place in either of two spots (a lone `}`) can count as added at one context and as kept at another. A file whose
-// counts still differ, or whose patch ends inside a hunk, is reported as not measured, and the report goes on. A
-// file's text is its blob (`git cat-file blob`). Every `git diff` runs with --no-ext-diff, --no-textconv, --no-color
-// and --no-relative, whatever the user's configuration says.
+// two run with the same context because Git enables a common-tail optimization at zero context only (it drops matching
+// 1 KB blocks of the two files' common tail before it diffs), which can change where it matches a line it could place
+// in either of two spots (a lone `}`). A file whose counts still differ, or whose patch ends inside a hunk, is reported
+// as not measured, and the report goes on. A file's text is its blob (`git cat-file blob`). Every `git diff` runs with
+// --no-ext-diff, --no-textconv, --no-color and --no-relative, whatever the user's configuration says.
 //
 // The residual, Git's own choices: its diff algorithm and indent heuristic place the added lines, and can change their
 // count; rename detection's similarity threshold (50% by default) and its limit decide what a move is, so an edited
@@ -276,7 +276,9 @@ const REGULAR = new Set(["100644", "100755"]);
  */
 export function addedLinesOfPatch(patch) {
   const added = [];
+  // the empty string after a patch's final newline is its end, not a line: a hunk still open there is cut short
   const lines = patch.split("\n");
+  if (lines.at(-1) === "") lines.pop();
   for (let index = 0; index < lines.length; index += 1) {
     const hunk = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/u.exec(lines[index]);
     if (hunk === null) continue;
@@ -374,8 +376,9 @@ function changeSignals(base) {
   }
   const gitAdded = gitAddedLines(mergeBase);
   /**
-   * The line numbers `change` adds to its file, from its own patch, checked against `--numstat`; `null` when the two
-   * disagree or a hunk ends before its counts, so the file is reported as not measured.
+   * The line numbers `change` adds to its file, from its own patch, checked against `--numstat`: `{ lines }`, or
+   * `{ unread }` with the reason when the two disagree or a hunk ends before its counts, so the file is reported as not
+   * measured.
    */
   const addedLinesOf = (change) => {
     const paths = change.code === "R" ? [change.old, change.file] : [change.file];
