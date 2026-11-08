@@ -824,8 +824,8 @@ function publishedElements<Occurrence>(
     .filter(({ kind }) => kind.kind === "binding")
     .map((place) => place.id);
   return inMode(mode, () => {
-    // (the analysis's parts first, its answers dropped when they end; then the route's compile, so that the two
-    // analyses' heaps are never held at once: with sharing off each can take a gigabyte, #1603)
+    // (the analysis's parts first, its answers dropped when they end; then the route's compile, so that the oracle never
+    // holds both analyses' answers: with sharing off each can take a gigabyte, #1603)
     const analysed = analysedElements(request, bindings, each);
     const route = JSON.stringify(publishedRoute(files, globals).text);
     return { ...analysed, route };
