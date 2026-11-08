@@ -6974,11 +6974,30 @@ const PAY_HOLDINGS = {
 /** The reads of each family: below the index's first bound, at it, and k² past it. */
 const PAY_READS = { below: () => 2, at: () => 3, past: (k: number) => k * k } as const;
 
-export const PAY_RULE_FAMILIES: readonly WorkFamily[] = Object.entries(PAY_HOLDINGS).flatMap(
+/** An object literal's own property names: the keys at its top level. */
+const ownNames = (object: string): number => {
+  let depth = 0;
+  let names = 0;
+  for (const char of object) {
+    if (char === "{") depth += 1;
+    else if (char === "}") depth -= 1;
+    else if (char === ":" && depth === 1) names += 1;
+  }
+  return names;
+};
+
+/** A family of the pay rule, with `names`: its k stored objects' property names, which the holding count reads. */
+export interface PayRuleFamily extends WorkFamily {
+  readonly names: (k: number) => number;
+}
+
+export const PAY_RULE_FAMILIES: readonly PayRuleFamily[] = Object.entries(PAY_HOLDINGS).flatMap(
   ([holding, { object, read }]) =>
-    Object.entries(PAY_READS).map(([reads, count]): WorkFamily => ({
+    Object.entries(PAY_READS).map(([reads, count]): PayRuleFamily => ({
       name: `pay-${holding}-${reads}`,
       measures: `#1948: k objects, ${holding} holding the read property, read ${reads} the index's bound`,
+      names: (k) =>
+        Array.from({ length: k }, (_, i) => ownNames(object(i, k))).reduce((a, b) => a + b, 0),
       program: (k) =>
         main(
           lines(

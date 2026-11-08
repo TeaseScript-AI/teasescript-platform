@@ -1108,10 +1108,15 @@ test("a deeper read below a place replaced by objects keeps each object's absenc
  * below, at and past the index's first bound) grows with its source from k = 16 to 32 within the suite's bound, or
  * within 1 % of `main`'s own growth where `main` grows faster (`MAIN_GROWTH`, measured once on `a1ebdae6c`, source
  * order, sharing on and off): so its work against `main`'s falls or rises under 1 % a step. `none-below` and `none-at`
- * are the one declared difference (the lead's ruling 3): k objects of a property each, read two or three times at a
+ * are the totals' one declared difference (the lead's ruling 3): k objects of a property each, read two or three times at a
  * property none holds, pay one fold over the objects where `main`'s index answered the second read, a constant share
  * converging near 1.12 of `main`'s work, its steps under 1 % from k = 16 (1.096, 1.110, 1.118 at k = 8, 16, 32).
- * Publications equal `main`'s on every family, size and mode (the PR's evidence, outside CI).
+ * Per counter (the lead's rulings 5 and 6), the head is at or below `main` but for two terms, each once per prefix and
+ * linear in the stored objects: T1, the pay rule's bookkeeping (its name and holding counts, and with the sharing on
+ * the root groups' read), and T2, ruling 3's folds before the index pays (`none-*`, `shared-past`). Of T1, this test
+ * holds the one bound it must not exceed: with the sharing off, at most one `structureSteps` a stored object's property
+ * name above `main`'s (`MAIN_STRUCTURE_STEPS`). Publications equal `main`'s on every family, size and mode, and every
+ * counter keeps within its row's term (the PR's evidence, outside CI).
  *
  * A path below a property answers as the place's levels do at every depth (`levelsAt`, a fold of every object at each
  * step down), in every mode: with objects of a property of their own beside the case's and reads at absent properties
@@ -1146,11 +1151,37 @@ test("the property index's pay rule over its family: work within main's growth, 
     "pay-rare-common-at": [2.891, 2.747],
     "pay-rare-common-past": [2.882, 2.622],
   };
-  assert.deepEqual(
-    PAY_RULE_FAMILIES.map((family) => family.name).sort(),
-    Object.keys(MAIN_GROWTH).sort(),
-  );
+  // (`main`'s `structureSteps` with the sharing off at k = 16 and 32, measured once on `a1ebdae6c`)
+  const MAIN_STRUCTURE_STEPS: Record<string, readonly [number, number]> = {
+    "pay-every-below": [208, 448],
+    "pay-every-at": [208, 448],
+    "pay-every-past": [208, 448],
+    "pay-none-below": [192, 416],
+    "pay-none-at": [192, 416],
+    "pay-none-past": [192, 416],
+    "pay-distinct-below": [192, 416],
+    "pay-distinct-at": [192, 416],
+    "pay-distinct-past": [192, 416],
+    "pay-shared-below": [672, 2400],
+    "pay-shared-at": [672, 2400],
+    "pay-shared-past": [672, 2400],
+    "pay-mixed-below": [256, 544],
+    "pay-mixed-at": [256, 544],
+    "pay-mixed-past": [256, 544],
+    "pay-rare-own-below": [224, 480],
+    "pay-rare-own-at": [224, 480],
+    "pay-rare-own-past": [224, 480],
+    "pay-rare-common-below": [224, 480],
+    "pay-rare-common-at": [224, 480],
+    "pay-rare-common-past": [224, 480],
+  };
+  for (const recorded of [MAIN_GROWTH, MAIN_STRUCTURE_STEPS])
+    assert.deepEqual(
+      PAY_RULE_FAMILIES.map((family) => family.name).sort(),
+      Object.keys(recorded).sort(),
+    );
   const steep: string[] = [];
+  const bookkeeping: string[] = [];
   for (const family of PAY_RULE_FAMILIES)
     for (const [index, mode] of [MODES[0]!, MODES[1]!].entries()) {
       const [small, large] = [16, 32].map((k) => {
@@ -1158,14 +1189,30 @@ test("the property index's pay rule over its family: work within main's growth, 
         assert.ok(request !== null, family.name);
         const { budget } = inMode(mode, () => analyseCore(request));
         assert.equal(budget.exhausted, null, family.name);
-        return { total: budget.total, nodes: budget.counts.get("syntaxNodes") ?? 1 };
+        return {
+          k,
+          total: budget.total,
+          nodes: budget.counts.get("syntaxNodes") ?? 1,
+          structure: budget.counts.get("structureSteps") ?? 0,
+        };
       });
       const growth = (2 * (large!.total / small!.total)) / (large!.nodes / small!.nodes);
       const bound = Math.max(DOUBLING, 1.01 * MAIN_GROWTH[family.name]![index]!);
       if (growth > bound)
         steep.push(`${family.name} ${JSON.stringify(mode)}: ${growth.toFixed(3)}`);
+      // (T1, the lead's ruling 6: with the sharing off, the pay rule's bookkeeping adds to `main`'s `structureSteps` at
+      // most one a stored object's property name, the holding count's)
+      if (mode.unshared)
+        for (const [at, run] of [small!, large!].entries()) {
+          const added = run.structure - MAIN_STRUCTURE_STEPS[family.name]![at]!;
+          if (added > family.names(run.k))
+            bookkeeping.push(
+              `${family.name} at ${run.k}: ${added} over ${family.names(run.k)} names`,
+            );
+        }
     }
   assert.deepEqual(steep, []);
+  assert.deepEqual(bookkeeping, []);
 
   const cases: readonly {
     readonly name: string;
