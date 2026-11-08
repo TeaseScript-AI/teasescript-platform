@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  ADMITTED,
   NOT_PINS,
   PIN_SUITES,
   builtOf,
@@ -57,11 +58,28 @@ const pinLines = () =>
   read().flatMap((entry) =>
     entry.pins.flatMap(({ from, to }) =>
       Array.from({ length: to - from + 1 }, (_, index) => from + index).flatMap((line) => {
-        const reading = readingOf(entry.scan[line - 1], entry.suite.forms);
+        const reading = readingOf(entry.scan[line - 1], entry.raw[line - 1], entry.suite);
         return reading?.form === undefined ? [] : [{ ...entry, line, reading }];
       }),
     ),
   );
+
+/** The suites and forms whose values `--check-grounds` must read, written here apart from the tool's declarations. */
+const PLANNED = [
+  "tests/helpers/type-core-families.ts row",
+  "tests/type-core-candidate.test.ts asserted",
+  "tests/type-core-closure.test.ts row",
+  "tests/type-core-closure.test.ts tuple",
+  "tests/type-core-contract-capture.test.ts asserted",
+  "tests/type-core-f18.test.ts totals",
+  "tests/type-core-work-a.test.ts row",
+  "tests/type-core-work-c.test.ts counters",
+  "tests/type-core-work-c.test.ts keyed",
+  "tests/type-core-work-c.test.ts row",
+];
+
+/** The refusals the check gives for a line it cannot read: no declared form, or a lost opening line. */
+const UNREADABLE = /in none of its declared forms|an opening line changed/u;
 
 const refusals = (entry, { head, diff }) =>
   refusalsOf(entry.file, entry.text, head, diff, entry.suite);
@@ -104,7 +122,7 @@ test("the list is kept true: each file a pin form finds is declared; each pin, g
   for (const { suite, file, scan, raw, pins } of read())
     for (const { from, to } of pins) {
       for (let line = from; line <= to; line += 1) {
-        const reading = readingOf(scan[line - 1], suite.forms);
+        const reading = readingOf(scan[line - 1], raw[line - 1], suite);
         assert.ok(
           reading === null || reading.form !== undefined,
           `${file}:${line} takes none of ${suite.file}'s forms: declare it`,
@@ -136,7 +154,9 @@ test("the three pin forms are found by their text, and a pin written another way
 
 test("every expected value of today's pins, moved by one, is refused without its ground and passes with one", () => {
   let values = 0;
+  const cells = new Set();
   for (const entry of pinLines()) {
+    if (entry.reading.values.length > 0) cells.add(`${entry.file} ${entry.reading.form}`);
     const text = entry.raw[entry.line - 1];
     const indent = text.slice(0, text.length - text.trimStart().length);
     for (const { text: value, from, to } of entry.reading.values) {
@@ -161,37 +181,115 @@ test("every expected value of today's pins, moved by one, is refused without its
     }
   }
   assert.ok(values > 300, `${values} expected values`);
+  assert.deepEqual([...cells].sort(), PLANNED);
 });
 
-test("a changed pin line in no declared form is refused with the fix: a value in a call, a list split across lines", () => {
-  const seen = new Set();
-  let cases = 0;
+test("a changed pin line in no declared form is refused with the fix, in every planned suite and form", () => {
+  const cells = new Set();
   for (const entry of pinLines()) {
     const key = `${entry.file} ${entry.reading.form}`;
-    // (a counter snapshot's values are in its string, so no call can hold them)
-    if (seen.has(key) || entry.reading.values.length === 0 || entry.reading.form === "counters")
-      continue;
-    seen.add(key);
+    if (cells.has(key) || entry.reading.values.length === 0) continue;
+    cells.add(key);
     const text = entry.raw[entry.line - 1];
     const [{ text: value, from, to }] = entry.reading.values;
-    const called = `${text.slice(0, from)}Number(${value})${text.slice(to)}`;
+    const swapped = (now) => [`${text.slice(0, from)}${now}${text.slice(to)}`];
     const split = text.indexOf(", ", from);
-    const variants = [
-      [called],
-      ...(split > 0 ? [[text.slice(0, split + 1), `  ${text.slice(split + 2)}`]] : []),
-    ];
+    // (a counter snapshot's values are in its string: a call cannot hold them, but a joined string can)
+    const variants =
+      entry.reading.form === "counters"
+        ? [[`${text.slice(0, from)}" + "${text.slice(from)}`]]
+        : [
+            swapped(`Number(${value})`),
+            swapped(`Number("${value}")`),
+            swapped(`Number(\`${value}\`)`),
+            swapped("Math.PI"),
+            ...(split > 0 ? [[text.slice(0, split + 1), `  ${text.slice(split + 2)}`]] : []),
+          ];
+    // (a line's values written as one string, where the suite's strings are no input: closure's names and sources are,
+    // and a string where its type holds numbers fails the type check)
+    if (!entry.suite.forms.includes("string"))
+      variants.push([`${text.slice(0, text.length - text.trimStart().length)}"${text.trim()}",`]);
     for (const lines of variants) {
-      cases += 1;
       const found = refusals(entry, edited(entry.text, [entry.line, 1, ...lines]));
-      assert.ok(found.length > 0, `${entry.file}:${entry.line} ${lines.join(" / ")}`);
-      for (const refusal of found)
-        assert.match(
-          refusal,
-          /in none of its declared forms.*declare its form in tools\/repository-checks\/pin-suites\.mjs/su,
-        );
+      assert.ok(
+        found.some((refusal) =>
+          /in none of its declared forms.*declare its form in tools\/repository-checks\/pin-suites\.mjs/su.test(
+            refusal,
+          ),
+        ),
+        `${entry.file}:${entry.line} ${lines.join(" / ")}: ${found.join(" | ")}`,
+      );
+      for (const refusal of found) assert.match(refusal, UNREADABLE);
     }
   }
-  assert.ok(cases >= 10, `${cases} cases`);
+  assert.deepEqual([...cells].sort(), PLANNED);
+});
+
+test("each form reads its expected values and only those", () => {
+  const suite = { forms: Object.keys(ADMITTED), pin: /^const PIN\b/u };
+  for (const [line, form, values] of [
+    ["  assert.equal(budget.total, 22_962_573);", "asserted", ["22_962_573"]],
+    ["  assert.deepEqual(units, [194, 17], JSON.stringify(mode));", "asserted", ["194", "17"]],
+    ['  ["the C-R1 chain", chain(16), [11837, 12196]],', "tuple", ["11837", "12196"]],
+    ['  ["an add", "let b = [[1]]", [684, 1020]],', "tuple", ["684", "1020"]],
+    ["    [7995, 60],", "row", ["7995", "60"]],
+    ["  { total: 246, decisions: [15], default: [4] },", "totals", ["246", "15", "4"]],
+    ["      16: [", "sizeKey", []],
+    ["        total: [8855, 23083],", "keyed", ["8855", "23083"]],
+    ['        "checks 142 invSteps 105",', "counters", ["142", "105"]],
+    ['    "the 8 places",', "string", []],
+    ["  [", "open", []],
+    ["  ],", "close", []],
+    ["const PIN = [", "opener", []],
+    ['  assert.equal(budget.total, Number("22962573"));', undefined, []],
+    ['        "checks " + "143 invSteps 105",', undefined, []],
+    ["  Math.PI,", undefined, []],
+    ["const PIN = [1, 2];", undefined, []],
+    ["const PIN = x;", undefined, []],
+    ["`text with 1`,", "string", []],
+  ]) {
+    const reading = readingOf(scanOf(line)[0], line, suite);
+    assert.deepEqual(
+      [reading.form, reading.values.map((value) => value.text)],
+      [form, values],
+      line,
+    );
+  }
+});
+
+test("the scan sets strings, templates, comments and regular expressions apart", () => {
+  const text = [
+    'const a = "x // y"; // a note',
+    "const t = `a ${f(`b ${1}`)} // c`;",
+    "function r() { return /`/; }",
+    "const q = x! / 2;",
+    "const n = !/'/.test(s);",
+    "/* a block",
+    "   still */ const z = 3;",
+    '  "a string line",',
+    "const m = `one",
+    "// inside a template",
+    "two`;",
+  ].join("\n");
+  const scan = scanOf(text);
+  assert.deepEqual(
+    scan.map((line) => [line.code.trim(), line.comment, line.top]),
+    [
+      ['const a = "";', false, true],
+      ['const t = "";', false, true],
+      ["function r() { return /r/; }", false, true],
+      ["const q = x! / 2;", false, true],
+      ["const n = !/r/.test(s);", false, true],
+      ["", true, true],
+      ["const z = 3;", true, false],
+      ['"",', false, true],
+      ['const m = ""', false, true],
+      ["", false, false],
+      [";", false, false],
+    ],
+  );
+  assert.equal(scan.ended, true);
+  assert.equal(scanOf("const a = `open").ended, false);
 });
 
 const closure = () =>
@@ -229,6 +327,14 @@ test("an input in a pin, a moved or reworded row, and a listed count need no gro
   const size = families.raw.findIndex((text) => /^\s*16: \[$/u.test(text)) + 1;
   const key = families.raw[size - 1].replace("16", "17");
   assert.deepEqual(refusals(families, edited(families.text, [size, 1, key])), []);
+  // (a changed string beside a re-pin is no ground: only a comment is)
+  const named = lineOf(entry, '    "a list join",');
+  const renamed = entry.raw[named - 1].replace("a list join", "a list join (1 unit more since #1)");
+  const value = entry.raw[named + 1].replace("32920", "32921");
+  assert.equal(
+    refusals(entry, edited(entry.text, [named, 1, renamed], [named + 2, 1, value])).length,
+    1,
+  );
   // (a listed-site count is named by its reason, so its file is not read)
   const kept = "tests/type-core-kept.test.ts";
   const listed = 'const LISTED = {\n  "a site": [\n    2,\n    "a reason",\n  ],\n};';
@@ -289,4 +395,28 @@ test("a pin outside a test is grounded at its declared anchor, not in a template
       lines[frozen - 1],
     );
   }
+});
+
+test("an edit that breaks an opener, or a construct the scan could misread, cannot hide a re-pin", () => {
+  const entry = closure();
+  const opener = lineOf(entry, "const OUTSIDE");
+  const add = lineOf(entry, '  ["an add",');
+  const row = entry.raw[add - 1].replace("[684,", "[685,");
+  const [, rest] = entry.raw[opener - 1].split("const ");
+  const broken = edited(entry.text, [opener, 1, "const", rest], [add, 0, row]);
+  assert.match(refusals(entry, broken).join("\n"), /an opening line changed/u);
+  assert.ok(refusals(entry, broken).some((refusal) => /:\d+: re-pinned \(685,/u.test(refusal)));
+  const capture = read().find(
+    (each) => each.suite.file === "tests/type-core-contract-capture.test.ts",
+  );
+  const total = capture.raw.findIndex((text) => text.includes("assert.equal(budget.total,")) + 1;
+  const moved = capture.raw[total - 1].replace("22_962_573", "22_962_574");
+  const regex = edited(
+    capture.text,
+    [1, 0, "export function reviewPattern() { return /`/; }"],
+    [total, 1, moved],
+  );
+  assert.equal(refusals(capture, regex).length, 1);
+  const open = edited(capture.text, [1, 0, "const unclosed = `"], [total, 1, moved]);
+  assert.match(refusals(capture, open).join("\n"), /its scan ends inside/u);
 });
