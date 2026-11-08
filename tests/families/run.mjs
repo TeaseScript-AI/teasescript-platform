@@ -64,6 +64,7 @@ import {
   sourceFault,
   storedRuns,
 } from "./baselines.mjs";
+import { isRecordedReason, UNKNOWN_REASON } from "./reasons.mjs";
 import { generatorsOf, placeOf, sourceKey } from "./sources.mjs";
 
 /** A tree's oracle library, from its `dist/`. */
@@ -136,12 +137,10 @@ function partHashes(oracle, files, mode, globals) {
   });
 }
 
-/** Why an oracle's questions stop (its `unansweredBy`'s reasons, #1837). */
-const REASONS = ["questions", "memory", "read-depth", "stopped"];
-
 /**
  * A publication's hashes with why it left nodes unanswered: the oracle's reason with its first node left, or the
- * binding where its answers' questions stopped, else `unknown` (no node named).
+ * binding where its answers' questions stopped, in a form a record holds (`reasons.mjs`), else `unknown` (no node
+ * named).
  */
 function withReason(hashes) {
   if (hashes === null || !(hashes.unanswered > 0)) return hashes;
@@ -151,12 +150,13 @@ function withReason(hashes) {
     : Number.isInteger(by?.binding)
       ? { binding: by.binding }
       : null;
+  const named = where === null ? null : { reason: by?.reason, ...where };
   return {
     ...hashes,
     unansweredBy:
-      REASONS.includes(by?.reason) && where !== null
-        ? { reason: by.reason, ...where }
-        : { reason: "unknown", node: null },
+      named !== null && named.reason !== UNKNOWN_REASON && isRecordedReason(named)
+        ? named
+        : { reason: UNKNOWN_REASON, node: null },
   };
 }
 
@@ -191,7 +191,7 @@ const digest = (value) => ({
 const reasonOf = (value) =>
   value === undefined || !(value.unanswered > 0)
     ? null
-    : (value.unansweredBy ?? { reason: "unknown", node: null });
+    : (value.unansweredBy ?? { reason: UNKNOWN_REASON, node: null });
 
 /** Where two publications' parts first differ: the part's index in the whole's order and each one's count of parts. */
 function firstPart(was, is) {

@@ -69,6 +69,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isRecordedReason } from "./reasons.mjs";
 import { generatorFolders, generatorsOf, holdsGenerators, placeOf } from "./sources.mjs";
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
@@ -1236,12 +1237,10 @@ export function sourceFault(line, units = null) {
         ? typeof result.thrown === "string"
         : shaped(result, ["value", ...charged]) &&
           shaped(value, ["hash", "parts", "unanswered", "unparsed"], ["unansweredBy"]) &&
-          // (why its oracle left nodes unanswered, #1837: only where it left some, a reason with its first node or none)
+          // (why its oracle left nodes unanswered, #1837: only where it left some, in a form a record holds,
+          // `reasons.mjs`)
           (value.unansweredBy === undefined ||
-            (value.unanswered > 0 &&
-              shaped(value.unansweredBy, ["reason", "node"]) &&
-              ["questions", "stopped", "unknown"].includes(value.unansweredBy.reason) &&
-              (value.unansweredBy.node === null || Number.isInteger(value.unansweredBy.node)))) &&
+            (value.unanswered > 0 && isRecordedReason(value.unansweredBy))) &&
           hash64(value.hash) &&
           (value.parts === null ||
             (Array.isArray(value.parts) &&

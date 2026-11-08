@@ -24,6 +24,7 @@ import { coreRequest } from "./helpers/type-core-analysis.js";
 const runner = resolve(process.cwd(), "tests/families/run.mjs");
 const baselines = resolve(process.cwd(), "tests/families/baselines.mjs");
 const stalls = resolve(process.cwd(), "tests/families/stalls.mjs");
+const reasons = resolve(process.cwd(), "tests/families/reasons.mjs");
 
 /**
  * A built tree's work ledger, which every unit of its analyses' work passes (the runner counts its charges and limits
@@ -272,7 +273,7 @@ export const publicationHashes = (files) => {
 };
 `;
 
-test("the corpus runner records why an oracle left a run unanswered, and the stall index counts each reason as a runner artefact apart from agreement (#1837)", () => {
+test("the corpus runner records why an oracle left a run unanswered, and the stall index counts each reason as a runner artefact apart from agreement (#1837)", async () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
     const tree = (
@@ -345,14 +346,13 @@ test("the corpus runner records why an oracle left a run unanswered, and the sta
     };
     // (the oracle's own question budget on both trees, at two counts: four runs of one source, its reason and node)
     const q = groups(questions2, questions3, "questions");
-    assert.deepEqual(q.rows, {
-      "unanswered: questions": [4, 1],
-      "unanswered: memory": [0, 0],
-      "unanswered: read-depth": [0, 0],
-      "unanswered: stopped": [0, 0],
-      "unanswered: unknown": [0, 0],
-      unansweredAlike: [0, 0],
-    });
+    // (every group of the one reason list, `reasons.mjs`, and the alike group, each with its runs and sources)
+    const reasonGroups: string[] = (await import(pathToFileURL(reasons).href)).REASON_GROUPS;
+    const rowsWith = (counted: Record<string, number[]>): Record<string, number[]> =>
+      Object.fromEntries(
+        [...reasonGroups, "unansweredAlike"].map((group) => [group, counted[group] ?? [0, 0]]),
+      );
+    assert.deepEqual(q.rows, rowsWith({ "unanswered: questions": [4, 1] }));
     const row = q.artefacts.find((r: { group: string }) => r.group === "unanswered: questions");
     assert.equal(row.issue, "#1941");
     assert.deepEqual([row.witness.source, row.witness.node], ["stopped", 7]);
@@ -471,26 +471,14 @@ test("the corpus runner records why an oracle left a run unanswered, and the sta
       const { artefacts } = lines(judged.stdout).find((line) => line.artefacts !== undefined);
       assert.deepEqual(
         artefacts.map((r: { group: string; runs: number }) => [r.group, r.runs]),
-        [
-          ["unanswered: questions", 4],
-          ["unanswered: memory", 0],
-          ["unanswered: read-depth", 0],
-          ["unanswered: stopped", 4],
-          ["unanswered: unknown", 0],
-          ["unansweredAlike", 0],
-        ],
+        Object.entries(rowsWith({ "unanswered: questions": [4], "unanswered: stopped": [4] })).map(
+          ([group, [runs]]) => [group, runs],
+        ),
       );
     }
     // (left alike on both trees: its own row, agreement named apart as before)
     const a = groups(questions2, questions2, "alike");
-    assert.deepEqual(a.rows, {
-      "unanswered: questions": [0, 0],
-      "unanswered: memory": [0, 0],
-      "unanswered: read-depth": [0, 0],
-      "unanswered: stopped": [0, 0],
-      "unanswered: unknown": [0, 0],
-      unansweredAlike: [4, 1],
-    });
+    assert.deepEqual(a.rows, rowsWith({ unansweredAlike: [4, 1] }));
     assert.equal(a.total.unansweredAlike, 1);
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -4295,4 +4283,64 @@ test("a base whose run ends its process leaves the head's runs from that one on 
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("one list of stop reasons: every reason has its stall group, and a stored line holds every reason in every recorded form (#1837, the families' fourth hand-kept copy)", async () => {
+  const { STOP_REASONS, UNKNOWN_REASON, REASON_GROUPS, groupOf } = await import(
+    pathToFileURL(reasons).href
+  );
+  const { sourceFault, DEFAULTS } = await import(pathToFileURL(baselines).href);
+  assert.deepEqual(REASON_GROUPS, [...STOP_REASONS, UNKNOWN_REASON].map(groupOf));
+  // (a stored line with one run left unanswered `by`)
+  const key = "a".repeat(64);
+  /** A recorded reason, as a stored run holds it or as a malformed one does. */
+  type RecordedBy = {
+    readonly reason: string;
+    readonly node?: number | null;
+    readonly binding?: number | null;
+  };
+  const stored = (by: RecordedBy) => ({
+    generator: "g.mjs",
+    source: "s",
+    key,
+    runs: {
+      "src-on publication": {
+        value: {
+          hash: key,
+          parts: ["0123456789abcdef"],
+          unanswered: 2,
+          unparsed: false,
+          unansweredBy: by,
+        },
+        work: 10,
+        allowance: 30_000_000,
+      },
+    },
+  });
+  const accepted: RecordedBy[] = [
+    // (the four lines that a store refused before this list: the forms #1837's oracle records)
+    { reason: "questions", node: 7 },
+    { reason: "memory", node: 7 },
+    { reason: "read-depth", node: 7 },
+    { reason: "questions", binding: 5 },
+    // (every reason in every recorded form, and the unknown one)
+    ...STOP_REASONS.flatMap((reason: string) => [
+      { reason, node: 7 },
+      { reason, node: null },
+      { reason, binding: 5 },
+    ]),
+    { reason: UNKNOWN_REASON, node: null },
+  ];
+  for (const by of accepted)
+    assert.equal(sourceFault(stored(by), DEFAULTS.units), undefined, JSON.stringify(by));
+  const refused: RecordedBy[] = [
+    { reason: "elsewhere", node: 7 },
+    { reason: UNKNOWN_REASON, node: 7 },
+    { reason: UNKNOWN_REASON, binding: 5 },
+    { reason: "questions", binding: null },
+    { reason: "questions", node: 7, binding: 5 },
+    { reason: "questions" },
+  ];
+  for (const by of refused)
+    assert.notEqual(sourceFault(stored(by), DEFAULTS.units), undefined, JSON.stringify(by));
 });

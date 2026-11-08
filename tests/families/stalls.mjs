@@ -42,6 +42,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { comparedOf } from "./baselines.mjs";
+import { groupOf, REASON_GROUPS, UNKNOWN_REASON } from "./reasons.mjs";
 import { sourceKey } from "./sources.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -687,14 +688,7 @@ for (const [area, row] of rows) {
 // the runner artefacts (#1837): each run a tree's oracle left unanswered, by why (`run.mjs`'s `unansweredBy`:
 // `questions`, `memory`, `read-depth`, `stopped`, else `unknown`; its witness the node, or the binding, left) or left alike, with its runs, sources and first witness; they stay apart from
 // agreement as before, so that no round classifies them again
-const GROUPS = [
-  "unanswered: questions",
-  "unanswered: memory",
-  "unanswered: read-depth",
-  "unanswered: stopped",
-  "unanswered: unknown",
-  "unansweredAlike",
-];
+const GROUPS = [...REASON_GROUPS, "unansweredAlike"];
 const ISSUES = { "unanswered: questions": "#1941" };
 const artefacts = new Map(
   GROUPS.map((group) => [group, { runs: 0, sources: new Set(), witness: null }]),
@@ -707,9 +701,8 @@ for (const [place, was] of replay) {
       .map((by) => by.reason);
     const groups = left.alike
       ? ["unansweredAlike"]
-      : [...new Set(reasons.length === 0 ? ["unknown"] : reasons)].map(
-          (reason) =>
-            `unanswered: ${GROUPS.includes(`unanswered: ${reason}`) ? reason : "unknown"}`,
+      : [...new Set(reasons.length === 0 ? [UNKNOWN_REASON] : reasons)].map((reason) =>
+          groupOf(GROUPS.includes(groupOf(reason)) ? reason : UNKNOWN_REASON),
         );
     for (const group of groups) {
       const row = artefacts.get(group);
@@ -720,8 +713,7 @@ for (const [place, was] of replay) {
         (by) =>
           by != null &&
           (group === "unansweredAlike" ||
-            group ===
-              `unanswered: ${GROUPS.includes(`unanswered: ${by.reason}`) ? by.reason : "unknown"}`),
+            group === groupOf(GROUPS.includes(groupOf(by.reason)) ? by.reason : UNKNOWN_REASON)),
       );
       const witness = {
         area: nameOf(is.area),
