@@ -3,17 +3,19 @@ import { ref } from "vue";
 import { Check } from "@lucide/vue";
 import PlayerActionButton from "@/components/PlayerActionButton.vue";
 
+// The preview's stand-in for a script's permanent buttons, held like them while a rewind switch is under way.
+defineProps<{ held: boolean }>();
 const enabled = ref(false);
 </script>
 
 <template>
   <div class="background-controls-fixture">
-    <PlayerActionButton>Repeat</PlayerActionButton>
-    <PlayerActionButton :aria-pressed="enabled" @click="enabled = !enabled">
+    <PlayerActionButton :inactive="held">Repeat</PlayerActionButton>
+    <PlayerActionButton :inactive="held" :aria-pressed="enabled" @click="held || (enabled = !enabled)">
       <span>Extra challenge <span class="block font-normal">{{ enabled ? 'On' : 'Off' }}</span></span>
       <Check class="size-4 shrink-0" :class="{ invisible: !enabled }" aria-hidden="true" />
     </PlayerActionButton>
-    <PlayerActionButton>Give me a hint</PlayerActionButton>
+    <PlayerActionButton :inactive="held">Give me a hint</PlayerActionButton>
     <PlayerActionButton disabled>Not available</PlayerActionButton>
   </div>
 </template>

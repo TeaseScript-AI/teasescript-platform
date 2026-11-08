@@ -228,10 +228,10 @@ with it.
   quota, the state stays inspected, the Player says so, and nothing changes. Rewind does one thing at a time: while a
   step restores a state, a state is being adopted, or Return or Debug off waits to reinstate the parked session, input
   to an inspected state, Resume, Return, and another step are refused and their controls disabled, and nothing is read
-  or saved for them. A switch that lasts about 0.4 s shows a small loading animation over the screen, beside the bar,
-  which moves nothing; a screen reader hears it as "Restoring an earlier state", "Continuing from this state", or
-  "Returning to session". When Debug off's return to the session fails at its restart gate, the Player's error notice
-  offers **Retry return to session**, also with Debug off; its success clears that failure's stop, and no other.
+  or saved for them. A switch that lasts about 0.4 s shows a small loading animation, an overlay that moves nothing; a
+  screen reader hears it as "Restoring an earlier state", "Continuing from this state", or "Returning to session". When
+  Debug off's return to the session fails at its restart gate, the Player's error notice offers **Retry return to
+  session**, also with Debug off; its success clears that failure's stop, and no other.
 - In the chat, Back is each earlier answer's **Back to here**; while a state is inspected, the later messages show grey
   and a bar offers Forward, Resume, and Return to session ([Player
   UI](ui/PLAYER-UI.md#composer-and-foreground-interactions)). Each state's transcript folds only the events that led to

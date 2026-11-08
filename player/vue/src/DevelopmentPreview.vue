@@ -283,7 +283,10 @@ else
           />
         </template>
         <template v-else #controls>
-          <BackgroundControlsFixture :key="backgroundControlsReset" />
+          <BackgroundControlsFixture
+            :key="backgroundControlsReset"
+            :held="player.rewind.inputHeld.value"
+          />
         </template>
       </StageRightRail>
     </template>

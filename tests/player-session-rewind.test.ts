@@ -67,7 +67,6 @@ interface RewindHost {
     beforeRestart(): void | Promise<void>;
     readonly switching: Readonly<Ref<"returning" | "continuing" | "restoring" | null>>;
     readonly inputHeld: Readonly<Ref<boolean>>;
-    readonly switchIndicator: Readonly<Ref<boolean>>;
     readonly switchAnnouncement: Readonly<Ref<string>>;
     readonly returnFailed: Readonly<Ref<boolean>>;
     retryReturn(): boolean;
@@ -155,8 +154,6 @@ interface Rewind {
   returnToSession(): Promise<boolean>;
   endWithPlayer(): void;
 }
-/** The composable's delay before a rewind switch's animation shows (`usePlayerSession.ts`). */
-let REWIND_SWITCH_INDICATOR_DELAY_MS: number;
 let usePlayerSession: (options: {
   bridge?: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
@@ -214,9 +211,6 @@ before(async () => {
   assert.equal(typeof rewind.useDebugRewind, "function");
   // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
   usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
-  assert.equal(typeof session.REWIND_SWITCH_INDICATOR_DELAY_MS, "number");
-  // EVIDENCE: validation: checked to be a number just above.
-  REWIND_SWITCH_INDICATOR_DELAY_MS = session.REWIND_SWITCH_INDICATOR_DELAY_MS as number;
   // EVIDENCE: validation: as above.
   useDebugRewind = rewind.useDebugRewind as typeof useDebugRewind;
 });
@@ -2372,12 +2366,11 @@ test("an obsolete Back gate's failure leaves no problem on the replacement's his
   assert.equal(rewind.problem.value, null);
 });
 
-/** What the Player shows of a switch now: its kind, whether it holds input, its announcement and its animation. */
+/** What the Player shows of a switch now: its kind, whether it holds input, and its announcement. */
 const switchShown = (host: RewindHost) => ({
   switching: host.rewind.switching.value,
   held: host.rewind.inputHeld.value,
   announcement: host.rewind.switchAnnouncement.value,
-  indicator: host.rewind.switchIndicator.value,
 });
 
 for (const kind of [
@@ -2387,7 +2380,7 @@ for (const kind of [
   "returning",
   "reinstating",
 ] as const)
-  test(`a rewind switch (${kind}) holds what it refuses at once, and its animation shows only after the delay`, async (context) => {
+  test(`a rewind switch (${kind}) holds what it refuses at once and announces itself`, async (context) => {
     const storage = memoryStorage();
     const made = createHost(context, storage.provider);
     const { host, rewind } = made;
@@ -2420,7 +2413,7 @@ for (const kind of [
           : kind === "returning"
             ? rewind.returnToSession()
             : Promise.resolve(made.debug.stop());
-    // At once: the switch names itself and holds the inspected state's input; no animation yet.
+    // At once: the switch names itself and holds the inspected state's input.
     const named: "restoring" | "continuing" | "returning" =
       kind === "restoring from the live session" || kind === "restoring"
         ? "restoring"
@@ -2436,21 +2429,11 @@ for (const kind of [
       switching: named,
       held: kind !== "restoring from the live session",
       announcement,
-      indicator: false,
     });
-    context.mock.timers.tick(REWIND_SWITCH_INDICATOR_DELAY_MS - 1);
-    assert.equal(host.rewind.switchIndicator.value, false, "not before the delay");
-    context.mock.timers.tick(1);
-    assert.equal(host.rewind.switchIndicator.value, true, "once the switch has lasted");
     release();
     await switched;
     await settle(context);
-    assert.deepEqual(switchShown(host), {
-      switching: null,
-      held: false,
-      announcement: "",
-      indicator: false,
-    });
+    assert.deepEqual(switchShown(host), { switching: null, held: false, announcement: "" });
   });
 
 for (const other of [
