@@ -8,6 +8,7 @@ import type { KeptRoomStore, KeptSessionStore } from "../../kept-sessions.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotice } from "../../notices.js";
 import { createPlayerRuntimeSession } from "../../compile-project.js";
+import type { PlayerRuntimeSession } from "../../runtime-adapter.js";
 import { browserSavedData } from "../../saved-data.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
@@ -131,7 +132,7 @@ function clearSampleNotices() {
   for (const notice of sampleNotices) player.withdrawNotice(notice.key);
 }
 // A scenario's factory, which the engine's host runs; no source `prepare` starts it.
-type ScenarioStart = Extract<PlayerSessionStart, (recording: never) => unknown>;
+type ScenarioStart = Extract<PlayerSessionStart, (recording: never) => PlayerRuntimeSession>;
 // The zone, presentation and clock of the Start's click (`temporalCapture`).
 const startOptions = (recording: Parameters<ScenarioStart>[0]) => ({
   ...recording,

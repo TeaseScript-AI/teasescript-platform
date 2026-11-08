@@ -38,7 +38,7 @@ import type {
 } from "./model.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
 import { transferredDecider, writtenDecider } from "./transfers.js";
-import { inheritedInto } from "./waiting.js";
+import { inheritedInto } from "../inherited/waiting.js";
 import { compareKeys, expand, stopsOf, viaSignature } from "./walk.js";
 
 // A2's scan: the stores a path is decided from, and the earliest contribution in evaluation order that decides it.

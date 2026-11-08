@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { Admission } from "../../src/type-inference/core/admission.js";
-import { drive } from "../../src/type-inference/core/admission/inherited.js";
+import { drive } from "../../src/type-inference/core/inherited/inherited.js";
 import { earliestDecider } from "../../src/type-inference/core/admission/scan.js";
 import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { withEveryRecord } from "../../src/type-inference/core/solver.js";

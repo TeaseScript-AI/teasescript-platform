@@ -39,7 +39,7 @@
   "src/type-inference/core/admission/ingress.ts": {
     "TABLE r4": 8
   },
-  "src/type-inference/core/admission/inherited.ts": {
+  "src/type-inference/core/inherited/inherited.ts": {
     "TABLE r4": 1
   },
   "src/type-inference/core/admission/landings.ts": {
@@ -262,7 +262,7 @@
     "TABLE r4": 3,
     "TABLE §": 4
   },
-  "src/type-inference/core/receiving-domain.ts": {
+  "src/type-inference/core/inherited/receiving-domain.ts": {
     "TABLE r4": 1
   },
   "src/type-inference/core/result.ts": {

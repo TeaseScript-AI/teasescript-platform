@@ -10,11 +10,14 @@ import { dirname, join, resolve } from "node:path";
 //
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else `origin/main`; the
 // changes are those since its merge-base with HEAD, committed or not, untracked files included. Always: `git diff
-// --check`, the format check of the changed files, oxlint, knip and the doc links, each as CI runs it. Then each
-// project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file belongs to the
-// checks that read it, and needs no project when only those that always run do. A changed path no project claims, other
-// than documentation, runs every project's checks. It never builds the TypeScript or runs the compiled test suite,
-// which CI does: a change that shows only there, such as the root tsconfig's emit settings, passes here.
+// --check`, the format check of the changed files, oxlint, knip, the doc links and the imports, each as CI runs it.
+// Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
+// belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
+// project claims, other than documentation, runs every project's checks. It never builds the TypeScript or runs the
+// compiled test suite, which CI does: a change that shows only there, such as the root tsconfig's emit settings, passes
+// here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work, as
+// `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs before review
+// (`docs/TESTING.md`, "Pinned work"), which it does not run itself.
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
 // detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
@@ -93,6 +96,9 @@ export function projectsFor(paths) {
 export function checksOf(projects) {
   return [...new Set([...projects].flatMap((project) => PROJECTS[project].checks))];
 }
+
+/** The core, a change to which prints the suites that pin its work. */
+const CORE = "src/type-inference/core/";
 
 /** The extensions `npm run format:check` covers. */
 const FORMATTED = /\.(?:ts|tsx|cts|mts|js|jsx|cjs|mjs)$/u;
@@ -173,7 +179,8 @@ function prettier() {
   return [process.execPath, "node_modules/prettier/bin/prettier.cjs"];
 }
 
-function run(name, command, args) {
+/** A check's run: its verdict, seconds and output; `shown` prints the output also when it passes. */
+function run(name, command, args, shown = false) {
   const start = performance.now();
   return new Promise((resolve) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
@@ -182,11 +189,12 @@ function run(name, command, args) {
     child.stdout.on("data", (chunk) => (output += chunk));
     child.stderr.on("data", (chunk) => (output += chunk));
     child.on("error", (error) =>
-      resolve({ name, passed: false, seconds: 0, output: error.message }),
+      resolve({ name, passed: false, seconds: 0, output: error.message, shown }),
     );
     child.on("close", (code) => {
       running.delete(child);
-      resolve({ name, passed: code === 0, seconds: (performance.now() - start) / 1000, output });
+      const seconds = (performance.now() - start) / 1000;
+      resolve({ name, passed: code === 0, seconds, output, shown });
     });
   });
 }
@@ -280,6 +288,12 @@ async function check(cleanups) {
       `projects: ${[...projects].join(", ") || "none"}\n`,
   );
 
+  // (a deleted core file counts too, which `changed`, holding the files that exist, leaves out, and a file moved out of
+  // the core, whose old path only `--no-renames` lists)
+  const coreChanged = [
+    ...git("diff", "--name-only", "--no-renames", mergeBase).split("\n"),
+    ...changed,
+  ].some((path) => path.startsWith(CORE));
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const formatted = changed.filter((path) => FORMATTED.test(path));
   const [formatter, ...formatterArgs] = prettier();
@@ -291,6 +305,17 @@ async function check(cleanups) {
     run("oxlint", process.execPath, ["tools/oxlint/run.mjs"]),
     run("knip", process.execPath, ["node_modules/knip/bin/knip.js"]),
     run("doc links", process.execPath, ["tools/repository-checks/doc-links.mjs"]),
+    run("imports", process.execPath, ["tools/repository-checks/imports.mjs"]),
+    ...(coreChanged
+      ? [
+          run(
+            "pin suites",
+            process.execPath,
+            ["tools/repository-checks/pin-suites.mjs", "--base", mergeBase],
+            true,
+          ),
+        ]
+      : []),
   ];
   for (const check of checksOf(projects))
     checks.push(
@@ -303,8 +328,8 @@ async function check(cleanups) {
     process.stdout.write(
       `${passed ? "PASS" : "FAIL"}  ${name.padEnd(18)} ${seconds.toFixed(1)}s\n`,
     );
-  for (const { name, passed, output } of results)
-    if (!passed) process.stdout.write(`\n--- ${name} ---\n${output}`);
+  for (const { name, passed, output, shown } of results)
+    if (!passed || shown) process.stdout.write(`\n--- ${name} ---\n${output}`);
   process.exitCode = results.every(({ passed }) => passed) ? 0 : 1;
 }
 
