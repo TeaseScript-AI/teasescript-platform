@@ -459,12 +459,24 @@ function staticMessage(rule: StaticRule): string {
 }
 
 /** A diagnostic's message with every fix in words (`inWords`), as a stop's unchecked region gives a fix (TABLE r4.162). */
-export function coreMessageInWords(diagnostic: CheckedDiagnostic, source: MessageSource): string {
-  return inWords(() => coreMessage(diagnostic, source));
+export function coreMessageInWords(
+  diagnostic: CheckedDiagnostic,
+  source: MessageSource,
+  moved: number | null = null,
+): string {
+  return inWords(() => coreMessage(diagnostic, source, moved));
 }
 
-/** A diagnostic's message: its first sentence, and a warning's consequence, fix and cause after it. */
-export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource): string {
+/**
+ * A diagnostic's message: its first sentence, and a warning's consequence, fix and cause after it. `moved`, the plan's
+ * checks a stop moved to the runtime, is the stop's warning's count: only the compiler that makes the plan knows it,
+ * and without it (`null`) the warning names no count.
+ */
+export function coreMessage(
+  diagnostic: CheckedDiagnostic,
+  source: MessageSource,
+  moved: number | null = null,
+): string {
   // (whether the values it names and its store's declaration reads are there when the script runs, unproved where it
   // does not say; whether its program runs at all; and whether an author's text a form holds lies clear of the other
   // diagnostics: TABLE r4.162, r4.168)
@@ -476,7 +488,7 @@ export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource
       severity: "error",
       alone,
     });
-  if (diagnostic.kind === "budget") return budgetMessage(diagnostic, source);
+  if (diagnostic.kind === "budget") return budgetMessage(diagnostic, source, moved);
   if (diagnostic.kind === "static") return staticMessage(diagnostic.rule);
   const text = source.text(diagnostic.site);
   const { rule, kinds } = diagnostic;

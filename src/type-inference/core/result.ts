@@ -423,7 +423,8 @@ export interface WorkPlace {
 /**
  * The analysis stopped proving (D4, option a′, TABLE r4.54, r4.55): past the work allowance, at a read chain past its
  * depth (`read-depth`), or at statements nested past the nesting limit (`nesting`). One warning, at the heaviest place
- * (the deepest nesting for `nesting`): the checks it moved to the runtime, `deferred` in number.
+ * (the deepest nesting for `nesting`): the warnings of the checks it moved to the runtime, `deferred` in number,
+ * several of which one check at a store may carry (its message counts the plan's checks, `budgetMessage`).
  */
 export interface BudgetStop {
   readonly class: "warning-runtime-check";

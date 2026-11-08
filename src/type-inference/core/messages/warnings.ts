@@ -808,15 +808,20 @@ function placeText(place: WorkPlace, source: MessageSource): string {
 
 /**
  * The stop's warning and its "not checked (budget)" mark (the owner's D4, TABLE r4.54: the warning as the owner's
- * example words it; the nesting limit's in the same form).
+ * example words it; the nesting limit's in the same form). The warning counts `moved`, the plan's checks the stop moved
+ * to the runtime (#2081), not the warnings it deferred, several of which one check at a store may carry; without a
+ * count, or with none, it names none.
  */
-export function budgetMessage(diagnostic: BudgetStop | NotChecked, source: MessageSource): string {
+export function budgetMessage(
+  diagnostic: BudgetStop | NotChecked,
+  source: MessageSource,
+  count: number | null,
+): string {
   const place = placeText(diagnostic.place, source);
   if (diagnostic.class === "not-checked-budget")
     return `${capitalized(place)} is not checked completely before the script plays, so its checks run while it plays.`;
-  const count = diagnostic.deferred;
   const moved =
-    count === 0
+    count === null || count === 0
       ? ""
       : ` ${count} ${count === 1 ? "check runs" : "checks run"} while it plays instead.`;
   return diagnostic.limit === "nesting"

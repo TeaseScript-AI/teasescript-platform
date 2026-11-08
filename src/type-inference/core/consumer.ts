@@ -566,9 +566,14 @@ export function withMessagesInWords<T>(callback: () => T): T {
 /**
  * A diagnostic of the core as the compiler reports it: its rule's code (D3 (a)), the severity of its class ("not
  * checked (budget)" at the editor's information level, TABLE r4.54), its sentences (`messages.ts`, D1) and its site's
- * span (D2); under `withMessagesInWords` also its message in words.
+ * span (D2); under `withMessagesInWords` also its message in words. `moved` is the plan's checks a stop moved to the
+ * runtime (`movedChecks`), which the stop's warning counts.
  */
-function diagnosticOf(diagnostic: CheckedDiagnostic, source: MessageSource): Diagnostic {
+function diagnosticOf(
+  diagnostic: CheckedDiagnostic,
+  source: MessageSource,
+  moved: number,
+): Diagnostic {
   const shown = createDiagnostic(
     diagnostic.class === "compile-error"
       ? DiagnosticSeverity.Error
@@ -576,14 +581,14 @@ function diagnosticOf(diagnostic: CheckedDiagnostic, source: MessageSource): Dia
         ? DiagnosticSeverity.Info
         : DiagnosticSeverity.Warning,
     diagnostic.code,
-    coreMessage(diagnostic, source),
+    coreMessage(diagnostic, source, moved),
     createSourceSpan(
       positionAt(source, diagnostic.site.file, diagnostic.site.start),
       positionAt(source, diagnostic.site.file, diagnostic.site.end),
     ),
   );
   return messagesInWords
-    ? Object.freeze({ ...shown, words: coreMessageInWords(diagnostic, source) })
+    ? Object.freeze({ ...shown, words: coreMessageInWords(diagnostic, source, moved) })
     : shown;
 }
 
@@ -600,7 +605,7 @@ export function coreCheckResult(
   request: CoreAnalysisRequest,
 ): TypeCheckResult {
   const diagnostics: Diagnostic[][] = request.files.map(() => []);
-  const { checks, core, contracts } = runtimeChecks(answers, index, request);
+  const { checks, core, contracts, moved } = runtimeChecks(answers, index, request);
   const known = knownValues(answers, index, (call) => core.expected.get(call));
   const fallbacks = fallbackUses(answers, index);
   const result = checkedOf(answers, index, known, fallbacks);
@@ -616,7 +621,7 @@ export function coreCheckResult(
   const shown = new Set(reportedDiagnostics(answers, result.diagnostics));
   for (const diagnostic of result.diagnostics)
     if (shown.has(diagnostic))
-      diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, source));
+      diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, source, moved));
   const paths = new Map<Statement, readonly boolean[]>();
   for (const statement of index.statements)
     if (statement.kind === "ifStatement") {
@@ -1087,6 +1092,135 @@ function knownConversionError(
     : null;
 }
 
+/** A site of the plan's checks: a store or load, a list `get` call, or the owner of a selected fallback. */
+type CheckSite = RuntimeCheckSite | BinaryExpression;
+
+/**
+ * Who owes each site's check (#2081): a published warning or a boundary, or only warnings a stop deferred, which the
+ * stop's warning counts (`movedChecks`).
+ */
+interface Owers {
+  readonly published: Set<CheckSite>;
+  readonly stopped: Set<CheckSite>;
+}
+
+/** A selected fallback's checks (C10): the fallback and each depth its obligations name. */
+interface Selected {
+  readonly fallback: Expression;
+  readonly depths: FallbackDepth[];
+}
+
+/** An obligation owed at its store, with the kinds its rule names and who owes it. */
+interface Owed {
+  readonly obligation: Obligation;
+  readonly kinds: readonly ItemTag[] | null;
+  readonly by: Set<CheckSite>;
+}
+
+/**
+ * The checks the warnings owe (`runtimeChecks`), the published warnings' and then those a stop moved to the runtime:
+ * C1's obligations, each placed at its store later, with the kinds its rule names, a stopped analysis's store type
+ * where it decided none (D4 a′); C10's fallbacks by owner; C5c's stores and C2's calls, into `core`. Each site's owers
+ * are marked as it is reached (`owers`).
+ */
+function warningChecks(
+  answers: Answers,
+  index: SliceIndex,
+  core: {
+    readonly requireExisting: Set<AssignmentStatement>;
+    readonly indexChecks: Set<CallExpression>;
+  },
+  owers: Owers,
+): { owed: Owed[]; fallbacks: Map<BinaryExpression | CallExpression, Selected> } {
+  const owed: Owed[] = [];
+  const fallbacks = new Map<BinaryExpression | CallExpression, Selected>();
+  // (in this order: the published warnings', then the stop's)
+  for (const [diagnostics, by] of [
+    [answers.diagnostics, owers.published],
+    [answers.budget.deferred, owers.stopped],
+  ] as const)
+    for (const diagnostic of diagnostics) {
+      if (diagnostic.class !== "warning-runtime-check" || diagnostic.kind === "budget") continue;
+      if (leftOutWarning(diagnostic)) continue;
+      const expression = index.expressionAt(diagnostic.site);
+      switch (diagnostic.kind) {
+        case "written-target": {
+          // C10's obligation names the fallback as every obligation names its value (§10.5 r4.10: `xs.element` for
+          // `xs[0]`, `d.entry` for a dict's, its text where no place holds it), with the element steps of a nested
+          // literal's depth; C1's a place (S6's departure 6)
+          const held = index.fallbackOf(expression);
+          const steps =
+            held === undefined
+              ? null
+              : fallbackSteps(
+                  diagnostic.obligation.target,
+                  answers.targetName(nodeOf(answers, index, expression)),
+                );
+          const owner = steps === null ? undefined : held;
+          if (owner === undefined)
+            owed.push({
+              obligation: diagnostic.obligation,
+              kinds: diagnostic.rule.rule === "store" ? diagnostic.rule.type : null,
+              by,
+            });
+          // C10: a load's default is checked as the load's result; any other where it is selected, all its depths at
+          // once
+          else if (owner.kind !== "loadExpression") {
+            const found = fallbacks.get(owner) ?? { fallback: expression, depths: [] };
+            found.depths.push({ steps: steps!, against: diagnostic.obligation.against });
+            fallbacks.set(owner, found);
+            by.add(owner);
+          }
+          break;
+        }
+        case "member-read": {
+          // C5c: a store whose receiver may lack the property, or not be an object, needs it there
+          const store = index.storeOfReceiver(expression);
+          if (store !== undefined) {
+            core.requireExisting.add(store);
+            by.add(store);
+          }
+          break;
+        }
+        case "integer-use": {
+          // C2: a list `get` checks its index's kind; a count or an index read is the runtime's own check
+          const call = index.getOfIndex(expression);
+          if (call !== undefined) {
+            core.indexChecks.add(call);
+            by.add(call);
+          }
+          break;
+        }
+        case "operator":
+          break;
+      }
+    }
+  return { owed, fallbacks };
+}
+
+/**
+ * The plan's checks only warnings a stop deferred owe (#2081): the checks the stop's warning says run while the script
+ * plays instead, each check field of the plan once, a part check each. A check a published warning or a boundary also
+ * owes runs anyway, and its own warning says so.
+ */
+function movedChecks(
+  checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
+  core: CoreRuntimeChecks,
+  owers: Owers,
+): number {
+  const moved = (site: CheckSite): boolean => owers.stopped.has(site) && !owers.published.has(site);
+  let count = 0;
+  for (const site of [
+    ...checks.keys(),
+    ...core.requireExisting,
+    ...core.indexChecks,
+    ...core.fallbackChecks.keys(),
+  ])
+    if (moved(site)) count += 1;
+  for (const [store, parts] of core.partChecks) if (moved(store)) count += parts.length;
+  return count;
+}
+
 /**
  * The runtime checks the core's obligations owe, through S3 §4's discharge map: C1's and C9's at the store that brings
  * the value into its place, the destination's written type or, else, its admitted type at the stored path, one check per
@@ -1103,6 +1237,7 @@ function runtimeChecks(
   checks: Map<RuntimeCheckSite, TypeCheckPlan>;
   core: CoreRuntimeChecks;
   contracts: ReadonlyMap<Store, ContractResult>;
+  moved: number;
 } {
   const textOf = (node: Expression): string => {
     const file = index.fileOf(node);
@@ -1118,60 +1253,8 @@ function runtimeChecks(
     repairs: new Set<LoadExpression>(),
     partChecks: new Map<Store, readonly PartCheckPlan[]>(),
   };
-  // each owed check with the kinds its rule names, a stopped analysis's store type where it decided none (D4 a′)
-  const owed: { readonly obligation: Obligation; readonly kinds: readonly ItemTag[] | null }[] = [];
-  const fallbacks = new Map<
-    BinaryExpression | CallExpression,
-    { readonly fallback: Expression; readonly depths: FallbackDepth[] }
-  >();
-  // the warnings' checks, and those a stop moved to the runtime
-  for (const diagnostic of [...answers.diagnostics, ...answers.budget.deferred]) {
-    if (diagnostic.class !== "warning-runtime-check" || diagnostic.kind === "budget") continue;
-    if (leftOutWarning(diagnostic)) continue;
-    const expression = index.expressionAt(diagnostic.site);
-    switch (diagnostic.kind) {
-      case "written-target": {
-        // C10's obligation names the fallback as every obligation names its value (§10.5 r4.10: `xs.element` for
-        // `xs[0]`, `d.entry` for a dict's, its text where no place holds it), with the element steps of a nested
-        // literal's depth; C1's a place (S6's departure 6)
-        const held = index.fallbackOf(expression);
-        const steps =
-          held === undefined
-            ? null
-            : fallbackSteps(
-                diagnostic.obligation.target,
-                answers.targetName(nodeOf(answers, index, expression)),
-              );
-        const owner = steps === null ? undefined : held;
-        if (owner === undefined)
-          owed.push({
-            obligation: diagnostic.obligation,
-            kinds: diagnostic.rule.rule === "store" ? diagnostic.rule.type : null,
-          });
-        // C10: a load's default is checked as the load's result; any other where it is selected, all its depths at once
-        else if (owner.kind !== "loadExpression") {
-          const found = fallbacks.get(owner) ?? { fallback: expression, depths: [] };
-          found.depths.push({ steps: steps!, against: diagnostic.obligation.against });
-          fallbacks.set(owner, found);
-        }
-        break;
-      }
-      case "member-read": {
-        // C5c: a store whose receiver may lack the property, or not be an object, needs it there
-        const store = index.storeOfReceiver(expression);
-        if (store !== undefined) core.requireExisting.add(store);
-        break;
-      }
-      case "integer-use": {
-        // C2: a list `get` checks its index's kind; a count or an index read is the runtime's own check
-        const call = index.getOfIndex(expression);
-        if (call !== undefined) core.indexChecks.add(call);
-        break;
-      }
-      case "operator":
-        break;
-    }
-  }
+  const owers: Owers = { published: new Set(), stopped: new Set() };
+  const { owed, fallbacks } = warningChecks(answers, index, core, owers);
   for (const [owner, { fallback, depths }] of fallbacks) {
     const type = fallbackPlan(
       fallback,
@@ -1190,6 +1273,7 @@ function runtimeChecks(
         kinds: check.against.filter(
           (kind): kind is Exclude<typeof kind, "non-null"> => kind !== "non-null",
         ),
+        by: owers.published,
       });
   // the types a typed load and a `fromJson` read their value as (F18)
   const typed = new Set<Expression>();
@@ -1210,7 +1294,7 @@ function runtimeChecks(
   const stopped = answers.budget.exhausted !== null;
   // each store's owed obligations, for the parts below its destination its own check does not reach (#1224)
   const atStore = new Map<Store, Obligation[]>();
-  for (const { obligation, kinds } of owed) {
+  for (const { obligation, kinds, by } of owed) {
     // a boundary check against `unknown` is the runtime's validation of representable external data, which runs for
     // every plan: no plan content (S3 §4); where a stopped decision left a store's own check against `unknown` (no
     // boundary's), the receiving completion completed its contract and its own store check owes a check at this site,
@@ -1232,6 +1316,7 @@ function runtimeChecks(
         if (index.iterates(at)) throw new OutsideContract(at, "a check of a loop variable");
       throw new Error("A check of the slice belongs to no store.");
     }
+    by.add(store);
     const held = atStore.get(store);
     if (held === undefined) atStore.set(store, [obligation]);
     else held.push(obligation);
@@ -1249,6 +1334,8 @@ function runtimeChecks(
       continue;
     const store = index.storeOf(index.expressionAt(warning.obligation.site));
     if (store === undefined) continue;
+    // (owed after a stop only: the completion runs where the analysis stopped)
+    owers.stopped.add(store);
     const held = completed.get(store);
     if (held === undefined) completed.set(store, [warning.obligation]);
     else held.push(warning.obligation);
@@ -1275,7 +1362,7 @@ function runtimeChecks(
     );
     if (parts.length > 0) core.partChecks.set(store, parts);
   }
-  return { checks, core, contracts: contracts.results };
+  return { checks, core, contracts: contracts.results, moved: movedChecks(checks, core, owers) };
 }
 
 /**

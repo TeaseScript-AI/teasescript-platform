@@ -1013,7 +1013,7 @@ function workPlaces(program: CoreProgram): {
 
 /**
  * The stop's diagnostics (D4 a′, TABLE r4.54): one warning at the heaviest place, the function or top level whose work
- * was the most before the stop (the deepest nesting's for `nesting`), counting the checks moved to the runtime; and
+ * was the most before the stop (the deepest nesting's for `nesting`), with the number of warnings it deferred; and
  * "not checked (budget)", once per function or top level one of those checks stands in, at its name or at its first.
  */
 function stopDiagnostics(
