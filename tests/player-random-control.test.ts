@@ -538,7 +538,19 @@ const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string,
   ],
 };
 
-// The senders of a random op in `usePlayerSession.ts`, found by their op names as string literals, each classified: only
+/** The session composable's files: `usePlayerSession.ts` and the owner modules it is composed of. */
+const COMPOSABLE_FILES = [
+  "player/vue/src/usePlayerSession.ts",
+  "player/vue/src/session/useRandomControl.ts",
+] as const;
+/** The text of the session composable's files, one after another. */
+function composableText(): string {
+  return COMPOSABLE_FILES.map((file) =>
+    readFileSync(new URL(`../../${file}`, import.meta.url), "utf8"),
+  ).join("\n");
+}
+
+// The senders of a random op in the session composable, found by their op names as string literals, each classified: only
 // `adoptRandom` gives a session a Player's control, and only at the invariant's points; a settings change never does
 // (orchestrator 2's ruling on P5's fourth occurrence). A sender in another module needs adding here.
 const RANDOM_SENDERS: readonly (readonly [string, string])[] = [
@@ -548,16 +560,13 @@ const RANDOM_SENDERS: readonly (readonly [string, string])[] = [
   ['"adoptRandom",', "adopting: `adoptRandom`, the one adoption"],
   ['.request("releaseRandom",', "releasing: Continue before its kept draw went on"],
   [
-    'clock.before("randomControl");',
+    'clock().before("randomControl");',
     "no sender: the clock's work kind before a settings change (`before`)",
   ],
 ];
 
 test("every random-op sender in the composable is classified as adopting or not", () => {
-  const lines = readFileSync(
-    new URL("../../player/vue/src/usePlayerSession.ts", import.meta.url),
-    "utf8",
-  )
+  const lines = composableText()
     .split("\n")
     .filter((line) => /"(randomControl|adoptRandom|releaseRandom)"/u.test(line));
   assert.equal(lines.length, RANDOM_SENDERS.length, lines.map((line) => line.trim()).join(" / "));
@@ -568,10 +577,7 @@ test("every random-op sender in the composable is classified as adopting or not"
     left.splice(at, 1);
   }
   // `adoptRandom` is called only at the invariant's points.
-  const composable = readFileSync(
-    new URL("../../player/vue/src/usePlayerSession.ts", import.meta.url),
-    "utf8",
-  );
+  const composable = composableText();
   const calls = composable
     .split("\n")
     .filter((line) => /\badoptRandom\(/u.test(line) && !/function adoptRandom/u.test(line));
@@ -606,10 +612,7 @@ test("every session introduction in the composable and rewind is classified as a
     }
   }
   // `startedSession` carries `startRandom()` for a Start only.
-  const composable = readFileSync(
-    new URL("../../player/vue/src/usePlayerSession.ts", import.meta.url),
-    "utf8",
-  );
+  const composable = composableText();
   assert.equal(composable.match(/startRandom\(\)/gu)?.length, 1);
   assert.match(composable, /const random = startRandom\(\);/u);
 });

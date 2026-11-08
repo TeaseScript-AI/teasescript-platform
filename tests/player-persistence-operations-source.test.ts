@@ -114,8 +114,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     issueTracing: SESSION,
     applyDebugMode: SESSION,
     debugView: SESSION,
-    sendRandomRequest: SESSION,
-    randomTried: SESSION,
     ownedSection: SESSION,
     settlePlanJson: SESSION,
     loadScriptStorage: READ,
@@ -143,6 +141,12 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   },
   "session/useActivationRun.ts": { "useActivationRun.retire": READ },
   "session/useCallView.ts": { viewCalls: SESSION },
+  "session/useRandomControl.ts": {
+    useRandomControl: SETUP,
+    sendRandomRequest: SESSION,
+    randomTried: SESSION,
+    "useRandomControl.dispose": SETUP,
+  },
   "session/useExportCandidate.ts": {
     useExportCandidate: READ,
     lives: READ,
