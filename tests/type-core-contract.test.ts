@@ -38,8 +38,9 @@ import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import type { Solver, Work } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
-import { PROPERTY_STORE_FAMILIES } from "./helpers/type-core-families.js";
+import { PAY_RULE_FAMILIES, PROPERTY_STORE_FAMILIES } from "./helpers/type-core-families.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
+import { DOUBLING } from "./helpers/type-core-work.js";
 import {
   inMode,
   inOrder,
@@ -49,6 +50,7 @@ import {
   publishedAnswers,
   publishedRoute,
   publishedUpToOrder,
+  stopSet,
 } from "./helpers/type-core-oracles.js";
 
 /*
@@ -1016,10 +1018,10 @@ function* levelsAt(contract: Contract, prefix: Key, rest: Rest): Work<readonly I
  * so the property index reading the objects holding it and one `missing` for the others keeps every holder's answer
  * (each store by itself with the sharing off), the missing status, its writer (the earliest literal, its group's
  * earliest member with the sharing on: #1323) and its place among the holders' answers. The objects are
- * indexed where every store is a closed object literal and, with the sharing on, a level's member, once the levels'
- * reads of the place's properties reach the index's size, from the second (here the second or third); a host value
- * among them or a test marking the reads leaves the place to its levels, and so does, with the sharing on, a tested
- * operand marking an object's structure.
+ * indexed where every store is a closed object literal and, with the sharing on, a level's member, once the folds its
+ * reads would have saved (the sources without each read's property) reach the index's construction, its names and
+ * sources (#1948's pay rule); a host value among them or a test marking the reads leaves the place to its levels, and
+ * so does, with the sharing on, a tested operand marking an object's structure.
  */
 test("a property of a place replaced by objects answers as its levels do, in every mode (#1456)", () => {
   const differing: string[] = [];
@@ -1049,7 +1051,9 @@ test("a property of a place replaced by objects answers as its levels do, in eve
       });
   }
   assert.deepEqual(differing, []);
-  const closed = ["plain", "two", "shared", "half", "typed", "open-value", "provenance", "alike"];
+  // (#1948: objects of a property each beside one they all hold are indexed only where their reads save what it costs,
+  // not at k = 4; the pay rule's family holds that shape, `mixed`)
+  const closed = ["plain", "two", "half", "typed", "open-value", "provenance", "alike"];
   assert.deepEqual(
     [...indexed].sort(),
     [
@@ -1096,6 +1100,264 @@ test("a deeper read below a place replaced by objects keeps each object's absenc
           );
         }
       });
+});
+
+/**
+ * #1948: the property index's pay rule (`propertyItems`) over its family, the rule's regression guard.
+ *
+ * Every family of `PAY_RULE_FAMILIES` (k objects holding the read property every one, none, one each, Codex r2's
+ * absent-field pattern, two shared beside one own, or one shared beside one own read one in k or k - 1 in k; read
+ * below, at and past the index's first bound) grows with its source from k = 16 to 32 within the suite's bound, or
+ * within 1 % of `main`'s own growth where `main` grows faster (`MAIN_GROWTH`, measured once on `a1ebdae6c`, source
+ * order, sharing on and off): so its work against `main`'s falls or rises under 1 % a step. `none-below` and `none-at`
+ * are the totals' one declared difference (the lead's ruling 3): k objects of a property each, read two or three times at a
+ * property none holds, pay one fold over the objects where `main`'s index answered the second read, a constant share
+ * converging near 1.12 of `main`'s work, its steps under 1 % from k = 16 (1.096, 1.110, 1.118 at k = 8, 16, 32).
+ * Per counter (the lead's rulings 5 and 6), the head is at or below `main` but for two terms, each once per prefix and
+ * linear in the stored objects: T1, the pay rule's bookkeeping (its name and holding counts, and with the sharing on
+ * the root groups' read), and T2, ruling 3's folds before the index pays (`none-*`, `shared-past`). Of T1, this test
+ * holds the one bound it must not exceed: with the sharing off, at most one `structureSteps` a stored object's property
+ * name above `main`'s (`MAIN_STRUCTURE_STEPS`). Publications equal `main`'s on every family, size and mode, and every
+ * counter keeps within its row's term (the PR's evidence, outside CI).
+ *
+ * A path below a property answers as the place's levels do at every depth (`levelsAt`, a fold of every object at each
+ * step down), in every mode: with objects of a property of their own beside the case's and reads at absent properties
+ * before its own, so that the index is made before the case's reads and answers them (with the sharing on, keeping
+ * the holders' fold at a path of two steps or more); the earliest literal writer, the `missing`'s place, merges at
+ * successive steps and members' order are those of the full fold; a property every object holds answers from the
+ * index, and below it from the levels. Two objects holding the same property are never indexed. And the four sources
+ * of the stops area's `1249-astra-copy-and-cycle-cases`, two objects holding one property, complete their decision at
+ * demand allowance 256 in the mode where `main` completes it there.
+ */
+test("the property index's pay rule over its family: work within main's growth, reads as the levels' (#1948, #1585)", () => {
+  const MAIN_GROWTH: Record<string, readonly [number, number]> = {
+    "pay-every-below": [2.64, 2.705],
+    "pay-every-at": [2.656, 2.721],
+    "pay-every-past": [3.046, 2.811],
+    "pay-none-below": [2.099, 2.09],
+    "pay-none-at": [2.12, 2.106],
+    "pay-none-past": [2.045, 2.054],
+    "pay-distinct-below": [3.167, 3.007],
+    "pay-distinct-at": [3.197, 3.032],
+    "pay-distinct-past": [2.888, 2.621],
+    "pay-shared-below": [2.029, 2.034],
+    "pay-shared-at": [2.027, 2.032],
+    "pay-shared-past": [2.05, 2.056],
+    "pay-mixed-below": [2.703, 2.582],
+    "pay-mixed-at": [2.71, 2.587],
+    "pay-mixed-past": [2.953, 2.723],
+    "pay-rare-own-below": [2.88, 2.738],
+    "pay-rare-own-at": [2.895, 2.751],
+    "pay-rare-own-past": [3.049, 2.836],
+    "pay-rare-common-below": [2.876, 2.734],
+    "pay-rare-common-at": [2.891, 2.747],
+    "pay-rare-common-past": [2.882, 2.622],
+  };
+  // (`main`'s `structureSteps` with the sharing off at k = 16 and 32, measured once on `a1ebdae6c`)
+  const MAIN_STRUCTURE_STEPS: Record<string, readonly [number, number]> = {
+    "pay-every-below": [208, 448],
+    "pay-every-at": [208, 448],
+    "pay-every-past": [208, 448],
+    "pay-none-below": [192, 416],
+    "pay-none-at": [192, 416],
+    "pay-none-past": [192, 416],
+    "pay-distinct-below": [192, 416],
+    "pay-distinct-at": [192, 416],
+    "pay-distinct-past": [192, 416],
+    "pay-shared-below": [672, 2400],
+    "pay-shared-at": [672, 2400],
+    "pay-shared-past": [672, 2400],
+    "pay-mixed-below": [256, 544],
+    "pay-mixed-at": [256, 544],
+    "pay-mixed-past": [256, 544],
+    "pay-rare-own-below": [224, 480],
+    "pay-rare-own-at": [224, 480],
+    "pay-rare-own-past": [224, 480],
+    "pay-rare-common-below": [224, 480],
+    "pay-rare-common-at": [224, 480],
+    "pay-rare-common-past": [224, 480],
+  };
+  for (const recorded of [MAIN_GROWTH, MAIN_STRUCTURE_STEPS])
+    assert.deepEqual(
+      PAY_RULE_FAMILIES.map((family) => family.name).sort(),
+      Object.keys(recorded).sort(),
+    );
+  const steep: string[] = [];
+  const bookkeeping: string[] = [];
+  for (const family of PAY_RULE_FAMILIES)
+    for (const [index, mode] of [MODES[0]!, MODES[1]!].entries()) {
+      const [small, large] = [16, 32].map((k) => {
+        const request = coreRequest(family.program(k), ["hostValue", "hostOther"]);
+        assert.ok(request !== null, family.name);
+        const { budget } = inMode(mode, () => analyseCore(request));
+        assert.equal(budget.exhausted, null, family.name);
+        return {
+          k,
+          total: budget.total,
+          nodes: budget.counts.get("syntaxNodes") ?? 1,
+          structure: budget.counts.get("structureSteps") ?? 0,
+        };
+      });
+      const growth = (2 * (large!.total / small!.total)) / (large!.nodes / small!.nodes);
+      const bound = Math.max(DOUBLING, 1.01 * MAIN_GROWTH[family.name]![index]!);
+      if (growth > bound)
+        steep.push(`${family.name} ${JSON.stringify(mode)}: ${growth.toFixed(3)}`);
+      // (T1, the lead's ruling 6: with the sharing off, the pay rule's bookkeeping adds to `main`'s `structureSteps` at
+      // most one a stored object's property name, the holding count's)
+      if (mode.unshared)
+        for (const [at, run] of [small!, large!].entries()) {
+          const added = run.structure - MAIN_STRUCTURE_STEPS[family.name]![at]!;
+          if (added > family.names(run.k))
+            bookkeeping.push(
+              `${family.name} at ${run.k}: ${added} over ${family.names(run.k)} names`,
+            );
+        }
+    }
+  assert.deepEqual(steep, []);
+  assert.deepEqual(bookkeeping, []);
+
+  const cases: readonly {
+    readonly name: string;
+    readonly source: string;
+    readonly reads: readonly string[];
+    // (`as written`: no objects added, since its objects hold the case's property every one; `alone`: neither objects
+    // added nor absent properties read first)
+    readonly objects?: "as written" | "alone";
+  }[] = [
+    {
+      name: "the issue's shape (#1585)",
+      source:
+        "let value:integer = 1\nlet root = {f0: {n: value}}\nroot = {f1: {n: value}}\nroot = {f2: {n: value}}\nroot = {f3: {n: value}}\nexit",
+      reads: ["f0.n", "f1.n", "f2.n", "f3.n", "f0.absent", "absent.n"],
+    },
+    {
+      name: "lacking around its holders",
+      source:
+        'let root = {g: 1}\nroot = {f: {n: 1}}\nroot = {h: true}\nroot = {f: {n: "s"}}\nroot = {g: 2}\nexit',
+      reads: ["f.n", "f.absent", "g.n", "h.n"],
+    },
+    {
+      name: "the earliest lacking stored after the first",
+      source:
+        "let early = {g: 1}\nlet late = {k: 2}\nlet root = {f: {n: 1}}\nroot = late\nroot = early\nroot = {f: {n: 2.5}}\nexit",
+      reads: ["f.n", "k.n", "g.n"],
+    },
+    {
+      name: "merged at successive steps",
+      source:
+        'let root = {f: {q: {n: 1}}, g: 1}\nroot = {f: {q: {n: 1}}, g: "s"}\nroot = {f: {q: {n: 2}}, g: true}\nroot = {h: {q: {n: 1}}, g: 1}\nroot = {h0: 1}\nroot = {h1: 1}\nroot = {h2: 1}\nexit',
+      reads: ["f.q.n", "f.q", "f.q.absent", "f.absent.n"],
+    },
+    {
+      name: "merged with one stored between",
+      source:
+        'let root = {f: {q: {n: 1}, x: 1}, g: 1}\nroot = {f: {q: {n: 1}, x: "s"}, g: 2}\nroot = {f: {q: {n: 1}, x: 1}, g: "z"}\nroot = {h: 1}\nroot = {h0: 1}\nroot = {h1: 1}\nroot = {h2: 1}\nexit',
+      reads: ["f.q.n", "f.q.absent", "f.x", "f.q"],
+    },
+    {
+      name: "host data, an empty list and an object without the step",
+      source:
+        "let root = {f: {n: hostValue}}\nroot = {f: {n: []}}\nroot = {f: {}}\nroot = {g: 1}\nexit",
+      reads: ["f.n", "f.n.element", "f.absent"],
+    },
+    {
+      name: "every object holding the property",
+      source:
+        'let first = {inside: {tone: 1}}\nlet second = {inside: {tone: "bad"}}\nlet root = second\nroot = first\nexit',
+      reads: ["inside.tone", "inside", "inside.absent"],
+      objects: "alone",
+    },
+    {
+      name: "a property every object holds beside one of its own",
+      source:
+        'let root = {s: {n: 1}, f0: 1}\nroot = {s: {n: "x"}, f1: 2}\nroot = {s: {q: true}, f2: 3}\nroot = {s: {n: 1}, f3: 4}\nexit',
+      reads: ["s", "s.n", "s.q", "f1"],
+      objects: "as written",
+    },
+    {
+      name: "a list read at its element",
+      source:
+        "let t:integer = 1\nlet root = {f0: [t]}\nroot = {f1: [t]}\nroot = {f2: [t]}\nroot = {f3: [t]}\nexit",
+      reads: ["f0.element", "f1.element", "f3.element", "absent.element"],
+    },
+  ];
+  // (objects of a property each and reads at absent ones first, so that the index is made before the case's reads)
+  const padded = (source: string): string =>
+    source.replace(
+      /exit$/,
+      `${Array.from({ length: 4 }, (_, i) => `root = {d${i}: 1}`).join("\n")}\nexit`,
+    );
+  const absent = Array.from({ length: 8 }, (_, j) => `z${j}.n`);
+  const differing: string[] = [];
+  // (a case without its index before its own reads, or `alone` with one after them)
+  const indexing: string[] = [];
+  // (the cases keeping, with the sharing on, their holders' fold at a path of two steps or more)
+  const deep = new Set<string>();
+  for (const { name, source, reads, objects } of cases) {
+    const request = coreRequest(
+      [{ path: "main.tease", source: objects === undefined ? padded(source) : source }],
+      ["hostValue", "hostOther"],
+    );
+    assert.ok(request !== null, name);
+    for (const mode of MODES)
+      inMode(mode, () => {
+        const pass = narrowingPass(request);
+        const root = bindingOf(pass, "root");
+        const prefix = keyOf(root, []);
+        const index = () => {
+          const held = pass.contract.propertyIndexes.get(pass.contract.prefixStores(prefix));
+          return held !== undefined && "holders" in held ? held : null;
+        };
+        const ask = (read: string): void => {
+          const path = read.split(".");
+          const asked = pass.solver.run(pass.contract.contractOf(keyOf(root, path)));
+          const levels = pass.solver.run(levelsAt(pass.contract, prefix, stepsRest(path)));
+          if (itemsText(asked) !== itemsText(mergeItems(levels, pass.program.scope)))
+            differing.push(`${name}: ${read} ${JSON.stringify(mode)}`);
+        };
+        if (objects !== "alone") {
+          for (const read of absent) ask(read);
+          if (index() === null)
+            indexing.push(`${name}: none before its reads ${JSON.stringify(mode)}`);
+        }
+        for (const read of [...reads, ...[...reads].reverse()]) ask(read);
+        const held = index();
+        if (objects === "alone" && held !== null) indexing.push(`${name} ${JSON.stringify(mode)}`);
+        if (
+          !mode.unshared &&
+          held !== null &&
+          [...held.folds.keys()].some((key) => key.includes("."))
+        )
+          deep.add(name);
+      });
+  }
+  assert.deepEqual(differing, []);
+  assert.deepEqual(indexing, []);
+  for (const name of [
+    "merged at successive steps",
+    "merged with one stored between",
+    "the issue's shape (#1585)",
+  ])
+    assert.ok(deep.has(name), `${name}: no holders' fold kept below its property`);
+
+  const first =
+    'let first={inside:{tone:1}}\nlet second={inside:{tone:"bad"}}\nlet result=second\n';
+  for (const { source, mode } of [
+    { source: `${first}result=first\nexit\n`, mode: 2 },
+    { source: `${first}result=first\nsay result.inside.tone\nexit\n`, mode: 0 },
+    { source: `${first}say result.inside.tone\nresult=first\nexit\n`, mode: 0 },
+    {
+      source:
+        'let a={tone:1,inner:null}\na.inner=a\nlet bad={inner:{tone:"bad"}}\nlet other=a\nother=bad\nsay other.inner.tone\nexit\n',
+      mode: 1,
+    },
+  ])
+    assert.deepEqual(
+      stopSet([{ path: "main.tease", source }], MODES[mode]!, ["hostValue", "hostOther"], 256)
+        ?.stops,
+      [],
+      `${source} mode ${mode}`,
+    );
 });
 
 /**
