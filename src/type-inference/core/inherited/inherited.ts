@@ -23,11 +23,11 @@ import { landed, landedKey, passThrough, passThroughKey } from "../admission/lan
 import type { Frontier, Inheriting, Stop, Stops, WaitingAnswer } from "../admission/model.js";
 import { permittedAt, unrestricted } from "../admission/permitted.js";
 import { inputsAt, inputsOf, scanAt } from "../admission/scan.js";
-import { inheritedInto, join } from "./waiting.js";
-import { isRead, read, type Read } from "./reads.js";
+import { inheritedInto, join, settleCycles, settledCycles } from "./waiting.js";
+import { isRead, read, type Read, type Reads } from "./reads.js";
 import type { Proof, ProofDemand, Proven, Work } from "../solver.js";
 import type { WorkLedger } from "../budget.js";
-import { copySources, stopsOf } from "../admission/walk.js";
+import { copySources, stopsOfRead } from "../admission/walk.js";
 import { wholeOf } from "../admission/eligibility.js";
 import { positions } from "../positions.js";
 
@@ -159,7 +159,7 @@ export class InheritedProof implements Proof {
 function inheritedProof(admission: Admission, key: CanonicalKey): ProofDemand<InheritedProof> {
   const site = admission.pass.program.places[keyPlace(key)]?.site ?? null;
   return {
-    key: joinParts("a4", isKeyId(key) ? `k${key}` : `t${key}`),
+    key: proofKey(key),
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
@@ -168,26 +168,29 @@ function inheritedProof(admission: Admission, key: CanonicalKey): ProofDemand<In
   };
 }
 
-/** A key's proof by its demand's key (`inheritedProof`'s `a4|`), for a replay of the demands a pass settled. */
-export function inheritedProofOf(admission: Admission, key: string): ProofDemand<InheritedProof> {
-  // EVIDENCE: invariant: `inheritedProof` writes a cursor's id after its `k` and a canonical text after its `t`.
-  const canonical = (key.startsWith("k") ? Number(key.slice(1)) : key.slice(1)) as CanonicalKey;
-  return inheritedProof(admission, canonical);
+/**
+ * A key's inherited proof's demand key: `a4|` and the key, a cursor as its token, so a replay's names carry it as they
+ * carry every cursor (`importNames`).
+ */
+function proofKey(key: CanonicalKey): string {
+  return joinParts("a4", key);
+}
+
+/** A key's proof by its demand's key (`proofKey`, after its `a4|`), for a replay of the demands a pass settled. */
+export function inheritedProofOf(admission: Admission, key: Key): ProofDemand<InheritedProof> {
+  return inheritedProof(admission, canonicalKey(admission.pass.contract, key));
 }
 
 function* inheritedRun(admission: Admission, key: CanonicalKey): Work<Proven<InheritedProof>> {
   const steps = scanOf(admission, key);
-  let answer: WaitingAnswer = null;
-  if (steps !== null) {
-    let step = steps.next();
-    while (step.done !== true) {
-      const yielded = step.value;
-      step = steps.next(
-        isRead(yielded) ? yield* yielded.work() : yield* waitOn(admission, key, yielded),
-      );
-    }
-    answer = step.value;
+  let step = steps.next();
+  while (step.done !== true) {
+    const yielded = step.value;
+    step = steps.next(
+      isRead(yielded) ? yield* yielded.work() : yield* waitOn(admission, key, yielded),
+    );
   }
+  const answer: WaitingAnswer = step.value;
   keepText(admission.work, String(key).length);
   const term = answer === null ? null : optionalOf(answer.copied, answer.nullable);
   return {
@@ -204,7 +207,7 @@ function* waitOn(
 ): Work<TypeTerm | null> {
   const { proof, open } = yield* admission.pass.solver.proven(inheritedProof(admission, key));
   if (open) {
-    join(admission, reader, key);
+    join(admission, proofKey(reader), reader, key);
     return null;
   }
   if (proof !== null) admission.inheritedOwn.set(key, proof.own);
@@ -218,7 +221,15 @@ function* waitOn(
 function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
   // (a key in its identity, as the proofs hold it: G3 stage 1)
   const key = canonicalKey(admission.pass.contract, asked);
-  const { proof } = admission.run(admission.pass.solver.proven(inheritedProof(admission, key)));
+  settledCycles(admission);
+  let proof: InheritedProof | null;
+  try {
+    ({ proof } = admission.run(admission.pass.solver.proven(inheritedProof(admission, key))));
+  } catch (error) {
+    // (a run that stopped leaves its unfinished proofs forgotten: their joins with them)
+    settleCycles(admission);
+    throw error;
+  }
   if (proof !== null) admission.inheritedOwn.set(key, proof.own);
   return proof?.term ?? null;
 }
@@ -228,7 +239,7 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
  * (`wrapped`), through a copy above it that copy's place's answer (`answerOf`), else its inputs' scan (`scanAt`);
  * `null` where no store reaches it.
  */
-function scanOf(admission: Admission, next: CanonicalKey): Inheriting<WaitingAnswer> | null {
+function* scanOf(admission: Admission, next: CanonicalKey): Inheriting<WaitingAnswer> {
   const { contract } = admission.pass;
   const place = keyPlace(next);
   const cursor = isKeyId(next) ? next : null;
@@ -237,12 +248,14 @@ function scanOf(admission: Admission, next: CanonicalKey): Inheriting<WaitingAns
   const id = (): number => (cursor !== null ? keyIdPath(cursor) : contract.pathIdOf(path!));
   const first = cursor !== null ? keyIdFirst(contract, cursor) : (path![0] ?? null);
   // (G3 3a: a key past a wrapper inherits what the wrapper's read does below it, from its frontier, `wrapped`)
-  const frontier = positions() ? wrappedFrontier(admission, place, id, first) : null;
-  if (frontier !== null)
-    return wrapped(admission, next, place, path ?? id(), first!, frontier, () =>
-      ownScanOf(admission, next),
-    );
-  return ownScanOf(admission, next);
+  const frontier = positions() ? yield* wrappedFrontier(admission, place, id, first) : null;
+  const scan =
+    frontier !== null
+      ? wrapped(admission, next, place, path ?? id(), first!, frontier, () =>
+          ownScanOf(admission, next),
+        )
+      : ownScanOf(admission, next);
+  return scan === null ? null : yield* scan;
 }
 
 /** `scanOf` past every wrapper: a copy above it, else its inputs' scan (`scanAt`). */
@@ -273,13 +286,13 @@ function ownScanOf(admission: Admission, next: CanonicalKey): Inheriting<Waiting
  * holds, with the path below it, when its first step passes one and each wrapper on the way is one for A2's scan too
  * (`scanHop`); `null` where the first step passes none. Once per place and path (by its id), from its parent's.
  */
-function wrappedFrontier(
+function* wrappedFrontier(
   admission: Admission,
   place: PlaceId,
   path: () => number,
   first: string | null,
-): Frontier | null {
-  if (first === null || scanHop(admission, place, first) === null) return null;
+): Reads<Frontier | null> {
+  if (first === null || (yield* scanHop(admission, place, first)) === null) return null;
   const { contract } = admission.pass;
   const ids: number[] = [path()];
   // (up to the nearest path known, then each one step below its parent's)
@@ -298,7 +311,7 @@ function wrappedFrontier(
     }
     const above = admission.frontiers.get(joinParts(place, contract.pathParent(id)))!;
     const step = contract.pathLast(id);
-    const hop = above.rest === 0 ? scanHop(admission, above.place, step) : null;
+    const hop = above.rest === 0 ? yield* scanHop(admission, above.place, step) : null;
     admission.frontiers.set(
       memoKey,
       hop === null
@@ -318,11 +331,11 @@ function wrappedFrontier(
  * binding's at the rest (`inheritedInto`), optional where the declaration's value there holds `null`. Once per place and
  * step.
  */
-function scanHop(
+function* scanHop(
   admission: Admission,
   place: PlaceId,
   step: string,
-): { readonly binding: PlaceId; readonly read: PlaceId; readonly decl: Definition } | null {
+): Reads<{ readonly binding: PlaceId; readonly read: PlaceId; readonly decl: Definition } | null> {
   const memoKey = joinParts(place, step);
   const known = admission.scanHops.get(memoKey);
   if (known !== undefined) return known;
@@ -339,7 +352,7 @@ function scanHop(
   if (hop !== null && binding !== undefined) {
     const root = keyOf(place, []);
     const eligible = wholeOf(admission, root, false);
-    const stops = stopsOf(admission, hop.literal, hop.decl.node);
+    const stops = yield* stopsOfRead(admission, hop.literal, hop.decl.node);
     const own = (list: readonly Stop[] | undefined): boolean =>
       list === undefined ||
       list.every(
@@ -409,7 +422,8 @@ function* wrapped(
   readonly own?: boolean;
 } | null> {
   const { program, values, contract } = admission.pass;
-  const decl = scanHop(admission, place, first)!.decl;
+  // (the hop the frontier found, known by then)
+  const decl = admission.scanHops.get(joinParts(place, first))!.decl;
   // (a cursor's path read by its id: G3 stage 1)
   const position = () =>
     typeof path === "number"
