@@ -9,6 +9,7 @@ import {
   snapshotForRetention,
   stillHeld,
 } from "./retention-child.js";
+import { deliveredRun } from "./delivered-run.js";
 
 /*
  * The retention child of the witness's positive controls (`retention-witness.test.ts`). A `scan/holder/piece` or
@@ -199,7 +200,7 @@ async function pieceOf(context: PlayerOpsContext, token: string, kind: string): 
     case "sidecarFile":
       return sidecar.files[0]!;
     case "renderedLines":
-      return context.sourceViews.latestFile!.lines;
+      return context.sourceViews.latestFile.value!.lines;
     case "plan":
       return context.plans.get(token)!;
     case "sourceElement":
@@ -237,7 +238,7 @@ async function runCases() {
     const context = playerOpsContext();
     const ops = playerBridgeOps(context);
     connections.push({ context, ops });
-    const run = (op: string, args: unknown) => ops[op]!.run(args, sessions, null);
+    const run = deliveredRun(context, ops, sessions);
     const compiled = await run("prepare", {
       source: { kind: "source", script: structuredClone(markedProject(marker)) },
     });

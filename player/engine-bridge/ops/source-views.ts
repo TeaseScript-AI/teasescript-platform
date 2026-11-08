@@ -8,6 +8,7 @@ import type { FileCode } from "../../random-draw-code.js";
 import type { DrawCode } from "../../vue/src/randomDrawPresentation.js";
 import { exactly, isRecord, isStringArray } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
+import { type DeliveryOwner, OwnedCell, OwnedMap } from "../delivery.js";
 import type { BridgeOps } from "../worker-host.js";
 
 /**
@@ -21,16 +22,23 @@ import type { BridgeOps } from "../worker-host.js";
  */
 export class SourceViewCaches {
   /** The sidecar text made from each compiled plan's sources, by token; `null` for one it could not make. */
-  readonly texts = new Map<string, Promise<string | null>>();
+  readonly texts: OwnedMap<string, Promise<string | null>>;
   /** The sidecar bound to each plan Debug asked about, by token, once found. */
-  readonly sidecars = new Map<string, SourceDebugSidecar>();
+  readonly sidecars: OwnedMap<string, SourceDebugSidecar>;
   /** The file of the latest draw: a file's draws often follow each other, as in a loop. */
-  latestFile: FileCode | null = null;
+  readonly latestFile: OwnedCell<FileCode>;
+
+  /** Caches owned by the connection's deliveries (`delivery.ts`). */
+  constructor(owner: DeliveryOwner) {
+    this.texts = new OwnedMap(owner);
+    this.sidecars = new OwnedMap(owner);
+    this.latestFile = new OwnedCell(owner);
+  }
 
   clear(): void {
     this.texts.clear();
     this.sidecars.clear();
-    this.latestFile = null;
+    this.latestFile.clear();
   }
 }
 
@@ -42,11 +50,12 @@ export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
     if (files === undefined || plan === undefined) return null;
     let text = caches.texts.get(token);
     if (text === undefined) {
-      text = import("../../../src/index.js").then(
+      const made = import("../../../src/index.js").then(
         ({ createSourceDebugSidecar }) => createSourceDebugSidecar(files, plan),
         () => null,
       );
-      caches.texts.set(token, text);
+      caches.texts.set(token, made);
+      text = made;
     }
     return text;
   };
@@ -96,8 +105,8 @@ export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
         const { drawCode, fileCode } = await import("../../random-draw-code.js");
         // A teardown during the import leaves nothing to keep.
         if (context.plans.get(plan) !== held) return { result: null };
-        if (caches.latestFile?.file !== file) caches.latestFile = fileCode(file);
-        const code: DrawCode | null = drawCode(caches.latestFile, site);
+        if (caches.latestFile.value?.file !== file) caches.latestFile.set(fileCode(file));
+        const code: DrawCode | null = drawCode(caches.latestFile.value!, site);
         return { result: code };
       },
     },

@@ -7,6 +7,7 @@ import {
   readRequest,
   refusal,
 } from "./protocol.js";
+import { type Delivery, type DeliveryOwner, deliveryOwner, OwnedMap } from "./delivery.js";
 import { decodeMessage, encodeMessage } from "./transport.js";
 
 /** How the Worker side sends and receives messages, whatever runs it: a browser Worker, a Node worker or a test port. */
@@ -39,8 +40,11 @@ export interface OpOutcome {
 
 export interface HostSessions {
   get(id: string): HostSession | undefined;
-  /** Keeps `session` under a new ID, which it returns. */
-  add(session: HostSession): string;
+  /**
+   * Keeps `session` under a new ID, which it returns, owned by `delivery` (the innermost open one by default) until it
+   * is posted (`delivery.ts`).
+   */
+  add(session: HostSession, delivery?: Delivery): string;
   delete(id: string): void;
   clear(): void;
 }
@@ -122,6 +126,10 @@ const HOST_OPS: BridgeOps = {
  * arguments, order, session or basis is wrong. Every error an op throws becomes an `engine` error reply; nothing is
  * retried.
  *
+ * Each op runs in a delivery of `owner` (`delivery.ts`), the connection's, which a Player host shares with its ops'
+ * context: what the op allocates, a session it adds included, is undone when the op throws or its success reply cannot be
+ * built, encoded or posted, before the error reply goes. Without its owner, a context's allocations are refused.
+ *
  * Returns the host's sessions, which only an in-process backend in the same realm reads (`in-process.ts`).
  *
  * `halt` (a session request) is handled on receipt, ahead of the requests still waiting: from then on every request of
@@ -133,25 +141,25 @@ export function startBridgeHost(
   port: HostPort,
   ops: BridgeOps,
   build: BuildIdentity,
+  owner: DeliveryOwner = deliveryOwner(),
 ): HostSessions {
   const table: BridgeOps = { ...ops, ...HOST_OPS };
-  const held = new Map<string, HostSession>();
   const halted = new Set<string>();
+  // A session leaving, however it leaves, takes its stop with it.
+  const held = new OwnedMap<string, HostSession>(owner, (_session, id) => halted.delete(id));
   let nextSession = 1;
   const sessions: HostSessions = {
     get: (id) => held.get(id),
-    add: (session) => {
+    add: (session, delivery) => {
       const id = `s${nextSession++}`;
-      held.set(id, session);
+      held.set(id, session, delivery);
       return id;
     },
     delete: (id) => {
       held.delete(id);
-      halted.delete(id);
     },
     clear: () => {
       held.clear();
-      halted.clear();
     },
   };
   let lastId = 0;
@@ -246,7 +254,9 @@ export function startBridgeHost(
     }
     if (!wellFormed)
       return refuse(request, refusal("arguments", `Malformed arguments for '${request.op}'.`));
+    const delivery = owner.begin();
     const fail = (error: unknown): void => {
+      abort(delivery);
       const ends = op.ends?.(error) ?? false;
       if (ends && session !== null) held.delete(session.id);
       refuse(request, engineError(error, op.ended?.(error, session?.value ?? null) ?? ends));
@@ -258,27 +268,49 @@ export function startBridgeHost(
       return fail(error);
     }
     if (outcome instanceof Promise)
-      return outcome.then((settled) => answer(request, session, settled), fail);
-    answer(request, session, outcome);
+      return outcome.then((settled) => answer(request, session, settled, delivery), fail);
+    answer(request, session, outcome, delivery);
   }
 
+  /** Undoes `delivery`; an undo that fails is reported by the owner (`delivery.ts`), and the error reply still goes. */
+  function abort(delivery: Delivery): void {
+    owner.rollback(delivery);
+  }
+
+  /**
+   * Posts the success reply of `outcome`, built, encoded and posted inside `delivery`: it commits once the post
+   * returned. A fault on the way aborts it before the error reply, which names the request's own session, as an
+   * allocated one is gone.
+   */
   function answer(
     request: BridgeRequest,
     session: { readonly id: string; readonly value: HostSession } | null,
     outcome: OpOutcome,
+    delivery: Delivery,
   ): void {
-    const named = outcome.session ?? session?.id ?? null;
-    const current = named === null ? undefined : held.get(named);
-    reply(
-      { id: request.id, session: named },
-      {
-        ok: true,
-        revision: current?.revision ?? null,
-        eventsThrough: outcome.eventsThrough ?? null,
-        result: outcome.result,
-        view: outcome.view ?? null,
-      },
-    );
+    try {
+      const named = outcome.session ?? session?.id ?? null;
+      const current = named === null ? undefined : held.get(named);
+      port.post(
+        encodeMessage({
+          v: BRIDGE_VERSION,
+          kind: "reply",
+          id: request.id,
+          session: named,
+          ok: true,
+          revision: current?.revision ?? null,
+          eventsThrough: outcome.eventsThrough ?? null,
+          result: outcome.result,
+          view: outcome.view ?? null,
+        }),
+      );
+    } catch (error) {
+      abort(delivery);
+      // A result that cannot cross (a DataCloneError) still answers the request.
+      return refuse(request, engineError(error, false));
+    }
+    // Closed while the op ran, the connection's cleanup already undid the delivery; there is nothing left to commit.
+    if (!owner.closed) owner.commit(delivery);
   }
 
   /** Handles `first`, then each waiting message, until an op is awaited. */

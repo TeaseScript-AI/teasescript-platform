@@ -10,6 +10,7 @@ import { PlayerBridge } from "../player-bridge.js";
 import { openBridge, type ClientPort } from "./client.js";
 import {
   alignTrace,
+  closeConnection,
   playerBridgeOps,
   playerOpsContext,
   type PlayerOpsContext,
@@ -26,17 +27,18 @@ import {
 } from "./ops/session.js";
 import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
 import type { RandomControlOptions } from "../../src/runtime/random/random-control.js";
+import type { Delivery } from "./delivery.js";
 import { decodeMessage } from "./transport.js";
 import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host.js";
 
 /*
- * The production backend until the L5 series activates the Worker: the same host and ops, in the page's realm, over a
- * port pair that passes every message through `structuredClone`. A request a session op handles runs when it is posted;
- * replies arrive later, on a microtask or after `delayMs`, so the UI meets replies that come later, as from a Worker.
+ * The Player's production backend: the same host and ops as a Worker's, in the page's realm, over a port pair that
+ * passes every message through `structuredClone`. A request a session op handles runs when it is posted; replies arrive
+ * later, on a microtask or after `delayMs`, as from a Worker.
  *
- * Until each family converts its UI, the **transition facade** below lets that family's code reach the host's session
- * synchronously, as before. Every main-realm import of one of its names is a RATCHET entry (`inventory.ts`), and the L5
- * gate requires this module gone, not only RATCHET empty.
+ * The **transition facade** below lets code that has not moved to the bridge reach the host's session synchronously.
+ * Every main-realm import of one of its names is a RATCHET entry (`inventory.ts`); the L5 gate requires this module
+ * gone, not only RATCHET empty.
  */
 
 interface Backend {
@@ -104,15 +106,18 @@ export function createInProcessBackend(
     post: (message) => toHost?.(structuredClone(message)),
     listen: (listener) => void (toClient = listener),
     onFailure: () => {},
+    // The client ends, by a loss or `terminate()`, and terminates its port first (`client.ts`), so the host here, which
+    // outlives it, closes the connection directly: nothing goes through the ended client.
     terminate: () => {
       toHost = null;
       toClient = null;
       transit.length = 0;
+      closeConnection(context, sessions);
     },
   };
   const { client } = openBridge(clientPort, build);
   const context = playerOpsContext();
-  const sessions = startBridgeHost(hostPort, playerBridgeOps(context), build);
+  const sessions = startBridgeHost(hostPort, playerBridgeOps(context), build, context.delivery);
   const bridge = new PlayerBridge(client);
   const flush = (session: string) => {
     for (let index = 0; index < transit.length;) {
@@ -193,6 +198,10 @@ export interface HostFactoryInput {
  * DevelopmentPreview's Start. A session that brought a plan of its own gets a new plan token. `{ plan, options }`
  * starts a held plan instead. Either runs with the connection's value trace; a Start (`random`) also with its Player's
  * random control. A restore begins without ownership, until an explicit adoption (`adoptRandom`).
+ *
+ * Its plan and session are owned by a delivery of the facade's own (`delivery.ts`) until the bridge took the session: a
+ * fault before that undoes them, and a closed connection admits neither. They are bound to that delivery by name, so an
+ * op's delivery that is open meanwhile (one still running, or one a request the factory began opened) never owns them.
  */
 export function introduceNow(
   bridge: PlayerBridge,
@@ -204,6 +213,26 @@ export function introduceNow(
 ): PlayerSession {
   const backend = backendOf(bridge);
   const { context } = backend;
+  const delivery = context.delivery.begin();
+  try {
+    const opened = introduceIn(backend, delivery, make, tracing, random);
+    context.delivery.commit(delivery);
+    return opened;
+  } catch (error) {
+    context.delivery.rollback(delivery);
+    throw error;
+  }
+}
+
+/** `introduceNow`'s body, inside its delivery. */
+function introduceIn(
+  backend: Backend,
+  delivery: Delivery,
+  make: Parameters<typeof introduceNow>[1],
+  tracing: TracingIntent | undefined,
+  random: StartRandom | undefined,
+): PlayerSession {
+  const { bridge, context } = backend;
   // The Player's newest tracing and random intents hold before the session begins, also while their requests wait.
   if (tracing !== undefined) alignTrace(context, tracing);
   const control = startRandom(context, random);
@@ -227,7 +256,8 @@ export function introduceNow(
           ...(control === null ? {} : { randomControl: control }),
         });
   const known = [...context.plans].find(([, held]) => held === created.plan)?.[0];
-  const token = known ?? context.hold(created.plan);
+  // Bound to the facade's delivery: a request the factory began may have opened one inside it, still running.
+  const token = known ?? context.hold(created.plan, delivery);
   // A factory may not have installed the control it was given; its first read attaches it in any case.
   const held = new HeldSession(
     created,
@@ -236,7 +266,7 @@ export function introduceNow(
     random?.owner ?? null,
     typeof make === "function" ? null : control,
   );
-  const id = backend.sessions.add(held);
+  const id = backend.sessions.add(held, delivery);
   return bridge.open(id, introduction(held, context, known === undefined));
 }
 

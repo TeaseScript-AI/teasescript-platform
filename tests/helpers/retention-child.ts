@@ -2,6 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeHeapSnapshot } from "node:v8";
+import { OwnedCell, OwnedMap } from "../../player/engine-bridge/delivery.js";
 
 /*
  * The child side of the retention witness (`retention-witness.ts`), for a child run by `runRetentionChild`: markers,
@@ -30,7 +31,10 @@ export function reach(root: WeakKey): Set<WeakKey> {
     if ((typeof value !== "object" && typeof value !== "function") || value === null) continue;
     if (found.has(value)) continue;
     found.add(value);
-    if (value instanceof Map) for (const [key, item] of value) pending.push(key, item);
+    // A registry the connection's deliveries own keeps its map private: its entries are what it reaches.
+    if (value instanceof Map || value instanceof OwnedMap)
+      for (const [key, item] of value) pending.push(key, item);
+    else if (value instanceof OwnedCell) pending.push(value.value);
     else if (value instanceof Set) pending.push(...value);
     else pending.push(...Object.values(value));
   }

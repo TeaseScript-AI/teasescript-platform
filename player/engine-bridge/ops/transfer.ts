@@ -56,7 +56,8 @@ export function transferOps(context: PlayerOpsContext): BridgeOps {
         const { session: transfer } = read;
         context.transferCount += 1;
         const ticket = `transfer-${context.transferCount}`;
-        context.transfers.set(ticket, { transfer, snapshotJson: null });
+        const held: TransferTicket = { transfer, snapshotJson: null };
+        context.transfers.set(ticket, held);
         return {
           result: {
             kind: "session",

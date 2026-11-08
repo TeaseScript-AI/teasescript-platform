@@ -545,6 +545,58 @@ test("turning Debug off while inspecting reinstates the session and deletes the 
   assert.equal(spill.destroyed, 1);
 });
 
+for (const end of ["Debug off", "unmount"] as const)
+  test(`after the connection is lost, ${end} while a state is inspected reinstates nothing and throws nothing`, async (context) => {
+    const storage = memoryStorage();
+    const made = createHost(context, storage.provider, { lossy: true });
+    const { host, rewind, debug, spill } = made;
+    await start(context, host);
+    await choose(context, host, "One");
+    assert.equal(await rewind.back(0), true);
+    const inspected = host.session.value;
+    made.lose!();
+    await settle(context);
+    // The lost host's states are gone, and with them Debug's history.
+    assert.equal(spill.destroyed, 1);
+    if (end === "Debug off") debug.stop();
+    else made.scope.stop();
+    assert.equal(host.session.value, inspected, "nothing reinstated");
+  });
+
+for (const hold of ["request", "reply"] as const)
+  test(`Debug off while an adoption's read is held (${hold}), then a lost connection: nothing is reinstated, and nothing rejects`, async (context) => {
+    const rejections: unknown[] = [];
+    const record = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", record);
+    context.after(() => void process.off("unhandledRejection", record));
+    // What the Player reports as host errors: the loss, and nothing a reinstatement attempted after it.
+    const reported: unknown[] = [];
+    context.mock.method(console, "error", (...args: unknown[]) => void reported.push(args[1]));
+    const storage = memoryStorage();
+    const made = createHost(context, storage.provider, { lossy: true });
+    const { host, rewind, debug } = made;
+    await start(context, host);
+    await choose(context, host, "One");
+    assert.equal(await rewind.back(0), true);
+    const shown = host.session.value;
+    const held = holdRead(context, await host.bridge, "captureStorage", hold, false);
+    const chosen = choose(context, host, "Two");
+    await held.arrived;
+    debug.stop();
+    made.lose!();
+    held.release();
+    await chosen;
+    await settle(context);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(host.session.value, shown, "the lost session is not reinstated");
+    assert.deepEqual(rejections, [], "no promise rejected unhandled");
+    assert.deepEqual(
+      reported.map((error) => (error instanceof Error ? error.message : String(error))),
+      ["The engine Worker failed: injected."],
+      "only the loss was reported: no reinstatement was attempted",
+    );
+  });
+
 test("Back waits for a pending save, and a new session deletes the history", async (context) => {
   const storage = memoryStorage();
   const { host, rewind, spill } = createHost(context, storage.provider);

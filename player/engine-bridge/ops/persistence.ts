@@ -103,11 +103,8 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
   const slots = context.planTexts;
   const planOf = (token: string) => heldPlan(context, token);
   const planText = (token: string): string => readPlanText(context, token);
-  const dropPlanText = (token: string) => {
-    const slot = slots.get(token);
-    if (slot?.timer != null) clearTimeout(slot.timer);
-    slots.delete(token);
-  };
+  // A slot's waiting task stops as the slot leaves (`PlayerOpsContext.planTexts`).
+  const dropPlanText = (token: string) => slots.delete(token);
   return {
     // Writes the plan's canonical JSON in a task of its own, unless it is written or waiting.
     preparePlanText: {
@@ -120,6 +117,8 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
         planOf(plan);
         if (slots.has(plan)) return { result: null };
         const slot: PlanTextSlot = { json: null, timer: null };
+        // Kept first, so that a slot its delivery undoes stops its task with it.
+        slots.set(plan, slot);
         slot.timer = setTimeout(() => {
           slot.timer = null;
           // A slot released or replaced meanwhile is no longer the plan's.
@@ -130,7 +129,6 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
             // The reader that needs it writes it then, and fails as it would have.
           }
         }, 0);
-        slots.set(plan, slot);
         return { result: null };
       },
     },

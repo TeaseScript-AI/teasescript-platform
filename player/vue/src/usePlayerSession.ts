@@ -384,6 +384,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     pendingTracing = false;
     pendingRandom = false;
     traceId.value = null;
+    // So did every state Debug's rewind could reinstate, so its history ends.
+    rewindRetirements.value++;
     reportHostError(error);
   }
   // Debug's value trace (DEBUGGER.md "Player Debug"), while Debug runs: the host holds it, as the connection's state
