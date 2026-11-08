@@ -244,6 +244,7 @@ test("every publication, stop and binding route of the export observation is cla
 const SESSION_FILES: readonly string[] = [
   "player/vue/src/usePlayerSession.ts",
   "player/vue/src/session/useRandomControl.ts",
+  "player/vue/src/session/useDebugModeAndTrace.ts",
 ];
 const ACTIVATION_FILES = [
   ...SESSION_FILES,
@@ -331,9 +332,10 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useRandomControl.ts: useRandomControl > resolveRandomDraw: catch ownedSection": READMITS,
   "usePlayerSession.ts: usePlayerSession > startFrom: finally settled":
     "clears the in-flight markers it set, only while they are still its own",
-  "usePlayerSession.ts: usePlayerSession > applyDebugMode: finally bridgeOf.request":
+  "useDebugModeAndTrace.ts: useDebugModeAndTrace > applyDebugMode: finally bridgeOf.request":
     "clears the Debug mode asked, only while it is still this request's",
-  "usePlayerSession.ts: usePlayerSession > applyDebugMode: then bridgeOf.request.finally": READMITS,
+  "useDebugModeAndTrace.ts: useDebugModeAndTrace > applyDebugMode: then bridgeOf.request.finally":
+    READMITS,
   "usePlayerSession.ts: usePlayerSession > primeAudio: catch element.play":
     "drops a blocked play; nothing follows",
   "usePlayerSession.ts: usePlayerSession > settlePlanJson: catch bridge.client.request":

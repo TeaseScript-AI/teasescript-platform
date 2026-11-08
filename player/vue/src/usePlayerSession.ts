@@ -50,7 +50,6 @@ import {
   introduceNow,
 } from "../../engine-bridge/in-process.js";
 import type { StartOptions } from "../../engine-bridge/ops/session.js";
-import type { TracingIntent } from "../../engine-bridge/player-ops.js";
 import type { StorageCapture } from "../../engine-bridge/ops/history.js";
 import type { KeepCapture } from "../../engine-bridge/ops/persistence.js";
 import {
@@ -88,7 +87,6 @@ import {
   type KeptSessionStore,
 } from "../../kept-sessions.js";
 import type { RuntimeDebugContext } from "../../../src/index.js";
-import type { DebugView, DebugViewRequest } from "../../debug-view.js";
 import {
   serializeValidatedRuntimeJson,
   type CheckpointErrorInfo,
@@ -142,6 +140,7 @@ import { usePlayerSessionServices } from "./session/usePlayerSessionServices.js"
 import { stopArguments, useActivationRun, type ActivationRun } from "./session/useActivationRun.js";
 import { useExportCandidate } from "./session/useExportCandidate.js";
 import { useRandomControl } from "./session/useRandomControl.js";
+import { useDebugModeAndTrace } from "./session/useDebugModeAndTrace.js";
 
 const PRIMED_AUDIO_ELEMENTS = 2;
 const SILENCE = silence(50);
@@ -301,13 +300,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     ready.client.onLoss(bridgeLost);
     // An injected bridge with a tracing serial allocated: only an earlier Player can have allocated it, as this one could
     // send nothing to the bridge before now.
-    if (options.bridge !== undefined && ready.hasAllocatedTracingIntent) pendingTracing = true;
+    if (options.bridge !== undefined && ready.hasAllocatedTracingIntent) debug.pendTracing();
     flushTracing(ready);
     flushRandom(ready, null);
     return ready;
   });
   bridgeReady.catch(() => {
-    pendingTracing = false;
+    debug.dropPending();
     random.dropPending();
   });
   // Each activation's diagnostic run, the one owner of what its completions may do; with its recording up to a Player
@@ -424,7 +423,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function bridgeLost(error: Error) {
     if (disposed) return;
     // The host's trace and random control went with it.
-    pendingTracing = false;
+    debug.dropPending();
     random.dropPending();
     traceId.value = null;
     // So did every state Debug's rewind could reinstate, and its history: its view stays, read-only, and nothing waiting
@@ -432,73 +431,34 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     retireRewind("loss");
     reportHostError(error);
   }
-  // Debug's value trace (DEBUGGER.md "Player Debug"), while Debug runs: the host holds it, as the connection's state
-  // (`debugTracing`), and every session operation there records into it. `traceId` names the host's trace now, once
-  // the host answered.
-  const debugTracing = ref(false);
-  const traceId = shallowRef<number | null>(null);
-  // Counts this Player's tracing changes, so a reply of an older one sets no `traceId`.
-  let tracingToggles = 0;
-  // Whether `debugTracing` waits to be sent, until the host is reachable. Only the latest setting goes, and only while
-  // this Player lives. A bridge a Player traced on before may still hold that Player's work in its queue: the setting
-  // then goes in any case, so that this Player's Starts carry it ahead of that work.
-  let pendingTracing = false;
-  // This Player's newest tracing intent sent, with its serial from the connection (`nextTracingIntent`), which every op
-  // that sets the host's trace carries (`TracingIntent`): the host applies only the newest, whichever channel brings it.
-  let lastIssued: TracingIntent | undefined;
-  /** This Player's newest tracing intent sent, or `undefined` before any: the host's trace is then off. */
-  const tracingIntent = () => lastIssued;
-  /** Sends tracing `on`, with the connection's next serial. */
-  function issueTracing(host: PlayerBridge, on: boolean) {
-    const intent = { on, intent: host.nextTracingIntent() };
-    lastIssued = intent;
-    return host.client.request("debugTracing", intent);
-  }
-  /** Sends the pending tracing setting, while this Player lives; its reply names the host's trace. */
-  function flushTracing(host: PlayerBridge) {
-    if (!pendingTracing || disposed) return;
-    pendingTracing = false;
-    const toggle = tracingToggles;
-    issueTracing(host, debugTracing.value).then(
-      (reply) => {
-        // EVIDENCE: validation: `debugTracing` replies from the same build with the trace it holds now.
-        const now = (reply.result as { readonly traceId: number | null }).traceId;
-        if (toggle === tracingToggles && !disposed) traceId.value = now;
-      },
-      (error: unknown) => {
-        if (!endsQuietly(error) && !disposed) reportHostError(error);
-      },
-    );
-  }
-  /**
-   * A view of Debug's value trace for the shown session, made in the host (`debugView`, `debug-view.ts`): the reply
-   * names the revision and trace it shows, which its caller compares with what shows when it arrives. `null` without a
-   * shown session or a trace, and for a session that no longer shows or that the host no longer holds; it never
-   * rejects.
-   */
-  function debugView(request: DebugViewRequest): Promise<DebugView | null> {
-    const current = session.value;
-    if (current === null || !debugTracing.value) return Promise.resolve(null);
-    return bridgeOf(current)
-      .read(current, "debugView", { request })
-      .then(
-        (view) => (session.value?.lineage === current.lineage ? view : null),
-        (error: unknown) => {
-          // A session the host released meanwhile has nothing to read; any other failure is the Player's error stop,
-          // as an op's failure is.
-          const gone = error instanceof BridgeRequestError && error.name === "SessionGoneError";
-          if (
-            !endsQuietly(error) &&
-            !gone &&
-            !disposed &&
-            !stopped.value &&
-            session.value?.lineage === current.lineage
-          )
-            reportHostError(error);
-          return null;
-        },
-      );
-  }
+  // Debug's value trace and Debug mode (`session/useDebugModeAndTrace.ts`).
+  const debug = useDebugModeAndTrace({
+    bridgeNow: () => bridge,
+    isDisposed: () => disposed,
+    reportHostError,
+    session,
+    stopped,
+    activationRun,
+    publishOwned,
+    keepSessionLater,
+    copyToDebugRoom,
+    clock: () => clock,
+    room: () => room,
+    hasNormalStorage: () => normalStorage !== undefined,
+    inspecting: () => inspecting,
+    activation: () => activation,
+  });
+  const {
+    debugTracing,
+    traceId,
+    tracingIntent,
+    flushTracing,
+    debugView,
+    setDebugTracing,
+    setDebugMode,
+    applyDebugMode,
+    debugModeOn,
+  } = debug;
   // Bumped when a stored photo finished loading, so presentation resolves its reference again.
   const mediaRevision = ref(0);
   const capturedMedia = new CapturedMediaStore(
@@ -528,10 +488,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const room = ref<"normal" | "debug">(
     options.room === "debug" && normalStorage !== undefined ? "debug" : "normal",
   );
-  // Whether Debug is on, which the script reads as `debugMode`.
-  let debugMode = false;
-  /** The Debug mode last asked of a session's host while its request is under way (`applyDebugMode`), or `null`. */
-  let debugModeAsked: { readonly lineage: object; readonly on: boolean } | null = null;
   // The script's debug room, or `null` without one, and whether it keeps a session.
   let debugRooms = options.debugRooms ?? memoryKeptRoomStore();
   const debugRoom = shallowRef<{ readonly session: boolean } | null>(null);
@@ -1115,11 +1071,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   let scriptSources: ReadonlyMap<string, string> = new Map();
   let disposed = false;
   tryOnScopeDispose(() => {
-    // The trace was this Player's: it ends with it, as when the trace lived in the page, and a Player that uses the
-    // connection next begins with it off. A setting not yet sent goes nowhere; a connection already lost takes nothing.
-    pendingTracing = false;
-    if (lastIssued?.on && bridge !== null) issueTracing(bridge, false).catch(() => {});
-    lastIssued = undefined;
+    // The trace was this Player's: it ends with it.
+    debug.dispose(bridge);
     // Its random control ends with it too, with its history.
     random.dispose(bridge);
     // The activation's run ends before the Player gives the connection up.
@@ -2461,67 +2414,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (failure !== null && ranToEnd) throw new StorageTransferError(failure);
   }
 
-  /**
-   * Turns Debug on or off for the script. On in the normal room, play goes on in the debug room (`copyToDebugRoom`). Off,
-   * play goes on where it is. A running session reads the change from its next statement on.
-   */
-  function setDebugMode(enabled: boolean) {
-    if (enabled === debugMode) return;
-    // A catch-up under way finishes first, as one observation, so the change comes no earlier than without it.
-    clock.before("debugMode");
-    debugMode = enabled;
-    if (enabled && room.value === "normal" && normalStorage !== undefined) void copyToDebugRoom();
-    else applyDebugMode();
-  }
-  /**
-   * Gives the running session the current Debug state. One that waits for Continue takes it at Continue, and a state
-   * Debug's rewind shows for inspection once it is adopted or the session it left is back.
-   */
-  function applyDebugMode() {
-    const current = session.value;
-    if (
-      current === null ||
-      inspecting.value ||
-      stopped.value ||
-      activation.value !== null ||
-      (current.state.status !== "running" && current.state.status !== "waiting")
-    )
-      return;
-    // What the host will hold once the requests sent settle: the last one asked of this session, else what shows.
-    const held =
-      debugModeAsked?.lineage === current.lineage ? debugModeAsked.on : current.state.debugMode;
-    if (held === debugMode) return;
-    const on = debugMode;
-    const asked = { lineage: current.lineage, on };
-    debugModeAsked = asked;
-    // It acts for the activation that shows the session: a Continue keeps the lineage, so the lineage alone does not
-    // say that its activation still lives.
-    const origin = activationRun.current();
-    // In the host (`setDebugMode`); the session shows the change while it still owns the UI.
-    void bridgeOf(current)
-      .request<{ readonly kind: string }>(
-        current,
-        "setDebugMode",
-        { on },
-        { publish: (next) => void publishOwned(next) },
-      )
-      .finally(() => {
-        if (debugModeAsked === asked) debugModeAsked = null;
-      })
-      .then(
-        (outcome) => {
-          if (origin !== null && !activationRun.admits(origin)) return;
-          if (outcome.kind === "set" && session.value?.lineage === current.lineage)
-            keepSessionLater();
-        },
-        (error: unknown) => {
-          if (endsQuietly(error)) return;
-          if (origin !== null && !activationRun.admits(origin)) return;
-          if (!disposed && !stopped.value && session.value?.lineage === current.lineage)
-            reportHostError(error, origin ?? activationRun.current());
-        },
-      );
-  }
   /** Whether the shown session runs or waits. */
   const sessionLive = computed(
     () =>
@@ -2553,7 +2445,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const releaseImporting = holdImporting();
     roomChange = roomChange.then(async () => {
       try {
-        if (normalStorage === undefined || room.value !== "normal" || !debugMode || disposed)
+        if (normalStorage === undefined || room.value !== "normal" || !debugModeOn() || disposed)
           return;
         const scope = normalStorage.scope;
         const live = sessionLive.value;
@@ -2871,7 +2763,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     camera.release();
     activation.value = {
       kind: "start",
-      begin: (origin) => startedSession(create, { debugMode }, origin),
+      begin: (origin) => startedSession(create, { debugMode: debugModeOn() }, origin),
       ...(outdated === undefined ? {} : { outdated }),
     };
     prepareActivation("start");
@@ -2988,8 +2880,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           continued = host.latest(continued) ?? continued;
         }
         // The script reads whether Debug is on now.
-        if (continued.state.debugMode !== debugMode) {
-          await host.request(continued, "setDebugMode", { on: debugMode });
+        if (continued.state.debugMode !== debugModeOn()) {
+          await host.request(continued, "setDebugMode", { on: debugModeOn() });
           owned();
           continued = host.latest(continued) ?? continued;
         }
@@ -3328,14 +3220,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
      * all its history. Sent at once when the host is reachable, else once it is, before a Start that waits for it; an
      * unmounted Player changes nothing.
      */
-    setDebugTracing(on: boolean) {
-      if (disposed || on === debugTracing.value) return;
-      debugTracing.value = on;
-      traceId.value = null;
-      tracingToggles += 1;
-      pendingTracing = true;
-      if (bridge !== null) flushTracing(bridge);
-    },
+    setDebugTracing,
     debugView,
     loadScriptStorage,
     scriptStorageOptions,

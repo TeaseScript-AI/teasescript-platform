@@ -90,6 +90,7 @@ const SERVICES =
 const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   [MAIN]: {
     usePlayerSession: SETUP,
+    "usePlayerSession.hasNormalStorage": MOVE,
     keptStore: RESOURCE,
     routed: RESOURCE,
     "scriptStorage.load": RESOURCE,
@@ -98,7 +99,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "scriptStorage.clear": RESOURCE,
     switchStorage: MOVE,
     enterDebugRoom: MOVE,
-    setDebugMode: MOVE,
     copyToDebugRoom: MOVE,
     createDebugRoom: MOVE,
     startDebugSessionAnew: MOVE,
@@ -111,9 +111,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "usePlayerSession.readPhoto": READ,
     stopAt: SESSION,
     supersede: SESSION,
-    issueTracing: SESSION,
-    applyDebugMode: SESSION,
-    debugView: SESSION,
     ownedSection: SESSION,
     settlePlanJson: SESSION,
     loadScriptStorage: READ,
@@ -141,6 +138,11 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   },
   "session/useActivationRun.ts": { "useActivationRun.retire": READ },
   "session/useCallView.ts": { viewCalls: SESSION },
+  "session/useDebugModeAndTrace.ts": {
+    issueTracing: SESSION,
+    applyDebugMode: SESSION,
+    debugView: SESSION,
+  },
   "session/useRandomControl.ts": {
     useRandomControl: SETUP,
     sendRandomRequest: SESSION,

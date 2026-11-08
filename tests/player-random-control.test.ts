@@ -520,7 +520,10 @@ test("every session op is classified, and only adoptCatchUp reads a session past
 const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string, string])[]>> = {
   "player/vue/src/usePlayerSession.ts": [
     ["prepareRestore(found.session)", "restore: a kept session"],
-    ["begin: (origin) => startedSession(create, { debugMode }, origin)", "start: Start"],
+    [
+      "begin: (origin) => startedSession(create, { debugMode: debugModeOn() }, origin)",
+      "start: Start",
+    ],
     ["introduceNow(requireBridge(), () => given, marks ?? NO_MARKS)", "restore: a raw restore"],
     ["return introduceNow(", "by kind: `startedSession`'s factory, with `random`"],
     [
@@ -542,6 +545,7 @@ const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string,
 const COMPOSABLE_FILES = [
   "player/vue/src/usePlayerSession.ts",
   "player/vue/src/session/useRandomControl.ts",
+  "player/vue/src/session/useDebugModeAndTrace.ts",
 ] as const;
 /** The text of the session composable's files, one after another. */
 function composableText(): string {

@@ -366,22 +366,16 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "own observation",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > applyDebugMode > then:callback.1": [
-    "none",
-    ["BridgeClient.request"],
-  ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > applyDebugMode > then:callback.2": [
-    "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
-  ],
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > applyDebugMode > then:callback.1":
+    ["none", ["BridgeClient.request"]],
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > applyDebugMode > then:callback.2":
+    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > copyToDebugRoom > then:callback": [
     "creation",
     ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > debugView > then:callback.2": [
-    "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
-  ],
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > debugView > then:callback.2":
+    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > editSavedData": [
     "none",
     ["BridgeClient.request"],
@@ -394,10 +388,8 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "none",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > flushTracing > then:callback.2": [
-    "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
-  ],
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > flushTracing > then:callback.2":
+    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > importSavedData": [
     "none",
     ["BridgeClient.request", "BridgeClient.signal"],
@@ -601,7 +593,7 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/useDevelopmentTime.ts useDevelopmentTime > skip {skip}",
   "player/vue/src/usePlayerDebug.ts usePlayerDebug > explain {explain}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > activate {activate}",
-  "player/vue/src/usePlayerSession.ts usePlayerSession > debugView {debugView}",
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > debugView {debugView}",
   "player/vue/src/session/useExportCandidate.ts useExportCandidate > debugExportCandidate {debugExportCandidate}",
   "player/vue/src/session/useExportCandidate.ts useExportCandidate > deliver > release {release}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > debugExportCandidate {debugExportCandidate}",
@@ -626,7 +618,7 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/useRandomControl.ts useRandomControl > resolveRandomDraw {resolveRandomDraw}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > clearScriptStorage {clearScriptStorage}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > serviceSection {serviceSection}",
-  "player/vue/src/usePlayerSession.ts usePlayerSession > setDebugMode {setDebugMode}",
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > setDebugMode {setDebugMode}",
   "player/vue/src/session/useRandomControl.ts useRandomControl > setRandomControl {setRandomControl}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > toStartPage {toStartPage}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {demandCallView}",
@@ -653,6 +645,22 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerSession.ts usePlayerSession {resolveRandomDraw}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {setRandomControl}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {settleUncontrolledDraw}",
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > applyDebugMode {applyDebugMode}",
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > flushTracing {flushTracing}",
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > setDebugTracing {setDebugTracing}",
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace {copyToDebugRoom}",
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace {keepSessionLater}",
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace {reportHostError}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > copyToDebugRoom {copyToDebugRoom}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > debugView {debugView}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > keepSessionLater {keepSessionLater}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > setDebugMode {setDebugMode}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > setDebugTracing {setDebugTracing}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {applyDebugMode}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {debugView}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {flushTracing}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {setDebugMode}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {setDebugTracing}",
 ];
 
 /**
@@ -991,7 +999,7 @@ const OBSERVATION_USES: readonly string[] = [
   "requestObservation <- player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > end [unawaited]",
   "requestObservation <- player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > requestObservation [exposed]",
   "before <- player/vue/src/usePlayerSession.ts usePlayerSession > requestObservation [returned]",
-  "before <- player/vue/src/usePlayerSession.ts usePlayerSession > setDebugMode [unawaited]",
+  "before <- player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > setDebugMode [unawaited]",
   "before <- player/vue/src/session/useRandomControl.ts useRandomControl > setRandomControl [unawaited]",
   "before <- player/vue/src/usePlayerSession.ts usePlayerSession > useEventListener:callback.2 [unawaited]",
   "before <- player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > before [exposed]",
