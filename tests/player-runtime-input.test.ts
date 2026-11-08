@@ -152,18 +152,25 @@ async function mount(
 
 /**
  * The ops each section of `bridge` posts, in order, with their arguments; `on(op, …)` runs once when `op` is posted, and
- * `replied` lists the replies' ops as they arrive; each post says whether its own reply has.
+ * `replied` lists the replies' ops as they arrive; each post says whether its own reply has. `arrivals()` counts the
+ * replies to sections and to requests alike, and each post has its own reply's place among them.
  */
 function track(context: TestContext, bridge: PlayerBridge) {
-  // Each post, with whether its own reply has arrived.
+  // Each post, with whether its own reply has arrived, and its place among all arrivals (1 for the first).
   const posts: {
     readonly op: string;
     readonly args: Record<string, unknown>;
     readonly basis: number | null;
     replied: boolean;
+    arrival: number | null;
   }[] = [];
   const replied: string[] = [];
+  let arrivals = 0;
   const hooks = new Map<string, () => void>();
+  const request = bridge.client.request.bind(bridge.client);
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) =>
+    request(...args).finally(() => void (arrivals += 1)),
+  );
   const section = bridge.client.section.bind(bridge.client);
   context.mock.method(
     bridge.client,
@@ -173,7 +180,13 @@ function track(context: TestContext, bridge: PlayerBridge) {
         body((op, args, basis, onReply) => {
           // EVIDENCE: fixture: the ops of this file's tests post record arguments.
           const record = args as Record<string, unknown>;
-          const post = { op, args: record, basis, replied: false };
+          const post: (typeof posts)[number] = {
+            op,
+            args: record,
+            basis,
+            replied: false,
+            arrival: null,
+          };
           posts.push(post);
           const sent = send(op, args, basis, onReply);
           const hook = hooks.get(op);
@@ -182,6 +195,7 @@ function track(context: TestContext, bridge: PlayerBridge) {
           return sent.then((reply) => {
             post.replied = true;
             replied.push(op);
+            post.arrival = ++arrivals;
             return reply;
           });
         }),
@@ -190,6 +204,7 @@ function track(context: TestContext, bridge: PlayerBridge) {
   return {
     posts,
     replied,
+    arrivals: () => arrivals,
     ops: () => posts.map((post) => post.op),
     on: (op: string, hook: () => void) => void hooks.set(op, hook),
   };
@@ -483,7 +498,11 @@ for (const target of ["an answer", "the pacing skip"] as const)
     await holding;
     await compiling;
     const result = await answering;
-    const answeredShown = host.session.value;
+    // Each publication from here on, as the number of replies that had arrived when it was shown.
+    const published: number[] = [];
+    context.after(
+      watch(host.session, () => void published.push(posted.arrivals()), { flush: "sync" }),
+    );
     await settle();
     assert.equal(result.kind, "answered");
     assert.equal(host.hostError.value, null);
@@ -491,23 +510,31 @@ for (const target of ["an answer", "the pacing skip"] as const)
     const ops = posted.ops().filter((op) => op !== "observeInput" && op !== "observeTime");
     assert.equal(ops.length, 1, `one op besides the observations: ${ops.join(", ")}`);
     // The clock's observations travel in sections of the session (`observeTime`, at their queue turn), so the tracker
-    // sees them. The page hide's is queued last, behind the input, whose own observation retires it: it still reaches
-    // the host (the barrier), and publishes nothing, so the input's publication stays shown.
-    const observations = posted.posts.filter((post) => post.op === "observeTime");
-    const hidden = observations.at(-1);
-    assert.ok(hidden !== undefined, "the page hide's observation reaches the host");
-    assert.equal(posted.ops().at(-1), "observeTime", "queued behind the input");
-    // Its own reply arrives a host delay later; only then can it have published.
+    // sees them. The page hide's is the first queued behind the input, whose own observation retires it: it still
+    // reaches the host (the barrier), and publishes nothing.
+    const inputAt = posted.posts.findIndex((post) => post.op === ops[0]);
+    const hidden = posted.posts.slice(inputAt + 1).find((post) => post.op === "observeTime");
+    assert.ok(
+      hidden !== undefined,
+      "the page hide's observation reaches the host, queued behind the input",
+    );
+    // Its own reply arrives a host delay later; what it publishes, it publishes before the next reply arrives.
     for (let waited = 0; !hidden.replied; waited += 10) {
       assert.ok(waited < 2_000, "the page hide's observation has its reply");
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     await settle();
-    assert.equal(host.session.value, answeredShown, "the retired observation publishes nothing");
-    // A deadline observation can come before it: the 10 ms script timer races this test's setup under the 50 ms host
-    // delay, so there is none or one, admitted before the synchronous steps above and only for the stale session
-    // (revision 1), which the facade call then replaced. A second one, or one for the shown session, fails.
-    const deadlines = observations.slice(0, -1);
+    assert.deepEqual(
+      published.filter((arrived) => arrived === hidden.arrival),
+      [],
+      "the retired observation publishes nothing",
+    );
+    // The 10 ms script timer's deadline wakes the clock in real time, racing this test's steps under the 50 ms host
+    // delay. Admitted before the synchronous steps above, its observation is for the stale session (revision 1), which
+    // the facade call then replaced, and the input's observation retires it: none or one such. Admitted after them, it
+    // queues behind the page hide's and nothing retires it: it publishes once its own reply arrives, a host delay after
+    // the page hide's, so the check above counts only what was shown before that next reply.
+    const deadlines = posted.posts.slice(0, inputAt).filter((post) => post.op === "observeTime");
     assert.ok(deadlines.length <= 1, `at most one deadline observation: ${deadlines.length}`);
     for (const deadline of deadlines)
       assert.equal(deadline.basis, shown.revision, "for the stale session");
