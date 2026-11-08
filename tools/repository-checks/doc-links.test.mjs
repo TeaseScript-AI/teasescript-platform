@@ -111,19 +111,23 @@ test("remark reads exactly Git's regular Markdown files, with no configuration o
   }
 });
 
-test("a file Git lists three times, while a merge conflicts, is read once", () => {
-  const { root, git } = checkout({ "c.md": `${BROKEN}one\n` });
+test("a file Git lists three times, while a merge conflicts, is read and counted once", () => {
+  const { root, git } = checkout({ "c.md": "# C\n\none\n" });
   try {
     git("checkout", "-q", "-b", "other");
-    write(root, { "c.md": `${BROKEN}two\n` });
+    write(root, { "c.md": "# C\n\ntwo\n" });
     git("commit", "-q", "-am", "two");
     git("checkout", "-q", "-");
-    write(root, { "c.md": `${BROKEN}three\n` });
+    write(root, { "c.md": "# C\n\nthree\n" });
     git("commit", "-q", "-am", "three");
     spawnSync("git", ["merge", "-q", "other"], { cwd: root });
+    assert.equal(git("ls-files", "--cached", "c.md").trim().split("\n").length, 3);
     const result = run(root);
-    assert.equal(result.status, 1, result.stdout + result.stderr);
-    assert.deepEqual(reported(result.stderr), ["c.md"], result.stderr);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.equal(
+      result.stdout,
+      "doc-links: remark reports no unresolved relative link or heading anchor in 1 Markdown files\n",
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
