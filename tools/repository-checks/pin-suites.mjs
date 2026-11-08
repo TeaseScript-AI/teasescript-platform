@@ -121,9 +121,12 @@ function git(root, ...args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 1 << 28 });
 }
 
-/** The paths changed since the merge-base of HEAD and `ref`, committed or not, untracked included. */
+/**
+ * The paths changed since the merge-base of HEAD and `ref`, committed or not, untracked included; a moved file by both
+ * its paths (`--no-renames`), so a file moved out of the core is a core change.
+ */
 function changedSince(root, mergeBase) {
-  const tracked = git(root, "diff", "--name-only", mergeBase).split("\n");
+  const tracked = git(root, "diff", "--name-only", "--no-renames", mergeBase).split("\n");
   const untracked = git(root, "ls-files", "--others", "--exclude-standard").split("\n");
   return [...new Set([...tracked, ...untracked].filter((path) => path !== ""))];
 }
