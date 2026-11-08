@@ -196,9 +196,13 @@ the tracker issue; it is not a per-pull-request level.
 **Pinned work.** Some suites pin the core's exact work: totals, listed copy and construction sites, and work tables
 (`tools/repository-checks/pin-suites.mjs` lists them). A change under `src/type-inference/core/` runs all of them before
 it asks for review and before READY: `node tools/repository-checks/pin-suites.mjs --run`. A pin that moves is re-pinned
-only with its ground: the comment above it says how many units more or fewer and which change made them, and the
-reviewer checks that no part of the change is a repeated question, work the core already did once, done again. A change
-to a test helper lists only a suite whose pins it holds, not every suite that imports it.
+only with its ground: a comment at the pin, or in its test's header, naming how many units more or fewer and the change
+that moved them ("18 units more at demand 64 since #1828: …" above the closure suite's list-join row; "6 fewer since
+#1901 …" in the contract-capture test's opening comment). Grounds are the reviewer's to check: for each changed pin line
+of the diff, the reviewer finds its ground, and checks that no part of the change is a repeated question, work the core
+already did once, done again. A mechanical check of grounds was tried and dropped (#2051): reading a pin's text, it
+stayed open to a pin written in a form it did not read. A change to a test helper lists only a suite whose pins it
+holds, not every suite that imports it.
 
 ## Test admission and consolidation
 
