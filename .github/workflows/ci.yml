@@ -119,6 +119,8 @@ jobs:
         with:
           persist-credentials: false
           show-progress: false
+          # the merge's first parent too, the base the structure signals are read against (below)
+          fetch-depth: 2
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
@@ -140,6 +142,12 @@ jobs:
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
         run: npm run check:pretest
+      # The structure signals the change adds to, against the merge's first parent (`tools/structure-report.mjs`,
+      # IMPLEMENTATION-AND-REVIEW.md "Code structure"): printed for the plan and the review to answer, never failing.
+      # It runs in the job that runs `check:pretest`, after it.
+      - name: Structure signals (advisory)
+        continue-on-error: true
+        run: node tools/structure-report.mjs --diff HEAD^1
       - name: Build and run tests, shard 3 of 3
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache

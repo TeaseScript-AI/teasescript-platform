@@ -68,6 +68,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isRecordedQuestions, isRecordedReason, limitOf, UNKNOWN_REASON } from "./run-contract.mjs";
 import { generatorFolders, generatorsOf, holdsGenerators, placeOf } from "./sources.mjs";
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
@@ -910,6 +911,35 @@ export function storedRuns(folder) {
   return incomplete === undefined ? { lines, identity, units } : { status: 1, refused: incomplete };
 }
 
+/**
+ * What the verified shards' `sources` store (#1837): their runs, those left unanswered by each reason (a binding's form
+ * apart, `run-contract.mjs`), and, under plan 2 (`units`), the runs that ended above `units` times their allowance within
+ * their question grant (`granted`), and the stalls over the unit limit.
+ */
+function storedOf(sources, units) {
+  const runs = sources.flatMap((source) => Object.values(source.runs));
+  const reasons = {};
+  for (const { value } of runs) {
+    if (!(value?.unanswered > 0)) continue;
+    // (a run stored before #1837 named no reason: `unknown`, as the runner reads it)
+    const by = value.unansweredBy ?? { reason: UNKNOWN_REASON };
+    const reason = by.binding === undefined ? by.reason : `${by.reason} (binding)`;
+    reasons[reason] = (reasons[reason] ?? 0) + 1;
+  }
+  return {
+    count: runs.length,
+    reasons,
+    ...(units === null
+      ? {}
+      : {
+          granted: runs.filter(
+            ({ work, allowance }) => allowance !== null && work > units * allowance,
+          ).length,
+          overLimit: sources.filter((source) => source.stalled === "units").length,
+        }),
+  };
+}
+
 /** A built tree's areas: the folders of tests/families/ with generators, and tools/corpus/fixture/. */
 function areasOf(tree) {
   // (the families' areas as the check finds them, then the corpus fixture, an area outside `tests/families`)
@@ -997,6 +1027,14 @@ async function stateOf(tree, root, readOnly) {
           shards,
           ...(damaged > 0 ? { damaged } : {}),
           store,
+          ...(count > 0
+            ? {
+                runs: storedOf(
+                  read.flatMap((shard) => shard.sources ?? []),
+                  made.area.units,
+                ),
+              }
+            : {}),
         };
       }
     }
@@ -1201,9 +1239,11 @@ const allowanceIn = (value) => value === null || (Number.isInteger(value) && val
  * them, and its runs, each a mode and check (`runName`) with one tree's result: a value (its hash, its parts' hashes or
  * none, its count of unanswered nodes and, since #1837, why (`unansweredBy`), whether the files did not parse) or the
  * text it threw. Under plan 2 each run also
- * holds the units it charged (`work`) and its program's allowance (`allowance`), a stall over the unit limit (`units`)
- * the run it cut (`cut`: its name, its units and allowance, a charged ledger's (above 0), the units over `units` times
- * the allowance: the stall's certificate, the same on every machine), and a run that reached the wall-clock safety net
+ * holds the units it charged (`work`) and its program's allowance (`allowance`), a publication run what its oracle
+ * reported of its own questions where it did (`questions`, #1837), and a stall over the unit limit (`units`) the run it
+ * cut (`cut`: its name, its units and allowance, a charged ledger's (above 0), and its `questions`, the units over its
+ * limit (`limitOf`, `run-contract.mjs`): the stall's certificate, the same on every machine). A run that ended charged
+ * at most that limit; and a run that reached the wall-clock safety net
  * is named apart (`uncharged`: the run, or `OUTSIDE_RUNS`), never a stall; a cut run or one at the safety net is none
  * that ended (Codex r2). Under either version a line ends one way at most (a stall, the safety net or the runner's
  * exception), and a plan 1 line has no stall over a unit limit, which no runner then wrote (Codex r3). These are
@@ -1225,22 +1265,26 @@ export function sourceFault(line, units = null) {
   )
     return "its exception is not the runner's text";
   if (!shaped(line.runs, [], Object.keys(line.runs ?? {}))) return "its runs are no object";
-  // each run a mode and check with one tree's result, its shape proved before any of its units is read
+  // each run a mode and check with one tree's result, its shape proved before any of its units is read; a publication
+  // run (plan 2) with what its oracle reported of its own questions, where it did (`questions`, #1837)
   const charged = units === null ? [] : ["work", "allowance"];
+  const reported = units === null ? [] : ["questions"];
+  /** Whether `questions` is none or what a publication run `run`'s oracle reported (`run-contract.mjs`). */
+  const reportedIn = (run, questions) =>
+    questions === undefined || (run.endsWith(" publication") && isRecordedQuestions(questions));
   for (const [run, result] of Object.entries(line.runs)) {
     const value = result?.value;
     const fits =
       runName(run) &&
-      (shaped(result, ["thrown", ...charged])
+      reportedIn(run, result?.questions) &&
+      (shaped(result, ["thrown", ...charged], reported)
         ? typeof result.thrown === "string"
-        : shaped(result, ["value", ...charged]) &&
+        : shaped(result, ["value", ...charged], reported) &&
           shaped(value, ["hash", "parts", "unanswered", "unparsed"], ["unansweredBy"]) &&
-          // (why its oracle left nodes unanswered, #1837: only where it left some, a reason with its first node or none)
+          // (why its oracle left nodes unanswered, #1837: only where it left some, in a form a record holds,
+          // `run-contract.mjs`)
           (value.unansweredBy === undefined ||
-            (value.unanswered > 0 &&
-              shaped(value.unansweredBy, ["reason", "node"]) &&
-              ["questions", "stopped", "unknown"].includes(value.unansweredBy.reason) &&
-              (value.unansweredBy.node === null || Number.isInteger(value.unansweredBy.node)))) &&
+            (value.unanswered > 0 && isRecordedReason(value.unansweredBy))) &&
           hash64(value.hash) &&
           (value.parts === null ||
             (Array.isArray(value.parts) &&
@@ -1248,11 +1292,12 @@ export function sourceFault(line, units = null) {
           Number.isInteger(value.unanswered) &&
           value.unanswered >= 0 &&
           typeof value.unparsed === "boolean") &&
-      // (a run that ended charged at most the limit: one over it stalls)
+      // (a run that ended charged at most its limit, a publication's grant included: one over it stalls)
       (units === null ||
         (unitsIn(result.work) &&
           allowanceIn(result.allowance) &&
-          (result.allowance === null || result.work <= units * result.allowance)));
+          (result.allowance === null ||
+            result.work <= limitOf(units, result.allowance, result.questions))));
     if (!fits) return `its run ${JSON.stringify(run)} is not one a store writes`;
   }
   // one end at most, under either version (no runner wrote two): a stall, a run at the safety net (plan 2) or the
@@ -1273,13 +1318,14 @@ export function sourceFault(line, units = null) {
   if (
     line.cut !== undefined &&
     !(
-      shaped(line.cut, ["run", "work", "allowance"]) &&
+      shaped(line.cut, ["run", "work", "allowance"], ["questions"]) &&
       runName(line.cut.run) &&
+      reportedIn(line.cut.run, line.cut.questions) &&
       !Object.hasOwn(line.runs, line.cut.run) &&
       Number.isInteger(line.cut.work) &&
       Number.isInteger(line.cut.allowance) &&
       line.cut.allowance > 0 &&
-      line.cut.work > units * line.cut.allowance
+      line.cut.work > limitOf(units, line.cut.allowance, line.cut.questions)
     )
   )
     return `its stall is not a run cut over ${units} times its allowance`;

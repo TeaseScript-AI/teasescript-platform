@@ -72,7 +72,7 @@ export function checkCommentForecasts(root) {
   const diagnostics = [];
   const used = new Set();
   const counted = {};
-  for (const file of checkedFiles(root)) {
+  for (const file of checkedFiles()) {
     const text = readFileSync(resolve(root, file), "utf8");
     for (const forecast of forecastsIn(file, text)) {
       const entry = allowed.findIndex(

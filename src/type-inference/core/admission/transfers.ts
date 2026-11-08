@@ -21,7 +21,7 @@ import { chooses, live, snapshotOf } from "./links.js";
 import type { Expansion, Inheriting, Part } from "./model.js";
 import { contributionOf } from "./own.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
-import { inheritedInto } from "./waiting.js";
+import { inheritedInto } from "../inherited/waiting.js";
 import { partOf, TYPED_ROLES } from "./walk.js";
 
 // The carriers' transfers (G3 2c): what a stored value's walk answers, over its tasks' recipes (`expand`): each

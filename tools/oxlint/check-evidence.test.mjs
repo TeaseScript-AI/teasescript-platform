@@ -128,3 +128,67 @@ const value = 1; // eslint-disable-line anti-slop/example
     ],
   );
 });
+
+test("reads a .vue file's script blocks only, at their lines in the file", () => {
+  const sourceText = `<template>
+  <!-- // eslint-disable-next-line no-console -->
+  <p>// oxlint-disable-next-line anti-slop/example</p>
+</template>
+<script setup lang="ts">
+// oxlint-disable-next-line anti-slop/example
+const first = value;
+</script>
+<script lang="ts">
+/* eslint-disable */
+</script>
+`;
+
+  assert.deepEqual(
+    checkEvidenceComments("Fixture.vue", sourceText).map(({ line, column }) => ({ line, column })),
+    [
+      { line: 6, column: 1 },
+      { line: 10, column: 1 },
+    ],
+  );
+});
+
+test("finds a .vue file's script blocks as Vue does, and reports at the file's line and column", () => {
+  const at = (sourceText) =>
+    checkEvidenceComments("Fixture.vue", sourceText).map(({ line, column }) => ({ line, column }));
+  // a `>` inside a quoted attribute ends no tag
+  assert.deepEqual(
+    at(
+      '<script setup lang="ts" generic="T extends Array<string>">// oxlint-disable-next-line no-debugger\ndebugger;\n</script>',
+    ),
+    [{ line: 1, column: 59 }],
+  );
+  // a `<script>` inside a template comment is no block
+  assert.deepEqual(
+    at(
+      '<template>\n<!-- <script>\n/* eslint-disable */\n</script> -->\n<p>ok</p>\n</template>\n<script setup lang="ts">const a = 1;</script>',
+    ),
+    [],
+  );
+  // a comment on the tag's own line, and an attribute that holds the block's own text
+  assert.deepEqual(at('<script lang="ts">/* eslint-disable */\nexport default {};\n</script>'), [
+    { line: 1, column: 19 },
+  ]);
+  assert.deepEqual(
+    at('<script\n data-note="/* eslint-disable */"\n lang="ts">/* eslint-disable */</script>'),
+    [{ line: 3, column: 12 }],
+  );
+});
+
+test("refuses a lint directive in a .vue file that Vue cannot parse, whose blocks it cannot all read", () => {
+  const at = (sourceText) =>
+    checkEvidenceComments("Fixture.vue", sourceText).map(({ line, column }) => ({ line, column }));
+  // Vue keeps one `<script>` of two, but oxlint lints both: the second's exception is refused all the same
+  assert.deepEqual(
+    at(
+      "<script>export default {};</script>\n<script>// oxlint-disable-next-line no-debugger -- EVIDENCE: a fixture\ndebugger;</script>",
+    ),
+    [{ line: 2, column: 12 }],
+  );
+  // a file Vue cannot parse that holds no directive, as a deliberately refused fixture
+  assert.deepEqual(at('<script setup src="./setup.ts"></script>\n'), []);
+});
