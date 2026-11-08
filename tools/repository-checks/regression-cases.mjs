@@ -35,8 +35,8 @@ import { fileURLToPath } from "node:url";
 //    `atBase` matches whole. Anything else is not: it passed, failed for another reason, did not finish (cancelled,
 //    timed out, a hook failed), or did not run (no event, as when its file does not load at the base).
 //
-// Bounded: a case that loads a module the head adds to the bundles' list does not run at the base, as one that imports
-// what the fix adds, and is reported so; and the base is compiled and bundled with the head's `node_modules`.
+// Bounded: a case that loads a module the head adds to the bundles' list fails at the base with `Cannot find module`,
+// reported as another reason than `atBase` names; and the base is compiled and bundled with the head's `node_modules`.
 //
 // Exit status: 0 when every checked case is a witness, 1 when one is not or a declaration is refused, 2 when it cannot
 // run (a missing option, a base it cannot check out, compile or bundle).
