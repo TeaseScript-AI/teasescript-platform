@@ -2901,8 +2901,8 @@ async function rewindSwitchScenario(cdp, origin) {
   const choice = (label) =>
     `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === '${label}')`;
   const theme = `document.documentElement.dataset.playerTheme`;
-  // Back to the first answer through the given gate, the state shown for inspection.
-  const inspect = async (gate) => {
+  // Back to the first answer through the given gate, the state shown for inspection, in theme `mode`.
+  const inspect = async (gate, mode) => {
     await navigate(cdp, `${origin}/player/?package=rewind&dev&rewindGate=${gate}`);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
     await physicalClick(cdp, "[data-session-activation] button");
@@ -2917,6 +2917,10 @@ async function rewindSwitchScenario(cdp, origin) {
       8_000,
       "Back showed no inspection",
     );
+    if ((await value(cdp, theme)) !== mode) {
+      await physicalClick(cdp, "[data-theme-mode-control]");
+      await waitFor(cdp, `${theme} === '${mode}'`);
+    }
   };
   for (const mode of ["light", "dark"])
     for (const [device, width, height] of [
@@ -2924,12 +2928,7 @@ async function rewindSwitchScenario(cdp, origin) {
       ["phone", 390, 844],
     ]) {
       await setViewport(cdp, width, height);
-      await inspect("slow");
-      // The theme is the Player's preference, which a reload keeps.
-      if ((await value(cdp, theme)) !== mode) {
-        await physicalClick(cdp, "[data-theme-mode-control]");
-        await waitFor(cdp, `${theme} === '${mode}'`);
-      }
+      await inspect("slow", mode);
       // Return waits at its slow gate: at once, what it refuses is disabled, the Player is busy and says so, and no
       // animation shows yet.
       await physicalClick(cdp, "[data-rewind-return]");
@@ -2964,7 +2963,7 @@ async function rewindSwitchScenario(cdp, origin) {
       );
       // Debug off's reinstatement fails at its gate: the failure stops the Player, and Retry return to session shows,
       // with Debug off.
-      await inspect("fail");
+      await inspect("fail", mode);
       // The Debug panel opens from the tools: on a phone, from the drawer that Show sidebar opens, through its Tools menu.
       if (device === "phone") {
         await physicalClick(cdp, '[aria-label="Show sidebar"]');
@@ -2993,6 +2992,9 @@ async function rewindSwitchScenario(cdp, origin) {
           `[...document.querySelectorAll('[aria-label="Hide sidebar"]')].find((each) => each.checkVisibility())`,
           "the drawer's Hide sidebar",
         );
+        // Once the drawer has closed and its transition ended.
+        await waitFor(cdp, `document.querySelector('[data-tools-surface]')?.inert === true`);
+        await delay(500);
         await waitFor(
           cdp,
           visible("[data-rewind-retry]"),
