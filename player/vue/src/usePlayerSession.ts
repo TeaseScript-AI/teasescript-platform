@@ -1,6 +1,7 @@
 import { computed, ref, shallowRef, watch } from "vue";
 import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
 import { browserMediaUrls } from "../../browser-capture.js";
+import { NO_MARKS, type HistoryMarks } from "../../debug-history-marks.js";
 import { planLockNeeds } from "../../plan-metadata.js";
 import {
   CapturedMediaNotStoredError,
@@ -87,12 +88,9 @@ import {
   type DebugPhotoCandidate,
 } from "../../debug-export-assembly.js";
 import type { DebugRewoundWhileDebugging } from "../../debug-export.js";
-import {
-  DEBUG_HISTORY_MEMORY_BUDGET,
-  type DebugHistoryMarks,
-  type DebugHistorySpill,
-} from "../../debug-history.js";
-import { openDebugHistorySpill, sweepDebugHistories } from "../../debug-history-indexeddb.js";
+import { sweepDebugHistories } from "../../debug-history-indexeddb.js";
+import { createRewindOwner } from "./rewindOwner";
+import type { DebugHistorySpill } from "../../engine-bridge/history/snapshots.js";
 import type { DebugRecorder, DebugRecording } from "../../debug-recorder.js";
 import {
   capturedMediaReferencesIn,
@@ -165,7 +163,7 @@ const MEDIA_SAMPLE_MS = 100;
 
 export interface PlayerSessionOptions {
   /**
-   * The engine's host; the in-process backend by default, until the L5 series activates the Worker. One live Player per
+   * The engine's host; the in-process backend by default. One live Player per
    * bridge, which a later Player may reuse after the previous Player scope is disposed; while another holds it, this
    * Player never becomes ready.
    */
@@ -221,9 +219,15 @@ export interface PlayerSessionOptions {
   debugRooms?: KeptRoomStore;
   /** The room the page opens (DEBUGGER.md "Debug room"): the script's own, `normal` by default, or its debug room. */
   room?: "normal" | "debug";
-  /** Opens where Debug's rewind history spills snapshots; IndexedDB by default, `null` keeps them in memory. */
+  /**
+   * Opens where Debug's rewind history in the composable's own host spills snapshots; IndexedDB by default, `null`
+   * keeps them in memory. An injected `bridge`'s host has its own.
+   */
   debugHistorySpill?: () => Promise<DebugHistorySpill | null>;
-  /** Characters of state JSON a rewind history keeps in memory before it spills; diagnostic tuning for tests. */
+  /**
+   * UTF-16 code units of snapshot JSON a rewind history in the composable's own host admits in memory, pending spill
+   * writes included (`DEBUG_HISTORY_ADMITTED_SNAPSHOT_CHARS` by default); diagnostic tuning for tests.
+   */
   debugHistoryMemoryBudget?: number;
 }
 
@@ -234,8 +238,6 @@ type Activation = {
   readonly kind: "start" | "continue";
   /** Begins the session; a Start or Continue over the bridge resolves once its first publication is applied. */
   readonly begin: () => PlayerSession | Promise<PlayerSession>;
-  /** The marks a continued session had, which it keeps. */
-  readonly marks?: DebugHistoryMarks;
   /** The restored session Continue goes on with. */
   readonly restored?: PlayerSession;
   /** Why Start shows instead of Continue: the kept session is of a format this Player no longer reads. */
@@ -273,10 +275,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     diagnostics.value = [...diagnostics.value, diagnostic];
   };
   // The engine's host, which owns the plans, the sessions and the recorder of every session's engine calls from Start,
-  // in every build, for a debug export (DEBUGGER.md "Debug export"); in-process until the L5 series activates the Worker.
+  // in every build, for a debug export (DEBUGGER.md "Debug export"); in-process by default.
   // The in-process backend is ready at once, so a Start within the first click needs no wait.
   let bridge: PlayerBridge | null =
-    options.bridge === undefined ? createInProcessBackend(playerBuildIdentity) : null;
+    options.bridge === undefined
+      ? createInProcessBackend(playerBuildIdentity, {
+          ...(options.debugHistorySpill && { historySpill: options.debugHistorySpill }),
+          ...(options.debugHistoryMemoryBudget !== undefined && {
+            historyBudget: options.debugHistoryMemoryBudget,
+          }),
+        })
+      : null;
   // This Player's hold on its bridge (`PlayerBridge.claim`): one live Player per bridge.
   const claim = Symbol("Player");
   // Once the host is reachable, and only while this Player lives: it takes the bridge, observes its loss (see
@@ -384,8 +393,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     pendingTracing = false;
     pendingRandom = false;
     traceId.value = null;
-    // So did every state Debug's rewind could reinstate, so its history ends.
-    rewindRetirements.value++;
+    // So did every state Debug's rewind could reinstate, and its history: its view stays, read-only, and nothing waiting
+    // on it acts.
+    retireRewind("loss");
     reportHostError(error);
   }
   // Debug's value trace (DEBUGGER.md "Player Debug"), while Debug runs: the host holds it, as the connection's state
@@ -611,13 +621,44 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   };
   const resolveTemporalContext = options.temporalContext ?? (() => playerTemporalContext());
   const session = shallowRef<PlayerSession | null>(null);
-  // Counts the times this script's saved data were replaced outside Debug's rewind, which ends its history.
+  /**
+   * The rewind retirement stamp (`rewindRetirements`, below) the owner's reply guards read; declared first, as the owner
+   * is made before everything that reads it.
+   */
   const rewindRetirements = ref(0);
+  // Debug's rewind over the Player's lifetime, which outlives each Debug scope (DEBUGGER.md "Rewind"): one deciding
+  // function (`player/rewind-lifecycle.ts`) and the owner that applies what it decides.
+  const rewindOwner = createRewindOwner({
+    bridge: () => bridge,
+    retirements: () => rewindRetirements.value,
+    shown: () => session.value,
+    ready: () => rewindReady.value,
+    generation: () => generation.value,
+    beginStep: () => beginRewindStep(),
+    show: (next, paused) => showRewound(next, { paused }),
+    // Read at each call, so a host or a test can put its own gate there.
+    beforeRestart: () => rewindApi.beforeRestart(),
+    reportHostError: (error) => reportHostError(error),
+  });
   // While Debug's rewind shows a restored state (DEBUGGER.md "Rewind"), nothing runs on its own: the clock stands, media
   // hold their position, and load reports and capture requests wait, until new input adopts the state as the session.
-  const inspecting = ref(false);
-  // Whether Debug's rewind restored an earlier state of the session; for its debug export.
-  const rewound = shallowRef<DebugRewoundWhileDebugging | null>(null);
+  // Whether it does is the rewind owner's lifecycle state, the one account of it; every show and end reports there.
+  const inspecting = rewindOwner.inspecting;
+  /**
+   * Debug's rewind history ends when what it could reinstate is gone: a clear, an import, or the lost host. This one
+   * stamp counts those retirements, and every guard of a rewind reply reads it; the reason goes to the rewind owner as
+   * plain data.
+   */
+  function retireRewind(by: "clear" | "import" | "loss") {
+    rewindRetirements.value++;
+    if (by === "loss") rewindOwner.lost();
+    else rewindOwner.retired(by);
+  }
+  // Whether Debug's rewind restored an earlier state of the session, as the shown session's marks say; for its debug
+  // export.
+  const rewound = computed<DebugRewoundWhileDebugging | null>(
+    () => session.value?.marks.rewoundWhileDebugging ?? null,
+  );
   // While the session is paused at a random draw (DEBUGGER.md "Random draws"), it holds like an inspected state until
   // the draw is resolved.
   const drawPending = computed(() => session.value?.state.randomDraw != null);
@@ -1299,11 +1340,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const others = entries.filter((entry) => entry.key !== key);
     storedEntries.value = value === null ? others : [...others, { key, value }];
   }
-  // Which session Debug changed the saved values of, for its debug export: when and how often.
-  const debugEdits = shallowRef<{
-    readonly firstEditSceneTimeMs: number;
-    readonly editCount: number;
-  } | null>(null);
+  // Which session Debug changed the saved values of, for its debug export: when and how often, as the shown session's
+  // marks say (the host counts each edit it applied).
+  const debugEdits = computed(() => session.value?.marks.editedWhileDebugging ?? null);
   /** Whether a running or waiting session takes an edit now; one that waits for Continue or the camera does not. */
   const liveSession = () =>
     session.value !== null &&
@@ -1417,7 +1456,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           if (stored.has(key)) return { kind: "overtaken" } as const;
           if (!liveSession()) return { kind: "saved", live: false } as const;
           if (pendingPlayerRuntimeStorageWrite(section.session.state) !== null) return "wait";
-          const latest = section.session;
           let outcome: { readonly kind: string } | typeof RETIRED;
           try {
             outcome = await section.send<{ readonly kind: string }>("applyStorageEdit", {
@@ -1433,11 +1471,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             return { kind: "saved", live: false } as const;
           if (outcome.kind === "storageWritePending") return "wait";
           if (outcome.kind !== "applied") return { kind: "saved", live: false } as const;
-          debugEdits.value = {
-            firstEditSceneTimeMs:
-              debugEdits.value?.firstEditSceneTimeMs ?? latest.state.observedSessionTimeMs,
-            editCount: (debugEdits.value?.editCount ?? 0) + 1,
-          };
           return { kind: "saved", live: true } as const;
         });
         if (decided === null) return { kind: "saved", live: false };
@@ -1475,7 +1508,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       await scriptStorage.clear();
       savedDataRevision.value++;
       // Debug's rewind could restore the saved data cleared now, so its history ends.
-      rewindRetirements.value++;
+      retireRewind("clear");
       return true;
     } catch {
       return false;
@@ -1580,7 +1613,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // does an inspected state, also one that ended.
     if (ownChosen) {
       if (sessionInProgress.value || inspecting.value) endSession();
-      rewindRetirements.value++;
+      retireRewind("import");
     }
     // Then the import is a preparation of its own: a Continue or Start still being prepared for the script would offer
     // what it replaces. It takes its number after the session it ends, which takes one itself.
@@ -1710,24 +1743,21 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     generation.value++;
     interactionReset.value++;
     jumpedRevision.value = -1;
-    inspecting.value = false;
-    rewound.value = null;
+    // The generation's new session ends the inspection (`rewindOwner.newSession`).
     session.value = null;
   }
 
   // Shows a session a Start began or a restore brought, as the Player's from now on; its scene time continues from the
-  // persisted observation, so a gap while no Player ran is not consumed. `inspecting`: a state Debug's rewind restored,
-  // shown for inspection, which takes input, Debug's random control and the clock only once input adopts it.
+  // persisted observation, so a gap while no Player ran is not consumed. `paused`: a state Debug's rewind restored and
+  // shows for inspection (`showRewound`), which takes Debug's random control and the clock only once input adopts it.
   function showSession(
     next: PlayerSession,
-    { inspecting: forInspection }: { readonly inspecting: boolean } = { inspecting: false },
+    { paused }: { readonly paused: boolean } = { paused: false },
   ) {
     // A failed write concerns the run it happened in.
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
     reportedMedia = new Set();
-    debugEdits.value = null;
-    inspecting.value = forInspection;
-    rewound.value = null;
+    // The inspection is the rewind owner's: a rewind's own show decided it, and any other is a new session's.
     device.reset();
     loads.clear();
     pendingLoadCount.value = 0;
@@ -1735,15 +1765,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     interactionReset.value++;
     jumpedRevision.value = -1;
     // An inspected state takes Debug's random control only once input adopts it (`adoptInspected` below).
-    if (!forInspection) adoptRandom(next);
+    if (!paused) adoptRandom(next);
     session.value = next;
     clock.rebase();
-    if (!forInspection) {
+    if (!paused) {
       applyDebugMode();
       settleUncontrolledDraw();
     }
     // The session that runs is the one a reload continues in its room.
-    if (!forInspection) keepSessionLater();
+    if (!paused) keepSessionLater();
   }
   // Publishes the result of a completed runtime action. Input to an inspected state is evaluated only once
   // `prepareInput` adopted it, so a result for the inspected state itself is never published.
@@ -1865,7 +1895,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       return;
     }
     keeping = (async () => {
-      // The caller finishes first, such as a Continue that gives the session its marks.
+      // The caller finishes first, such as a Continue that shows the session it keeps.
       await Promise.resolve();
       try {
         do {
@@ -2086,7 +2116,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             count: found.session.events.length,
             last: found.session.events.at(-1) ?? null,
           };
-          prepareRestore(found.session, found.marks);
+          prepareRestore(found.session);
         });
         return;
       }
@@ -2109,7 +2139,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   ): Promise<
     | {
         readonly session: PlayerSession;
-        readonly marks: DebugHistoryMarks;
         readonly media: readonly (readonly [string, StoredCapturedMedia | null])[];
       }
     | { readonly outdated?: Problem }
@@ -2134,7 +2163,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       const host = await bridgeReady;
       ctx.check();
       restored = await ctx.admit(() =>
-        host.restoreKept(plan, found.planJson, found.snapshotJson, found.events),
+        host.restoreKept(plan, found.planJson, found.snapshotJson, found.events, found.marks),
       );
     } catch (error) {
       if (error instanceof StaleOperation) throw error;
@@ -2184,7 +2213,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         owns();
       }
     owns();
-    return { session, marks: found.marks, media };
+    return { session, media };
   }
   /**
    * Returns to the start page once the session ended by `exit`, which the host does when the player closes the end
@@ -2379,7 +2408,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // A session of this script in progress ends first; Debug's rewind could restore this script's earlier saved data
     // over the import, so its history ends.
     if (sessionInProgress.value || inspecting.value) endSession();
-    rewindRetirements.value++;
+    retireRewind("import");
     // The import is then a preparation of its own: a Continue or Start still being prepared would offer what it
     // replaces. It owns that preparation, in this room and plan tenure; once either moves on, it issues nothing more.
     const owner = nextPreparation();
@@ -2772,27 +2801,23 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
 
   /**
-   * Shows a state Debug's rewind restored (DEBUGGER.md "Rewind") as a new generation of the session, with the marks it
-   * had: paused for inspection, or running, as when Return reinstates the session Back left. `create` gets the recorder
-   * to begin anew at the state; `{ session }` shows a session the host holds again, as Return's parked one.
+   * Readies the page for a rewind step's commit or a reinstatement, which begins the host's recording anew: after a
+   * Player error, the recording up to the error is kept for the debug export first. Its callers await what it returns.
    */
-  function publishRewound(
-    create: PlayerSessionStart | { readonly session: () => PlayerSession },
-    state: { readonly paused: boolean; readonly marks: DebugHistoryMarks },
-  ) {
+  function beforeRewindRestart(): void | Promise<void> {
+    // Nothing runs after a Player error, so the recording is still the one up to the error until it begins anew.
+    if (stopped.value && failureRecording === null) failureRecording = exportedRecording();
+  }
+  /**
+   * Shows a session Debug's rewind restored or reinstated in the host (DEBUGGER.md "Rewind"), with its marks, as a new
+   * generation of the session: paused for inspection, or running, as the session Back left when Return reinstates it.
+   * The host began its recording anew at it.
+   */
+  function showRewound(next: PlayerSession, { paused }: { readonly paused: boolean }) {
     // An unmounted Player publishes nothing.
     if (disposed) return;
-    // Nothing runs after a Player error, so the recording is still the one up to the error until it begins anew here.
-    if (stopped.value && failureRecording === null) failureRecording = exportedRecording();
-    const next =
-      typeof create === "object" && "session" in create
-        ? create.session()
-        : startedSession(create, { debugMode }, "restore");
-    if (next instanceof Promise) throw new Error("A rewound state is a factory's session.");
-    showSession(next, { inspecting: state.paused });
+    showSession(next, { paused });
     rewoundGeneration = generation.value;
-    debugEdits.value = state.marks.editedWhileDebugging;
-    rewound.value = state.marks.rewoundWhileDebugging;
   }
   // Debug's rewind does one thing at a time: restoring a state (a step, which may read a spilled snapshot) or adopting
   // the inspected one (which replaces the saved data). Each holds this until it is done, and neither starts meanwhile.
@@ -2822,7 +2847,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       held = false;
     };
   }
-  let rewindAdopted: (() => void) | null = null;
+  // A new session, a Start's or a Continue's, gets a history of its own; a session the rewind shows is none.
+  watch(generation, () => rewindOwner.showing || rewindOwner.newSession(), { flush: "sync" });
+  watch(session, (next) => rewindOwner.follow(next), { flush: "sync" });
+  tryOnScopeDispose(() => rewindOwner.disposal());
+
   /**
    * Adopts the inspected state as the session: the saved data are replaced by the state's own, as one validated
    * replacement that also keeps the photos they use, and the state runs from then on, saving as any session. When the
@@ -2881,8 +2910,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   async function adoptShown(shown: PlayerSession): Promise<boolean> {
     const owner = generation.value;
+    // The history's adoption begins before the read, as requests to the host keep their order, and ends once settled.
+    // Refused, nothing is read, written or adopted.
+    if (!rewindOwner.adoptionBegun()) return false;
     rewindWork.value = "adopt";
-    let written: boolean;
+    let written = false;
+    let accepted = false;
     try {
       // The adopted state's saved values, read in the host while the adoption holds the rewind's work; each way the
       // read settles goes through `settleAdoption`, which first asks whether the adoption still owns the page.
@@ -2894,13 +2927,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         );
     } finally {
       rewindWork.value = null;
+      // Turning the value trace on or off rewraps the shown session; only a rewind or a new session replaces it.
+      written &&= ownsShown(owner, shown);
+      // The completion is the page's only while the owner accepts it: a write that finished after a new session or a
+      // seal activates nothing.
+      accepted = rewindOwner.adoptionSettled(written);
     }
-    // Turning the value trace on or off rewraps the shown session; only a rewind or a new session replaces it.
-    if (!written || !ownsShown(owner, shown)) return false;
+    if (!written || !accepted) return false;
     notices.dismiss(playerNoticeKeys.rewindNotAdopted);
     savedDataRevision.value++;
-    rewindAdopted?.();
-    inspecting.value = false;
     clock.rebase();
     applyDebugMode();
     if (session.value !== null) adoptRandom(session.value);
@@ -2948,7 +2983,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     camera.release();
     activation.value = {
       kind: "start",
-      begin: () => startedSession(create, { debugMode }, "start"),
+      begin: () => startedSession(create, { debugMode }),
       ...(outdated === undefined ? {} : { outdated }),
     };
     prepareActivation("start");
@@ -3004,9 +3039,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Shows the explicit Continue control for a restored session; its execution, time and media resume only then.
    * Continue records the wall clock and the player's zone and presentation as they are now.
    */
-  function prepareRestore(given: PlayerSession | PlayerRuntimeSession, marks?: DebugHistoryMarks) {
-    // A session restored outside the host, such as one an embedding host restored, is registered there first.
-    const restored = "lineage" in given ? given : introduceNow(requireBridge(), () => given);
+  function prepareRestore(given: PlayerRuntimeSession, marks?: HistoryMarks): void;
+  function prepareRestore(given: PlayerSession): void;
+  function prepareRestore(given: PlayerSession | PlayerRuntimeSession, marks?: HistoryMarks) {
+    // A session restored outside the host, such as one an embedding host restored, is registered there first, with
+    // the marks it was given (none for an outside restore); a session the host holds keeps the host's.
+    const restored =
+      "lineage" in given ? given : introduceNow(requireBridge(), () => given, marks ?? NO_MARKS);
     supersede();
     beginning.value = false;
     camera.release();
@@ -3072,7 +3111,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         owned();
         return host.latest(continued) ?? continued;
       },
-      ...(marks === undefined ? {} : { marks }),
       restored,
     };
     prepareActivation("continue");
@@ -3151,16 +3189,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   /**
    * The session `create` makes: a held plan over the bridge (`start`), a transitional factory in the host before its
-   * first run (`introduceNow`). Either runs with the host's value trace. Only a Start (`kind`) carries its Player's
-   * random ownership; a restore takes it at its adoption.
+   * first run (`introduceNow`). Either runs with the host's value trace, and carries its Player's random ownership, as
+   * only a Start does; a restore takes it at its adoption.
    */
   function startedSession(
     create: PlayerSessionStart,
     recording: { readonly debugMode: boolean },
-    /** What `create` makes: a Start's fresh session, or a restore (Debug's rewind), which takes no Start ownership. */
-    kind: "start" | "restore",
   ): PlayerSession | Promise<PlayerSession> {
-    const random = kind === "start" ? startRandom() : undefined;
+    const random = startRandom();
     const host = requireBridge();
     // A factory, as the Start's options, records the click's capture through `temporalCapture()`, which `begin` binds.
     if (typeof create === "function")
@@ -3173,6 +3209,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             ...(made.debugTrace === null ? {} : { debugTrace: made.debugTrace }),
             ...(made.randomControl === null ? {} : { randomControl: made.randomControl }),
           }),
+        NO_MARKS,
         tracingIntent(),
         random,
       );
@@ -3230,11 +3267,27 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       kept = { plan: false, count: 0, last: null };
       keptPresentation = null;
     }
-    if (pending.marks !== undefined) {
-      debugEdits.value = pending.marks.editedWhileDebugging;
-      rewound.value = pending.marks.rewoundWhileDebugging;
-    }
   }
+
+  const rewindApi = {
+    /** Whether a restored state is shown for inspection, which runs only once input adopts it. */
+    inspecting: computed(() => inspecting.value),
+    /** Whether a restored state is being adopted: its saved data are being replaced. */
+    adopting: computed(() => rewindWork.value === "adopt"),
+    /** Whether a rewind step or an adoption runs now. */
+    working: computed(() => rewindWork.value !== null),
+    /** Whether the session may be left for a restored state, apart from rewind work under way. */
+    ready: rewindReady,
+    beginStep: beginRewindStep,
+    /** Whether the session is a restored state: when, and how many rewinds led to it; for its debug export. */
+    rewound: computed(() => rewound.value),
+    canRewind,
+    beforeRestart: beforeRewindRestart,
+    /** Adopts the inspected state without new input, so it runs on; resolves to whether it was adopted. */
+    resume: () => adoptRewound(),
+    /** Debug's rewind over the Player's lifetime: its history, its handoffs and its lifecycle (`rewindOwner.ts`). */
+    owner: rewindOwner,
+  };
 
   return {
     session: computed(() => session.value),
@@ -3519,38 +3572,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** A section of the shown session for input (`runtime-input.ts`). */
     inputSection,
     publishJump,
-    showSession,
+    /** Shows `next` as the Player's session from now on; Debug's rewind shows its own states through its owner. */
+    showSession: (next: PlayerSession) => showSession(next),
     update,
     prepareInput,
     /** Debug's rewind (DEBUGGER.md "Rewind"): how the session host shows the states it restores. */
-    rewind: {
-      /** Whether a restored state is shown for inspection, which runs only once input adopts it. */
-      inspecting: computed(() => inspecting.value),
-      /** Whether a restored state is being adopted: its saved data are being replaced. */
-      adopting: computed(() => rewindWork.value === "adopt"),
-      /** Changes whenever this script's saved data were cleared or imported, which ends the rewind history. */
-      retirements: computed(() => rewindRetirements.value),
-      /** Whether a rewind step or an adoption runs now. */
-      working: computed(() => rewindWork.value !== null),
-      /** Whether the session may be left for a restored state, apart from rewind work under way. */
-      ready: rewindReady,
-      beginStep: beginRewindStep,
-      /** Whether the session is a restored state: when, and how many rewinds led to it; for its debug export. */
-      rewound: computed(() => rewound.value),
-      canRewind,
-      /** Opens a new spill store for a rewind history. */
-      openSpill: options.debugHistorySpill ?? (() => openDebugHistorySpill()),
-      memoryBudget: options.debugHistoryMemoryBudget ?? DEBUG_HISTORY_MEMORY_BUDGET,
-      publish: publishRewound,
-      /** Adopts the inspected state without new input, so it runs on; resolves to whether it was adopted. */
-      resume: () => adoptRewound(),
-      /** The adoption under way, which resolves to whether the state was adopted, or `null`. */
-      adoption: () => adoption,
-      /** Calls `listener` whenever an inspected state is adopted as the session, before it runs on. */
-      onAdopted(listener: (() => void) | null) {
-        rewindAdopted = listener;
-      },
-    },
+    rewind: rewindApi,
     prepare,
     prepareScript,
     prepareRestore,

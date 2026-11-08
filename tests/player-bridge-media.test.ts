@@ -26,6 +26,7 @@ import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoin
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { viewCalls, viewed, withoutViews } from "./helpers/debug-readers.js";
 import { hatch, inProcessBridge } from "./helpers/in-process-bridge.js";
+import { NO_MARKS } from "../player/debug-history-marks.js";
 
 /*
  * L5d's bridge (B-media): media load reports as an op, the media origin in the view's instruction facts, and the plan
@@ -257,8 +258,10 @@ for (const [when, playSteps] of [
     // In-process through the transitional factory, as the Player restores today.
     const inProcess = await inProcessBridge();
     const { token } = await prepared(inProcess);
-    const local = introduceNow(inProcess, (host) =>
-      restorePlayerRuntimeSessionAt(host.plan(token), json, []),
+    const local = introduceNow(
+      inProcess,
+      (host) => restorePlayerRuntimeSessionAt(host.plan(token), json, []),
+      NO_MARKS,
     );
     if (playSteps === 0)
       assert.ok(

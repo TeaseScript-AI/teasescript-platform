@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test, { before, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 /*
  * L5i.5, R3: the census of session work (`tools/session-work-census.mjs`). The tool derives the sending boundary from
@@ -105,6 +106,76 @@ type Policy =
 
 /** Each entry point of the work census, by file and place: its policy, and the surfaces it reaches. */
 const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = {
+  "player/vue/src/rewindOwner.ts createRewindOwner > apply > finally:callback#2": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
+  "player/vue/src/rewindOwner.ts createRewindOwner > back > step:callback": [
+    "resume",
+    ["BridgeClient.request"],
+  ],
+  "player/vue/src/rewindOwner.ts createRewindOwner > close > then:callback#1.1": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
+  "player/vue/src/rewindOwner.ts createRewindOwner > close > then:callback#1.2": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
+  "player/vue/src/rewindOwner.ts createRewindOwner > enroll > DebugHistoryView:callback": [
+    "read",
+    ["BridgeClient.request"],
+  ],
+  "player/vue/src/rewindOwner.ts createRewindOwner > enroll > DebugHistoryView:callback > catch:callback":
+    ["lifecycle", ["BridgeClient.signal"]],
+  "player/vue/src/rewindOwner.ts createRewindOwner > forward > step:callback": [
+    "resume",
+    ["BridgeClient.request"],
+  ],
+  "player/vue/src/rewindOwner.ts createRewindOwner > gate > then:callback.1": [
+    "resume",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
+  "player/vue/src/rewindOwner.ts createRewindOwner > gate > then:callback.2": [
+    "resume",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
+  "player/vue/src/rewindOwner.ts createRewindOwner > apply > then:callback#1": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
+  "player/vue/src/rewindOwner.ts createRewindOwner > open > function": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
+  "player/vue/src/rewindOwner.ts createRewindOwner > retryReturn": [
+    "resume",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
+  "player/vue/src/rewindOwner.ts createRewindOwner > reportUnless > function": [
+    "lifecycle",
+    ["BridgeClient.signal"],
+  ],
+  "player/vue/src/useDebugRewind.ts useDebugRewind > tryOnScopeDispose:callback": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
+  "player/vue/src/usePlayerSession.ts usePlayerSession > clearScriptStorage": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
+  "player/vue/src/usePlayerSession.ts usePlayerSession > showSession": [
+    "resume",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
+  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#11": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
+  "player/vue/src/usePlayerSession.ts usePlayerSession > tryOnScopeDispose:callback#3": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
+  ],
   "player/vue/src/usePlayerSession.ts usePlayerSession > importSavedData > owned:callback > commit:callback#2":
     ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback > replaceSession > admit:callback#1":
@@ -213,28 +284,12 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["BridgeClient.request"],
   ],
   "player/vue/src/useDebugRewind.ts useDebugRewind > back": [
-    "creation",
-    [
-      "BridgeClient.request",
-      "BridgeClient.section",
-      "BridgeClient.signal",
-      "beginRecordingNow",
-      "introduceNow",
-    ],
-  ],
-  "player/vue/src/useDebugRewind.ts useDebugRewind > back > step:callback": [
-    "read",
-    ["BridgeClient.request"],
+    "resume",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
   ],
   "player/vue/src/useDebugRewind.ts useDebugRewind > forward": [
-    "creation",
-    [
-      "BridgeClient.request",
-      "BridgeClient.section",
-      "BridgeClient.signal",
-      "beginRecordingNow",
-      "introduceNow",
-    ],
+    "resume",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
   ],
   "player/vue/src/useDebugRewind.ts useDebugRewind > resume": [
     "resume",
@@ -242,35 +297,12 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/useDebugRewind.ts useDebugRewind > returnToSession": [
     "resume",
-    [
-      "BridgeClient.request",
-      "BridgeClient.section",
-      "BridgeClient.signal",
-      "beginRecordingNow",
-      "introduceNow",
-    ],
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
   ],
-  "player/vue/src/useDebugRewind.ts useDebugRewind > tryOnScopeDispose:callback": [
-    "resume",
-    [
-      "BridgeClient.request",
-      "BridgeClient.section",
-      "BridgeClient.signal",
-      "beginRecordingNow",
-      "introduceNow",
-    ],
+  "player/vue/src/useDebugRewind.ts useDebugRewind > then:callback.1": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
   ],
-  "player/vue/src/useDebugRewind.ts useDebugRewind > tryOnScopeDispose:callback > then:callback.1":
-    [
-      "resume",
-      [
-        "BridgeClient.request",
-        "BridgeClient.section",
-        "BridgeClient.signal",
-        "beginRecordingNow",
-        "introduceNow",
-      ],
-    ],
   "player/vue/src/useDebugView.ts useDebugView": [
     "read",
     ["BridgeClient.request", "BridgeClient.signal"],
@@ -291,14 +323,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["own observation", ["BridgeClient.request", "BridgeClient.section"]],
   "player/vue/src/usePlayerDebug.ts usePlayerDebug": [
     "composition",
-    [
-      "BridgeClient.request",
-      "BridgeClient.section",
-      "BridgeClient.signal",
-      "beginRecordingNow",
-      "hatch",
-      "introduceNow",
-    ],
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal", "introduceNow"],
   ],
   "player/vue/src/usePlayerDebug.ts usePlayerDebug > explain": [
     "read",
@@ -314,14 +339,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/usePlayerDebug.ts usePlayerDebug > watch:callback#3.2 > run:callback": [
     "composition",
-    [
-      "BridgeClient.request",
-      "BridgeClient.section",
-      "BridgeClient.signal",
-      "beginRecordingNow",
-      "hatch",
-      "introduceNow",
-    ],
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
   ],
   "player/vue/src/usePlayerSession.ts usePlayerSession > MediaLoadQueue:callback.1": [
     "own observation",
@@ -361,11 +379,11 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/usePlayerSession.ts usePlayerSession > importSavedData": [
     "none",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal"],
   ],
   "player/vue/src/usePlayerSession.ts usePlayerSession > importSession": [
     "creation",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.request", "BridgeClient.section", "BridgeClient.signal", "introduceNow"],
   ],
   "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback": [
     "creation",
@@ -511,7 +529,6 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
 const ESCAPES: Readonly<Record<string, Policy>> = {
   "player/lock-service.ts LockService > #present > wake {wake}": "own observation",
   "player/vue/src/session/useCallView.ts useCallView {followCallView}": "lifecycle",
-  "player/vue/src/useDebugRewind.ts useDebugRewind {follow}": "read",
   "player/vue/src/usePlayerSession.ts usePlayerSession > then:callback {bridgeLost}": "lifecycle",
   "player/vue/src/usePlayerSession.ts usePlayerSession {catchUp}": "clock scheduling",
   "player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > scheduleWakeUp {catchUp}":
@@ -533,9 +550,6 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/usePlayerSessionServices.ts usePlayerSessionServices {serviceSection}",
   "player/vue/src/useDebugRandom.ts useDebugRandom > resolve {resolve}",
   "player/vue/src/useDebugRandom.ts useDebugRandom > resolveLeastTried {resolveLeastTried}",
-  "player/vue/src/useDebugRewind.ts useDebugRewind > back {back}",
-  "player/vue/src/useDebugRewind.ts useDebugRewind > forward {forward}",
-  "player/vue/src/useDebugRewind.ts useDebugRewind > returnToSession {returnToSession}",
   "player/vue/src/useDevelopmentTime.ts useDevelopmentTime > advanceBy {advanceBy}",
   "player/vue/src/useDevelopmentTime.ts useDevelopmentTime > skip {skip}",
   "player/vue/src/usePlayerDebug.ts usePlayerDebug > explain {explain}",
@@ -560,11 +574,10 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerSession.ts usePlayerSession > randomTried {randomTried}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > reportHostError {reportHostError}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > resolveRandomDraw {resolveRandomDraw}",
-  "player/vue/src/usePlayerSession.ts usePlayerSession > rewind > publish {publishRewound}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > clearScriptStorage {clearScriptStorage}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > serviceSection {serviceSection}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > setDebugMode {setDebugMode}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > setRandomControl {setRandomControl}",
-  "player/vue/src/usePlayerSession.ts usePlayerSession > showSession {showSession}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > toStartPage {toStartPage}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {demandCallView}",
   "player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > before {before}",
@@ -574,6 +587,12 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > requestObservation {requestObservation}",
 ];
 
+/**
+ * What an adoption path gives the connection's rewind history (L5i.6), the table's third column: `publish` takes every
+ * publication into it (`observePublication`), an introduction's included; `keep` alone, a same-revision wrapper, is no
+ * publication, so a path passes none exactly when it reaches no `publish`.
+ */
+type HistoryPassage = "publication observation" | "introduction" | "none";
 /** How an op's result session is adopted in the host (item 15): each entry point that reaches `publish` or `keep`. */
 type Adoption =
   | "result"
@@ -582,96 +601,132 @@ type Adoption =
   | "introduction"
   | "host dispatch"
   | "facade exception";
-const ADOPTIONS: Readonly<Record<string, readonly [Adoption, readonly string[]]>> = {
-  "player/engine-bridge/engine-host.ts (module)": [
-    "host dispatch",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/in-process.ts beginRecordingNow": [
-    "facade exception",
-    ["HeldSession.keep"],
-  ],
-  "player/engine-bridge/in-process.ts createInProcessBackend": [
-    "host dispatch",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/in-process.ts hatch": [
-    "facade exception",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/in-process.ts introduceNow": ["facade exception", ["HeldSession.publish"]],
-  "player/engine-bridge/node-worker.ts (module)": [
-    "host dispatch",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/input.ts inputOps > applyStorageEdit > sessionOp:callback#3.2": [
-    "result",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/input.ts inputOps > completeStorageWrite > sessionOp:callback#2.2": [
-    "result",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/input.ts inputOps > pressPermanentButton > sessionOp:callback#1.2": [
-    "result",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/input.ts interactionOp > sessionOp:callback.2": [
-    "result",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/media.ts mediaOps > reportMediaLoad > sessionOp:callback.2": [
-    "result",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/random.ts randomOps > resolveDraw > sessionOp:callback.2": [
-    "result",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/resources.ts answerOp > sessionOp:callback.2": [
-    "result",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/session.ts sessionOp:callback.2": [
-    "result",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/session.ts sessionOps > adoptCatchUp > sessionOp:callback#5.2": [
-    "catch-up adoption",
-    ["HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/session.ts sessionOps > beginRecording > sessionOp:callback#9.2": [
-    "recorder attachment",
-    ["HeldSession.keep"],
-  ],
-  "player/engine-bridge/ops/session.ts sessionOps > continue > sessionOp:callback#1.2": [
-    "result",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/session.ts sessionOps > skipPacing > sessionOp:callback#7.2": [
-    "result",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/session.ts sessionOps > stepTime > sessionOp:callback#2.2": [
-    "result",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/ops/trace.ts traceOps > setDebugMode > sessionOp:callback#2.2": [
-    "result",
-    ["HeldSession.keep", "HeldSession.publish"],
-  ],
-  "player/engine-bridge/worker-host.ts startBridgeHost > drain > then:callback": [
-    "introduction",
-    ["HeldSession.publish"],
-  ],
-  "player/engine-bridge/worker-host.ts startBridgeHost > listen:callback": [
-    "introduction",
-    ["HeldSession.publish"],
-  ],
-};
+const ADOPTIONS: Readonly<Record<string, readonly [Adoption, readonly string[], HistoryPassage]>> =
+  {
+    "player/engine-bridge/engine-host.ts (module)": [
+      "host dispatch",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/in-process.ts beginRecordingNow": [
+      "facade exception",
+      ["HeldSession.keep"],
+      "none",
+    ],
+    "player/engine-bridge/in-process.ts createInProcessBackend": [
+      "host dispatch",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/in-process.ts hatch": [
+      "facade exception",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/in-process.ts introduceNow": [
+      "facade exception",
+      ["HeldSession.publish"],
+      "introduction",
+    ],
+    "player/engine-bridge/node-worker.ts (module)": [
+      "host dispatch",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/input.ts inputOps > applyStorageEdit > sessionOp:callback#3.2": [
+      "result",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/input.ts inputOps > completeStorageWrite > sessionOp:callback#2.2": [
+      "result",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/input.ts inputOps > pressPermanentButton > sessionOp:callback#1.2": [
+      "result",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/input.ts interactionOp > sessionOp:callback.2": [
+      "result",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/media.ts mediaOps > reportMediaLoad > sessionOp:callback.2": [
+      "result",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/random.ts randomOps > resolveDraw > sessionOp:callback.2": [
+      "result",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/resources.ts answerOp > sessionOp:callback.2": [
+      "result",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/session.ts sessionOp:callback.2": [
+      "result",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/session.ts sessionOps > adoptCatchUp > sessionOp:callback#5.2": [
+      "catch-up adoption",
+      ["HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/session.ts sessionOps > beginRecording > sessionOp:callback#9.2": [
+      "recorder attachment",
+      ["HeldSession.keep"],
+      "none",
+    ],
+    "player/engine-bridge/ops/session.ts sessionOps > continue > sessionOp:callback#1.2": [
+      "result",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/session.ts sessionOps > skipPacing > sessionOp:callback#7.2": [
+      "result",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/session.ts sessionOps > stepTime > sessionOp:callback#2.2": [
+      "result",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/ops/trace.ts traceOps > setDebugMode > sessionOp:callback#2.2": [
+      "result",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "publication observation",
+    ],
+    "player/engine-bridge/worker-host.ts startBridgeHost > drain > then:callback": [
+      "introduction",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "introduction",
+    ],
+    "player/engine-bridge/worker-host.ts startBridgeHost > listen:callback": [
+      "introduction",
+      ["HeldSession.keep", "HeldSession.publish"],
+      "introduction",
+    ],
+  };
 /** The adoption census's followed escapes: the op tables' `run` members, and the facade's exposures. */
 const ADOPTION_ESCAPES: readonly string[] = [
   "player/engine-bridge/ops/history.ts historyOps > captureStorage > run {run}",
+  "player/engine-bridge/ops/history.ts historyOps > historyClose > run {run}",
+  "player/engine-bridge/ops/history.ts historyOps > rewindCommit > run {run}",
+  "player/engine-bridge/ops/history.ts historyOps > rewindDrop > run {run}",
+  "player/engine-bridge/ops/history.ts historyOps > historyEnroll > run {run}",
+  "player/engine-bridge/ops/history.ts historyOps > historyOpen > run {run}",
+  "player/engine-bridge/ops/history.ts historyOps > historyTimeline > run {run}",
+  "player/engine-bridge/ops/history.ts historyOps > rewindAdopt > run {run}",
+  "player/engine-bridge/ops/history.ts historyOps > rewindBack > run {run}",
+  "player/engine-bridge/ops/history.ts historyOps > rewindForward > run {run}",
+  "player/engine-bridge/ops/history.ts historyOps > rewindReturn > run {run}",
   "player/engine-bridge/ops/transfer.ts transferOps > readTransfer > run {run}",
   "player/engine-bridge/ops/transfer.ts transferOps > releaseTransfer > run {run}",
   "player/engine-bridge/ops/transfer.ts transferOps > reviewTransfer > run {run}",
@@ -711,13 +766,16 @@ function assertTable<T>(
   const stale = Object.keys(table)
     .filter((key) => !keys.has(key))
     .sort();
+  // Every difference at once, so one run shows all a change needs.
+  const differing = found
+    .filter((each) => Object.hasOwn(table, keyOf(each)))
+    .filter((each) => !isDeepStrictEqual(value(each), table[keyOf(each)]))
+    .map((each) => ({ key: keyOf(each), found: value(each), declared: table[keyOf(each)] }));
   assert.deepEqual(
-    { missing, stale },
-    { missing: [], stale: [] },
-    `${label}: unclassified or stale`,
+    { missing, stale, differing },
+    { missing: [], stale: [], differing: [] },
+    `${label}: unclassified, stale or differing`,
   );
-  for (const each of found)
-    assert.deepEqual(value(each), table[keyOf(each)], `${label}: ${keyOf(each)}`);
 }
 
 /** The work census at the sources as they are, or with `overrides`. */
@@ -818,7 +876,15 @@ test("every host path that adopts an op's result is classified (item 15)", () =>
   assertTable(
     found.entries,
     ADOPTIONS,
-    (each): readonly [Adoption, readonly string[]] => [lookup(keyOf(each))[0], each.origins],
+    (each): readonly [Adoption, readonly string[], HistoryPassage | "inconsistent"] => {
+      const [adoption, , passage] = lookup(keyOf(each));
+      const publishes = each.origins.includes("HeldSession.publish");
+      return [
+        adoption,
+        each.origins,
+        publishes === (passage !== "none") ? passage : "inconsistent",
+      ];
+    },
     "adoption entry points",
   );
   assert.deepEqual(

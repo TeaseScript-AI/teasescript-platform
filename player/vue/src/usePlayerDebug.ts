@@ -78,6 +78,8 @@ export function usePlayerDebug(
     { immediate: true, flush: "sync" },
   );
   tryOnScopeDispose(() => {
+    // The Player unmounts: rewind's history ends as its disposal, not as Debug turned off.
+    rewind.value?.endWithPlayer();
     timeScope?.stop();
     logScope?.stop();
     player.setDebugTracing(false);

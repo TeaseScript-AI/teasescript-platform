@@ -40,6 +40,7 @@ import {
   type RandomIntent,
 } from "../connection-state.js";
 import { planMetadata, type PlanMetadata } from "../plan-facts.js";
+import { NO_MARKS, marksAfterEdit, type HistoryMarks } from "../../debug-history-marks.js";
 import type { CallViewReply, Introduction, Publication } from "../session-protocol.js";
 import type { BridgeOp, BridgeOps, HostSession, OpOutcome } from "../worker-host.js";
 
@@ -56,6 +57,8 @@ const KEPT: Adoption = Object.freeze({ kind: "kept" });
  * A session the host holds: the adapter's session at its latest publication, and how many of its events the host has
  * handed out (the cursor every publication starts from). A late observation's catch-up stays inside it.
  */
+let nextHistoryKey = 1;
+
 export class HeldSession implements HostSession {
   #current: PlayerRuntimeSession;
   #delivered = 0;
@@ -72,16 +75,25 @@ export class HeldSession implements HostSession {
   #control: RandomControlOptions | null;
   /** Whether the main side views the session's calls (`viewCalls`): its publications then carry the call view. */
   viewingCalls = false;
+  /**
+   * The session's marks for a debug export (`HistoryMarks`): given at its construction, by every route that makes one,
+   * and changed only by an applied storage edit (`marksEdited`). Every publication carries them.
+   */
+  #marks: HistoryMarks;
+  /** The key Debug's rewind history names this session's lineage by (`HistoryRegistry`). */
+  readonly historyKey = `l${nextHistoryKey++}`;
 
   constructor(
     session: PlayerRuntimeSession,
     readonly planToken: string,
     connection: PlayerOpsContext,
+    marks: HistoryMarks,
     owner: number | null = null,
     control: RandomControlOptions | null = null,
   ) {
     this.#current = session;
     this.#connection = connection;
+    this.#marks = marks;
     this.#owner = owner;
     this.#control = control;
   }
@@ -112,6 +124,16 @@ export class HeldSession implements HostSession {
   /** The session at its latest publication as it is, changing nothing: for adopting a catch-up only. */
   get publication(): PlayerRuntimeSession {
     return this.#current;
+  }
+
+  /** The session's marks now. */
+  get marks(): HistoryMarks {
+    return this.#marks;
+  }
+
+  /** Records an applied storage edit at the session's observed time, in the edit's own host step. */
+  marksEdited(): void {
+    this.#marks = marksAfterEdit(this.#marks, this.#current.state.observedSessionTimeMs);
   }
 
   /** The Player whose random control the session runs with, or `null`. */
@@ -180,6 +202,8 @@ export class HeldSession implements HostSession {
    */
   publish(next: PlayerRuntimeSession): Publication {
     this.#current = next;
+    // Every publication passes the connection's rewind history, which takes a point from this same `next`.
+    const history = this.#connection.history.observePublication(this, next);
     const from = this.#delivered;
     const through = next.events.length;
     this.#delivered = through;
@@ -192,6 +216,8 @@ export class HeldSession implements HostSession {
       events: next.events.slice(from),
       instructions: instructionFacts(next, this.viewingCalls),
       callView: this.viewingCalls ? Object.freeze({ calls }) : null,
+      marks: this.#marks,
+      history,
     });
   }
 
@@ -236,6 +262,7 @@ export class HeldSession implements HostSession {
       planToken: this.planToken,
       metadata,
       liveEventSequence: this.#current.liveEventSequence,
+      historyKey: this.historyKey,
     });
   }
 }
@@ -381,6 +408,7 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
           }),
           plan,
           context,
+          NO_MARKS,
           random?.owner ?? null,
           control,
         );

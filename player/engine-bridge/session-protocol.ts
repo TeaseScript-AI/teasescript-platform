@@ -6,6 +6,8 @@ import type { DebugView, DebugViewRequest } from "../debug-view.js";
 import type { CheckpointCapture, KeepCapture } from "./ops/persistence.js";
 import type { RandomTriedView } from "./ops/random.js";
 import type { StorageCapture } from "./ops/history.js";
+import type { HistoryMarks } from "../debug-history-marks.js";
+import type { HistoryDelta } from "./history/core.js";
 import type { PlayerRuntimeState } from "../runtime-adapter.js";
 
 /*
@@ -49,6 +51,10 @@ export interface Publication {
   readonly instructions: InstructionFacts;
   /** The active calls while the session's calls are viewed (`viewCalls`), else `null`. */
   readonly callView: PlayerCallView | null;
+  /** The session's marks for a debug export, as the host holds them (`HeldSession.marks`). */
+  readonly marks: HistoryMarks;
+  /** The changes of Debug's rewind history this publication made, oldest first; empty for most. */
+  readonly history: readonly HistoryDelta[];
 }
 
 /** The first publication of a session the host now holds, from cursor 0, with what stays fixed for its lifetime. */
@@ -60,6 +66,8 @@ export interface Introduction extends Publication {
   readonly metadata: PlanMetadata | null;
   /** The first event sequence the session's own runs emitted; the events before it are restored history. */
   readonly liveEventSequence: number;
+  /** The key Debug's rewind history names the session's event log by (`HistoryPosition.log`). */
+  readonly historyKey: string;
 }
 
 /**

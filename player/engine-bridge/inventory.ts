@@ -162,13 +162,7 @@ export const RATCHET: readonly RatchetEntry[] = [
     name: "playerRuntimeSnapshotOrNull",
     family: "L5h",
   },
-  // L5i (the history's points with its host core, L5i.6: #1981)
-  {
-    importer: "player/debug-history.ts",
-    target: "player/runtime-adapter.ts",
-    name: "playerRuntimeSnapshotJson",
-    family: "L5i",
-  },
+  // L5i
   {
     importer: "player/debug-export-assembly.ts",
     target: "src/index.ts",
@@ -267,33 +261,9 @@ export const RATCHET: readonly RatchetEntry[] = [
     family: "L5i",
   },
   {
-    importer: "player/debug-history.ts",
-    target: "player/engine-bridge/in-process.ts",
-    name: "hatch",
-    family: "L5i",
-  },
-  {
     importer: "player/vue/src/DevelopmentPreview.vue",
     target: "player/compile-project.ts",
     name: "createPlayerRuntimeSession",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/useDebugRewind.ts",
-    target: "player/engine-bridge/in-process.ts",
-    name: "beginRecordingNow",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/useDebugRewind.ts",
-    target: "player/engine-bridge/in-process.ts",
-    name: "heldPlan",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/useDebugRewind.ts",
-    target: "player/runtime-adapter.ts",
-    name: "restorePlayerRuntimeSessionAt",
     family: "L5i",
   },
   {

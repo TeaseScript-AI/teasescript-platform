@@ -193,15 +193,19 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
 
 ### Rewind
 
-While the Debug features run, Debug's rewind (`player/debug-history.ts`) keeps a **point** for every interaction the
-session newly presents (`askChoice`, a button, an ask, or `askImage`), the one shown when Debug is turned on included;
-an ask that a timer, media, or permanent-button block suspended and shows again is the same point. A point holds the
-validated state as checkpoint JSON, which includes the session's storage view, and the events that led to it, which
-rebuild its transcript; the plan is shared, and photos stay in the Player's captured-media store, which keeps every
-photo it admitted while it is mounted. The history keeps every point: the newest, up to 32 Mi characters of state JSON,
-in memory and the older ones in an IndexedDB database of its own (`teasescript-debug-history-<UUID>`). Without
-IndexedDB, or once it fails, the history takes no more points than fit that budget and keeps those it has; it also stops
-at a state too large to save (`TSK004`). Turning
+While the Debug features run, Debug's rewind keeps a history in the engine's host (`player/engine-bridge/history/`),
+which the Player shows as it changes (`player/debug-history.ts`). It has a **point** for every interaction the session
+newly presents (`askChoice`, a button, an ask, or `askImage`), the one shown when Debug is turned on included; an
+interaction answered before then has none. An ask that a timer, media, or permanent-button block suspended and shows
+again is the same point. A point holds the validated state as checkpoint JSON, which includes the session's storage
+view, and the number of the session's events that led to it, which rebuild its transcript; the plan is shared, and
+photos stay in the Player's captured-media store, which keeps every photo it admitted while it is mounted. Each point's
+JSON is written at once to an IndexedDB database of the history's own (`teasescript-debug-history-<UUID>`) and leaves
+memory once written. A point is taken only while the JSON in memory, writes still pending included, stays within
+32 Mi UTF-16 code units (`DEBUG_HISTORY_ADMITTED_SNAPSHOT_CHARS`, provisional); without IndexedDB every point stays in
+memory, and once a write fails only the JSON not yet written stays there, while the snapshots written stay in IndexedDB. A point that does not fit, or a state too large to save (`TSK004`), ends the collection:
+the history keeps the points it has and takes no more. The state the first Back leaves is kept the same way; when it
+does not fit, Back changes nothing. Turning
 either Debug switch off, a new Start or Continue, importing or clearing this script's saved data, and unmounting the
 Player delete the history and its database; an import also ends an inspected state. A page that ended without deleting
 its database, for example after a crash or by navigating away, leaves it to the next Player, which deletes it at startup
@@ -222,7 +226,8 @@ with it.
   session runs and saves as any session. The parked session, the states kept for Forward, and the points after the
   adopted state are gone; earlier points stay for a later Back. When the saved data cannot be replaced, for example on
   quota, the state stays inspected, the Player says so, and nothing changes. Rewind does one thing at a time: while a
-  step restores a state or a state is being adopted, input to an inspected state, Return, and another step are refused.
+  step restores a state, a state is being adopted, or Return or Debug off waits to reinstate the parked session, input
+  to an inspected state, Resume, Return, and another step are refused, and nothing is read or saved for them.
 - In the chat, Back is each earlier answer's **Back to here**; while a state is inspected, the later messages show grey
   and a bar offers Forward, Resume, and Return to session ([Player
   UI](ui/PLAYER-UI.md#composer-and-foreground-interactions)). Each state's transcript folds only the events that led to

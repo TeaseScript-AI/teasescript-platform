@@ -42,7 +42,6 @@ import SessionErrorDialog from "./SessionErrorDialog.vue";
 import RandomDrawPicker from "./RandomDrawPicker.vue";
 import { useRandomDrawGuard } from "./useRandomDrawGuard";
 import RewindInspection from "./RewindInspection.vue";
-import { rewindFutureTranscript } from "../../debug-history.js";
 import { rewindRows } from "./rewindPresentation";
 import { useDebugExport } from "./useDebugExport";
 import { playerNoticeKeys, playerNotices } from "../../notices.js";
@@ -358,9 +357,8 @@ const rewindPoints = computed(() => {
   const state = debug.rewind.value?.state.value;
   const leading = state?.inspection?.points ?? state?.points.length ?? 0;
   const rows = new Map<string, number>();
-  state?.points.slice(0, leading).forEach((point, index) => {
-    if (point.response?.rowId) rows.set(point.response.rowId, index);
-  });
+  for (const point of state?.points.slice(0, leading) ?? [])
+    if (point.response?.rowId) rows.set(point.response.rowId, point.id);
   return rows;
 });
 provide(rewindRows, {
@@ -369,16 +367,14 @@ provide(rewindRows, {
     props.player.rewind.canRewind.value &&
     debug.rewind.value?.busy.value === false,
   back(entryId) {
-    const index = rewindPoints.value.get(entryId);
-    if (index !== undefined) void debug.rewind.value?.back(index);
+    const point = rewindPoints.value.get(entryId);
+    if (point !== undefined) void debug.rewind.value?.back(point);
   },
 });
 // While a restored state is inspected, the messages of the state Forward restores follow it, grey.
-const rewindFuture = computed(() => {
-  const state = debug.rewind.value?.state.value;
-  if (!props.player.rewind.inspecting.value || !state?.shown || !state.future) return null;
-  return rewindFutureTranscript(state.shown, state.future);
-});
+const rewindFuture = computed(() =>
+  props.player.rewind.inspecting.value ? (debug.rewind.value?.future.value ?? null) : null,
+);
 const tools = computed(() => [
   ...(debug.menu.value ? [debugTool] : []),
   ...(abTestsMenu.value ? [abTestsTool] : []),

@@ -1,5 +1,5 @@
 import { randomUuid } from "./captured-media.js";
-import type { DebugHistorySpill } from "./debug-history.js";
+import type { DebugHistorySpill } from "./engine-bridge/history/snapshots.js";
 
 /**
  * Debug's rewind history spills snapshots to a database of its own, named by this prefix and a random UUID, which its

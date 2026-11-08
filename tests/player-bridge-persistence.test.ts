@@ -6,7 +6,7 @@ import { BridgeRequestError, connectBridge } from "../player/engine-bridge/clien
 import { hatch } from "../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { CheckpointCapture, KeepCapture } from "../player/engine-bridge/ops/persistence.js";
-import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
+import { playerBridgeOps, type PrepareResult } from "../player/engine-bridge/player-ops.js";
 import { PlayerBridge } from "../player/player-bridge.js";
 import {
   createPlayerRuntimeRestorePoint,
@@ -18,6 +18,7 @@ import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { formObligations, malformedArguments } from "./helpers/argument-forms.js";
 import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
+import { NO_MARKS } from "../player/debug-history-marks.js";
 
 /*
  * L5h.1's ops: what the Player keeps and exports of a session, read in the host after the session's earlier requests,
@@ -201,16 +202,23 @@ test("a kept session restores against the held plan; another plan, an ended sess
     const shown = bridge.latest(session)!;
     const keep = await keepOf(bridge, shown, plan);
     const events = shown.events.slice(0, keep.eventsThrough);
-    const restored = await bridge.restoreKept(plan, keep.planJson!, keep.snapshotJson, events);
+    const restored = await bridge.restoreKept(
+      plan,
+      keep.planJson!,
+      keep.snapshotJson,
+      events,
+      NO_MARKS,
+    );
     assert.ok(typeof restored === "object");
     const otherPlan = await bridge.restoreKept(
       plan,
       serializeValidatedRuntimeJson(compilePlayerProject('say "other"\nexit').plan!),
       keep.snapshotJson,
       events,
+      NO_MARKS,
     );
     const damaged = await bridge
-      .restoreKept(plan, keep.planJson!, '{"broken":true}', events)
+      .restoreKept(plan, keep.planJson!, '{"broken":true}', events, NO_MARKS)
       .catch((error: unknown) => error);
     assert.ok(damaged instanceof BridgeRequestError);
     // An ended session: the same script's state after it exits.
@@ -225,6 +233,7 @@ test("a kept session restores against the held plan; another plan, an ended sess
       endedKeep.planJson!,
       endedKeep.snapshotJson,
       ended.events,
+      NO_MARKS,
     );
     return {
       restored: {
@@ -273,7 +282,7 @@ test("only a reservation keeps the plan's JSON: written once in its task, read b
     const keep = await keepOf(bridge, session, plan);
     assert.equal(keep.planJson, PLAN_JSON);
     assert.equal(
-      await bridge.restoreKept(plan, PLAN_JSON, keep.snapshotJson, []).then(() => "read"),
+      await bridge.restoreKept(plan, PLAN_JSON, keep.snapshotJson, [], NO_MARKS).then(() => "read"),
       "read",
     );
     assert.equal((await bridge.client.request("planText", { plan })).result, PLAN_JSON);
@@ -337,4 +346,43 @@ test("captureStorage reads the shown state's saved values in the host, at its re
   });
   assert.deepEqual(remote, inProcess);
   assert.deepEqual(inProcess, { entries: [{ key: "score", value: 3 }], persistent: true });
+});
+
+test("a kept session's events are checked at the op: an unknown kind, a malformed sequence or a reversed log is refused", async () => {
+  await onBoth(async (bridge) => {
+    const plan = await prepared(bridge);
+    const session = await bridge.start(plan, START, false);
+    await bridge.request(session, "observeTime", { atMs: 2_500, media: [] });
+    const shown = bridge.latest(session)!;
+    const keep = await keepOf(bridge, shown, plan);
+    const events = shown.events.slice(0, keep.eventsThrough);
+    for (const bad of [
+      events.map((event, index) =>
+        index === 0 ? { ...event, kind: "unrecognized-event" } : event,
+      ),
+      events.map((event, index) => (index === 0 ? { ...event, sequence: "x" } : event)),
+      [...events].reverse(),
+    ])
+      await assert.rejects(
+        bridge.client.request("restoreKept", {
+          plan,
+          planJson: keep.planJson,
+          snapshotJson: keep.snapshotJson,
+          events: bad,
+          marks: NO_MARKS,
+        }),
+        /Malformed arguments/u,
+      );
+  });
+});
+
+test("every op that takes an event list checks it with one function at its boundary (`isEventLog`)", () => {
+  const takers = Object.entries(playerBridgeOps())
+    .filter(([, op]) => op.checkArguments.toString().includes("args.events"))
+    .map(([name, op]) => [name, op.checkArguments.toString().includes("isEventLog(args.events)")]);
+  assert.deepEqual(takers.sort(), [
+    ["restoreKept", true],
+    ["rewindBack", true],
+    ["rewindForward", true],
+  ]);
 });

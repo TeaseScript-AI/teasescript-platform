@@ -22,6 +22,9 @@ import { transferOps, type TransferTicket } from "./ops/transfer.js";
 import { resourceOps } from "./ops/resources.js";
 import { sessionOps } from "./ops/session.js";
 import { traceOps } from "./ops/trace.js";
+import { HistoryRegistry } from "./history/registry.js";
+import type { DebugHistorySpill } from "./history/snapshots.js";
+import { openDebugHistorySpill } from "../debug-history-indexeddb.js";
 import type { BridgeOps, HostSessions } from "./worker-host.js";
 import type { RandomState } from "./connection-state.js";
 
@@ -147,9 +150,21 @@ export interface PlayerOpsContext {
   transferCount: number;
   /** Debug's random control on this connection (`alignRandom`); every session its owner holds runs with it. */
   readonly random: RandomState;
+  /** Debug's rewind histories on this connection (`ops/history.ts`); `teardown` closes them. */
+  readonly history: HistoryRegistry;
 }
 
-export function playerOpsContext(): PlayerOpsContext {
+/** Opens a spill store for a rewind history where the host's realm has IndexedDB, else none. */
+const hostSpill = (): Promise<DebugHistorySpill | null> => openDebugHistorySpill();
+
+export function playerOpsContext(
+  options: {
+    /** A rewind history's spill store, as tests give one; IndexedDB where the realm has it by default. */
+    readonly historySpill?: () => Promise<DebugHistorySpill | null>;
+    /** UTF-16 code units of snapshot JSON a history admits; `DEBUG_HISTORY_ADMITTED_SNAPSHOT_CHARS` by default. */
+    readonly historyBudget?: number;
+  } = {},
+): PlayerOpsContext {
   const delivery = deliveryOwner();
   const plans = new OwnedMap<string, InstructionPlan>(delivery);
   let nextPlan = 1;
@@ -181,6 +196,11 @@ export function playerOpsContext(): PlayerOpsContext {
       history: new RandomHistory(),
       forgotAt: 0,
     },
+    history: new HistoryRegistry(
+      delivery,
+      options.historySpill ?? hostSpill,
+      options.historyBudget,
+    ),
   };
 }
 
@@ -286,6 +306,8 @@ function releaseConnection(context: PlayerOpsContext, sessions: HostSessions): v
   context.sourceViews.clear();
   context.planTexts.clear();
   context.transfers.clear();
+  // Its histories close as the Player's disposal: their parked sessions and candidates go with the sessions below.
+  context.history.closeAll("disposal");
   sessions.clear();
 }
 

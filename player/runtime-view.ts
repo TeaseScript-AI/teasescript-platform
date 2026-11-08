@@ -43,6 +43,8 @@ import type {
 } from "./model.js";
 import type { InstructionFact, InstructionFacts } from "./engine-bridge/instruction-facts.js";
 import type { PlayerCallView, PlayerCriticalState } from "./engine-bridge/session-protocol.js";
+import type { HistoryMarks } from "./debug-history-marks.js";
+import type { HistoryDelta } from "./engine-bridge/history/core.js";
 import type { PlayerBridge } from "./player-bridge.js";
 
 // What the Player reads from a session's published state, without the engine: the foreground, timers, deadlines,
@@ -92,6 +94,12 @@ export interface PlayerSession extends PlayerSessionView {
   readonly instructions: InstructionFacts;
   /** The active calls while the session's calls are viewed (`demandCallView`), else `null`. */
   readonly callView: PlayerCallView | null;
+  /** The session's marks for a debug export, as the host holds them with this publication. */
+  readonly marks: HistoryMarks;
+  /** The changes of Debug's rewind history this publication made, oldest first. */
+  readonly history: readonly HistoryDelta[];
+  /** The key Debug's rewind history names this session's event log by. */
+  readonly historyKey: string;
   /**
    * What all publications of the session share (its store): while any of them is reachable, the host keeps the
    * session; once none is, the bridge releases it there.

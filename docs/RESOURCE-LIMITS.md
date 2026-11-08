@@ -214,6 +214,16 @@ behavior. The configured listener port remains the only current playground tooli
 |---|---|---|---|---|---|---|
 | `playground.port-domain` | `playground/server.ts`; configured local listener port | Integer `1..65,535` through option or `PORT`. | transport, storage, or tooling guard | `provisional` | Network port representation + ADR 0019; tooling compatibility review for configuration changes | The configured listener requires an explicit non-zero TCP port number; `65,535` is the protocol port maximum, while `0` requests OS ephemeral allocation rather than naming a port. The local rationale is concrete; focused boundary-test evidence remains incomplete. |
 
+## Player Debug history bounds
+
+Debug's rewind history (DEBUGGER.md "Rewind") is an opt-in authoring tool. These bound what it retains in the engine's
+host, not TeaseScript or engine capacity.
+
+| ID | Source / boundary | Current | Category | Status | Authority / change | Evidence / repair |
+|---|---|---|---|---|---|---|
+| `player.debug-history-admitted-snapshot-chars` | `player/engine-bridge/history/snapshots.ts` (`DEBUG_HISTORY_ADMITTED_SNAPSHOT_CHARS`, `SnapshotStore.add`); a point's admission | 32 Mi UTF-16 code units of snapshot JSON held in memory, writes still pending to the spill included; a point that would exceed it is not taken and collection stops with the points kept. The state the first Back leaves is kept as a point is: when it does not fit, Back is refused. It bounds the retained JSON, not the Worker's heap. | transport, storage, or tooling guard | `provisional` | Owner decision, 2026-11-07 (#1999): an accepted temporary policy; ADR 0019 | Why a bound: the history retains snapshot JSON in the Worker. Why this value: measured at 51–103 MB of Worker heap, 1.5–3.1 bytes per code unit, at runtime-v2 `2d155cdc0`, Node 26.13 (sx-job `110721260874a8`); with the write-through spill the bound holds only pending writes, so it binds only without IndexedDB or with a slow one. Gap: no measurement past the bound with a spill, and none on phones. `tests/player-history-snapshots.test.ts` covers admission at and past the bound. |
+| `player.debug-history-spill-quota` | `player/debug-history-indexeddb.ts`, `SnapshotStore`'s write-through; a spill write the browser refuses | The browser's storage quota for the history's IndexedDB database: a refused write stops collection with the points kept: the JSON not yet written stays in memory, and the snapshots written stay in IndexedDB. | transport, storage, or tooling guard | `provisional` | Unresolved decision (#1990): stopping is today's mechanism, not a settled retention policy; ADR 0019 | The platform sets the bound; the history stops collecting with its prefix rather than fail. Browser evidence pending. `tests/player-history-snapshots.test.ts` and `tests/player-debug-history.test.ts` cover a failing write. |
+
 ## Updating this registry
 
 An entry's status is one of the closed list in

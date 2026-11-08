@@ -223,7 +223,10 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
       (held, args) => {
         // EVIDENCE: validation: checkArguments accepted the shape; the engine validates the value.
         const edit = args as { readonly key: string; readonly value: SerializableRuntimeValue };
-        return answered(held, applyPlayerRuntimeStorageEdit(held.sessionForOperation(), edit));
+        const result = applyPlayerRuntimeStorageEdit(held.sessionForOperation(), edit);
+        // The edit's mark, in the edit's own host step: the publication that shows the edit carries it.
+        if (result.outcome.kind === "applied") held.marksEdited();
+        return answered(held, result);
       },
       false,
     ),

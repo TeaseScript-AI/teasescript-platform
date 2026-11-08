@@ -14,6 +14,7 @@ import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoin
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
+import { NO_MARKS } from "../player/debug-history-marks.js";
 
 /*
  * L5i.3, Sol r2 R2.1: the connection's value trace has one writer, the Player's newest tracing intent. Each change
@@ -153,6 +154,7 @@ async function play(bridge: PlayerBridge, each: Case) {
             recorder: made.recorder,
             ...(made.debugTrace === null ? {} : { debugTrace: made.debugTrace }),
           }),
+        NO_MARKS,
         intent,
       );
       starts.set(index, { session, trace: heldTrace(bridge) });

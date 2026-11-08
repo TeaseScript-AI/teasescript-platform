@@ -29,6 +29,7 @@ import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js
 import type { RandomControlOptions } from "../../src/runtime/random/random-control.js";
 import type { Delivery } from "./delivery.js";
 import { decodeMessage } from "./transport.js";
+import { parseHistoryMarks, type HistoryMarks } from "../debug-history-marks.js";
 import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host.js";
 
 /*
@@ -69,11 +70,12 @@ function heldOf(backend: Backend, session: PlayerSession): HeldSession {
 
 /**
  * Starts the in-process backend, ready at once: the Player's ops served on a port pair in this realm. With `delayMs`,
- * replies arrive after that delay instead of on a microtask (the delayed smoke).
+ * replies arrive after that delay instead of on a microtask (the delayed smoke). `historySpill` and `historyBudget` set
+ * Debug's rewind histories' spill store and admission bound (`playerOpsContext`).
  */
 export function createInProcessBackend(
   build: BuildIdentity,
-  options: { readonly delayMs?: number } = {},
+  options: { readonly delayMs?: number } & NonNullable<Parameters<typeof playerOpsContext>[0]> = {},
 ): PlayerBridge {
   let toHost: ((data: unknown) => void) | null = null;
   let toClient: ((data: unknown) => void) | null = null;
@@ -116,7 +118,7 @@ export function createInProcessBackend(
     },
   };
   const { client } = openBridge(clientPort, build);
-  const context = playerOpsContext();
+  const context = playerOpsContext(options);
   const sessions = startBridgeHost(hostPort, playerBridgeOps(context), build, context.delivery);
   const bridge = new PlayerBridge(client);
   const flush = (session: string) => {
@@ -208,6 +210,8 @@ export function introduceNow(
   make:
     | ((host: HostFactoryInput) => PlayerRuntimeSession)
     | { readonly plan: string; readonly options: StartOptions; readonly recording: boolean },
+  /** The session's marks: a restore's, as it was kept or exported; `NO_MARKS` for a Start. */
+  marks: HistoryMarks,
   tracing?: TracingIntent,
   random?: StartRandom,
 ): PlayerSession {
@@ -215,7 +219,7 @@ export function introduceNow(
   const { context } = backend;
   const delivery = context.delivery.begin();
   try {
-    const opened = introduceIn(backend, delivery, make, tracing, random);
+    const opened = introduceIn(backend, delivery, make, marks, tracing, random);
     context.delivery.commit(delivery);
     return opened;
   } catch (error) {
@@ -229,6 +233,7 @@ function introduceIn(
   backend: Backend,
   delivery: Delivery,
   make: Parameters<typeof introduceNow>[1],
+  marks: HistoryMarks,
   tracing: TracingIntent | undefined,
   random: StartRandom | undefined,
 ): PlayerSession {
@@ -263,6 +268,7 @@ function introduceIn(
     created,
     token,
     context,
+    parseHistoryMarks(marks),
     random?.owner ?? null,
     typeof make === "function" ? null : control,
   );

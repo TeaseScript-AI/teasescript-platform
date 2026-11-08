@@ -1,5 +1,8 @@
+import { interpreterEventProblem } from "../../src/runtime/event-validation.js";
+import type { InterpreterEvent } from "../../src/runtime/events.js";
+
 // Shape checks of op arguments, which the host runs before an op: records with exactly their keys, and arrays read by
-// index. The engine still validates the host data inside them, as it always does.
+// index, and the event logs a restore takes. The engine still validates the other host data inside them.
 
 /**
  * Whether `value` is an object and no array. It admits any prototype, such as a `Date` or a `Map`; where an argument must
@@ -41,3 +44,21 @@ export const isStringArray = (value: unknown): boolean =>
 /** A finite number of milliseconds that is not negative. */
 export const isTime = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+/**
+ * Whether `value` is a log of interpreter events: each one an event (`interpreterEventProblem`), their sequence
+ * increasing from 1. Every op that takes an event list checks it with this at its boundary (`rewindBack`,
+ * `rewindForward`, `restoreKept`): the engine's restore takes the events as they are.
+ */
+export function isEventLog(value: unknown): value is readonly InterpreterEvent[] {
+  if (!Array.isArray(value)) return false;
+  let sequence = 0;
+  for (const event of value) {
+    if (interpreterEventProblem(event) !== null) return false;
+    // EVIDENCE: validation: interpreterEventProblem accepted the event, with its sequence, above.
+    const next = (event as InterpreterEvent).sequence;
+    if (next <= sequence) return false;
+    sequence = next;
+  }
+  return true;
+}

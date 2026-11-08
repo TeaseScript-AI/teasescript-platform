@@ -8,6 +8,7 @@ import {
   type BridgeResult,
   type ClientPort,
 } from "../player/engine-bridge/client.js";
+import { NO_MARKS } from "../player/debug-history-marks.js";
 import { DeliveryRefusedError } from "../player/engine-bridge/delivery.js";
 import {
   createInProcessBackend,
@@ -573,14 +574,14 @@ test("terminating the in-process backend's client closes its connection: plans a
   });
   // EVIDENCE: fixture: `prepare` of this plan prepares.
   const plan = (reply.result as { plan: string }).plan;
-  const session = introduceNow(bridge, () => createPlayerRuntimeSession(PLAN));
+  const session = introduceNow(bridge, () => createPlayerRuntimeSession(PLAN), NO_MARKS);
   assert.equal(heldPlan(bridge, plan), heldPlan(bridge, plan));
   bridge.client.terminate();
   assert.throws(() => heldPlan(bridge, plan), /No plan 'p1' is held/);
   assert.throws(() => hatch(session, (held) => held), /The host holds no such session/);
   // A facade call after the close is refused before it allocates.
   assert.throws(
-    () => introduceNow(bridge, () => createPlayerRuntimeSession(PLAN)),
+    () => introduceNow(bridge, () => createPlayerRuntimeSession(PLAN), NO_MARKS),
     DeliveryRefusedError,
   );
 });
@@ -602,11 +603,15 @@ for (const each of product(SCOPE_AXES))
     let pending: Promise<BridgeResult> | null = null;
     if (each.order === "requestThenFacade")
       pending = bridge.client.request("readTransfer", { text });
-    const session = introduceNow(bridge, () => {
-      if (each.order === "facadeThenRequest")
-        pending = bridge.client.request("readTransfer", { text });
-      return createPlayerRuntimeSession(PLAN);
-    });
+    const session = introduceNow(
+      bridge,
+      () => {
+        if (each.order === "facadeThenRequest")
+          pending = bridge.client.request("readTransfer", { text });
+        return createPlayerRuntimeSession(PLAN);
+      },
+      NO_MARKS,
+    );
     const settledRequest = await Promise.allSettled([pending!]);
     assert.equal(settledRequest[0]!.status, each.request === "fails" ? "rejected" : "fulfilled");
     assert.ok(
@@ -639,7 +644,7 @@ test("a facade call whose handoff fails undoes what it allocated, and keeps what
   };
   const other = compilePlayerProject('say "other"\nexit').plan!;
   assert.throws(
-    () => introduceNow(bridge, () => createPlayerRuntimeSession(other)),
+    () => introduceNow(bridge, () => createPlayerRuntimeSession(other), NO_MARKS),
     /handoff fails/,
   );
   bridge.open = open;

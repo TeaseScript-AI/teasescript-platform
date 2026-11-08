@@ -67,11 +67,16 @@ let usePlayerSession: (options: {
   capturedMedia?: { repository: FakeMediaRepository };
   capabilities: { camera: boolean };
 }) => StopHost;
-let useDebugRewind: (player: StopHost) => {
-  back(index: number): Promise<boolean>;
+interface StopRewind {
+  readonly state: Readonly<Ref<{ readonly points: readonly { readonly id: number }[] }>>;
+  back(point: number): Promise<boolean>;
   resume(): Promise<boolean>;
-  returnToSession(): boolean;
-};
+  returnToSession(): Promise<boolean>;
+}
+let useDebugRewind: (player: StopHost) => StopRewind;
+/** Back to the point at `index` in the history's points, by its ID. */
+const backTo = (rewind: StopRewind, index: number) =>
+  rewind.back(rewind.state.value.points[index]?.id ?? -1);
 let useDevelopmentTime: (
   player: StopHost,
   initial: { readonly autoSkip: boolean },
@@ -534,7 +539,7 @@ test("Resume after a Player error is refused before the saved data are replaced"
   host.update(first.session);
   await settle();
   assert.equal(values.get("count"), 1);
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   host.reportHostError(new TypeError("A component failed."));
   assert.equal(await rewind.resume(), false);
   assert.deepEqual(replacements, []);
@@ -610,7 +615,7 @@ test("after a Player error, a debug export keeps the recording up to the error t
     ["run", "completeAction", "run"],
   );
   // Back shows an earlier state, from which the recorder begins anew; the export still shows the error's recording.
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   assert.deepEqual(host.debugRecording(), atError);
   assert.deepEqual((await host.debugExportCandidate(shown)).recording, atError);
   // A new Start records its own session.
@@ -761,7 +766,7 @@ test("a debug export offers a photo only the replay saves, also after a Player e
   assert.equal(values.get("picture"), photo);
   host.reportHostError(new TypeError("A component failed."));
   // Back shows First again, without the photo saved; the export replays the calls up to the error.
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   assert.equal(label(), "First");
   const afterBack = await exported();
   assert.deepEqual(afterBack.offered, [[photo, ["savedValue"]]]);
@@ -843,13 +848,13 @@ for (const atDraw of [false, true])
       release();
       await settle();
     }
-    assert.equal(await rewind.back(0), true);
+    assert.equal(await backTo(rewind, 0), true);
     if (!atDraw) release();
     await settle();
     assert.equal(host.resolveAsset(next), null, "the photo the session never took is held");
     assert.notEqual(host.resolveAsset(taken), null);
     // Return reinstates the session Back left; its photo is taken anew, and the first stays.
-    assert.equal(rewind.returnToSession(), true);
+    assert.equal(await rewind.returnToSession(), true);
     if (atDraw) host.setRandomControl(null);
     await until(() => typeof binding("b") === "string", "the session's photo was not taken");
     const retaken = binding("b");

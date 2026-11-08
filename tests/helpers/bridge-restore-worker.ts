@@ -8,6 +8,7 @@ import { startBridgeHost } from "../../player/engine-bridge/worker-host.js";
 import { plainRecording } from "./plain-recording.js";
 import { DebugRecorder } from "../../player/debug-recorder.js";
 import { restorePlayerRuntimeSessionAt } from "../../player/runtime-adapter.js";
+import { NO_MARKS } from "../../player/debug-history-marks.js";
 
 /*
  * The Player's engine Worker, as `node-worker.ts` runs it, plus two test ops. `restoreForTest` restores a snapshot of a
@@ -57,6 +58,7 @@ startBridgeHost(
           restorePlayerRuntimeSessionAt(instructions, snapshotJson, []),
           plan,
           context,
+          NO_MARKS,
         );
         const id = sessions.add(held);
         const view = introduction(held, context, false);

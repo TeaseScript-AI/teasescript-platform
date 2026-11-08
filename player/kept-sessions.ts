@@ -9,8 +9,11 @@ import {
   type CapturedMediaRepository,
 } from "./captured-media.js";
 import type { MediaInUse } from "./captured-media-persistence.js";
-import { parseEditedWhileDebugging, parseRewoundWhileDebugging } from "./debug-history-marks.js";
-import type { DebugHistoryMarks } from "./debug-history.js";
+import {
+  parseEditedWhileDebugging,
+  parseRewoundWhileDebugging,
+  type HistoryMarks,
+} from "./debug-history-marks.js";
 import type { ScriptStorageProvider } from "./script-storage.js";
 
 /**
@@ -60,7 +63,7 @@ export interface KeptSession {
   readonly planJson: string;
   readonly snapshotJson: string;
   readonly events: readonly InterpreterEvent[];
-  readonly marks: DebugHistoryMarks;
+  readonly marks: HistoryMarks;
 }
 
 /** A session read back from storage: external data until `keptSession` validated it. */
@@ -78,7 +81,7 @@ export interface KeptSessionUpdate {
   readonly events: readonly InterpreterEvent[];
   /** The engine's JSON of each of `events` (`serializeValidatedRuntimeJson`), which a store keeping text writes. */
   readonly eventsJson: readonly string[];
-  readonly marks: DebugHistoryMarks;
+  readonly marks: HistoryMarks;
 }
 
 /**
@@ -232,7 +235,7 @@ export function memoryKeptSessionStore(): KeptSessionStore {
 /** The sessions of a memory store, which `discardSession` deletes without their photos. */
 function memorySessions(): KeptSessionStore & Pick<KeptRoomStore, "discardSession"> {
   interface Kept {
-    session: { planJson: string; snapshotJson: string; marks: DebugHistoryMarks } | null;
+    session: { planJson: string; snapshotJson: string; marks: HistoryMarks } | null;
     events: InterpreterEvent[];
     readonly media: Map<string, CapturedMediaRecord>;
   }

@@ -29,6 +29,7 @@ import { listRandomSites, type InstructionPlan, type RandomOutcome } from "../sr
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
+import { NO_MARKS } from "../player/debug-history-marks.js";
 
 /*
  * L5i.4: Debug's random control as the engine host's connection state. Its owner's sessions decide their draws from the
@@ -280,6 +281,7 @@ test("a settings change racing a Start applies to the right session: queued, and
   const started = introduceNow(
     bridge,
     { plan: token, options: START, recording: false },
+    NO_MARKS,
     undefined,
     { owner: 1, intent: intentOf(1, 2, []) },
   );
@@ -421,7 +423,14 @@ test("a held session's next read attaches a changed control only after ending a 
     'repeat 20 {\n    wait 10 ms\n}\nlet hit = chance(50)\nshowButton "Done"\nexit',
   );
   const context = playerOpsContext();
-  const held = new HeldSession(createPlayerRuntimeSession(plan, START), "p1", context, 1, null);
+  const held = new HeldSession(
+    createPlayerRuntimeSession(plan, START),
+    "p1",
+    context,
+    NO_MARKS,
+    1,
+    null,
+  );
   held.beginCatchUp(beginPlayerRuntimeCatchUp(held.sessionForOperation(), 1_000));
   alignRandom(context, intentOf(1, 1, []));
   // The publication as it is keeps the catch-up; reading the session ends it and attaches.
@@ -479,6 +488,7 @@ const SESSION_OPS: Readonly<
   answerCapture: "ends a catch-up",
   answerFileStore: "ends a catch-up",
   answerLock: "ends a catch-up",
+  historyEnroll: "runs through sessionForOperation",
 };
 
 test("every session op is classified, and only adoptCatchUp reads a session past its attach", () => {
@@ -498,25 +508,28 @@ test("every session op is classified, and only adoptCatchUp reads a session past
 });
 
 // The caller inventory of Continue's boundary (Sol plan P5, code r1 C3): the calls that introduce or restore a session
-// in `usePlayerSession.ts` and `useDebugRewind.ts`, by these callee spellings (`startedSession`, `introduceNow`,
-// `prepareRestore`, `publishRewound`, `host.start`, `rewind.publish`), each classified. Only a Start carries its Player's
+// in `usePlayerSession.ts`, `useDebugRewind.ts` and `rewindOwner.ts`, by these callee spellings (`startedSession`,
+// `introduceNow`, `prepareRestore`, `host.start`, `showRewound`, `host.show`), each classified. Only a Start carries its Player's
 // random ownership (`startRandom()`); a restore takes it at its adoption. A new such call in those files fails until it
 // is classified. A new module, or an indirection under another name, needs adding here.
 const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string, string])[]>> = {
   "player/vue/src/usePlayerSession.ts": [
-    ["prepareRestore(found.session, found.marks)", "restore: a kept session"],
-    ['startedSession(create, { debugMode }, "restore")', "restore: Debug's rewind"],
-    ['begin: () => startedSession(create, { debugMode }, "start")', "start: Start"],
-    ["introduceNow(requireBridge(), () => given)", "restore: a raw restore"],
+    ["prepareRestore(found.session)", "restore: a kept session"],
+    ["begin: () => startedSession(create, { debugMode })", "start: Start"],
+    ["introduceNow(requireBridge(), () => given, marks ?? NO_MARKS)", "restore: a raw restore"],
     ["return introduceNow(", "by kind: `startedSession`'s factory, with `random`"],
     [
       "return host.start(create.plan, startOptions, true, random)",
       "by kind: `startedSession`'s held plan",
     ],
+    ["show: (next, paused) => showRewound(next, { paused })", "restore: the rewind owner's show"],
   ],
-  "player/vue/src/useDebugRewind.ts": [
-    ["rewind.publish(", "restore: Debug's rewind (`publishRewound`)"],
-    ["rewind.publish(", "restore: Debug's Return (`publishRewound`)"],
+  "player/vue/src/useDebugRewind.ts": [],
+  "player/vue/src/rewindOwner.ts": [
+    [
+      "host.show(next, paused)",
+      "restore: a session Debug's rewind restored or reinstated in the host, shown by its owner",
+    ],
   ],
 };
 
@@ -560,7 +573,7 @@ test("every random-op sender in the composable is classified as adopting or not"
   assert.deepEqual(
     calls.map((line) => line.trim()),
     [
-      "if (!forInspection) adoptRandom(next);",
+      "if (!paused) adoptRandom(next);",
       "if (session.value !== null) adoptRandom(session.value);",
       "adoptRandom(continued);",
     ],
@@ -569,8 +582,8 @@ test("every random-op sender in the composable is classified as adopting or not"
 
 test("every session introduction in the composable and rewind is classified as a Start or a restore", () => {
   const callee =
-    /\b(startedSession|introduceNow|prepareRestore|publishRewound|host\.start|rewind\.publish)\(/u;
-  const definition = /function (startedSession|prepareRestore|publishRewound)\(/u;
+    /\b(startedSession|introduceNow|prepareRestore|host\.start|showRewound|host\.show)\(/u;
+  const definition = /function (startedSession|prepareRestore|showRewound)\(/u;
   for (const [file, classified] of Object.entries(SESSION_INTRODUCTIONS)) {
     const calls = readFileSync(new URL(`../../${file}`, import.meta.url), "utf8")
       .split("\n")
@@ -593,7 +606,7 @@ test("every session introduction in the composable and rewind is classified as a
     "utf8",
   );
   assert.equal(composable.match(/startRandom\(\)/gu)?.length, 1);
-  assert.match(composable, /const random = kind === "start" \? startRandom\(\) : undefined;/u);
+  assert.match(composable, /const random = startRandom\(\);/u);
 });
 
 test("malformed random arguments are refused before anything runs", async () => {

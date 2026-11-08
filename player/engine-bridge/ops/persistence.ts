@@ -6,9 +6,10 @@ import {
   playerRuntimeSnapshotJson,
   restorePlayerRuntimeSessionAt,
 } from "../../runtime-adapter.js";
-import { everyItem, exactly, isRecord } from "../argument-checks.js";
+import { exactly, isEventLog, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
 import type { BridgeOps, HostSessions } from "../worker-host.js";
+import { isHistoryMarks, parseHistoryMarks } from "../../debug-history-marks.js";
 import { HeldSession, introduction } from "./session.js";
 
 /*
@@ -219,18 +220,21 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
       session: "none",
       checkArguments: (args) =>
         isRecord(args) &&
-        exactly(args, ["plan", "planJson", "snapshotJson", "events"]) &&
+        exactly(args, ["plan", "planJson", "snapshotJson", "events", "marks"]) &&
         typeof args.plan === "string" &&
         typeof args.planJson === "string" &&
         typeof args.snapshotJson === "string" &&
-        everyItem(args.events, isRecord),
+        isEventLog(args.events) &&
+        isHistoryMarks(args.marks),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted the shape; the engine validates the kept state and events.
-        const { plan, planJson, snapshotJson, events } = args as {
+        // The engine validates the kept state as it restores it.
+        // EVIDENCE: validation: checkArguments accepted the shape and each event (`isEventLog`).
+        const { plan, planJson, snapshotJson, events, marks } = args as {
           readonly plan: string;
           readonly planJson: string;
           readonly snapshotJson: string;
           readonly events: readonly InterpreterEvent[];
+          readonly marks: unknown;
         };
         if (planText(plan) !== planJson) {
           const result: KeptRestore = { kind: "otherPlan" };
@@ -241,7 +245,8 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
           const result: KeptRestore = { kind: "ended" };
           return { result };
         }
-        const held = new HeldSession(restored, plan, context);
+        // The kept session's marks, as it was kept: validated above, read again into frozen data.
+        const held = new HeldSession(restored, plan, context, parseHistoryMarks(marks));
         const id = sessions.add(held);
         const view = introduction(held, context, false);
         const result: KeptRestore = { kind: "restored" };

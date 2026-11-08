@@ -3,6 +3,7 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
 import {
+  activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
   advancePlayerRuntimeTime,
   createPlayerRuntimeRestorePoint,
   playerRuntimeSnapshotJson,
@@ -32,6 +33,11 @@ import type { PlayerBridge } from "../player/player-bridge.js";
 import { drawCode, fileCode, outcomeLines } from "../player/random-draw-code.js";
 import { loadSourceDebugSidecar } from "../src/runtime/debug/source-sidecar.js";
 import { createSourceDebugSidecar } from "../src/index.js";
+import { NO_MARKS } from "../player/debug-history-marks.js";
+import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
+
+// The button press on a session the composable's host holds (`OnHost`).
+const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
 
 // Debug's random draws (DEBUGGER.md "Random draws") through the real Vue session host and engine: with Choose outcomes
 // on in the debug room, a session pauses at every draw and goes on with the outcome the picker gives; Next time and
@@ -54,27 +60,10 @@ interface RandomHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   activate(): Promise<void>;
-  showSession(
-    next: PlayerRuntimeSession | PlayerSession,
-    options?: { readonly inspecting: boolean },
-  ): void;
+  showSession(next: PlayerRuntimeSession | PlayerSession): void;
   prepareInput(): true | Promise<boolean>;
+  update(session: PlayerRuntimeSession): void;
   prepareRestore(restored: PlayerRuntimeSession | PlayerSession): void;
-  readonly rewind: {
-    publish(
-      create: (recording: {
-        readonly recorder: DebugRecorder;
-        readonly debugTrace?: unknown;
-      }) => PlayerRuntimeSession,
-      state: {
-        readonly paused: boolean;
-        readonly marks: {
-          readonly editedWhileDebugging: null;
-          readonly rewoundWhileDebugging: null;
-        };
-      },
-    ): void;
-  };
   randomTried(
     site: string,
   ): Promise<{
@@ -142,9 +131,38 @@ let usePlayerSession: (options: {
   room: "debug";
 }) => RandomHost;
 let useDebugRandom: (player: RandomHost) => DebugRandom;
+/** Debug's rewind, as the Player's Debug features run it (`useDebugRewind.ts`). */
+interface DebugRewind {
+  readonly state: Readonly<Ref<{ readonly points: readonly { readonly id: number }[] }>>;
+  back(point: number): Promise<boolean>;
+}
+let useDebugRewind: (player: RandomHost) => DebugRewind;
 let presentation: Presentation;
 
+/** A state of `kept` the host restored and holds, as Debug's rewind restores one there (`restoreKept`'s route). */
+async function hostRestored(
+  host: RandomHost,
+  bridge: PlayerBridge,
+  plan: InstructionPlan,
+  kept: PlayerRuntimeSession,
+): Promise<PlayerSession> {
+  const token = await preparedPlan(host.bridge, plan);
+  await bridge.client.request("preparePlanText", { plan: token });
+  // EVIDENCE: validation: `planText` replies from the same build with the held plan's canonical JSON.
+  const json = (await bridge.client.request("planText", { plan: token })).result as string;
+  const restored = await bridge.restoreKept(
+    token,
+    json,
+    playerRuntimeSnapshotJson(kept),
+    kept.events,
+    NO_MARKS,
+  );
+  assert.ok(typeof restored === "object", "the kept session restores");
+  return restored;
+}
+
 before(async () => {
+  await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/usePlayerSession.ts",
   );
@@ -154,6 +172,12 @@ before(async () => {
   const shown: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/randomDrawPresentation.ts",
   );
+  const rewinding: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/useDebugRewind.ts",
+  );
+  assert.equal(typeof rewinding.useDebugRewind, "function");
+  // EVIDENCE: validation: Vite loaded the real source module and its export is callable; this is its tested API.
+  useDebugRewind = rewinding.useDebugRewind as typeof useDebugRewind;
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof random.useDebugRandom, "function");
   assert.equal(typeof shown.randomDrawChoices, "function");
@@ -241,7 +265,7 @@ async function mount(context: TestContext, plan: InstructionPlan) {
       debugRooms: memoryKeptRoomStore(),
       room: "debug",
     });
-    return { host, random: useDebugRandom(host) };
+    return { host, random: useDebugRandom(host), rewind: useDebugRewind(host) };
   })!;
   context.after(() => scope.stop());
   await mounted.host.loadScriptStorage();
@@ -251,6 +275,31 @@ async function mount(context: TestContext, plan: InstructionPlan) {
   await settle(context);
   mounted.random.enabled.value = true;
   return mounted;
+}
+
+/**
+ * Starts `plan` and goes Back to the history's first point, its first interaction: the state Debug's rewind restores
+ * there, shown for inspection. A history takes points only at interactions, so an inspected state never waits at a draw.
+ */
+async function rewound(context: TestContext, mounted: Awaited<ReturnType<typeof mount>>) {
+  await mounted.host.activate();
+  await settle(context);
+  await backToLast(context, mounted);
+}
+
+/** Back to the history's last point, which the shown session reached: inspected there. */
+async function backToLast(context: TestContext, mounted: Awaited<ReturnType<typeof mount>>) {
+  const point = mounted.rewind.state.value.points.at(-1);
+  assert.ok(point !== undefined, "the session's interaction is a point");
+  assert.equal(await mounted.rewind.back(point.id), true, "Back restores it");
+  await settle(context);
+}
+
+/** Presses the shown button as the Player's input does: readied first, which adopts an inspected state. */
+async function press(context: TestContext, host: RandomHost) {
+  assert.equal(await host.prepareInput(), true, "the input is admitted");
+  host.update(activatePlayerRuntimeButton(host.session.value!)!.session);
+  await settle(context);
 }
 
 /** What `site` took, as the host's history of the shown session's Player gives it. */
@@ -358,32 +407,32 @@ test("a picker answer counts before the draws it lets run, so they decide from i
   assert.deepEqual((await triedOf(host, site)).history, ["false", "true"], "in the order taken");
 });
 
-test("a restored state waits at its draw for the picker only once input adopts it", async (context) => {
+test("a rewound state asks the picker at its next draw only once input adopts it", async (context) => {
   const plan = compiled(
-    'let hit = chance(50)\nsay "Hit: ${hit}", instant\nlet again = chance(50)\nsay "Again: ${again}", instant\nshowButton "Next"\nexit',
+    'showButton "Go"\nlet hit = chance(50)\nsay "Hit: ${hit}", instant\nshowButton "Again"\nlet again = chance(50)\nsay "Again: ${again}", instant\nshowButton "Next"\nexit',
   );
-  const { host, random } = await mount(context, plan);
-  await host.activate();
-  await settle(context);
-  const atDraw = host.session.value!;
-  // Shown for inspection, as Debug's rewind shows a state it restored: no picker, so the inspection controls work.
+  const mounted = await mount(context, plan);
+  const { host, random } = mounted;
   const asked = () => random.draw.value?.drawId ?? null;
-  host.showSession(atDraw, { inspecting: true });
+  // Inspected at its button, as Debug's rewind restores it: no picker, so the inspection controls work.
+  await rewound(context, mounted);
   assert.equal(asked(), null);
-  assert.equal(await host.prepareInput(), true);
-  assert.equal(asked(), atDraw.state.randomDraw!.drawId);
+  await press(context, host);
+  assert.notEqual(asked(), null, "adopted, the picker asks at its next draw");
   assert.equal(await random.resolve({ kind: "boolean", value: true }), true);
-  assert.deepEqual(said(host), ["Hit: true"]);
-  // Adopted after Choose outcomes was turned off, it goes on naturally.
-  host.showSession(host.session.value!, { inspecting: true });
+  await settle(context);
+  // The button's own entry, then the say after the draw.
+  assert.deepEqual(said(host), ["Go", "Hit: true"]);
+  // Back at the next button, then adopted after Choose outcomes was turned off: it goes on naturally.
+  await backToLast(context, mounted);
   random.enabled.value = false;
   await settle(context);
-  assert.notEqual(host.session.value?.state.randomDraw, null, "an inspected state stays as it was");
-  assert.equal(await host.prepareInput(), true);
+  assert.equal(asked(), null, "an inspected state stays as it was");
+  await press(context, host);
   // The host resolves it, one reply later.
   await settle(context);
   assert.equal(host.session.value?.state.randomDraw, null);
-  assert.equal(said(host).length, 2);
+  assert.equal(said(host).length, 4);
 });
 
 // L5i.4, Sol plan P5, code r1 C3 and r2 (orchestrator 2's ruling (b)), the invariant of Continue's boundary: a session
@@ -395,7 +444,8 @@ test("a restored state waits at its draw for the picker only once input adopts i
 const RESTORE_PATHS = [
   "a raw restore, Continue",
   "a kept restore, Continue",
-  "a rewound state, Continue",
+  // No "a rewound state, Continue": an inspected state is paused and never kept (`keepSessionLater`), so no Continue
+  // restores one; a kept restore's Continue and a rewound state's adoption cover the boundary.
   "a rewound state, input adopts it",
   "a Start's own session, Continue",
 ] as const;
@@ -406,6 +456,8 @@ const BOUNDARY_CASES = RESTORE_PATHS.flatMap((path) =>
 );
 const TWO_DRAWS =
   'let a = chance(50)\nlet b = chance(50)\nsay "${a} ${b}", instant\nshowButton "Next"\nexit';
+/** The same draws after a first interaction, where Debug's rewind takes the point it restores. */
+const GO_TWO_DRAWS = `showButton "Go"\n${TWO_DRAWS}`;
 
 test("Continue's boundary covers every restore path with every settings change", () => {
   const observed = BOUNDARY_CASES.map(({ path, transition }) => ({ path, transition }));
@@ -416,8 +468,10 @@ test("Continue's boundary covers every restore path with every settings change",
 
 for (const { path, transition, name } of BOUNDARY_CASES)
   test(`Continue's boundary: ${name}`, async (context) => {
-    const plan = compiled(TWO_DRAWS);
-    const { host, random } = await mount(context, plan);
+    const rewinding = path.startsWith("a rewound state");
+    const plan = compiled(rewinding ? GO_TWO_DRAWS : TWO_DRAWS);
+    const mounted = await mount(context, plan);
+    const { host, random } = mounted;
     const bridge = await host.bridge;
     const sites = listRandomSites(plan).map((each) => each.id);
     const [site = ""] = sites;
@@ -433,34 +487,18 @@ for (const { path, transition, name } of BOUNDARY_CASES)
     };
     // Kept at its first draw, as a session the adapter's own control paused there.
     const kept = createPlayerRuntimeSession(plan, { randomControl: {} });
-    const keptDraw = kept.state.randomDraw!.drawId;
     if (path === "a raw restore, Continue")
       host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(kept)));
-    else if (path === "a kept restore, Continue") {
-      const token = await preparedPlan(host.bridge, plan);
-      await bridge.client.request("preparePlanText", { plan: token });
-      // EVIDENCE: validation: `planText` replies from the same build with the held plan's canonical JSON.
-      const json = (await bridge.client.request("planText", { plan: token })).result as string;
-      const restored = await bridge.restoreKept(
-        token,
-        json,
-        playerRuntimeSnapshotJson(kept),
-        kept.events,
-      );
-      assert.ok(typeof restored === "object", "the kept session restores");
-      host.prepareRestore(restored);
-    } else if (path === "a Start's own session, Continue") {
+    else if (path === "a kept restore, Continue")
+      host.prepareRestore(await hostRestored(host, bridge, plan, kept));
+    else if (path === "a Start's own session, Continue") {
       await host.activate();
       await settle(context);
       assert.notEqual(random.draw.value, null, "the Start waits at its first draw");
       host.prepareRestore(host.session.value!);
     } else {
-      const point = createPlayerRuntimeRestorePoint(kept);
-      host.rewind.publish(({ recorder }) => restorePlayerRuntimeSession(point, recorder), {
-        paused: true,
-        marks: { editedWhileDebugging: null, rewoundWhileDebugging: null },
-      });
-      await settle(context);
+      // Inspected at its first interaction, before the draws, as Debug's rewind restores it.
+      await rewound(context, mounted);
       assert.equal(
         await host.randomTried(site),
         null,
@@ -468,16 +506,12 @@ for (const { path, transition, name } of BOUNDARY_CASES)
       );
       await change();
       assert.equal(await host.randomTried(site), null, `${name}: a settings change adopts nothing`);
-      if (path === "a rewound state, input adopts it") {
-        assert.equal(await host.prepareInput(), true);
-        await settle(context);
-        assert.equal(random.draw.value?.drawId, keptDraw, `${name}: the picker asks at its draw`);
-        assert.notEqual(await host.randomTried(site), null, `${name}: adopted`);
-        return;
-      }
-      host.prepareRestore(host.session.value!);
+      await press(context, host);
+      assert.notEqual(random.draw.value, null, `${name}: the picker asks at its draw`);
+      assert.notEqual(await host.randomTried(site), null, `${name}: adopted`);
+      return;
     }
-    if (!path.startsWith("a rewound state")) await change();
+    await change();
     await host.activate();
     await settle(context);
     assert.equal(random.draw.value, null, `${name}: no draw waits: both went on naturally`);
@@ -488,18 +522,12 @@ for (const { path, transition, name } of BOUNDARY_CASES)
 // The ruling's check: a session adopted once needs no other adoption. A settings change while an input-adopted restore
 // runs applies to it through its ownership: its second draw goes on by itself, decided and recorded by the new setting.
 test("a settings change applies to an input-adopted restore through its ownership", async (context) => {
-  const plan = compiled(TWO_DRAWS);
-  const { host, random } = await mount(context, plan);
+  const plan = compiled(GO_TWO_DRAWS);
+  const mounted = await mount(context, plan);
+  const { host, random } = mounted;
   const [, second = ""] = listRandomSites(plan).map((each) => each.id);
-  const kept = createPlayerRuntimeSession(plan, { randomControl: {} });
-  const point = createPlayerRuntimeRestorePoint(kept);
-  host.rewind.publish(({ recorder }) => restorePlayerRuntimeSession(point, recorder), {
-    paused: true,
-    marks: { editedWhileDebugging: null, rewoundWhileDebugging: null },
-  });
-  await settle(context);
-  assert.equal(await host.prepareInput(), true);
-  await settle(context);
+  await rewound(context, mounted);
+  await press(context, host);
   assert.notEqual(random.draw.value, null, "adopted, it waits at its draw");
   random.setNext(second, "untried");
   assert.equal(await random.resolve("natural"), true);

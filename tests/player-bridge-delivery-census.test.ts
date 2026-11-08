@@ -172,6 +172,19 @@ const MODULE_STATE: Readonly<Record<string, string>> = {
   "inventory.ts › RATCHET": "a constant table",
   "inventory.ts › VIEW_READERS": "a constant table",
   "ops/session.ts › START_OPTIONS": "a constant table",
+  "ops/session.ts › nextHistoryKey":
+    "the realm's lineage-key serial: a scalar, which holds no allocation",
+  "ops/history.ts › CLOSE_REASONS": "a constant table",
+  "history/core.ts › NO_EFFECTS": "a frozen constant",
+  "history/core.ts › HistoryCore.#points":
+    "a history's points, private to its core, which the registry owns",
+  "history/core.ts › HistoryCore.#lastSequence":
+    "a history's last sequence per log, private to its core, which the registry owns",
+  "history/registry.ts › NOTHING": "a frozen constant",
+  "history/snapshots.ts › SnapshotStore.#memory":
+    "a history's snapshots in memory, private to its store, which its core owns",
+  "history/snapshots.ts › SnapshotStore.#spilled":
+    "the IDs of a history's spilled snapshots, private to its store, which its core owns",
 };
 
 /** `node` without the casts and parentheses around it. */
