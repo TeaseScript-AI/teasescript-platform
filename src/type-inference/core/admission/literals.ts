@@ -1685,7 +1685,7 @@ function intermediateDepths(path: readonly string[]): number[] {
 /**
  * #1765: whether each of `depths` along `path` holds `fact` for a side, read by one descent down the path (`layersOf`):
  * through a literal's children and through a carried value's parts alike (Astra r2's B1 on #1789: a carrier's literal
- * was descended once per longer prefix). The two facts' own levels and leaves, side by side:
+ * was descended once per longer prefix). The facts' own levels and leaves, side by side:
  * - `null` (#1765): `mayHoldNull`'s rule;
  * - `dict` (#1762) and `set` (#1825): `collectionOwn` at a value's own level, its items below it (`collectionHeld`).
  */
