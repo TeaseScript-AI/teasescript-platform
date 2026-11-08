@@ -4,11 +4,10 @@ import type {
   InteractionUiPayload,
 } from "../../src/plan/model.js";
 import type {
-  RuntimeActionSettlementSnapshot,
   RuntimeLockActionSnapshot,
   RuntimePendingActionSnapshot,
 } from "../../src/runtime/actions/model.js";
-import type { InterpreterEvent } from "../../src/runtime/events.js";
+import type { ActionCompletedEvent, InterpreterEvent } from "../../src/runtime/events.js";
 import { CANDIDATE_OPS, type CandidateOp } from "./candidates.js";
 import { OUTCOMES, UnfamiliarResult } from "./outcomes.js";
 import type { TapeEntry } from "./tape.js";
@@ -16,8 +15,8 @@ import type { TapeEntry } from "./tape.js";
 /*
  * What a tape met, read from its recorded replies rather than from the proposals that made them: every action kind its
  * publications show in the foreground or the background (an interaction by its UI kind, a temporal one by its temporal
- * kind, a form's field kinds, a lock by its phase), every event kind, every action settlement its results report, and
- * every op it got accepted. `MECHANISMS` is the complete list, each part checked against its runtime type by
+ * kind, a form's field kinds, a lock by its phase), every event kind, every settlement its `actionCompleted` events
+ * report, and every op it got accepted. `MECHANISMS` is the complete list, each part checked against its runtime type by
  * `satisfies`, so a census can name what no tape met.
  */
 
@@ -27,6 +26,7 @@ type ShownKind =
   | `interaction:temporal:${InteractionTemporalKind}`
   | `form field:${FormField["kind"]}`
   | `lock:${RuntimeLockActionSnapshot["phase"]}`;
+type Settlement = ActionCompletedEvent["settlement"];
 type SettlementKey<S> = S extends {
   readonly actionKind: infer A extends string;
   readonly settlementKind: infer K extends string;
@@ -108,7 +108,22 @@ const SETTLEMENTS = {
   "lock:completed:ask": true,
   "lock:completed:submitted": true,
   "lock:completed:cancelled": true,
-} as const satisfies Record<SettlementKey<RuntimeActionSettlementSnapshot>, true>;
+  "timer:finished": true,
+  "timer:stopped": true,
+  "media:finished": true,
+  "media:stopped": true,
+  "permanentButton:removed": true,
+} as const satisfies Record<SettlementKey<Settlement>, true>;
+
+/** A settlement's key: its action kind, its settlement kind and its outcome, when it has one. */
+const settlementKey = (settlement: Settlement): string =>
+  [
+    settlement.actionKind,
+    settlement.settlementKind,
+    "outcome" in settlement ? settlement.outcome : undefined,
+  ]
+    .filter((part) => part !== undefined)
+    .join(":");
 
 const prefixed = (prefix: string, keys: Readonly<Record<string, true>>) =>
   Object.keys(keys).map((key) => `${prefix} ${key}`);
@@ -167,23 +182,13 @@ export function inventoryOf(entries: readonly TapeEntry[]): string[] {
       if (action.kind === "interaction" && action.ui.kind === "form")
         for (const field of action.ui.fields) met.add(`shown form field:${field.kind}`);
     }
-    for (const event of view?.events ?? []) met.add(`event ${event.kind}`);
-    if (!isCandidateOp(entry.op)) continue;
-    const result = entry.reply.result;
-    // EVIDENCE: validation: an op's settled result carries the runtime's settlement snapshot.
-    const settlement = (result as { settlement?: RuntimeActionSettlementSnapshot } | null)
-      ?.settlement;
-    if (settlement !== undefined)
-      met.add(
-        `settlement ${[
-          settlement.actionKind,
-          settlement.settlementKind,
-          "outcome" in settlement ? settlement.outcome : undefined,
-        ]
-          .filter((part) => part !== undefined)
-          .join(":")}`,
-      );
-    if (accepted(entry.op, result)) met.add(`accepted ${entry.op}`);
+    for (const event of view?.events ?? []) {
+      met.add(`event ${event.kind}`);
+      if (event.kind === "actionCompleted")
+        met.add(`settlement ${settlementKey(event.settlement)}`);
+    }
+    if (isCandidateOp(entry.op) && accepted(entry.op, entry.reply.result))
+      met.add(`accepted ${entry.op}`);
   }
   return [...met].sort();
 }
