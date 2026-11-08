@@ -402,14 +402,17 @@ test(
       assert.notEqual(loadError, -1, result.stderr);
       assert.match(lines[loadError], /ForeignSessionError/u);
       lines.splice(loadError, 1);
-      assert.deepEqual(lines.sort(), [
-        "tests/verdicts.test.ts:13: 'captureKeep refuses a foreign session' (#7) failed at the base for another reason than `atBase` names; its error's first line: Expected values to be strictly deep-equal:",
-        "tests/verdicts.test.ts:17: 'an own op passes' (#7) passed at the base, so it does not witness the defect",
-        "tests/verdicts.test.ts:33: 'a CR message' (#7) failed at the base for another reason than `atBase` names; its error's first line: unrelated",
-        "tests/verdicts.test.ts:40: 'after a failing hook' (#7) did not run at the base: it did not start: a hook failed before it",
-        "tests/verdicts.test.ts:43: 'looped pass' (#7) passed at the base, so it does not witness the defect",
-        "tests/cancel.test.ts:6: 'a cancelled case' (#7) started at the base and did not end",
-      ]);
+      assert.deepEqual(
+        lines.sort(),
+        [
+          "tests/verdicts.test.ts:13: 'captureKeep refuses a foreign session' (#7) failed at the base for another reason than `atBase` names; its error's first line: Expected values to be strictly deep-equal:",
+          "tests/verdicts.test.ts:17: 'an own op passes' (#7) passed at the base, so it does not witness the defect",
+          "tests/verdicts.test.ts:33: 'a CR message' (#7) failed at the base for another reason than `atBase` names; its error's first line: unrelated",
+          "tests/verdicts.test.ts:40: 'after a failing hook' (#7) did not run at the base: it did not start: a hook failed before it",
+          "tests/verdicts.test.ts:43: 'looped pass' (#7) passed at the base, so it does not witness the defect",
+          "tests/cancel.test.ts:6: 'a cancelled case' (#7) started at the base and did not end",
+        ].sort(),
+      );
       assert.match(
         result.stdout,
         new RegExp(
