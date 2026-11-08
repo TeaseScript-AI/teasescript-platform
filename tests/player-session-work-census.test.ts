@@ -573,6 +573,7 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerSession.ts usePlayerSession > publishJump {publishJump}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > randomTried {randomTried}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > reportHostError {reportHostError}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > reportReinstatementFailure {reportReinstatementFailure}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > resolveRandomDraw {resolveRandomDraw}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > clearScriptStorage {clearScriptStorage}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > serviceSection {serviceSection}",

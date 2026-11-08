@@ -2965,8 +2965,18 @@ async function rewindSwitchScenario(cdp, origin) {
       // Debug off's reinstatement fails at its gate: the failure stops the Player, and Retry return to session shows,
       // with Debug off.
       await inspect("fail");
-      // The Debug panel's launcher shows at desktop width; the phone's screenshot follows at its own.
-      await setViewport(cdp, 1440, 900);
+      // The Debug panel opens from the tools: on a phone, from the drawer that Show sidebar opens, through its Tools menu.
+      if (device === "phone") {
+        await physicalClick(cdp, '[aria-label="Show sidebar"]');
+        await waitFor(
+          cdp,
+          `!!document.querySelector('[data-show-tools]') || ${visible('[data-tools-focus="launcher:Debug"]')}`,
+          8_000,
+          "Show sidebar opened no drawer",
+        );
+        if (await value(cdp, `!!document.querySelector('[data-show-tools]')`))
+          await physicalClick(cdp, "[data-show-tools]");
+      }
       await physicalClick(cdp, '[data-tools-focus="launcher:Debug"]');
       await waitFor(cdp, visible("[data-debug-active]"), 8_000, "The Debug panel did not open");
       await physicalClick(cdp, "[data-debug-active]");
@@ -2976,15 +2986,23 @@ async function rewindSwitchScenario(cdp, origin) {
         8_000,
         `A failed reinstatement, ${mode} ${device}: no retry`,
       );
-      await physicalClick(cdp, '[data-tools-focus="launcher:Debug"]');
-      await waitFor(cdp, `!document.querySelector('[data-tool="Debug"]')`);
-      await setViewport(cdp, width, height);
-      await waitFor(
-        cdp,
-        visible("[data-rewind-retry]"),
-        8_000,
-        `The retry, ${mode} ${device}: not shown`,
-      );
+      // The panel closes: on a phone, with the drawer.
+      if (device === "phone") {
+        await physicalClickOn(
+          cdp,
+          `[...document.querySelectorAll('[aria-label="Hide sidebar"]')].find((each) => each.checkVisibility())`,
+          "the drawer's Hide sidebar",
+        );
+        await waitFor(
+          cdp,
+          visible("[data-rewind-retry]"),
+          8_000,
+          `The retry, ${mode} ${device}: not shown`,
+        );
+      } else {
+        await physicalClick(cdp, '[data-tools-focus="launcher:Debug"]');
+        await waitFor(cdp, `!document.querySelector('[data-tool="Debug"]')`);
+      }
       await save(`retry-${mode}-${device}`);
       // The retry brings the session Back left back, which takes input again.
       await physicalClick(cdp, "[data-rewind-retry]");
