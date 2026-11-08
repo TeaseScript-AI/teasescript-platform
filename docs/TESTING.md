@@ -199,10 +199,10 @@ it asks for review and before READY: `node tools/repository-checks/pin-suites.mj
 only with its ground: a comment at the pin, or in its test's header, naming how many units more or fewer and the change
 that moved them ("18 units more at demand 64 since #1828: …" above the closure suite's list-join row; "6 fewer since
 #1901 …" in the contract-capture test's opening comment). Grounds are the reviewer's to check: for each changed pin line
-of the diff, the reviewer finds its ground, and checks that no part of the change is a repeated question, work the core
-already did once, done again. A mechanical check of grounds was tried and dropped (#2051): reading a pin's text, it
-stayed open to a pin written in a form it did not read. A change to a test helper lists only a suite whose pins it
-holds, not every suite that imports it.
+of the diff, the reviewer finds its ground and checks that the units added are not a question the core already answered
+once (a repeated question). A mechanical check of grounds was tried and dropped (#2051): reading a pin's text, it stayed
+open to a pin written in a form it did not read. A change to a test helper lists only a suite whose pins it holds, not
+every suite that imports it.
 
 ## Test admission and consolidation
 
