@@ -10,7 +10,12 @@ import type { CoreResult } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
-import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
+import {
+  HELD_S10_RECORDS,
+  heldBack,
+  readFixture,
+  type FixtureRecord,
+} from "./helpers/type-core-fixture.js";
 import { inMode, MODES, stopIdentity } from "./helpers/type-core-oracles.js";
 import {
   BOUNDED_ADMISSION_WITNESSES,
@@ -50,14 +55,20 @@ test("the core gives the expected record for every record of the cells it comple
   }
   assert.deepEqual(Object.fromEntries(held), {
     "the adapters' records (S9b)": 3,
-    "stage 3b's cells (S10)": 306,
+    "the route rule's corridor across locations (#1938)": 19,
+    "a static warning of S9b's otherwise (#1737)": 7,
+    "U4's consumer remainder (#2025)": 3,
+    "a fixture expectation awaiting its ruling (#2025)": 3,
+    "the numeric crossover (#1173, #2025)": 1,
+    "a fixture expectation defect (#2025)": 1,
+    "a context word under an unrelated test (#2024)": 1,
     "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
     "S9b's F18 copy of a written type as the receiving context (r4.77 (2))": 18,
     "fromJson with files: true outside the slice, and C13's text operand": 2,
     "a known-value error the record lacks (decision 3 on #1072)": 1,
     "C13's warning of a choice value from outside the script the record lacks (#1437)": 3,
   });
-  assert.equal(asserted.length, 1_679);
+  assert.equal(asserted.length, 1_950);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
@@ -70,6 +81,29 @@ test("the core gives the expected record for every record of the cells it comple
   // (TABLE §3.4, D2, r4.62: every site compares whole, a member read's and an operator's included)
   t.diagnostic(`${asserted.length} records compared by whole sites`);
   assert.deepEqual(failures, []);
+});
+
+/**
+ * The completeness check of stage 3b's closed hold list (#1073 U6): each held name is a fixture record with an `N` cell
+ * whose analysis still differs from its record, so a hold cannot outlive its cause; and every other record with an `N`
+ * cell is asserted, by the test above.
+ */
+test("each stage 3b record held by name exists, has an N cell and still differs (#1073 U6)", () => {
+  const byName = new Map(records.map((record) => [record.name, record]));
+  const wrong: string[] = [];
+  for (const [name, reason] of HELD_S10_RECORDS) {
+    const record = byName.get(name);
+    if (record === undefined) {
+      wrong.push(`${name}: no such record`);
+      continue;
+    }
+    if (!record.cells.some((cell) => /^N\d/.test(cell))) wrong.push(`${name}: no N cell`);
+    if (heldBack(record) !== reason) wrong.push(`${name}: held by another reason`);
+    if (recordDifferences(record.expected, analysed(record)).length === 0)
+      wrong.push(`${name}: matches its record, so it is no longer held (${reason})`);
+  }
+  assert.deepEqual(wrong, []);
+  assert.equal(HELD_S10_RECORDS.size, 35);
 });
 
 /**
