@@ -65,6 +65,12 @@ interface RewindHost {
     readonly canRewind: Readonly<Ref<boolean>>;
     readonly adopting: Readonly<Ref<boolean>>;
     beforeRestart(): void | Promise<void>;
+    readonly switching: Readonly<Ref<"returning" | "continuing" | "restoring" | null>>;
+    readonly inputHeld: Readonly<Ref<boolean>>;
+    readonly switchIndicator: Readonly<Ref<boolean>>;
+    readonly switchAnnouncement: Readonly<Ref<string>>;
+    readonly returnFailed: Readonly<Ref<boolean>>;
+    retryReturn(): boolean;
     /** The Player's rewind owner (`rewindOwner.ts`): the history view it shows. */
     readonly owner: {
       readonly view: Readonly<Ref<DebugHistoryView | null>>;
@@ -73,6 +79,7 @@ interface RewindHost {
       retryReturn(): boolean;
     } & MutableOwner;
   };
+  readonly stopped: Readonly<Ref<boolean>>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(
@@ -148,6 +155,8 @@ interface Rewind {
   returnToSession(): Promise<boolean>;
   endWithPlayer(): void;
 }
+/** The composable's delay before a rewind switch's animation shows (`usePlayerSession.ts`). */
+let REWIND_SWITCH_INDICATOR_DELAY_MS: number;
 let usePlayerSession: (options: {
   bridge?: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
@@ -205,6 +214,9 @@ before(async () => {
   assert.equal(typeof rewind.useDebugRewind, "function");
   // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
   usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
+  assert.equal(typeof session.REWIND_SWITCH_INDICATOR_DELAY_MS, "number");
+  // EVIDENCE: validation: checked to be a number just above.
+  REWIND_SWITCH_INDICATOR_DELAY_MS = session.REWIND_SWITCH_INDICATOR_DELAY_MS as number;
   // EVIDENCE: validation: as above.
   useDebugRewind = rewind.useDebugRewind as typeof useDebugRewind;
 });
@@ -2358,4 +2370,112 @@ test("an obsolete Back gate's failure leaves no problem on the replacement's his
   context.after(() => again.stop());
   await settle(context);
   assert.equal(rewind.problem.value, null);
+});
+
+/** What the Player shows of a switch now: its kind, whether it holds input, its announcement and its animation. */
+const switchShown = (host: RewindHost) => ({
+  switching: host.rewind.switching.value,
+  held: host.rewind.inputHeld.value,
+  announcement: host.rewind.switchAnnouncement.value,
+  indicator: host.rewind.switchIndicator.value,
+});
+
+for (const kind of [
+  "restoring from the live session",
+  "restoring",
+  "continuing",
+  "returning",
+  "reinstating",
+] as const)
+  test(`a rewind switch (${kind}) holds what it refuses at once, and its animation shows only after the delay`, async (context) => {
+    const storage = memoryStorage();
+    const made = createHost(context, storage.provider);
+    const { host, rewind } = made;
+    await start(context, host);
+    await choose(context, host, "One");
+    await choose(context, host, "Red");
+    if (kind !== "restoring from the live session") {
+      assert.equal(await backTo(rewind, 1), true);
+      await settle(context);
+    }
+    // The switch held where it waits: a step's snapshot read, the adoption's provider write, or a restart gate.
+    let release: () => void;
+    if (kind.startsWith("restoring")) release = made.holdGets();
+    else if (kind === "continuing") release = storage.holdReplaces();
+    else {
+      let open!: () => void;
+      const gate = new Promise<void>((resolve) => (open = resolve));
+      const original = host.rewind.beforeRestart.bind(host.rewind);
+      host.rewind.beforeRestart = async () => {
+        await gate;
+        await original();
+      };
+      release = () => open();
+    }
+    const switched =
+      kind === "restoring from the live session" || kind === "restoring"
+        ? backTo(rewind, 0)
+        : kind === "continuing"
+          ? rewind.resume()
+          : kind === "returning"
+            ? rewind.returnToSession()
+            : Promise.resolve(made.debug.stop());
+    // At once: the switch names itself and holds the inspected state's input; no animation yet.
+    const named: "restoring" | "continuing" | "returning" =
+      kind === "restoring from the live session" || kind === "restoring"
+        ? "restoring"
+        : kind === "reinstating"
+          ? "returning"
+          : kind;
+    const announcement = {
+      restoring: "Restoring an earlier state",
+      continuing: "Continuing from this state",
+      returning: "Returning to session",
+    }[named];
+    assert.deepEqual(switchShown(host), {
+      switching: named,
+      held: kind !== "restoring from the live session",
+      announcement,
+      indicator: false,
+    });
+    context.mock.timers.tick(REWIND_SWITCH_INDICATOR_DELAY_MS - 1);
+    assert.equal(host.rewind.switchIndicator.value, false, "not before the delay");
+    context.mock.timers.tick(1);
+    assert.equal(host.rewind.switchIndicator.value, true, "once the switch has lasted");
+    release();
+    await switched;
+    await settle(context);
+    assert.deepEqual(switchShown(host), {
+      switching: null,
+      held: false,
+      announcement: "",
+      indicator: false,
+    });
+  });
+
+test("a failed reinstatement offers its retry over the Player's lifetime, which returns to the session", async (context) => {
+  const made = createHost(context, memoryStorage().provider);
+  const { host } = made;
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  await start(context, host);
+  await choose(context, host, "One");
+  const live = shownView(host);
+  assert.equal(await backTo(made.rewind, 0), true);
+  // Debug off, whose restart gate fails.
+  const original = host.rewind.beforeRestart.bind(host.rewind);
+  host.rewind.beforeRestart = () => Promise.reject(new Error("The restart gate failed."));
+  made.debug.stop();
+  await settle(context);
+  assert.equal(reported.length, 1, "the failure is reported");
+  assert.equal(host.rewind.returnFailed.value, true, "the retry is offered, with Debug off");
+  // The retry goes through the gate again: the offer goes once the return begins, and the session returns.
+  host.rewind.beforeRestart = original;
+  assert.equal(host.rewind.retryReturn(), true);
+  assert.equal(host.rewind.returnFailed.value, false, "the offer goes once the return begins");
+  assert.equal(host.rewind.switching.value, "returning");
+  await settle(context);
+  assert.equal(shownView(host).lineage, live.lineage, "the session Back left shows again");
+  assert.equal(host.rewind.inspecting.value, false);
+  assert.equal(host.stopped.value, false, "and takes input again");
 });

@@ -56,14 +56,21 @@ export function useDevelopmentTime(
 
   const state = computed(() => player.session.value?.state ?? null);
   // A session that a Player error stopped takes no time any more.
+  // While a switch of Debug's rewind is under way, an inspected state takes no time either (DEBUGGER.md "Rewind").
   const canSkip = computed(
-    () => !jumping.value && !player.stopped.value && state.value !== null && skippable(state.value),
+    () =>
+      !jumping.value &&
+      !player.stopped.value &&
+      !player.rewind.inputHeld.value &&
+      state.value !== null &&
+      skippable(state.value),
   );
   // A session that ended has no scene time left to advance.
   const canAdvance = computed(
     () =>
       !jumping.value &&
       !player.stopped.value &&
+      !player.rewind.inputHeld.value &&
       state.value !== null &&
       state.value.status !== "halted" &&
       state.value.status !== "failed",

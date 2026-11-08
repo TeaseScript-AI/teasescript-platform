@@ -496,6 +496,19 @@ export function createRewindOwner(host: RewindOwnerHost) {
       if (state.closing === "failed") return "failed";
       return state.closing !== null || state.returning ? "pending" : null;
     }),
+    /**
+     * The switch under way, for presentation, from this state alone: `returning` while a Return or Debug off's
+     * reinstatement waits, `continuing` while an adoption runs, `restoring` while a step restores a state; `null`
+     * otherwise. While one is under way, the function refuses the controls DEBUGGER.md "Rewind" names.
+     */
+    switching: computed((): "returning" | "continuing" | "restoring" | null => {
+      void revision.value;
+      if (state.sealed !== null) return null;
+      if (state.returning || state.closing === "gate" || state.closing === "adoption")
+        return "returning";
+      if (state.adopting) return "continuing";
+      return state.step !== null ? "restoring" : null;
+    }),
     /** Applies the deltas `session`'s publication carries, once per publication. */
     follow(session: PlayerSession | null) {
       if (session === null) return;

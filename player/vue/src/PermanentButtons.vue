@@ -5,7 +5,8 @@ import type { PlayerPermanentButtonPresentation } from "../../model.js";
 
 // The script's permanent buttons in creation order. A button whose block runs stays in place, inactive, and keeps
 // keyboard focus; when a focused button is removed, focus moves to the button that takes its place.
-const props = defineProps<{ buttons: readonly PlayerPermanentButtonPresentation[] }>();
+// While `held`, a switch of Debug's rewind is under way, and every button is inactive.
+const props = defineProps<{ buttons: readonly PlayerPermanentButtonPresentation[]; held?: boolean }>();
 const emit = defineEmits<{ press: [buttonId: number] }>();
 const group = ref<HTMLElement | null>(null);
 
@@ -26,7 +27,7 @@ watch(
 );
 
 function press(button: PlayerPermanentButtonPresentation) {
-  if (!button.busy) emit("press", button.buttonId);
+  if (!button.busy && !props.held) emit("press", button.buttonId);
 }
 </script>
 
@@ -36,7 +37,7 @@ function press(button: PlayerPermanentButtonPresentation) {
       v-for="button in buttons"
       :key="button.buttonId"
       :label="button.label"
-      :inactive="button.busy"
+      :inactive="button.busy || held"
       :data-permanent-button="button.buttonId"
       @click="press(button)"
     />

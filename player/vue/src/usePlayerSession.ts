@@ -160,6 +160,11 @@ const SILENCE = silence(50);
 
 // Media progress is sampled this often while media loads or plays; cues fire at this resolution.
 const MEDIA_SAMPLE_MS = 100;
+/**
+ * How long a rewind switch runs before its loading animation shows (DEBUGGER.md "Rewind"), so a fast switch shows
+ * nothing extra and nothing flickers.
+ */
+export const REWIND_SWITCH_INDICATOR_DELAY_MS = 400;
 
 export interface PlayerSessionOptions {
   /**
@@ -3269,7 +3274,53 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
   }
 
+  // A rewind switch shows its loading animation only once it has lasted this long, so a fast one shows nothing extra.
+  const switchIndicator = ref(false);
+  let switchTimer: ReturnType<typeof setTimeout> | null = null;
+  watch(
+    () => rewindOwner.switching.value,
+    (switching, before) => {
+      if (switching !== null && before !== null) return;
+      if (switchTimer !== null) clearTimeout(switchTimer);
+      switchTimer = null;
+      switchIndicator.value = false;
+      if (switching !== null)
+        switchTimer = setTimeout(() => {
+          switchTimer = null;
+          switchIndicator.value = true;
+        }, REWIND_SWITCH_INDICATOR_DELAY_MS);
+    },
+    { flush: "sync" },
+  );
+  tryOnScopeDispose(() => {
+    if (switchTimer !== null) clearTimeout(switchTimer);
+  });
+
   const rewindApi = {
+    /**
+     * The rewind switch under way (`rewindOwner.switching`): `restoring`, `continuing` or `returning`, or `null`. While
+     * one is, the controls it refuses are disabled.
+     */
+    switching: rewindOwner.switching,
+    /** Whether the input an inspected state takes is refused now: a switch is under way while a state is inspected. */
+    inputHeld: computed(() => rewindOwner.switching.value !== null && inspecting.value),
+    /** What a screen reader hears of the switch under way, politely; empty when none is. */
+    switchAnnouncement: computed(() => {
+      const switching = rewindOwner.switching.value;
+      return switching === "returning"
+        ? "Returning to session"
+        : switching === "continuing"
+          ? "Continuing from this state"
+          : switching === "restoring"
+            ? "Restoring an earlier state"
+            : "";
+    }),
+    /** Whether the switch under way has lasted long enough to show its loading animation. */
+    switchIndicator: computed(() => switchIndicator.value),
+    /** Whether Debug off's reinstatement failed at its gate, which `retryReturn` retries; for the Player's lifetime. */
+    returnFailed: computed(() => rewindOwner.reinstatement.value === "failed"),
+    /** Retries the failed reinstatement through its gate; returns whether it began. */
+    retryReturn: () => rewindOwner.retryReturn(),
     /** Whether a restored state is shown for inspection, which runs only once input adopts it. */
     inspecting: computed(() => inspecting.value),
     /** Whether a restored state is being adopted: its saved data are being replaced. */

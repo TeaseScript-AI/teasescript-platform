@@ -42,6 +42,7 @@ import SessionErrorDialog from "./SessionErrorDialog.vue";
 import RandomDrawPicker from "./RandomDrawPicker.vue";
 import { useRandomDrawGuard } from "./useRandomDrawGuard";
 import RewindInspection from "./RewindInspection.vue";
+import RewindStatus from "./RewindStatus.vue";
 import { rewindRows } from "./rewindPresentation";
 import { useDebugExport } from "./useDebugExport";
 import { playerNoticeKeys, playerNotices } from "../../notices.js";
@@ -365,6 +366,7 @@ provide(rewindRows, {
   offers: (entryId) =>
     rewindPoints.value.has(entryId) &&
     props.player.rewind.canRewind.value &&
+    props.player.rewind.switching.value === null &&
     debug.rewind.value?.busy.value === false,
   back(entryId) {
     const point = rewindPoints.value.get(entryId);
@@ -737,6 +739,7 @@ async function toggleFullscreen() {
               <template v-if="player.permanentButtons.value.length" #controls>
                 <PermanentButtons
                   :buttons="player.permanentButtons.value"
+                  :held="player.rewind.inputHeld.value"
                   @press="player.pressPermanentButton"
                 />
               </template>
@@ -757,6 +760,7 @@ async function toggleFullscreen() {
           :input-section="player.inputSection"
           :prepare-input="player.prepareInput"
           :hold-form-drafts="player.rewind.inspecting.value"
+          :held="player.rewind.inputHeld.value"
           :images="player.images"
           :capture="player.imageCapture"
           :debug-countdown="debug.countdownText.value"
@@ -778,6 +782,15 @@ async function toggleFullscreen() {
               :rewind="debug.rewind.value"
               :adopting="player.rewind.adopting.value"
               :working="player.rewind.working.value"
+              :switching="player.rewind.switching.value !== null"
+            />
+            <!-- The Player's own: it stays after Debug off, where a failed return to the session is retried. -->
+            <RewindStatus
+              :busy="player.rewind.switching.value !== null"
+              :announcement="player.rewind.switchAnnouncement.value"
+              :indicator="player.rewind.switchIndicator.value"
+              :return-failed="player.rewind.returnFailed.value"
+              @retry="player.rewind.retryReturn()"
             />
           </template>
         </RuntimeInteraction>

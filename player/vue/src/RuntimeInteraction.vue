@@ -78,6 +78,8 @@ const props = defineProps<{
    * rewind restored, which takes it with the next form input once that input adopted the state.
    */
   holdFormDrafts?: boolean;
+  /** While true, the controls take no input: a switch of Debug's rewind is under way (DEBUGGER.md "Rewind"). */
+  held?: boolean;
   /** Stores an image file chosen for `askImage`; without it an image request offers no file input. */
   images?: PlayerImageInput;
   /** The steps of a presented `askImage` request, whose "Use image" answers it with the preview. */
@@ -821,7 +823,7 @@ function submit(source: "input" | "button") {
 </script>
 
 <template>
-  <div ref="root" data-runtime-interaction class="contents">
+  <div ref="root" data-runtime-interaction class="contents" :aria-busy="held || undefined">
     <ConversationSurface>
       <template #default="{ bottomInset }">
         <Transcript
@@ -839,7 +841,7 @@ function submit(source: "input" | "button") {
               :key="actionId ?? 0"
               :form="form"
               :accessible-name="foreground.accessibleName"
-              :disabled="submitting"
+              :disabled="submitting || !!held"
               @step="(fieldId) => complete(intents.formStep(fieldId, formDraft()), false)"
               @submit="complete(intents.formSubmit(formDraft(), 'button'))"
               @cancel="complete(intents.formCancel('button'))"
@@ -850,7 +852,7 @@ function submit(source: "input" | "button") {
               v-else
               :key="actionId ?? 0"
               :foreground="foreground"
-              :disabled="submitting || readingImage"
+              :disabled="submitting || readingImage || !!held"
               :image="imageControls"
               @activate="(optionId) => complete(intents.choice(optionId, 'button'))"
               @skip="complete(intents.imageSkip('button'))"
@@ -906,6 +908,7 @@ function submit(source: "input" | "button") {
         <Composer
           ref="composer"
           :disabled="
+            !!held ||
             (!foreground && !pacing && !lockField) ||
             foreground?.kind === 'popup' ||
             foreground?.kind === 'export-text' ||

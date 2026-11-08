@@ -9,7 +9,13 @@ import type { DebugRewind } from "./useDebugRewind";
 
 // Debug's rewind while a restored state is inspected (DEBUGGER.md "Rewind"): it says the session is a Debug fork,
 // what was answered here before, and offers Forward, Resume, and Return to session. Back is each answer's Back to here.
-const props = defineProps<{ rewind: DebugRewind; adopting: boolean; working: boolean }>();
+const props = defineProps<{
+  rewind: DebugRewind;
+  adopting: boolean;
+  working: boolean;
+  /** Whether a switch of the rewind is under way (`switching`), which refuses every control here. */
+  switching: boolean;
+}>();
 
 const state = computed(() => props.rewind.state.value);
 // The answer the interaction shown got before the rewind, when the state shown is a point.
@@ -18,7 +24,7 @@ const earlier = computed(() => {
   const point = inspection === null ? undefined : points[inspection.points - 1];
   return point !== undefined && point.id === shown?.id ? (point.response?.text ?? null) : null;
 });
-const idle = computed(() => !props.working && !props.rewind.busy.value);
+const idle = computed(() => !props.working && !props.switching && !props.rewind.busy.value);
 </script>
 
 <template>
