@@ -1,0 +1,6 @@
+[
+  {
+    "cycle": ["src/type-inference/core/narrowing-statements.ts", "src/type-inference/core/narrowing.ts"],
+    "waits": "the O4 lead's structure plan, after the open compiler pull requests: the shared part moves out of the pair"
+  }
+]
