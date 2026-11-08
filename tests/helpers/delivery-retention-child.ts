@@ -159,7 +159,8 @@ function connection(): Connection {
 
 /**
  * A session's plan, marked with `planMarker`, that loads its saved value and says it, so the session's own marker (the
- * saved value's) sits in its engine state, its publication's view and transcript, and its events.
+ * saved value's) sits in its engine state, its transcript and its events. Its publication's state view does not carry
+ * it; weak references to its original public graph cover that view.
  */
 function sessionProject(planMarker: string) {
   return {
@@ -180,8 +181,8 @@ function sessionProject(planMarker: string) {
 }
 
 /**
- * A plan for the source-view caches: its path and texts carry `planMarker`, and only its comments carry `marker`, which
- * the plan does not keep, but its sources and the caches made from them do.
+ * A plan for the source-view caches: its code carries `planMarker`, and only its comments carry `marker`, which the
+ * plan does not keep, but its sources and the caches made from them do.
  */
 function cacheProject(planMarker: string, marker: string) {
   return {
@@ -213,7 +214,6 @@ function markedTransfer(marker: string): Promise<string> {
   );
 }
 
-/** Runs `allocation`'s op on `link` for `marker`: its prerequisites first, committed, then the op itself. */
 /**
  * Runs `allocation`'s op on `link`: its prerequisite plan first, committed, marked with `planMarker`, then the op itself,
  * whose own input carries `marker` where one can (a plan, sources, a transfer, a session's saved data).
@@ -252,7 +252,7 @@ async function allocate(
         const plan = await prepared({ kind: "source", script: cacheProject(planMarker, marker) });
         cachePlan = plan;
         const metadata = await link.request("planMetadata", { plan });
-        // EVIDENCE: fixture: `planMetadata` of a held plan gives its random sites, and the project has two.
+        // EVIDENCE: fixture: `planMetadata` of a held plan gives its random sites.
         const site = (metadata.result as { randomSites: readonly { path: string }[] })
           .randomSites[0]!;
         return { plan, path: site.path, site };
@@ -270,7 +270,6 @@ async function allocate(
   return watched;
 }
 
-/** Every case of the child, grouped by class; returns, per case, how many of its weak references still hold. */
 /**
  * What every session's publication reaches whatever it ran (the engine's module constants, such as its default
  * speakers): found from a publication of an unmarked session, so the publication net counts only what a case's own
@@ -293,6 +292,7 @@ async function sharedReach(): Promise<void> {
   }
 }
 
+/** Every case of the child, grouped by class; returns, per case, how many of its weak references still hold. */
 async function runCases() {
   await sharedReach();
   const cases = childCases();
