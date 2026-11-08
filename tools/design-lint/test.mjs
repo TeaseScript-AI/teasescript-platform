@@ -201,7 +201,7 @@ const representatives = [
 // sample of it, as the property campaign does (docs/LINTING.md): DESIGN_LINT_MATRIX_SEED picks another sample, and
 // DESIGN_LINT_MATRIX=full checks every row.
 const matrixSeed = Number(process.env.DESIGN_LINT_MATRIX_SEED ?? 2102);
-const matrixSize = process.env.DESIGN_LINT_MATRIX === "full" ? Infinity : 500;
+const matrixSize = process.env.DESIGN_LINT_MATRIX === "full" ? representatives.length ** 2 : 500;
 /** The matrix rows this run checks: `matrixSize` of them, chosen by `matrixSeed`, or all. */
 function matrixRows() {
   const rows = representatives.flatMap((first) =>
