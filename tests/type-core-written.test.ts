@@ -16,7 +16,7 @@ import {
 import { coreRecord, type WrittenTypeError } from "../src/type-inference/core/result.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { Admission } from "../src/type-inference/core/admission.js";
-import { inheritedAt } from "../src/type-inference/core/admission/inherited.js";
+import { inheritedAt } from "../src/type-inference/core/inherited/inherited.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { writtenTypeErrors } from "../src/type-inference/core/written.js";

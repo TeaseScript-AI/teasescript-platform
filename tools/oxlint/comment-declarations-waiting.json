@@ -168,7 +168,7 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/admission/inherited.ts",
+    "file": "src/type-inference/core/inherited/inherited.ts",
     "kind": "docblock",
     "text": "Whether a written type a copy decides at a prefix of a path leaves the path unrestricted (A4 through copies, the",
     "waits": "the O4 lead's cleanup"
@@ -318,7 +318,7 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/receiving-domain.ts",
+    "file": "src/type-inference/core/inherited/receiving-domain.ts",
     "kind": "reference",
     "text": "#retakenOf",
     "waits": "the O4 lead's cleanup"

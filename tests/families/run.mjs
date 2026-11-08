@@ -17,16 +17,14 @@
 // run that takes longer than `--timeout` seconds, the safety net, does work no ledger charges: it is counted apart
 // (`uncharged`, named by its run, on stderr and in `--out`), never a stall, and the next source runs. A run
 // that throws on either tree is an exception, never compared (#1439): printed to stderr with its source, mode and
-// check, and kept with its stack in `--out`, as is a difference, also where the source stalls later. A publication whose
-// oracle left nodes unanswered at its own budget stop (`publicationHashes`'s `unanswered`) on either tree agrees only
-// where both trees left the same count unanswered and published the same parts up to it (`unansweredAlike`, #1592,
-// counted apart from agreement); any other is neither agreement nor a difference, and is counted apart (`unanswered`)
-// and kept in `--out`. With `--baseline`, the head alone runs, and each run is judged against the stored base result of
-// the same source, mode and check (a source with each run it does not hold is kept in `--out` as `uncompared`, never
-// agreement); `--store` runs one tree of a commit (sx-tree's, with `src/` and `.sha`) at the runner's defaults and
-// stores one shard of each source's results, one JSON line each, in the baseline of its `src/` tree (`baselines.mjs`),
-// whose area folder `--baseline` then reads, only where the area is complete under the rule status shares
-// (`storedRuns`); it is refused as status refuses it otherwise (exit 1 or 2).
+// check, and kept with its stack in `--out`, as is a difference, also where the source stalls later. A publication
+// whose oracle left nodes unanswered on either tree is judged as the README's contract says (`judged`: a difference
+// where what both answered differs, else `unansweredAlike` or `unanswered`). With `--baseline`, the head alone runs,
+// and each run is judged against the stored base result of the same source, mode and check (a source with each run it
+// does not hold is kept in `--out` as `uncompared`, never agreement); `--store` runs one tree of a commit (sx-tree's,
+// with `src/` and `.sha`) at the runner's defaults and stores one shard of each source's results, one JSON line each,
+// in the baseline of its `src/` tree (`baselines.mjs`), whose area folder `--baseline` then reads, only where the area
+// is complete under the rule status shares (`storedRuns`); it is refused as status refuses it otherwise (exit 1 or 2).
 // A stored run holds its charged units and allowance (a plan 2 area's, #1647), a stall over the unit limit the run it
 // cut. `--work` keeps a record of each source: each run's charged work (the units its analyses charge their work
 // ledgers), allowance and milliseconds on each tree (with `--baseline`, the stored base's units first), a stalled run's
@@ -35,7 +33,7 @@
 // places its file lists (`items.mjs sources`, #1826), its `--work` record named `items <hash>` in place of a shard.
 // Prints one JSON line per generator and a total: sources, unparsed, stalled, exceptions, unanswered, unansweredAlike,
 // uncompared, uncharged, modes, runs, differences.
-import { fork } from "node:child_process";
+import { fork, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
@@ -138,6 +136,42 @@ function partHashes(oracle, files, mode, globals) {
 }
 
 /**
+ * The heap limit, in MB, V8 gives a Node process (`heapLimitWith`): V8's own figure, read in that process, so that
+ * `NODE_OPTIONS` is read by Node itself, never by this runner. In this process's environment with
+ * `--max-old-space-size=<memory>` given (`memory`), as each source's process is, or without (`alone`: what
+ * `NODE_OPTIONS` alone gives); or without `NODE_OPTIONS` (`none`). Undefined where the probe failed or printed no
+ * positive number.
+ */
+function heapLimitWith(memory) {
+  const withoutOptions = { ...process.env };
+  delete withoutOptions.NODE_OPTIONS;
+  const said =
+    memory === "alone"
+      ? spawnSync(
+          process.execPath,
+          ["-p", "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)"],
+          { encoding: "utf8" },
+        )
+      : memory === "none"
+        ? spawnSync(
+            process.execPath,
+            ["-p", "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)"],
+            { encoding: "utf8", env: withoutOptions },
+          )
+        : spawnSync(
+            process.execPath,
+            [
+              `--max-old-space-size=${memory}`,
+              "-p",
+              "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)",
+            ],
+            { encoding: "utf8" },
+          );
+  const printed = said.status === 0 ? said.stdout?.trim() : undefined;
+  return /^[1-9]\d*$/.test(printed ?? "") ? Number(printed) : undefined;
+}
+
+/**
  * A publication's hashes with why it left nodes unanswered: the oracle's reason with its first node left, or the
  * binding where its answers' questions stopped, in a form a record holds (`run-contract.mjs`), else `unknown` (no node
  * named).
@@ -191,27 +225,58 @@ function firstPart(was, is) {
 }
 
 /**
+ * Whether two publications agree on what both answered, where either left nodes unanswered (#1837): the answers and the
+ * record (unless either's answers stopped at a binding, where both are its stop's), each occurrence both answered, and
+ * the route, by their hashes. `equal`; `{ differs }`, the first part that differs (its index, or `route`); or
+ * `uncomparable` where either holds no parts (no base, or a stored base before #1503).
+ */
+function answeredPrefix(was, is) {
+  const [base, head] = [was?.value?.parts, is.value.parts];
+  if (!Array.isArray(base) || !Array.isArray(head)) return "uncomparable";
+  const atBinding = [was.value, is.value].some(
+    (value) => value.unansweredBy?.binding !== undefined,
+  );
+  const occurrences = Math.max(0, Math.min(base.length, head.length) - 3);
+  const compared = [
+    ...(atBinding ? [] : [0, 1]),
+    ...Array.from({ length: occurrences }, (_, index) => 2 + index),
+  ];
+  const differs = compared.find((part) => base[part] !== head[part]);
+  if (differs !== undefined) return { differs };
+  return base.at(-1) === head.at(-1) ? "equal" : { differs: "route" };
+}
+
+/**
  * A run's outcome from the base's result (`was`, run or stored; none where the baseline has none) and the head's
  * (`is`): an exception on either, never compared (#1439); nodes left unanswered on either, agreement apart
  * (`unansweredAlike`, #1592) only where the base's result holds its parts and both trees left the same count
- * unanswered and published the same answered part (the parts up to the stop, by their hash), else `unanswered`; with no
- * base, `uncompared`, never agreement; else a difference, or nothing where they agree.
+ * unanswered and published the same answered part (the parts up to the stop, by their hash), else `unanswered`, each
+ * with whether what both answered agrees (`prefix`, `answeredPrefix`), a difference where it does not; with no base,
+ * `uncompared`, never agreement; else a difference, or nothing where they agree.
  */
 function judged(was, is) {
   if (was?.thrown !== undefined || is.thrown !== undefined)
     return { thrown: { base: was?.thrown, head: is.thrown } };
-  if (was?.value.unanswered > 0 || is.value.unanswered > 0)
+  if (was?.value.unanswered > 0 || is.value.unanswered > 0) {
+    const by = { base: reasonOf(was?.value), head: reasonOf(is.value) };
+    const prefix = answeredPrefix(was, is);
+    if (prefix.differs !== undefined)
+      return {
+        difference: {
+          base: was.value.hash.slice(0, 16),
+          head: is.value.hash.slice(0, 16),
+          part: prefix.differs,
+          parts: [was.value.parts.length, is.value.parts.length],
+          unanswered: { base: was.value.unanswered, head: is.value.unanswered },
+          by,
+        },
+      };
     return Array.isArray(was?.value.parts) &&
       was.value.unanswered === is.value.unanswered &&
       was.value.hash === is.value.hash
-      ? {
-          unansweredAlike: is.value.unanswered,
-          by: { base: reasonOf(was?.value), head: reasonOf(is.value) },
-        }
-      : {
-          unanswered: { base: was?.value.unanswered, head: is.value.unanswered },
-          by: { base: reasonOf(was?.value), head: reasonOf(is.value) },
-        };
+      ? { unansweredAlike: is.value.unanswered, by, prefix }
+      : { unanswered: { base: was?.value.unanswered, head: is.value.unanswered }, by, prefix };
+  }
   if (was === undefined) return { uncompared: true };
   if (was.value.hash === is.value.hash) return {};
   return {
@@ -462,6 +527,17 @@ if (process.argv[2] === "--child") {
   const seconds = Number(option("timeout") ?? DEFAULTS.timeout);
   const timeout = seconds * 1000;
   const memory = Number(option("memory") ?? DEFAULTS.memory);
+  // (each source's process gets `--memory` as its heap, whatever heap `NODE_OPTIONS` sets, as the central queue sets
+  // one on every job: the total names `memory`, and beside it the heap limit `NODE_OPTIONS` alone gives a Node process
+  // (`nodeOptions.heapLimit`), where `NODE_OPTIONS` changes the heap at all (its limit other than without it) and that
+  // limit differs from a source's process's, so the override is never silent. Each limit is V8's own, read by a probe
+  // process, so no form of `NODE_OPTIONS` is read by this runner; a probe that fails is said so (`probe: "failed"`), #1956)
+  const nodeOptions = (() => {
+    if ((process.env.NODE_OPTIONS ?? "").trim() === "") return undefined;
+    const [alone, none, source] = ["alone", "none", memory].map(heapLimitWith);
+    if ([alone, none, source].includes(undefined)) return { probe: "failed" };
+    return alone !== none && alone !== source ? { heapLimit: alone } : undefined;
+  })();
   if (store !== undefined && options.has("only"))
     refused("--store stores whole shards: drop --only");
   const itemized = options.has("items") || options.has("items-from-env");
@@ -844,6 +920,11 @@ if (process.argv[2] === "--child") {
   /** What the stored tree and the head did (a stall's, an exception's or an uncharged run's text), where either did. */
   const either = (base, head) =>
     base === undefined && head === undefined ? undefined : { base, head };
+  /** Each tree this runner runs, by its part: the base and the head, the head against a stored base, a tree stored. */
+  const treeNames =
+    baseline !== undefined ? ["head"] : roots.length === 2 ? ["base", "head"] : ["base"];
+  /** Whether a stall's reason (its text) is a crash: the process ended (a fatal V8 error, a signal), not the unit limit. */
+  const crashed = (stall) => typeof stall === "string" && stall !== "units";
   /**
    * A head's run of a `--work` record (one tree's units, allowance and milliseconds) with the stored base's first: its
    * units and allowance on that run where the stored line (`kept`) holds them (a plan 2 area's ended run, or the run
@@ -862,6 +943,8 @@ if (process.argv[2] === "--child") {
       allowance: [was?.allowance ?? null, allowance],
       ms: [null, ms],
       ...(running === undefined ? {} : { running: 1 }),
+      // (the stored base's run cut over the unit limit: its units, not a run it ended, #1837)
+      ...(kept?.runs[id] === undefined && was !== undefined ? { baseCut: true } : {}),
     };
   };
   const counts = [
@@ -877,7 +960,9 @@ if (process.argv[2] === "--child") {
     "differences",
   ];
   const zeros = () => Object.fromEntries(counts.map((key) => [key, 0]));
-  const total = { area, generators: 0, ...zeros(), modes: 4 };
+  const total = { area, generators: 0, ...zeros(), crashed: { base: 0, head: 0 }, modes: 4 };
+  // (sources where the head crashed and the base did not: exit 3, #1837's F24)
+  let headOnly = 0;
   // `--work`: what ran, then one line per source, then the total
   worked({
     work: {
@@ -919,7 +1004,7 @@ if (process.argv[2] === "--child") {
   });
   let sequence = 0;
   for (const { name, checks, sources } of generators) {
-    const row = { generator: name, ...zeros() };
+    const row = { generator: name, ...zeros(), crashed: { base: 0, head: 0 } };
     for (const source of sources) {
       const before = { ...row };
       row.sources += 1;
@@ -978,8 +1063,11 @@ if (process.argv[2] === "--child") {
           ...where
         } = outcome;
         // (a run left unanswered: why, on each tree, on the source's record, #1837's runner artefacts)
+        // (a run left unanswered: and one whose answered parts differ, its `by` the difference's, named so, #1837)
         if (by !== undefined)
           left.push({ ...where, ...(unanswered === undefined ? { alike: true } : {}), by });
+        else if (difference?.by !== undefined)
+          left.push({ ...where, differs: true, by: difference.by });
         if (exception !== undefined) {
           row.exceptions += 1;
           thrown({ generator: name, source: source.name, ...where, thrown: exception }, source);
@@ -998,6 +1086,45 @@ if (process.argv[2] === "--child") {
       }
       // with a baseline, a source stalls or throws outside its runs where either tree did, as with both trees run
       const stalled = baseline === undefined ? reply.stalled : either(kept?.stalled, reply.stalled);
+      // (the run this runner's stall cut: its tree, mode and check, #1965; none named where it came between runs)
+      // (which tree this runner's stall was on: the one it was running, or its one tree, #1837's F24)
+      const stalledTree =
+        reply.stalled === undefined
+          ? undefined
+          : reply.cutAt !== undefined
+            ? treeNames[reply.cutAt.tree]
+            : treeNames.length === 1
+              ? treeNames[0]
+              : null;
+      // (the stall's tree and the run it cut, each `null` where unknown: between runs, or a stored base's crash, #1965;
+      // a stored base's stall over the unit limit names its cut run)
+      const storedCut = kept?.cut?.run?.split(" ") ?? [];
+      const at =
+        reply.stalled !== undefined
+          ? {
+              tree: stalledTree,
+              mode: reply.cutAt?.mode ?? null,
+              check: reply.cutAt?.check ?? null,
+            }
+          : kept?.stalled !== undefined && baseline !== undefined
+            ? {
+                tree: "base",
+                mode: storedCut[0] ?? null,
+                check: storedCut.length > 1 ? storedCut.slice(1).join(" ") : null,
+              }
+            : undefined;
+      // (a crash on each tree: this runner's, the head's alone after the base's, a stored base's, #1837's F24)
+      const crashes = {
+        base:
+          (crashed(reply.stalled) && stalledTree === "base") ||
+          (baseline !== undefined && crashed(kept?.stalled)),
+        head:
+          (crashed(reply.stalled) && stalledTree === "head") ||
+          (afterBase ?? []).some((ran) => crashed(ran.head.stalled)),
+      };
+      if (crashes.base) row.crashed.base += 1;
+      if (crashes.head) row.crashed.head += 1;
+      if (crashes.head && !crashes.base) headOnly += 1;
       const failed =
         baseline === undefined ? reply.thrown : either(kept?.thrown?.runner, reply.thrown?.runner);
       // a run that reached the safety net does work no ledger charges (#1647, #1424): named by its run (and tree), a
@@ -1045,6 +1172,7 @@ if (process.argv[2] === "--child") {
           generator: name,
           source: source.name,
           stalled,
+          ...(at === undefined ? {} : { at }),
           ...(afterBase === undefined ? {} : { afterBase }),
           ...inputs,
         });
@@ -1076,6 +1204,8 @@ if (process.argv[2] === "--child") {
               .map((key) => [key, row[key] - before[key]]),
           ),
           ...(stalled === undefined ? {} : { stalled }),
+          ...(at === undefined ? {} : { at }),
+          ...(crashes.base || crashes.head ? { crashed: crashes } : {}),
           ...(afterBase === undefined ? {} : { afterBase }),
           ...(uncharged === undefined ? {} : { uncharged }),
           ...(left.length === 0 ? {} : { unanswered: left }),
@@ -1084,10 +1214,18 @@ if (process.argv[2] === "--child") {
     console.log(JSON.stringify(row));
     total.generators += 1;
     for (const key of counts) total[key] += row[key];
+    for (const tree of ["base", "head"]) total.crashed[tree] += row.crashed[tree];
   }
   for (const { child } of Object.values(slots)) child?.kill();
   if (progress !== undefined) rmSync(pathOf(progress, "outside"), { force: true });
-  const ended = { ...total, units, timeout: seconds, node: process.version };
+  const ended = {
+    ...total,
+    units,
+    timeout: seconds,
+    memory,
+    ...(nodeOptions === undefined ? {} : { nodeOptions }),
+    node: process.version,
+  };
   if (storing !== undefined) {
     // the shard whole, its total last, with what made it
     const runner = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url)));
@@ -1099,14 +1237,17 @@ if (process.argv[2] === "--child") {
   }
   worked({ total: ended });
   console.log(JSON.stringify(ended));
+  // (3: the head crashed where the base did not, ahead of 1: anything else to read; 2 is a refused usage)
   process.exitCode =
-    total.differences +
-      total.stalled +
-      total.exceptions +
-      total.unanswered +
-      total.uncompared +
-      total.uncharged ===
-    0
-      ? 0
-      : 1;
+    headOnly > 0
+      ? 3
+      : total.differences +
+            total.stalled +
+            total.exceptions +
+            total.unanswered +
+            total.uncompared +
+            total.uncharged ===
+          0
+        ? 0
+        : 1;
 }

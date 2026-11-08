@@ -19,13 +19,13 @@ import {
   spanRef,
 } from "../contract/key-ids.js";
 import { keyLane } from "../contract/lanes.js";
-import { landed, landedKey, passThrough, passThroughKey } from "./landings.js";
-import type { Frontier, Inheriting, Stop, Stops, Waiting } from "./model.js";
-import { permittedAt, unrestricted } from "./permitted.js";
-import { inputsAt, inputsOf, scanAt } from "./scan.js";
+import { landed, landedKey, passThrough, passThroughKey } from "../admission/landings.js";
+import type { Frontier, Inheriting, Stop, Stops, Waiting } from "../admission/model.js";
+import { permittedAt, unrestricted } from "../admission/permitted.js";
+import { inputsAt, inputsOf, scanAt } from "../admission/scan.js";
 import { cycleOf, inheritedInto, join } from "./waiting.js";
-import { copySources, stopsOf } from "./walk.js";
-import { wholeOf } from "./eligibility.js";
+import { copySources, stopsOf } from "../admission/walk.js";
+import { wholeOf } from "../admission/eligibility.js";
 import { positions } from "../positions.js";
 
 // A4 through copies: the written type an unwritten place's decision inherits, from the graph of copies.

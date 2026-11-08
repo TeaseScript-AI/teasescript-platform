@@ -8,8 +8,8 @@ import {
   type CanonicalKey,
   type Rest,
 } from "../contract/key-ids.js";
-import type { Inheriting } from "./model.js";
-import { permittedAt } from "./permitted.js";
+import type { Inheriting } from "../admission/model.js";
+import { permittedAt } from "../admission/permitted.js";
 
 // The decisions that wait on each other through copies (a union-find by key), and what a scan reads of an inherited type.
 

@@ -198,7 +198,7 @@ function areaOf(generator) {
  * `head`, `null` where the tree did not run it here), the base being the stored one where one tree ran: not recorded
  * before #1647, its stored units since (`ms` none).
  */
-function runOf({ mode, check, work, allowance = [], ms, running }) {
+function runOf({ mode, check, work, allowance = [], ms, running, baseCut }) {
   const tree = (index) =>
     ms[index] === null && (index === 1 || work[index] === null)
       ? null
@@ -206,7 +206,8 @@ function runOf({ mode, check, work, allowance = [], ms, running }) {
           work: work[index],
           allowance: allowance[index] ?? null,
           ms: ms[index],
-          done: running !== index,
+          // (a stored base's run cut over the unit limit is no run it ended)
+          done: running !== index && !(index === 0 && baseCut === true),
         };
   return work.length === 2
     ? { mode, check, base: tree(0), head: tree(1) }
@@ -221,8 +222,11 @@ function entryOf(line, area, trees, ran) {
   const runs = line.runs?.map(runOf);
   let { stalled } = line;
   if (typeof stalled === "string") {
+    // (the tree its record names, #1965; else the tree a progress record had running)
     const running = line.runs?.at(-1)?.running;
-    const tree = trees === 2 && running !== undefined ? ["base", "head"][running] : undefined;
+    const tree =
+      line.at?.tree ??
+      (trees === 2 && running !== undefined ? ["base", "head"][running] : undefined);
     stalled = { [tree ?? (trees === 1 ? "head" : "source")]: stalled };
   } else if (stalled !== undefined)
     stalled = Object.fromEntries(Object.entries(stalled).filter(([, why]) => why !== undefined));
@@ -623,7 +627,10 @@ for (const [place, was] of replay) {
   if (was.stalled !== undefined) {
     const line = { area: nameOf(was.area), generator: was.generator, source: was.source };
     const rerunOf = is === was ? {} : { rerun: { outcome: outcomeOf(is), ...verdict } };
-    console.log(JSON.stringify({ ...line, stalled: was.stalled, ...verdictOf(was), ...rerunOf }));
+    const at = was.at === undefined ? {} : { at: was.at };
+    console.log(
+      JSON.stringify({ ...line, stalled: was.stalled, ...at, ...verdictOf(was), ...rerunOf }),
+    );
   }
   if (is !== was) row.rerun += 1;
   // (a source an `--out` file lists is a stall of a shard whose other sources are not listed)
@@ -648,8 +655,18 @@ for (const [place, was] of replay) {
   if (verdict !== undefined) row[verdict.verdict] += 1;
   if (is.stalled !== undefined) {
     row.unavailable += 1;
-    const { area, generator, source, key, stalled, runs } = is;
-    index.push({ area, generator, source, key, stalled, ...verdict, runs });
+    const { area, generator, source, key, stalled, at, runs } = is;
+    // (with the tree and run the stall names, #1965)
+    index.push({
+      area,
+      generator,
+      source,
+      key,
+      stalled,
+      ...(at === undefined ? {} : { at }),
+      ...verdict,
+      runs,
+    });
   }
 }
 const total = zeros();
@@ -695,7 +712,8 @@ const artefacts = new Map(
 );
 for (const [place, was] of replay) {
   const is = rerun.get(place) ?? was;
-  for (const left of is.unanswered ?? []) {
+  // (a run whose answered parts differ is a difference, counted as one; only its growth leaves it out)
+  for (const left of (is.unanswered ?? []).filter(({ differs }) => differs !== true)) {
     const reasons = [left.by?.base, left.by?.head]
       .filter((by) => by != null)
       .map((by) => by.reason);
@@ -741,6 +759,75 @@ const artefactRows = GROUPS.map((group) => {
 });
 if (artefactRows.some((row) => row.runs > 0))
   console.log(JSON.stringify({ artefacts: artefactRows }));
+// the growth bar (#1837's F22), advisory: per area, each series of a shape's sizes in one mode and check, the head's
+// units over the base's at each size, flagged where a doubling of the size raises that ratio by 1 % or more. A run left
+// unanswered, cut by a stall or at the safety net on either tree, or run by the head alone after the base's stall, ends
+// at a stop, not at its program's work: it is left out, and its series is named as the residual.
+const growth = new Map();
+for (const [place, was] of replay) {
+  const is = rerun.get(place) ?? was;
+  const sized = /^(.*)@(\d+)$/.exec(is.source);
+  if (sized === null) continue;
+  const [, shape, size] = sized;
+  const area = nameOf(is.area);
+  if (!growth.has(area))
+    growth.set(area, { series: new Map(), residual: new Set(), unmeasured: new Set() });
+  const { series, residual, unmeasured } = growth.get(area);
+  const stopped = new Set([
+    ...(is.unanswered ?? []).map(({ mode, check }) => `${mode} ${check}`),
+    ...(is.afterBase ?? [])
+      .filter(({ mode }) => mode !== undefined)
+      .map(({ mode, check }) => `${mode} ${check}`),
+    ...Object.values(
+      typeof is.uncharged === "object" ? (is.uncharged ?? {}) : { at: is.uncharged },
+    ),
+  ]);
+  for (const run of is.runs ?? []) {
+    const name = `${is.generator} ${shape} ${run.mode} ${run.check}`;
+    const ended = run.base?.done && run.head?.done;
+    if (stopped.has(`${run.mode} ${run.check}`) || !ended) {
+      residual.add(name);
+      continue;
+    }
+    // (a tree without a work ledger records no units: its series named apart, unmeasured)
+    if (!(run.base.work > 0 && run.head.work > 0)) {
+      unmeasured.add(name);
+      continue;
+    }
+    if (!series.has(name)) series.set(name, new Map());
+    series.get(name).set(Number(size), run.head.work / run.base.work);
+  }
+  for (const { mode, check } of is.afterBase ?? [])
+    if (mode !== undefined) residual.add(`${is.generator} ${shape} ${mode} ${check}`);
+}
+for (const [area, { series, residual, unmeasured }] of [...growth].sort(([a], [b]) =>
+  a.localeCompare(b),
+)) {
+  const measured = [];
+  for (const [name, ratios] of series) {
+    const sizes = [...ratios.keys()].sort((a, b) => a - b);
+    const steps = sizes
+      .slice(1)
+      .map((size, index) => [sizes[index], size])
+      .filter(([smaller, size]) => size === 2 * smaller)
+      .map(([smaller, size]) => ratios.get(size) / ratios.get(smaller) - 1);
+    if (steps.length > 0)
+      measured.push({ series: name, sizes, ratios: sizes.map((size) => ratios.get(size)), steps });
+  }
+  const flagged = measured
+    .filter(({ steps }) => steps.some((step) => step >= 0.01))
+    .sort((a, b) => Math.max(...b.steps) - Math.max(...a.steps));
+  console.log(
+    JSON.stringify({
+      growth: area,
+      measured: measured.length,
+      flagged: flagged.length,
+      worst: flagged.slice(0, 5),
+      residual: { series: residual.size, named: [...residual].sort() },
+      unmeasured: { series: unmeasured.size, named: [...unmeasured].sort() },
+    }),
+  );
+}
 closed &&=
   total.sources > 0 &&
   total.agreed + total.unansweredAlike === total.sources &&

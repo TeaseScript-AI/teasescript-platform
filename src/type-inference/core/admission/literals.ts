@@ -36,7 +36,7 @@ import { refText, Touches, type Touch, type TouchRef } from "../touch.js";
 import { decided } from "./decision.js";
 import { hotSets } from "./groups.js";
 import { heldMeetings } from "./held.js";
-import { drive } from "./inherited.js";
+import { drive } from "../inherited/inherited.js";
 import { admitsNumber, concrete, deciding, fits, NUMERIC } from "./kinds.js";
 import { inheritance, landedBelow } from "./landings.js";
 import type { Join, JoinDecided, OwnStructure } from "./model.js";
