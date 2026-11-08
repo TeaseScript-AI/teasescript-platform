@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
@@ -94,8 +102,20 @@ test(
   },
 );
 
-/** A repository with a base branch `main` and a branch `feature` off it, each changing `a.mjs` as `edit` says. */
-function repository({ conflict = false, slowOxlint = false } = {}) {
+/**
+ * A repository with a base branch `main` and a branch `feature` off it, each changing `a.mjs` as `edit` says. `core`
+ * also changes a file of the type core on `feature` ("added", or "deleted" or "renamed" out of the core, the file being
+ * on `main` for those);
+ * `mapper` is code the stand-in pin-suite mapper runs after its line. `passing` leaves `a.mjs` as it was and gives every
+ * other check a stand-in that passes, so the mapper's verdict alone decides the run.
+ */
+function repository({
+  conflict = false,
+  slowOxlint = false,
+  core = false,
+  mapper = "",
+  passing = false,
+} = {}) {
   const directory = mkdtempSync(join(tmpdir(), "check-changed-repo-"));
   const run = (...args) => spawnSync("git", args, { cwd: directory, encoding: "utf8" });
   const write = (path, text) => {
@@ -109,11 +129,29 @@ function repository({ conflict = false, slowOxlint = false } = {}) {
   write(".gitignore", "node_modules/\n");
   // (the checks the merge runs: oxlint waits when asked, so a signal meets a running check)
   write("tools/oxlint/run.mjs", slowOxlint ? "setTimeout(() => {}, 60_000);\n" : "\n");
+  // (a stand-in for the pin-suite mapper that says how it was asked)
+  write(
+    "tools/repository-checks/pin-suites.mjs",
+    `console.log(\`listed for \${process.argv.slice(2).join(" ")}\`);\n${mapper}`,
+  );
+  if (core === "deleted" || core === "renamed")
+    write("src/type-inference/core/answers.ts", "export const answers = 1;\n");
+  if (passing)
+    for (const path of [
+      "tools/repository-checks/doc-links.mjs",
+      "tools/repository-checks/imports.mjs",
+    ])
+      write(path, "\n");
   run("add", ".");
   run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base");
   run("switch", "-q", "-c", "feature");
-  write("a.mjs", "export const a = 2;\n");
-  run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-am", "feature");
+  if (!passing) write("a.mjs", "export const a = 2;\n");
+  if (core === "added") write("src/type-inference/core/answers.ts", "export const answers = 1;\n");
+  if (core === "deleted") rmSync(join(directory, "src/type-inference/core/answers.ts"));
+  if (core === "renamed")
+    run("mv", "src/type-inference/core/answers.ts", "src/type-inference/answers.ts");
+  run("add", "-A");
+  run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "feature");
   if (conflict) {
     run("switch", "-q", "main");
     write("a.mjs", "export const a = 3;\n");
@@ -123,6 +161,11 @@ function repository({ conflict = false, slowOxlint = false } = {}) {
   // A stand-in `node_modules` whose Prettier is the pinned one and does nothing.
   write("node_modules/prettier/package.json", JSON.stringify({ version: "0.0.0" }));
   write("node_modules/prettier/bin/prettier.cjs", "\n");
+  if (passing) {
+    write("node_modules/knip/bin/knip.js", "\n");
+    write("node_modules/.bin/tsc", "#!/bin/sh\nexit 0\n");
+    chmodSync(join(directory, "node_modules/.bin/tsc"), 0o755);
+  }
   return { directory, worktrees: () => run("worktree", "list").stdout.trim().split("\n").length };
 }
 
@@ -224,6 +267,73 @@ test(
     } finally {
       for (const path of [directory, elsewhere, unregistered])
         rmSync(path, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "a change to the type core prints the pin-suite mapper's list, plain and merged, a deletion and a move out of it too, and another change does not run it",
+  { timeout: 60_000 },
+  () => {
+    for (const merged of [false, true])
+      for (const core of ["added", "deleted", "renamed", false]) {
+        const { directory } = repository({ core });
+        try {
+          const result = spawnSync(
+            process.execPath,
+            [tool, ...(merged ? ["--merged"] : []), "--base", "main"],
+            { cwd: directory, encoding: "utf8", env: environment },
+          );
+          const base = spawnSync("git", ["merge-base", "HEAD", "main"], {
+            cwd: directory,
+            encoding: "utf8",
+          }).stdout.trim();
+          const at = `${merged ? "merged" : "plain"}, ${core || "no core change"}`;
+          if (core) {
+            assert.match(
+              result.stdout,
+              /^PASS {2}pin suites +\d+\.\ds$/mu,
+              `${at}: ${result.stderr}`,
+            );
+            assert.match(
+              result.stdout,
+              new RegExp(`--- pin suites ---\\nlisted for --base ${base}\\n`, "u"),
+              at,
+            );
+          } else assert.doesNotMatch(result.stdout, /pin suites/u, at);
+        } finally {
+          rmSync(directory, { recursive: true, force: true });
+        }
+      }
+  },
+);
+
+test(
+  "the pin-suite mapper's verdict alone decides a run whose other checks pass, its output printed",
+  { timeout: 30_000 },
+  () => {
+    for (const fails of [false, true]) {
+      const { directory } = repository({
+        core: "added",
+        passing: true,
+        mapper: fails ? 'console.error("no merge-base"); process.exitCode = 2;\n' : "",
+      });
+      try {
+        const result = spawnSync(process.execPath, [tool, "--base", "main"], {
+          cwd: directory,
+          encoding: "utf8",
+          env: environment,
+        });
+        assert.equal(result.status, fails ? 1 : 0, result.stdout + result.stderr);
+        assert.deepEqual(
+          result.stdout.match(/^FAIL {2}\S.*$/gmu)?.map((line) => line.split(/ {2,}/u)[1]) ?? [],
+          fails ? ["pin suites"] : [],
+        );
+        // (its stdout and stderr arrive in either order)
+        if (fails) assert.match(result.stdout, /--- pin suites ---\n[^]*no merge-base\n/u);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
     }
   },
 );
