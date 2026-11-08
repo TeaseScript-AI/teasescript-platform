@@ -325,16 +325,13 @@
     "TABLE r4": 27
   },
   "tests/helpers/type-core-fixture.ts": {
-    "TABLE r4": 2
+    "TABLE r4": 1
   },
   "tests/helpers/type-core-held-host.ts": {
     "TABLE r4": 25
   },
   "tests/helpers/type-core-lost-check-matrix.ts": {
     "TABLE r4": 1
-  },
-  "tests/helpers/type-core-narrowing.ts": {
-    "TABLE §": 1
   },
   "tests/helpers/type-core-oracles.ts": {
     "TABLE r4": 5
@@ -424,7 +421,7 @@
     "TABLE §": 3
   },
   "tests/type-core-messages.test.ts": {
-    "TABLE r4": 4
+    "TABLE r4": 3
   },
   "tests/type-core-narrowing.test.ts": {
     "TABLE §": 1,

@@ -81,14 +81,20 @@ export function error(
 export function withFacts(walk: Consumers, diagnostic: CoreDiagnostic): CoreDiagnostic {
   if (diagnostic.class === "compile-error" && diagnostic.kind !== "written-type") {
     const { rule, site } = diagnostic;
+    // (the route rule's error reads the facts of the warning it stands in for, whose fix it gives)
+    const required = diagnostic.requiredCheck !== undefined;
     const expects =
-      (rule.rule === "member" && rule.use !== "store") || rule.rule === "operator"
+      (rule.rule === "member" && rule.use !== "store") ||
+      rule.rule === "operator" ||
+      (required && diagnostic.kinds.includes("null"))
         ? expected(walk, site)
         : undefined;
+    const keeps = required ? keptChoice(walk, site, rule) : [];
     return {
       ...diagnostic,
       ...(expects === undefined ? {} : { expects }),
       present: present(walk, site, rule),
+      ...(keeps === null ? { keeps: "unproved" as const } : keeps.length === 0 ? {} : { keeps }),
     };
   }
   if (diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget") {

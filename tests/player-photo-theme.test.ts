@@ -20,7 +20,6 @@ import { referencePhotos } from "./helpers/photo-swatches-fixture.js";
 interface PhotoColours {
   readonly surfaces: PhotoSurfaces;
   readonly accent: OklchColor | null;
-  readonly vignette: number;
 }
 type Mode = "light" | "dark";
 interface PhotoColourChoice {
@@ -261,6 +260,27 @@ function hslRgb(hue: number, saturation: number, lightness: number): Rgb {
   };
   return [channel(0), channel(8), channel(4)];
 }
+
+test("the default themes keep text readable on their resting surfaces, in either mode and contrast", () => {
+  for (const mode of ["light", "dark"] as const)
+    for (const contrast of ["standard", "high"] as const) {
+      const failures = generatePlayerTheme({ ...defaults[mode], contrast })
+        .diagnostics.filter(
+          (item) =>
+            item.passes === false &&
+            ["text-primary", "text-secondary"].includes(item.foreground) &&
+            [
+              "surface-canvas",
+              "surface-chrome",
+              "surface-raised",
+              "surface-floating",
+              "surface-control",
+            ].includes(item.background),
+        )
+        .map((item) => `${item.foreground} on ${item.background} ${item.ratio.toFixed(3)}`);
+      assert.deepEqual(failures, [], `${mode}, ${contrast}`);
+    }
+});
 
 test("photo colours fail no contrast check that the theme passes, in either mode and contrast", () => {
   const all = photos();

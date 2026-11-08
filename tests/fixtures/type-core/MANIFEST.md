@@ -4,6 +4,15 @@ Opus, 2026-10-24, builder for M4 step S0 (brief `/tmp/agent-work/o4-3a-lead-fabl
 port plan's S0 (a) and (b) (`../checkpoint-9/port-plan/PLAN.md` revision 4, §2 row S0, §3.1 "Host globals"). S4
 commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; nothing here is in the repository.
 
+## A loop's write that a break follows (#2025)
+
+The S10 builder (Opus) corrected one record of `cells.jsonl` by hand: `cp9-cells/3b/loop/break/changed` expects
+`valid`, with no diagnostic and no check, in place of a `loop` warning and its null-check. Its loop writes `n = null` and
+then leaves by an unconditional `break`, so no round starts with that value, and the use reads only the tested `n`. V30
+§13: a loop's start accounts for the values an earlier round left, and a write drops a check only when the written value
+can make the check false. `cp9-cells/3b/loop/break/changed`'s two controls, without the `break` and with it under a
+condition, are rows of the cells test and keep the warning.
+
 ## F18's call-site snapshot (#1072)
 
 No record changed. `heldBack` releases 11 of the 32 `cp9-cells/s9b/f18-held/…` records: `named/*` (10) and

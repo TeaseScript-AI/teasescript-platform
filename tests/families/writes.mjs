@@ -117,6 +117,7 @@ const ALLOWED = {
     once: [() => true, "registers an event handler"],
     send: [() => true, "sends a message to the parent process"],
     cwd: [exactly(0), "reads the working folder"],
+    memoryUsage: [exactly(0), "reads the process's memory use (the runner's child's peak heap)"],
   },
   processes: {
     "the heap probe": [

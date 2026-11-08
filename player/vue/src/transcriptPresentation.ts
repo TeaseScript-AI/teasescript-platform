@@ -7,7 +7,7 @@ export interface TranscriptPalette {
   /** The background of the player's own messages. */
   readonly reply: string;
   readonly canvas: string;
-  /** The background where a Stage photo's vignette is strongest, or `null` without one. */
+  /** The background where the vignette is strongest, or `null` without a vignette. */
   readonly edge: string | null;
   readonly link: string;
 }
@@ -87,7 +87,7 @@ export function resolveAppearance(
     authoredBackground === null
       ? null
       : (authoredText ?? blackOrWhiteInk(authoredColorToOklch(authoredBackground)));
-  // Prose sits on the background, which a Stage photo's vignette makes lighter or darker towards its edges.
+  // Prose sits on the background, which the vignette makes lighter or darker towards its edges.
   const backdrop =
     authoredBackground ??
     (authored?.kind !== "prose"
