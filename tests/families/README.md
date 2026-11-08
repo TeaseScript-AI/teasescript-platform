@@ -16,9 +16,10 @@ What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise;
   - `--memory 2048` MB of heap for each source's process. It is the process's own `--max-old-space-size`, so it holds
     whatever heap `NODE_OPTIONS` sets, which holds for the runner's own process only. The usual source of a difference
     is the central queue, which sets `--max-old-space-size` in `NODE_OPTIONS` on every job: the total line (on stdout,
-    and the work record's last line) carries `memory`, and beside it, where `NODE_OPTIONS` names a heap, the heap limit V8
-    gives the runner's own process wherever it differs from a source's process's (`nodeOptions.heapLimit`, MB, V8's own
-    figure, #1956);
+    and the work record's last line) carries `memory`, and beside it `nodeOptions.heapLimit`, the heap limit
+    `NODE_OPTIONS` alone gives a Node process, where `NODE_OPTIONS` changes the heap at all and that limit differs from a
+    source's process's. Each limit is V8's own, read by a probe process, so the runner reads no form of `NODE_OPTIONS`
+    itself; a failed probe is said so (`nodeOptions.probe`, #1956);
   - `--allowances natural,16,256` for the stop runs.
 
   A stored baseline is made at these defaults: its PLAN records them, and `--store` refuses others.

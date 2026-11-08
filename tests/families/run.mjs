@@ -136,28 +136,39 @@ function partHashes(oracle, files, mode, globals) {
 }
 
 /**
- * The heap limit, in MB, V8 gives a Node process in this process's environment (`NODE_OPTIONS` included): with
- * `--max-old-space-size=<memory>` given, as each source's process is, or without (what `NODE_OPTIONS` alone gives). V8's
- * own figure, read in that process, so that `NODE_OPTIONS` is read by Node itself, never by this runner.
+ * The heap limit, in MB, V8 gives a Node process (`heapLimitWith`): V8's own figure, read in that process, so that
+ * `NODE_OPTIONS` is read by Node itself, never by this runner. In this process's environment with
+ * `--max-old-space-size=<memory>` given (`memory`), as each source's process is, or without (`alone`: what
+ * `NODE_OPTIONS` alone gives); or without `NODE_OPTIONS` (`none`). Undefined where the probe failed or printed no
+ * positive number.
  */
 function heapLimitWith(memory) {
+  const withoutOptions = { ...process.env };
+  delete withoutOptions.NODE_OPTIONS;
   const said =
-    memory === undefined
+    memory === "alone"
       ? spawnSync(
           process.execPath,
           ["-p", "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)"],
           { encoding: "utf8" },
         )
-      : spawnSync(
-          process.execPath,
-          [
-            `--max-old-space-size=${memory}`,
-            "-p",
-            "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)",
-          ],
-          { encoding: "utf8" },
-        );
-  return Number(said.stdout.trim());
+      : memory === "none"
+        ? spawnSync(
+            process.execPath,
+            ["-p", "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)"],
+            { encoding: "utf8", env: withoutOptions },
+          )
+        : spawnSync(
+            process.execPath,
+            [
+              `--max-old-space-size=${memory}`,
+              "-p",
+              "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)",
+            ],
+            { encoding: "utf8" },
+          );
+  const printed = said.status === 0 ? said.stdout?.trim() : undefined;
+  return /^[1-9]\d*$/.test(printed ?? "") ? Number(printed) : undefined;
 }
 
 /**
@@ -517,13 +528,16 @@ if (process.argv[2] === "--child") {
   const timeout = seconds * 1000;
   const memory = Number(option("memory") ?? DEFAULTS.memory);
   // (each source's process gets `--memory` as its heap, whatever heap `NODE_OPTIONS` sets, as the central queue sets
-  // one on every job: the total names `memory`, and beside it, where `NODE_OPTIONS` names a heap, the heap limit
-  // `NODE_OPTIONS` alone gives a Node process (`nodeOptions.heapLimit`), wherever it differs from a source's process's,
-  // so the override is never silent; both limits as V8 reads them, #1956)
-  const nodeOptions = /old[-_]space[-_]size/.test(process.env.NODE_OPTIONS ?? "")
-    ? heapLimitWith(undefined)
-    : undefined;
-  const differing = nodeOptions !== undefined && nodeOptions !== heapLimitWith(memory);
+  // one on every job: the total names `memory`, and beside it the heap limit `NODE_OPTIONS` alone gives a Node process
+  // (`nodeOptions.heapLimit`), where `NODE_OPTIONS` changes the heap at all (its limit other than without it) and that
+  // limit differs from a source's process's, so the override is never silent. Each limit is V8's own, read by a probe
+  // process, so no form of `NODE_OPTIONS` is read by this runner; a probe that fails is said so (`probe: "failed"`), #1956)
+  const nodeOptions = (() => {
+    if ((process.env.NODE_OPTIONS ?? "").trim() === "") return undefined;
+    const [alone, none, source] = ["alone", "none", memory].map(heapLimitWith);
+    if ([alone, none, source].includes(undefined)) return { probe: "failed" };
+    return alone !== none && alone !== source ? { heapLimit: alone } : undefined;
+  })();
   if (store !== undefined && options.has("only"))
     refused("--store stores whole shards: drop --only");
   const itemized = options.has("items") || options.has("items-from-env");
@@ -1209,7 +1223,7 @@ if (process.argv[2] === "--child") {
     units,
     timeout: seconds,
     memory,
-    ...(differing ? { nodeOptions: { heapLimit: nodeOptions } } : {}),
+    ...(nodeOptions === undefined ? {} : { nodeOptions }),
     node: process.version,
   };
   if (storing !== undefined) {

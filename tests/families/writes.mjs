@@ -135,10 +135,14 @@ const ALLOWED = {
           heap.every((element) => /^`--max-old-space-size=\$\{\w+\}`$/.test(element.getText())) &&
           literal(elements.at(-2)) === "-p" &&
           literal(elements.at(-1)) === script &&
-          onlyOptions(options, (key) => key === "encoding")
+          onlyOptions(
+            options,
+            (key, value) =>
+              key === "encoding" || (key === "env" && value.getText() === "withoutOptions"),
+          )
         );
       },
-      "a Node process that prints V8's heap limit and ends (the runner's `heapLimitWith`, #1956): it writes nothing",
+      "a Node process that prints V8's heap limit and ends (the runner's `heapLimitWith`, #1956), in this process's environment or that without `NODE_OPTIONS`: it writes nothing",
     ],
     "the gate's lock holder": [
       (call, { importedFrom }) => {

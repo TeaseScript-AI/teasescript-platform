@@ -1053,8 +1053,14 @@ test("the stored baselines' tools show no plain write outside the gate in their 
   // which are no tool's
   assert.deepEqual(
     processes.map((process) => process.allowed),
-    // (the heap probe twice: with a source's heap and without, #1956)
-    ["the gate's lock holder", "the heap probe", "the heap probe", "the runner's own child"],
+    // (the heap probe thrice: with a source's heap, with NODE_OPTIONS alone, and without it, #1956)
+    [
+      "the gate's lock holder",
+      "the heap probe",
+      "the heap probe",
+      "the heap probe",
+      "the runner's own child",
+    ],
   );
   assert.deepEqual(
     loads.map((load) => load.function),
@@ -4821,6 +4827,9 @@ test("the stall index prints a growth line per area: a series whose head-over-ba
       ['--max-old-space-size=2048 --max-old-space-size=" 3000"', true],
       ['--max-old-space-size=2048 "--max-old-space-size=3000"', true],
       ["--max-old-space-size=2048 --title=x\t--max-old-space-size=3000", false],
+      // (quotes inside the option's name, which Node drops, and a title that names the option but sets no heap)
+      ['--max-old-""space-size=3000', true],
+      ["--title=old-space-size", false],
       ["--max-old-space-size=2048", false],
     ] as const) {
       const said = spawnSync(
