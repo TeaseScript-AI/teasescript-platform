@@ -145,8 +145,9 @@ test("tests of one field beside a test of another merge their operand regions wi
 });
 
 test("a component of mutually recursive results is abandoned within the native stack", () => {
-  // `Solver.#abandon`
-  assert.deepEqual(spreadCase("solver"), ["warning-runtime-check", 3, 3]);
+  // `Solver.#abandon`; `outer()`'s written union `string | integer` read for `.length` is the route rule's error since
+  // #1073 PR 4 (AD-1: a called function's written union proves itself)
+  assert.deepEqual(spreadCase("solver"), ["compile-error", 3, 0]);
 });
 
 test("a choice of written records is answered within the native stack", () => {

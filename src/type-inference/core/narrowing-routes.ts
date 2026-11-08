@@ -1,4 +1,5 @@
-import type { PlaceId } from "../graph.js";
+import type { Expression } from "../../ast.js";
+import type { PlaceId, SourceSite } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import { joinParts, keepText, type WorkLedger } from "./budget.js";
 import {
@@ -10,7 +11,7 @@ import {
   type Key,
 } from "./definitions.js";
 import type { FlowNode } from "./flow-graph.js";
-import type { ItemTag } from "./items.js";
+import { REASON, type Item, type ItemTag } from "./items.js";
 import type { Work } from "./solver.js";
 import {
   copied,
@@ -25,8 +26,11 @@ import {
 import {
   locationOf,
   pathKey,
+  peel,
   removes,
   stablePath,
+  testForms,
+  type NarrowingForm,
   type NarrowingIndex,
   type StablePath,
 } from "./narrowing.js";
@@ -37,6 +41,7 @@ import {
   type TreeBlock,
   type TreeStatement,
 } from "./narrowing-statements.js";
+import { selectsElement } from "./method-categories.js";
 import { propertyName } from "./program.js";
 
 /*
@@ -52,10 +57,11 @@ import { propertyName } from "./program.js";
  *   stores, projected only for the one candidate examined; each with the reach of its writer side (the outermost block
  *   its open writer segments reach), so a consumer finds the nearest candidate whose writer side reaches it by one
  *   binary search over a tree of reaches, never a backward scan.
- * A consumer's query examines that one candidate: its certification (a seed, a certified `otherwise`, a scalar copy
- * whose source read has a certified witness by this same query, memoised per node and key), then the corridor's
- * remaining segments (the middle and the consumer side), each one binary search per layer, and the consumer's own
- * statement's compulsory calls (the nearest call-in dominating n). An unsuitable candidate yields the warning.
+ * A consumer's query examines that one candidate: its certification (AD-1, #1073: what its stored value holds,
+ * or a scalar copy whose source read has a witness by this same query, memoised per node and key; `#certificate`), then
+ * the corridor's remaining segments (the middle and the consumer side), each one binary search per layer, and the
+ * consumer's own statement's compulsory calls (the nearest call-in dominating n). An unsuitable candidate yields the
+ * warning. The consumers ask it through `required`, the route rule's one decision (`consumers/warnings.ts`).
  */
 
 /** A candidate D′ of a key: its definition, where it stands, and the end of the block its writer side reaches. */
@@ -114,8 +120,118 @@ function literalTag(program: CorePass["program"], value: PlaceId): ItemTag | nul
   return null;
 }
 
-/** The definitions N3 may certify (N3 (iii)): declarations, assignments, a parameter's default; never an argument. */
-const CERTIFIED: ReadonlySet<string> = new Set(["initializer", "assignment", "parameter default"]);
+/** How far a condition's part's truth or falsity guards: an offset, and whether to the arms (`#conditionFacts`). */
+interface Guarding {
+  readonly to: number;
+  /** Whether it reaches the statement's `then` arm or loop body (`then`), its `else` arm or way past (`else`). */
+  readonly arm: "then" | "else" | null;
+}
+
+/**
+ * A condition's test as a fact (`NarrowingRoutes.#conditionFacts`): the tested text, the form it proves, and where it
+ * guards: within the condition from the test's end up to `to`, and the `then` arm (or a loop's body) or the `else` arm
+ * (or the way past).
+ */
+interface ConditionFact {
+  readonly text: string;
+  /** The tested read's refined location (N1's), where it is a stable path. */
+  readonly location: string | null;
+  readonly form: NarrowingForm;
+  readonly from: number;
+  readonly to: number;
+  /** It guards the `then` arm or a loop's body (the condition's truth). */
+  readonly holding: boolean;
+  /** It guards the `else` arm or the way past (the condition's falsity). */
+  readonly otherwise: boolean;
+}
+
+/** An `if`'s or a `while`'s condition's facts, in walk order and by tested text. */
+interface ConditionFacts {
+  readonly list: readonly ConditionFact[];
+  readonly byText: ReadonlyMap<string, readonly ConditionFact[]>;
+}
+
+/**
+ * A text's tests of one offending kind (`NarrowingRoutes.#tests`): the arms a condition's test of the needed form
+ * guards from their start, and per block the indexes (sorted) of its statements every route past which passed one.
+ */
+interface TextTests {
+  readonly entered: Set<TreeBlock>;
+  readonly passed: Map<number, number[]>;
+}
+
+/** The statements that leave the code after them for good on every route through them (`NarrowingRoutes.#ends`). */
+const ENDING: ReadonlySet<string> = new Set([
+  "returnStatement",
+  "exitStatement",
+  "endStatement",
+  "gotoStatement",
+  "breakStatement",
+  "continueStatement",
+]);
+
+/** The tree's blocks that end on every route through them, and per block its labels' indexes (`#ends`). */
+interface Endings {
+  readonly ending: Set<TreeBlock>;
+  readonly labels: Map<number, number[]>;
+}
+
+/** An `if` arm's feasibility for the route rule's default (`NarrowingRoutes.#infeasible`). */
+type ArmFeasibility = "feasible" | "infeasible" | "unavailable";
+
+/** A condition's own guards of a text and kind (`#ownGuarded`): their starts sorted, and the furthest end by each. */
+interface OwnGuards {
+  readonly from: readonly number[];
+  readonly reach: readonly number[];
+}
+
+/**
+ * Whether items hold `tag` as a value the use may receive (AD-1): made by a store or a call's result, or allowed by a
+ * written type (V30 §13: `n + 1` with `n: integer?` is the error); not a stopped read's (`budget`), not one under a
+ * test's guard mark (§3.2), not a kind a test proved of external data, and not one another callable or a handler may
+ * store (X6, X7: a run the compiler does not prove, V30 §13, "only where the compiler can prove the run").
+ */
+function produces(work: WorkLedger, items: readonly Item[], tag: ItemTag): boolean {
+  work.charge("exactQueries");
+  return some(
+    work,
+    "exactQueries",
+    items,
+    (item) =>
+      item.tag === tag &&
+      !((item.context === "call" && item.called !== true) || item.context === "handler") &&
+      (item.reasons & REASON.budget) === 0 &&
+      item.guarded !== true &&
+      item.tested !== true &&
+      item.fromExternal !== true,
+  );
+}
+
+/**
+ * The expressions that are their own value's producer at a use (AD-1): a call, a `load`, an `otherwise`, a selection
+ * (`.first`, `.last`, `.random`).
+ */
+function producerAt(expression: Expression, work: WorkLedger): boolean {
+  work.charge("exactQueries");
+  const at = peel(expression, work);
+  return (
+    at.kind === "callExpression" ||
+    at.kind === "loadExpression" ||
+    (at.kind === "binaryExpression" && at.operator === "otherwise") ||
+    (at.kind === "propertyAccessExpression" && selectsElement(at.property.name))
+  );
+}
+
+/**
+ * The definitions N3 may certify (N3 (iii)): declarations, assignments, a property's store, a parameter's default; never
+ * an argument, a return or a loop variable.
+ */
+const CERTIFIED: ReadonlySet<string> = new Set([
+  "initializer",
+  "assignment",
+  "property",
+  "parameter default",
+]);
 
 export class NarrowingRoutes {
   /** Per key and applicability its kill layer, per (key, offending kind) its test layer. */
@@ -124,12 +240,26 @@ export class NarrowingRoutes {
   readonly #candidates = new Map<string, ReadonlyMap<TreeBlock, Candidates>>();
   /** Per (key, node, offending kind): the witness found, or `null`. */
   readonly #witnesses = new Map<string, Definition | null>();
-  /** The parameters a call binds an argument to, by key (an omitted default's certificate, N3), made once. */
-  #arguments: ReadonlySet<Key> | null = null;
   /** Per object literal: its properties' places by name, made on its first projection. */
   readonly #properties = new Map<PlaceId, ReadonlyMap<string, PlaceId>>();
   /** The program's ledger. */
   readonly #work: WorkLedger;
+  /** Per tested text, the `if`s and `while`s whose conditions test it (`#testing`), made on the first query. */
+  #tested: Map<string, TreeStatement[]> | null = null;
+  /** Per (text, offending kind), its tests (`#tests`). */
+  readonly #textTests = new Map<string, TextTests>();
+  /** Per `if` or `while`, its condition's own guards by (text, offending kind) (`#ownGuarded`). */
+  readonly #own = new Map<TreeStatement, Map<string, OwnGuards>>();
+  /** The blocks that end and the labels (`#ends`), made on the first query. */
+  #endings: Endings | null = null;
+  /** The program's `if`s whose conditions hold a test (`#testing`). */
+  readonly #ifs: TreeStatement[] = [];
+  /** Whether the program holds an `if` arm infeasible by entry narrowing (`#holdsInfeasible`), made on the first query. */
+  #holds: boolean | null = null;
+  /** Per arm, whether its entry's narrowing leaves a tested read no kind (`#infeasible`). */
+  readonly #infeasibleArms = new Map<TreeBlock, ArmFeasibility>();
+  /** Per `if` or `while`, its condition's tests as facts (`#conditionFacts`). */
+  readonly #conditions = new Map<TreeStatement, ConditionFacts | null>();
 
   public constructor(
     readonly pass: CorePass,
@@ -141,15 +271,302 @@ export class NarrowingRoutes {
   }
 
   /**
+   * AD-1 (#1073, V30 §13) at a consumer's read of `value` whose items hold the offending `tag`: the writer of a
+   * route that brings it there without a check, or `null` where the compiler proves none, and the consumer warns with
+   * its check. A stable read without element steps asks N3's witness, its D′'s stored value the writer; a call, a
+   * `load`, an `otherwise` or a selection read where it is used is its own producer, the writer where its value produces
+   * the kind, unless a condition around the use tests it. Any other read keeps its warning: an element step or a
+   * reference member, which the route query does not follow (#1073 PR 4, decision (A)).
+   */
+  public *required(
+    value: PlaceId,
+    tag: ItemTag,
+    others: readonly ItemTag[] = [],
+  ): Work<SourceSite | null> {
+    this.#work.charge("exactQueries");
+    const program = this.pass.program;
+    const site = program.places[value]?.site ?? null;
+    if (site === null) return null;
+    const node = program.exprAt(site);
+    // (the default: no error in a program that holds an infeasible arm, the use keeps the warning, #1938)
+    if (yield* this.#holdsInfeasible()) return null;
+    // (a value whose node reads no expression, a call's, a `get`'s or a `load`'s result, is its own producer; any other,
+    // a compound assignment's operand among them, keeps its warning)
+    if (node === null || node.expression === undefined) {
+      const c = program.opOf.get(value)?.kind;
+      return (c === "call" || c === "get" || c === "load" || c === "fallback") &&
+        (node === null || program.live(node)) &&
+        (yield* this.#valueProduces(value, node, [], tag))
+        ? site
+        : null;
+    }
+    const expression = node.expression;
+    if (!program.live(node)) return null;
+    const path = stablePath(program, node.file, expression);
+    const last = path === null ? undefined : path.steps[path.steps.length - 1];
+    // (a selection, `.first`, `.last`, `.random`, is its own producer where it is read, as a call is)
+    if (path === null || (last?.kind === "property" && selectsElement(last.name)))
+      return (path !== null || producerAt(expression, program.work)) &&
+        !this.#checked(node, this.#text(site), tag, -1) &&
+        (yield* this.#valueProduces(value, node, [], tag))
+        ? site
+        : null;
+    if (some(program.work, "exactQueries", path.steps, (step) => step.kind !== "property"))
+      return null;
+    const d = yield* this.witness(pathKey(path, program.work), tag, node, others);
+    const writer = d?.value === undefined ? null : (program.places[d.value]?.site ?? null);
+    // (a test of the needed form after the writer on every route to the use, `while n == null { … }`: the check on that
+    // route the compiler cannot keep, the warning; Codex r1 F1 on #1937)
+    if (writer === null || this.#checked(node, this.#text(site), tag, writer.start)) return null;
+    return writer;
+  }
+
+  /**
+   * The tested-producer rule's one decision (V30 §13, the `call` warning; AD-1's "unless a check stands"): whether a
+   * check that removes `tag` from the text `text` stands, after `from`, on every route to the use at `node`. It holds
+   * only by the closed set of forms below; any other test form, arm, loop or way out counts as no check, and the route
+   * rule's error stands:
+   * - a test is N1's form (`testForms`) under `and`, `or`, `not` and parentheses (`#conditionFacts`);
+   * - the use is in an arm such a test guards from its start: an `if`'s `then` arm by its truth or its `else` arm by its
+   *   falsity, a `while`'s body by its truth;
+   * - or it is in the test's own condition after it, where its truth (an `and`) or its falsity (an `or`) guards it;
+   * - or it is after a statement of its block every route past which passed such a test, with no label between them
+   *   (`#tests`).
+   */
+  #checked(node: FlowNode, text: string, tag: ItemTag, from: number): boolean {
+    this.#work.charge("exactQueries");
+    const work = this.#work;
+    const chain = this.#chainOf(node);
+    if (chain === null || node.span === null) return false;
+    const use = node.span.start.offset;
+    const tests = this.#tests(text, tag);
+    const labels = this.#ends().labels;
+    for (const place of each(work, "exactQueries", chain)) {
+      const owner = place.block.owner;
+      if (owner !== null && owner.start > from && tests.entered.has(place.block)) return true;
+      if (place.index < 0) continue;
+      const statement = place.block.statements[place.index]!;
+      if (statement.start > from && this.#ownGuarded(statement, text, tag, use)) return true;
+      const passed = tests.passed.get(place.block.id);
+      if (passed === undefined) continue;
+      // (a route may enter the block at a label: only a statement after the last label before the use counts)
+      const marks = labels.get(place.block.id) ?? [];
+      const label = lowerBound(work, marks, place.index) - 1;
+      const after = this.#firstAfter(place.block, from);
+      const low = label >= 0 && marks[label]! + 1 > after ? marks[label]! + 1 : after;
+      if (countIn(work, passed, low, place.index) > 0) return true;
+    }
+    return false;
+  }
+
+  /** The index of a block's first statement that starts after `from`: a binary search, each comparison charged. */
+  #firstAfter(block: TreeBlock, from: number): number {
+    this.#work.charge("exactQueries");
+    let low = 0;
+    let high = block.statements.length;
+    for (const _ of steps(this.#work, "exactQueries", () => low < high)) {
+      const middle = (low + high) >> 1;
+      if (block.statements[middle]!.start <= from) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  }
+
+  /**
+   * A text's tests of one offending kind, built once: the arms a test of the needed form guards from their start, and
+   * the statements every route past which passed one: an `if` whose every live arm is guarded so, holds such a
+   * statement, or ends (`#ends`), with one arm not ending; a `while` whose falsity proves it and that no `break` leaves;
+   * and so on up through each `if` holding one. A loop or a `switch` holding one is not (a `break` or a `continue` may
+   * leave the body before it, and a loop's body may not run).
+   */
+  #tests(text: string, tag: ItemTag): TextTests {
+    this.#work.charge("indexSteps");
+    const memo = joinParts(text, tag);
+    const known = this.#textTests.get(memo);
+    if (known !== undefined) return known;
+    const work = this.#work;
+    const ending = this.#ends().ending;
+    const entered = new Set<TreeBlock>();
+    const holding = new Set<TreeBlock>();
+    const passed = new Map<number, number[]>();
+    const pending: TreeStatement[] = [];
+    const statements = this.#testing().get(text) ?? [];
+    for (const statement of each(work, "indexSteps", statements)) {
+      const facts = this.#conditionFacts(statement)?.byText.get(text) ?? [];
+      const failing = some(
+        work,
+        "indexSteps",
+        facts,
+        (fact) => fact.otherwise && removes(fact.form, tag, work),
+      );
+      if (some(work, "indexSteps", facts, (fact) => fact.holding && removes(fact.form, tag, work)))
+        entered.add(statement.arms[0]!);
+      if (statement.statement.kind === "ifStatement") {
+        if (failing) entered.add(statement.arms[1]!);
+        pending.push(statement);
+      } else if (failing && !this.#broken(statement)) pending.push(statement);
+    }
+    const done = new Set<TreeStatement>();
+    for (const _ of steps(work, "indexSteps", () => pending.length > 0)) {
+      const statement = pending.pop()!;
+      if (done.has(statement)) continue;
+      // (an `if`: every live arm guarded, holding a passed statement, or ending, and one of them not ending)
+      if (statement.statement.kind === "ifStatement") {
+        let open = false;
+        let through = false;
+        for (const arm of each(work, "indexSteps", statement.arms)) {
+          if (!arm.live) continue;
+          if (entered.has(arm) || holding.has(arm)) through = true;
+          else if (!ending.has(arm)) open = true;
+        }
+        if (open || !through) continue;
+      }
+      done.add(statement);
+      const list = passed.get(statement.block.id);
+      if (list === undefined) passed.set(statement.block.id, [statement.index]);
+      else list.push(statement.index);
+      holding.add(statement.block);
+      const owner = statement.block.owner;
+      if (owner !== null && owner.statement.kind === "ifStatement") pending.push(owner);
+    }
+    for (const list of each(work, "indexSteps", passed.values()))
+      sorted(work, "indexSteps", list, (a, b) => a - b);
+    const made = { entered, passed };
+    keepText(work, memo.length);
+    this.#textTests.set(memo, made);
+    return made;
+  }
+
+  /**
+   * The blocks that end on every route through them, found once bottom-up: one holding a statement that leaves
+   * (`ENDING`) or an `if` every live arm of which ends; never by a loop or a `switch`. And per block its labels' indexes
+   * (a `goto`'s way in).
+   */
+  #ends(): Endings {
+    this.#work.charge("indexSteps");
+    if (this.#endings !== null) return this.#endings;
+    const work = this.#work;
+    const ending = new Set<TreeBlock>();
+    const labels = new Map<number, number[]>();
+    // (an arm's block is made after its owner's: from the last block, each arm before the block holding its owner)
+    let index = this.tree.blocks.length;
+    for (const _ of steps(work, "indexSteps", () => index > 0)) {
+      index -= 1;
+      const block = this.tree.blocks[index]!;
+      for (const statement of each(work, "indexSteps", block.statements)) {
+        const kind = statement.statement.kind;
+        if (kind === "labelStatement") {
+          const list = labels.get(block.id);
+          if (list === undefined) labels.set(block.id, [statement.index]);
+          else list.push(statement.index);
+        }
+        if (
+          ENDING.has(kind) ||
+          (kind === "ifStatement" &&
+            !some(work, "indexSteps", statement.arms, (arm) => arm.live && !ending.has(arm)))
+        )
+          ending.add(block);
+      }
+    }
+    this.#endings = { ending, labels };
+    return this.#endings;
+  }
+
+  /** Whether a live `break` leaves a loop: a way past it its header's test does not guard. */
+  #broken(statement: TreeStatement): boolean {
+    this.#work.charge("indexSteps");
+    const program = this.pass.program;
+    const exit = statement.loop?.exit;
+    return (
+      exit === undefined ||
+      some(
+        this.#work,
+        "indexSteps",
+        exit.predecessors,
+        (before) =>
+          program.live(before) &&
+          !program.flow.isDeadEdge(before, exit) &&
+          before.statement?.kind === "breakStatement",
+      )
+    );
+  }
+
+  /** Per tested text, the `if`s and `while`s whose conditions test it: one walk of the tree on the first query. */
+  #testing(): ReadonlyMap<string, readonly TreeStatement[]> {
+    this.#work.charge("indexSteps");
+    if (this.#tested !== null) return this.#tested;
+    const work = this.#work;
+    const made = new Map<string, TreeStatement[]>();
+    for (const block of each(work, "indexSteps", this.tree.blocks)) {
+      for (const statement of each(work, "indexSteps", block.statements)) {
+        const facts = this.#conditionFacts(statement);
+        if (facts === null) continue;
+        if (statement.statement.kind === "ifStatement" && facts.list.length > 0)
+          this.#ifs.push(statement);
+        for (const [text] of each(work, "indexSteps", facts.byText)) {
+          const list = made.get(text);
+          if (list === undefined) made.set(text, [statement]);
+          else list.push(statement);
+        }
+      }
+    }
+    this.#tested = made;
+    return made;
+  }
+
+  /**
+   * Whether an earlier part of an `if`'s or a `while`'s own condition guards the use at offset `use` with a test that
+   * removes `tag` from the text `text` (`f() != null and f() > 0`): per statement and (text, kind), the guarding facts'
+   * starts sorted with the furthest end among each prefix, built once, then one binary search.
+   */
+  #ownGuarded(statement: TreeStatement, text: string, tag: ItemTag, use: number): boolean {
+    this.#work.charge("exactQueries");
+    const work = this.#work;
+    const facts = this.#conditionFacts(statement)?.byText.get(text);
+    if (facts === undefined) return false;
+    const memo = joinParts(text, tag);
+    let per = this.#own.get(statement);
+    if (per === undefined) this.#own.set(statement, (per = new Map()));
+    let guards = per.get(memo);
+    if (guards === undefined) {
+      const kept: ConditionFact[] = [];
+      for (const fact of each(work, "exactQueries", facts))
+        if (removes(fact.form, tag, work)) kept.push(fact);
+      sorted(work, "exactQueries", kept, (a, b) => a.from - b.from);
+      const from: number[] = [];
+      const reach: number[] = [];
+      let far = -1;
+      for (const fact of each(work, "exactQueries", kept)) {
+        if (fact.to > far) far = fact.to;
+        from.push(fact.from);
+        reach.push(far);
+      }
+      guards = { from, reach };
+      keepText(work, memo.length);
+      per.set(memo, guards);
+    }
+    // (the last guard that starts at or before the use)
+    const at = lowerBound(work, guards.from, use + 1) - 1;
+    return at >= 0 && guards.reach[at]! > use;
+  }
+
+  /**
    * N3 (iii): an exact definition D′ of `key` that certifies `tag` and reaches `node` without a check, or `null` when the
    * compiler proves no such route (the consumer then warns with its check). The witness of a copy or an `otherwise`
    * asks this same query of its source, one memoised query per node and key, resolved without native recursion.
+   * `others`: where `tag` is a member of the written union `key` declares, the union's other kinds the use does not
+   * take, which certify the route as `tag` does (#1073: the written domain proves itself).
    */
-  public *witness(key: Key, tag: ItemTag, node: FlowNode): Work<Definition | null> {
+  public *witness(
+    key: Key,
+    tag: ItemTag,
+    node: FlowNode,
+    others: readonly ItemTag[] = [],
+  ): Work<Definition | null> {
     this.#work.charge("eventSteps");
     // a chain of copies: each query waits on its source's, the last first
     const waiting: { readonly memo: string; readonly found: Candidate }[] = [];
-    let memo = joinParts(key, node.id, tag);
+    let memo = joinParts(key, node.id, tag, this.#othersText(others));
     let answer: Definition | null = null;
     for (const _ of steps(this.#work, "exactQueries", () => true)) {
       const known = this.#witnesses.get(memo);
@@ -160,8 +577,8 @@ export class NarrowingRoutes {
       // (a query met again on its own chain proves nothing)
       keepText(this.#work, memo.length);
       this.#witnesses.set(memo, null);
-      const found = yield* this.#examined(key, tag, node);
-      const source = found === null ? false : this.#certificate(found, key, tag);
+      const found = yield* this.#examined(key, tag, node, others);
+      const source = found === null ? false : yield* this.#certificate(found, key, tag, others);
       if (found === null || source === false) {
         answer = null;
         break;
@@ -173,7 +590,8 @@ export class NarrowingRoutes {
       }
       waiting.push({ memo, found });
       ({ key, tag, node } = source);
-      memo = joinParts(key, node.id, tag);
+      others = [];
+      memo = joinParts(key, node.id, tag, "");
     }
     // each copy is certified exactly when its source's read is
     for (const _ of steps(this.#work, "exactQueries", () => waiting.length > 0)) {
@@ -188,7 +606,12 @@ export class NarrowingRoutes {
    * The one candidate a consumer examines, when its corridor is open: the nearest of the key's own certified
    * definitions and each prefix's whole stores whose writer side reaches the read, then the corridor checked whole.
    */
-  *#examined(key: Key, tag: ItemTag, node: FlowNode): Work<Candidate | null> {
+  *#examined(
+    key: Key,
+    tag: ItemTag,
+    node: FlowNode,
+    others: readonly ItemTag[],
+  ): Work<Candidate | null> {
     this.#work.charge("exactQueries");
     const { program, handlers, contract } = this.pass;
     if (!program.live(node) || program.blockReachable(node) || node.span === null) return null;
@@ -211,12 +634,104 @@ export class NarrowingRoutes {
       const found = candidates === undefined ? null : this.#last(candidates, at);
       if (found !== null && (best === null || found.start > best.start)) best = found;
     };
-    consider(this.#ownCandidates(key, tag));
+    consider(yield* this.#ownCandidates(key, tag, others));
     for (const prefix of each(program.work, "eventSteps", keptPrefixes(program.work, key)))
       consider(this.#wholeStores(prefix));
-    const found: Candidate | null = best;
+    // EVIDENCE: `consider` assigns `best` in its closure, which TypeScript's flow analysis does not track.
+    const found = best as Candidate | null;
     if (found === null) return null;
+    // (a store whose own statement holds the read takes effect after it, `n += 1`: it brings the read nothing)
+    const last = found.chain[found.chain.length - 1]!;
+    const statement = last.index < 0 ? undefined : last.block.statements[last.index];
+    if (statement !== undefined && statement.start <= at && at < statement.end) return null;
+    const stored = found.def.value === undefined ? null : program.places[found.def.value]?.site;
+    if (stored !== undefined && stored !== null && stored.start <= at && at < stored.end)
+      return null;
     return this.#open(key, tag, found, chain, node) ? found : null;
+  }
+
+  /**
+   * The route rule's default (Sol's F2 on #1937, then Codex r6 and r7; the lead's ruling; #1938 designs the precise
+   * rule): the certificate promotes to an error only where no live `if` arm of the program's admitted callables is
+   * infeasible by entry narrowing (N1's forms over the core's items, `#infeasible`) or has a stopped tested read, so none
+   * on the use's witness chain or among the callables whose results or defaults reach it does; otherwise the use keeps
+   * main's warning. An uncalled function contributes no live arm. An arm it does not prove counts as feasible: a
+   * comparison that is constant outside N1's forms (`o.k == 1`), a loop's exit, a `switch` case, another location's
+   * test. One answer per program, from the `if`s `#testing` finds once.
+   */
+  *#holdsInfeasible(): Work<boolean> {
+    this.#work.charge("eventSteps");
+    if (this.#holds !== null) return this.#holds;
+    const work = this.#work;
+    this.#testing();
+    let holds = false;
+    for (const statement of each(work, "eventSteps", this.#ifs)) {
+      for (const arm of each(work, "eventSteps", statement.arms))
+        if (arm.live && (yield* this.#infeasible(arm)) !== "feasible") {
+          holds = true;
+          break;
+        }
+      if (holds) break;
+    }
+    this.#holds = holds;
+    return holds;
+  }
+
+  /**
+   * Whether an `if`'s arm is one no run enters (`infeasible`): a test of its condition (N1's form, `atEntry`) whose
+   * narrowing removes every kind its read holds at the condition. `unavailable`, which blocks the route rule's promotion
+   * (Sol's final F1 on #1937, the lead's ruling), where a tested read's answer is missing: a stopped decision's (the
+   * `budget` reason), an `unknown` without the `external` reason (admission lacking items, #2009, #2011), or empty.
+   * `feasible` where the kinds are known and the narrowing leaves some, or the read is external data: an `unknown` with
+   * the `external` reason is an answer, a value of any kind, so the arm is entered. One answer per arm.
+   */
+  *#infeasible(arm: TreeBlock): Work<ArmFeasibility> {
+    this.#work.charge("eventSteps");
+    const known = this.#infeasibleArms.get(arm);
+    if (known !== undefined) return known;
+    const work = this.#work;
+    const owner = arm.owner;
+    let answer: ArmFeasibility = "feasible";
+    const facts = owner?.statement.kind === "ifStatement" ? this.#conditionFacts(owner) : null;
+    // (each location's narrowings at the entry once: a condition may test one location many times)
+    const seen = new Set<string>();
+    if (arm.entry !== null && facts !== null)
+      for (const fact of each(work, "eventSteps", facts.list)) {
+        if (fact.location === null || seen.has(fact.location)) continue;
+        seen.add(fact.location);
+        for (const g of each(work, "eventSteps", this.index.atEntry(arm.entry, fact.location))) {
+          const items = yield* this.pass.values.keyItems(g.key, g.input);
+          if (
+            items.length === 0 ||
+            some(
+              work,
+              "eventSteps",
+              items,
+              (item) =>
+                (item.reasons & REASON.budget) !== 0 ||
+                (item.tag === "unknown" && (item.reasons & REASON.external) === 0),
+            )
+          ) {
+            answer = "unavailable";
+            break;
+          }
+          if (
+            items.length > 0 &&
+            !some(
+              work,
+              "eventSteps",
+              items,
+              (item) => item.tag === "unknown" || !removes(g.form, item.tag, work),
+            )
+          ) {
+            answer = "infeasible";
+            break;
+          }
+        }
+        if (answer !== "feasible") break;
+      }
+    this.#infeasibleArms.set(arm, answer);
+    return answer;
   }
 
   /** X7's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged. */
@@ -227,30 +742,34 @@ export class NarrowingRoutes {
   }
 
   /**
-   * Whether a candidate certifies the offending item for `key` (N3 (iii), N3a): `true` for a seed, `false` when it is
-   * refused, or the read whose own witness certifies it (a scalar copy's source, an `otherwise`'s left operand).
+   * Whether a candidate certifies the offending item for `key` (N3 (iii), N3a, re-derived by AD-1, #1073): `true`
+   * where its stored value produces the kind on some run, `false` where it does not, or the read whose own witness
+   * certifies it (a scalar copy's source, a whole copy's source below the copied path, an `otherwise`'s left operand).
+   * Every producer certifies by what its value holds (a literal, a default of any kind, a lookup, a parse, a
+   * conversion, a fallback): no producer is refused as such. A parameter's default is in its read's items only where
+   * some call omits the argument (V30: an error only for a run that can happen).
    */
-  #certificate(
+  *#certificate(
     found: Candidate,
     key: Key,
     tag: ItemTag,
-  ): boolean | { readonly key: Key; readonly tag: ItemTag; readonly node: FlowNode } {
+    others: readonly ItemTag[],
+  ): Work<boolean | { readonly key: Key; readonly tag: ItemTag; readonly node: FlowNode }> {
     this.#work.charge("exactQueries");
     const { program, lists } = this.pass;
     const d = found.def;
-    // X3's exact definitions N3 certifies: a declaration, an assignment with a certain receiver, a single-site
-    // parameter's default; never a weak store, an element or dict key, a loop variable, a return or an argument
+    // X3's exact definitions N3 certifies: a declaration, an assignment with a certain receiver, a parameter's default;
+    // never a weak store, an element or dict key, a loop variable, a return or an argument
     if (
       d.kind !== "whole" ||
       d.weak ||
       d.value === undefined ||
       !CERTIFIED.has(d.how) ||
-      (d.how === "parameter default" && !lists.singleSite(d.fn)) ||
       !lists.certain(d)
     )
       return false;
-    // a whole store of a prefix answers below it only through its literal's properties, to a seed
-    // (`keyPath` walks the key's text)
+    // a whole store of a prefix answers below it through its literal's properties, else through what its value holds
+    // there (`keyPath` walks the key's text)
     const full = keyPath(key);
     program.work.charge("exactQueries", full.length);
     const rest: string[] = [];
@@ -260,46 +779,199 @@ export class NarrowingRoutes {
       step += 1;
     }
     let value: PlaceId = d.value;
-    for (const step of each(program.work, "exactQueries", rest)) {
-      const property = this.#property(value, propertyName(step));
-      if (property === undefined) return false;
+    let below = 0;
+    for (const _ of steps(program.work, "exactQueries", () => below < rest.length)) {
+      const property = this.#property(value, propertyName(rest[below]!));
+      if (property === undefined) break;
       value = property;
+      below += 1;
     }
-    if (literalTag(program, value) === tag) {
-      // a parameter's default is selected where the call omits the argument: its one call site binds none
-      return d.how !== "parameter default" || !this.#argued().has(d.key);
+    const left: string[] = [];
+    for (const _ of steps(program.work, "exactQueries", () => below < rest.length)) {
+      left.push(rest[below]!);
+      below += 1;
     }
-    const c = program.opOf.get(value);
-    // `load(key, default: …)`: storage may lack the key on any run (the storage premise)
-    if (c?.kind === "load") return c.fallback !== null && literalTag(program, c.fallback) === tag;
-    if (rest.length > 0) return false;
-    // `a otherwise <literal>`: live, and selected where `a` is the literal `null` or its own `null` is certified at that
-    // node
-    if (c?.kind === "fallback") {
-      const right = program.places[c.right]?.site;
-      const fallback = right === undefined || right === null ? null : program.exprAt(right);
-      if (literalTag(program, c.right) !== tag || fallback === null || !program.live(fallback))
-        return false;
-      if (literalTag(program, c.left) === "null")
-        return d.how !== "parameter default" || !this.#argued().has(d.key);
-      const read = this.#scalarRead(c.left);
-      return read === null ? false : { key: read.key, tag: "null", node: read.node };
+    program.work.charge("exactQueries", left.length);
+    if (left.length === 0) {
+      const literal = literalTag(program, value);
+      if (literal !== null)
+        return (
+          literal === tag || some(program.work, "exactQueries", others, (kind) => kind === literal)
+        );
+      const c = program.opOf.get(value);
+      // `a otherwise <literal>`: live, and selected where `a` is the literal `null` or its own `null` is certified at
+      // that node
+      if (c?.kind === "fallback" && literalTag(program, c.right) === tag) {
+        const right = program.places[c.right]?.site;
+        const fallback = right === undefined || right === null ? null : program.exprAt(right);
+        if (fallback === null || !program.live(fallback)) return false;
+        if (literalTag(program, c.left) === "null") return true;
+        const read = this.#scalarRead(c.left);
+        if (read !== null) return { key: read.key, tag: "null", node: read.node };
+      }
     }
     // a scalar copy whose source read has a certified witness
-    const read = this.#scalarRead(value);
-    return read === null ? false : { key: read.key, tag, node: read.node };
+    const read = left.length === 0 ? this.#scalarRead(value) : null;
+    if (read !== null) return { key: read.key, tag, node: read.node };
+    // any other producer, a whole copy below the copied path among them, by what its value holds there on some run,
+    // neither stopped nor read under a failed test: one answer per read, never a route per field of each copy (W34)
+    if (yield* this.#valueProduces(value, d.node, left, tag)) return true;
+    for (const kind of each(program.work, "exactQueries", others))
+      if (yield* this.#valueProduces(value, d.node, left, kind)) return true;
+    return false;
   }
 
-  /** The keys of the parameters some call binds an argument to: one walk of the transfers, made once per pass. */
-  #argued(): ReadonlySet<Key> {
-    this.#work.charge("indexSteps");
-    if (this.#arguments !== null) return this.#arguments;
-    const { definitions, program } = this.pass;
-    const argued = new Set<Key>();
-    for (const d of each(program.work, "indexSteps", definitions.transferDefs))
-      if (d.how === "argument") argued.add(d.key);
-    this.#arguments = argued;
-    return argued;
+  /**
+   * An `if`'s or a `while`'s condition's tests as facts (N1's forms, `testForms`), found once per statement by one walk
+   * of the condition: each test's form where it holds, guarding the rest of an `and` and, through every `and` above it,
+   * the `then` arm or the loop's body; its form where it fails, guarding the rest of an `or` and, through every `or`
+   * above it, the `else` arm or the way past; a `not` swaps the two.
+   */
+  #conditionFacts(statement: TreeStatement): ConditionFacts | null {
+    this.#work.charge("exactQueries");
+    const known = this.#conditions.get(statement);
+    if (known !== undefined) return known;
+    const ast = statement.statement;
+    if (ast.kind !== "ifStatement" && ast.kind !== "whileStatement") {
+      this.#conditions.set(statement, null);
+      return null;
+    }
+    const list: ConditionFact[] = [];
+    const byText = new Map<string, ConditionFact[]>();
+    const end = ast.condition.span.end.offset;
+    // (each node with how far its truth's and its falsity's facts guard, and whether to the arms)
+    const pending: {
+      readonly at: Expression;
+      readonly holding: Guarding | null;
+      readonly failing: Guarding | null;
+    }[] = [
+      { at: ast.condition, holding: { to: end, arm: "then" }, failing: { to: end, arm: "else" } },
+    ];
+    const add = (
+      text: string,
+      location: string | null,
+      form: NarrowingForm,
+      from: number,
+      side: Guarding,
+    ): void => {
+      this.#work.charge("exactQueries");
+      const fact: ConditionFact = {
+        text,
+        location,
+        form,
+        from,
+        to: side.to,
+        holding: side.arm === "then",
+        otherwise: side.arm === "else",
+      };
+      list.push(fact);
+      const same = byText.get(text);
+      if (same === undefined) byText.set(text, [fact]);
+      else same.push(fact);
+    };
+    for (const _ of steps(this.#work, "exactQueries", () => pending.length > 0)) {
+      const { at: raw, holding, failing } = pending.pop()!;
+      const at = peel(raw, this.#work);
+      const close = at.span.end.offset;
+      if (at.kind === "binaryExpression" && (at.operator === "and" || at.operator === "or")) {
+        const and = at.operator === "and";
+        const kept = and ? holding : failing;
+        const left: Guarding =
+          kept === null
+            ? { to: close, arm: null }
+            : { to: kept.to > close ? kept.to : close, arm: kept.arm };
+        pending.push(
+          and
+            ? { at: at.left, holding: left, failing: null }
+            : { at: at.left, holding: null, failing: left },
+          and ? { at: at.right, holding, failing: null } : { at: at.right, holding: null, failing },
+        );
+        continue;
+      }
+      if (at.kind === "unaryExpression" && at.operator === "not") {
+        pending.push({ at: at.operand, holding: failing, failing: holding });
+        continue;
+      }
+      const forms = testForms(at, this.#work);
+      if (forms === null) continue;
+      const tested = peel(forms.tested, this.#work);
+      const text = this.#text({
+        file: statement.file,
+        start: tested.span.start.offset,
+        end: tested.span.end.offset,
+      });
+      const path = stablePath(this.pass.program, statement.file, tested);
+      const location = path === null ? null : locationOf(path, this.#work);
+      if (holding !== null) add(text, location, forms.holding, close, holding);
+      if (failing !== null) add(text, location, forms.failing, close, failing);
+    }
+    const made = { list, byText };
+    this.#conditions.set(statement, made);
+    return made;
+  }
+
+  /** The source text at a site, kept as charged text. */
+  #text(site: SourceSite): string {
+    this.#work.charge("exactQueries");
+    keepText(this.#work, site.end - site.start);
+    return this.pass.program.textAt(site);
+  }
+
+  /** A memo key's part for a written union's other kinds, each charged. */
+  #othersText(others: readonly ItemTag[]): string {
+    this.#work.charge("exactQueries");
+    let text = "";
+    for (const kind of each(this.#work, "exactQueries", others)) text = joinParts(text, kind);
+    return text;
+  }
+
+  /**
+   * Whether a value produces `tag` on some run where it stands (`node`), below `path`: a literal of that kind; an
+   * `otherwise` its left side's kinds, and its fallback's only where that left side can be null (a fallback that is
+   * never selected produces nothing, #1737), its chain of left sides walked iteratively; any other value as its items
+   * say (`produces`).
+   */
+  *#valueProduces(
+    value: PlaceId,
+    node: FlowNode | null,
+    path: readonly string[],
+    tag: ItemTag,
+  ): Work<boolean> {
+    this.#work.charge("exactQueries");
+    const program = this.pass.program;
+    if (path.length > 0)
+      return produces(program.work, yield* this.pass.values.valueItems(value, node, path), tag);
+    // (the fallbacks from the outermost in, down to the first left side that is none)
+    const rights: PlaceId[] = [];
+    let left = value;
+    for (const _ of steps(
+      program.work,
+      "exactQueries",
+      () => program.opOf.get(left)?.kind === "fallback",
+    )) {
+      const c = program.opOf.get(left)!;
+      if (c.kind !== "fallback") break;
+      rights.push(c.right);
+      left = c.left;
+    }
+    const holds = function* (at: PlaceId, kind: ItemTag, routes: NarrowingRoutes): Work<boolean> {
+      program.work.charge("exactQueries");
+      const literal = literalTag(program, at);
+      if (literal !== null) return literal === kind;
+      return produces(program.work, yield* routes.pass.values.valueItems(at, node, []), kind);
+    };
+    // from the innermost out: whether the value so far can be null, and whether it produced the kind
+    let nullable = yield* holds(left, "null", this);
+    let produced = tag !== "null" && (yield* holds(left, tag, this));
+    let index = rights.length;
+    for (const _ of steps(program.work, "exactQueries", () => index > 0)) {
+      index -= 1;
+      const right = rights[index]!;
+      if (!nullable) break;
+      if (tag !== "null" && !produced) produced = yield* holds(right, tag, this);
+      nullable = yield* holds(right, "null", this);
+    }
+    return tag === "null" ? nullable : produced;
   }
 
   /** A read of a stable path without element steps: its key and node. */
@@ -670,35 +1342,43 @@ export class NarrowingRoutes {
   }
 
   /** A key's own exact definitions that certify `tag` where they stand (a seed or a certified read), by callable body. */
-  #ownCandidates(key: Key, tag: ItemTag): ReadonlyMap<TreeBlock, Candidates> {
+  *#ownCandidates(
+    key: Key,
+    tag: ItemTag,
+    others: readonly ItemTag[],
+  ): Work<ReadonlyMap<TreeBlock, Candidates>> {
     this.#work.charge("indexSteps");
-    const memo = joinParts(key, tag);
+    const memo = joinParts(key, tag, this.#othersText(others));
     const known = this.#candidates.get(memo);
     if (known !== undefined) return known;
     const layer = this.#testLayer(key, tag);
-    const made = this.#candidateLists(
-      passing(this.#work, "indexSteps", this.pass.definitions.byKey.get(key) ?? [], (d) =>
-        this.#carries(d, tag),
-      ),
-      layer,
-      layer.calls,
-    );
+    const carrying: Definition[] = [];
+    for (const d of each(this.#work, "indexSteps", this.pass.definitions.byKey.get(key) ?? []))
+      if (yield* this.#carries(d, tag, others)) carrying.push(d);
+    const made = this.#candidateLists(carrying, layer, layer.calls);
     keepText(this.#work, memo.length);
     this.#candidates.set(memo, made);
     return made;
   }
 
-  /** Whether a definition's own expression could certify `tag` (the seeds, loads, `otherwise` and copies). */
-  #carries(d: Definition, tag: ItemTag): boolean {
+  /**
+   * Whether a definition's own value could certify `tag`: a literal of that kind, else what the value holds where it is
+   * stored (a copy's source as read there, any other producer's value), neither stopped nor read under a failed test
+   * (AD-1: no producer is refused as such).
+   */
+  *#carries(d: Definition, tag: ItemTag, others: readonly ItemTag[]): Work<boolean> {
     this.#work.charge("indexSteps");
     const program = this.pass.program;
     if (d.kind !== "whole" || d.weak || d.value === undefined) return false;
     const literal = literalTag(program, d.value);
-    if (literal !== null) return literal === tag;
-    const c = program.opOf.get(d.value);
-    if (c?.kind === "load") return c.fallback !== null && literalTag(program, c.fallback) === tag;
-    if (c?.kind === "fallback") return literalTag(program, c.right) === tag;
-    return this.#scalarRead(d.value) !== null;
+    if (literal !== null)
+      return (
+        literal === tag || some(program.work, "indexSteps", others, (kind) => kind === literal)
+      );
+    if (yield* this.#valueProduces(d.value, d.node, [], tag)) return true;
+    for (const kind of each(program.work, "indexSteps", others))
+      if (yield* this.#valueProduces(d.value, d.node, [], kind)) return true;
+    return false;
   }
 
   /** A prefix's whole stores, by callable body, their reach by the shared layer alone (checked whole when examined). */
