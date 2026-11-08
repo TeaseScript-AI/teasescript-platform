@@ -260,16 +260,17 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
       "introduceNow",
     ],
   ],
-  "player/vue/src/useDebugRewind.ts useDebugRewind > tryOnScopeDispose:callback > then:callback": [
-    "resume",
+  "player/vue/src/useDebugRewind.ts useDebugRewind > tryOnScopeDispose:callback > then:callback.1":
     [
-      "BridgeClient.request",
-      "BridgeClient.section",
-      "BridgeClient.signal",
-      "beginRecordingNow",
-      "introduceNow",
+      "resume",
+      [
+        "BridgeClient.request",
+        "BridgeClient.section",
+        "BridgeClient.signal",
+        "beginRecordingNow",
+        "introduceNow",
+      ],
     ],
-  ],
   "player/vue/src/useDebugView.ts useDebugView": [
     "read",
     ["BridgeClient.request", "BridgeClient.signal"],

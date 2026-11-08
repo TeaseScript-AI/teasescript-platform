@@ -569,6 +569,9 @@ for (const hold of ["request", "reply"] as const)
     const record = (reason: unknown) => rejections.push(reason);
     process.on("unhandledRejection", record);
     context.after(() => void process.off("unhandledRejection", record));
+    // What the Player reports as host errors: the loss, and nothing a reinstatement attempted after it.
+    const reported: unknown[] = [];
+    context.mock.method(console, "error", (...args: unknown[]) => void reported.push(args[1]));
     const storage = memoryStorage();
     const made = createHost(context, storage.provider, { lossy: true });
     const { host, rewind, debug } = made;
@@ -587,6 +590,11 @@ for (const hold of ["request", "reply"] as const)
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(host.session.value, shown, "the lost session is not reinstated");
     assert.deepEqual(rejections, [], "no promise rejected unhandled");
+    assert.deepEqual(
+      reported.map((error) => (error instanceof Error ? error.message : String(error))),
+      ["The engine Worker failed: injected."],
+      "only the loss was reported: no reinstatement was attempted",
+    );
   });
 
 test("Back waits for a pending save, and a new session deletes the history", async (context) => {
