@@ -22,14 +22,15 @@ import { OWNERSHIP_MODES, type Operated, type Ownership } from "./helpers/plan-j
  * lists is outside the check's reach, as is a binding it cannot resolve lexically.
  */
 
-/** The host's modules, under this folder: the composable and every module of its `session/` folder. */
+/** The host's modules, under this folder: the composable and every module of its `session/` folder and subfolders. */
 const HOST_ROOT = "player/vue/src";
 const MAIN = "usePlayerSession.ts";
 /** The rewind's owner, whose adoption replaces the saved values. */
 const REWIND = "session/useSessionRewind.ts";
 const HOST_MODULES = () => [
   MAIN,
-  ...readdirSync(resolve(process.cwd(), HOST_ROOT, "session"))
+  ...readdirSync(resolve(process.cwd(), HOST_ROOT, "session"), { recursive: true })
+    .map(String)
     .filter((name) => name.endsWith(".ts"))
     .sort()
     .map((name) => `session/${name}`),
@@ -94,15 +95,11 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     usePlayerSession: SETUP,
     "usePlayerSession.hasNormalStorage": MOVE,
     keptStore: RESOURCE,
-    routed: RESOURCE,
     "scriptStorage.load": RESOURCE,
     "scriptStorage.write": RESOURCE,
     "scriptStorage.replace": RESOURCE,
     "scriptStorage.clear": RESOURCE,
-    switchStorage: MOVE,
-    enterDebugRoom: MOVE,
     copyToDebugRoom: MOVE,
-    createDebugRoom: MOVE,
     startDebugSessionAnew: MOVE,
     activate: SESSION,
     "prepareRestore.begin": SESSION,
@@ -121,7 +118,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     reviewSavedDataImport: READ,
     reviewedImport: READ,
     exportSession: READ,
-    storedPhotos: READ,
     "usePlayerSession.savedPhoto": READ,
     resolveAsset: READ,
     scriptStorageOptions: READ,
@@ -141,6 +137,17 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     issueTracing: SESSION,
     applyDebugMode: SESSION,
     debugView: SESSION,
+  },
+  "session/persistence/useStorageRoute.ts": {
+    useStorageRoute: SETUP,
+    "useStorageRoute.debugRoomsNow": RESOURCE,
+    "useStorageRoute.debugRoomStorageNow": RESOURCE,
+    "useStorageRoute.storageRouteNow": RESOURCE,
+    routed: RESOURCE,
+    switchStorage: MOVE,
+    enterDebugRoom: MOVE,
+    createDebugRoom: MOVE,
+    storedPhotos: READ,
   },
   "session/useSessionRewind.ts": { adoptShown: EDIT, settleAdoption: EDIT },
   "session/useSessionMedia.ts": { storeImageFile: EDIT, "useSessionMedia.watchMedia": SETUP },
@@ -200,6 +207,11 @@ const DERIVED: Readonly<Record<string, string>> = {
   keptScope: "the saved values' scope, a name: no store",
   exportCandidate:
     "a debug export's candidate, reading the media store's photos through `readPhoto`: it writes no store",
+  cameraOffered: "whether a camera is offered here, from the options' capabilities: no store",
+  locks:
+    "the lock service, given the options' lock code: it asks a service, not the host, and writes no store",
+  route:
+    "the room and the route of the saved values, made from the options and the media store: its own places are checked in its module",
   rewind:
     "the rewind's owner, given the saved values: its adoption writes them, classified there (`settleAdoption`)",
 };
@@ -686,12 +698,14 @@ function consumers(source: ts.SourceFile, checked: ReadonlySet<string>): Map<str
  * functions apart: each binding's name.
  */
 function derivedBindings(source: ts.SourceFile): string[] {
-  let host: ts.FunctionDeclaration | undefined;
+  // The host's body, and the body of each owner it is composed of (`use…`, at a module's top level).
+  const hosts: ts.FunctionDeclaration[] = [];
   ts.forEachChild(source, (node) => {
-    if (ts.isFunctionDeclaration(node) && node.name?.text === "usePlayerSession") host = node;
+    if (ts.isFunctionDeclaration(node) && /^use[A-Z]/u.test(node.name?.text ?? ""))
+      hosts.push(node);
   });
   const found: string[] = [];
-  for (const statement of host?.body?.statements ?? []) {
+  for (const statement of hosts.flatMap((host) => host.body?.statements ?? [])) {
     if (!ts.isVariableStatement(statement)) continue;
     for (const declaration of statement.declarationList.declarations) {
       const value = declaration.initializer;
@@ -980,13 +994,16 @@ test("an adoption's read reaches settleAdoption only from its two callbacks, wit
 });
 
 test("every binding of the host made from a raw resource is one, the media store, or classified", () => {
-  const source = ts.createSourceFile(
-    MAIN,
-    readFileSync(resolve(process.cwd(), HOST_ROOT, MAIN), "utf8"),
-    ts.ScriptTarget.Latest,
-    true,
+  const derived = HOST_MODULES().flatMap((module) =>
+    derivedBindings(
+      ts.createSourceFile(
+        module,
+        readFileSync(resolve(process.cwd(), HOST_ROOT, module), "utf8"),
+        ts.ScriptTarget.Latest,
+        true,
+      ),
+    ),
   );
-  const derived = derivedBindings(source);
   assert.deepEqual(
     derived.filter((name) => !RAW.has(name) && !Object.hasOwn(DERIVED, name)),
     [],

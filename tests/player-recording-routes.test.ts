@@ -247,6 +247,7 @@ const SESSION_FILES: readonly string[] = [
   "player/vue/src/session/useDebugModeAndTrace.ts",
   "player/vue/src/session/useSessionMedia.ts",
   "player/vue/src/session/useSessionRewind.ts",
+  "player/vue/src/session/persistence/useStorageRoute.ts",
 ];
 const ACTIVATION_FILES = [
   ...SESSION_FILES,
@@ -357,7 +358,7 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "usePlayerSession.ts: usePlayerSession > keepIn: await discardKeptSession": KEPT_SESSION,
   "usePlayerSession.ts: usePlayerSession > keepIn: await forgetKeptSession": KEPT_SESSION,
   "usePlayerSession.ts: usePlayerSession > keepIn: await insertOrAcceptExisting": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await storageRoute": KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > keepIn: await route.storageRouteNow": KEPT_SESSION,
   "usePlayerSession.ts: usePlayerSession > keepIn: await store.publish": KEPT_SESSION,
   "usePlayerSession.ts: usePlayerSession > forgetKeptSession: await discardKeptSession.then":
     KEPT_SESSION,

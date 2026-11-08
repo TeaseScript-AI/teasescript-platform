@@ -18,7 +18,6 @@ import {
   capturedMediaReferences,
   capturedMediaStorage,
   withCapturedMedia,
-  type CapturedMediaStorage,
 } from "../../captured-media-persistence.js";
 import { browserImageDecoder, type ImageDecoder } from "../../image-file.js";
 import { type LockDialogInput } from "../../lock-service.js";
@@ -71,7 +70,6 @@ import {
   capturedMediaReferencesIn,
   keptPhotoReferences,
   keptSession,
-  memoryKeptRoomStore,
   memoryKeptSessionStore,
   type KeptRoomStore,
   type KeptSessionStore,
@@ -131,6 +129,7 @@ import { useRandomControl } from "./session/useRandomControl.js";
 import { useDebugModeAndTrace } from "./session/useDebugModeAndTrace.js";
 import { useSessionMedia } from "./session/useSessionMedia.js";
 import { useSessionRewind } from "./session/useSessionRewind.js";
+import { useStorageRoute } from "./session/persistence/useStorageRoute.js";
 
 export interface PlayerSessionOptions {
   /**
@@ -464,99 +463,23 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           keptPhotoReferences(options.keptSessions),
         )
       : undefined;
-  // The script's own saved data, which the debug room leaves as they are.
-  const normalStorage = capturedMediaPersistence ?? options.scriptStorage;
-  // The room shown, whose session, saved values, and photos are in use (DEBUGGER.md "Debug room"): the script's own,
-  // `normal`, or its debug room, `debug`, which the page's URL opens and Debug on in the normal room goes on in. Only a
-  // script with storage has a debug room.
-  const room = ref<"normal" | "debug">(
-    options.room === "debug" && normalStorage !== undefined ? "debug" : "normal",
-  );
-  // The script's debug room, or `null` without one, and whether it keeps a session.
-  let debugRooms = options.debugRooms ?? memoryKeptRoomStore();
-  const debugRoom = shallowRef<{ readonly session: boolean } | null>(null);
-  let debugRoomStorage: CapturedMediaStorage | null = null;
-  /**
-   * Where saved values go: a provider used as it is, or one that keeps their captured media durable, each with its view
-   * for one persistence operation, whose ownership admits every call it makes (`persistence-ownership.ts`).
-   */
-  interface StorageRoute {
-    readonly provider: ScriptStorageProvider;
-    forOperation(owner: PersistenceOwnership): ScriptStorageProvider;
-  }
-  const plainRoute = (provider: ScriptStorageProvider): StorageRoute => ({
-    provider,
-    forOperation: (owner) => owner.values(provider),
+  // Where saved values and photos go: the room shown and its route (`session/persistence/useStorageRoute.ts`).
+  const route = useStorageRoute({
+    options,
+    capturedMedia,
+    capturedMediaPersistence,
+    retireStaleOperations,
   });
-  const capturedRoute = (storage: CapturedMediaStorage): StorageRoute => ({
-    provider: storage,
-    forOperation: (owner) => storage.forOperation(owner),
-  });
-  const normalRoute: StorageRoute | undefined =
-    capturedMediaPersistence === undefined
-      ? options.scriptStorage && plainRoute(options.scriptStorage)
-      : capturedRoute(capturedMediaPersistence);
-  // Where storage operations go: the route in use, or a switch to another one, which operations issued meanwhile wait
-  // for, in issue order.
-  let storageRoute: StorageRoute | Promise<StorageRoute> | undefined = normalRoute;
-  const routed = <T>(operation: (route: StorageRoute) => Promise<T>): Promise<T> => {
-    const route = storageRoute!;
-    return route instanceof Promise ? route.then(operation) : operation(route);
-  };
-  /** The saved values in use, for the persistence operation `owner`: every call it makes there is admitted. */
-  const operationStorage = (owner: PersistenceOwnership): ScriptStorageProvider => ({
-    scope: normalStorage!.scope,
-    load: () => routed((route) => route.forOperation(owner).load()),
-    write: (key, value) => routed((route) => route.forOperation(owner).write(key, value)),
-    replace: (entries) => routed((route) => route.forOperation(owner).replace(entries)),
-    clear: () => routed((route) => route.forOperation(owner).clear()),
-  });
-  const storageProvider: ScriptStorageProvider | undefined = normalStorage && {
-    scope: normalStorage.scope,
-    load: () => routed((route) => route.provider.load()),
-    write: (key, value) => routed((route) => route.provider.write(key, value)),
-    replace: (entries) => routed((route) => route.provider.replace(entries)),
-    clear: () => routed((route) => route.provider.clear()),
-  };
-  /**
-   * Sends storage operations where `next` resolves from now on, once the operations issued before have finished where
-   * they were issued. `next` must not reject.
-   */
-  function switchStorage(next: () => Promise<StorageRoute>): Promise<void> {
-    const previous = storageRoute!;
-    const switched = (async () => {
-      const { provider } = await previous;
-      await (provider === debugRoomStorage ? debugRoomStorage : capturedMediaPersistence)?.flush();
-      return next();
-    })();
-    storageRoute = switched;
-    return switched.then((route) => {
-      if (storageRoute === switched) storageRoute = route;
-    });
-  }
-  /** Sends saved values and photos to the scope's debug room, which exists; `durable` are its photos this Player holds. */
-  function enterDebugRoom(
-    scope: string,
-    state: { readonly session: boolean },
-    durable: ReadonlySet<string>,
-  ): StorageRoute {
-    capturedMedia.useRepository(debugRooms.media, durable);
-    debugRoomStorage = withCapturedMedia(debugRooms.values(scope), capturedMedia);
-    debugRoom.value = state;
-    return capturedRoute(debugRoomStorage);
-  }
-  // The room the page opens is in use before a session is prepared; the debug room is made from a copy of the script's
-  // own saved data when there is none yet.
-  if (normalStorage !== undefined)
-    void switchStorage(async () => {
-      debugRoom.value = await debugRooms.read(normalStorage.scope).catch(() => null);
-      if (room.value === "normal") return normalRoute!;
-      const durable =
-        debugRoom.value === null
-          ? await createDebugRoom(normalStorage.scope, false)
-          : new Set<string>();
-      return enterDebugRoom(normalStorage.scope, debugRoom.value ?? { session: false }, durable);
-    });
+  const {
+    normalStorage,
+    room,
+    debugRoom,
+    operationStorage,
+    storageProvider,
+    switchStorage,
+    enterDebugRoom,
+    createDebugRoom,
+  } = route;
   // Every change this Player makes to the stored values goes through here, which keeps `storedEntries` equal to what the
   // provider holds as far as this Player knows, such as for the debug room's offer to delete them; another tab's
   // changes arrive with the next read. A failed change leaves them as they were; session-local values (`null`) stay
@@ -927,9 +850,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     camera.release();
     captureCamera.release();
     // Issued saves still finish and store their photos before the live lock and the session media are released.
-    void Promise.all([capturedMediaPersistence?.close(), debugRoomStorage?.drain()]).finally(() =>
-      capturedMedia.close(),
-    );
+    void Promise.all([
+      capturedMediaPersistence?.close(),
+      route.debugRoomStorageNow()?.drain(),
+    ]).finally(() => capturedMedia.close());
   });
 
   // The stored values that seed the next session, or `null` when storage is session-local: no provider, or one that
@@ -1529,7 +1453,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // activation"); only a script with storage keeps one, under its storage scope. The debug room keeps its own.
   const keptSessions = options.keptSessions ?? memoryKeptSessionStore();
   const keptScope = options.scriptStorage?.scope ?? null;
-  const keptStore = (): KeptSessionStore => (room.value === "debug" ? debugRooms : keptSessions);
+  const keptStore = (): KeptSessionStore =>
+    room.value === "debug" ? route.debugRoomsNow() : keptSessions;
   // The host's token of the script's plan, which a kept session runs.
   let scriptPlan: string | null = null;
   // What is kept of the shown session, so that keeping it again adds only the events after it: whether the plan is kept,
@@ -1697,7 +1622,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const eventsJson = added.map(serializeValidatedRuntimeJson);
     const references = capturedMediaReferencesIn(snapshotJson, eventsJson);
     // The room's saved data are in use once storage reached it.
-    await storageRoute;
+    await route.storageRouteNow();
     ctx.check();
     try {
       // A new session replaces the one kept before.
@@ -1765,7 +1690,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function discardKeptSession(ctx: PersistenceOwnership, inDebugRoom: boolean): Promise<void> {
     return inDebugRoom
-      ? ctx.rooms(debugRooms).discardSession(keptScope!)
+      ? ctx.rooms(route.debugRoomsNow()).discardSession(keptScope!)
       : ctx.kept(keptSessions).discard(keptScope!);
   }
   /**
@@ -1879,7 +1804,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     | { readonly outdated?: Problem }
   > {
     if (keptScope === null) return {};
-    await storageRoute;
+    await route.storageRouteNow();
     ctx.check();
     // The normal room's photos come back as session media; the debug room reads its own like its saved ones.
     const normalRoom = keptStore() === keptSessions;
@@ -2297,7 +2222,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         kept = { plan: false, count: 0, last: null };
         keptPresentation = null;
         await switchStorage(async () => {
-          if (replacing) await debugRooms.discard(scope).catch(() => {});
+          if (replacing)
+            await route
+              .debugRoomsNow()
+              .discard(scope)
+              .catch(() => {});
           const durable = making ? await createDebugRoom(scope, false) : new Set<string>();
           return enterDebugRoom(scope, making ? { session: live } : debugRoom.value!, durable);
         });
@@ -2314,59 +2243,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     });
     return roomChange;
   }
-  /**
-   * Stores a new debug room with a copy of the script's own saved values and photos as they are now, or none when
-   * `empty`. Resolves to the references of the photos it copied, none when the room could not be created as a copy: the
-   * Player then holds those photos itself.
-   */
-  async function createDebugRoom(scope: string, empty: boolean): Promise<ReadonlySet<string>> {
-    let entries: readonly RuntimeScriptStorageEntrySnapshot[] = [];
-    let photos: readonly CapturedMediaRecord[] = [];
-    try {
-      if (!empty) {
-        entries = await normalStorage!.load();
-        photos = await storedPhotos(scope);
-      }
-    } catch {
-      // Saved data this browser cannot read is not copied; the debug room starts without it.
-    }
-    const all = () => new Set(photos.map((photo) => photo.reference));
-    // The photos the room holds as copied, only once a creation that copied them succeeded.
-    let copied: ReadonlySet<string> = new Set();
-    try {
-      await debugRooms.create(scope, entries, photos);
-      copied = all();
-    } catch {
-      // Another tab created it meanwhile, or this browser cannot keep it: then it lives in this page.
-      if ((await debugRooms.read(scope).catch(() => null)) === null) {
-        debugRooms = memoryKeptRoomStore();
-        retireStaleOperations();
-        copied = await debugRooms
-          .create(scope, entries, photos)
-          .then(all, () => debugRooms.create(scope, [], []).then(() => new Set<string>()));
-      }
-    }
-    // A photo the room did not take is held here, so a keep or save that uses it stores it in the room.
-    for (const photo of photos)
-      if (!copied.has(photo.reference)) capturedMedia.restoreSessionMedia(photo.reference, photo);
-    return copied;
-  }
-  /** The script's stored photos, checked as the Player reads them. */
-  async function storedPhotos(scope: string): Promise<readonly CapturedMediaRecord[]> {
-    const repository = options.capturedMedia?.repository ?? null;
-    if (repository === null) return [];
-    const reader = new CapturedMediaStore(repository, browserMediaUrls, scope);
-    try {
-      const photos: CapturedMediaRecord[] = [];
-      for (const reference of await repository.listReferences(scope)) {
-        const record = await reader.read(reference);
-        if (record !== null) photos.push(record);
-      }
-      return photos;
-    } finally {
-      reader.close();
-    }
-  }
+
   /**
    * From the debug room's start page and the player's click, starts a new debug session: with the debug room's saved
    * data as they are, deleting only its session (`reload`), or with its saved data and photos deleted too (`reset`).
@@ -2384,7 +2261,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         keptPresentation = null;
         if (clear === "reset")
           await switchStorage(async () => {
-            await debugRooms.discard(scope).catch(() => {});
+            await route
+              .debugRoomsNow()
+              .discard(scope)
+              .catch(() => {});
             return enterDebugRoom(scope, { session: false }, await createDebugRoom(scope, true));
           });
         await loadScriptStorage();
