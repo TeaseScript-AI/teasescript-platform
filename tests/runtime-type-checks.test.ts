@@ -14,6 +14,8 @@ import {
   type RuntimeSnapshot,
 } from "../src/index.js";
 import { createPlayerRuntimeSession } from "../player/compile-project.js";
+import { listHasPosition } from "../src/runtime/values/collection-operations.js";
+import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -373,6 +375,19 @@ test("an index or member that a value does not have names the value, its bounds,
   ] as const) {
     assert.deepEqual(failure(`${PICK}${statements}\nexit`), [code, message, span], statements);
   }
+});
+
+test("a number that is no position of a list stays a number, so its index message is type-checked (#2019)", () => {
+  // Typed, never called: what the type check decides. A type guard's false branch would make this number `never`.
+  const typed = (value: SerializableRuntimeValue) => {
+    if (typeof value === "number" && listHasPosition(1, value)) return;
+    if (typeof value === "number") {
+      // @ts-expect-error -- a rejected position is still a number.
+      const nothing: never = value;
+      return nothing;
+    }
+  };
+  assert.equal(typeof typed, "function");
 });
 
 test("a value with unknown parts is checked part by part", () => {

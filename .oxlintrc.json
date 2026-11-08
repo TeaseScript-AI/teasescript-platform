@@ -126,7 +126,6 @@
     },
     {
       "files": [
-        "src/runtime/evaluation/access.ts",
         "src/runtime/values/serializable-values.ts",
         "tests/helpers/type-core-held-host.ts"
       ],

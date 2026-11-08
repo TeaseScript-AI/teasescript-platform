@@ -372,7 +372,7 @@ export function listPosition(
   use: "read" | "assign" | "remove",
   span: SourceSpan = indexPlan!.span,
 ): number {
-  if (listHasPosition(list.items.length, value)) return value;
+  if (typeof value === "number" && listHasPosition(list.items.length, value)) return value;
   const whole = typeof value === "number" && Number.isInteger(value);
   if (!whole) throw notWholeIndex(evaluator, indexPlan, value, span);
   const indexLabel = writtenIndexLabel(evaluator, indexPlan);
