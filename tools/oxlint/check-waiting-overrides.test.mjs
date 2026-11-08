@@ -184,6 +184,29 @@ test(
         '{\n  "rules": { "eqeqeq": "of" },\n  "overrides": [\n    {\n      "files": [],\n      "rules": { "no-debugger": 3 }\n    }\n  ]\n}\n',
         [],
       );
+      // a severity in an array, the last of a repeated key, and a configuration that extends another
+      const array = check(root, JSON.stringify({ rules: { eqeqeq: ["of", {}] } }, null, 2), []);
+      assert.deepEqual(
+        array.findings.map(({ at }) => at),
+        ['"of",'],
+      );
+      const repeated = check(
+        root,
+        '{\n "rules":{\n  "no-debugger":"error",\n  "no-debugger":"of"\n }\n}\n',
+        [],
+      );
+      assert.deepEqual(
+        repeated.findings.map(({ at }) => at),
+        ['"of"'],
+      );
+      const extended = check(root, '{ "extends": ["./extra.json"] }', []);
+      assert.deepEqual(extended.findings, [
+        {
+          at: '["./extra.json"] }',
+          message:
+            "the configuration extends another, whose rules the waiting check does not read: write its rules into this file",
+        },
+      ]);
       assert.deepEqual(rootRules.findings, [
         {
           at: '"of" },',
@@ -346,6 +369,11 @@ export default { meta: { name: "slow" }, rules: { hold: { create: () => ({ Progr
       // a live owner's probe: this test's own process
       const live = `.oxlintrc.probe-${process.pid}-0123abcd.json`;
       writeFileSync(join(root, live), "{}");
+      // pid 1, which another user owns (EPERM) or which is alive: left; and a near name of the dead run's: left
+      const unreachable = ".oxlintrc.probe-1-0123abcd.json";
+      const near = `.oxlintrc.probe-${run.pid}-0123abc.json`;
+      writeFileSync(join(root, unreachable), "{}");
+      writeFileSync(join(root, near), "{}");
       rmSync(join(root, "started"));
       writeFileSync(
         join(root, ".oxlintrc.json"),
@@ -357,11 +385,45 @@ export default { meta: { name: "slow" }, rules: { hold: { create: () => ({ Progr
       const next = spawnSync(process.execPath, ["run.mjs"], { cwd: root, encoding: "utf8" });
       assert.equal(next.stdout, "done\n", next.stderr);
       assert.deepEqual(
-        readdirSync(root).filter((name) => name.startsWith(".oxlintrc.probe-")),
-        [live],
+        readdirSync(root)
+          .filter((name) => name.startsWith(".oxlintrc.probe-"))
+          .sort(),
+        [live, near, unreachable].sort(),
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   },
 );
+
+test("two findings that differ only in their JSON's key order are one finding", () => {
+  const root = project({
+    "src/a.ts": "export const a = 1;\n",
+    // a stand-in oxlint whose one finding has its keys in another order under the probe configuration
+    "fake-oxlint.mjs": `const args = process.argv.slice(2);
+const diagnostic = { message: "same", code: "x(y)", severity: "error", filename: "src/a.ts", labels: [{ span: { offset: 0, length: 1, line: 1, column: 1 } }] };
+const reversed = (value) => Array.isArray(value) ? value.map(reversed) : value !== null && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, each]) => [key, reversed(each)])) : value;
+const probe = args[args.indexOf("--config") + 1] !== ".oxlintrc.json";
+process.stdout.write(JSON.stringify({ diagnostics: [probe ? reversed(diagnostic) : diagnostic] }));
+`,
+  });
+  try {
+    const config = '{ "overrides": [{ "files": ["src/a.ts"], "rules": { "eqeqeq": "off" } }] }';
+    writeFileSync(join(root, ".oxlintrc.json"), config);
+    const findings = checkWaitingOverrides(
+      root,
+      ".oxlintrc.json",
+      config,
+      new Set(["src/a.ts"]),
+      join(root, "fake-oxlint.mjs"),
+    );
+    assert.deepEqual(
+      findings.map(({ message }) => message),
+      [
+        "'src/a.ts' waits for eqeqeq, but oxlint reports nothing more in it without that entry: remove it from the entry",
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

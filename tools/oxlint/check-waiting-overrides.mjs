@@ -20,7 +20,8 @@ import { join } from "node:path";
 //
 // "Off" is a severity oxlint's schema (`AllowWarnDeny`, `node_modules/oxlint/configuration_schema.json`) says turns a
 // rule off: "allow", "off" or 0, alone or first in an array. A severity the schema does not have, in the root `rules`
-// or an entry's, is refused before oxlint runs.
+// or an entry's, is refused before oxlint runs, at the severity itself (the last of a repeated key, which is the one
+// that counts). The check reads one configuration file: one that `extends` another is refused.
 
 /** The severities oxlint's `AllowWarnDeny` has, and those of them that turn a rule off. */
 const SEVERITIES = new Set(["allow", "off", "warn", "error", "deny", 0, 1, 2]);
@@ -130,9 +131,11 @@ export function checkWaitingOverrides(root, configFile, configText, linted, exec
   const config = JSON.parse(configText);
   const positions = positionsOf(configText);
   const findings = [];
-  /** A finding at the value whose path is `path`. */
+  /** A finding at the value whose path is `path`: its last occurrence, the one `JSON.parse` keeps for a repeated key. */
   const report = (path, message) => {
-    const at = positions.find((each) => JSON.stringify(each.path) === JSON.stringify(path)).start;
+    const at = positions.findLast(
+      (each) => JSON.stringify(each.path) === JSON.stringify(path),
+    ).start;
     const before = configText.slice(0, at);
     findings.push({
       fileName: configFile,
@@ -142,6 +145,14 @@ export function checkWaitingOverrides(root, configFile, configText, linted, exec
     });
   };
 
+  // the check reads this one file's rule sets, so a configuration that extends another is refused
+  if (config.extends !== undefined) {
+    report(
+      ["extends"],
+      "the configuration extends another, whose rules the waiting check does not read: write its rules into this file",
+    );
+    return findings;
+  }
   const overrides = config.overrides ?? [];
   const ruleSets = [
     { path: ["rules"], rules: config.rules, where: "the configuration's" },
@@ -155,7 +166,7 @@ export function checkWaitingOverrides(root, configFile, configText, linted, exec
     for (const [rule, setting] of Object.entries(rules ?? {}))
       if (!SEVERITIES.has(severityOf(setting)))
         report(
-          [...path, rule],
+          Array.isArray(setting) && setting.length > 0 ? [...path, rule, 0] : [...path, rule],
           `${where} rule '${rule}' has the severity ${JSON.stringify(severityOf(setting))}, which oxlint's AllowWarnDeny does not have: write "off" (or "allow" or 0) to turn it off, or "error"`,
         );
   // oxlint does not run on a configuration whose severity it cannot parse
