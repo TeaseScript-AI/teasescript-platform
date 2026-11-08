@@ -54,8 +54,10 @@ An `overrides` entry whose rules are all off (`"allow"`, `"off"` or `0`, oxlint'
 the findings of those rules in its files wait for another open pull request or a cleanup. It names files, never
 patterns. `tools/oxlint/check-waiting-overrides.mjs`, in `npm run lint`, checks that each path a waiting entry lists has
 a finding that oxlint reports without that entry and not with it, and refuses a path that is not a linted file. A
-severity oxlint's schema does not have is refused in any entry. An entry is added only for a finding that waits, so
-that with the check each list shrinks.
+finding is oxlint's whole diagnostic, so one whose message or place changes when the entry goes keeps the entry too. A
+severity oxlint's schema does not have is refused, in the root `rules` or an entry's. An entry is added only for a
+finding that waits, so that with the check each list shrinks. Interrupted, the check stops by the signal; the next run
+removes the probe configuration an interrupted run left.
 
 ## Comment forecasts
 

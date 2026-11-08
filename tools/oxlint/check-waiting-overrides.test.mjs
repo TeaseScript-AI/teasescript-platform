@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -164,9 +173,27 @@ test(
       );
       assert.deepEqual(unknown.findings, [
         {
-          at: '"src/other.ts"], "rules": { "no-debugger": "of" } },',
+          at: '"of" } },',
           message:
             'the overrides entry\'s rule \'no-debugger\' has the severity "of", which oxlint\'s AllowWarnDeny does not have: write "off" (or "allow" or 0) to turn it off, or "error"',
+        },
+      ]);
+      // the root rules too, and an entry with no files to point at
+      const rootRules = check(
+        root,
+        '{\n  "rules": { "eqeqeq": "of" },\n  "overrides": [\n    {\n      "files": [],\n      "rules": { "no-debugger": 3 }\n    }\n  ]\n}\n',
+        [],
+      );
+      assert.deepEqual(rootRules.findings, [
+        {
+          at: '"of" },',
+          message:
+            'the configuration\'s rule \'eqeqeq\' has the severity "of", which oxlint\'s AllowWarnDeny does not have: write "off" (or "allow" or 0) to turn it off, or "error"',
+        },
+        {
+          at: "3 }",
+          message:
+            'the overrides entry\'s rule \'no-debugger\' has the severity 3, which oxlint\'s AllowWarnDeny does not have: write "off" (or "allow" or 0) to turn it off, or "error"',
         },
       ]);
     } finally {
@@ -200,3 +227,141 @@ test("the check stops when oxlint's output holds no findings to read", { timeout
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// A JS plugin whose one finding per file differs, between the two runs, in exactly one part: its message, its place or
+// its length. The difference comes from a global that only the waiting entry declares.
+const MARKER_PLUGIN = `export default {
+  meta: { name: "marker" },
+  rules: {
+    demo: {
+      create: (context) => ({
+        Program(node) {
+          const marked = context.sourceCode.getScope(node).variables.some((variable) => variable.name === "marker");
+          const [first, second] = node.body;
+          if (context.filename.endsWith("message.ts"))
+            context.report({ node: first, message: marked ? "with marker" : "without marker" });
+          if (context.filename.endsWith("place.ts")) context.report({ node: marked ? first : second, message: "same" });
+          if (context.filename.endsWith("length.ts"))
+            context.report({ node: marked ? first : first.expression, message: "same" });
+        },
+      }),
+    },
+  },
+};
+`;
+
+test(
+  "a finding is the whole diagnostic: a change in its message, place or length alone keeps the entry, and the file comes from its field",
+  { timeout: 60_000 },
+  () => {
+    const root = project({
+      "marker.mjs": MARKER_PLUGIN,
+      "src/message.ts": "a = 1; b = 2;\nexport {};\n",
+      "src/place.ts": "a = 1; b = 2;\nexport {};\n",
+      "src/length.ts": "a = 1; b = 2;\nexport {};\n",
+      // a name with a newline, which a line-joined identity would cut at `src/a`
+      "src/a\nb.ts": "debugger;\nexport {};\n",
+    });
+    try {
+      const config = `{
+  "categories": { "correctness": "off" },
+  "jsPlugins": ["${join(root, "marker.mjs")}"],
+  "rules": { "marker/demo": "error", "no-debugger": "error" },
+  "overrides": [
+    { "files": ["src/message.ts", "src/place.ts", "src/length.ts"], "globals": { "marker": "readonly" }, "rules": { "eqeqeq": "off" } },
+    { "files": ["src/a\\nb.ts"], "rules": { "no-debugger": "off" } }
+  ]
+}
+`;
+      const { findings, leftover } = check(root, config, [
+        "src/message.ts",
+        "src/place.ts",
+        "src/length.ts",
+        "src/a\nb.ts",
+      ]);
+      assert.deepEqual(findings, []);
+      assert.deepEqual(leftover, []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+const checker = fileURLToPath(new URL("./check-waiting-overrides.mjs", import.meta.url));
+/** A script that runs the check in `root` on its `.oxlintrc.json` and prints `done`. */
+const runner = (root, linted) => `import { readFileSync } from "node:fs";
+import { checkWaitingOverrides } from ${JSON.stringify(checker)};
+const config = readFileSync(".oxlintrc.json", "utf8");
+checkWaitingOverrides(${JSON.stringify(root)}, ".oxlintrc.json", config, new Set(${JSON.stringify(linted)}), ${JSON.stringify(executable)});
+console.log("done");
+`;
+
+test(
+  "interrupted, the check stops by the signal; the next run removes a dead owner's probe and leaves a live one's",
+  { timeout: 60_000 },
+  async () => {
+    // a plugin that marks the run as started, then holds it
+    const root = project({
+      "slow.mjs": `import { writeFileSync } from "node:fs";
+export default { meta: { name: "slow" }, rules: { hold: { create: () => ({ Program() {
+  writeFileSync(${JSON.stringify("started")}, "");
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
+} }) } } };
+`,
+      "src/a.ts": "export const a = 1;\n",
+    });
+    try {
+      writeFileSync(
+        join(root, ".oxlintrc.json"),
+        JSON.stringify({
+          categories: { correctness: "off" },
+          jsPlugins: [join(root, "slow.mjs")],
+          rules: { "slow/hold": "error" },
+          overrides: [{ files: ["src/a.ts"], rules: { "no-debugger": "off" } }],
+        }),
+      );
+      writeFileSync(join(root, "run.mjs"), runner(root, ["src/a.ts"]));
+      const run = spawn(process.execPath, ["run.mjs"], {
+        cwd: root,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      let stdout = "";
+      run.stdout.on("data", (chunk) => (stdout += chunk));
+      const ended = new Promise((resolve) =>
+        run.on("close", (status, signal) => resolve({ status, signal })),
+      );
+      const deadline = Date.now() + 30_000;
+      while (!existsSync(join(root, "started")) && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      run.kill("SIGTERM");
+      assert.deepEqual(await ended, { status: null, signal: "SIGTERM" });
+      assert.equal(stdout, "");
+      // the interrupted run's probe is left, with its dead owner's pid
+      const left = readdirSync(root).filter((name) => name.startsWith(".oxlintrc.probe-"));
+      assert.deepEqual(
+        left.map((name) => name.split("-")[1]),
+        [String(run.pid)],
+      );
+
+      // a live owner's probe: this test's own process
+      const live = `.oxlintrc.probe-${process.pid}-0123abcd.json`;
+      writeFileSync(join(root, live), "{}");
+      rmSync(join(root, "started"));
+      writeFileSync(
+        join(root, ".oxlintrc.json"),
+        JSON.stringify({
+          categories: { correctness: "off" },
+          overrides: [{ files: ["src/a.ts"], rules: { "no-debugger": "off" } }],
+        }),
+      );
+      const next = spawnSync(process.execPath, ["run.mjs"], { cwd: root, encoding: "utf8" });
+      assert.equal(next.stdout, "done\n", next.stderr);
+      assert.deepEqual(
+        readdirSync(root).filter((name) => name.startsWith(".oxlintrc.probe-")),
+        [live],
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { rmSync, writeFileSync } from "node:fs";
+import { readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 // The waiting lists of `.oxlintrc.json` (docs/LINTING.md "Waiting lists"): an `overrides` entry whose rules are all
@@ -9,13 +9,18 @@ import { join } from "node:path";
 //
 // The check lets oxlint resolve its own configuration. For each waiting entry it runs oxlint (`--type-aware`, as
 // `run.mjs` does) over the entry's files twice: with the configuration, and with a copy that leaves the entry out,
-// written beside it (`overrides` paths resolve from the configuration's folder) under a name unique to the run and
-// removed at the end, also on SIGINT, SIGTERM and SIGHUP. A finding of the second run that the first lacks keeps its
-// file listed.
+// written beside it (`overrides` paths resolve from the configuration's folder). A finding is oxlint's whole JSON
+// diagnostic, compared as a structure (its file, code, severity, message, and every label's place and length): one of
+// the second run that the first lacks keeps its file listed. So a finding of a rule that stays on, whose message or
+// place changes when the entry goes, keeps the entry too.
+//
+// The copy is `.oxlintrc.probe-<pid>-<random>.json`, a name oxlint never reads by itself, gitignored, and removed when
+// the check ends. The check installs no signal handler: interrupted, it stops by the signal; the next run removes what
+// an interrupted run left, each probe whose owner process is no longer alive.
 //
 // "Off" is a severity oxlint's schema (`AllowWarnDeny`, `node_modules/oxlint/configuration_schema.json`) says turns a
-// rule off: "allow", "off" or 0, alone or first in an array. A severity the schema does not have is refused, in any
-// entry.
+// rule off: "allow", "off" or 0, alone or first in an array. A severity the schema does not have, in the root `rules`
+// or an entry's, is refused before oxlint runs.
 
 /** The severities oxlint's `AllowWarnDeny` has, and those of them that turn a rule off. */
 const SEVERITIES = new Set(["allow", "off", "warn", "error", "deny", 0, 1, 2]);
@@ -27,8 +32,8 @@ export const isWaitingEntry = (entry) =>
   Object.keys(entry.rules ?? {}).length > 0 &&
   Object.values(entry.rules).every((setting) => OFF.has(severityOf(setting)));
 
-/** Each string value of `text` (strict JSON) with its path of keys and indexes, and its offset. */
-function stringsOf(text) {
+/** Each value of `text` (strict JSON), objects and arrays included, with its path of keys and indexes, and its offset. */
+function positionsOf(text) {
   const found = [];
   let at = 0;
   const space = () => {
@@ -43,6 +48,7 @@ function stringsOf(text) {
   };
   const value = (path) => {
     space();
+    found.push({ path, start: at });
     if (text[at] === "{") {
       at += 1;
       space();
@@ -67,14 +73,26 @@ function stringsOf(text) {
         if (text[at++] === "]") return;
       }
     }
-    if (text[at] === '"') return void found.push({ path, start: string().start });
+    if (text[at] === '"') return void string();
     while (at < text.length && !/[\s,}\]]/u.test(text[at])) at += 1;
   };
   value([]);
   return found;
 }
 
-/** Each diagnostic of oxlint's JSON output, as one string: its file, code, place and message. */
+/** `value` with its objects' keys in order, so that two equal structures print alike. */
+const canonical = (value) =>
+  Array.isArray(value)
+    ? value.map(canonical)
+    : value !== null && typeof value === "object"
+      ? Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map((key) => [key, canonical(value[key])]),
+        )
+      : value;
+
+/** Each diagnostic of oxlint's JSON output: `{ file, key }`, `key` the whole diagnostic as a canonical string. */
 function diagnosticsOf(result) {
   let diagnostics;
   try {
@@ -84,10 +102,23 @@ function diagnosticsOf(result) {
       `check-waiting-overrides: oxlint printed no findings to read (exit ${result.status}):\n${result.stdout}${result.stderr}`,
     );
   }
-  return diagnostics.map(
-    ({ filename, code, message, labels }) =>
-      `${filename}\n${code}\n${labels?.[0]?.span?.offset ?? ""}\n${message}`,
-  );
+  return diagnostics.map((diagnostic) => ({
+    file: diagnostic.filename,
+    key: JSON.stringify(canonical(diagnostic)),
+  }));
+}
+
+/** Removes each probe in `root` whose owner process is no longer alive: what an interrupted run left. */
+function sweepProbes(root) {
+  for (const name of readdirSync(root)) {
+    const owner = /^\.oxlintrc\.probe-(\d+)-[0-9a-f]{8}\.json$/u.exec(name);
+    if (owner === null) continue;
+    try {
+      process.kill(Number(owner[1]), 0);
+    } catch (error) {
+      if (error.code === "ESRCH") rmSync(join(root, name), { force: true });
+    }
+  }
 }
 
 /**
@@ -97,11 +128,11 @@ function diagnosticsOf(result) {
  */
 export function checkWaitingOverrides(root, configFile, configText, linted, executable) {
   const config = JSON.parse(configText);
-  const strings = stringsOf(configText);
+  const positions = positionsOf(configText);
   const findings = [];
-  /** A finding at the string whose path is `path` (the entry itself when no such string is found). */
+  /** A finding at the value whose path is `path`. */
   const report = (path, message) => {
-    const at = strings.find((each) => each.path.join("\n") === path.join("\n"))?.start ?? 0;
+    const at = positions.find((each) => JSON.stringify(each.path) === JSON.stringify(path)).start;
     const before = configText.slice(0, at);
     findings.push({
       fileName: configFile,
@@ -112,12 +143,20 @@ export function checkWaitingOverrides(root, configFile, configText, linted, exec
   };
 
   const overrides = config.overrides ?? [];
-  for (const [index, entry] of overrides.entries())
-    for (const [rule, setting] of Object.entries(entry.rules ?? {}))
+  const ruleSets = [
+    { path: ["rules"], rules: config.rules, where: "the configuration's" },
+    ...overrides.map((entry, index) => ({
+      path: ["overrides", index, "rules"],
+      rules: entry.rules,
+      where: "the overrides entry's",
+    })),
+  ];
+  for (const { path, rules, where } of ruleSets)
+    for (const [rule, setting] of Object.entries(rules ?? {}))
       if (!SEVERITIES.has(severityOf(setting)))
         report(
-          ["overrides", index, "files", 0],
-          `the overrides entry's rule '${rule}' has the severity ${JSON.stringify(severityOf(setting))}, which oxlint's AllowWarnDeny does not have: write "off" (or "allow" or 0) to turn it off, or "error"`,
+          [...path, rule],
+          `${where} rule '${rule}' has the severity ${JSON.stringify(severityOf(setting))}, which oxlint's AllowWarnDeny does not have: write "off" (or "allow" or 0) to turn it off, or "error"`,
         );
   // oxlint does not run on a configuration whose severity it cannot parse
   if (findings.length > 0) return findings;
@@ -125,16 +164,8 @@ export function checkWaitingOverrides(root, configFile, configText, linted, exec
     .map((entry, index) => ({ entry, index }))
     .filter(({ entry }) => isWaitingEntry(entry));
 
+  sweepProbes(root);
   const probe = `.oxlintrc.probe-${process.pid}-${randomBytes(4).toString("hex")}.json`;
-  const remove = () => rmSync(join(root, probe), { force: true });
-  const signals = ["SIGINT", "SIGTERM", "SIGHUP"].map((signal) => {
-    const onSignal = () => {
-      remove();
-      process.kill(process.pid, signal);
-    };
-    process.once(signal, onSignal);
-    return [signal, onSignal];
-  });
   const lint = (file, files) =>
     diagnosticsOf(
       spawnSync(
@@ -167,11 +198,11 @@ export function checkWaitingOverrides(root, configFile, configText, linted, exec
         join(root, probe),
         JSON.stringify({ ...config, overrides: overrides.filter((_, at) => at !== index) }),
       );
-      const kept = new Set(lint(configFile, files));
+      const kept = new Set(lint(configFile, files).map(({ key }) => key));
       const needed = new Set(
         lint(probe, files)
-          .filter((diagnostic) => !kept.has(diagnostic))
-          .map((diagnostic) => diagnostic.split("\n")[0]),
+          .filter(({ key }) => !kept.has(key))
+          .map(({ file }) => file),
       );
       const rules = Object.keys(entry.rules);
       for (const [position, file] of entry.files.entries())
@@ -182,8 +213,7 @@ export function checkWaitingOverrides(root, configFile, configText, linted, exec
           );
     }
   } finally {
-    remove();
-    for (const [signal, onSignal] of signals) process.off(signal, onSignal);
+    rmSync(join(root, probe), { force: true });
   }
   return findings.sort((one, other) => one.line - other.line || one.column - other.column);
 }
