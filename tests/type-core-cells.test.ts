@@ -10,7 +10,12 @@ import type { CoreResult } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
-import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
+import {
+  HELD_S10_RECORDS,
+  heldBack,
+  readFixture,
+  type FixtureRecord,
+} from "./helpers/type-core-fixture.js";
 import { inMode, MODES, stopIdentity } from "./helpers/type-core-oracles.js";
 import {
   BOUNDED_ADMISSION_WITNESSES,
@@ -50,14 +55,20 @@ test("the core gives the expected record for every record of the cells it comple
   }
   assert.deepEqual(Object.fromEntries(held), {
     "the adapters' records (S9b)": 3,
-    "stage 3b's cells (S10)": 306,
+    "the route rule's corridor across locations (#1938)": 18,
+    "a written optional load's definite number error (#1173, listed in #1938)": 1,
+    "a static warning of S9b's otherwise (#1737)": 7,
+    "U4's consumer remainder (#2025)": 3,
+    "a fixture expectation awaiting its ruling (#2025)": 3,
+    "the numeric crossover (#1173, #2025)": 1,
+    "a context word under an unrelated test (#2024)": 1,
     "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
     "S9b's F18 copy of a written type as the receiving context (r4.77 (2))": 18,
     "fromJson with files: true outside the slice, and C13's text operand": 2,
     "a known-value error the record lacks (decision 3 on #1072)": 1,
     "C13's warning of a choice value from outside the script the record lacks (#1437)": 3,
   });
-  assert.equal(asserted.length, 1_679);
+  assert.equal(asserted.length, 1_951);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
@@ -70,6 +81,158 @@ test("the core gives the expected record for every record of the cells it comple
   // (TABLE §3.4, D2, r4.62: every site compares whole, a member read's and an operator's included)
   t.diagnostic(`${asserted.length} records compared by whole sites`);
   assert.deepEqual(failures, []);
+});
+
+/**
+ * The completeness check of stage 3b's closed hold list (#1073 U6): each held name is a fixture record with an `N` cell,
+ * held by its own reason, whose analysis in every mode gives exactly the differences its hold names, and whose
+ * differences have its reason's signature. A hold whose cause is repaired, changed or misnamed fails; every other record
+ * with an `N` cell is asserted, by the test above.
+ */
+test("each stage 3b record held by name exists, has an N cell, and differs in every mode exactly as its cause does (#1073 U6)", () => {
+  // (each hold's reason found independently of the map that names it, one cause per hold: a record a reviewer or the
+  // owner assigned by name, else the one class its differences fall in)
+  const assigned = new Map<string, string>([
+    ["cp9-cells/r42/guard/holding-path", "U4's consumer remainder (#2025)"],
+    ["cp9-cells/r46/guard/branch-holding-path/guarded", "U4's consumer remainder (#2025)"],
+    ["cp9-cells/3b/review-early/s2-same-location-compound-loop", "U4's consumer remainder (#2025)"],
+    [
+      "cp9-cells/r46/guard/arithmetic-unary/guarded",
+      "a fixture expectation awaiting its ruling (#2025)",
+    ],
+    [
+      "cp9-cells/3b/invalidation/clear/changed",
+      "a fixture expectation awaiting its ruling (#2025)",
+    ],
+    ["cp9-cells/3b/invalidation/sort/changed", "a fixture expectation awaiting its ruling (#2025)"],
+    ["cp9-cells/r49/sharing/record-aliases/guarded", "the numeric crossover (#1173, #2025)"],
+  ]);
+  const causeOf = (name: string, lines: readonly string[]): string => {
+    const named = assigned.get(name);
+    if (named !== undefined) return named;
+    const required = lines.some((line) => line.startsWith("missing required check "));
+    if (required && lines.some((line) => line.startsWith("missing check integer-check ")))
+      return "a written optional load's definite number error (#1173, listed in #1938)";
+    if (required) return "the route rule's corridor across locations (#1938)";
+    if (
+      lines.length > 0 &&
+      lines.every(
+        (line) =>
+          line.startsWith("extra diagnostic static warning ") ||
+          line === "outcome valid, got warning",
+      )
+    )
+      return "a static warning of S9b's otherwise (#1737)";
+    if (lines.length > 0 && lines.every((line) => line.startsWith("missing context ")))
+      return "a context word under an unrelated test (#2024)";
+    return "no known cause";
+  };
+  // (the differences as a multiset: the comparison compares entries regardless of their order)
+  const sorted = (lines: readonly string[]): string => JSON.stringify([...lines].sort());
+  const byName = new Map(records.map((record) => [record.name, record]));
+  const wrong: string[] = [];
+  for (const [name, hold] of HELD_S10_RECORDS) {
+    const record = byName.get(name);
+    if (record === undefined) {
+      wrong.push(`${name}: no such record`);
+      continue;
+    }
+    if (!record.cells.some((cell) => /^N\d/.test(cell))) wrong.push(`${name}: no N cell`);
+    if (heldBack(record) !== hold.reason) wrong.push(`${name}: held by another reason`);
+    const cause = causeOf(name, hold.differences);
+    if (cause !== hold.reason) wrong.push(`${name}: held as ${hold.reason}, its cause is ${cause}`);
+    const request = coreRequest(record.files);
+    assert.ok(request !== null, name);
+    for (const mode of MODES) {
+      const differences = recordDifferences(
+        record.expected,
+        inMode(mode, () => compactAnalysis(request)),
+      );
+      if (sorted(differences) !== sorted(hold.differences))
+        wrong.push(
+          `${name} in ${JSON.stringify(mode)}: ${JSON.stringify(differences)}, its hold names ${JSON.stringify(hold.differences)}`,
+        );
+    }
+  }
+  assert.deepEqual(wrong, []);
+  assert.equal(HELD_S10_RECORDS.size, 34);
+});
+
+/**
+ * V30 §13 (a loop's start accounts for the values an earlier round left; a write in the body drops a check only when the
+ * written value can make the check false): `cp9-cells/3b/loop/break/changed`'s write of `null` is followed by an
+ * unconditional `break`, so no round starts with it and the use is valid, as its corrected record says (#2025). Its two
+ * controls: without the `break`, and with the `break` under a condition, a later round can start with the `null`, and
+ * the use is the warning with its `loop` context and its check.
+ */
+test("a loop's write that an unconditional break follows leaves no value for a later round, and its controls warn (#2025)", () => {
+  const head =
+    'let flagHost = askBoolean "flag"\nlet n = 1\nif flagHost { n = null }\nif n != null { repeat 2 { repeat n {}\n n = null\n';
+  const rows: readonly (readonly [string, string, string | null])[] = [
+    ["an unconditional break (the corrected record)", `${head} break } }\nexit\n`, null],
+    ["no break", `${head}} }\nexit\n`, "loop"],
+    ["a conditional break", `${head} if askBoolean "b" { break } } }\nexit\n`, "loop"],
+  ];
+  const wrong: string[] = [];
+  for (const [name, source, context] of rows) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    for (const mode of MODES) {
+      const record = inMode(mode, () => compactAnalysis(request));
+      const warnings = record.diagnostics.filter((d) => d.class === "warning-runtime-check");
+      const fits =
+        context === null
+          ? record.outcome === "valid" && record.checks.length === 0
+          : record.outcome === "warning-runtime-check" &&
+            warnings.length === 1 &&
+            warnings[0]?.context === context &&
+            record.checks.some((check) => check.kind === "null-check" && check.target === "n");
+      if (!fits) wrong.push(`${name} in ${JSON.stringify(mode)}: ${JSON.stringify(record)}`);
+    }
+  }
+  assert.deepEqual(wrong, []);
+});
+
+test("the record comparison the asserted records rest on reports each part: outcome, sites, context and N10's payload (#1073 U6)", () => {
+  // (a record with a required-check payload and an asserted context, its own analysis compared with its record changed
+  // in one part at a time: a release by the comparison is only as complete as these parts)
+  const record = records.find((entry) => entry.name === "cp9-cells/F15/unknown-member");
+  assert.ok(record !== undefined && heldBack(record) === null);
+  const actual = analysed(record);
+  assert.deepEqual(recordDifferences(record.expected, actual), []);
+  const first = record.expected.diagnostics.find(
+    (d) => d.requiredCheck !== undefined && d.requiredCheck !== null,
+  );
+  const contexted = record.expected.diagnostics.find((d) => d.context !== null);
+  const payload = first?.requiredCheck;
+  assert.ok(payload && contexted);
+  const changed = (diagnostics: typeof record.expected.diagnostics) => ({
+    ...record.expected,
+    diagnostics,
+  });
+  const parts: Readonly<Record<string, CompactRecord>> = {
+    outcome: {
+      ...record.expected,
+      outcome: record.expected.outcome === "valid" ? "warning" : "valid",
+    },
+    site: changed(
+      record.expected.diagnostics.map((d) =>
+        d === first ? { ...d, site: { ...d.site, offset: d.site.offset + 1 } } : d,
+      ),
+    ),
+    context: changed(
+      record.expected.diagnostics.map((d) =>
+        d === contexted ? { ...d, context: d.context === "branch" ? "loop" : "branch" } : d,
+      ),
+    ),
+    payload: changed(
+      record.expected.diagnostics.map((d) =>
+        d === first ? { ...d, requiredCheck: { ...payload, missingTests: ["otherwise"] } } : d,
+      ),
+    ),
+  };
+  for (const [part, expected] of Object.entries(parts))
+    assert.notDeepEqual(recordDifferences(expected, actual), [], part);
 });
 
 /**

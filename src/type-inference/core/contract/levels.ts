@@ -178,6 +178,8 @@ function closedObject(contract: Contract, entry: PrefixEntry): boolean {
  * for any other prefix or path (a selection below the property: each entry by itself, `contractAlong`), which its
  * levels answer, and for the prefix's reads before its index pays: its first at the levels' own cost, so a prefix
  * read once costs what its levels do, each later one until the folds its reads would save reach its construction.
+ * `null` also below a property every source holds, where the index skips no source: the levels' fold there is the
+ * holders' own.
  *
  * #1948, #1585: the same at any depth below the property. What this reasons about lasts the pass's index of the
  * prefix's settled stores (`Contract.propertyIndexes`): the prefix's groups it was made from, and the F11 `missing`
@@ -256,6 +258,9 @@ export function* propertyItems(
   const step = rest.at(0)!;
   const path = pathAt(contract, 0, step);
   const holders = index.holders.get(path) ?? [];
+  // (#1948: below a property every source holds, the index skips no source, and its walk of each holder costs more
+  // than the levels' own fold)
+  if (rest.length > 1 && holders.length === index.sources.length) return null;
   const lack = propertyLack(contract, index, path, step);
   const out: Item[] = [];
   let placed = lack.writer === null;
@@ -272,12 +277,9 @@ export function* propertyItems(
       for (const item of yield* contract.entryAt(source.entry!, rest, flow)) out.push(item);
     }
   else {
-    // (a fold's group stands where its first holder does: the holders in order, each group's first among them; below a
-    // property every source holds, its holders' fold is the prefix's own, `groupsAt`'s, which its levels' reads share)
+    // (a fold's group stands where its first holder does: the holders in order, each group's first among them)
     let first = 0;
-    for (const group of rest.length > 1 && holders.length === index.sources.length
-      ? groupsAt(contract, asked, levels.base, rest)
-      : holderGroups(contract, index, holders, rest)) {
+    for (const group of holderGroups(contract, index, holders, rest)) {
       work.charge("invSteps");
       while (holders[first]!.group!.literal !== group.literal) first += 1;
       before(holders[first]!.at);

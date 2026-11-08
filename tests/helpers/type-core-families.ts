@@ -6933,7 +6933,8 @@ export const COPY_CHAIN_SOURCES: readonly { readonly name: string; readonly sour
 
 /**
  * #1948: the property index's pay rule (`propertyItems`) over a family: k objects stored into one place in turn, each
- * read below a property after the stores, by how the objects hold the read property and how often it is read. The
+ * read below a property after the stores, by how the objects hold the read properties, in which mix they are read and
+ * how often. The
  * index is built only where its reads save what it costs, so each family's work grows with its source as `main`'s does
  * (`main`: its growth, measured once, where it is steeper than the gate's bound).
  */
@@ -6957,6 +6958,16 @@ const PAY_HOLDINGS = {
     object: (i: number) => `{s0: {n: hostValue}, s1: {n: hostValue}, f${i}: {n: hostValue}}`,
     read: (j: number, k: number) =>
       j % 2 === 0 ? `s${(j >> 1) % 2}.n${j}` : `f${(j >> 1) % k}.n${j}`,
+  },
+  // (one property every object holds beside one of its own: one read in k below its own, the rest below the shared)
+  "rare-own": {
+    object: (i: number) => `{common: {n: hostValue}, f${i}: {n: hostValue}}`,
+    read: (j: number, k: number) => (j % k === 0 ? `f${(j / k) % k}.n` : `common.m${j}`),
+  },
+  // (the same objects, one read in k below the shared property, the rest below their own)
+  "rare-common": {
+    object: (i: number) => `{common: {n: hostValue}, f${i}: {n: hostValue}}`,
+    read: (j: number, k: number) => (j % k === 0 ? `common.m${j}` : `f${j % k}.m${j}`),
   },
 } as const;
 
