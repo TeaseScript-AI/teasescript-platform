@@ -22,6 +22,8 @@ function logged(port) {
         id: message?.id ?? null,
         op: message?.op ?? null,
         session: message?.session ?? null,
+        // A time observation's scene time, so a reader can see whether time moves.
+        atMs: message?.args?.atMs ?? null,
       });
     },
     listen(listener) {
