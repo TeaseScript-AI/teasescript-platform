@@ -15,12 +15,21 @@ import {
 } from "../src/type-inference/core/program.js";
 import { coreRecord, type WrittenTypeError } from "../src/type-inference/core/result.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
+import { Admission } from "../src/type-inference/core/admission.js";
+import { inheritedAt } from "../src/type-inference/core/admission/inherited.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { writtenTypeErrors } from "../src/type-inference/core/written.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { plannedContent, plannedStores, runGlobals } from "./helpers/type-core-route.js";
-import { inMode, MODES, publishedAnswers, publishedRoute } from "./helpers/type-core-oracles.js";
+import {
+  inMode,
+  MODES,
+  publication,
+  publishedAnswers,
+  publishedRoute,
+} from "./helpers/type-core-oracles.js";
 import {
   DEFAULT_CHAIN_MATRIX,
   INFERRED_COPY_MATRIX,
@@ -1341,6 +1350,80 @@ test("copies of different sources, repeated self copies, cycles and a rejection 
       ["failed", `TSR058@${read}:${read + 1}`, []],
     );
   }
+});
+
+test("a cycle of copies inherits the same written types whichever of its places admission asks first (#1931; ADR 0021 1)", () => {
+  const orders = (places: readonly string[]): string[][] =>
+    places.length <= 1
+      ? [[...places]]
+      : places.flatMap((first, at) =>
+          orders(places.filter((_, other) => other !== at)).map((rest) => [first, ...rest]),
+        );
+  // (A4's inherited type of each place, asked in `order` on a fresh admission: `none` where it copies no written type)
+  const inheritedIn = (source: string, order: readonly string[]): Record<string, string> => {
+    const { request, ids } = prepare(source);
+    const pass = narrowingPass(request);
+    const admission = new Admission(
+      pass,
+      { run: (work) => pass.solver.run(work) },
+      new Map(),
+      new Set(),
+    );
+    const got: Record<string, string> = {};
+    for (const place of order) {
+      const term = inheritedAt(admission, ids.get(place)!, []);
+      got[place] = term === null ? "none" : JSON.stringify(term);
+    }
+    return got;
+  };
+  const NUMBER = JSON.stringify({ kind: "atom", name: "number" });
+  const everyOrder = (source: string, places: readonly string[]) => {
+    const first = inheritedIn(source, places);
+    for (const order of orders(places))
+      assert.deepEqual(inheritedIn(source, order), first, `${order.join(" > ")}\n${source}`);
+    return first;
+  };
+  // (u copies v and x, v copies u, x copies v: one cycle, each copy in it cut; v keeps its own later written copy, and
+  // x copies none of it whichever place is asked first, u too: #1931)
+  const ring = (stores: string) =>
+    `let w: number = 1\nlet u = hostValue\nlet v = hostValue\nlet x = hostValue\n${stores}\nsay u\nsay v\nsay x\nexit\n`;
+  for (const stores of ["x = v\nv = u\nu = v\nu = x\nv = w", "x = v\nu = v\nu = x\nv = u\nv = w"])
+    assert.deepEqual(everyOrder(ring(stores), ["u", "v", "x"]), {
+      u: "none",
+      v: NUMBER,
+      x: "none",
+    });
+  // the analysis decides so in each mode (only v by its copy of a written type), and publishes one record, diagnostics
+  // and plan in all four (`publication`)
+  const witness = ring("x = v\nv = u\nu = v\nu = x\nv = w");
+  const { request, ids } = prepare(witness);
+  const published = new Set<string | null>();
+  for (const mode of MODES) {
+    assert.deepEqual(
+      inMode(mode, () => {
+        const answers = analyseCore(request);
+        return ["u", "v", "x"].map((place) => {
+          const { admitted } = answers.place(ids.get(place)!, []);
+          return `${place} ${admitted.by === "decided" && admitted.inherited ? "copied" : admitted.by}`;
+        });
+      }),
+      ["u decided", "v copied", "x decided"],
+      JSON.stringify(mode),
+    );
+    published.add(publication([{ path: "main.tease", source: witness }], mode, GLOBALS));
+  }
+  assert.equal(published.size, 1);
+  assert.notEqual([...published][0], null);
+  // controls: a copy back after the first value decides waits on nothing; a cycle fed late cuts only its copies
+  const W = "let w: number = 1\n";
+  assert.deepEqual(
+    everyOrder(`${W}let a = w\nlet b = a\na = b\nsay a\nsay b\nexit\n`, ["a", "b"]),
+    { a: NUMBER, b: NUMBER },
+  );
+  assert.deepEqual(
+    everyOrder(`${W}let a = hostValue\nlet b = a\na = b\nb = w\nsay a\nsay b\nexit\n`, ["a", "b"]),
+    { a: "none", b: NUMBER },
+  );
 });
 
 test("a literal's elements are compared at every field copies land, decided or not, after a rejection too (Astra's review B1)", () => {
