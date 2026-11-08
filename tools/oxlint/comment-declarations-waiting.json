@@ -84,12 +84,6 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/temporal-capture.ts",
-    "kind": "reference",
-    "text": "GMT",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
     "file": "src/temporal.ts",
     "kind": "reference",
     "text": "days_from_civil",
@@ -219,12 +213,6 @@
     "file": "src/type-inference/core/consumers/stores.ts",
     "kind": "docblock",
     "text": "One admission decision for one key as one demand (S3 §5), with the program's nodes' allowance (S3 revision 14: a",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/contract-descriptors.ts",
-    "kind": "reference",
-    "text": "Lost",
     "waits": "the O4 lead's cleanup"
   },
   {
@@ -406,5 +394,23 @@
     "kind": "docblock",
     "text": "A source's typed loads and parses as its plan reads them (`load` and `expected` lines, `plannedContent`), or how the",
     "waits": "#1937"
+  },
+  {
+    "file": "player/engine-bridge/ops/session.ts",
+    "kind": "docblock",
+    "text": "L5b's ops: Start, Continue, time (observe, step, catch-up) and pacing skip, and the recording's start. Each wraps",
+    "waits": "#1999 (lane 3, L5i.6), which changes this file"
+  },
+  {
+    "file": "player/vue/src/usePlayerSession.ts",
+    "kind": "reference",
+    "text": "adoptInspected",
+    "waits": "#1999 (lane 3, L5i.6), which changes this file"
+  },
+  {
+    "file": "tools/runtime-oracle/materialize.mjs",
+    "kind": "docblock",
+    "text": "Acquires and builds `commit` into a new root under `home`; returns its path.",
+    "waits": "the runtime oracle's next seal: its tooling's bytes are sealed (tools/runtime-oracle/manifest.json)"
   }
 ]

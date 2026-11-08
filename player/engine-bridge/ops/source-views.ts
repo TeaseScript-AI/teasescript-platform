@@ -11,7 +11,7 @@ import type { PlayerOpsContext } from "../player-ops.js";
 import { type DeliveryOwner, OwnedCell, OwnedMap } from "../delivery.js";
 import type { BridgeOps } from "../worker-host.js";
 
-/**
+/*
  * The ops of family L5i (the L5 series) for Debug's source views: the code of a random draw's file, and earlier outcomes
  * as code. Both are made here, in the Worker, from the source it compiled, so the Player's page holds no parser. Debug's
  * trace and its script Debug mode are the trace ops' (`ops/trace.ts`).

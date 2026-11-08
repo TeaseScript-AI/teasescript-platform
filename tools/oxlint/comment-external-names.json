@@ -28,5 +28,15 @@
     "name": "GuessMyNumber",
     "kind": "corpus unit",
     "source": "the language corpus"
+  },
+  {
+    "name": "prefinish",
+    "kind": "external API",
+    "source": "Node's stream.Writable event"
+  },
+  {
+    "name": "regexp_last_match_info",
+    "kind": "external API",
+    "source": "V8's isolate field for the last RegExp match"
   }
 ]

@@ -55,7 +55,7 @@ const EXCLUDED: readonly { readonly pair: Partial<Case>; readonly reason: string
   },
 ];
 
-/** The axes, in their declared order. */
+// The axes, in their declared order.
 // EVIDENCE: validation: `AXES` is a literal whose keys are exactly `Axis`.
 const AXIS_NAMES = Object.keys(AXES) as Axis[];
 
