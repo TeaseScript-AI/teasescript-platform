@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { PROJECTS, projectsFor, removeTemporaryWorktree } from "./check-changed.mjs";
+import { PROJECTS, checksOf, projectsFor, removeTemporaryWorktree } from "./check-changed.mjs";
 
 // A representative changed path for each project, and the projects it alone needs.
 const REPRESENTATIVES = {
@@ -13,14 +13,24 @@ const REPRESENTATIVES = {
   "player-vue": ["player/vue/src/PlayerApp.vue", ["player-vue"]],
   "oxlint-rules": ["tools/oxlint/run.mjs", ["oxlint-rules"]],
   tools: ["tools/test-shards.mjs", ["tools"]],
+  "repository checks": ["tools/repository-checks/regression-cases.mjs", ["tools"]],
   families: ["tests/families/copies/1313-astra-composite-cases.mjs", ["families"]],
   fixtures: ["tests/fixtures/type-core/cells.jsonl", ["typescript"]],
   documentation: ["docs/TESTING.md", []],
+  // root configuration files, each needing the projects whose checks read it
+  "root tsconfig": ["tsconfig.json", ["typescript", "oxlint-rules", "design-lint"]],
+  "Player tsconfig": ["player/vue/tsconfig.json", ["player-vue", "design-lint"]],
+  "knip config": ["knip.json", ["tools"]],
+  formatting: [".prettierrc.json", ["formatting"]],
+  "Prettier ignore file": [".prettierignore", ["formatting"]],
+  "design-lint": ["eslint.design.config.mjs", ["design-lint"]],
+  "oxlint config": [".oxlintrc.json", []],
   unknown: [".github/workflows/ci.yml", Object.keys(PROJECTS)],
+  "package manifest": ["package.json", Object.keys(PROJECTS)],
 };
 
 test(
-  "each changed path needs its project's checks, documentation none, and an unknown path every project's",
+  "each changed path needs its project's checks, documentation and oxlint's configuration none, and an unknown path every project's",
   { timeout: 30_000 },
   () => {
     // Every project has a representative, so a new project cannot go unchecked here.
@@ -41,6 +51,12 @@ test(
     // `player/` outside `player/vue/` belongs to the TypeScript project, and `player/vue/` only to the Player's.
     assert.deepEqual([...projectsFor(["player/runtime-adapter.ts"])], ["typescript"]);
     assert.deepEqual([...projectsFor(["player/vue/src/usePlayerSession.ts"])], ["player-vue"]);
+    // A check that several projects name runs once: `lint:design` is the Player's and the design lint's.
+    const everyCheck = checksOf(projectsFor([".github/workflows/ci.yml"]));
+    assert.deepEqual(everyCheck, [
+      ...new Set(Object.values(PROJECTS).flatMap(({ checks }) => checks)),
+    ]);
+    assert.equal(everyCheck.filter((check) => check === "lint:design").length, 1);
   },
 );
 

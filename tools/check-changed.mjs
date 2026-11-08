@@ -10,9 +10,12 @@ import { dirname, join, resolve } from "node:path";
 //
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else `origin/main`; the
 // changes are those since its merge-base with HEAD, committed or not, untracked files included. Always: `git diff
-// --check`, the format check of the changed files, oxlint and knip, each as CI runs it. Then each project a changed
-// path belongs to (`projectsFor`): its type check and tests. A changed path no project claims, other than
-// documentation, runs every project's checks.
+// --check`, the format check of the changed files, oxlint, knip, the doc links and the imports, each as CI runs it.
+// Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
+// belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
+// project claims, other than documentation, runs every project's checks. It never builds the TypeScript or runs the
+// compiled test suite, which CI does: a change that shows only there, such as the root tsconfig's emit settings, passes
+// here.
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
 // detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
@@ -30,7 +33,8 @@ export const PROJECTS = {
     claims: (path) =>
       (/^(?:src|tests|playground|player)\/.*\.(?:ts|mts|cts|tsx)$/u.test(path) &&
         !path.startsWith("player/vue/")) ||
-      path.startsWith("tests/fixtures/"),
+      path.startsWith("tests/fixtures/") ||
+      path === "tsconfig.json",
     checks: ["tsc"],
   },
   families: { claims: (path) => path.startsWith("tests/families/"), checks: ["test:families"] },
@@ -38,28 +42,57 @@ export const PROJECTS = {
     claims: (path) => path.startsWith("player/vue/"),
     checks: ["typecheck:player", "lint:design"],
   },
-  "oxlint-rules": { claims: (path) => path.startsWith("tools/oxlint/"), checks: ["test:lint"] },
+  // (`tools/oxlint/tsconfig.json`, which `test:lint` compiles the rules with, extends the root one)
+  "oxlint-rules": {
+    claims: (path) => path.startsWith("tools/oxlint/") || path === "tsconfig.json",
+    checks: ["test:lint"],
+  },
   tools: {
-    claims: (path) => /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path),
+    claims: (path) =>
+      /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path) ||
+      path.startsWith("tools/repository-checks/") ||
+      path === "knip.json",
     checks: ["test:verification"],
+  },
+  // Prettier's configuration and ignore file change how every file formats, not only the changed ones.
+  formatting: {
+    claims: (path) => path === ".prettierrc.json" || path === ".prettierignore",
+    checks: ["format:check"],
+  },
+  // (the shadcn rules resolve component imports through the root tsconfig's paths, then the Player's)
+  "design-lint": {
+    claims: (path) =>
+      path === "eslint.design.config.mjs" ||
+      path === "tsconfig.json" ||
+      path === "player/vue/tsconfig.json",
+    checks: ["lint:design", "test:lint:design"],
   },
 };
 
-/** A path whose change no project's check covers, as CI checks none of it: documentation. */
+/** Root configuration files that only the checks run for every change read: oxlint's. */
+const READ_BY_ALWAYS_RUN_CHECKS = new Set([".oxlintrc.json"]);
+
+/** A documentation path selects no project's checks; its Markdown links are checked on every run (`doc links`). */
 const isDocumentation = (path) => path.endsWith(".md") || path.startsWith("docs/");
 
 /**
- * The projects whose checks `paths` need. A path no project claims, documentation aside, needs every project: an
- * unknown kind of path is checked by everything, never by nothing.
+ * The projects whose checks `paths` need. A path no project claims, documentation and the configuration only the checks
+ * run for every change read aside, needs every project: an unknown kind of path is checked by everything, never by
+ * nothing.
  */
 export function projectsFor(paths) {
   const projects = new Set();
   for (const path of paths) {
-    if (isDocumentation(path)) continue;
+    if (isDocumentation(path) || READ_BY_ALWAYS_RUN_CHECKS.has(path)) continue;
     const claiming = Object.keys(PROJECTS).filter((name) => PROJECTS[name].claims(path));
     for (const name of claiming.length > 0 ? claiming : Object.keys(PROJECTS)) projects.add(name);
   }
   return projects;
+}
+
+/** The checks `projects` run, each once although several projects name it, in the order the projects name them. */
+export function checksOf(projects) {
+  return [...new Set([...projects].flatMap((project) => PROJECTS[project].checks))];
 }
 
 /** The extensions `npm run format:check` covers. */
@@ -258,14 +291,15 @@ async function check(cleanups) {
       : []),
     run("oxlint", process.execPath, ["tools/oxlint/run.mjs"]),
     run("knip", process.execPath, ["node_modules/knip/bin/knip.js"]),
+    run("doc links", process.execPath, ["tools/repository-checks/doc-links.mjs"]),
+    run("imports", process.execPath, ["tools/repository-checks/imports.mjs"]),
   ];
-  for (const project of projects)
-    for (const check of PROJECTS[project].checks)
-      checks.push(
-        check === "tsc"
-          ? run("tsc", "node_modules/.bin/tsc", ["--noEmit", "-p", "tsconfig.json"])
-          : run(check, npm, ["run", "--silent", check]),
-      );
+  for (const check of checksOf(projects))
+    checks.push(
+      check === "tsc"
+        ? run("tsc", "node_modules/.bin/tsc", ["--noEmit", "-p", "tsconfig.json"])
+        : run(check, npm, ["run", "--silent", check]),
+    );
   const results = await Promise.all(checks);
   for (const { name, passed, seconds } of results)
     process.stdout.write(

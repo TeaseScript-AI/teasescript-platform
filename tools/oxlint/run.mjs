@@ -10,9 +10,11 @@ import { checkEvidenceComments } from "./check-evidence.mjs";
 import { checkObligationInventory } from "./check-obligation-inventory.mjs";
 import { checkQuestionSources } from "./check-question-sources.mjs";
 import { checkSiteKeys } from "./check-site-keys.mjs";
-import { lintFiles, repositoryRoot } from "./files.mjs";
+import { checkWaitingOverrides } from "./check-waiting-overrides.mjs";
+import { lintFiles, OXLINT_OPTIONS, repositoryRoot } from "./files.mjs";
 
-// Runs the repository's own lint checks, then oxlint, over the same files (`npm run lint`):
+// Runs the repository's own lint checks, then oxlint with its type-aware rules (`--type-aware`, through
+// `oxlint-tsgolint`), over the same files (`npm run lint`):
 //
 //   node tools/oxlint/run.mjs
 //
@@ -21,6 +23,9 @@ import { lintFiles, repositoryRoot } from "./files.mjs";
 // Exit status: oxlint's when it failed, else 1 when the own checks found anything, else 0.
 
 const files = lintFiles();
+const executable = fileURLToPath(
+  new URL("./bin/oxlint", import.meta.resolve("oxlint/package.json")),
+);
 let ownFindings = 0;
 for (const file of files) {
   for (const diagnostic of checkEvidenceComments(
@@ -40,6 +45,13 @@ for (const diagnostic of [
   ...checkObligationInventory(repositoryRoot),
   ...checkQuestionSources(repositoryRoot),
   ...checkSiteKeys(repositoryRoot),
+  ...checkWaitingOverrides(
+    repositoryRoot,
+    ".oxlintrc.json",
+    readFileSync(resolve(repositoryRoot, ".oxlintrc.json"), "utf8"),
+    new Set(files),
+    executable,
+  ),
 ]) {
   console.error(
     `${diagnostic.fileName}:${diagnostic.line}:${diagnostic.column}: ${diagnostic.message}`,
@@ -47,22 +59,10 @@ for (const diagnostic of [
   ownFindings += 1;
 }
 
-const executable = fileURLToPath(
-  new URL("./bin/oxlint", import.meta.resolve("oxlint/package.json")),
-);
-const result = spawnSync(
-  process.execPath,
-  [
-    executable,
-    "--config",
-    ".oxlintrc.json",
-    "--disable-nested-config",
-    "--report-unused-disable-directives-severity",
-    "error",
-    ...files,
-  ],
-  { cwd: repositoryRoot, stdio: "inherit" },
-);
+const result = spawnSync(process.execPath, [executable, ...OXLINT_OPTIONS, ...files], {
+  cwd: repositoryRoot,
+  stdio: "inherit",
+});
 if (result.error) throw result.error;
 if (ownFindings > 0)
   console.error(

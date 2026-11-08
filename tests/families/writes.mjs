@@ -157,13 +157,15 @@ const ALLOWED = {
               ["serialization", "stdio"].includes(key) ||
               (key === "execArgv" &&
                 ts.isArrayLiteralExpression(value) &&
-                value.elements.every((element) =>
-                  /^`--max-old-space-size=\$\{\w+\}`$/.test(element.getText()),
+                value.elements.every(
+                  (element) =>
+                    /^`--max-old-space-size=\$\{\w+\}`$/.test(element.getText()) ||
+                    literal(element) === "--expose-gc",
                 )),
           )
         );
       },
-      "the runner's own module (`--child`), whose writes are this module's and so listed, with a heap limit as its only `execArgv`",
+      "the runner's own module (`--child`), whose writes are this module's and so listed, with a heap limit and `--expose-gc` (which lets it collect, writing nothing, #1837) as its only `execArgv`",
     ],
   },
   loads: {

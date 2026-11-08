@@ -25,16 +25,31 @@ The repository currently has no browser-automation dependency and no external pr
 
 ## Normal and diagnostic verification
 
-`npm run check` runs formatting verification, lint, lint-rule/exception fixtures, Knip, and the build with compiled
-tests, preserving actionable failure information. `npm run format` applies the formatter policy;
-`npm run format:check` verifies it without writing. `npm run lint` applies the [type-evidence policy](LINTING.md);
-`npm run test:lint` type-checks and tests the maintained rule implementation; `npm run knip` checks the selected
-unused-code and dependency categories. `npm run lint:design` and `npm run test:lint:design`
-check the [Player design contracts](LINTING.md#player-design-lint) and their positive/negative fixtures;
-both are included in `npm run check`.
+`npm run check` runs formatting verification, lint, lint-rule/exception fixtures, Knip, the doc links, and the build
+with compiled tests, preserving actionable failure information. `npm run format` applies the formatter policy; `npm run
+format:check` verifies it without writing. `npm run lint` applies the [type-evidence policy](LINTING.md); `npm run
+test:lint` type-checks and tests the maintained rule implementation; `npm run knip` checks the selected unused-code and
+dependency categories. `npm run check:doc-links` runs remark-validate-links, with remark-gfm, in unified-engine within
+its own process, on exactly Git's regular Markdown files: it reports every relative link and heading anchor in the
+Markdown files that Git tracks or does not ignore that does not resolve. Absolute URLs, this repository's included, are
+not checked. Outside that claim, as the plugin does not read them as GitHub does: raw-HTML links, and GitHub's view
+forms (`?plain=1`, `?raw=1`, a folder's README anchors, a heading GitHub's sanitizer filters a tag from); the docs have
+none of them. A reference definition naming a missing file is reported even when no link uses it. A broken link fails
+`check:pretest` wherever it sits, so its fix belongs to whoever moved the file or renamed the heading, also in a file
+they did not touch. `npm run check:imports` runs dependency-cruiser: cruising each tsconfig with the compiler's import
+elision, it reports no edge a rule forbids, and its graph has no value cycle outside the waiting list. The rules are the
+boundaries the architecture documents declare (`src/` imports no `player/`, `playground/` or package it is not admitted;
+the framework-independent `player/` no `player/vue/`); cycles through imports the compiler erases are counted, not
+refused. Not seen: a `<script src>` block, a `.js` file beside a same-name `.ts` (read as the `.js`), and a `.vue` file
+Vue's parser refuses (vue-tsc refuses it in CI). `tools/repository-checks/imports.mjs` lists the boundaries with their
+sources, the packages each area may import with their reasons, the generated-component exception, and what no document
+declares. `npm run lint:design` and `npm run test:lint:design` check the [Player design
+contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
-TypeScript compilation precedes UI work; compiled tests run only after all builds pass. Each command's output is
-printed together, including warnings. A failure stops the group and subsequent stages; SIGINT/SIGTERM also terminate
+TypeScript compilation precedes UI work; compiled tests run only after all builds pass, as many files at once as
+`node --test` runs, fewer under a cgroup memory limit: as many as fit at 3 GiB plus 640 MiB a file
+(`tools/test-files-at-once.mjs`). Each command's output is printed together, including warnings. A failure stops the
+group and subsequent stages; SIGINT/SIGTERM also terminate
 child process groups, escalating after a grace period. A command stopped this way is labelled `ABORTED`, not `FAIL`,
 and prints after the failed one. `npm run test:verification` checks scheduling, diagnostics and
 process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`).
@@ -62,9 +77,13 @@ Its `playerProfile` has person fields, which `playerProfile.petNames` reads and 
 copies, only when `--player-profile profile.json` gives a JSON object of them, such as
 `{"firstName": "Alex", "petNames": ["puppy"]}`. The probe is a developer aid, not a test.
 `npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
-`node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, format, oxlint, knip, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash.
+`node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, format, oxlint, knip, the doc links, the imports, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash.
 `node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a tree hash only exists), and finds its unfilled placeholders (its header lists the rules); it never fetches.
+CI's "Structure signals (advisory)" step, after `check:pretest` in the job that runs it, prints
+`node tools/structure-report.mjs --diff HEAD^1`: the structure signals the change adds to, against the merge's first
+parent. It never fails; the plan or the review answers each signal.
 `node tools/ci-test-counts.mjs <run id>` prints a GitHub Actions run's node:test totals (tests, pass, fail, skipped) per job and step, read from `gh run view <run id> --log`, and their sum; `--log <file>` reads a saved log.
+`node tools/counters.mjs [ROOT] [--json]` counts a checkout's lint disables, `@ts-expect-error` and `@ts-ignore` directives, skipped and todo tests, shrink-only list entries and structure signals (its header defines each), for comparing them over time.
 
 For a compiler change meant to preserve behaviour, such as a refactor,
 `node tools/compiler-differential.mjs --base <dist> --head <dist>` loads two builds (each a `dist/` from
@@ -174,6 +193,13 @@ before it. An empty cell has no corpus yet.
 The compiler's shadow gate (`tests/families/shadow.mjs`) is a campaign run from the tree after merges and reported on
 the tracker issue; it is not a per-pull-request level.
 
+**Pinned work.** Some suites pin the core's exact work: totals, listed copy and construction sites, and work tables
+(`tools/repository-checks/pin-suites.mjs` lists them). A change under `src/type-inference/core/` runs all of them before
+it asks for review and before READY: `node tools/repository-checks/pin-suites.mjs --run`. A pin that moves is re-pinned
+only with its ground: the comment above it says how many units more or fewer and which change made them, and the
+reviewer checks that no part of the change is a repeated question, work the core already did once, done again. A change
+to a test helper lists only a suite whose pins it holds, not every suite that imports it.
+
 ## Test admission and consolidation
 
 Give each maintained test family a distinct evidence obligation: accepted behavior, a real public/trusted boundary,
@@ -212,14 +238,14 @@ counts. CI runs only `npm run test:families`, which checks that every module sti
 
 ### Sampled sweeps
 
-CI runs `npm run check` as two jobs side by side, `check-1` and `check-2`, each meant to stay at least 3 minutes under
-its 15-minute limit at the slow end of runner variance (#1638): each builds and runs one half of the compiled tests
-(`npm test -- --shard=i/2`), `check-2` also the checks before them (`npm run check:pretest`). Every type-core test file
-and every other of 10 s or more is listed, costliest first, with its median seconds over three CI runs or more in
+CI runs `npm run check` as three jobs side by side, `check-1` to `check-3`, each meant to stay at least 3 minutes under
+its 15-minute limit at the slow end of runner variance (#1638, #1978): each builds and runs one third of the compiled
+tests (`npm test -- --shard=i/3`), `check-3` also the checks before them (`npm run check:pretest`). Every type-core test
+file and every other of 10 s or more is listed, costliest first, with its median seconds over three CI runs or more in
 `tools/costly-test-files.mjs`, beside the seconds of `check:pretest`: each test job keeps its files' seconds as an
 artifact for 7 days, and `node tools/measure-test-files.mjs --write --from-ci RUN ...` regenerates the module from them
 (its header names the runs; seconds measured on a worker do not predict CI's). The full suite starts the listed files
-first, and `tools/test-shards.mjs` shares the files out so that the jobs end together, `check-2`'s after its checks
+first, and `tools/test-shards.mjs` shares the files out so that the jobs end together, `check-3`'s after its checks
 before the tests. Their costliest sweeps
 that claim something at every member of a list of settled stops or allowances (`testedStops`, the stops before admission
 settled in `type-core-stop`, `completionAllowances`) visit of each list the first, the last and two evenly between
@@ -287,6 +313,33 @@ a focused regression test. The test should normally fail on the unmodified
 baseline for the reported root cause and pass after the repair. When
 failing-before evidence cannot reasonably be supplied, document why and provide
 the strongest focused reproduction available.
+
+A regression test may be declared as a regression case: `regressionCase(name, { pr, atBase }, fn)`
+(`tests/helpers/regression-case.ts`) in place of `test(name, fn)`. `pr` is the pull request whose fix it witnesses.
+`atBase` matches the first line of the message of the error the case throws without the fix, on the Node that `.nvmrc`
+pins (Node's own messages change between versions), cut at its first line break (CR LF, LF, CR, U+2028 or U+2029). The
+tool anchors it at both ends, so write the line without `^` and `$`; its flags may be `i`, `u` and `v` only:
+- `assert.rejects`: `/Missing expected rejection \(ForeignSessionError\)\./`;
+- a table of rows: `assert.deepStrictEqual`'s own first line, `Expected values to be strictly deep-equal:`, is the same
+  for every wrong value, so give each row's assertion a message whose first line names the witness, as
+  ``assert.deepStrictEqual(actual, row.expected, `#1828 ${row.name}`)`` with `atBase` `/#1828 nested set/`.
+
+On a pull request, CI's `check-1` runs the cases it declares against its base after its build
+(`tools/repository-checks/regression-cases.mjs`), and reports how each ends there; the report is evidence for the
+review, not a gate, and the step never fails the job. A case is its `regressionCase` call, by its place in the compiled
+file, so declare it at a file's top level or in a `describe`, never inside a test or a skipped suite. The report names a
+call that did not register, a file whose declarations cannot be listed, and each selected case that passes at the base,
+fails for another reason, does not finish, or does not run. A case of another pull request does not run when that one is
+merged into the base (a commit subject ending `(#N)` in the base's `git log`), and is reported otherwise. Name what the
+fix adds by string (`{ name: "ForeignSessionError" }`), not by import, or the file does not load at the base. The base
+is compiled with `tsc` and its Player test bundles are built, so a case may load a Player module
+(`tests/helpers/player-modules.ts`). What the report does not establish, which is why it is not enforced: that an id
+names the same declaration at the base (the base's compilation can move a call site, and a loop can register its rows in
+another order), that every way of calling `regressionCase` is found, and that the selected cases run alone (another
+`only` test in the file runs too). A case that loads a module the head adds to the bundles' list
+(`player/vue/vite.test-modules.config.ts`) fails at the base with `Cannot find module`, another reason than its
+`atBase`; and the base is compiled and bundled with the head's `node_modules`. Interrupted, the tool stops by the
+signal; the next run removes what an interrupted run left. Declaring is opt-in; no rule requires it.
 
 A focused regression set is sufficient when the defect and its neighboring
 supported behavior are understood. When repeated sibling findings or an

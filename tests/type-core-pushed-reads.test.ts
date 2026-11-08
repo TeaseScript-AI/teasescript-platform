@@ -1061,6 +1061,75 @@ function floorControls(): { readonly source: string; readonly horizon: number | 
       ];
       out.push({ source: rows.join("\n") + "\n", horizon: closed ? 10 : null });
     }
+  // (the floor's witnesses, #2005: r7's ring over a literal lacking the tested property, read one step past it, where a
+  // hold kept at a floor marks; and a key entry under a test of a property the literal lacks, read at the ring's own
+  // property, where a floor's step taken as a plain goal, or an immediate mark past an unwitnessed root, marks)
+  for (const p0 of ["{b:0}", "{a:0}"])
+    out.push({
+      source:
+        [
+          `let p0=${p0}`,
+          "let p1={a:0,b:0}",
+          "let p2={a:0,b:0}",
+          "p2.q=p0",
+          "if p0.q.a is integer { p1=p0 }",
+          "if p0.q.q.b is integer { p1=p0 }",
+          "p2=p1",
+          "p2=p2.q",
+          'say "${p2.q.a.z} ${p2.q.q.b.z}"',
+          "exit",
+        ].join("\n") + "\n",
+      horizon: null,
+    });
+  for (const p0 of ["{a:0}", "{b:1}"])
+    out.push({
+      source:
+        [
+          `let p0=${p0}`,
+          "let p2={a:1}",
+          "p2.q=p0.q",
+          "if p0.q.b is integer { p2.q=p0.q }",
+          "p2=p2.q",
+          'say "${p2.b}"',
+          "exit",
+        ].join("\n") + "\n",
+      horizon: null,
+    });
+  // (an accepted mark over a host value a floor carries: the mark survives the floor, #2005's F5)
+  for (const p0 of ["{q:hostValue}", "{q:{q:hostValue}}"])
+    out.push({
+      source:
+        [
+          `let p0=${p0}`,
+          "let p1={a:0,b:0}",
+          "let p2={a:0,b:0}",
+          "p2.q=p0",
+          "if p0.q is object { p1=p0 }",
+          "p2=p1",
+          "p2=p2.q",
+          'say "${p2.q.a.z}"',
+          "exit",
+        ].join("\n") + "\n",
+      horizon: null,
+    });
+  // (a store below that floor, which native reads at its longer prefix: the floor keeps a key's direct children)
+  for (const read of ["${p2.q.r.c}", "${p2.r.c}"])
+    out.push({
+      source:
+        [
+          "let p0={q:hostValue}",
+          "let p1={a:0,b:0}",
+          "let p2={a:0,b:0}",
+          "p2.q=p0",
+          "p2.q.q.r={c:1}",
+          "if p0.q is object { p1=p0 }",
+          "p2=p1",
+          "p2=p2.q",
+          `say "${read}"`,
+          "exit",
+        ].join("\n") + "\n",
+      horizon: null,
+    });
   for (const condition of ["p0.q.b is integer", "p0.q is object"]) {
     const rows = [
       "let p0={a:0}",
@@ -1139,6 +1208,26 @@ test("a receiver with a scalar sibling, a structural sibling, an already marked 
         label,
       );
     }
+});
+
+test("a path of 2,048 steps below pure nodes is walked without a native frame per step: the analysis stops where native's does (#2005, Codex r1)", () => {
+  // (the pure path's steps and a floor's children pass through the build's tasks, as a goal's nodes do)
+  const source =
+    [
+      "let p0={a:0}",
+      "let p2={a:0}",
+      `p2.q={a:0}${".x".repeat(2048)}`,
+      "if p0.q.a is integer { p2=p0 }",
+      "p2=p2.q",
+      'say "${p2.a}"',
+      "exit",
+    ].join("\n") + "\n";
+  const files = [{ path: "main.tease", source }];
+  const mode = MODES[0]!;
+  assert.equal(
+    publication(files, mode, GLOBALS),
+    withoutPushedReads(() => publication(files, mode, GLOBALS)),
+  );
 });
 
 /** Astra r2 B3's family: `x` copied `copies` times under a conjunction of `tests` tests of its properties, then marked. */

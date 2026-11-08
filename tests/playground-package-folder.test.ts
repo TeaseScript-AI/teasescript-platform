@@ -353,7 +353,12 @@ test("a package lists every .tease file it can read, and compiling it reports th
     await writeFile(join(lockedFolder, "b.tease"), "end\n");
     await chmod(lockedFolder, 0o000);
     // Removing the package needs the folder readable again.
-    const locked = await catalog().finally(() => chmod(lockedFolder, 0o700));
+    let locked;
+    try {
+      locked = await catalog();
+    } finally {
+      await chmod(lockedFolder, 0o700);
+    }
     const folder =
       "The folder 'rooms/locked.tease' cannot be opened (EACCES). Check that the permissions of 'rooms/locked.tease' allow reading the folder.";
     assert.deepEqual(locked.unreadable, [

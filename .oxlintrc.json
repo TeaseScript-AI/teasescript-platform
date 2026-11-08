@@ -24,6 +24,29 @@
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/require-safety-comment-for-type-assertion": "error",
     "prefer-rest-params": "error",
+    "typescript/no-floating-promises": [
+      "error",
+      {
+        "allowForKnownSafeCalls": [
+          { "from": "package", "package": "node:test", "name": ["test", "describe", "it", "suite"] }
+        ]
+      }
+    ],
+    "typescript/no-misused-promises": "error",
+    "typescript/await-thenable": "off",
+    "typescript/no-array-delete": "off",
+    "typescript/no-base-to-string": "off",
+    "typescript/no-duplicate-type-constituents": "off",
+    "typescript/no-for-in-array": "off",
+    "typescript/no-implied-eval": "off",
+    "typescript/no-meaningless-void-operator": "off",
+    "typescript/no-misused-spread": "off",
+    "typescript/no-redundant-type-constituents": "off",
+    "typescript/no-unsafe-unary-minus": "off",
+    "typescript/no-useless-default-assignment": "off",
+    "typescript/require-array-sort-compare": "off",
+    "typescript/restrict-template-expressions": "off",
+    "typescript/unbound-method": "off",
     "unicorn/no-new-array": "off",
     "require-yield": "off",
     "no-unused-vars": [
@@ -36,16 +59,9 @@
       "files": [
         "player/capture-device.ts",
         "player/captured-media.ts",
-        "src/compiler/lowering/compiler.ts",
         "src/deterministic-math.ts",
-        "src/external-data-capture.ts",
         "src/message-markup.ts",
-        "src/plan/dataflow.ts",
-        "src/plan/instruction-stream-analyses/execution-regions.ts",
         "src/runtime/random/random.ts",
-        "src/runtime/snapshot/snapshot-validation-analysis.ts",
-        "src/runtime/values/plain-data.ts",
-        "src/runtime/values/serializable-values.ts",
         "src/semantic/scope.ts",
         "src/type-checker.ts",
         "src/type-inference/collector.ts",
@@ -55,9 +71,6 @@
         "src/type-inference/core/checks/interactions.ts",
         "src/type-inference/core/contract.ts",
         "src/type-inference/core/contract/levels.ts",
-        "src/type-inference/core/items.ts",
-        "src/type-inference/core/plus-index.ts",
-        "src/type-inference/core/values.ts",
         "src/validation-testing.ts",
         "src/xmp-keywords.ts",
         "tests/families-runner.test.ts",
@@ -75,6 +88,52 @@
         "unicorn/no-useless-fallback-in-spread": "off",
         "unicorn/no-useless-spread": "off",
         "unicorn/prefer-string-starts-ends-with": "off"
+      }
+    },
+    {
+      "files": [
+        "player/vue/src/AbTestsPanel.vue",
+        "player/vue/src/CodeBlock.vue",
+        "player/vue/src/ExportTextDialog.vue",
+        "player/vue/src/FloatingViewfinder.vue",
+        "player/vue/src/LayoutDebug.vue",
+        "player/vue/src/LockDialog.vue",
+        "player/vue/src/PasswordField.vue",
+        "player/vue/src/PathBreadcrumb.vue",
+        "player/vue/src/PlayerApp.vue",
+        "player/vue/src/PlayerToolsShell.vue",
+        "player/vue/src/PopupDialog.vue",
+        "player/vue/src/RandomDrawPicker.vue",
+        "player/vue/src/SessionEndDialog.vue",
+        "player/vue/src/StageRightRail.vue",
+        "player/vue/src/StorageEditDialog.vue",
+        "player/vue/src/ToolPanelHeader.vue",
+        "player/vue/src/components/ui/sidebar/SidebarProvider.vue"
+      ],
+      "rules": {
+        "anti-slop/require-safety-comment-for-type-assertion": "off"
+      }
+    },
+    {
+      "files": [
+        "src/**/*.{ts,tsx,mts,cts}",
+        "player/**/*.{ts,tsx,mts,cts}",
+        "tests/helpers/**/*.{ts,tsx,mts,cts}"
+      ],
+      "rules": {
+        "typescript/no-base-to-string": "error",
+        "typescript/restrict-template-expressions": "error"
+      }
+    },
+    {
+      "files": [
+        "src/runtime/evaluation/access.ts",
+        "src/runtime/values/serializable-values.ts",
+        "tests/helpers/type-core-held-host.ts"
+      ],
+      "rules": {
+        "typescript/no-base-to-string": "off",
+        "typescript/restrict-template-expressions": "off"
       }
     }
   ]

@@ -120,6 +120,10 @@ test(
           null,
         ],
         ["defaced", "a defaced wall", "a word"],
+        ["4322b2e0e668", "the runner's sha256 4322b2e0e668", "a file's sha256"],
+        ["7ce49d8d3ba1", "(sha256: 7ce49d8d3ba1)", "a file's sha256"],
+        ["7ce49d8d3ba1", "SHA256=7ce49d8d3ba1", "a file's sha256"],
+        ["7ce49d8d3ba1", "the sha256 of 7ce49d8d3ba1", null],
         ["a1b2c3d4e5f6", "https://example.com/a1b2c3d4e5f6", "inside a URL or a path"],
         ["0c1d2e3f4a5b", "/tmp/x/0c1d2e3f4a5b/", "inside a URL or a path"],
         ["0123abc4567", "https://github.com/o/r/commit/0123abc4567", null],
@@ -179,11 +183,11 @@ test(
       for (const [text, line] of [
         [
           "",
-          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths); 0 placeholders",
+          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders",
         ],
         [
           `at ${shas[0].slice(0, 9)}, <sha>`,
-          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths); 1 placeholders",
+          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders",
         ],
       ]) {
         const { out } = check(text, [directory]);

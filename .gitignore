@@ -10,3 +10,5 @@ coverage/
 __pycache__/
 *.py[cod]
 .playground-tls/
+# the waiting-list check's probe configuration (tools/oxlint/check-waiting-overrides.mjs), removed after each run
+/.oxlintrc.probe-*.json

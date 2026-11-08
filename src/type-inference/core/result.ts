@@ -255,8 +255,9 @@ export type DiagnosticRule =
        */
       readonly optional?: { readonly type: readonly boolean[]; readonly kinds: readonly boolean[] };
       /**
-       * #1762: each side's `path` as its sentence writes it, a dict's layer its `entry` step: the earliest element's
-       * (`type`) and the other's (`kinds`); absent where both are `path`.
+       * #1762, #1825: each side's `path` as its sentence writes it, a dict's layer its `entry` step and a set's its
+       * `member` step, a sentence's word that no path, check or key holds: the earliest element's (`type`) and the
+       * other's (`kinds`); absent where both are `path`.
        */
       readonly shown?: MixedSteps;
     }

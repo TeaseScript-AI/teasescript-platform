@@ -2,7 +2,8 @@
 
 The lint policy catches discarded type evidence and straightforward JavaScript mistakes while preserving runtime
 validation. `.oxlintrc.json` is the executable rule/severity list; all selected rules are errors. `npm run lint` checks
-TypeScript and JavaScript source, tests, playground code, and tooling, including the vendored rules themselves.
+TypeScript and JavaScript source, tests, playground code, and tooling, including the vendored rules themselves, and the
+`<script>` blocks of `.vue` files.
 Dependency, build, coverage, and Git directories are excluded. `npm run check` includes lint and rule fixtures.
 
 ## Correctness category
@@ -10,9 +11,60 @@ Dependency, build, coverage, and Git directories are excluded. `npm run check` i
 Oxlint's `correctness` category is on. Two of its rules are off, because every site the code has is deliberate:
 `unicorn/no-new-array` (`new Array(n)` preallocates on purpose, and some tests build holey arrays; `Array.from` would
 change holes and cost) and `require-yield` (the type core's contract API requires a generator `*make()` that may return
-without yielding). `no-unused-vars` ignores names that start with `_`, as `tsc`'s unused checks do. The single
-`overrides` entry lists the files whose findings wait for another open pull request, or for the compiler's own cleanup;
-that list only shrinks, and each cleanup removes its files from it.
+without yielding). `no-unused-vars` ignores names that start with `_`, as `tsc`'s unused checks do. The files whose
+findings of these rules wait for another open pull request or a cleanup are a [waiting list](#waiting-lists).
+
+## Type-aware rules
+
+`npm run lint` runs oxlint with `--type-aware`: four rules read TypeScript's types through `oxlint-tsgolint`.
+
+- On every linted TypeScript and JavaScript file:
+  - `typescript/no-floating-promises`: a promise is awaited, returned, ended with `.catch` or with a `.then` that has a
+    rejection handler, or marked ignored with `void`. node:test's `test`, `describe`, `it` and `suite` are exempt, as
+    the runner awaits them. The exemption matches by name, so it also covers a test's `t.test(…)` subtests, which
+    node:test awaits before the test ends.
+  - `typescript/no-misused-promises`: a promise is not passed where its result is ignored or a boolean is expected,
+    such as an `async` event listener or an `if (promise)`; handle the promise inside the callback, ending it with
+    `.catch`. TypeScript types `.finally`'s callback as returning `void`, so the rule refuses a callback that returns a
+    promise even though `finally` awaits it; write `try … finally` with `await` there.
+- On the TypeScript files (`.ts`, `.tsx`, `.mts`, `.cts`) in `src/`, `player/` and `tests/helpers/`, which are product
+  code and the shared oracles:
+  - `typescript/restrict-template-expressions`: a template literal may interpolate a string, number, bigint, boolean,
+    `null`, `undefined`, `any`, `RegExp`, `Error` or `URL`, and may not interpolate an object, array, function,
+    `unknown` or `never`. A `never` usually means that a type guard narrowed more than it proves.
+  - `typescript/no-base-to-string`: `String(x)`, `x.toString()`, `` `${x}` ``, `"…" + x` and `join()` refuse a value
+    whose type may print `[object Object]`.
+
+  In test files and JavaScript, types are wider than values, and the fixes would be casts, so these two rules are off
+  there.
+- The `correctness` category's other type-aware rules are off: this policy has not chosen them, and `.oxlintrc.json`
+  lists them.
+- `.vue` files: these four rules do not reach them, because tsgolint reads only the TypeScript program. oxlint's other
+  rules read their `<script>` blocks with its own loader. The [exception check](#evidence-and-exceptions) reads them
+  as Vue's parser finds them, and refuses a lint directive in a file that Vue cannot parse.
+  Vue handles a promise that a component's template handler, `watch` callback or lifecycle hook returns: a rejection in
+  a component inside `PlayerApp.vue` reaches `PlayerApp.vue`'s `onErrorCaptured`, which reports it, and one in
+  `PlayerApp.vue`'s own reaches Vue's default handler, as no `app.config.errorHandler` is set. #2023 lists the
+  components' session and data functions as composable candidates; in a composable, these rules reach them.
+- In agent sessions oxlint prints one line per finding, which leaves out the type a coercion rule refused; `-f default`
+  shows it. If these two rules' findings need their type in the one-line form, it is added to those findings alone,
+  never by switching every finding to `-f default`.
+
+On the LXC (2026-11-08), `npm run lint` took 47–52 s with these rules and 40–43 s without them, run alone at a load
+of 8 to 20, and 46 s with them and the waiting-list check below at a load of 6 to 11. The largest process peaked at
+about 1.7 GB in each. Inside `tools/check-changed.mjs`, beside its other checks, the lint step took 113 s with these
+rules, and 70 s without them in another run at a similar load. The pre-push check runs lint as CI does.
+
+## Waiting lists
+
+An `overrides` entry whose rules are all off (`"allow"`, `"off"` or `0`, oxlint's `AllowWarnDeny`) is a waiting list:
+the findings of those rules in its files wait for another open pull request or a cleanup. It names files, never
+patterns. `tools/oxlint/check-waiting-overrides.mjs`, in `npm run lint`, checks that each path a waiting entry lists has
+a finding that oxlint reports without that entry and not with it, and refuses a path that is not a linted file. A
+finding is oxlint's whole diagnostic, so one whose message or place changes when the entry goes keeps the entry too. A
+severity oxlint's schema does not have is refused, in the root `rules` or an entry's. An entry is added only for a
+finding that waits, so that with the check each list shrinks. Interrupted, the check stops by the signal; the next run
+removes the probe configuration an interrupted run left.
 
 ## Comment forecasts
 
@@ -83,6 +135,15 @@ They execute native/JavaScript code during local checks and CI. Vendored source 
 selected revision in `tools/oxlint/anti-slop/`; upgrades require reviewing changes and rerunning local rule fixtures.
 The local adaptations allow precise contracts and honest `unknown` dictionaries and restrict assertion-comment scope.
 Do not enable new upstream defaults as an incidental upgrade.
+
+`oxlint-tsgolint`, which gives oxlint its type-aware rules, is a development dependency pinned exactly. Oxlint declares
+it as an optional peer and speaks its protocol, so the two are upgraded together. It is a native Go binary per
+platform, installed through optional dependencies and published by oxlint's maintainers with npm provenance, and it is
+built on typescript-go 7.0, the compiler line of the repository's `@typescript/native`. It reads the source in local
+checks and CI; nothing of it reaches the Player bundle. The alternative, typescript-eslint's typed rules, type-checks
+through TypeScript's JavaScript API at another version and was not measured. `node_modules/typescript` is TypeScript
+6.0.3, a peer dependency npm installs for the ESLint parser and `vue-tsc`; the repository's `tsc` is
+`@typescript/native` 7.0.2 (`node_modules/.bin/tsc`, `npm run typecheck`).
 
 This type-evidence route avoids a schema library, another test runner, and a second type-checking engine. Node runs
 the rule fixtures directly; the existing compiler type-checks their source. The separate exception checker reuses the

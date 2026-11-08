@@ -115,3 +115,19 @@ test("a detached docblock is named by its first line of text", () => {
   );
   assert.deepEqual(detachedDocblocks(source, text), [{ line: 3, text: "The point." }]);
 });
+
+test("a .vue file's scripts are the blocks Vue's parser finds, each with where it starts", () => {
+  const text =
+    '<template>\n<!-- <script>const hidden = 1;</script> -->\n</template>\n<script setup lang="ts" generic="T extends Array<string>">const a = 1;\n</script>\n<script\n data-x="const b = 2;"\n lang="ts">const b = 2;</script>\n';
+  assert.deepEqual(
+    scriptsOf("a.vue", text).map(({ text: script, lineOffset, columnOffset }) => ({
+      script,
+      lineOffset,
+      columnOffset,
+    })),
+    [
+      { script: "const a = 1;\n", lineOffset: 3, columnOffset: 58 },
+      { script: "const b = 2;", lineOffset: 7, columnOffset: 11 },
+    ],
+  );
+});

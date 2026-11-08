@@ -3,10 +3,11 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } fro
 import { availableParallelism, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { run } from "node:test";
+import { filesAtOnce } from "./test-files-at-once.mjs";
 import { shardFiles } from "./test-shards.mjs";
 
 // Measures what `tools/costly-test-files.mjs` records: each compiled test file's seconds, from its process's start to its
-// end, and the seconds of the checks CI's `check-2` job runs before its tests (`npm run check:pretest`). `--write`
+// end, and the seconds of the checks CI's last test job runs before its tests (`npm run check:pretest`). `--write`
 // rewrites `tools/costly-test-files.mjs`; `--raw FILE` keeps the measurement.
 //
 // `--from-ci RUN ...` (with `gh`) takes them from CI's own runs of the suite, the machines the shards balance: each test
@@ -67,12 +68,14 @@ const median = (values) => {
   return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 
-/** CI's runs: each run's files' seconds (both test jobs' artifacts), its pre-test step's seconds and its commit. */
+/** CI's runs: each run's files' seconds (every test job's artifact), its pre-test step's seconds and its commit. */
 function ciRuns(ids) {
   return ids.map((runId) => {
     // (a run's last attempt: re-running a run removes the artifacts of its earlier attempts)
     const where = `repos/{owner}/{repo}/actions/runs/${runId}`;
-    const commit = gh("api", where, "-q", ".head_sha");
+    const { head_sha: commit, conclusion } = JSON.parse(gh("api", where));
+    // (a run that did not pass may lack a test job that never started, whose files the other runs would then cover)
+    if (conclusion !== "success") fail([`run ${runId} did not pass (${conclusion})`]);
     const jobs = JSON.parse(gh("api", `${where}/jobs`, "-q", ".jobs"));
     const step = jobs
       .flatMap((job) => job.steps ?? [])
@@ -84,7 +87,12 @@ function ciRuns(ids) {
     const kept = readdirSync(folder).map((name) =>
       JSON.parse(readFileSync(join(folder, name, "test-file-seconds.json"), "utf8")),
     );
-    if (kept.length !== 2) fail([`run ${runId} kept ${kept.length} test jobs' seconds, not 2`]);
+    // (a test job is one with a step that runs a shard of the tests)
+    const testJobs = jobs.filter((job) =>
+      (job.steps ?? []).some((found) => found.name.startsWith("Build and run tests")),
+    ).length;
+    if (testJobs === 0 || kept.length !== testJobs)
+      fail([`run ${runId} kept ${kept.length} test jobs' seconds, not ${testJobs}`]);
     const atOnce = new Set(kept.map((found) => found.filesAtOnce));
     if (atOnce.size !== 1)
       fail([`run ${runId}'s test jobs ran ${[...atOnce].join(" and ")} files at once`]);
@@ -124,7 +132,8 @@ if (fromCi !== null) {
   const fileSeconds = {};
   const testSeconds = {};
   const failed = [];
-  for await (const event of run({ files: paths, concurrency: true, isolation: "process" })) {
+  const atOnce = filesAtOnce();
+  for await (const event of run({ files: paths, concurrency: atOnce, isolation: "process" })) {
     if (event.data?.nesting !== 0 || event.data.file === undefined) continue;
     const file = event.data.file.slice(event.data.file.lastIndexOf("/") + 1);
     if (event.type === "test:fail") failed.push(`${file}: ${event.data.name}`);
@@ -144,7 +153,7 @@ if (fromCi !== null) {
   measured = {
     source: "",
     from: `a local run at ${commit.slice(0, 9)}, Node ${process.version}, ${availableParallelism()} CPUs`,
-    filesAtOnce: availableParallelism() - 1,
+    filesAtOnce: atOnce,
     pretestSeconds: null,
     fileSeconds,
     testSeconds,
