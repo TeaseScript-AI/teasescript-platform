@@ -169,13 +169,13 @@ onBeforeUnmount(() => observer?.disconnect());
                 <template v-if="canMoveLeft || canMoveRight">
                   <DropdownMenuItem
                     :disabled="!canMoveLeft"
-                    class="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+                    class="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[disabled]:pointer-events-none"
                     @select="emit('move', -1)"
                     >Move left</DropdownMenuItem
                   >
                   <DropdownMenuItem
                     :disabled="!canMoveRight"
-                    class="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+                    class="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[disabled]:pointer-events-none"
                     @select="emit('move', 1)"
                     >Move right</DropdownMenuItem
                   >
