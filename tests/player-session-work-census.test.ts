@@ -73,8 +73,15 @@ const CLIENT_MEMBERS = {
 /** Every function the in-process facade exports: the session functions, and what does not send. */
 const FACADE_EXPORTS = {
   sending: ["hatch", "introduceNow", "beginRecordingNow"],
-  // The backend's creation, and reads of the connection's state (plans, recording, trace, random), with no session.
-  nonSending: ["createInProcessBackend", "heldRandom", "heldTrace", "heldPlan", "heldRecording"],
+  // The backend's creation, and reads of the connection's state (plans, recording, runs, trace, random), with no session.
+  nonSending: [
+    "createInProcessBackend",
+    "heldRandom",
+    "heldTrace",
+    "heldPlan",
+    "heldRecording",
+    "heldRuns",
+  ],
 } as const;
 
 const SURFACES: readonly Surface[] = [

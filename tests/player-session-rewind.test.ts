@@ -186,6 +186,8 @@ let createInProcessBackend: (build: {
   readonly appVersion: null;
 }) => PlayerBridge;
 let BridgeLostError: typeof ClientModule.BridgeLostError;
+// The diagnostic runs a bridge of that backend holds (`heldRuns`).
+let heldRuns: (bridge: PlayerBridge) => number[];
 let usePlayerDebug: (
   player: RewindHost,
   initial: { readonly menu: boolean; readonly autoSkip: boolean },
@@ -207,6 +209,9 @@ before(async () => {
   assert.equal(typeof facade.createInProcessBackend, "function");
   // EVIDENCE: validation: Vite loaded the real source modules; these are the composable's own backend and loss class.
   createInProcessBackend = facade.createInProcessBackend as typeof createInProcessBackend;
+  assert.equal(typeof facade.heldRuns, "function");
+  // EVIDENCE: validation: as above, its callable facade.
+  heldRuns = facade.heldRuns as typeof heldRuns;
   // EVIDENCE: validation: as above.
   BridgeLostError = client.BridgeLostError as typeof BridgeLostError;
   assert.equal(typeof debug.usePlayerDebug, "function");
@@ -2621,4 +2626,44 @@ test("a debug export copies the shown publication's events and transcript, after
   assert.equal(await rewind.returnToSession(), true);
   await settle(context);
   assert.deepEqual(await exportedPrefix(), prefixOf(shownView(host)), "the reinstated session's");
+});
+
+/*
+ * L5h.3b, Sol code r2's B2-L: each activation's run reaches the host once, on its first host request, or on its incident's
+ * commit when it failed before one; either way it ends the run before it. So the host holds the latest activation's run
+ * only, across successes and failures, and none once the Player is disposed of.
+ */
+test("the host holds only the latest activation's run, whether activations succeed or fail before the host", async (context) => {
+  const made = createHost(context, memoryStorage().provider, { lossy: true });
+  const { host } = made;
+  const bridge = await host.bridge;
+  await host.loadScriptStorage();
+  const prepared = await bridge.client.request("prepare", { source: { kind: "source", script } });
+  // EVIDENCE: fixture: `prepare` of a source replies with its held plan's token.
+  const plan = (prepared.result as { readonly plan: string }).plan;
+  const failing = () => {
+    host.prepare({
+      plan,
+      options: () => {
+        throw new TypeError("The options could not be read.");
+      },
+    });
+    host.activate();
+    return settle(context);
+  };
+  const held: number[][] = [];
+  await start(context, host);
+  held.push(heldRuns(bridge));
+  await failing();
+  held.push(heldRuns(bridge));
+  await failing();
+  held.push(heldRuns(bridge));
+  await start(context, host);
+  held.push(heldRuns(bridge));
+  await failing();
+  held.push(heldRuns(bridge));
+  made.scope.stop();
+  await settle(context);
+  held.push(heldRuns(bridge));
+  assert.deepEqual(held, [[1], [2], [3], [4], [5], []]);
 });

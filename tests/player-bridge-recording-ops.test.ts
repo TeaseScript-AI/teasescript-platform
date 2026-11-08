@@ -84,7 +84,9 @@ const MALFORMED = (op: string): Answer => ({
 /** Each op's argument forms. */
 const ARGUMENTS = {
   retireRun: [{ required: { run: "integer" } }],
-  commitIncident: [{ required: { error: "string", run: "integer", stop: "integer" } }],
+  commitIncident: [
+    { required: { error: "string", run: "integer", stop: "integer", retires: "nullableInteger" } },
+  ],
   captureRecording: [{ required: { session: "string" } }],
   captureExport: [{ required: { session: "nullableString", recording: "selector" } }],
   exportPrepare: [{ required: { ticket: "string", replay: "boolean" } }],
@@ -255,18 +257,38 @@ test("the recording ops' outcomes answer as written, in-process and in a Worker"
       bridge.client.request("releaseRecording", { ticket: "r0" }),
     );
     outcomes["commitIncident"] = await answerOf(
-      bridge.client.request("commitIncident", { error: "TypeError", run: 1, stop: 7 }),
+      bridge.client.request("commitIncident", {
+        error: "TypeError",
+        run: 1,
+        stop: 7,
+        retires: null,
+      }),
     );
     outcomes["commitIncident again"] = await answerOf(
-      bridge.client.request("commitIncident", { error: "RangeError", run: 1, stop: 8 }),
+      bridge.client.request("commitIncident", {
+        error: "RangeError",
+        run: 1,
+        stop: 8,
+        retires: null,
+      }),
       kind,
     );
     outcomes["commitIncident unbegun run"] = await answerOf(
-      bridge.client.request("commitIncident", { error: "TypeError", run: 9, stop: 1 }),
+      bridge.client.request("commitIncident", {
+        error: "TypeError",
+        run: 9,
+        stop: 1,
+        retires: null,
+      }),
     );
     await bridge.retireRun(1);
     outcomes["commitIncident retired run"] = await answerOf(
-      bridge.client.request("commitIncident", { error: "TypeError", run: 1, stop: 9 }),
+      bridge.client.request("commitIncident", {
+        error: "TypeError",
+        run: 1,
+        stop: 9,
+        retires: null,
+      }),
     );
     return outcomes;
   });

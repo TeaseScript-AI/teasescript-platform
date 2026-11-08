@@ -70,15 +70,20 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
       },
     },
     // A Player error before its run had a session: the run's incident, with no session to stop.
+    // An activation that failed before its first host request begins its run here, ending the run before it: each
+    // activation's run reaches the host once, on that request or on this one.
     commitIncident: {
       session: "none",
-      checkArguments: isStopArguments,
+      checkArguments: (args) =>
+        isRecord(args) &&
+        exactly(args, ["error", "run", "stop", "retires"]) &&
+        isStopArguments({ error: args.error, run: args.run, stop: args.stop }) &&
+        (args.retires === null || Number.isSafeInteger(args.retires)),
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted stop arguments before run.
-        const stop = args as StopArguments;
-        // A Start that failed in its host may not have begun its run there.
+        // EVIDENCE: validation: checkArguments accepted stop arguments with the run's `retires` before run.
+        const { retires, ...stop } = args as StopArguments & { readonly retires: number | null };
         if (!owner.runs.has(stop.run))
-          advanceExportObservation(owner, { kind: "beginRun", run: stop.run, retires: null });
+          advanceExportObservation(owner, { kind: "beginRun", run: stop.run, retires });
         advanceExportObservation(owner, { kind: "stopRequested", stop });
         const committed = advanceExportObservation(owner, {
           kind: "stopCommitted",

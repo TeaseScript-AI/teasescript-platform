@@ -370,7 +370,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Without a session to stop, the run's incident is committed by itself.
     const incident = () => {
       const args = stopOf(name, stop);
-      if (args !== null) void bridge?.commitIncident(args).catch(() => {});
+      if (args !== null)
+        void bridge?.commitIncident(args, activationRun?.retires ?? null).catch(() => {});
     };
     if (starting === null) {
       hostError.value = name;
