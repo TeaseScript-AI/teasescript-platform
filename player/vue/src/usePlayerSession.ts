@@ -154,6 +154,7 @@ import { usePlayerCameraLifecycle, useSessionCamera } from "./session/usePlayerC
 import { usePlayerSessionServices } from "./session/usePlayerSessionServices.js";
 import { useFailureRecording } from "./session/useFailureRecording.js";
 import type { ExportCaptureReply } from "../../engine-bridge/session-protocol.js";
+import type { RunBegin } from "../../engine-bridge/recording/export-observation.js";
 
 const PRIMED_AUDIO_ELEMENTS = 2;
 const SILENCE = silence(50);
@@ -323,14 +324,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The error name of an exception of the Player itself, such as one at Start; it stays until the next Start. Such an
   // exception stops the session where it stands (see `stopped`).
   const hostError = ref<string | null>(null);
-  // The diagnostic run of the latest Start or Continue (`ExportObservation`): the host binds its sessions to it, and a
-  // Player error stop commits the run's incident there. `null` before the first activation.
+  // The diagnostic run of the latest Start or Continue (`ExportObservation`), which its request carries: the host binds
+  // its sessions to it, and a Player error stop commits the run's incident there. `null` before the first activation.
   let run: number | null = null;
-  /** Begins the next run in the host before the activation's session exists, ending the run before it. */
-  function beginRun(host: PlayerBridge) {
+  /** The next activation's run, ending the run before it; its Start or Continue carries it to the host. */
+  function nextRun(host: PlayerBridge): RunBegin {
     const retires = run;
     run = host.nextRun();
-    void host.beginRun(run, retires).catch(() => {});
+    return { run, retires };
   }
   /** The stop arguments of a Player error `name` at stop `stop`, in the current run; `null` outside any run. */
   const stopOf = (name: string, stop: number) => (run === null ? null : { error: name, run, stop });
@@ -3163,7 +3164,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         // The recording of a restored session starts from the state it continues, and so does a new epoch of the
         // host's value trace, once the Continue owns the UI. The epoch's request is not awaited: the host runs it
         // before what follows (a draw's resume, Debug mode, Continue).
-        await host.request(restored, "beginRecording", null);
+        await host.request(restored, "beginRecording", nextRun(host));
         owned();
         const tracing = tracingIntent();
         if (tracing?.on)
@@ -3297,9 +3298,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         NO_MARKS,
         tracingIntent(),
         random,
+        nextRun(host),
       );
     const startOptions = { ...create.options(), debugMode: recording.debugMode };
-    return host.start(create.plan, startOptions, true, random);
+    return host.start(create.plan, startOptions, true, random, nextRun(host));
   }
   /**
    * Starts the prepared session; an exception of the Player while it begins is reported, with what was recorded. A
@@ -3315,7 +3317,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       });
     hostError.value = null;
     failureRecording.retire();
-    beginRun(bridge);
     let begun: PlayerSession | Promise<PlayerSession>;
     // `begin` records the click's capture: it reads it before its first await, a Start in its factory or options.
     clicked = sample;

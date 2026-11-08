@@ -1,4 +1,5 @@
 import type { InstructionPlan } from "../../src/playback.js";
+import { advanceExportObservation, type RunBegin } from "./recording/export-observation.js";
 import type { DebugRecording } from "../debug-recorder.js";
 import {
   createPlayerRuntimeSession,
@@ -214,9 +215,13 @@ export function introduceNow(
   marks: HistoryMarks,
   tracing?: TracingIntent,
   random?: StartRandom,
+  /** A Start's run, which begins before its session; none for a session restored outside the host. */
+  run?: RunBegin,
 ): PlayerSession {
   const backend = backendOf(bridge);
   const { context } = backend;
+  if (run !== undefined)
+    advanceExportObservation(context.exportObservation, { kind: "beginRun", ...run });
   const delivery = context.delivery.begin();
   try {
     const opened = introduceIn(backend, delivery, make, marks, tracing, random);

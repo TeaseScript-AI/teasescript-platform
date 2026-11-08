@@ -35,7 +35,6 @@ const SCRIPT: string = scenarios.WITNESS;
 
 /** The session's export, assembled from the host's capture with every category chosen, as its file's text. */
 async function exportText(bridge: PlayerBridge): Promise<{ text: string; release: () => void }> {
-  await bridge.beginRun(1, null);
   const prepared = await bridge.client.request("prepare", {
     source: { kind: "source", script: SCRIPT },
   });
@@ -43,7 +42,10 @@ async function exportText(bridge: PlayerBridge): Promise<{ text: string; release
   const result = prepared.result as PrepareResult;
   assert.equal(result.kind, "prepared");
   const plan = result.kind === "prepared" ? result.plan : "";
-  const session: PlayerSession = await bridge.start(plan, { wallClockMs: 0 }, true);
+  const session: PlayerSession = await bridge.start(plan, { wallClockMs: 0 }, true, undefined, {
+    run: 1,
+    retires: null,
+  });
   const actionId = activePlayerRuntimeInteraction(session.state)?.actionId;
   assert.ok(actionId !== undefined);
   await bridge.request(session, "submitComposer", { actionId, text: "Ann", input: null });

@@ -50,7 +50,6 @@ export const HOST_OPS = {
     read: false,
   },
   exportPrepare: { planJson: "a plan's hash and replay checkpoints; no plan JSON", read: false },
-  beginRun: { planJson: "a debug export's diagnostic run; no plan", read: false },
   retireRun: { planJson: "a debug export's diagnostic run; no plan", read: false },
   commitIncident: {
     planJson: "a debug export's incident of a run with no session; no plan",

@@ -42,6 +42,22 @@ export function isStopArguments(value: unknown): value is StopArguments {
   );
 }
 
+/** An activation's run, which a Start, Continue's handoff or an introduction carries: its number, and the run it ends. */
+export interface RunBegin {
+  readonly run: number;
+  readonly retires: number | null;
+}
+
+/** Whether `value` is a run's begin: whole numbers, `retires` `null` when no run ends. */
+export function isRunBegin(value: unknown): value is RunBegin {
+  return (
+    isRecord(value) &&
+    exactly(value, ["run", "retires"]) &&
+    Number.isSafeInteger(value.run) &&
+    (value.retires === null || Number.isSafeInteger(value.retires))
+  );
+}
+
 /** The arguments of a Player error stop's halt: the validated error name, with its run and stop identity. */
 export interface StopArguments {
   readonly error: string;

@@ -58,21 +58,6 @@ function heldTicket<K extends HeldTicket["kind"]>(
 export function recordingOps(context: PlayerOpsContext): BridgeOps {
   const owner = context.exportObservation;
   return {
-    // A Start or a Continue begins diagnostic run `run`, before any of its sessions exists; `retires` ends the run before.
-    beginRun: {
-      session: "none",
-      checkArguments: (args) =>
-        isRecord(args) &&
-        exactly(args, ["run", "retires"]) &&
-        isRun(args.run) &&
-        (args.retires === null || isRun(args.retires)),
-      run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { run, retires } = args as { readonly run: number; readonly retires: number | null };
-        advanceExportObservation(owner, { kind: "beginRun", run, retires });
-        return { result: null };
-      },
-    },
     // The Player's disposal ends its run.
     retireRun: {
       session: "none",
@@ -91,6 +76,9 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
       run: (args) => {
         // EVIDENCE: validation: checkArguments accepted stop arguments before run.
         const stop = args as StopArguments;
+        // A Start that failed in its host may not have begun its run there.
+        if (!owner.runs.has(stop.run))
+          advanceExportObservation(owner, { kind: "beginRun", run: stop.run, retires: null });
         advanceExportObservation(owner, { kind: "stopRequested", stop });
         const committed = advanceExportObservation(owner, {
           kind: "stopCommitted",
@@ -108,7 +96,7 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
       run: (args, sessions) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
         const held = heldSession(sessions, (args as { readonly session: string }).session);
-        const capture = context.recorder.capture(held.publication.engine);
+        const capture = context.recorder.capture(held.sessionForOperation().engine);
         if (capture.kind !== "captured") return { result: capture satisfies RecordingCaptureReply };
         const ticket = context.nextTicket();
         context.recordings.set(ticket, {
@@ -150,18 +138,19 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
         const decided = advanceExportObservation(owner, { kind: "capture", run });
         if (decided.kind === "pending") return { result: decided satisfies ExportCaptureReply };
         const incident = decided.kind === "incident" ? decided.incident : null;
+        // The session at its latest publication, made ready for this op as every op does.
+        const current = held?.sessionForOperation() ?? null;
         let recording: DebugRecording | null = null;
         if (selector.recording !== "current")
           recording = heldTicket(context, selector.recording.ticket, "recording").recording;
-        else if (held !== null) {
-          const capture = context.recorder.capture(held.publication.engine);
+        else if (current !== null) {
+          const capture = context.recorder.capture(current.engine);
           if (capture.kind === "stale")
             return {
               result: { kind: "refused", reason: "provenance" } satisfies ExportCaptureReply,
             };
           if (capture.kind === "captured") recording = capture.recording;
         }
-        const current = held?.sessionForOperation() ?? null;
         const snapshot = current === null ? null : playerRuntimeSnapshotOrNull(current);
         const plan =
           recording?.plan ?? (held === null ? null : (context.plans.get(held.planToken) ?? null));

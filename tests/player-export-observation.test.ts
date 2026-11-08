@@ -59,9 +59,11 @@ interface Observed {
 async function runCase(c: { readonly [A in Axis]: Value<A> }): Promise<Observed> {
   const bridge = await bridgeOn(c.transport);
   try {
-    await bridge.beginRun(1, null);
     const plan = await preparedPlan(Promise.resolve(bridge), PLAN);
-    const session = await bridge.start(plan, { wallClockMs: 0 }, true);
+    const session = await bridge.start(plan, { wallClockMs: 0 }, true, undefined, {
+      run: 1,
+      retires: null,
+    });
     if (c.edit === "edited")
       await bridge.request(session, "applyStorageEdit", { key: "edited", value: 1 });
     const recorded = await bridge.read(session, "captureRecording");

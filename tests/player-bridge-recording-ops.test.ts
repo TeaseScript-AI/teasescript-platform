@@ -83,7 +83,6 @@ const MALFORMED = (op: string): Answer => ({
 
 /** Each op's argument forms. */
 const ARGUMENTS = {
-  beginRun: [{ required: { run: "integer", retires: "nullableInteger" } }],
   retireRun: [{ required: { run: "integer" } }],
   commitIncident: [{ required: { error: "string", run: "integer", stop: "integer" } }],
   captureRecording: [{ required: { session: "string" } }],
@@ -184,8 +183,11 @@ test("the recording ops' outcomes answer as written, in-process and in a Worker"
       answered(
         typeof result === "object" && result !== null && "kind" in result ? result.kind : result,
       );
-    await bridge.beginRun(1, null);
-    const recorded = await bridge.start(plan, { wallClockMs: 0 }, true);
+    // The first Start begins run 1.
+    const recorded = await bridge.start(plan, { wallClockMs: 0 }, true, undefined, {
+      run: 1,
+      retires: null,
+    });
     // A second session, started without the recorder, whose engine the recorder does not record.
     const unrecorded = await bridge.start(plan, { wallClockMs: 0 }, false);
     const captured = await bridge.read(recorded, "captureRecording");
@@ -318,8 +320,13 @@ test("the recording ops' outcomes answer as written, in-process and in a Worker"
     commitIncident: { answer: incident },
     // The first committed incident stays the run's.
     "commitIncident again": { answer: incident },
-    "commitIncident unbegun run": { answer: null },
-    "commitIncident retired run": { answer: null },
+    // A run the host has not begun, as one whose Start failed in its host, begins with its incident.
+    "commitIncident unbegun run": {
+      answer: { errorName: "TypeError", run: 9, stop: 1, revision: null, eventsThrough: null },
+    },
+    "commitIncident retired run": {
+      answer: { errorName: "TypeError", run: 1, stop: 9, revision: null, eventsThrough: null },
+    },
   });
 });
 
@@ -434,13 +441,15 @@ function failingConnection() {
 test("an answer whose reply failed to post leaves the host ahead: an export of that session is refused by identity, holding nothing", async () => {
   const link = failingConnection();
   const { bridge, context } = link;
-  await bridge.beginRun(1, null);
   const plan = await preparedPlan(
     Promise.resolve(bridge),
     compilePlayerProject('let first = askText "First?"\nlet second = askText "Second?"\nexit')
       .plan!,
   );
-  const session = await bridge.start(plan, { wallClockMs: 0 }, true);
+  const session = await bridge.start(plan, { wallClockMs: 0 }, true, undefined, {
+    run: 1,
+    retires: null,
+  });
   const exportOf = () =>
     bridge.captureExport(session, "current", (reply, view) => ({
       kind: reply.kind,

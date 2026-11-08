@@ -21,7 +21,7 @@ import type {
   ExportIdentity,
 } from "./engine-bridge/session-protocol.js";
 import type { PreparedExport } from "./engine-bridge/recording/export-replay.js";
-import type { StopArguments } from "./engine-bridge/recording/export-observation.js";
+import type { RunBegin, StopArguments } from "./engine-bridge/recording/export-observation.js";
 import type { PlayerSession } from "./runtime-view.js";
 import type { HistoryMarks } from "./debug-history-marks.js";
 import { SessionStore } from "./session-store.js";
@@ -220,18 +220,20 @@ export class PlayerBridge {
     return this.store(this.#own(session))?.session ?? null;
   }
 
-  /** Starts a session of the held plan `plan`; resolves with its first publication. */
+  /** Starts a session of the held plan `plan` in run `run`; resolves with its first publication. */
   async start(
     plan: string,
     options: StartOptions,
     recording: boolean,
     random?: StartRandom,
+    run?: RunBegin,
   ): Promise<PlayerSession> {
     const reply = await this.#client.request("start", {
       plan,
       options,
       recording,
       ...(random === undefined ? {} : { random }),
+      ...(run === undefined ? {} : { run }),
     });
     // EVIDENCE: validation: `start` replies from the same build with the new session and its introduction.
     return this.open(reply.session!, reply.view as Introduction);
@@ -283,18 +285,10 @@ export class PlayerBridge {
   }
 
   #runs = 0;
-  /** The next number of a diagnostic run on this connection (`beginRun`), counted as rewind histories are. */
+  /** The next number of a diagnostic run on this connection (`RunBegin`), counted as rewind histories are. */
   nextRun(): number {
     this.#runs += 1;
     return this.#runs;
-  }
-
-  /**
-   * Begins diagnostic run `run` in the host, before the Start or Continue that makes it creates any session, and ends
-   * `retires`, the Player's run before it (`ExportObservation`). Ordered before the requests sent after it.
-   */
-  async beginRun(run: number, retires: number | null): Promise<void> {
-    await this.#client.request("beginRun", { run, retires });
   }
 
   /** Ends diagnostic run `run` (`retireRun`), as the Player that began it is disposed of. */

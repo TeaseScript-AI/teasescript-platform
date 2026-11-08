@@ -44,8 +44,10 @@ import { NO_MARKS, marksAfterEdit, type HistoryMarks } from "../../debug-history
 import type { CallViewReply, Introduction, Publication, StopReply } from "../session-protocol.js";
 import {
   advanceExportObservation,
+  isRunBegin,
   isStopArguments,
   runIncident,
+  type RunBegin,
   type ObservedSession,
   type SessionObservation,
 } from "../recording/export-observation.js";
@@ -449,19 +451,24 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
       session: "none",
       checkArguments: (args) =>
         isRecord(args) &&
-        exactly(args, ["plan", "options", "recording"], ["random"]) &&
+        exactly(args, ["plan", "options", "recording"], ["random", "run"]) &&
         typeof args.plan === "string" &&
         isStartOptions(args.options) &&
         typeof args.recording === "boolean" &&
-        (args.random === undefined || isStartRandom(args.random)),
+        (args.random === undefined || isStartRandom(args.random)) &&
+        (args.run === undefined || isRunBegin(args.run)),
       run: (args, sessions) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { plan, options, recording, random } = args as {
+        const { plan, options, recording, random, run } = args as {
           readonly plan: string;
           readonly options: StartOptions;
           readonly recording: boolean;
           readonly random?: StartRandom;
+          readonly run?: RunBegin;
         };
+        // The Start's run begins before its session, which binds to it.
+        if (run !== undefined)
+          advanceExportObservation(context.exportObservation, { kind: "beginRun", ...run });
         const instructions = context.plans.get(plan);
         if (instructions === undefined) throw new Error(`No plan '${plan}' is held.`);
         const control = startRandom(context, random);
@@ -595,9 +602,13 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
       false,
     ),
     beginRecording: sessionOp(
-      (args) => args === null,
-      (held) => {
-        // Continue hands over a session the Player held already: it joins the run Continue began.
+      (args) => args === null || isRunBegin(args),
+      (held, args) => {
+        // Continue hands over a session the Player held already: it begins Continue's run, which the session joins.
+        // EVIDENCE: validation: the op's check admitted `null` or a run's begin.
+        const run = args as RunBegin | null;
+        if (run !== null)
+          advanceExportObservation(context.exportObservation, { kind: "beginRun", ...run });
         held.bindRun();
         beginRecordingAt(held, context);
         return { result: null, view: null };

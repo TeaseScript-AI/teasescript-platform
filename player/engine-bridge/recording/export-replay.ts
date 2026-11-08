@@ -1,9 +1,6 @@
-import {
-  createCheckpoint,
-  type InstructionPlan,
-  type RuntimeCheckpoint,
-  type RuntimeSnapshot,
-} from "../../../src/index.js";
+import type { InstructionPlan, RuntimeCheckpoint, RuntimeSnapshot } from "../../../src/index.js";
+// The checkpoint's own module: the Worker's host loads no compiler until a source is prepared.
+import { createCheckpoint } from "../../../src/runtime/snapshot/checkpoint.js";
 import { serializeValidatedRuntimeJson } from "../../../src/runtime/snapshot/checkpoint-json.js";
 import type { DebugExport, DebugReplay } from "../../debug-export.js";
 import type { DebugRecording } from "../../debug-recorder.js";

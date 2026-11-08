@@ -552,6 +552,10 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
 
 /** The escapes that are not followed (a value passed as a callback): each is an entry point too, with its policy. */
 const ESCAPES: Readonly<Record<string, Policy>> = {
+  // The reply hooks a request passes on: a debug export's capture releases its ticket from its hook.
+  "player/engine-bridge/client.ts openBridge > Promise:callback > request > exclusive:callback {onReply}":
+    "bridge plumbing",
+  "player/player-bridge.ts PlayerBridge > request > #send:callback {onReply}": "bridge plumbing",
   "player/lock-service.ts LockService > #present > wake {wake}": "own observation",
   "player/vue/src/session/useCallView.ts useCallView {followCallView}": "lifecycle",
   "player/vue/src/usePlayerSession.ts usePlayerSession > then:callback {bridgeLost}": "lifecycle",
@@ -568,6 +572,9 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerSession.ts usePlayerSession > reviewSessionImport {reviewSessionImport}",
   "player/engine-bridge/client.ts openBridge > Promise:callback > request {request}",
   "player/engine-bridge/client.ts openBridge > Promise:callback > section {section}",
+  "player/player-bridge.ts PlayerBridge > captureExport > onReply {onReply}",
+  "player/player-bridge.ts PlayerBridge > request > #send:callback > onReply {onReply}",
+  "player/player-bridge.ts PlayerBridge > viewCalls > #send:callback > onReply {onReply}",
   "player/engine-bridge/client.ts openBridge > Promise:callback > signal {signal}",
   "player/vue/src/session/useCallView.ts useCallView > demandCallView {demandCallView}",
   "player/vue/src/session/useCallView.ts useCallView {reportHostError}",
@@ -753,7 +760,6 @@ const ADOPTION_ESCAPES: readonly string[] = [
   "player/engine-bridge/ops/history.ts historyOps > rewindBack > run {run}",
   "player/engine-bridge/ops/history.ts historyOps > rewindForward > run {run}",
   "player/engine-bridge/ops/history.ts historyOps > rewindReturn > run {run}",
-  "player/engine-bridge/ops/recording.ts recordingOps > beginRun > run {run}",
   "player/engine-bridge/ops/recording.ts recordingOps > captureExport > run {run}",
   "player/engine-bridge/ops/recording.ts recordingOps > captureRecording > run {run}",
   "player/engine-bridge/ops/recording.ts recordingOps > commitIncident > run {run}",
