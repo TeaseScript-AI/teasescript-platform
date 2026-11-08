@@ -1,5 +1,10 @@
 import type { InterpreterEvent } from "../src/runtime/events.js";
-import type { CallViewReply, Introduction, Publication } from "./engine-bridge/session-protocol.js";
+import type {
+  CallViewReply,
+  Introduction,
+  Publication,
+  StopReply,
+} from "./engine-bridge/session-protocol.js";
 import type { PlayerSpeakerPresentation, PlayerTranscriptEntryPresentation } from "./model.js";
 import type { PlayerBridge } from "./player-bridge.js";
 import { appendTranscript, DEFAULT_SPEAKERS, type PlayerSession } from "./runtime-view.js";
@@ -63,9 +68,16 @@ export class SessionStore {
    * Applies nothing more: what is shown is what the host ran before the stop, with the call view `final` of the
    * acknowledgement when it is of that publication (`mergeCallView`).
    */
-  freeze(final: CallViewReply | null = null): void {
+  freeze(final: CallViewReply | StopReply | null = null): void {
     if (this.#phase === "frozen") return;
     if (final !== null) this.mergeCallView(final);
+    // A Player error stop's identity and incident, installed at the revision it froze: the stop is no engine publication.
+    if (final !== null && "diagnostic" in final && final.revision === this.#session.revision)
+      this.#session = Object.freeze({
+        ...this.#session,
+        diagnostic: final.diagnostic,
+        incident: final.incident,
+      });
     this.#phase = "frozen";
   }
 
@@ -117,6 +129,8 @@ export class SessionStore {
       instructions: view.instructions,
       callView: view.callView,
       marks: view.marks,
+      diagnostic: view.diagnostic,
+      incident: view.incident,
       history: view.history,
       historyKey: this.#historyKey,
       liveEventSequence: this.#liveEventSequence,

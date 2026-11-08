@@ -59,11 +59,19 @@ interface ImageHost {
   ): Promise<void>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   debugExportCandidate(
-    shown: Pick<DebugExportCandidate, "player" | "host">,
+    details: () => Pick<DebugExportCandidate, "player" | "host">,
+    live: () => boolean,
   ): Promise<DebugExportCandidate>;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   readonly inputSection: unknown;
+  setRandomControl(control: { readonly sites: readonly [] } | null): void;
+  forgetRandomHistory(): void;
+  readonly randomRevision: Readonly<Ref<number>>;
+  readonly hostError: Readonly<Ref<string | null>>;
+  prepareRestore(given: PlayerRuntimeSession): void;
+  setDebugMode(on: boolean): void;
+  readonly stopped: Readonly<Ref<boolean>>;
 }
 let usePlayerSession: (options: {
   resolveAsset?: (path: string) => string | null;
@@ -218,11 +226,15 @@ test("a debug export candidate is the state when it was asked for, while play co
   const transcriptEntries = [...asked.transcriptEntries];
   // So is its state, which play changes in place.
   const askedSnapshot = playerRuntimeSnapshot(asked);
-  const pending = host.debugExportCandidate({
-    player: {},
-    host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
-  });
-  // The player answers before the candidate has read the photo the session used.
+  const pending = host.debugExportCandidate(
+    () => ({
+      player: {},
+      host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
+    }),
+    () => true,
+  );
+  // The capture is delivered; the player answers while the candidate reads the photo the session used.
+  await new Promise((resolve) => setTimeout(resolve, 0));
   host.update(submitPlayerRuntimeComposer(asked, "later answer")!.session);
   assert.equal(host.session.value?.state.status, "halted");
   const candidate = await pending;
@@ -291,10 +303,13 @@ test("after a reload, Continue's debug export offers the photo its state holds, 
   const after = await page();
   assert.equal(after.host.activation.value, "continue");
   await after.host.activate();
-  const candidate = await after.host.debugExportCandidate({
-    player: {},
-    host: { stage: { status: "loaded", path: null }, media: [], notices: [], debugLog: null },
-  });
+  const candidate = await after.host.debugExportCandidate(
+    () => ({
+      player: {},
+      host: { stage: { status: "loaded", path: null }, media: [], notices: [], debugLog: null },
+    }),
+    () => true,
+  );
   assert.deepEqual(
     candidate.photos.map((each) => [each.reference, each.usedBy, each.byteLength]),
     [[photo, [], PNG.length]],
@@ -520,4 +535,252 @@ test("a package image the Stage cannot load is reported while the Stage shows it
   await host.activate();
   await nextTick();
   assert.equal(host.notices.value.length, 0);
+});
+
+// L5h.3b, the second final review's B2-L-C-D-E: a candidate whose photo read still waits when its activation retires
+// is no candidate. Its ticket goes, no read starts after the retirement, and the replacement shows on untouched.
+test("a debug export whose photo read waits while a new Start retires its activation hands nothing over", async (context) => {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() =>
+    usePlayerSession({ decodeImage: async () => ({ width: 1, height: 1 }) }),
+  )!;
+  context.after(() => scope.stop());
+  host.prepare((options) =>
+    createPlayerRuntimeSession(
+      'let image = askImage("Photo")\nlet second = askImage("Second photo")\nlet name = askText "Name"\nexit',
+      options,
+    ),
+  );
+  await host.activate();
+  await answer(host, await chosen(host, "used.png"));
+  await answer(host, await chosen(host, "second.png"));
+  const media: Record<string, unknown> = await loadPlayerModule("player/captured-media.ts");
+  const facade: Record<string, unknown> = await loadPlayerModule(
+    "player/engine-bridge/in-process.ts",
+  );
+  assert.equal(typeof facade.heldTickets, "function");
+  // EVIDENCE: validation: the bundle's tickets facade, checked callable above.
+  const heldTickets = facade.heldTickets as (bridge: PlayerBridge) => string[];
+  // EVIDENCE: validation: the bundle's media store class, whose `read` the candidate's photo reads go through.
+  const store = media.CapturedMediaStore as {
+    prototype: { read(reference: string): Promise<object | null> };
+  };
+  const bridge = await host.bridge;
+  const read = store.prototype.read;
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  const state = { reached: false, retired: false };
+  const reads: boolean[] = [];
+  context.mock.method(store.prototype, "read", async function (this: unknown, reference: string) {
+    reads.push(state.retired);
+    const record = await read.call(this, reference);
+    state.reached = true;
+    await gate;
+    return record;
+  });
+  const pending = host.debugExportCandidate(
+    () => ({
+      player: {},
+      host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
+    }),
+    () => true,
+  );
+  await until(() => state.reached, "the candidate reads its first photo");
+  assert.deepEqual(heldTickets(bridge), ["r1"]);
+  host.prepare((options) =>
+    createPlayerRuntimeSession('let next = askText "Replacement"\nexit', options),
+  );
+  await host.activate();
+  const replacement = host.session.value;
+  state.retired = true;
+  open();
+  // The composable gives `null` for a candidate it does not hand over.
+  const candidate: DebugExportCandidate | null = await pending;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(
+    {
+      candidate,
+      readsAfterRetirement: reads.filter((after) => after).length,
+      tickets: heldTickets(bridge),
+      replacementShown: host.session.value === replacement,
+    },
+    { candidate: null, readsAfterRetirement: 0, tickets: [], replacementShown: true },
+  );
+});
+
+/*
+ * L5h.3b, the scoped round after the second final review: a random adoption acts for the activation that shows its
+ * session (`adoptRandom`). The real adoption's reply is held at the page's request; a successor activation begins; then
+ * the old reply arrives. A success writes nothing over the successor's history revision; a failure stops nothing of
+ * it, sets no error and captures nothing. Runs and tickets end empty.
+ */
+async function heldAdoption(
+  context: TestContext,
+  before: "start" | "continue",
+  outcome: "success" | "failure",
+) {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() => usePlayerSession({}))!;
+  context.after(() => scope.stop());
+  const bridge = await host.bridge;
+  const facade: Record<string, unknown> = await loadPlayerModule(
+    "player/engine-bridge/in-process.ts",
+  );
+  // EVIDENCE: validation: the bundle's facades, which the assertions below call.
+  const { heldRuns, heldTickets } = facade as {
+    heldRuns: (bridge: PlayerBridge) => number[];
+    heldTickets: (bridge: PlayerBridge) => string[];
+  };
+  host.setRandomControl({ sites: [] });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  if (before === "continue") {
+    host.prepare((options) =>
+      createPlayerRuntimeSession('let restored = askText "Restored"\nexit', options),
+    );
+    await host.activate();
+  }
+  const request = bridge.client.request.bind(bridge.client);
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  const held = { adoption: false };
+  const posted: string[] = [];
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    posted.push(args[0]);
+    const answered = request(...args);
+    if (args[0] !== "adoptRandom" || held.adoption) return answered;
+    held.adoption = true;
+    // The host ran the adoption; its reply reaches the page only once the successor began.
+    return answered.then(async (reply) => {
+      await gate;
+      if (outcome === "failure") throw new TypeError("The adoption failed.");
+      return reply;
+    });
+  });
+  if (before === "continue") host.prepareRestore(host.session.value!);
+  else
+    host.prepare((options) => createPlayerRuntimeSession('let old = askText "Old"\nexit', options));
+  await host.activate();
+  await until(() => held.adoption, "the activation adopts its session");
+  host.prepare((options) =>
+    createPlayerRuntimeSession('let next = askText "Successor"\nexit', options),
+  );
+  await host.activate();
+  host.forgetRandomHistory();
+  const successor = host.session.value;
+  const stateBefore = JSON.stringify(successor?.state);
+  await until(() => posted.includes("randomControl"), "the successor's reset is sent");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const revision = host.randomRevision.value;
+  const from = posted.length;
+  open();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const observed = {
+    revision: host.randomRevision.value,
+    error: host.hostError.value,
+    captures: posted.slice(from).filter((op) => op === "captureRecording").length,
+    shown:
+      host.session.value === successor && JSON.stringify(host.session.value?.state) === stateBefore,
+  };
+  scope.stop();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return { observed, revision, runs: heldRuns(bridge), tickets: heldTickets(bridge) };
+}
+
+for (const [before, outcome] of [
+  ["start", "success"],
+  ["start", "failure"],
+  ["continue", "failure"],
+] as const)
+  test(`a ${before}'s random adoption whose ${outcome} arrives after a successor began acts for nothing of it`, async (context) => {
+    const { observed, revision, runs, tickets } = await heldAdoption(context, before, outcome);
+    // The successor's reset is the history's second revision, after the old adoption's first; it stays.
+    assert.deepEqual(
+      { revision, observed, runs, tickets },
+      {
+        revision: 2,
+        observed: { revision: 2, error: null, captures: 0, shown: true },
+        runs: [],
+        tickets: [],
+      },
+    );
+  });
+
+// L5h.3b, the last scoped round: Debug mode's change acts for the activation that showed its session. A Continue keeps
+// the session's lineage, so a change whose failure arrives after a Continue began must not stop that Continue.
+test("a Debug mode change whose failure arrives after a Continue of the same lineage began stops nothing of it", async (context) => {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() => usePlayerSession({}))!;
+  context.after(() => scope.stop());
+  const bridge = await host.bridge;
+  const facade: Record<string, unknown> = await loadPlayerModule(
+    "player/engine-bridge/in-process.ts",
+  );
+  // EVIDENCE: validation: the bundle's facades, which the assertions below call.
+  const { heldRuns, heldTickets } = facade as {
+    heldRuns: (bridge: PlayerBridge) => number[];
+    heldTickets: (bridge: PlayerBridge) => string[];
+  };
+  host.prepare((options) => createPlayerRuntimeSession('let old = askText "Old"\nexit', options));
+  await host.activate();
+  const request = bridge.client.request.bind(bridge.client);
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  const held = { completed: false };
+  const posted: string[] = [];
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    posted.push(args[0]);
+    const answered = request(...args);
+    if (args[0] !== "setDebugMode" || held.completed) return answered;
+    // The host ran the change; its failure reaches the page only once the Continue began.
+    return answered.then(async () => {
+      held.completed = true;
+      await gate;
+      throw new TypeError("The Debug mode change failed.");
+    });
+  });
+  const identityOf = (session: unknown) => {
+    // EVIDENCE: fixture: a host session's publication carries its diagnostic identity and lineage.
+    return session as {
+      readonly diagnostic: { readonly run: number };
+      readonly lineage: string;
+    } | null;
+  };
+  const predecessor = identityOf(host.session.value);
+  host.setDebugMode(true);
+  await until(() => held.completed, "the host ran the Debug mode change");
+  host.prepareRestore(host.session.value!);
+  await host.activate();
+  const successor = identityOf(host.session.value);
+  const state = JSON.stringify(host.session.value?.state);
+  const from = posted.length;
+  open();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const observed = {
+    runs: [predecessor?.diagnostic.run, successor?.diagnostic.run],
+    sameLineage: predecessor?.lineage === successor?.lineage,
+    error: host.hostError.value,
+    stopped: host.stopped.value,
+    captures: posted.slice(from).filter((op) => op === "captureRecording").length,
+    sameState: JSON.stringify(host.session.value?.state) === state,
+  };
+  scope.stop();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(
+    { observed, runs: heldRuns(bridge), tickets: heldTickets(bridge) },
+    {
+      observed: {
+        runs: [1, 2],
+        sameLineage: true,
+        error: null,
+        stopped: false,
+        captures: 0,
+        sameState: true,
+      },
+      runs: [],
+      tickets: [],
+    },
+  );
 });

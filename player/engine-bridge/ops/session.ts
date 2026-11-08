@@ -41,7 +41,18 @@ import {
 } from "../connection-state.js";
 import { planMetadata, type PlanMetadata } from "../plan-facts.js";
 import { NO_MARKS, marksAfterEdit, type HistoryMarks } from "../../debug-history-marks.js";
-import type { CallViewReply, Introduction, Publication } from "../session-protocol.js";
+import type { CallViewReply, Introduction, Publication, StopReply } from "../session-protocol.js";
+import {
+  advanceExportObservation,
+  ensureRun,
+  isRunBegin,
+  RetiredRunError,
+  isStopArguments,
+  runIncident,
+  type RunBegin,
+  type ObservedSession,
+  type SessionObservation,
+} from "../recording/export-observation.js";
 import type { BridgeOp, BridgeOps, HostSession, OpOutcome } from "../worker-host.js";
 
 /** What adopting an op's result session did (`HeldSession.adoptResult`). */
@@ -59,7 +70,7 @@ const KEPT: Adoption = Object.freeze({ kind: "kept" });
  */
 let nextHistoryKey = 1;
 
-export class HeldSession implements HostSession {
+export class HeldSession implements HostSession, ObservedSession {
   #current: PlayerRuntimeSession;
   #delivered = 0;
   readonly #connection: PlayerOpsContext;
@@ -82,6 +93,12 @@ export class HeldSession implements HostSession {
   #marks: HistoryMarks;
   /** The key Debug's rewind history names this session's lineage by (`HistoryRegistry`). */
   readonly historyKey = `l${nextHistoryKey++}`;
+  /** The diagnostic run the session belongs to (`ExportObservation`), bound as it is made; `null` outside any run. */
+  run: number | null = null;
+  /** The session's latest publication as the export observes it. */
+  observation: SessionObservation | null = null;
+  /** The Player error stop that froze the session (`atStop`), or `null`: a debug export's diagnostic identity. */
+  stoppedBy: number | null = null;
 
   constructor(
     session: PlayerRuntimeSession,
@@ -96,6 +113,14 @@ export class HeldSession implements HostSession {
     this.#marks = marks;
     this.#owner = owner;
     this.#control = control;
+    // Every route that makes a session binds it to the Player's current run before it publishes.
+    this.bindRun();
+  }
+
+  /** Binds the session to the connection's current run, as it is made and as Continue hands an existing one over. */
+  bindRun(): void {
+    const owner = this.#connection.exportObservation;
+    advanceExportObservation(owner, { kind: "bindSession", session: this, run: owner.current });
   }
 
   /**
@@ -208,6 +233,15 @@ export class HeldSession implements HostSession {
     const through = next.events.length;
     this.#delivered = through;
     const { calls, ...state } = next.state;
+    const owner = this.#connection.exportObservation;
+    // The export observes what the engine holds, which a failed delivery does not undo, unlike the history's record of
+    // what the page was shown: the capture's identity match then refuses until a publication the page applied.
+    advanceExportObservation(owner, {
+      kind: "publication",
+      session: this,
+      revision: next.revision,
+      eventsThrough: through,
+    });
     return Object.freeze({
       revision: next.revision,
       state: Object.freeze(state),
@@ -217,6 +251,8 @@ export class HeldSession implements HostSession {
       instructions: instructionFacts(next, this.viewingCalls),
       callView: this.viewingCalls ? Object.freeze({ calls }) : null,
       marks: this.#marks,
+      diagnostic: Object.freeze({ run: this.run, stop: null }),
+      incident: runIncident(owner, this.run),
       history,
     });
   }
@@ -247,9 +283,49 @@ export class HeldSession implements HostSession {
     });
   }
 
-  /** What `halt`'s acknowledgement carries: the call view of the publication the stop froze, viewed or not. */
-  atStop(): CallViewReply {
-    return this.callView(true);
+  /** Whether `args` are a Player error stop's (`StopArguments`); a plain halt, as of a superseded session, has none. */
+  checkStop(args: unknown): boolean {
+    return isStopArguments(args);
+  }
+
+  /**
+   * A Player error stop of this session arrived: the run's capture waits for its commit. The stopped session is the
+   * stop's run's, also a Continue's restored session the error stopped before Continue handed it over (`bindRun`).
+   * `false` for a stop of a run that ended, which changes nothing and is refused (`halt`); a plain halt is admitted.
+   */
+  stopRequested(args: unknown): boolean {
+    if (!isStopArguments(args)) return true;
+    const owner = this.#connection.exportObservation;
+    // The stop's run begins here when the host has not seen it, as when its Continue failed before its handoff.
+    if (!ensureRun(owner, args)) return false;
+    advanceExportObservation(owner, { kind: "bindSession", session: this, run: args.run });
+    return (
+      advanceExportObservation(owner, { kind: "stopRequested", stop: args }).kind === "admitted"
+    );
+  }
+
+  /**
+   * What `halt`'s acknowledgement carries: the call view of the publication the stop froze, viewed or not; for a Player
+   * error stop, also its diagnostic identity and the run's incident, which the stop commits now, as the work running at
+   * it settled. A stop whose run ended meanwhile commits nothing and carries the call view only.
+   */
+  atStop(args: unknown = null): CallViewReply | StopReply {
+    const view = this.callView(true);
+    if (!isStopArguments(args)) return view;
+    const committed = advanceExportObservation(this.#connection.exportObservation, {
+      kind: "stopCommitted",
+      stop: args,
+      session: this.observation,
+    });
+    if (committed.kind !== "incident") return view;
+    const { incident } = committed;
+    // The first stop froze the session; a later one changes neither it nor the run's incident.
+    this.stoppedBy ??= args.stop;
+    return Object.freeze({
+      ...view,
+      diagnostic: Object.freeze({ run: args.run, stop: args.stop }),
+      incident,
+    });
   }
 
   /** The session's first publication, from cursor 0, with its fixed fields; nothing was handed out before it. */
@@ -383,19 +459,24 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
       session: "none",
       checkArguments: (args) =>
         isRecord(args) &&
-        exactly(args, ["plan", "options", "recording"], ["random"]) &&
+        exactly(args, ["plan", "options", "recording"], ["random", "run"]) &&
         typeof args.plan === "string" &&
         isStartOptions(args.options) &&
         typeof args.recording === "boolean" &&
-        (args.random === undefined || isStartRandom(args.random)),
+        (args.random === undefined || isStartRandom(args.random)) &&
+        (args.run === undefined || isRunBegin(args.run)),
       run: (args, sessions) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { plan, options, recording, random } = args as {
+        const { plan, options, recording, random, run } = args as {
           readonly plan: string;
           readonly options: StartOptions;
           readonly recording: boolean;
           readonly random?: StartRandom;
+          readonly run?: RunBegin;
         };
+        // The Start's run begins before its session, which binds to it; a Start of a run that ended starts nothing.
+        if (run !== undefined && !ensureRun(context.exportObservation, run))
+          throw new RetiredRunError(run.run);
         const instructions = context.plans.get(plan);
         if (instructions === undefined) throw new Error(`No plan '${plan}' is held.`);
         const control = startRandom(context, random);
@@ -529,8 +610,14 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
       false,
     ),
     beginRecording: sessionOp(
-      (args) => args === null,
-      (held) => {
+      (args) => args === null || isRunBegin(args),
+      (held, args) => {
+        // Continue hands over a session the Player held already: it begins Continue's run, which the session joins.
+        // EVIDENCE: validation: the op's check admitted `null` or a run's begin.
+        const run = args as RunBegin | null;
+        if (run !== null && !ensureRun(context.exportObservation, run))
+          throw new RetiredRunError(run.run);
+        held.bindRun();
         beginRecordingAt(held, context);
         return { result: null, view: null };
       },

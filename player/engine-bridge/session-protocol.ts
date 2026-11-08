@@ -8,6 +8,9 @@ import type { RandomTriedView } from "./ops/random.js";
 import type { StorageCapture } from "./ops/history.js";
 import type { HistoryMarks } from "../debug-history-marks.js";
 import type { HistoryDelta } from "./history/core.js";
+import type { DebugRecording, DebugRecordingEnd } from "../debug-recorder.js";
+import type { RuntimeFailureSnapshot, RuntimeSnapshot } from "../../src/index.js";
+import type { DiagnosticIdentity, ExportIncident } from "./recording/export-observation.js";
 import type { PlayerRuntimeState } from "../runtime-adapter.js";
 
 /*
@@ -37,6 +40,15 @@ export interface CallViewReply {
   readonly callView: PlayerCallView | null;
 }
 
+/**
+ * What a Player error stop's acknowledgement carries: the stopped publication's call view, its diagnostic identity with
+ * the stop, and the run's committed incident.
+ */
+export interface StopReply extends CallViewReply {
+  readonly diagnostic: DiagnosticIdentity;
+  readonly incident: ExportIncident | null;
+}
+
 /** One publication of a session: its state, its revision, and its events after the cursor `from`. */
 export interface Publication {
   readonly revision: number;
@@ -53,6 +65,10 @@ export interface Publication {
   readonly callView: PlayerCallView | null;
   /** The session's marks for a debug export, as the host holds them (`HeldSession.marks`). */
   readonly marks: HistoryMarks;
+  /** The diagnostic run the session belongs to, and no stop: a stop's identity comes with its acknowledgement. */
+  readonly diagnostic: DiagnosticIdentity;
+  /** The run's committed Player error incident (`ExportObservation`), or `null` while it has none. */
+  readonly incident: ExportIncident | null;
   /** The changes of Debug's rewind history this publication made, oldest first; empty for most. */
   readonly history: readonly HistoryDelta[];
 }
@@ -69,6 +85,52 @@ export interface Introduction extends Publication {
   /** The key Debug's rewind history names the session's event log by (`HistoryPosition.log`). */
   readonly historyKey: string;
 }
+
+/**
+ * A capture of a session's recording (`captureRecording`): kept under `ticket` when the recorder records that session,
+ * with how it ends and whether every call is recorded; `stale` when it records another, `none` before any recording.
+ */
+export type RecordingCaptureReply =
+  | {
+      readonly kind: "captured";
+      readonly ticket: string;
+      readonly end: DebugRecordingEnd;
+      readonly complete: boolean;
+    }
+  | { readonly kind: "stale" }
+  | { readonly kind: "none" };
+
+/** What a debug export's capture names as its session's observation: matched against the main side's store view. */
+export interface ExportIdentity {
+  readonly run: number | null;
+  readonly session: string | null;
+  readonly revision: number | null;
+  readonly eventsThrough: number | null;
+  /** The Player error stop that froze the session, or `null`. */
+  readonly stop: number | null;
+}
+
+/**
+ * A debug export's capture (`captureExport`): frozen under `ticket` with the shown session's state, marks and failure,
+ * the run's incident and the selected recording; `pending` while a stop of the run commits (retry); `refused` with why.
+ */
+export type ExportCaptureReply =
+  | {
+      readonly kind: "captured";
+      readonly ticket: string;
+      readonly identity: ExportIdentity;
+      readonly snapshot: RuntimeSnapshot | null;
+      readonly failure: RuntimeFailureSnapshot | null;
+      readonly marks: HistoryMarks | null;
+      readonly incident: ExportIncident | null;
+      readonly recording: DebugRecording | null;
+    }
+  | { readonly kind: "pending" }
+  /**
+   * The capture is no candidate: the host could not prove the current recording's provenance, or (on the main side,
+   * `PlayerBridge.captureExport`) the store's view of the session is not the publication the host observed.
+   */
+  | { readonly kind: "refused"; readonly reason: "provenance" | "identity" };
 
 /**
  * The host's session-free reads (`PlayerBridge.read`), each op with its arguments and its result: a read of an op this
@@ -96,6 +158,10 @@ export interface ReadOps {
     readonly args: Record<string, never>;
     readonly result: StorageCapture;
   };
+  readonly captureRecording: {
+    readonly args: Record<string, never>;
+    readonly result: RecordingCaptureReply;
+  };
 }
 export type ReadOp = keyof ReadOps;
 /** The read ops by name, at run time: exactly the keys of `ReadOps`. */
@@ -105,4 +171,5 @@ export const READ_OPS = {
   captureCheckpoint: true,
   randomTried: true,
   captureStorage: true,
+  captureRecording: true,
 } as const satisfies Record<ReadOp, true>;

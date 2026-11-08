@@ -107,6 +107,8 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     prepareActivation: SESSION,
     startedSession: SESSION,
     reportHostError: SESSION,
+    incident: SESSION,
+    "usePlayerSession.readPhoto": READ,
     stopAt: SESSION,
     supersede: SESSION,
     issueTracing: SESSION,
@@ -125,7 +127,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     storedPhotos: READ,
     "usePlayerSession.savedPhoto": READ,
     resolveAsset: READ,
-    "usePlayerSession.debugExportCandidate": READ,
     scriptStorageOptions: READ,
     ownStoredMedia: READ,
     readTransfer: TRANSFER,
@@ -140,7 +141,22 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     sameMedium:
       "compares a held photo's bytes with an imported one's, by position: it reaches no store",
   },
+  "session/useActivationRun.ts": { "useActivationRun.retire": READ },
   "session/useCallView.ts": { viewCalls: SESSION },
+  "session/useExportCandidate.ts": {
+    useExportCandidate: READ,
+    lives: READ,
+    release: READ,
+    deliver: READ,
+    "deliver.prepare": READ,
+    debugExportCandidate: READ,
+    capture: READ,
+  },
+  "session/useFailureRecording.ts": {
+    settle: READ,
+    "useFailureRecording.stopped": READ,
+    "useFailureRecording.retire": READ,
+  },
   "session/usePlayerCameras.ts": { useSessionCamera: CAMERA, usePlayerCameraLifecycle: CAMERA },
   "session/usePlayerSessionServices.ts": {
     usePlayerSessionServices: SERVICES,
@@ -175,6 +191,8 @@ const DERIVED: Readonly<Record<string, string>> = {
   resolveTemporalContext: "the host's time zone source, from the options: no store",
   decodeImage: "the host's image decoder, from the options: no store",
   keptScope: "the saved values' scope, a name: no store",
+  exportCandidate:
+    "a debug export's candidate, reading the media store's photos through `readPhoto`: it writes no store",
 };
 
 /** The handles an ownership binds a raw resource with. */
@@ -223,6 +241,7 @@ const BRIDGE = {
   hasAllocatedTracingIntent: "local",
   nextRandomIntent: "local",
   nextHistoryIntent: "local",
+  nextRun: "local",
   claim: "refused",
   unclaim: "refused",
   client: "local",
@@ -238,6 +257,11 @@ const BRIDGE = {
   historyOpen: "host",
   historyTimeline: "host",
   historyStep: "host",
+  releaseRecording: "host",
+  captureExport: "host",
+  exportPrepare: "host",
+  retireRun: "host",
+  commitIncident: "host",
   request: "host",
   viewCalls: "host",
   section: "host",

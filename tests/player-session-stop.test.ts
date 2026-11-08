@@ -50,7 +50,8 @@ interface StopHost {
   setDebugTracing(on: boolean): void;
   debugRecording(): DebugRecording | null;
   debugExportCandidate(
-    shown: Pick<DebugExportCandidate, "player" | "host">,
+    details: () => Pick<DebugExportCandidate, "player" | "host">,
+    live: () => boolean,
   ): Promise<DebugExportCandidate>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): RuntimeAdapter.PlayerRuntimeSessionOptions;
@@ -617,7 +618,15 @@ test("after a Player error, a debug export keeps the recording up to the error t
   // Back shows an earlier state, from which the recorder begins anew; the export still shows the error's recording.
   assert.equal(await backTo(rewind, 0), true);
   assert.deepEqual(host.debugRecording(), atError);
-  assert.deepEqual((await host.debugExportCandidate(shown)).recording, atError);
+  assert.deepEqual(
+    (
+      await host.debugExportCandidate(
+        () => shown,
+        () => true,
+      )
+    ).recording,
+    atError,
+  );
   // A new Start records its own session.
   host.prepare(create);
   await host.activate();
@@ -647,7 +656,10 @@ test("a debug export of a failed state the session cannot export names the failu
   );
   await host.activate();
   assert.equal(host.session.value?.state.status, "failed");
-  const candidate = await host.debugExportCandidate(shown);
+  const candidate = await host.debugExportCandidate(
+    () => shown,
+    () => true,
+  );
   context.mock.restoreAll();
   let choices = NO_PERSONAL_CONTENT;
   for (const category of ["savedValues", "answers", "sessionText", "replay"] as const)
@@ -729,7 +741,10 @@ test("a debug export offers a photo only the replay saves, also after a Player e
   );
   // The candidate's photos with their uses, and the file with every category and the photo chosen, read back.
   const exported = async () => {
-    const candidate = await host.debugExportCandidate(shown);
+    const candidate = await host.debugExportCandidate(
+      () => shown,
+      () => true,
+    );
     let choices = NO_PERSONAL_CONTENT;
     for (const category of ["savedValues", "answers", "sessionText", "replay", "photos"] as const)
       choices = chooseDebugCategory(choices, candidate, category, true);

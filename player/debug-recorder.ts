@@ -39,6 +39,27 @@ export interface DebugRecording {
   readonly reason: string | null;
 }
 
+/**
+ * How a recording ends: `live`, at the session's current state; frozen at the state where the session `failed`, before
+ * a call that `thrown`, or before a call it `skipped`; or `unavailable`, when that state could not be exported or
+ * rebuilt.
+ */
+export type DebugRecordingEnd = "live" | "failed" | "thrown" | "skipped" | "unavailable";
+
+/**
+ * What the recorder holds for an engine (`DebugRecorder.capture`): its recording, how it ends, and the begin it belongs
+ * to; `stale` when the recorder's recording is another engine's, or it was detached; `none` before any begin.
+ */
+export type RecordingCapture =
+  | {
+      readonly kind: "captured";
+      readonly recording: DebugRecording;
+      readonly end: DebugRecordingEnd;
+      readonly epoch: number;
+    }
+  | { readonly kind: "stale" }
+  | { readonly kind: "none" };
+
 /** An engine call's result as the recorder reads it. */
 interface CallResult {
   readonly events: readonly InterpreterEvent[];
@@ -53,10 +74,12 @@ interface CallResult {
 }
 
 /**
- * A recording that froze: the log then; the state at its last call, `undefined` until it is rebuilt after a throw, and
- * `null` when it could not be exported or rebuilt; and how the session had failed there.
+ * A recording that froze: why (a failed session, a call that threw, or one it could not log); the log then; the state at
+ * its last call, `undefined` until it is rebuilt after a throw, and `null` when it could not be exported or rebuilt;
+ * and how the session had failed there.
  */
 interface FrozenRecording {
+  readonly cause: "failure" | "throw" | "skip";
   readonly anchor: RuntimeSnapshot;
   readonly operations: readonly DebugOperation[];
   end: RuntimeSnapshot | null | undefined;
@@ -83,11 +106,14 @@ interface PublishedLog {
 /** How much of a session the recorder keeps; diagnostic retention, not a limit on scripts. */
 export interface DebugRecorderLimits {
   readonly operations: number;
-  /** Characters of recorded arguments as JSON. */
-  readonly argumentBytes: number;
+  /** UTF-16 code units of the recorded arguments as JSON (`String.length`). */
+  readonly argumentCodeUnits: number;
 }
 
-const DEFAULT_LIMITS: DebugRecorderLimits = { operations: 4096, argumentBytes: 2 * 1024 * 1024 };
+const DEFAULT_LIMITS: DebugRecorderLimits = {
+  operations: 4096,
+  argumentCodeUnits: 2 * 1024 * 1024,
+};
 
 /**
  * Records the engine calls of one Player's sessions so a debug export can replay them: an anchor snapshot and every
@@ -116,10 +142,14 @@ export class DebugRecorder {
   #plan: InstructionPlan | null = null;
   /** The engine whose calls the log keeps; calls of any other engine are neither logged nor rebuilt. */
   #owner: PlayerRuntimeEngine | null = null;
+  /** Counts the begins: a capture names the begin its recording belongs to. A restart of the log keeps it. */
+  #epoch = 0;
+  /** Whether the binding to `#owner` ended (`detach`): a capture is then stale, while the log stays for diagnostics. */
+  #detached = false;
   /** The log: an anchor and the calls since, which reach the session's state unless `#broken`. */
   #anchor: RuntimeSnapshot | null = null;
   #operations: DebugOperation[] = [];
-  #argumentBytes = 0;
+  #argumentCodeUnits = 0;
   /** Whether a call since the anchor could not be logged; the Player's next call then starts the log again. */
   #broken = false;
   /** Exports the session's current state. */
@@ -141,7 +171,7 @@ export class DebugRecorder {
     readonly anchor: RuntimeSnapshot | null;
     readonly operations: DebugOperation[];
     readonly count: number;
-    readonly argumentBytes: number;
+    readonly argumentCodeUnits: number;
     readonly broken: boolean;
     readonly current: (() => RuntimeSnapshot) | null;
     readonly published: PublishedLog | null;
@@ -167,9 +197,11 @@ export class DebugRecorder {
   ): void {
     this.#plan = plan;
     this.#owner = owner;
+    this.#epoch += 1;
+    this.#detached = false;
     this.#anchor = anchor;
     this.#operations = [];
-    this.#argumentBytes = 0;
+    this.#argumentCodeUnits = 0;
     this.#broken = false;
     this.#current = current;
     // A recording may begin at a paused draw, whose call is not in the log.
@@ -191,7 +223,7 @@ export class DebugRecorder {
       anchor: this.#anchor,
       operations: this.#operations,
       count: this.#operations.length,
-      argumentBytes: this.#argumentBytes,
+      argumentCodeUnits: this.#argumentCodeUnits,
       broken: this.#broken,
       current: this.#current,
       published: this.#published,
@@ -218,7 +250,7 @@ export class DebugRecorder {
     staged.operations.length = staged.count;
     this.#anchor = staged.anchor;
     this.#operations = staged.operations;
-    this.#argumentBytes = staged.argumentBytes;
+    this.#argumentCodeUnits = staged.argumentCodeUnits;
     this.#broken = staged.broken;
     this.#current = staged.current;
     this.#published = staged.published;
@@ -241,6 +273,26 @@ export class DebugRecorder {
 
   /** The recording so far, or `null` before any session began. */
   recording(): DebugRecording | null {
+    return this.#read()?.recording ?? null;
+  }
+
+  /**
+   * The recording of `owner`'s calls, with how it ends and the begin it belongs to: `captured` only while the recorder's
+   * recording is `owner`'s, from its latest begin, and not detached; `stale` otherwise; `none` before any begin.
+   */
+  capture(owner: PlayerRuntimeEngine): RecordingCapture {
+    const read = this.#read();
+    if (read === null) return { kind: "none" };
+    if (this.#detached || owner !== this.#owner) return { kind: "stale" };
+    return { kind: "captured", recording: read.recording, end: read.end, epoch: this.#epoch };
+  }
+
+  /** Ends the binding to the recorder's engine, as when its connection closes: later captures are stale. */
+  detach(): void {
+    this.#detached = true;
+  }
+
+  #read(): { readonly recording: DebugRecording; readonly end: DebugRecordingEnd } | null {
     // Calls on a copy the session has not adopted are not the session's yet.
     const log = this.#staged ?? {
       anchor: this.#anchor,
@@ -262,7 +314,7 @@ export class DebugRecorder {
         : frozen === null
           ? "The current state could not be exported."
           : "The state before the error could not be rebuilt from the recorded calls.");
-    return {
+    const recording: DebugRecording = {
       plan: this.#plan,
       anchorSnapshot: frozen?.anchor ?? log.anchor,
       operations: frozen === null ? log.operations.slice(0, log.count) : [...frozen.operations],
@@ -271,6 +323,7 @@ export class DebugRecorder {
       complete: reason === null,
       reason,
     };
+    return { recording, end: endOf(frozen, end) };
   }
 
   /**
@@ -416,7 +469,7 @@ export class DebugRecorder {
     input: () => RuntimeSnapshot,
     args: readonly unknown[],
     continuation: boolean,
-  ): { readonly args: unknown[]; readonly bytes: number } | null {
+  ): { readonly args: unknown[]; readonly codeUnits: number } | null {
     // A call that continues one the log could not keep cannot be replayed either.
     if (this.#plan === null || (this.#broken && continuation)) return null;
     try {
@@ -436,8 +489,8 @@ export class DebugRecorder {
         this.#skip("A call's arguments could not be copied exactly.", input);
         return null;
       }
-      const bytes = json.length;
-      if (bytes > this.#limits.argumentBytes) {
+      const codeUnits = json.length;
+      if (codeUnits > this.#limits.argumentCodeUnits) {
         this.#skip("A recorded call was larger than the recording keeps.", input);
         return null;
       }
@@ -446,14 +499,14 @@ export class DebugRecorder {
       if (
         !continuation &&
         (this.#operations.length + 2 > this.#limits.operations ||
-          this.#argumentBytes + bytes > this.#limits.argumentBytes)
+          this.#argumentCodeUnits + codeUnits > this.#limits.argumentCodeUnits)
       )
         this.#restart(input);
-      this.#argumentBytes += bytes;
+      this.#argumentCodeUnits += codeUnits;
       // A copy: the recording must not change when the Player reuses an object it passed.
       const copy: unknown = JSON.parse(json);
       if (!Array.isArray(copy)) throw new TypeError("The arguments are not a list.");
-      return { args: copy, bytes };
+      return { args: copy, codeUnits };
     } catch {
       if (owner === this.#owner) this.#skip("The recorder could not copy a call.", null);
       return null;
@@ -475,7 +528,7 @@ export class DebugRecorder {
         paused: this.#paused,
       };
     this.#operations = [];
-    this.#argumentBytes = 0;
+    this.#argumentCodeUnits = 0;
     this.#broken = false;
   }
 
@@ -487,11 +540,21 @@ export class DebugRecorder {
     this.#broken = true;
     if (this.#frozen !== null) return;
     this.#problem ??= problem;
-    this.#freeze(input === null ? undefined : input(), null);
+    this.#freeze("skip", input === null ? undefined : input(), null);
   }
 
-  #freeze(end: RuntimeSnapshot | null | undefined, failure: RuntimeFailureSnapshot | null): void {
-    this.#frozen ??= { anchor: this.#anchor!, operations: [...this.#operations], end, failure };
+  #freeze(
+    cause: FrozenRecording["cause"],
+    end: RuntimeSnapshot | null | undefined,
+    failure: RuntimeFailureSnapshot | null,
+  ): void {
+    this.#frozen ??= {
+      cause,
+      anchor: this.#anchor!,
+      operations: [...this.#operations],
+      end,
+      failure,
+    };
   }
 
   /**
@@ -508,7 +571,7 @@ export class DebugRecorder {
       this.#problem ??= "The state at the error could not be exported.";
       end = null;
     }
-    this.#freeze(end, failure);
+    this.#freeze("failure", end, failure);
   }
 
   #add(
@@ -534,7 +597,7 @@ export class DebugRecorder {
       input: kind === "completeAction" ? this.#input : null,
     });
     // A failed session still holds its state, so the end is taken now; after a throw it is rebuilt when needed.
-    if (thrown !== null) this.#freeze(undefined, null);
+    if (thrown !== null) this.#freeze("throw", undefined, null);
     else if (result?.status === "failed") this.#freezeFailed(result.failure);
   }
 
@@ -552,6 +615,13 @@ export class DebugRecorder {
     }
     return frozen.end;
   }
+}
+
+/** How a recording whose end is `end` ends: frozen by its cause, else live; `unavailable` without an end. */
+function endOf(frozen: FrozenRecording | null, end: RuntimeSnapshot | null): DebugRecordingEnd {
+  if (end === null) return "unavailable";
+  if (frozen === null) return "live";
+  return frozen.cause === "failure" ? "failed" : frozen.cause === "throw" ? "thrown" : "skipped";
 }
 
 /** The state `current` exports, or `null` when it cannot be exported. */

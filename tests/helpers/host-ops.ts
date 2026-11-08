@@ -40,6 +40,23 @@ export const HOST_OPS = {
     read: false,
   },
   releaseTransfer: { planJson: "cleanup of a ticket, which holds no plan JSON", read: false },
+  captureRecording: {
+    planJson:
+      "a held session's recording under a ticket, which its reply does not carry; no plan JSON",
+    read: true,
+  },
+  releaseRecording: { planJson: "cleanup of a ticket, which holds no plan JSON", read: false },
+  captureExport: {
+    planJson:
+      "a debug export's capture under a ticket; its reply's recording carries its compiled plan as data, with no plan JSON",
+    read: false,
+  },
+  exportPrepare: { planJson: "a plan's hash and replay checkpoints; no plan JSON", read: false },
+  retireRun: { planJson: "a debug export's diagnostic run; no plan", read: false },
+  commitIncident: {
+    planJson: "a debug export's incident of a run with no session; no plan",
+    read: false,
+  },
   debugTracing: { planJson: "the connection's value trace", read: false },
   debugView: { planJson: "a held session's trace view", read: true },
   restartTrace: { planJson: "a held session's trace, begun anew", read: false },

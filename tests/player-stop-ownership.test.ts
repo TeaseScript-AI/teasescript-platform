@@ -41,10 +41,10 @@ interface StopHost {
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): Promise<void>;
   temporalCapture(): PlayerRuntimeSessionOptions;
-  debugExportCandidate(shown: {
-    readonly player: object;
-    readonly host: object;
-  }): Promise<{
+  debugExportCandidate(
+    details: () => { readonly player: object; readonly host: object },
+    live: () => boolean,
+  ): Promise<{
     readonly session: { readonly transcriptEntries: readonly { readonly text: string }[] } | null;
   }>;
   setDebugTracing(on: boolean): void;
@@ -505,7 +505,10 @@ for (const kind of [
     if (shown !== null) {
       assert.equal(bridge.frozen(shown), true, "the stopped session's store froze");
       assert.deepEqual(stopLine(bridge, player).export, shown.state.observedSessionTimeMs);
-      const exported = await player.debugExportCandidate({ player: {}, host: {} });
+      const exported = await player.debugExportCandidate(
+        () => ({ player: {}, host: {} }),
+        () => true,
+      );
       assert.deepEqual(
         exported.session?.transcriptEntries.map((entry) => entry.text),
         shown.transcriptEntries.map((entry) => entry.text),

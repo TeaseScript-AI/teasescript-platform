@@ -17,6 +17,7 @@ const modules = [
   "player/saved-data.ts",
   "player/theme/palette.ts",
   "player/theme/photo-theme.ts",
+  "player/vue/src/debugStageImage.ts",
   "player/vue/src/randomDrawPresentation.ts",
   "player/vue/src/runtime-input.ts",
   "player/vue/src/hostedScript.ts",

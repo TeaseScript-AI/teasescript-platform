@@ -515,11 +515,11 @@ test("every session op is classified, and only adoptCatchUp reads a session past
 const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string, string])[]>> = {
   "player/vue/src/usePlayerSession.ts": [
     ["prepareRestore(found.session)", "restore: a kept session"],
-    ["begin: () => startedSession(create, { debugMode })", "start: Start"],
+    ["begin: (origin) => startedSession(create, { debugMode }, origin)", "start: Start"],
     ["introduceNow(requireBridge(), () => given, marks ?? NO_MARKS)", "restore: a raw restore"],
     ["return introduceNow(", "by kind: `startedSession`'s factory, with `random`"],
     [
-      "return host.start(create.plan, startOptions, true, random)",
+      "return host.start(create.plan, startOptions, true, random, origin.begin)",
       "by kind: `startedSession`'s held plan",
     ],
     ["show: (next, paused) => showRewound(next, { paused })", "restore: the rewind owner's show"],
@@ -575,7 +575,7 @@ test("every random-op sender in the composable is classified as adopting or not"
     [
       "if (!paused) adoptRandom(next);",
       "if (session.value !== null) adoptRandom(session.value);",
-      "adoptRandom(continued);",
+      "adoptRandom(continued, origin);",
     ],
   );
 });

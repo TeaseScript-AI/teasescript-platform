@@ -16,7 +16,12 @@ import type {
   Publication,
   ReadOp,
   ReadOps,
+  StopReply,
+  ExportCaptureReply,
+  ExportIdentity,
 } from "./engine-bridge/session-protocol.js";
+import type { PreparedExport } from "./engine-bridge/recording/export-replay.js";
+import type { RunBegin, StopArguments } from "./engine-bridge/recording/export-observation.js";
 import type { PlayerSession } from "./runtime-view.js";
 import type { HistoryMarks } from "./debug-history-marks.js";
 import { SessionStore } from "./session-store.js";
@@ -91,6 +96,17 @@ export interface SessionSection {
   ): Promise<R>;
   /** The session's latest publication in its store. */
   readonly session: PlayerSession;
+}
+
+/** Whether `view`, the store's view of a session, is the publication `identity` names, with its stop identity. */
+function matches(view: PlayerSession | null, identity: ExportIdentity): boolean {
+  return (
+    view !== null &&
+    view.revision === identity.revision &&
+    view.events.length === identity.eventsThrough &&
+    view.diagnostic.run === identity.run &&
+    view.diagnostic.stop === identity.stop
+  );
 }
 
 /**
@@ -204,18 +220,20 @@ export class PlayerBridge {
     return this.store(this.#own(session))?.session ?? null;
   }
 
-  /** Starts a session of the held plan `plan`; resolves with its first publication. */
+  /** Starts a session of the held plan `plan` in run `run`; resolves with its first publication. */
   async start(
     plan: string,
     options: StartOptions,
     recording: boolean,
     random?: StartRandom,
+    run?: RunBegin,
   ): Promise<PlayerSession> {
     const reply = await this.#client.request("start", {
       plan,
       options,
       recording,
       ...(random === undefined ? {} : { random }),
+      ...(run === undefined ? {} : { run }),
     });
     // EVIDENCE: validation: `start` replies from the same build with the new session and its introduction.
     return this.open(reply.session!, reply.view as Introduction);
@@ -264,6 +282,70 @@ export class PlayerBridge {
     if (outcome.kind !== "restored") return outcome.kind;
     // EVIDENCE: validation: a restored session's reply carries its id and introduction.
     return this.open(reply.session!, reply.view as Introduction);
+  }
+
+  #runs = 0;
+  /** The next number of a diagnostic run on this connection (`RunBegin`), counted as rewind histories are. */
+  nextRun(): number {
+    this.#runs += 1;
+    return this.#runs;
+  }
+
+  /** Ends diagnostic run `run` (`retireRun`), as the Player that began it is disposed of. */
+  async retireRun(run: number): Promise<void> {
+    await this.#client.request("retireRun", { run });
+  }
+
+  /** Commits a Player error of a run that has no session to stop (`commitIncident`). */
+  async commitIncident(stop: StopArguments): Promise<void> {
+    await this.#client.request("commitIncident", stop);
+  }
+
+  /**
+   * Captures a debug export of `session`, or of none, with the recording `recording` selects (`captureExport`), after the
+   * session's earlier requests. In the reply's hook, before the request's promise resolves and before another reply
+   * applies, a capture of a session is matched against the store's view of it then: its revision, event boundary and
+   * diagnostic identity. One that does not match, as after a publication the page never received, is refused
+   * (`identity`) and released. `deliver` then decides the candidate with that view.
+   */
+  async captureExport<T>(
+    session: PlayerSession | null,
+    recording: "current" | "none" | { readonly ticket: string },
+    deliver: (reply: ExportCaptureReply, shown: PlayerSession | null) => T,
+  ): Promise<T> {
+    if (session !== null) this.#own(session);
+    const delivered: { outcome?: { readonly value: T } } = {};
+    await this.#client.request(
+      "captureExport",
+      { session: session?.id ?? null, recording },
+      {
+        ...(session === null ? {} : { after: session.id }),
+        onReply: (result) => {
+          // EVIDENCE: validation: `captureExport` replies from the same build with `ExportCaptureReply`.
+          const reply = result.result as ExportCaptureReply;
+          const view = session === null ? null : this.latest(session);
+          if (session !== null && reply.kind === "captured" && !matches(view, reply.identity)) {
+            void this.releaseRecording(reply.ticket).catch(() => {});
+            delivered.outcome = { value: deliver({ kind: "refused", reason: "identity" }, view) };
+          } else delivered.outcome = { value: deliver(reply, view) };
+        },
+      },
+    );
+    if (delivered.outcome === undefined)
+      throw new Error("The export capture's reply was not delivered.");
+    return delivered.outcome.value;
+  }
+
+  /** What export `ticket`'s file needs of the engine (`exportPrepare`): its plan's hash, and with `replay`, replay data. */
+  async exportPrepare(ticket: string, replay: boolean): Promise<PreparedExport> {
+    const reply = await this.#client.request("exportPrepare", { ticket, replay });
+    // EVIDENCE: validation: `exportPrepare` replies from the same build with `PreparedExport`.
+    return reply.result as PreparedExport;
+  }
+
+  /** Lets go of the recording or export held under `ticket` (`releaseRecording`); an unknown one changes nothing. */
+  async releaseRecording(ticket: string): Promise<void> {
+    await this.#client.request("releaseRecording", { ticket });
   }
 
   /**
@@ -424,20 +506,21 @@ export class PlayerBridge {
   deliverInTransit: ((session: string) => void) | null = null;
 
   /**
-   * Stops `session` at a Player error. The host refuses whatever the session has not run (`halt`), so late answers and
+   * Stops `session` at a Player error, `stop` naming the error with its run and stop (`null` for a session that is only
+   * superseded). The host refuses whatever the session has not run (`halt`), so late answers and
    * reports are dropped; the store still applies the replies to ops the host ran, which arrive before the host's
    * acknowledgement, and freezes there. What is shown is then what the host ran, which its recording and export hold.
    * Resolves once frozen: at once in-process, a round trip later with a Worker.
    */
-  halt(session: PlayerSession): Promise<void> {
+  halt(session: PlayerSession, stop: StopArguments | null = null): Promise<void> {
     const store = this.store(this.#own(session));
     if (store === null || store.halted) return Promise.resolve();
     store.stopping();
     const acknowledged = this.#client
-      .signal("halt", null, session.id, (result) =>
+      .signal("halt", stop, session.id, (result) =>
         store.freeze(
-          // EVIDENCE: validation: a Player session's `halt` acknowledgement carries a `CallViewReply` or `null`.
-          result.result as CallViewReply | null,
+          // EVIDENCE: validation: a Player session's `halt` acknowledgement carries a call view, with a stop's identity.
+          result.result as CallViewReply | StopReply | null,
         ),
       )
       .then(

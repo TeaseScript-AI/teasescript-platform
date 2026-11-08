@@ -21,7 +21,7 @@ const unknownBuild = { commit: null, dirty: null, mode: null, appVersion: null }
 // Test settings from the parent's environment, as it was when the Worker started: a recorder that keeps smaller calls,
 // and a realm in which a snapshot holding a list longer than this cannot be exported (as V8 cannot enumerate the keys
 // of a very long list, which a list of this size stands for).
-const argumentBytes = Number(process.env.RECORDER_ARGUMENT_BYTES ?? Number.NaN);
+const argumentCodeUnits = Number(process.env.RECORDER_ARGUMENT_CODE_UNITS ?? Number.NaN);
 const unexportableOver = Number(process.env.UNEXPORTABLE_LIST_OVER ?? Number.NaN);
 if (Number.isFinite(unexportableOver)) {
   const ownKeys = Reflect.ownKeys;
@@ -33,7 +33,9 @@ if (Number.isFinite(unexportableOver)) {
 }
 const context = {
   ...playerOpsContext(),
-  ...(Number.isFinite(argumentBytes) ? { recorder: new DebugRecorder({ argumentBytes }) } : {}),
+  ...(Number.isFinite(argumentCodeUnits)
+    ? { recorder: new DebugRecorder({ argumentCodeUnits }) }
+    : {}),
 };
 startBridgeHost(
   parentHostPort(),

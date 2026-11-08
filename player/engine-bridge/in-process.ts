@@ -1,4 +1,5 @@
 import type { InstructionPlan } from "../../src/playback.js";
+import { ensureRun, RetiredRunError, type RunBegin } from "./recording/export-observation.js";
 import type { DebugRecording } from "../debug-recorder.js";
 import {
   createPlayerRuntimeSession,
@@ -214,9 +215,14 @@ export function introduceNow(
   marks: HistoryMarks,
   tracing?: TracingIntent,
   random?: StartRandom,
+  /** A Start's run, which begins before its session; none for a session restored outside the host. */
+  run?: RunBegin,
 ): PlayerSession {
   const backend = backendOf(bridge);
   const { context } = backend;
+  // A Start of a run that ended makes nothing.
+  if (run !== undefined && !ensureRun(context.exportObservation, run))
+    throw new RetiredRunError(run.run);
   const delivery = context.delivery.begin();
   try {
     const opened = introduceIn(backend, delivery, make, marks, tracing, random);
@@ -303,7 +309,23 @@ export function heldPlan(bridge: PlayerBridge, token: string): InstructionPlan {
   return plan;
 }
 
-/** **Facade.** What the connection's recorder holds for a debug export (`DebugRecorder.recording`). */
-export function heldRecording(bridge: PlayerBridge): DebugRecording | null {
-  return backendOf(bridge).context.recorder.recording();
+/** **Facade, for tests.** The diagnostic runs the connection holds for its debug exports (`ExportObservation`), in order. */
+export function heldRuns(bridge: PlayerBridge): number[] {
+  return [...backendOf(bridge).context.exportObservation.runs.keys()].sort((a, b) => a - b);
+}
+
+/** **Facade, for tests.** The tickets the connection holds (`captureRecording`, `captureExport`), in order. */
+export function heldTickets(bridge: PlayerBridge): string[] {
+  return [...backendOf(bridge).context.recordings.keys()];
+}
+
+/**
+ * **Facade.** The recording captured under `ticket` (`captureRecording`), or `null` when no recording is held under it;
+ * without a ticket, what the connection's recorder holds now (`DebugRecorder.recording`).
+ */
+export function heldRecording(bridge: PlayerBridge, ticket?: string): DebugRecording | null {
+  const { context } = backendOf(bridge);
+  if (ticket === undefined) return context.recorder.recording();
+  const held = context.recordings.get(ticket);
+  return held?.kind === "recording" ? held.recording : null;
 }

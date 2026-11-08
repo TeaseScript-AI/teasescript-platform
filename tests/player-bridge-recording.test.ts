@@ -393,7 +393,7 @@ test("in a Worker, a failure freezes the recording at it, and an end it cannot e
 });
 
 test("in a Worker, a call larger than the recorder keeps makes the recording incomplete", async () => {
-  const remote = await worker({ RECORDER_ARGUMENT_BYTES: "50" });
+  const remote = await worker({ RECORDER_ARGUMENT_CODE_UNITS: "50" });
   try {
     const session = await remote.start(
       await prepared(remote, 'let name = askText "Name"\nexit'),

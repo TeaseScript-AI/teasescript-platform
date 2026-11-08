@@ -13,6 +13,7 @@ import {
 } from "../player/debug-export-assembly.js";
 import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
 import { DebugRecorder } from "../player/debug-recorder.js";
+import { prepareExport } from "../player/engine-bridge/recording/export-replay.js";
 import {
   answerPlayerRuntimeLock,
   activatePlayerRuntimeButton,
@@ -79,17 +80,25 @@ function candidate(
   recorder: DebugRecorder,
   read: () => Promise<Uint8Array<ArrayBuffer> | null> = async () => photoBytes,
 ): DebugExportCandidate {
+  const recording = recorder.recording();
+  const snapshot = playerRuntimeSnapshot(session);
   const frozen: Omit<DebugExportCandidate, "photos"> = {
     build: { commit: "abc", dirty: false, mode: "production", appVersion: "0.0.0" },
     package: { id: "development-package:test", version: null },
+    release: () => {},
+    // What the host prepares from the export's ticket (`exportPrepare`).
+    prepare: (replay) =>
+      prepareExport(
+        { plan: recording?.plan ?? session.plan, session: { snapshot }, recording },
+        replay,
+      ),
     session: {
-      plan: session.plan,
-      snapshot: playerRuntimeSnapshot(session),
+      snapshot,
       failure: session.state.failure,
       events: session.events,
       transcriptEntries: session.transcriptEntries,
     },
-    recording: recorder.recording(),
+    recording,
     hostError: null,
     editedWhileDebugging: null,
     rewoundWhileDebugging: null,
@@ -435,10 +444,14 @@ test("a state that cannot be checkpointed is exported as the last good state, wh
   const recorder = new DebugRecorder();
   const session = createPlayerRuntimeSession('let name = askText "Name"\nexit', { recorder });
   const recording = recorder.recording()!;
+  // A Player defect left a state the engine's validation refuses.
+  const broken = { ...recording, endSnapshot: { ...recording.endSnapshot!, nextInstruction: -1 } };
+  const base = candidate(session, recorder);
   const frozen: DebugExportCandidate = {
-    ...candidate(session, recorder),
-    // A Player defect left a state the engine's validation refuses.
-    recording: { ...recording, endSnapshot: { ...recording.endSnapshot!, nextInstruction: -1 } },
+    ...base,
+    recording: broken,
+    prepare: (replay) =>
+      prepareExport({ plan: broken.plan, session: base.session, recording: broken }, replay),
     hostError: "TypeError",
   };
   const { exported } = await assembleDebugExport(frozen, all(frozen));

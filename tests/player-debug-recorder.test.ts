@@ -374,7 +374,7 @@ test("a failure freezes the recording, from the first run on, and a too large ca
     JSON.stringify(jumpedResult),
   );
 
-  const small = new DebugRecorder({ argumentBytes: 50 });
+  const small = new DebugRecorder({ argumentCodeUnits: 50 });
   const asking = createPlayerRuntimeSession('let name = askText "Name"\nexit', { recorder: small });
   submitPlayerRuntimeComposer(asking, "x".repeat(100));
   assert.deepEqual(
@@ -718,7 +718,7 @@ test("after a call the recording could not keep, an error still continues from t
     'let pick = askChoice again: "Again"',
     "exit",
   ].join("\n");
-  const small = new DebugRecorder({ argumentBytes: 50 });
+  const small = new DebugRecorder({ argumentCodeUnits: 50 });
   const answered = submitPlayerRuntimeComposer(
     startedWithScopesUsedUp(asking, 0, small),
     "x".repeat(100),
@@ -749,7 +749,7 @@ test("after a call the recording could not keep, an error still continues from t
     'say "${name}", instant',
     "exit",
   ].join("\n");
-  const session = startedWithScopesUsedUp(checked, 0, new DebugRecorder({ argumentBytes: 50 }));
+  const session = startedWithScopesUsedUp(checked, 0, new DebugRecorder({ argumentCodeUnits: 50 }));
   continues(session, () => submitPlayerRuntimeComposer(session, "x".repeat(100)));
   const continued = submitPlayerRuntimeComposer(session, "ok")!.session;
   assert.equal(continued.state.status, "halted");
@@ -760,7 +760,7 @@ test("after a call the recording could not keep, an error still continues from t
     startedWithScopesUsedUp(
       `let first = askText "First"\n${checked}`,
       0,
-      new DebugRecorder({ argumentBytes: 50 }),
+      new DebugRecorder({ argumentCodeUnits: 50 }),
     ),
     "a".repeat(100),
   )!.session;
@@ -1088,7 +1088,7 @@ test("a resolution whose continuation throws leaves the session at the paused st
 });
 
 test("a call the recorder cannot keep while a draw is paused leaves recovery of the paused state intact", () => {
-  const recorder = new DebugRecorder({ argumentBytes: 128 });
+  const recorder = new DebugRecorder({ argumentCodeUnits: 128 });
   let session = createPlayerRuntimeSession(
     'let t = timer(duration: (1..=2) s, async: true, repeat: true) {\n  say "${random()}", instant\n}\nwait 10 s\nexit',
     { recorder },
@@ -1157,4 +1157,85 @@ test("a log that starts again at a paused state keeps the resolution exact", asy
     JSON.stringify(playerRuntimeSnapshot(session)),
   );
   assert.equal((await replay(recorder)).kind, "reproduced");
+});
+
+test("a capture answers for the engine the recorder records, says how its recording ends, and names its begin", (context) => {
+  const FAILING =
+    "let zero = dynamic(0)\nlet result = 1 / zero\nexit\nfunction dynamic(value) {\n    return value\n}";
+  const ends: Record<string, unknown> = {};
+  // Live: the session's state now.
+  const live = new DebugRecorder();
+  const asking = createPlayerRuntimeSession('let name = askText "Name"\nexit', { recorder: live });
+  ends["live"] = live.capture(asking.engine);
+  // Failed: frozen where the session failed.
+  const failing = new DebugRecorder();
+  const failed = createPlayerRuntimeSession(FAILING, { recorder: failing });
+  ends["failed"] = failing.capture(failed.engine);
+  // Skipped: frozen before a call it could not log.
+  const small = new DebugRecorder({ argumentCodeUnits: 50 });
+  const skipping = createPlayerRuntimeSession('let name = askText "Name"\nexit', {
+    recorder: small,
+  });
+  submitPlayerRuntimeComposer(skipping, "x".repeat(100));
+  ends["skipped"] = small.capture(skipping.engine);
+  // Thrown: frozen before a call that threw.
+  const throwing = new DebugRecorder();
+  const scoped = startedWithScopesUsedUp(
+    [
+      "let go = true",
+      "timer async 1 s {",
+      '  say "before", instant',
+      "  if go {",
+      '    say "deep", instant',
+      "  }",
+      "}",
+      'let pick = askChoice again: "Again"',
+      "exit",
+    ].join("\n"),
+    1,
+    throwing,
+  );
+  assert.throws(() => observePlayerRuntimeTime(scoped, 1_000), SCOPES_USED_UP);
+  ends["thrown"] = throwing.capture(scoped.engine);
+  // Unavailable: a state the session cannot export, never an earlier one in its place.
+  const ownKeys = Reflect.ownKeys;
+  context.mock.method(Reflect, "ownKeys", (target: Parameters<typeof Reflect.ownKeys>[0]) => {
+    if (Array.isArray(target) && target.length > 1_000)
+      throw new RangeError("Too many properties to enumerate");
+    return ownKeys(target);
+  });
+  const blind = new DebugRecorder();
+  const large = createPlayerRuntimeSession("let xs = (1..=1500).toList()\nwait 1 s\nexit", {
+    recorder: blind,
+  });
+  ends["unavailable"] = blind.capture(large.engine);
+  context.mock.restoreAll();
+  const kinds = Object.fromEntries(
+    Object.entries(ends).map(([name, capture]) => {
+      assert.ok(typeof capture === "object" && capture !== null && "kind" in capture);
+      return [name, capture.kind === "captured" && "end" in capture ? capture.end : capture.kind];
+    }),
+  );
+  assert.deepEqual(kinds, {
+    live: "live",
+    failed: "failed",
+    skipped: "skipped",
+    thrown: "thrown",
+    unavailable: "unavailable",
+  });
+
+  // Another engine's capture is stale; before any begin there is none; a detached recorder's is stale.
+  const other = createPlayerRuntimeSession('let name = askText "Name"\nexit');
+  assert.deepEqual(live.capture(other.engine), { kind: "stale" });
+  assert.deepEqual(new DebugRecorder().capture(asking.engine), { kind: "none" });
+  const first = live.capture(asking.engine);
+  assert.ok(first.kind === "captured");
+  // A later begin rebinds to its engine, under a new epoch; the earlier engine's capture is then stale.
+  const next = createPlayerRuntimeSession('let name = askText "Name"\nexit', { recorder: live });
+  const rebound = live.capture(next.engine);
+  assert.ok(rebound.kind === "captured" && rebound.epoch === first.epoch + 1);
+  assert.deepEqual(live.capture(asking.engine), { kind: "stale" });
+  live.detach();
+  assert.deepEqual(live.capture(next.engine), { kind: "stale" });
+  assert.notEqual(live.recording(), null, "a detached recorder keeps its log for diagnostics");
 });
