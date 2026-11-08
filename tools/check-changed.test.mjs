@@ -6,8 +6,10 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,9 +20,11 @@ import {
   PROJECTS,
   UNKNOWN_TO_COSTLY,
   checksOf,
-  mainNodeModules,
+  MAIN_CHECKOUT,
+  mainLinkCommand,
   projectsFor,
   shellWord,
+  staleLink,
   removeTemporaryWorktree,
   unknownToCostly,
 } from "./check-changed.mjs";
@@ -121,30 +125,21 @@ test(
         refusal(join(main, "without")),
         /no node_modules: link `\$\(sx-tree [0-9a-f]{40}\)\/node_modules`, or run `npm ci`/u,
       );
-      // a checkout whose path needs quoting: the named command, run as it is printed, makes the link
-      const spaced = join(main, "with spaces, it's");
-      mkdirSync(join(spaced, "node_modules"), { recursive: true });
-      const named = /link it with `(.*)`\n$/u.exec(refusal(spaced))?.[1];
-      assert.ok(named !== undefined);
-      const linked = spawnSync("sh", ["-c", named], { cwd: directory, encoding: "utf8" });
-      assert.equal(linked.status, 0, linked.stderr);
+      // a stale link at node_modules: named as stale, and the named command, run as printed, replaces only that link
+      symlinkSync(join(main, "gone"), join(directory, "node_modules"));
+      const stale = refusal(join(main, "with"));
+      assert.equal(
+        stale,
+        `check-changed: no node_modules: node_modules is a stale link (to ${join(main, "gone")}): replace it with \`ln -sfn ${join(main, "with", "node_modules")} node_modules\`\n`,
+      );
+      const replaced = spawnSync("sh", ["-c", /`(ln .*)`/u.exec(stale)[1]], {
+        cwd: directory,
+        encoding: "utf8",
+      });
+      assert.equal(replaced.status, 0, replaced.stderr);
       assert.equal(
         realpathSync(join(directory, "node_modules")),
-        realpathSync(join(spaced, "node_modules")),
-      );
-      // a relative checkout whose name starts with `-`: named by its absolute path, so `ln` reads no option
-      rmSync(join(directory, "node_modules"));
-      mkdirSync(join(directory, "-main", "node_modules"), { recursive: true });
-      const dashed = /link it with `(.*)`\n$/u.exec(refusal("-main"))?.[1];
-      assert.equal(
-        dashed,
-        `ln -s ${join(realpathSync(directory), "-main", "node_modules")} node_modules`,
-      );
-      const relinked = spawnSync("sh", ["-c", dashed], { cwd: directory, encoding: "utf8" });
-      assert.equal(relinked.status, 0, relinked.stderr);
-      assert.equal(
-        realpathSync(join(directory, "node_modules")),
-        realpathSync(join(directory, "-main", "node_modules")),
+        realpathSync(join(main, "with", "node_modules")),
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -434,14 +429,105 @@ test(
 );
 
 test("main's node_modules come from TEASESCRIPT_MAIN, and unset or empty from the LXC's checkout", () => {
-  const lxc = "/opt/teasescript-agents/teasescript-main/current/node_modules";
-  assert.equal(mainNodeModules({}), lxc);
-  assert.equal(mainNodeModules({ TEASESCRIPT_MAIN: "" }), lxc);
-  assert.equal(mainNodeModules({ TEASESCRIPT_MAIN: "/srv/main/" }), "/srv/main/node_modules");
-  assert.equal(
-    mainNodeModules({ TEASESCRIPT_MAIN: "-main" }),
-    join(process.cwd(), "-main", "node_modules"),
-  );
-  assert.equal(shellWord("/opt/a-b/c_d.e/node_modules"), "/opt/a-b/c_d.e/node_modules");
-  assert.equal(shellWord("/tmp/with spaces/it's"), "'/tmp/with spaces/it'\\''s'");
+  assert.equal(MAIN_CHECKOUT, "/opt/teasescript-agents/teasescript-main/current");
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "check-changed-default-")));
+  try {
+    mkdirSync(join(root, "lxc", "node_modules"), { recursive: true });
+    const linked = `ln -s ${join(root, "lxc", "node_modules")} node_modules`;
+    assert.equal(mainLinkCommand({}, root, join(root, "lxc")), linked);
+    assert.equal(mainLinkCommand({ TEASESCRIPT_MAIN: "" }, root, join(root, "lxc")), linked);
+    assert.equal(mainLinkCommand({}, root, join(root, "absent")), null);
+    assert.equal(mainLinkCommand({ TEASESCRIPT_MAIN: "absent" }, root, join(root, "lxc")), null);
+    // only a link whose target is gone is stale: not a folder, a file, a live link or nothing
+    assert.equal(staleLink(root), false);
+    for (const [make, stale] of [
+      [() => symlinkSync(join(root, "gone"), join(root, "node_modules")), true],
+      [() => symlinkSync(join(root, "lxc", "node_modules"), join(root, "node_modules")), false],
+      [() => mkdirSync(join(root, "node_modules")), false],
+      [() => writeFileSync(join(root, "node_modules"), ""), false],
+    ]) {
+      make();
+      assert.equal(staleLink(root), stale);
+      rmSync(join(root, "node_modules"), { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
+
+/** Folder names a checkout can have that a shell or `ln` reads as something else, unless the command guards them. */
+const HARD_NAMES = [
+  "plain",
+  "with space",
+  "it's",
+  'say "hi"',
+  "$HOME",
+  "back`tick",
+  "back\\slash",
+  "star*?",
+  "-dash",
+  "new\nline",
+];
+/**
+ * Where the checkout is and how `TEASESCRIPT_MAIN` names it from the repository `repo` in `root`: by its absolute path,
+ * relative, after `./`, after `../`, and through a link followed by `..`, where the system's path and the spelling's
+ * lexical one are two different folders, each with a `node_modules` of its own.
+ */
+const PATH_FORMS = {
+  absolute: (root, name) => ({ configured: `${root}/base/${name}`, at: `${root}/base/${name}` }),
+  relative: (root, name) => ({ configured: name, at: `${root}/repo/${name}` }),
+  dot: (root, name) => ({ configured: `./${name}`, at: `${root}/repo/${name}` }),
+  parent: (root, name) => ({ configured: `../${name}`, at: `${root}/${name}` }),
+  linkThenParent: (root, name) => {
+    mkdirSync(`${root}/slots/current`, { recursive: true });
+    symlinkSync(`${root}/slots/current`, `${root}/repo/link`);
+    mkdirSync(`${root}/repo/${name}/node_modules`, { recursive: true });
+    writeFileSync(
+      `${root}/repo/${name}/node_modules/id`,
+      "the lexical folder, not the configured one",
+    );
+    return { configured: `./link/../${name}`, at: `${root}/slots/${name}` };
+  },
+};
+
+test(
+  "the named command, run as printed, links the very node_modules the configured path opens, over every hard name and path form",
+  { timeout: 60_000 },
+  () => {
+    const cases = [
+      ...Object.keys(PATH_FORMS).flatMap((form) =>
+        HARD_NAMES.map((name) => ({ form, name, stale: false })),
+      ),
+      ...Object.keys(PATH_FORMS).map((form) => ({ form, name: "it's -stale", stale: true })),
+    ];
+    for (const { form, name, stale } of cases) {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "check-changed-domain-")));
+      try {
+        mkdirSync(`${root}/repo`);
+        const { configured, at } = PATH_FORMS[form](root, name);
+        mkdirSync(`${at}/node_modules`, { recursive: true });
+        writeFileSync(`${at}/node_modules/id`, `${form} ${JSON.stringify(name)}`);
+        if (stale) symlinkSync(`${root}/gone`, `${root}/repo/node_modules`);
+        const label = `${form} ${JSON.stringify(name)}${stale ? " over a stale link" : ""}`;
+        const command = mainLinkCommand({ TEASESCRIPT_MAIN: configured }, `${root}/repo`);
+        assert.ok(command !== null, label);
+        const ran = spawnSync("sh", ["-c", command], { cwd: `${root}/repo`, encoding: "utf8" });
+        assert.equal(ran.status, 0, `${label}: ${ran.stderr}`);
+        // the folder the configured path opens, as the system opens it: the raw string, not normalized
+        const opened = `${configured.startsWith("/") ? "" : `${root}/repo/`}${configured}/node_modules/id`;
+        assert.equal(
+          readFileSync(`${root}/repo/node_modules/id`, "utf8"),
+          readFileSync(opened, "utf8"),
+          label,
+        );
+        assert.equal(
+          readFileSync(`${root}/repo/node_modules/id`, "utf8"),
+          `${form} ${JSON.stringify(name)}`,
+          label,
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  },
+);
