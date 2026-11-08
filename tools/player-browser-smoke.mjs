@@ -1710,7 +1710,13 @@ async function photoVignetteScenario(cdp, origin) {
   };
   // The background fades to a new colour; the text is read once it has settled.
   const settled = `!document.documentElement.hasAttribute('data-photo-fade')`;
-  const switchMode = async (mode) => {
+  const switchMode = async (mode, holdMs = 0) => {
+    // A main thread held right after the click's own handlers, as on a busy page: the fade's transitions start late.
+    if (holdMs > 0)
+      await evaluate(
+        cdp,
+        `window.addEventListener('click', () => { for (const until = performance.now() + ${holdMs}; performance.now() < until; ); }, { once: true });`,
+      );
     await physicalClick(cdp, `[aria-label="Switch to ${mode} theme"]`);
     await waitFor(cdp, `document.documentElement.dataset.playerTheme === '${mode}'`);
     await waitFor(cdp, settled, 3_000, `The ${mode} colours did not settle`);
@@ -1734,6 +1740,10 @@ async function photoVignetteScenario(cdp, origin) {
   await switchMode("light");
   await readable("Light, High", true);
   await settings("standard");
+  // A frame late enough to start the fade's transitions after its timer once left the authored colours adapted to a
+  // half-faded background for good (#2031); the colours must settle readable even then.
+  await switchMode("dark", 250);
+  await readable("Dark, Standard, after a late frame", false);
 }
 
 /** The pixels of an 8-bit, non-interlaced RGB or RGBA PNG, such as a DevTools screenshot. */
