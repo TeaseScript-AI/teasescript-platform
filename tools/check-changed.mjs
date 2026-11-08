@@ -47,7 +47,10 @@ export const PROJECTS = {
     checks: ["test:lint"],
   },
   tools: {
-    claims: (path) => /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path) || path === "knip.json",
+    claims: (path) =>
+      /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path) ||
+      path.startsWith("tools/repository-checks/") ||
+      path === "knip.json",
     checks: ["test:verification"],
   },
   // Prettier's configuration and ignore file change how every file formats, not only the changed ones.

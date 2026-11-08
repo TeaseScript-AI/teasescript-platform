@@ -289,6 +289,33 @@ baseline for the reported root cause and pass after the repair. When
 failing-before evidence cannot reasonably be supplied, document why and provide
 the strongest focused reproduction available.
 
+A regression test may be declared as a regression case: `regressionCase(name, { pr, atBase }, fn)`
+(`tests/helpers/regression-case.ts`) in place of `test(name, fn)`. `pr` is the pull request whose fix it witnesses.
+`atBase` matches the first line of the message of the error the case throws without the fix, on the Node that `.nvmrc`
+pins (Node's own messages change between versions), cut at its first line break (CR LF, LF, CR, U+2028 or U+2029). The
+tool anchors it at both ends, so write the line without `^` and `$`; its flags may be `i`, `u` and `v` only:
+- `assert.rejects`: `/Missing expected rejection \(ForeignSessionError\)\./`;
+- a table of rows: `assert.deepStrictEqual`'s own first line, `Expected values to be strictly deep-equal:`, is the same
+  for every wrong value, so give each row's assertion a message whose first line names the witness, as
+  ``assert.deepStrictEqual(actual, row.expected, `#1828 ${row.name}`)`` with `atBase` `/#1828 nested set/`.
+
+On a pull request, CI's `check-1` runs the cases it declares against its base after its build
+(`tools/repository-checks/regression-cases.mjs`), and reports how each ends there; the report is evidence for the
+review, not a gate, and the step never fails the job. A case is its `regressionCase` call, by its place in the compiled
+file, so declare it at a file's top level or in a `describe`, never inside a test or a skipped suite. The report names a
+call that did not register, a file whose declarations cannot be listed, and each selected case that passes at the base,
+fails for another reason, does not finish, or does not run. A case of another pull request does not run when that one is
+merged into the base (a commit subject ending `(#N)` in the base's `git log`), and is reported otherwise. Name what the
+fix adds by string (`{ name: "ForeignSessionError" }`), not by import, or the file does not load at the base. The base
+is compiled with `tsc` and its Player test bundles are built, so a case may load a Player module
+(`tests/helpers/player-modules.ts`). What the report does not establish, which is why it is not enforced: that an id
+names the same declaration at the base (the base's compilation can move a call site, and a loop can register its rows in
+another order), that every way of calling `regressionCase` is found, and that the selected cases run alone (another
+`only` test in the file runs too). A case that loads a module the head adds to the bundles' list
+(`player/vue/vite.test-modules.config.ts`) fails at the base with `Cannot find module`, another reason than its
+`atBase`; and the base is compiled and bundled with the head's `node_modules`. Interrupted, the tool stops by the
+signal; the next run removes what an interrupted run left. Declaring is opt-in; no rule requires it.
+
 A focused regression set is sufficient when the defect and its neighboring
 supported behavior are understood. When repeated sibling findings or an
 enumerable behavior space leave material completeness uncertainty, use the
