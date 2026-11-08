@@ -1023,6 +1023,7 @@ test("the stored baselines' tools show no plain write outside the gate in their 
   const { modules, sites, escapes, processes, loads } = await inventoryOf(process.cwd());
   assert.deepEqual(modules, [
     "tests/families/baselines.mjs",
+    "tests/families/reasons.mjs",
     "tests/families/run.mjs",
     "tests/families/sources.mjs",
   ]);
@@ -1086,6 +1087,7 @@ test("the stored baselines' tools show no plain write outside the gate in their 
     for (const file of [
       "tools/corpus/baseline.sh",
       "tests/families/baselines.mjs",
+      "tests/families/reasons.mjs",
       "tests/families/run.mjs",
       "tests/families/sources.mjs",
     ]) {
@@ -1580,7 +1582,7 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
       writeFileSync(join(folder, "package-lock.json"), "{}\n");
       writeFileSync(join(folder, ".sha"), `${sha.repeat(40)}\n`);
-      for (const tool of ["baselines.mjs", "run.mjs", "sources.mjs"])
+      for (const tool of ["baselines.mjs", "reasons.mjs", "run.mjs", "sources.mjs"])
         cpSync(join("tests", "families", tool), join(folder, "tests", "families", tool));
       writeFileSync(
         join(folder, "tests", "families", "area", "stored.mjs"),
@@ -3927,7 +3929,7 @@ test("a baseline plans copies in 64 shards where it first plans it, keeps a coun
     writeFileSync(join(built, "package.json"), '{ "type": "module" }\n');
     writeFileSync(join(built, "package-lock.json"), "{}\n");
     writeFileSync(join(built, ".sha"), `${"1".repeat(40)}\n`);
-    for (const tool of ["baselines.mjs", "run.mjs", "sources.mjs"])
+    for (const tool of ["baselines.mjs", "reasons.mjs", "run.mjs", "sources.mjs"])
       cpSync(join("tests", "families", tool), join(built, "tests", "families", tool));
     const cases = (names: string[]) =>
       `export const cases = ${JSON.stringify(names.map((name) => [name, name]))};\n`;
