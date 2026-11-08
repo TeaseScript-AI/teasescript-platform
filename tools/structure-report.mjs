@@ -35,7 +35,9 @@
 // count; rename detection's similarity threshold (50% by default) and its limit decide what a move is, so an edited
 // move below them counts as a deletion and an addition; and attributes can make a file binary, which adds no lines.
 //
-// Exit status: 0 when the report is printed, 2 when --diff cannot read the change as Git wrote it.
+// Exit status: 0 when the report is printed; 2, with the usage, when --top, --json, --compare or --diff has no value
+// (it is the last argument, or the argument after it starts with `--`) or is given twice, before anything is read or
+// written; 2 when --diff cannot read the change as Git wrote it.
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -53,21 +55,38 @@ const COMPONENTS = ["src", "player", "tests", "tools", "playground"];
 const CODE = /\.(ts|tsx|mts|cts|js|mjs|cjs|vue)$/;
 const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/;
 
-const args = process.argv.slice(2);
-const option = (name) => {
-  const i = args.indexOf(name);
-  if (i < 0) return undefined;
-  const value = args[i + 1];
-  args.splice(i, 2);
-  return value;
+const USAGE = `usage: node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]
+       node tools/structure-report.mjs [ROOT…] --diff BASE [--json FILE]`;
+/** Ends the run before anything is read or written (exit 2). */
+const refuse = (message) => {
+  console.error(`structure-report: ${message}\n${USAGE}`);
+  process.exit(2);
 };
-const top = Number(option("--top") ?? 10);
-const jsonOut = option("--json");
-const compareWith = option("--compare");
-const diffBase = option("--diff");
+/**
+ * The command line, read once from left to right: each of the options that take a value consumes the argument after it,
+ * which must be there and must not start with `--`, and is given at most once; every other argument is a root.
+ */
+const rootArgs = [];
+const options = new Map();
+for (let i = 2; i < process.argv.length; i++) {
+  const arg = process.argv[i];
+  if (!["--top", "--json", "--compare", "--diff"].includes(arg)) {
+    rootArgs.push(arg);
+    continue;
+  }
+  const value = process.argv[i + 1];
+  if (value === undefined || value.startsWith("--")) refuse(`${arg} takes a value`);
+  if (options.has(arg)) refuse(`${arg} is given twice`);
+  options.set(arg, value);
+  i++;
+}
+const top = Number(options.get("--top") ?? 10);
+const jsonOut = options.get("--json");
+const compareWith = options.get("--compare");
+const diffBase = options.get("--diff");
 const roots =
-  args.length > 0
-    ? args.map((root) => path.posix.normalize(root).replace(/\/+$/u, "") || ".")
+  rootArgs.length > 0
+    ? rootArgs.map((root) => path.posix.normalize(root).replace(/\/+$/u, "") || ".")
     : COMPONENTS;
 
 const git = (...gitArgs) =>
