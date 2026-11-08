@@ -98,7 +98,9 @@ test("events without the file's own entry, or that it cannot place, never throw"
 
 // node:test's `run()` refuses to run files from inside a test file, so a script of its own runs the hung file and
 // follows it, with the threshold and the look in tenths of a second. The script is a file, not `node -e`: `run()` gives
-// its files' processes this process's `execArgv`, which would carry the `-e` code into them.
+// its files' processes this process's `execArgv`, which would carry the `-e` code into them. On a loaded machine the
+// threshold can pass before the hung subtest begins, so an earlier line may rightly name the file or `outer` alone: the
+// script stops at the line naming the hung subtest, or after 5 s.
 test("a real hung file is named down to its hung subtest from node:test's own events", () => {
   const directory = mkdtempSync(join(tmpdir(), "test-in-flight-"));
   try {
@@ -120,7 +122,11 @@ test("a real hung file is named down to its hung subtest from node:test's own ev
       `import { trackInFlight } from ${JSON.stringify(tracker)};`,
       "const controller = new AbortController();",
       `const stream = run({ files: [${JSON.stringify(file)}], isolation: "process", signal: controller.signal });`,
-      "const write = (line) => { process.stdout.write(line); controller.abort(); };",
+      "const write = (line) => {",
+      "  process.stdout.write(line);",
+      '  if (line.includes(" › inner hangs")) controller.abort();',
+      "};",
+      "setTimeout(() => controller.abort(), 5_000).unref();",
       "trackInFlight((type, listener) => stream.on(type, listener), { after: 200, look: 50, write });",
       'stream.on("data", () => {});',
     ].join("\n");
@@ -132,9 +138,10 @@ test("a real hung file is named down to its hung subtest from node:test's own ev
       encoding: "utf8",
       timeout: 15_000,
     });
+    const lines = result.stdout.split("\n").filter(Boolean);
     assert.match(
-      result.stdout.split("\n")[0],
-      /^test-in-flight: 0m 0s without a test beginning or ending in .*hung\.test\.mjs › outer › inner hangs$/u,
+      lines.find((line) => line.includes(" › inner hangs")) ?? lines.join("\n"),
+      /^test-in-flight: \d+m \d+s without a test beginning or ending in .*hung\.test\.mjs › outer › inner hangs$/u,
       result.stderr,
     );
   } finally {
