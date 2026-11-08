@@ -494,14 +494,13 @@ if (process.argv[2] === "--child") {
   const timeout = seconds * 1000;
   const memory = Number(option("memory") ?? DEFAULTS.memory);
   // (each source's process gets `--memory` as its heap, whatever heap `NODE_OPTIONS` sets, as the central queue sets
-  // one on every job: said once here, and the total names `memory`, so the override is never silent, #1956)
-  const asked = /(?:^|\s)--max[-_]old[-_]space[-_]size=(\d+)(?:\s|$)/.exec(
-    process.env.NODE_OPTIONS ?? "",
-  )?.[1];
-  if (asked !== undefined && Number(asked) !== memory)
-    console.error(
-      `families-runner: each source's process runs with --memory ${memory} MB of heap; NODE_OPTIONS's ${asked} MB applies to this process only`,
-    );
+  // one on every job: the total names `memory`, and beside it the heap `NODE_OPTIONS` asked where that differs, so the
+  // override is never silent, #1956)
+  const asked = Number(
+    /(?:^|\s)--max[-_]old[-_]space[-_]size=(\d+)(?:\s|$)/.exec(
+      process.env.NODE_OPTIONS ?? "",
+    )?.[1] ?? memory,
+  );
   if (store !== undefined && options.has("only"))
     refused("--store stores whole shards: drop --only");
   const itemized = options.has("items") || options.has("items-from-env");
@@ -1161,7 +1160,14 @@ if (process.argv[2] === "--child") {
   }
   for (const { child } of Object.values(slots)) child?.kill();
   if (progress !== undefined) rmSync(pathOf(progress, "outside"), { force: true });
-  const ended = { ...total, units, timeout: seconds, memory, node: process.version };
+  const ended = {
+    ...total,
+    units,
+    timeout: seconds,
+    memory,
+    ...(asked === memory ? {} : { nodeOptions: { memory: asked } }),
+    node: process.version,
+  };
   if (storing !== undefined) {
     // the shard whole, its total last, with what made it
     const runner = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url)));

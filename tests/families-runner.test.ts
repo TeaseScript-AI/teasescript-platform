@@ -510,8 +510,8 @@ test("the corpus runner and the stall index count a run left unanswered alike on
         .filter((line) => line !== "")
         .map((line) => JSON.parse(line));
     // the same count and answered part on both trees (a joined publication's parts are a counted one's): agreement,
-    // counted and named apart; another count, or another answered part, never agreement (`counts`, each tree's);
-    // `answered` agrees in each
+    // counted and named apart; another count, never agreement (`counts`, each tree's); another answer where both
+    // answered, a difference (#1837's prefix compare); `answered` agrees in each
     for (const [name, base, head, counts] of [
       ["alike", counted!, counted!, undefined],
       ["alike-joined", whole!, counted!, undefined],
@@ -527,11 +527,12 @@ test("the corpus runner and the stall index count a run left unanswered alike on
         { encoding: "utf8" },
       );
       const alike = counts === undefined;
+      const differs = name === "parts";
       assert.equal(result.status, alike ? 0 : 1, result.stderr);
       const total = lines(result.stdout).at(-1);
       assert.deepEqual(
         [total.exceptions, total.unanswered, total.unansweredAlike, total.runs, total.differences],
-        [0, alike ? 0 : 4, alike ? 4 : 0, 8, 0],
+        [0, alike || differs ? 0 : 4, alike ? 4 : 0, 8, differs ? 4 : 0],
         name,
       );
       assert.deepEqual(
@@ -552,7 +553,7 @@ test("the corpus runner and the stall index count a run left unanswered alike on
       const { sources, agreed, unansweredAlike, unanswered, closed } = printed.at(-1);
       assert.deepEqual(
         [sources, agreed, unansweredAlike, unanswered, closed],
-        [2, 1, alike ? 1 : 0, alike ? 0 : 4, alike],
+        [2, 1, alike ? 1 : 0, alike || differs ? 0 : 4, alike],
         name,
       );
       const named = { generator: "stops.mjs", source: "stopped", unansweredAlike: 4 };
@@ -837,7 +838,15 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     assert.deepEqual(runs(against), runs(beside));
     assert.deepEqual(
       against.kept.filter(({ stalled }) => stalled !== undefined),
-      [{ generator: "stored.mjs", source: "ends", stalled: { base: "exit 3", head: "exit 3" } }],
+      [
+        {
+          generator: "stored.mjs",
+          source: "ends",
+          stalled: { base: "exit 3", head: "exit 3" },
+          // (the run the head's stall cut, #1965)
+          at: { tree: "head", mode: "src-on", check: "publication" },
+        },
+      ],
     );
     // a stored base result without its parts or its count (#1592), its shard's digest repaired: no store writes it, so
     // the comparison refuses it as every reader of a shard does (#1647, Codex r1), naming the line
@@ -4668,7 +4677,7 @@ export function publicationHashes(files) {
 }
 `;
 
-test("the stall index prints a growth line per area: a series whose head-over-base units rise 1 % or more a doubling flagged, a series with a stopped run left out as the residual; and a NODE_OPTIONS heap other than --memory is said on stderr, the total naming memory (#1837's F22, #1956)", () => {
+test("the stall index prints a growth line per area: a series whose head-over-base units rise 1 % or more a doubling flagged, a series with a stopped run left out as the residual; and a NODE_OPTIONS heap other than --memory is named beside it in the total (#1837's F22, #1956)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
     const built = (name: string, head: boolean) => {
@@ -4696,11 +4705,8 @@ test("the stall index prints a growth line per area: a series whose head-over-ba
       { encoding: "utf8", env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=3000" } },
     );
     assert.equal(ran.status, 1, ran.stderr);
-    assert.match(
-      ran.stderr,
-      /runs with --memory 2048 MB of heap; NODE_OPTIONS's 3000 MB applies to this process only/,
-    );
-    assert.equal(JSON.parse(ran.stdout.trim().split("\n").at(-1)!).memory, 2048);
+    const ended = JSON.parse(ran.stdout.trim().split("\n").at(-1)!);
+    assert.deepEqual([ended.memory, ended.nodeOptions], [2048, { memory: 3000 }]);
     const judged = spawnSync(process.execPath, [stalls, work], { encoding: "utf8" });
     const growth = judged.stdout
       .trim()
