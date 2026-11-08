@@ -141,7 +141,7 @@ export function prefixLevels(contract: Contract, asked: Key, stores: PrefixStore
         closed = false;
         break;
       }
-  const levels = { others, base, closed, read: false };
+  const levels = { others, base, closed, reads: 0 };
   contract.levelBases.set(prefix, levels);
   return levels;
 }
@@ -177,7 +177,7 @@ function closedObject(contract: Contract, entry: PrefixEntry): boolean {
  * with the earliest literal writer, standing where the first of them stands among the holders (`propertyLack`); `null`
  * for any other prefix or path (a selection below the property: each entry by itself, `contractAlong`), which its
  * levels answer, and for the prefix's reads before its index pays: its first at the levels' own cost, so a prefix
- * read once costs what its levels do, each later one until the reads reach the index's size.
+ * read once costs what its levels do, each later one until the folds its reads would save reach its construction.
  *
  * #1948, #1585: the same at any depth below the property. What this reasons about lasts the pass's index of the
  * prefix's settled stores (`Contract.propertyIndexes`): the prefix's groups it was made from, and the F11 `missing`
@@ -203,14 +203,23 @@ export function* propertyItems(
   let index = contract.propertyIndexes.get(stores);
   if (index === undefined || !("holders" in index)) {
     // (its first property read: the levels answer it at their own cost, nothing kept for it)
-    if (!levels.read) {
-      levels.read = true;
-      return null;
-    }
+    levels.reads += 1;
+    if (levels.reads === 1) return null;
     const groups = sharing() ? groupsAt(contract, asked, levels.base, stepsRest([])) : null;
     const sources = groups ?? stores.list;
+    // (#1948: its levels read it while the folds its reads would have saved are less than the index's construction, its
+    // names and sources. A read from the index folds its property's holders alone, so it saves the sources without the
+    // property: all for an absent one, none for one every source holds. Its sources' names are counted once its reads
+    // could pay for the least index, at most all sources but one saved a read against one name a source
+    // (`propertyIndex` charges at least two units a source), so that a prefix of two objects read fewer than four times
+    // takes its levels alone, as before #1948; each name's holders, once they could pay for this index, so that a prefix
+    // of a few wide objects read twice is never counted; from then on each read adds the sources its own property
+    // lacks, until they reach the index's construction. Objects read only at properties they all hold are never
+    // indexed; k objects of a distinct property each are, at their fifth read; k objects of k shared properties
+    // read at absent ones, at about their 2k-th)
+    if (levels.reads * (sources.length - 1) < 2 * sources.length) return null;
     if (index === undefined) {
-      // (the index's size: its sources' property names)
+      // (its sources' property names)
       let names = 0;
       const count = (literal: PlaceId): void => {
         work.charge("structureSteps");
@@ -219,14 +228,26 @@ export function* propertyItems(
       if (groups === null) for (const entry of stores.list) count(entry.value!);
       else for (const group of groups) count(group.literal);
       contract.keep(2);
-      contract.propertyIndexes.set(stores, (index = { asked: 1, names }));
+      contract.propertyIndexes.set(stores, (index = { names, holding: null, saved: 0 }));
     }
-    // (its levels read it, a fold of the sources each, while what they read for the prefix's properties is less than
-    // the index's size: a prefix of a few wide objects, as each of k copies of one read twice, is never indexed)
-    if ((index.asked + 1) * sources.length < index.names) {
-      index.asked += 1;
-      return null;
+    const cost = index.names + sources.length;
+    if (index.holding === null) {
+      if (levels.reads * (sources.length - 1) < cost) return null;
+      const holding = new Map<string, number>();
+      const add = (literal: PlaceId): void => {
+        for (const name of contract.literalIndex(literal).root.objects!.list[0]!.names) {
+          work.charge("structureSteps");
+          const known = holding.get(name);
+          if (known === undefined) contract.keep(1);
+          holding.set(name, (known ?? 0) + 1);
+        }
+      };
+      if (groups === null) for (const entry of stores.list) add(entry.value!);
+      else for (const group of groups) add(group.literal);
+      index.holding = holding;
     }
+    index.saved += sources.length - (index.holding.get(rest.at(0)!) ?? 0);
+    if (index.saved < cost) return null;
     // (#1323: with the sharing on every group, F11's earliest lacking named among them as among entries off)
     const shared = groups === null ? null : { groups };
     index = propertyIndex(contract, stores.list, shared);
@@ -251,9 +272,12 @@ export function* propertyItems(
       for (const item of yield* contract.entryAt(source.entry!, rest, flow)) out.push(item);
     }
   else {
-    // (a fold's group stands where its first holder does: the holders in order, each group's first among them)
+    // (a fold's group stands where its first holder does: the holders in order, each group's first among them; below a
+    // property every source holds, its holders' fold is the prefix's own, `groupsAt`'s, which its levels' reads share)
     let first = 0;
-    for (const group of holderGroups(contract, index, holders, rest)) {
+    for (const group of rest.length > 1 && holders.length === index.sources.length
+      ? groupsAt(contract, asked, levels.base, rest)
+      : holderGroups(contract, index, holders, rest)) {
       work.charge("invSteps");
       while (holders[first]!.group!.literal !== group.literal) first += 1;
       before(holders[first]!.at);
@@ -269,8 +293,9 @@ export function* propertyItems(
  * #1948: a property's holders' groups at a path below a prefix of closed objects (`propertyItems`), the path's first
  * step the property: folded from the holders' groups at the prefix one step at a time, as `groupsAt` folds every
  * group, so each group's members stand in the order its parents merged at each step (a fold made at the path alone
- * would merge them in the holders' order). Once per index and path, so the reads of the path's group share its members'
- * name (`membersKey`) as they do at `groupsAt`'s; never kept as the prefix's groups, whose complete list a read
+ * would merge them in the holders' order). Once per index and path below a deeper read (`asked`), so the reads of the
+ * path's group share its members' name (`membersKey`) as they do at `groupsAt`'s; a read of the property itself is
+ * folded afresh unless a deeper read kept its fold. Never kept as the prefix's groups, whose complete list a read
  * without the index folds.
  */
 function holderGroups(
@@ -278,20 +303,23 @@ function holderGroups(
   index: PropertyIndex,
   holders: readonly PropertySource[],
   path: Rest,
+  asked = path,
 ): readonly LevelGroup[] {
   const memoKey = joinParts(restPart(path));
   const known = index.folds.get(memoKey);
   if (known !== undefined) return known;
-  contract.keepText(memoKey.length);
+  // (a read of the property itself folds its holders afresh, keeping nothing, as before #1948)
+  const kept = asked.length > 1;
+  if (kept) contract.keepText(memoKey.length);
   contract.keep(path.length === 1 ? holders.length : 1);
   const groups = foldGroups(
     contract,
     path,
     path.length === 1
       ? holders.map((source) => source.group!)
-      : holderGroups(contract, index, holders, restTo(contract, path, path.length - 1)),
+      : holderGroups(contract, index, holders, restTo(contract, path, path.length - 1), asked),
   );
-  index.folds.set(memoKey, groups);
+  if (kept) index.folds.set(memoKey, groups);
   return groups;
 }
 

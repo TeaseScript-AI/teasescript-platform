@@ -759,6 +759,33 @@ const artefactRows = GROUPS.map((group) => {
 });
 if (artefactRows.some((row) => row.runs > 0))
   console.log(JSON.stringify({ artefacts: artefactRows }));
+// near the cap, advisory: each run whose peak heap on a tree passed `NEAR_CAP` of its process's heap limit (`run.mjs`'s
+// `nearCap`), with its runs, sources and first witness; never a stall, as a sampled peak is not the same on every machine
+const near = { runs: 0, sources: new Set(), witness: null };
+for (const [place, was] of replay) {
+  const is = rerun.get(place) ?? was;
+  for (const run of is.nearCap ?? []) {
+    near.runs += 1;
+    near.sources.add(place);
+    const witness = {
+      area: nameOf(is.area),
+      generator: is.generator,
+      source: is.source,
+      mode: run.mode,
+      check: run.check,
+      tree: run.tree,
+      peak: run.peak,
+    };
+    const text = (w) => `${w.area} ${w.generator}/${w.source} ${w.mode} ${w.check} ${w.tree}`;
+    if (near.witness === null || text(witness) < text(near.witness)) near.witness = witness;
+  }
+}
+if (near.runs > 0)
+  console.log(
+    JSON.stringify({
+      nearCap: { runs: near.runs, sources: near.sources.size, witness: near.witness },
+    }),
+  );
 // the growth bar (#1837's F22), advisory: per area, each series of a shape's sizes in one mode and check, the head's
 // units over the base's at each size, flagged where a doubling of the size raises that ratio by 1 % or more. A run left
 // unanswered, cut by a stall or at the safety net on either tree, or run by the head alone after the base's stall, ends

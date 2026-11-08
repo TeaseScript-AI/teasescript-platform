@@ -684,7 +684,7 @@ test("a collection test defines its element steps; a negative one none (N1)", ()
         [...xs, "if xs is integer[] { xs.reverse()\n repeat xs[0] {} }"],
         "repeat xs[0]",
         7,
-        "is integer element: branch",
+        "is integer element: member",
       ],
     ],
     at,
@@ -711,7 +711,11 @@ test("N2's events: a mutator, a helper holding one, a block holding one, never a
         [xs, `if xs[0] != null { xs.${call}\n repeat xs[0] {} }`],
         read,
         7,
-        "non-null: branch",
+        // (a reordering invalidates the element read, `member`; an add or a removal stores the key, `branch`: #1073
+        // PR 4's U5, as the fixture's `invalidation/*/changed` records name them)
+        ["reverse()", "sort()", "shuffle()"].includes(call)
+          ? "non-null: member"
+          : "non-null: branch",
       ]),
       [
         "helper",
@@ -1288,8 +1292,14 @@ test("a stored selection takes its element's narrowing as an index does, never i
     answer(...xs, `if ${test} != null { let sink: integer = ${read} }`);
   const untested = (read: string): string => answer(...xs, `let sink: integer = ${read}`);
   assert.equal(tested("xs.first", "xs.first"), tested("xs[0]", "xs[0]"));
-  assert.equal(tested("xs.random", "xs.random"), untested("xs.random"));
-  assert.equal(tested("xs.first", "xs.last"), untested("xs.last"));
+  // (`.random`'s test is a check the compiler cannot keep, the warning; with none, its `null` is the route rule's error,
+  // AD-1)
+  assert.match(tested("xs.random", "xs.random"), /^warning-runtime-check/);
+  assert.match(untested("xs.random"), /^compile-error/);
+  // (a test of `.first` is one of the element key `.last` reads too: the warning, the proof limit of a corridor that
+  // follows keys, not locations, #1938; with no test, `.last`'s `null` is the route rule's error)
+  assert.match(tested("xs.first", "xs.last"), /^warning-runtime-check/);
+  assert.match(untested("xs.last"), /^compile-error/);
   // an empty list passes every element test: C6 still asks the selection's element of its owner
   const empty = record(
     choice,
@@ -1413,14 +1423,12 @@ test("a read below a selection takes its narrowing, each selected owner's own se
   assert.equal(tested(rows, "rows.first.last", "rows.first.last"), "valid");
   assert.equal(tested(rs, "rs.first.f", "rs.last.f"), untested(rs, "rs.last.f"));
   assert.equal(tested(rs, "rs.random.f", "rs.random.f"), untested(rs, "rs.random.f"));
-  assert.equal(
-    tested(rows, "rows.random.first", "rows.random.first"),
-    untested(rows, "rows.random.first"),
-  );
-  assert.equal(
-    tested(rows, "rows.first.random", "rows.first.random"),
-    untested(rows, "rows.first.random"),
-  );
+  // (a selection through `.random` is read anew: its test is a check the compiler cannot keep, the warning; with none,
+  // its `null` is the route rule's error, AD-1)
+  for (const read of ["rows.random.first", "rows.first.random"]) {
+    assert.match(tested(rows, read, read), /^warning-runtime-check/, read);
+    assert.match(untested(rows, read), /^compile-error/, read);
+  }
   // an empty list passes every element test: C6 still asks each selection's element of its owner; a property an
   // element lacks stays a member read
   const checks = (...lines: readonly string[]): string[] =>
@@ -1969,7 +1977,7 @@ test("N3 proves a route without a check, and refuses every corridor §13 closes"
   );
 });
 
-test("N3 certifies seeds, a certified `otherwise` and scalar copies; refuses defaults no run must select", () => {
+test("N3 certifies every producer by what its value holds (AD-1), a certified `otherwise` and scalar copies; refuses a default no run selects", () => {
   const c = 'let c = askBoolean "c"';
   const cases: readonly (readonly [string, readonly string[], string, number, ItemTag, string])[] =
     [
@@ -1987,7 +1995,7 @@ test("N3 certifies seeds, a certified `otherwise` and scalar copies; refuses def
         REPEAT,
         7,
         "null",
-        "none",
+        "values.get(0, default: null)",
       ],
       [
         "parsing default",
@@ -1995,7 +2003,7 @@ test("N3 certifies seeds, a certified `otherwise` and scalar copies; refuses def
         REPEAT,
         7,
         "null",
-        "none",
+        'fromJson("4", default: null)',
       ],
       [
         "void exit",
@@ -2007,8 +2015,10 @@ test("N3 certifies seeds, a certified `otherwise` and scalar copies; refuses def
         REPEAT,
         7,
         "null",
-        "none",
+        "rounds(true)",
       ],
+      // (AD-1, #1073: a lookup's, a parse's and a void exit's `null` certify as a literal's does; a fallback never
+      // selected certifies nothing)
       ["dead fallback", ["let n = 1 otherwise null", REPEAT], REPEAT, 7, "null", "none"],
       [
         "certified otherwise",
@@ -2054,7 +2064,7 @@ test("N3 certifies seeds, a certified `otherwise` and scalar copies; refuses def
         REPEAT,
         7,
         "null",
-        "none",
+        "values.get(0, default: null) otherwise null",
       ],
       [
         "an omitted default after a literal null",
@@ -2116,7 +2126,7 @@ test("N3 certifies seeds, a certified `otherwise` and scalar copies; refuses def
         "repeat box.n",
         7,
         "null",
-        "none",
+        "{n: a}",
       ],
     ];
   for (const [name, lines, marker, delta, tag, expected] of cases)
@@ -2212,14 +2222,14 @@ test("a deep path's events are its prefixes' and collections' that hold one, whe
         test("rows[0][0].reverse()"),
         "repeat rows[0][0][1]",
         7,
-        "non-null: branch",
+        "non-null: member",
       ],
       [
         "a middle collection",
         test("rows[0].reverse()"),
         "repeat rows[0][0][1]",
         7,
-        "non-null: branch",
+        "non-null: member",
       ],
       [
         "a middle prefix's store",
@@ -2246,7 +2256,7 @@ test("a deep path's events are its prefixes' and collections' that hold one, whe
         ],
         "repeat box.element[0][0]",
         7,
-        "non-null: branch",
+        "non-null: member",
       ],
       [
         "a collection below a variable index",
@@ -2257,7 +2267,7 @@ test("a deep path's events are its prefixes' and collections' that hold one, whe
         ],
         "repeat rows[i][0]",
         7,
-        "non-null: branch",
+        "non-null: member",
       ],
       [
         "a collection below a fixed key",
@@ -2267,7 +2277,7 @@ test("a deep path's events are its prefixes' and collections' that hold one, whe
         ],
         'repeat d["a"][0]',
         7,
-        "non-null: branch",
+        "non-null: member",
       ],
       [
         "a collection mutated in a later operand: that operand's read",
@@ -2277,7 +2287,7 @@ test("a deep path's events are its prefixes' and collections' that hold one, whe
         ],
         "rows[0][0] > 0",
         0,
-        "non-null: branch",
+        "non-null: member",
       ],
       [
         "a collection mutated in a later operand: the body's read",
@@ -2287,14 +2297,14 @@ test("a deep path's events are its prefixes' and collections' that hold one, whe
         ],
         "repeat rows[0][0]",
         7,
-        "non-null: branch",
+        "non-null: member",
       ],
       [
         "a positive collection test's element step",
         [lists, "if m is integer[][] { m[0].reverse()\n repeat m[0][0] {} }"],
         "repeat m[0][0]",
         7,
-        "is integer element: branch",
+        "is integer element: member",
       ],
     ],
     at,

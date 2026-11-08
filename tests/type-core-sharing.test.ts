@@ -791,9 +791,11 @@ const COMPOSED_ORDER_ROWS: readonly {
     },
     {
       name: "a condition's other kinds at its site",
+      // (its other kinds stored by handlers: a run the compiler does not prove, the warning, never the route rule's error,
+      // AD-1 and X7)
       source:
-        'let value: integer | string | duration | boolean = 1\nif hostValue == 1 { value = "s" }\n' +
-        "if hostOther == 1 { value = 1 s }\nif value {}\nexit\n",
+        "let value: integer | string | duration | boolean = true\ntimer async 1 s { value = 1 }\n" +
+        'timer async 2 s { value = "s" }\ntimer async 3 s { value = 1 s }\nif value {}\nexit\n',
       lists: (answers) =>
         warnings(answers).flatMap((warning) =>
           warning.kinds[0] === "integer" && warning.besides.length > 0 ? [warning.besides] : [],
@@ -1598,10 +1600,11 @@ test("a property store missing from literals the levels fold names the object wr
  * #1323 (Sol's `fresh-growth` family): k calls of `read({noise:hostValue,p:{}})` and k reads of `x.p.f_i` in `read`,
  * every read a `missing` of the same objects: the members' reads that name it are shared between the reads the fold
  * proves alike (`membersMissing`'s classes), so the reads beyond the present-property control grow linearly in k, not
- * as k², with the sharing on, as the diagnostics do.
+ * as k², with the sharing on, as the diagnostics do. #1948: and with k more calls whose arguments lack `p`, so that
+ * the reads below `p` come from the property index, its holders' fold kept once per path (`holderGroups`).
  */
 test("a group's missing writer is read once per class of alike reads, linear in the family's size (#1323)", () => {
-  const program = (k: number, absent: boolean): SourceFile[] => [
+  const program = (k: number, absent: boolean, lacking: boolean): SourceFile[] => [
     {
       path: "main.tease",
       source: [
@@ -1613,6 +1616,9 @@ test("a group's missing writer is read once per class of alike reads, linear in 
           { length: k },
           (_, i) => `let r${i}=read({noise:hostValue,p:${absent ? "{}" : "shared"}})`,
         ),
+        ...(lacking
+          ? Array.from({ length: k }, (_, i) => `let z${i}=read({noise:hostValue,q:${i}})`)
+          : []),
         "exit",
         "",
       ].join("\n"),
@@ -1625,16 +1631,18 @@ test("a group's missing writer is read once per class of alike reads, linear in 
     return original.apply(this, args);
   };
   try {
-    const extra = (k: number): number => {
-      const count = (absent: boolean): number => {
-        reads = 0;
-        inMode(MODES[0]!, () => analyseCore(coreRequest(program(k, absent), GLOBALS)!));
-        return reads;
+    for (const lacking of [false, true]) {
+      const extra = (k: number): number => {
+        const count = (absent: boolean): number => {
+          reads = 0;
+          inMode(MODES[0]!, () => analyseCore(coreRequest(program(k, absent, lacking), GLOBALS)!));
+          return reads;
+        };
+        return count(true) - count(false);
       };
-      return count(true) - count(false);
-    };
-    const [small, large] = [extra(8), extra(32)];
-    assert.ok(large <= 4 * small + 4, `${small} at 8, ${large} at 32`);
+      const [small, large] = [extra(8), extra(32)];
+      assert.ok(large <= 4 * small + 4, `${small} at 8, ${large} at 32, lacking ${lacking}`);
+    }
   } finally {
     Contract.prototype.contractOfValueAt = original;
   }

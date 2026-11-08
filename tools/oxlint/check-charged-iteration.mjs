@@ -81,6 +81,7 @@ const CONSTANT = [
   ...core("type-inference/core/program.ts", [
     "CoreProgram.effectNode",
     "CoreProgram.exprAt",
+    "CoreProgram.functionRegion",
     "CoreProgram.live",
     "CoreProgram.position",
     "CoreProgram.positionEnd",
@@ -111,7 +112,8 @@ const CHARGING = [
     "CoreProgram.blockReachable",
     "CoreProgram.inBlockCode",
   ]),
-  ...core("type-inference/core/values.ts", ["Values.valueItems"]),
+  // (a key's read at a node, §3: the value side's charged work, as `valueItems`)
+  ...core("type-inference/core/values.ts", ["Values.keyItems", "Values.valueItems"]),
 ];
 
 /**
@@ -130,7 +132,12 @@ const STEP = [
   ...core("type-inference/core/definitions.ts", ["keyBelow", "keyOf", "keyPath", "keyPlace"]),
   ...core("type-inference/core/exact-path.ts", ["withoutEmpty"]),
   ...core("type-inference/core/handlers.ts", ["HandlerIndex.afterSomeCreation"]),
-  ...core("type-inference/core/program.ts", ["CoreProgram.targetRoot", "propertyName"]),
+  // (a site's source text, kept as charged text at the call: `NarrowingRoutes.#text`)
+  ...core("type-inference/core/program.ts", [
+    "CoreProgram.targetRoot",
+    "CoreProgram.textAt",
+    "propertyName",
+  ]),
   ...core("type-inference/narrowing-shapes.ts", ["conditionShape"]),
 ];
 

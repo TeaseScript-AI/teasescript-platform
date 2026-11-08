@@ -246,8 +246,9 @@ export class NarrowingEvents {
       lists.push([this.#texts(prefix, false), "branch"]);
     for (const variable of each(work, "eventSteps", g.variables))
       lists.push([this.#texts(variable, true), "branch"]);
+    // (a collection's invalidation changes the element read, the `member` word, as its own store's word is `branch`)
     for (const collection of each(work, "eventSteps", g.collections))
-      lists.push([this.index.invalidations(collection)?.texts, "branch"]);
+      lists.push([this.index.invalidations(collection)?.texts, "member"]);
     if (this.#ownedAway(g)) lists.push([this.index.statements.callTexts, "call"]);
     return lists;
   }
@@ -384,7 +385,7 @@ export class NarrowingEvents {
     for (const collection of each(this.#work, "eventSteps", g.collections)) {
       const invalidations = this.index.invalidations(collection);
       if (invalidations !== undefined)
-        events.push({ positions: invalidations.positions, word: "branch", own: false });
+        events.push({ positions: invalidations.positions, word: "member", own: false });
     }
     if (this.#ownedAway(g))
       events.push({ positions: definitions.sitePositions, word: "call", own: false });

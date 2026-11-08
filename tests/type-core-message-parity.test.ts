@@ -934,7 +934,39 @@ const UNION_RULE_FIXES: ReadonlyMap<string, string> = new Map([
   ],
 ]);
 
+/** The union tests a record's N10 payloads name (`if x is T`), by record. */
+const ROUTE_TESTS: ReadonlyMap<string, readonly string[]> = new Map(
+  readFixture().map((record) => [
+    record.name,
+    record.expected.diagnostics.flatMap((d) =>
+      d.requiredCheck === undefined
+        ? []
+        : d.requiredCheck.missingTests.filter((t) => / is /.test(t)),
+    ),
+  ]),
+);
+const routeTests = (record: string): readonly string[] => ROUTE_TESTS.get(record) ?? [];
+
 const INTENDED: readonly Intended[] = [
+  {
+    rule:
+      "AD-1 (#1073 PR 4): a written union's member the use does not take, brought by a route " +
+      "without a check, is the route rule's error, whose fix is the test the route lacks (`if x is T`, its record's " +
+      "N10 payload), not the current checker's conversion of a value it took as definite",
+    matches: (pair) =>
+      routeTests(pair.record).length > 0 &&
+      /^'[^']+' can be [^.]+ here because of line \d+\./.test(pair.message),
+    // (the test its record's payload names: as code, or in words of its type where its code is not proved, #1449)
+    replacement: (pair) => {
+      const tests = routeTests(pair.record);
+      const kind = /^if .+ is (\w+)$/.exec(tests[0] ?? "")?.[1] ?? "(?!)";
+      return new RegExp(
+        tests.map((test) => `as in '${escaped(test)} \\{`).join("|") +
+          `|Check that '[^']+' is [^.']*\\(${kind}\\) first\\.`,
+      );
+    },
+    count: 10,
+  },
   {
     rule:
       "TABLE r4.162: the new checker's code stands only where it is proved where it is pasted (no other diagnostic in " +
@@ -950,7 +982,8 @@ const INTENDED: readonly Intended[] = [
     replacement: (pair) =>
       unproved(pair)[pair.forms.findIndex(({ form }) => form?.test(pair.message) !== true)] ??
       /(?!)/,
-    count: 17,
+    // (5 more since #1073 PR 4: the route rule's errors beside a union, whose fallback for null alone is not proved)
+    count: 22,
   },
   {
     rule:
@@ -1006,7 +1039,8 @@ const INTENDED: readonly Intended[] = [
       diagnostic.class === "warning-runtime-check" &&
       diagnostic.fits.length > 0,
     replacement: ({ record, named }) => typeTest(named, UNION_TESTS.get(record)!),
-    count: 11,
+    // (1 since #1073 PR 4: its 10 written-union pairs are the route rule's errors, the AD-1 entry's)
+    count: 1,
   },
   {
     rule:
@@ -1051,7 +1085,9 @@ const INTENDED: readonly Intended[] = [
       diagnostic.besides.length > 0 &&
       / otherwise (?!\.\.\.$)\S/.test(current),
     replacement: () => exact(SAME_TYPE),
-    count: 5,
+    // (0 since #1073 PR 4: these null fixes are the route rule's errors', in words where their code is not proved, the
+    // #1449 entry's)
+    count: 0,
   },
   {
     rule:

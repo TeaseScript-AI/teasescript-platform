@@ -100,8 +100,8 @@ export interface PrefixLevels {
    * member (`closedObject`): a property below the prefix is read from its property index (`propertyItems`).
    */
   readonly closed: boolean;
-  /** #1456: whether a property below it has been read; its first read is the levels' alone (`propertyItems`). */
-  read: boolean;
+  /** #1456: how many times a property below it has been read; its first read is the levels' alone (`propertyItems`). */
+  reads: number;
 }
 
 /**
@@ -133,11 +133,16 @@ export interface PropertyIndex {
 
 /**
  * #1456: a prefix of closed objects whose properties its levels read until the index pays (`propertyItems`), from
- * its second property read on: the reads made so far, and the index's size, its sources' property names.
+ * the read whose folds could first pay for the least index on: its sources' property names.
  */
 export interface PropertyReads {
-  asked: number;
   readonly names: number;
+  /**
+   * #1948: each name's holders among its sources, counted once its reads could pay for the index (`null` until then),
+   * and the sources its reads from then on would have saved, each lacking the read's property.
+   */
+  holding: Map<string, number> | null;
+  saved: number;
 }
 
 /** F11 at a prefix's property: the earliest writer of a source without it, and the first one's position (-1: none). */

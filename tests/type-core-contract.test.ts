@@ -38,8 +38,9 @@ import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import type { Solver, Work } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
-import { PROPERTY_STORE_FAMILIES } from "./helpers/type-core-families.js";
+import { PAY_RULE_FAMILIES, PROPERTY_STORE_FAMILIES } from "./helpers/type-core-families.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
+import { DOUBLING } from "./helpers/type-core-work.js";
 import {
   inMode,
   inOrder,
@@ -49,6 +50,7 @@ import {
   publishedAnswers,
   publishedRoute,
   publishedUpToOrder,
+  stopSet,
 } from "./helpers/type-core-oracles.js";
 
 /*
@@ -1047,7 +1049,9 @@ test("a property of a place replaced by objects answers as its levels do, in eve
       });
   }
   assert.deepEqual(differing, []);
-  const closed = ["plain", "two", "shared", "half", "typed", "open-value", "provenance", "alike"];
+  // (#1948: objects of a property each beside one they all hold are indexed only where their reads save what it costs,
+  // not at k = 4; the pay rule's family holds that shape, `mixed`)
+  const closed = ["plain", "two", "half", "typed", "open-value", "provenance", "alike"];
   assert.deepEqual(
     [...indexed].sort(),
     [
@@ -1097,18 +1101,65 @@ test("a deeper read below a place replaced by objects keeps each object's absenc
 });
 
 /**
- * #1948, #1585: a path below a property of a place replaced by closed objects answers as the place's levels do at every
- * depth: in every mode, each read's contract equals its levels' items, merged (`levelsAt`, a fold of every object at
- * each step down), so reading the objects holding its first property keeps each holder's answer at the path, the
- * others' one `missing`, its earliest literal writer and its place among the holders' answers. The objects lack the
- * property before, between and after its holders, the earliest lacking object is stored after the first, the holders
- * merge at successive steps (and one stored between two others it merges with), and the holders' values are host
- * data, an empty list, an object without the step and a list read at its element; the paths are read once in order and
- * again in reverse, so the later reads come from the index and the fold it keeps. With the sharing on, each source's
- * index answers a path of two or more steps.
+ * #1948: the property index's pay rule (`propertyItems`) over its family, the rule's regression guard.
+ *
+ * Every family of `PAY_RULE_FAMILIES` (k objects holding the read property every one, none, one each, Codex r2's
+ * absent-field pattern, or two shared beside one own; read below, at and past the index's first bound) grows with its
+ * source from k = 16 to 32 within the suite's bound, or within 1 % of `main`'s own growth where `main` grows faster
+ * (`MAIN_GROWTH`, measured once on `a1ebdae6c`, source order, sharing on and off): so its work against `main`'s falls
+ * or rises under 1 % a step. `none-below` and `none-at` are the one declared difference (the lead's ruling 3): k
+ * objects of a property each, read two or three times at a property none holds, pay one fold over the objects where
+ * `main`'s index answered the second read, a constant share converging near 1.12 of `main`'s work, its steps under
+ * 1 % from k = 16 (1.096, 1.110, 1.118 at k = 8, 16, 32). Publications equal `main`'s on every family, size and mode
+ * (the PR's evidence, outside CI).
+ *
+ * A path below a property answers as the place's levels do at every depth (`levelsAt`, a fold of every object at each
+ * step down), in every mode: with objects of a property of their own beside the case's and reads at absent properties
+ * before its own, so its reads come from the index; the earliest literal writer, the `missing`'s place, merges at
+ * successive steps and members' order are those of the full fold. Two objects holding the same property are never
+ * indexed. And the four sources of the stops area's `1249-astra-copy-and-cycle-cases`, two objects holding one
+ * property, complete their decision at demand allowance 256 in the mode where `main` completes it there.
  */
-test("a path below a property of a place replaced by objects answers as its levels do at every depth, in every mode (#1948, #1585)", () => {
-  const sources: readonly {
+test("the property index's pay rule over its family: work within main's growth, reads as the levels' (#1948, #1585)", () => {
+  const MAIN_GROWTH: Record<string, readonly [number, number]> = {
+    "pay-every-below": [2.64, 2.705],
+    "pay-every-at": [2.656, 2.721],
+    "pay-every-past": [3.046, 2.811],
+    "pay-none-below": [2.099, 2.09],
+    "pay-none-at": [2.12, 2.106],
+    "pay-none-past": [2.045, 2.054],
+    "pay-distinct-below": [3.167, 3.007],
+    "pay-distinct-at": [3.197, 3.032],
+    "pay-distinct-past": [2.888, 2.621],
+    "pay-shared-below": [2.029, 2.034],
+    "pay-shared-at": [2.027, 2.032],
+    "pay-shared-past": [2.05, 2.056],
+    "pay-mixed-below": [2.703, 2.582],
+    "pay-mixed-at": [2.71, 2.587],
+    "pay-mixed-past": [2.953, 2.723],
+  };
+  assert.deepEqual(
+    PAY_RULE_FAMILIES.map((family) => family.name).sort(),
+    Object.keys(MAIN_GROWTH).sort(),
+  );
+  const steep: string[] = [];
+  for (const family of PAY_RULE_FAMILIES)
+    for (const [index, mode] of [MODES[0]!, MODES[1]!].entries()) {
+      const [small, large] = [16, 32].map((k) => {
+        const request = coreRequest(family.program(k), ["hostValue", "hostOther"]);
+        assert.ok(request !== null, family.name);
+        const { budget } = inMode(mode, () => analyseCore(request));
+        assert.equal(budget.exhausted, null, family.name);
+        return { total: budget.total, nodes: budget.counts.get("syntaxNodes") ?? 1 };
+      });
+      const growth = (2 * (large!.total / small!.total)) / (large!.nodes / small!.nodes);
+      const bound = Math.max(DOUBLING, 1.01 * MAIN_GROWTH[family.name]![index]!);
+      if (growth > bound)
+        steep.push(`${family.name} ${JSON.stringify(mode)}: ${growth.toFixed(3)}`);
+    }
+  assert.deepEqual(steep, []);
+
+  const cases: readonly {
     readonly name: string;
     readonly source: string;
     readonly reads: readonly string[];
@@ -1134,13 +1185,13 @@ test("a path below a property of a place replaced by objects answers as its leve
     {
       name: "merged at successive steps",
       source:
-        'let root = {f: {q: {n: 1}}, g: 1}\nroot = {f: {q: {n: 1}}, g: "s"}\nroot = {f: {q: {n: 2}}, g: true}\nroot = {f: {q: {n: 1}}, h: 1}\nexit',
+        'let root = {f: {q: {n: 1}}, g: 1}\nroot = {f: {q: {n: 1}}, g: "s"}\nroot = {f: {q: {n: 2}}, g: true}\nroot = {h: {q: {n: 1}}, g: 1}\nroot = {h0: 1}\nroot = {h1: 1}\nroot = {h2: 1}\nexit',
       reads: ["f.q.n", "f.q", "f.q.absent", "f.absent.n"],
     },
     {
       name: "merged with one stored between",
       source:
-        'let root = {f: {q: {n: 1}, x: 1}, g: 1}\nroot = {f: {q: {n: 1}, x: "s"}, g: 2}\nroot = {f: {q: {n: 1}, x: 1}, g: "z"}\nroot = {h: 1}\nexit',
+        'let root = {f: {q: {n: 1}, x: 1}, g: 1}\nroot = {f: {q: {n: 1}, x: "s"}, g: 2}\nroot = {f: {q: {n: 1}, x: 1}, g: "z"}\nroot = {h: 1}\nroot = {h0: 1}\nroot = {h1: 1}\nroot = {h2: 1}\nexit',
       reads: ["f.q.n", "f.q.absent", "f.x", "f.q"],
     },
     {
@@ -1150,23 +1201,40 @@ test("a path below a property of a place replaced by objects answers as its leve
       reads: ["f.n", "f.n.element", "f.absent"],
     },
     {
+      name: "every object holding the property",
+      source:
+        'let first = {inside: {tone: 1}}\nlet second = {inside: {tone: "bad"}}\nlet root = second\nroot = first\nexit',
+      reads: ["inside.tone", "inside", "inside.absent"],
+    },
+    {
       name: "a list read at its element",
       source:
         "let t:integer = 1\nlet root = {f0: [t]}\nroot = {f1: [t]}\nroot = {f2: [t]}\nroot = {f3: [t]}\nexit",
       reads: ["f0.element", "f1.element", "f3.element", "absent.element"],
     },
   ];
+  // (objects of a property each and reads at absent ones first, so that the case's reads come from the index)
+  const padded = (source: string): string =>
+    source.replace(
+      /exit$/,
+      `${Array.from({ length: 4 }, (_, i) => `root = {d${i}: 1}`).join("\n")}\nexit`,
+    );
+  const absent = Array.from({ length: 8 }, (_, j) => `z${j}.n`);
   const differing: string[] = [];
-  const deep = new Set<string>();
-  for (const { name, source, reads } of sources) {
-    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  const indexed = new Set<string>();
+  for (const { name, source, reads } of cases) {
+    const alone = name === "every object holding the property";
+    const request = coreRequest(
+      [{ path: "main.tease", source: alone ? source : padded(source) }],
+      ["hostValue", "hostOther"],
+    );
     assert.ok(request !== null, name);
     for (const mode of MODES)
       inMode(mode, () => {
         const pass = narrowingPass(request);
         const root = bindingOf(pass, "root");
         const prefix = keyOf(root, []);
-        for (const read of [...reads, ...[...reads].reverse()]) {
+        for (const read of [...(alone ? [] : absent), ...reads, ...[...reads].reverse()]) {
           const path = read.split(".");
           const asked = pass.solver.run(pass.contract.contractOf(keyOf(root, path)));
           const levels = pass.solver.run(levelsAt(pass.contract, prefix, stepsRest(path)));
@@ -1174,16 +1242,36 @@ test("a path below a property of a place replaced by objects answers as its leve
             differing.push(`${name}: ${read} ${JSON.stringify(mode)}`);
         }
         const held = pass.contract.propertyIndexes.get(pass.contract.prefixStores(prefix));
-        if (
-          held !== undefined &&
-          "folds" in held &&
-          [...held.folds.keys()].some((key) => key.includes("."))
-        )
-          deep.add(name);
+        if (held !== undefined && "holders" in held) indexed.add(name);
       });
   }
   assert.deepEqual(differing, []);
-  assert.deepEqual([...deep].sort(), sources.map(({ name }) => name).sort());
+  assert.deepEqual(
+    [...indexed].sort(),
+    cases
+      .map(({ name }) => name)
+      .filter((name) => name !== "every object holding the property")
+      .sort(),
+  );
+
+  const first =
+    'let first={inside:{tone:1}}\nlet second={inside:{tone:"bad"}}\nlet result=second\n';
+  for (const { source, mode } of [
+    { source: `${first}result=first\nexit\n`, mode: 2 },
+    { source: `${first}result=first\nsay result.inside.tone\nexit\n`, mode: 0 },
+    { source: `${first}say result.inside.tone\nresult=first\nexit\n`, mode: 0 },
+    {
+      source:
+        'let a={tone:1,inner:null}\na.inner=a\nlet bad={inner:{tone:"bad"}}\nlet other=a\nother=bad\nsay other.inner.tone\nexit\n',
+      mode: 1,
+    },
+  ])
+    assert.deepEqual(
+      stopSet([{ path: "main.tease", source }], MODES[mode]!, ["hostValue", "hostOther"], 256)
+        ?.stops,
+      [],
+      `${source} mode ${mode}`,
+    );
 });
 
 /**
