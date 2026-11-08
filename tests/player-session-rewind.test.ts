@@ -563,6 +563,32 @@ for (const end of ["Debug off", "unmount"] as const)
     assert.equal(host.session.value, inspected, "nothing reinstated");
   });
 
+for (const hold of ["request", "reply"] as const)
+  test(`Debug off while an adoption's read is held (${hold}), then a lost connection: nothing is reinstated, and nothing rejects`, async (context) => {
+    const rejections: unknown[] = [];
+    const record = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", record);
+    context.after(() => void process.off("unhandledRejection", record));
+    const storage = memoryStorage();
+    const made = createHost(context, storage.provider, { lossy: true });
+    const { host, rewind, debug } = made;
+    await start(context, host);
+    await choose(context, host, "One");
+    assert.equal(await rewind.back(0), true);
+    const shown = host.session.value;
+    const held = holdRead(context, await host.bridge, "captureStorage", hold, false);
+    const chosen = choose(context, host, "Two");
+    await held.arrived;
+    debug.stop();
+    made.lose!();
+    held.release();
+    await chosen;
+    await settle(context);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(host.session.value, shown, "the lost session is not reinstated");
+    assert.deepEqual(rejections, [], "no promise rejected unhandled");
+  });
+
 test("Back waits for a pending save, and a new session deletes the history", async (context) => {
   const storage = memoryStorage();
   const { host, rewind, spill } = createHost(context, storage.provider);

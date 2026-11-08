@@ -142,7 +142,8 @@ export function useDebugRewind(player: PlayerSessionHost) {
   }
 
   // Turning Debug off leaves no restored state inspected: one whose adoption is under way is reinstated only if that
-  // adoption fails and the session is still that generation; a step under way is abandoned with the history.
+  // adoption fails while the session is still that generation and its history was not retired meanwhile (a lost
+  // connection retires it: the host no longer holds the parked session). A step under way is abandoned with the history.
   tryOnScopeDispose(() => {
     const current = history.value;
     const adoption = rewind.adoption();
@@ -151,10 +152,27 @@ export function useDebugRewind(player: PlayerSessionHost) {
       if (adoption === null) reinstate(parked);
       else {
         const generation = player.generation.value;
-        void adoption.then((adopted) => {
-          if (!adopted && rewind.inspecting.value && player.generation.value === generation)
-            reinstate(parked);
-        });
+        const retirements = rewind.retirements.value;
+        adoption.then(
+          (adopted) => {
+            if (
+              adopted ||
+              !rewind.inspecting.value ||
+              player.generation.value !== generation ||
+              rewind.retirements.value !== retirements
+            )
+              return;
+            try {
+              reinstate(parked);
+            } catch (error) {
+              // On a live connection, a reinstatement that fails is the Player's host failure.
+              player.reportHostError(error);
+            }
+          },
+          () => {
+            // An adoption that rejected is its caller's failure to report; nothing is reinstated for it.
+          },
+        );
       }
     }
     rewind.onAdopted(null);
