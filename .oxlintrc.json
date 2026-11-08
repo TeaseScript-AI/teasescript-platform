@@ -110,6 +110,14 @@
         "typescript/no-base-to-string": "off",
         "typescript/restrict-template-expressions": "off"
       }
+    },
+    {
+      "files": ["tests/helpers/live-host-effects.ts", "tests/helpers/source-ops-lifecycle.ts"],
+      "rules": { "typescript/no-base-to-string": "off" }
+    },
+    {
+      "files": ["tests/player-session-rewind.test.ts"],
+      "rules": { "typescript/no-floating-promises": "off" }
     }
   ]
 }
