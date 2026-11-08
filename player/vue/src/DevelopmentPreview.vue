@@ -119,8 +119,8 @@ const player = usePlayerSession(
 );
 
 // `?rewindGate=slow` holds each restart gate of Debug's rewind for 1.5 s, so a switch lasts long enough to show its
-// animation; `?rewindGate=fail` fails the second one, Debug off's reinstatement after a Back, so its retry shows
-// (DEBUGGER.md "Rewind"). The Player reads the gate at each call (`rewind.beforeRestart`).
+// animation; `?rewindGate=fail` fails the second one, Debug off's reinstatement after a Back, so its retry shows, and
+// holds the third, that retry, likewise (DEBUGGER.md "Rewind"). The Player reads the gate at each call (`rewind.beforeRestart`).
 const rewindGate = query.get("rewindGate");
 if (rewindGate === "slow" || rewindGate === "fail") {
   const gate = player.rewind.beforeRestart.bind(player.rewind);
@@ -128,7 +128,7 @@ if (rewindGate === "slow" || rewindGate === "fail") {
   player.rewind.beforeRestart = async () => {
     asked += 1;
     if (rewindGate === "fail" && asked === 2) throw new Error("The restart gate failed (rewindGate=fail).");
-    if (rewindGate === "slow") await new Promise((resolve) => setTimeout(resolve, 1_500));
+    if (rewindGate === "slow" || asked === 3) await new Promise((resolve) => setTimeout(resolve, 1_500));
     return gate();
   };
 }

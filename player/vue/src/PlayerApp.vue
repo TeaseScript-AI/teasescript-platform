@@ -324,14 +324,20 @@ watch(
       previous[0] === failure &&
       previous[1] === hostError
     )
-      // A retried return keeps its notice, whose toast the retry closed, until it succeeds or fails anew.
+      // A retried return keeps its notice, whose toast the retry closed and whose retry it disables, until it succeeds
+      // or fails anew.
       return;
     else
       props.player.publishNotice(
         playerNotices.sessionError(
           failure === null ? "player" : "script",
           showErrorDetails,
-          returnFailed ? () => void props.player.rewind.retryReturn() : undefined,
+          returnFailed
+            ? {
+                run: () => void props.player.rewind.retryReturn(),
+                enabled: () => props.player.rewind.returnFailed.value,
+              }
+            : undefined,
         ),
       );
   },

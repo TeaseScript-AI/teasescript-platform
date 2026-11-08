@@ -3017,10 +3017,18 @@ async function rewindSwitchScenario(cdp, origin) {
       );
       await save(`retry-${mode}-${device}`);
       // The retry brings the session Back left back, which takes input again, and withdraws the error.
+      // The retry, which the failing gate holds, closes its toast; the panel does not offer it again while it runs.
       await physicalClickOn(cdp, retry, "the error notice's Retry return to session");
+      await physicalClick(cdp, "[data-notification-bell]");
       await waitFor(
         cdp,
-        `!document.querySelector('[data-sonner-toast][data-type="error"]') && !!${choice("Left")} && !${choice("Left")}.disabled`,
+        `document.querySelector('[data-notice-action="session-error"]')?.disabled === true`,
+        1_000,
+        `A pending retry, ${mode} ${device}: the panel still offers it`,
+      );
+      await waitFor(
+        cdp,
+        `!document.querySelector('[data-player-notice="session-error"]') && !!${choice("Left")} && !${choice("Left")}.disabled`,
         8_000,
         `The retry, ${mode} ${device}: the session did not come back`,
       );

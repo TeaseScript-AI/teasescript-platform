@@ -587,7 +587,7 @@ Start withdraws it), a session this browser cannot keep for a reload (warning, w
 withdrawn when the request ends), a media file the script refers to that the Player cannot use (warning, see
 [Stage and media presentation](#stage-and-media-presentation)), and a session stopped by an error (error, with
 **Details**; see [Session end and failure](#session-end-and-failure)), which after a failed return to the session from
-Debug's [rewind](../DEBUGGER.md#rewind) needs action: **Retry return to session**. Each level also has a theme status colour, following
+Debug's [rewind](../DEBUGGER.md#rewind) needs action: **Retry return to session**, disabled while that retry runs. Each level also has a theme status colour, following
 the usual convention: info blue, warning orange, error red. A toast uses the level's soft tint as its surface and its
 solid tone for the border and icon; a panel entry uses the same tint with a solid mark along its start edge and a solid
 icon; and the bell's dot takes the most severe level that needs attention. The development preview's Visual Lab shows every level.

@@ -11,7 +11,12 @@ export interface PlayerNotice {
   readonly level: PlayerNoticeLevel;
   readonly message: string;
   /** One control the player may activate, such as retrying audio; it runs from the player's click. */
-  readonly action?: { readonly label: string; readonly run: () => void };
+  readonly action?: {
+    readonly label: string;
+    readonly run: () => void;
+    /** Whether it can run now, read while the action shows, which shows it disabled otherwise; by default it can. */
+    readonly enabled?: () => boolean;
+  };
   /** Opens more about the notice, such as an error's dialog, as **Details**; unlike `action`, it leaves the toast open. */
   readonly details?: () => void;
   /**
@@ -113,12 +118,13 @@ export const playerNotices = {
   }),
   /**
    * The session stopped because of a script error, or the Player itself failed; Details shows the error. `retry`, after
-   * a failed return to the session (DEBUGGER.md "Rewind"), retries that return, the only way back to it but a new Start.
+   * a failed return to the session (DEBUGGER.md "Rewind"), retries that return, the only way back to it but a new Start;
+   * it is `enabled` until a retry begins.
    */
   sessionError: (
     cause: "script" | "player",
     showDetails: () => void,
-    retry?: () => void,
+    retry?: { readonly run: () => void; readonly enabled: () => boolean },
   ): PlayerNotice => ({
     key: playerNoticeKeys.sessionError,
     level: "error",
@@ -126,7 +132,10 @@ export const playerNotices = {
       cause === "script"
         ? "The script stopped because of an error."
         : "The Player ran into an error.",
-    ...(retry && { action: { label: "Retry return to session", run: retry }, dismissible: false }),
+    ...(retry && {
+      action: { label: "Retry return to session", run: retry.run, enabled: retry.enabled },
+      dismissible: false,
+    }),
     details: showDetails,
   }),
   /**

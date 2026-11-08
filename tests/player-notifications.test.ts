@@ -169,11 +169,10 @@ test("an error's toast stays: its action closes it, its Details leaves it open",
   assert.equal(warning.duration, 8000);
   click(warning.action);
   const error = toastOptions(
-    playerNotices.sessionError(
-      "player",
-      () => runs.push("details"),
-      () => runs.push("retry"),
-    ),
+    playerNotices.sessionError("player", () => runs.push("details"), {
+      run: () => runs.push("retry"),
+      enabled: () => true,
+    }),
   );
   assert.equal(error.duration, Infinity);
   // Sonner closes its toast after its cancel button's click always, and after its action button's unless prevented.
