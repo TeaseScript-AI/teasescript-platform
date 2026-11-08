@@ -37,6 +37,7 @@ import {
   withQuestionBound,
   withQuestionMemory,
 } from "./helpers/type-core-oracles.js";
+import { DOUBLING } from "./helpers/type-core-work.js";
 
 /*
  * Controls of the oracle library (`tests/helpers/type-core-oracles.ts`), which later reviews and the generator corpus
@@ -434,6 +435,69 @@ test("the oracle's questions cost per cell they return is flat on W19-record, an
     for (const cost of series)
       assert.ok(cost < QUESTION_UNITS_PER_CELL, `${shape}: ${JSON.stringify(series)}`);
   }
+});
+
+/** No globals: the list-field copies read none. */
+const NO_GLOBALS: readonly string[] = [];
+
+/**
+ * #1948: a binding's admitted type, asked of each binding, reads its copied value at its own field, never every copied
+ * object there: on r3-root-copies (`r_i = a.f_i` over k whole copies of one-field objects into `a`, the oracle's
+ * `["element"]` question) and with the fields lists (the backend's own `[]` question, which reads their elements), the
+ * bindings' questions grow with the program in every mode (3.7 a doubling at 16 → 32 before #1948: the contract's fold
+ * of every copied object at the field, admission's copies of `a` tried for every field).
+ */
+test("a binding's admitted type reads its copied value at its own field: the bindings' questions grow linearly (#1948)", async () => {
+  const rows = (k: number, row: (i: number) => string) =>
+    Array.from({ length: k }, (_, i) => row(i)).join("\n");
+  const lists = (k: number) => [
+    {
+      files: main(
+        [
+          "let t:integer=1",
+          rows(k, (i) => `let root${i}={f${i}:[t]}`),
+          "let a=root0",
+          rows(k - 1, (i) => `a=root${i + 1}`),
+          rows(k, (i) => `let r${i}=a.f${i}`),
+          "exit",
+        ].join("\n"),
+      ),
+      globals: NO_GLOBALS,
+    },
+  ];
+  const series = [
+    {
+      name: "r3-root-copies [element]",
+      path: ["element"],
+      sources: await family(
+        "tests/families/copies/f1-astra-r3-field-families.mjs",
+        "r3-root-copies",
+        [16, 32],
+      ),
+    },
+    { name: "list fields []", path: [], sources: [...lists(16), ...lists(32)] },
+  ];
+  const steep: string[] = [];
+  for (const { name, path, sources } of series)
+    for (const [index, mode] of MODES.entries()) {
+      const [small, large] = sources.map(({ files, globals }) => {
+        const request = coreRequest(files, globals);
+        assert.ok(request !== null);
+        return inMode(mode, () => {
+          const answers = analyseCore(request);
+          assert.equal(answers.budget.exhausted, null);
+          const bindings = new CoreProgram(request).places
+            .filter(({ kind }) => kind.kind === "binding" && /^r\d+$/.test(kind.name))
+            .map(({ id }) => id);
+          answers.apart(() => undefined);
+          const before = answers.budget.finishing;
+          answers.apart(() => bindings.map((binding) => answers.place(binding, path)));
+          return answers.budget.finishing - before;
+        });
+      });
+      if (large! > DOUBLING * small!) steep.push(`${name}, mode ${index}: ${small} → ${large}`);
+    }
+  assert.deepEqual(steep, []);
 });
 
 test("jsonText writes plan data as JSON.stringify does, and also past the depth JSON.stringify reaches (#1503)", () => {
