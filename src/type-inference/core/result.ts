@@ -445,6 +445,22 @@ export interface NotChecked {
 }
 
 /**
+ * N10's payload of the route rule's error (N3, N10; AD-1, #1073): the rule, the writer D′ whose value
+ * brings the offending kind to the use by a route without a check, and the tests that route lacks, in the order the
+ * message offers them.
+ */
+export interface RequiredCheck {
+  readonly rule: "N3";
+  readonly writer: SourceSite;
+  readonly missingTests: readonly string[];
+  /** The read the tests name, in the source's text (not recorded). */
+  readonly subject: string;
+  /** The warning the route rule's error stands in for: its kinds that fit and its provenance, which its fix reads. */
+  readonly fits: readonly ItemTag[];
+  readonly provenance: Provenance;
+}
+
+/**
  * An error, a written type's error, or a warning with its explanation and its one obligation (§4); each a consumer's
  * with its rule's code, the rule, and the offending kinds (an error's every kind; a warning's explaining item's).
  */
@@ -462,6 +478,10 @@ export type CoreDiagnostic =
       readonly expects?: SiteExpectation;
       /** Whether the values it names are there when the script runs (`unproved` where it does not say). */
       readonly present?: Presence;
+      /** N10: the required check a route to the use lacks (AD-1), where the error is the route rule's. */
+      readonly requiredCheck?: RequiredCheck;
+      /** The route rule's error: what a new variable keeping its subject declares, as the warning's (`keeps`). */
+      readonly keeps?: readonly ItemTag[] | "unproved";
     }
   | WrittenTypeError
   | {
@@ -617,6 +637,12 @@ export interface RecordDiagnostic {
   readonly suggestion?: string | null;
   /** The copy that brought a copied property's rejected kind (ADR 0021 rule 1.1, TABLE r4.75 (4)). */
   readonly related?: RecordSite;
+  /** N10's payload of the route rule's error (`RequiredCheck`). */
+  readonly requiredCheck?: {
+    readonly rule: string;
+    readonly writer: RecordSite;
+    readonly missingTests: readonly string[];
+  };
 }
 
 /**
@@ -687,6 +713,15 @@ export function coreRecord(result: CoreResult, paths: readonly string[]): CoreRe
               : diagnostic.rule.rule === "store" && diagnostic.rule.brought !== null
                 ? { related: site(diagnostic.rule.brought) }
                 : {}),
+            ...(diagnostic.kind !== "written-type" && diagnostic.requiredCheck !== undefined
+              ? {
+                  requiredCheck: {
+                    rule: diagnostic.requiredCheck.rule,
+                    writer: site(diagnostic.requiredCheck.writer),
+                    missingTests: [...diagnostic.requiredCheck.missingTests],
+                  },
+                }
+              : {}),
           }
         : {
             class: diagnostic.class,

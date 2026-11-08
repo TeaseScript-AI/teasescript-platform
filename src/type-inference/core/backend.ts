@@ -35,9 +35,10 @@ import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
  * count, an index), C5 (a member of a receiver at a read or a store), C10 (a fallback or a default) and C13 (a `for`
  * loop's iterable, a method's arguments and the elements `join` and `sort` read); its ingresses are a host value, a load
  * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
- * Rejected after the analysis: any other consumer's diagnostic, a warning about a possible `null` (narrowing's required
- * check, S10), a property read of a value that may be no object, a value `say` may not show, an argument of another
- * kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested `SLICE_DEPTH` deep.
+ * Rejected after the analysis: any other consumer's diagnostic, a property read of a value that may be no object, a
+ * value `say` may not show, an argument of another kind than a built-in function takes (the built-in signature check
+ * C13, S9b), and lists nested `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a
+ * route to the use has no check, else a warning whose use the runtime checks.
  * Refused during it: a value whose structure the slice does not follow, at the store whose capture established it
  * (`leftSlice`), the analysis ended there; nothing is refused at a stop or a work count. A stop compiles with its
  * warning and its checks at runtime (D4 a′), but where admission settled and a store's required check is not carried by
@@ -186,17 +187,6 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
       diagnostic.rule.rule !== "json"
     )
       return { file: diagnostic.site.file, span: at(diagnostic.site), what: "this operand" };
-    // a possible `null` needs narrowing's required check (S10); a member a receiver may lack is C5's own
-    if (
-      diagnostic.class === "warning-runtime-check" &&
-      diagnostic.obligation.kind === "null-check" &&
-      (diagnostic.kind !== "member-read" || diagnostic.obligation.on.includes(" is not null "))
-    )
-      return {
-        file: diagnostic.site.file,
-        span: at(diagnostic.site),
-        what: "a value that may be null here",
-      };
   }
   const kindsAt = (expression: Expression): readonly string[] =>
     (answers.at(nodeOf(answers, index, expression))?.items ?? []).map((item) => item.tag);

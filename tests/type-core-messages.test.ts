@@ -287,8 +287,10 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     [
       'let key = "k"\nlet v = load(key, default: null)\nv.add(2)\nexit\n',
       [
-        // (no check in code: 'v' may also lack the method there, which a null check does not rule out, TABLE r4.162)
-        `W TSV043 'v.add(2)': 'v' may be null here. ${STOPS} Check that 'v' is not null first.`,
+        // (no check in code: 'v' may also lack the method there, which a null check does not rule out, #1449;
+        // the load's null reaches the call by a route without a check: the route rule's error, AD-1)
+        `E TSV043 'v.add(2)': 'v' can be null here because of 'load(key, default: null)' on line 2. Check that 'v' is ` +
+          "not null first.",
         `W TSV043 'v.add(2)': 'v' may not have method 'add' here. If it does not, the Tease stops with an error at ` +
           `this line. ${OUTSIDE("v")}`,
       ],
@@ -296,8 +298,9 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     [
       'let key = "k"\nlet value = load(key, default: null)\nsay value.get(0, default: 3)\nexit\n',
       [
-        `W TSV043 'value.get(0, default: 3)': 'value' may be null here. ${STOPS} Check that 'value' is not null ` +
-          "first, or give a fallback of the same type with 'otherwise'.",
+        // (the load's null reaches the call by a route without a check: the route rule's error, AD-1)
+        `E TSV043 'value.get(0, default: 3)': 'value' can be null here because of 'load(key, default: null)' on ` +
+          "line 2. Check that 'value' is not null first, or give a fallback of the same type with 'otherwise'.",
         "W TSV043 'value.get(0, default: 3)': 'value' may not have method 'get' here. If it does not, the Tease " +
           `stops with an error at this line. ${OUTSIDE("value")}`,
         `W TSV043 '0': A list index must be a whole number (integer), but '0' may be a value of another type here. ${STOPS}`,
@@ -308,8 +311,9 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     [
       'let key = "k"\nlet value = load(key, default: null)\nsay value.get("a\\"b", default: 3)\nexit\n',
       [
-        `W TSV043 'value.get("a\\"b", default: 3)': 'value' may be null here. ${STOPS} Check that 'value' is not ` +
-          "null first, or give a fallback of the same type with 'otherwise'.",
+        // (the load's null reaches the call by a route without a check: the route rule's error, AD-1)
+        `E TSV043 'value.get("a\\"b", default: 3)': 'value' can be null here because of 'load(key, default: null)' ` +
+          "on line 2. Check that 'value' is not null first, or give a fallback of the same type with 'otherwise'.",
         `W TSV043 'value.get("a\\"b", default: 3)': 'value' may not have method 'get' here. If it does not, the ` +
           `Tease stops with an error at this line. ${OUTSIDE("value")}`,
         `W TSV043 '"a\\"b"': A list index must be a whole number (integer), but '"a\\"b"' may be a value of another ` +

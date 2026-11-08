@@ -4,13 +4,15 @@ import { pipeline } from "node:stream/promises";
 import { run } from "node:test";
 import { spec } from "node:test/reporters";
 import { filesAtOnce } from "./test-files-at-once.mjs";
+import { trackInFlight } from "./test-in-flight.mjs";
 
 // Runs the test files given as arguments in that order, each in its own process, with the reporter and exit status of
 // `node --test`, whose command line sorts the files instead, and as many at once as `node --test` runs, fewer where a
 // cgroup memory limit holds fewer (`tools/test-files-at-once.mjs`). A signal cancels the run as it cancels
 // `node --test`, which stops the files' processes instead of leaving them running. Where `TEST_FILE_SECONDS` names a
 // file, it receives each file's seconds from its process's start to its end, as CI's test jobs keep them for
-// `tools/measure-test-files.mjs`.
+// `tools/measure-test-files.mjs`. A test still running long after it began is named on standard error
+// (`tools/test-in-flight.mjs`).
 const controller = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => controller.abort());
 
@@ -21,6 +23,7 @@ const tests = run({
   isolation: "process",
   signal: controller.signal,
 });
+trackInFlight((type, listener) => tests.on(type, listener));
 const seconds = {};
 tests.on("test:complete", (data) => {
   // (a file's own entry is named by its path as given)
