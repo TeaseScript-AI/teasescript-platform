@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Project, ts } from "ts-morph";
 
-import { chargedIterationDiagnostics } from "./check-charged-iteration.mjs";
+import { CONFIGURED, chargedIterationDiagnostics } from "./check-charged-iteration.mjs";
 
 const ITERATION = `
 import type { WorkLedger } from "./budget.js";
@@ -17,6 +17,14 @@ export function* steps(work: WorkLedger, counter: string, more: () => boolean): 
     work.charge(counter);
     yield;
   }
+}
+export function mapped<T, U>(work: WorkLedger, counter: string, items: Iterable<T>, map: (item: T) => U): U[] {
+  const made: U[] = [];
+  for (const item of items) {
+    work.charge(counter);
+    made.push(map(item));
+  }
+  return made;
 }
 export function some<T>(work: WorkLedger, counter: string, items: Iterable<T>, test: (item: T) => boolean): boolean {
   for (const item of each(work, counter, items)) if (test(item)) return true;
@@ -33,6 +41,9 @@ export function listed(units: number): number {
 }
 export function helper(items: readonly number[]): number {
   return items.length;
+}
+export function joinParts(...parts: readonly (string | number | readonly string[])[]): string {
+  return parts.length === 0 ? "" : "|";
 }
 `;
 
@@ -259,4 +270,112 @@ const number = Number(items);
 export const all = [table, text, sum, size, number];
 `;
   assert.deepEqual(rejected(sourceText), [6, 15, 16, 17, 19]);
+});
+
+/** The lines the configured checker reports in an `objects.ts` holding `source`, the scope's other files empty. */
+function objectsLines(source, others = {}) {
+  const project = new Project({
+    useInMemoryFileSystem: true,
+    compilerOptions: {
+      strict: true,
+      target: ts.ScriptTarget.ES2023,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      lib: ["lib.es2023.d.ts"],
+    },
+  });
+  const [chargeFile] = CONFIGURED.charge.split(":");
+  project.createSourceFile(`/repo/${chargeFile}`, BUDGET);
+  project.createSourceFile(`/repo/${CONFIGURED.iteration}`, ITERATION);
+  const objects = CONFIGURED.files.find((file) => file.endsWith("/objects.ts"));
+  assert.ok(objects !== undefined, "objects.ts is in the configured scope");
+  for (const file of CONFIGURED.files)
+    if (file !== objects) project.createSourceFile(`/repo/${file}`, "export {};\n");
+  for (const [file, text] of Object.entries(others))
+    project.createSourceFile(`/repo/${file}`, text);
+  project.createSourceFile(`/repo/${objects}`, source);
+  return chargedIterationDiagnostics(project.getProgram().compilerObject, "/repo", CONFIGURED)
+    .filter(({ fileName }) => fileName.endsWith("/objects.ts"))
+    .map(({ line }) => line);
+}
+
+test("the configured checker covers objects.ts: a raw loop there is rejected, a charged one accepted (#1747)", () => {
+  // (through the configured scope itself: dropping objects.ts from it lets the raw loop pass, and this fails)
+  const lines = objectsLines(`
+import { each } from "../narrowing-iteration.js";
+import type { WorkLedger } from "../budget.js";
+declare const work: WorkLedger;
+export function raw(items: readonly number[]): number {
+  work.charge("objectSteps");
+  let total = 0;
+  for (const item of items) total += item;
+  return total;
+}
+export function charged(items: readonly number[]): number {
+  work.charge("objectSteps");
+  let total = 0;
+  for (const item of each(work, "objectSteps", items)) total += item;
+  return total;
+}
+`);
+  // (the raw loop's line, and nothing in the charged function: its items an entry's input)
+  assert.deepEqual(lines, [8]);
+});
+
+test("objects.ts calls only its own allowlist, and hands no collection of any size to an allowed call outside OBJECTS_COLLECTIONS (#1747, Codex r5, r6)", () => {
+  // (an `object` may be an array; `joinParts` and `keyOf` walk an array part; `keyBelow` is the narrowing modules')
+  const DEFINITIONS = `
+export function keyOf(place: number, path: readonly string[]): string {
+  return path.length === 0 ? String(place) : "|";
+}
+export function keyBelow(key: string, rest: readonly string[]): string {
+  return rest.length === 0 ? key : "|";
+}
+`;
+  const lines = objectsLines(
+    `
+import { joinParts, type WorkLedger } from "../budget.js";
+import { keyBelow, keyOf } from "../definitions.js";
+import { mapped } from "../narrowing-iteration.js";
+declare const work: WorkLedger;
+export function copy(input: object): object {
+  work.charge("objectSteps");
+  return { ...input };
+}
+export function name(input: readonly string[]): string {
+  work.charge("objectSteps");
+  return joinParts(input);
+}
+export function scalar(kind: string, at: number): string {
+  work.charge("objectSteps");
+  return joinParts(kind, at);
+}
+export function key(input: readonly string[]): string {
+  work.charge("objectSteps");
+  return keyOf(1, input);
+}
+export function fixed(): string {
+  work.charge("objectSteps");
+  return keyOf(1, []);
+}
+export function below(): string {
+  work.charge("objectSteps");
+  return keyBelow("1|", []);
+}
+export function labels(input: readonly string[]): string[] {
+  work.charge("objectSteps");
+  return mapped(work, "objectSteps", [input], joinParts);
+}
+export function called(input: readonly string[]): string[] {
+  work.charge("objectSteps");
+  return mapped(work, "objectSteps", [input], (parts) => joinParts(parts));
+}
+`,
+    { "src/type-inference/core/definitions.ts": DEFINITIONS },
+  );
+  // (the spread, the array join, the array key, a narrowing modules' call even with a literal array, an allowed function
+  // handed as a callback, and the same call in an arrow, now seen with its array; nothing in the scalar join or the
+  // literal key. objects.ts's language (`objects-language.mjs`) also rejects the `object` entry parameter (6), the
+  // narrowing modules' `keyBelow` as a callee (28), the unadmitted helper `mapped` (32, 36) and the arrow handed to it (36))
+  assert.deepEqual(lines, [6, 8, 12, 20, 28, 28, 32, 32, 36, 36, 36]);
 });

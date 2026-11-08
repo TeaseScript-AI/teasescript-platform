@@ -262,10 +262,12 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
     [5090, 5528, 5090, 5255, 6984, 6350, 6875, 6077],
   ],
   ["an add", "let b = [[1]]\nb.add(hostValue)", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],
+  // (18 units more at demand 64 since #1828: the mixed join's sentence walks each operand to its leaf and reads its
+  // occurrence there, its decider asked once with `decidedAt`'s, Codex r2 on #1899)
   [
     "a list join",
     `${frozen}\nlet xs = [1]\nlet ys = ["s"]\nb.f = [xs + ys]`,
-    [20044, 21252, 19818, 21009, 32902, 34371, 32052, 33430],
+    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],
   ],
   [
     "a compound assignment",

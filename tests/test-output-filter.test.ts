@@ -294,6 +294,42 @@ test(
   },
 );
 
+test(
+  "the full suite's runner stops without an error when its output has no reader before the signal",
+  { skip: process.platform === "win32" },
+  async () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+    const environment = { ...process.env };
+    delete environment.NODE_TEST_CONTEXT;
+    const ended = resolve(directory, "ended");
+    const file = resolve(directory, "ending.test.js");
+    // Ctrl+C ends the filter and a file's process at once, and the runner can report that file before it handles the
+    // signal itself. Here the file's process ends only after the runner's output has lost its reader, and no signal
+    // comes at all.
+    writeFileSync(
+      file,
+      `setInterval(() => require("node:fs").existsSync(${JSON.stringify(ended)}) && process.exit(1), 10);`,
+    );
+    const runner = spawn(
+      process.execPath,
+      [resolve(process.cwd(), "tools/run-test-files.mjs"), file],
+      { env: environment, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    runner.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+    const closed = once(runner, "close", { signal: AbortSignal.timeout(30_000) });
+    try {
+      runner.stdout.destroy();
+      writeFileSync(ended, "");
+      assert.deepEqual(await closed, [1, null]);
+      assert.doesNotMatch(stderr, /Error/);
+    } finally {
+      if (runner.exitCode === null && runner.signalCode === null) runner.kill("SIGKILL");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 const pipedInput = /takes no standard input, so do not pipe into it/;
 
 test("filter refuses data piped or redirected to its standard input", () => {

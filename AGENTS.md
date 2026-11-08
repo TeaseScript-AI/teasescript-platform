@@ -17,13 +17,24 @@ integration-status, or current-capability work.
 Planning documents, wishes, research, historical audits, examples, draft ADRs,
 tests, issues, pull-request text, and review comments are not accepted authority
 by themselves. A model preference, external convention, tool default, or
-earlier agent suggestion is not a repository requirement. Do not invent
-project-wide policy, numeric thresholds, style or readability limits, naming
-rules, compatibility promises, mandatory tools, or workflow gates. Use strong
-requirement language only for accepted behavior, real boundaries, or explicit
-owner decisions recorded in a canonical source. Propose durable rules separately
-with evidence; after owner approval, record them canonically before treating
-them as authority.
+earlier agent suggestion is not a repository requirement.
+
+Who decides what:
+
+- **Not invented by an agent:** project-wide policy, numeric thresholds, style or
+  readability limits, naming rules, compatibility promises, mandatory tools, or
+  workflow gates.
+- **The exception, development tooling and mechanical checks** (lint rules, CI
+  and pre-push checks, test and review tooling): these need no owner approval.
+  Whoever is responsible for the work adopts them with evidence, records them in
+  their canonical document, and keeps them neither stricter than their purpose
+  needs nor too loose to work.
+- **The owner's:** product, language, architecture, security and compatibility
+  decisions, and what counts as accepted behavior for a test to guard.
+- **Strong requirement language** only for accepted behavior, real boundaries, or
+  decisions recorded in a canonical source.
+- **A durable rule** is proposed separately with evidence; after the approval
+  that applies, record it canonically before treating it as authority.
 
 Durable repository responsibility must not depend on a persistent agent identity.
 Issue, branch, and pull-request assignments are temporary; agents do not become

@@ -1,0 +1,275 @@
+{
+  "cases": {
+    "headings": {
+      "rendered": "3dcc8844f7942a094fc12f0a4df1b3d7a94908cf:slug-probe.md",
+      "source": "# Slug probe\n\n## A – B\n\n## Don't stop: `npm run check:pretest`\n\n## snake_case and _emphasis_ **bold** *it*\n\n## [Link](x.md) &amp; Ünïcode\n\n## Same\n\n## Same\n\n## Same 1\n\nSetext two\n----------\n\nSetext one\n==========\n\n# Trailing ###\n\n## Ends with emoji 🎉\n\n## Under\\_score esc\n\n## `code_with_under` and `a  b`\n\n## <code>html</code> tag & more\n\n## 1. Numbered (part) [x] {y} ~z~ ^w^ \"q\" a/b a.b a,b a;b a=b a?b a!b a@b a$b a%b a+b\n\n## __double__ and ***triple*** and ~~strike~~\n\n> ## Quoted heading\n\n## Tab\tinside\n\n##    Spaced   out   \n\n   ## Indented three\n\n## Ünicode – Stripe — ‘curly’ “quotes” … ©®\n",
+      "links": [
+        "x.md"
+      ],
+      "anchors": [
+        "1-numbered-part-x-y-z-w-q-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab",
+        "a--b",
+        "code_with_under-and-a--b",
+        "dont-stop-npm-run-checkpretest",
+        "double-and-triple-and-strike",
+        "ends-with-emoji-",
+        "html-tag--more",
+        "indented-three",
+        "link--ünïcode",
+        "quoted-heading",
+        "same",
+        "same-1",
+        "same-1-1",
+        "setext-one",
+        "setext-two",
+        "slug-probe",
+        "snake_case-and-emphasis-bold-it",
+        "spaced---out",
+        "tabinside",
+        "trailing",
+        "under_score-esc",
+        "ünicode--stripe--curly-quotes--"
+      ]
+    },
+    "b1-list-fence": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b1-list-fence.md",
+      "source": "- ```md\n  example\n  ```\n\n[bad](missing.md)\n",
+      "links": [
+        "missing.md"
+      ],
+      "anchors": []
+    },
+    "b1-quote-fence": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b1-quote-fence.md",
+      "source": "> ```md\n> example\n\n[bad](missing.md)\n",
+      "links": [
+        "missing.md"
+      ],
+      "anchors": []
+    },
+    "b1-escaped-backticks": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b1-escaped-backticks.md",
+      "source": "\\`[bad](missing.md)\\`\n",
+      "links": [
+        "missing.md"
+      ],
+      "anchors": []
+    },
+    "b1-comment-in-code": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b1-comment-in-code.md",
+      "source": "`<!--` [bad](missing.md) `-->`\n",
+      "links": [
+        "missing.md"
+      ],
+      "anchors": []
+    },
+    "b1-code-in-destination": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b1-code-in-destination.md",
+      "source": "[bad](missing`x`.md)\n",
+      "links": [
+        "missing`x`.md"
+      ],
+      "anchors": []
+    },
+    "b1-indented-code": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b1-indented-code.md",
+      "source": "Text.\n\n    [bad](missing.md)\n",
+      "links": [],
+      "anchors": []
+    },
+    "b1-html-block": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b1-html-block.md",
+      "source": "<div>\n[bad](missing.md)\n</div>\n",
+      "links": [],
+      "anchors": []
+    },
+    "b1-unclosed-comment": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b1-unclosed-comment.md",
+      "source": "<!-- [bad](missing.md)\n",
+      "links": [],
+      "anchors": []
+    },
+    "b2-quoted-definition": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b2-quoted-definition.md",
+      "source": "> [ref]: missing.md\n>\n> [ref]\n",
+      "links": [
+        "missing.md"
+      ],
+      "anchors": []
+    },
+    "b2-listed-definition": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b2-listed-definition.md",
+      "source": "- [ref]: missing.md\n\n  [ref]\n",
+      "links": [
+        "missing.md"
+      ],
+      "anchors": []
+    },
+    "b2-escape-parity": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b2-escape-parity.md",
+      "source": "[bad\\\\](missing.md)\n",
+      "links": [
+        "missing.md"
+      ],
+      "anchors": []
+    },
+    "b2-nested-brackets": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b2-nested-brackets.md",
+      "source": "[outer [inner](README.md)](missing.md)\n",
+      "links": [
+        "README.md"
+      ],
+      "anchors": []
+    },
+    "b2-title-across-paragraphs": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b2-title-across-paragraphs.md",
+      "source": "[x](missing.md\n\n\"title\")\n",
+      "links": [],
+      "anchors": []
+    },
+    "b4-listed-heading": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b4-listed-heading.md",
+      "source": "- ## Listed\n\n[x](#listed)\n",
+      "links": [
+        "#listed"
+      ],
+      "anchors": [
+        "listed"
+      ]
+    },
+    "b4-quoted-setext": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b4-quoted-setext.md",
+      "source": "> Quoted\n> ---\n\n[x](#quoted)\n",
+      "links": [
+        "#quoted"
+      ],
+      "anchors": [
+        "quoted"
+      ]
+    },
+    "b4-multiline-setext": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b4-multiline-setext.md",
+      "source": "Line one\nline two\n---\n",
+      "links": [],
+      "anchors": [
+        "line-oneline-two"
+      ]
+    },
+    "b4-setext-one": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b4-setext-one.md",
+      "source": "Title one\n===\n",
+      "links": [],
+      "anchors": [
+        "title-one"
+      ]
+    },
+    "b4-html-block-heading": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b4-html-block-heading.md",
+      "source": "<div>\n## Ghost\n</div>\n",
+      "links": [],
+      "anchors": []
+    },
+    "b4-link-heading": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b4-link-heading.md",
+      "source": "## [a [b] c](README.md)\n",
+      "links": [
+        "README.md"
+      ],
+      "anchors": [
+        "a-b-c"
+      ]
+    },
+    "b4-image-heading": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b4-image-heading.md",
+      "source": "## ![Logo][ref] and text\n\n[ref]: picture.png\n",
+      "links": [
+        "picture.png"
+      ],
+      "anchors": [
+        "-and-text"
+      ]
+    },
+    "b5-entity-path": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b5-entity-path.md",
+      "source": "[x](README&#46;md)\n",
+      "links": [
+        "README.md"
+      ],
+      "anchors": []
+    },
+    "b5-entity-hash": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b5-entity-hash.md",
+      "source": "[x](target.md&num;fake)\n",
+      "links": [
+        "target.md#fake"
+      ],
+      "anchors": []
+    },
+    "b5-entity-heading": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b5-entity-heading.md",
+      "source": "## Caf&eacute; &copy;\n",
+      "links": [],
+      "anchors": [
+        "café-"
+      ]
+    },
+    "b5-invalid-codepoint": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b5-invalid-codepoint.md",
+      "source": "## A &#1114112; B\n",
+      "links": [],
+      "anchors": [
+        "a--b"
+      ]
+    },
+    "b6-unicode-numbers": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/b6-unicode-numbers.md",
+      "source": "## A ½ ² Ⅳ ① B\n",
+      "links": [],
+      "anchors": [
+        "a---ⅳ--b"
+      ]
+    },
+    "n3-shadowed-definition": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/n3-shadowed-definition.md",
+      "source": "[x]\n\n[x]: README.md\n[x]: missing.md\n",
+      "links": [
+        "README.md"
+      ],
+      "anchors": []
+    },
+    "n3-unused-definition": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/n3-unused-definition.md",
+      "source": "[unused]: missing.md\n",
+      "links": [],
+      "anchors": []
+    },
+    "front-matter": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/front-matter.md",
+      "source": "---\ntitle: T\n---\n\n# Body\n\n[a](x.md)\n",
+      "links": [
+        "x.md"
+      ],
+      "anchors": [
+        "body"
+      ]
+    },
+    "emoji-heading": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/emoji-heading.md",
+      "source": "## Done :tada:\n",
+      "links": [],
+      "anchors": [
+        "done-tada"
+      ]
+    },
+    "percent-and-space": {
+      "rendered": "2532b098f26853c3bd410809a288c43ce139dccd:probe-2015/percent-and-space.md",
+      "source": "[a](<with space.md>) [b](%C3%BCber.md#%C3%BCber) [c](sub/?plain=1#L2)\n",
+      "links": [
+        "sub/?plain=1#L2",
+        "with space.md",
+        "über.md#über"
+      ],
+      "anchors": []
+    }
+  }
+}
