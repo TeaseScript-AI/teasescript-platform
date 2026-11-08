@@ -1685,6 +1685,26 @@ test("a test that holds removes kinds, not the read's cause: its read's warning 
     answer(both),
     `warning-runtime-check, member-read ${first} branch, member-read ${last} loop, empty-check xs ${first}, empty-check xs ${last}`,
   );
+  // a read without its test whose items carry two words keeps G's items: data from outside the script, `unknown` with its
+  // reasons' word, beside the loop store's list, `loop` (#2024's condition 1, the lead's choice pending)
+  const host = (head: string): string =>
+    `let xs = hostValue\n${head}repeat 2 {\n    say xs.first\n    xs = []\n}${head === "" ? "" : "\n}"}\nexit\n`;
+  const later = "written-target 9 later";
+  const copies = "copy-type xs 9, copy-type xs 9";
+  for (const [name, source, nulls] of [
+    ["host data without a test", host(""), true],
+    ["host data under a null test", host("if xs != null {\n"), true],
+    ["host data under a type test", host("if xs is integer[] {\n"), false],
+  ] as const) {
+    const at = source.indexOf("xs.first");
+    assert.equal(
+      answer(source),
+      nulls
+        ? `warning-runtime-check, ${later}, member-read ${at} unknown, member-read ${at} unknown, ${copies}, null-check xs ${at}, empty-check xs ${at}`
+        : `warning-runtime-check, ${later}, member-read ${at} unknown, ${copies}, empty-check xs ${at}`,
+      name,
+    );
+  }
 });
 
 /** The work one query charges, at k = 64 and 128, per doubling of the source: about 2 for linear work. */
