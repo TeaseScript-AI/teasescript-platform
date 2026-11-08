@@ -77,6 +77,9 @@ copies, only when `--player-profile profile.json` gives a JSON object of them, s
 `npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
 `node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, format, oxlint, knip, the doc links, the imports, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash.
 `node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a tree hash only exists), and finds its unfilled placeholders (its header lists the rules); it never fetches.
+CI's "Structure signals (advisory)" step, after `check:pretest` in the job that runs it, prints
+`node tools/structure-report.mjs --diff HEAD^1`: the structure signals the change adds to, against the merge's first
+parent. It never fails; the plan or the review answers each signal.
 `node tools/ci-test-counts.mjs <run id>` prints a GitHub Actions run's node:test totals (tests, pass, fail, skipped) per job and step, read from `gh run view <run id> --log`, and their sum; `--log <file>` reads a saved log.
 `node tools/counters.mjs [ROOT] [--json]` counts a checkout's lint disables, `@ts-expect-error` and `@ts-ignore` directives, skipped and todo tests, shrink-only list entries and structure signals (its header defines each), for comparing them over time.
 
