@@ -95,10 +95,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     usePlayerSession: SETUP,
     "usePlayerSession.hasNormalStorage": MOVE,
     keptStore: RESOURCE,
-    "scriptStorage.load": RESOURCE,
-    "scriptStorage.write": RESOURCE,
-    "scriptStorage.replace": RESOURCE,
-    "scriptStorage.clear": RESOURCE,
     copyToDebugRoom: MOVE,
     startDebugSessionAnew: MOVE,
     activate: SESSION,
@@ -112,7 +108,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     supersede: SESSION,
     ownedSection: SESSION,
     settlePlanJson: SESSION,
-    loadScriptStorage: READ,
     "usePlayerSession.readSavedData": READ,
     savedScripts: READ,
     reviewSavedDataImport: READ,
@@ -120,12 +115,9 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     exportSession: READ,
     "usePlayerSession.savedPhoto": READ,
     resolveAsset: READ,
-    scriptStorageOptions: READ,
     ownStoredMedia: READ,
     readTransfer: TRANSFER,
     discardSessionReview: TRANSFER,
-    applySavedDataEdit: EDIT,
-    clearScriptStorage: EDIT,
     "usePlayerSession.rememberScriptName": EDIT,
     "usePlayerSession.images.discard": EDIT,
     sameMedium:
@@ -137,6 +129,18 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     issueTracing: SESSION,
     applyDebugMode: SESSION,
     debugView: SESSION,
+  },
+  "session/persistence/useSavedValues.ts": {
+    useSavedValues: SETUP,
+    "useSavedValues.watchWrites": SETUP,
+    "scriptStorage.load": RESOURCE,
+    "scriptStorage.write": RESOURCE,
+    "scriptStorage.replace": RESOURCE,
+    "scriptStorage.clear": RESOURCE,
+    loadScriptStorage: READ,
+    scriptStorageOptions: READ,
+    applySavedDataEdit: EDIT,
+    clearScriptStorage: EDIT,
   },
   "session/persistence/useStorageRoute.ts": {
     useStorageRoute: SETUP,
@@ -210,6 +214,8 @@ const DERIVED: Readonly<Record<string, string>> = {
   cameraOffered: "whether a camera is offered here, from the options' capabilities: no store",
   locks:
     "the lock service, given the options' lock code: it asks a service, not the host, and writes no store",
+  savedValues:
+    "the saved values in use, made from the route's provider: its own places are checked in its module",
   route:
     "the room and the route of the saved values, made from the options and the media store: its own places are checked in its module",
   rewind:

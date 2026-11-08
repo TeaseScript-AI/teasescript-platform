@@ -178,7 +178,7 @@ test("the page's diagnostic senders each check their activation's admission, and
     ]),
     [
       `${OWNER} useActivationRun > begin <- ${SESSION} > startFrom`,
-      `${OWNER} useActivationRun > retire <- ${SESSION} > tryOnScopeDispose:callback#1`,
+      `${OWNER} useActivationRun > retire <- ${SESSION} > tryOnScopeDispose:callback`,
     ],
   );
 });
@@ -248,6 +248,7 @@ const SESSION_FILES: readonly string[] = [
   "player/vue/src/session/useSessionMedia.ts",
   "player/vue/src/session/useSessionRewind.ts",
   "player/vue/src/session/persistence/useStorageRoute.ts",
+  "player/vue/src/session/persistence/useSavedValues.ts",
 ];
 const ACTIVATION_FILES = [
   ...SESSION_FILES,
@@ -343,11 +344,11 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "drops a blocked play; nothing follows",
   "usePlayerSession.ts: usePlayerSession > settlePlanJson: catch bridge.client.request":
     "drops the plan JSON's refusal; nothing follows",
-  "usePlayerSession.ts: usePlayerSession > loadScriptStorage: await readScriptStorage": SAVED_DATA,
-  "usePlayerSession.ts: usePlayerSession > readScriptStorage: await values.load": SAVED_DATA,
-  "usePlayerSession.ts: usePlayerSession > readScriptStorage: await capturedMedia.knownReferences.catch":
+  "useSavedValues.ts: useSavedValues > loadScriptStorage: await readScriptStorage": SAVED_DATA,
+  "useSavedValues.ts: useSavedValues > readScriptStorage: await values.load": SAVED_DATA,
+  "useSavedValues.ts: useSavedValues > readScriptStorage: await capturedMedia.knownReferences.catch":
     SAVED_DATA,
-  "usePlayerSession.ts: usePlayerSession > readScriptStorage: catch capturedMedia.knownReferences":
+  "useSavedValues.ts: useSavedValues > readScriptStorage: catch capturedMedia.knownReferences":
     SAVED_DATA,
   "usePlayerSession.ts: usePlayerSession > keepSessionLater: await Promise.resolve": KEPT_SESSION,
   "usePlayerSession.ts: usePlayerSession > keepSessionLater: await keepOnce": KEPT_SESSION,

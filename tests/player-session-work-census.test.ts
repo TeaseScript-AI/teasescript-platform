@@ -372,14 +372,17 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > debugView > then:callback.2":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
+  // Debug's demand of the call view, through `useCallView`'s returned function the composable exposes: a control.
+  "player/vue/src/usePlayerSession.ts usePlayerSession > demandCallView": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
   "player/vue/src/usePlayerSession.ts usePlayerSession > editSavedData": [
     "none",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > editSavedData > then:callback#1": [
-    "none",
-    ["BridgeClient.request"],
-  ],
+  "player/vue/src/session/persistence/useSavedValues.ts useSavedValues > editSavedData > then:callback#1":
+    ["none", ["BridgeClient.request"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > exportSession": [
     "none",
     ["BridgeClient.request"],
@@ -482,7 +485,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > tryOnScopeDispose:callback#1": [
+  "player/vue/src/usePlayerSession.ts usePlayerSession > tryOnScopeDispose:callback": [
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
@@ -490,7 +493,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "clock: keepCapture",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#6": [
+  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#4": [
     "none",
     ["BridgeClient.request"],
   ],
@@ -498,15 +501,11 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "own observation",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#3 > then:callback.1": [
-    "none",
-    ["BridgeClient.request"],
-  ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#3 > then:callback.2": [
-    "none",
-    ["BridgeClient.request"],
-  ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#3 > yieldThenReport > setTimeout:callback":
+  "player/vue/src/session/persistence/useSavedValues.ts useSavedValues > watchWrites > watch:callback#1 > then:callback.1":
+    ["none", ["BridgeClient.request"]],
+  "player/vue/src/session/persistence/useSavedValues.ts useSavedValues > watchWrites > watch:callback#1 > then:callback.2":
+    ["none", ["BridgeClient.request"]],
+  "player/vue/src/session/persistence/useSavedValues.ts useSavedValues > watchWrites > watch:callback#1 > yieldThenReport > setTimeout:callback":
     ["none", ["BridgeClient.request"]],
   "player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > catchUp > function": [
     "clock scheduling",
@@ -675,6 +674,13 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerSession.ts usePlayerSession {adoptRewound}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {prepareInput}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {retireRewind}",
+  "player/vue/src/session/persistence/useSavedValues.ts useSavedValues > clearScriptStorage {clearScriptStorage}",
+  "player/vue/src/session/persistence/useSavedValues.ts useSavedValues > editSavedData {editSavedData}",
+  "player/vue/src/session/persistence/useSavedValues.ts useSavedValues {inputSection}",
+  "player/vue/src/session/persistence/useSavedValues.ts useSavedValues {retireRewind}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > retireRewind {retireRewind}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {clearScriptStorage}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {editSavedData}",
 ];
 
 /**
