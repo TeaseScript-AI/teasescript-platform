@@ -242,20 +242,13 @@ export interface Frontier {
   readonly rest: number;
 }
 
-/** A scan's answer for its key (`Waiting`): the copied written type and whether it holds `null`, or none. */
+/** A key's scan's answer (`scanOf`): the copied written type and whether it holds `null`, or none. */
 export type WaitingAnswer = {
   readonly copied: TypeTerm | null;
   readonly nullable: boolean;
   /** Whether the deciding copy reads its written type at its own root (`Admission.inheritedOwn`, #1901). */
   readonly own?: boolean;
 } | null;
-
-export interface Waiting {
-  readonly key: CanonicalKey;
-  readonly steps: Inheriting<WaitingAnswer> | null;
-  /** Its cycle of decisions when it stopped (`cycleOf`): a scan whose cycle grew meanwhile is taken again. */
-  cycle: string;
-}
 
 /**
  * A path of a place in `openAbove`'s walk: the written types copies landed above it carry down to it (`permittedAt`,

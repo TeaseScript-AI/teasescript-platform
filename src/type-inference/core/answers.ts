@@ -817,7 +817,7 @@ function* asked(demand: ProofDemand<Proof>): Work<readonly Item[]> {
 }
 
 /**
- * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`,
+ * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `a4|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`,
  * `lit|`, `op|`, `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write
  * them).
  */
@@ -835,6 +835,9 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
       return asked(objectsAt(contract, Number(parts[0]), splitPath(parts[1] ?? "")));
     case "obk":
       return asked(keyObjects(contract, parts.join("|")));
+    // (#1072 A2's inherited proofs, by their key, as the admission made on the pass makes them)
+    case "a4":
+      return asked(pass.receivingDomain.replayProof!(parts.join("|")));
     case "s": {
       const rest = splitPath(parts[2] ?? "");
       return contract.subAt(joinParts(parts[0]!, parts[1] ?? ""), rest);
