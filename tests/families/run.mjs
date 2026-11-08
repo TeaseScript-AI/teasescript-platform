@@ -17,10 +17,10 @@
 // run that takes longer than `--timeout` seconds, the safety net, does work no ledger charges: it is counted apart
 // (`uncharged`, named by its run, on stderr and in `--out`), never a stall, and the next source runs. A run
 // that throws on either tree is an exception, never compared (#1439): printed to stderr with its source, mode and
-// check, and kept with its stack in `--out`, as is a difference, also where the source stalls later. A publication whose
-// oracle left nodes unanswered on either tree is judged as the README's contract says (`judged`: a difference where
-// what both answered differs, else `unansweredAlike` or `unanswered`). With `--baseline`, the head alone runs, and each run is judged against the stored base result of
-// the same source, mode and check (a source with each run it does not hold is kept in `--out` as `uncompared`, never
+// check, and kept with its stack in `--out`, as is a difference, also where the source stalls later. A publication
+// whose oracle left nodes unanswered on either tree is judged as the README's contract says (`judged`: a difference
+// where what both answered differs, else `unansweredAlike` or `unanswered`). With `--baseline`, the head alone runs,
+// and each run is judged against the stored base result of the same source, mode and check (a source with each run it does not hold is kept in `--out` as `uncompared`, never
 // agreement); `--store` runs one tree of a commit (sx-tree's, with `src/` and `.sha`) at the runner's defaults and
 // stores one shard of each source's results, one JSON line each, in the baseline of its `src/` tree (`baselines.mjs`),
 // whose area folder `--baseline` then reads, only where the area is complete under the rule status shares
