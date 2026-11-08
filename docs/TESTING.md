@@ -299,6 +299,18 @@ baseline for the reported root cause and pass after the repair. When
 failing-before evidence cannot reasonably be supplied, document why and provide
 the strongest focused reproduction available.
 
+A regression test may be declared as a regression case: `regressionCase(name, { pr, atBase }, fn)`
+(`tests/helpers/regression-case.ts`) in place of `test(name, fn)`. `pr` is the pull request whose fix it witnesses, and
+`atBase` matches the whole first line of the message of the error the case throws without the fix, as
+`/Missing expected rejection \(ForeignSessionError\)\./` does `assert.rejects`'s. On a pull request, CI's `check-1`
+runs the cases it declares against its base after its build (`tools/repository-checks/regression-cases.mjs`): each must
+fail there with that line, and one that passes, fails for another reason, does not finish, or does not run fails the
+job. Name what the fix adds by string (`{ name: "ForeignSessionError" }`), not by import, or the file does not load at
+the base. The base is compiled with `tsc` alone, so a case in a file that needs the Player's test bundles does not run
+there. Declaring is opt-in; no rule requires it. The step is in `check-1`, which had the most room before the slowest
+job in the first three-job runs (42425098809, 42425942185 and 42426219880: 98, 16 and 144 s; `check-2` 94, 135 and 0 s;
+`check-3`, which also runs `check:pretest`, 0, 0 and 122 s).
+
 A focused regression set is sufficient when the defect and its neighboring
 supported behavior are understood. When repeated sibling findings or an
 enumerable behavior space leave material completeness uncertainty, use the
