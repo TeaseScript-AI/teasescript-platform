@@ -496,10 +496,13 @@ if (process.argv[2] === "--child") {
   // (each source's process gets `--memory` as its heap, whatever heap `NODE_OPTIONS` sets, as the central queue sets
   // one on every job: the total names `memory`, and beside it the heap `NODE_OPTIONS` asked where that differs, so the
   // override is never silent, #1956)
+  // (Node takes the last of several)
   const asked = Number(
-    /(?:^|\s)--max[-_]old[-_]space[-_]size=(\d+)(?:\s|$)/.exec(
-      process.env.NODE_OPTIONS ?? "",
-    )?.[1] ?? memory,
+    [
+      ...(process.env.NODE_OPTIONS ?? "").matchAll(
+        /(?:^|\s)--max[-_]old[-_]space[-_]size=(\d+)(?=\s|$)/g,
+      ),
+    ].at(-1)?.[1] ?? memory,
   );
   if (store !== undefined && options.has("only"))
     refused("--store stores whole shards: drop --only");
@@ -906,6 +909,8 @@ if (process.argv[2] === "--child") {
       allowance: [was?.allowance ?? null, allowance],
       ms: [null, ms],
       ...(running === undefined ? {} : { running: 1 }),
+      // (the stored base's run cut over the unit limit: its units, not a run it ended, #1837)
+      ...(kept?.runs[id] === undefined && was !== undefined ? { baseCut: true } : {}),
     };
   };
   const counts = [
@@ -1024,8 +1029,11 @@ if (process.argv[2] === "--child") {
           ...where
         } = outcome;
         // (a run left unanswered: why, on each tree, on the source's record, #1837's runner artefacts)
+        // (a run left unanswered: and one whose answered parts differ, its `by` the difference's, named so, #1837)
         if (by !== undefined)
           left.push({ ...where, ...(unanswered === undefined ? { alike: true } : {}), by });
+        else if (difference?.by !== undefined)
+          left.push({ ...where, differs: true, by: difference.by });
         if (exception !== undefined) {
           row.exceptions += 1;
           thrown({ generator: name, source: source.name, ...where, thrown: exception }, source);
@@ -1045,23 +1053,39 @@ if (process.argv[2] === "--child") {
       // with a baseline, a source stalls or throws outside its runs where either tree did, as with both trees run
       const stalled = baseline === undefined ? reply.stalled : either(kept?.stalled, reply.stalled);
       // (the run this runner's stall cut: its tree, mode and check, #1965; none named where it came between runs)
-      const at =
+      // (which tree this runner's stall was on: the one it was running, or its one tree, #1837's F24)
+      const stalledTree =
         reply.stalled === undefined
           ? undefined
-          : reply.cutAt === undefined
-            ? null
-            : {
-                tree: treeNames[reply.cutAt.tree],
-                mode: reply.cutAt.mode,
-                check: reply.cutAt.check,
-              };
+          : reply.cutAt !== undefined
+            ? treeNames[reply.cutAt.tree]
+            : treeNames.length === 1
+              ? treeNames[0]
+              : null;
+      // (the stall's tree and the run it cut, each `null` where unknown: between runs, or a stored base's crash, #1965;
+      // a stored base's stall over the unit limit names its cut run)
+      const storedCut = kept?.cut?.run?.split(" ") ?? [];
+      const at =
+        reply.stalled !== undefined
+          ? {
+              tree: stalledTree,
+              mode: reply.cutAt?.mode ?? null,
+              check: reply.cutAt?.check ?? null,
+            }
+          : kept?.stalled !== undefined && baseline !== undefined
+            ? {
+                tree: "base",
+                mode: storedCut[0] ?? null,
+                check: storedCut.length > 1 ? storedCut.slice(1).join(" ") : null,
+              }
+            : undefined;
       // (a crash on each tree: this runner's, the head's alone after the base's, a stored base's, #1837's F24)
       const crashes = {
         base:
-          (crashed(reply.stalled) && at?.tree === "base") ||
+          (crashed(reply.stalled) && stalledTree === "base") ||
           (baseline !== undefined && crashed(kept?.stalled)),
         head:
-          (crashed(reply.stalled) && at?.tree === "head") ||
+          (crashed(reply.stalled) && stalledTree === "head") ||
           (afterBase ?? []).some((ran) => crashed(ran.head.stalled)),
       };
       if (crashes.base) row.crashed.base += 1;

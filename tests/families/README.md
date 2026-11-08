@@ -26,13 +26,14 @@ What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise;
     that names none, each with the first node left or the binding where the answers' own questions stopped;
   - its limit (`limitOf`): `units` × its allowance, plus, for a publication run, its oracle's 64 units for each cell its
     questions returned, kept with the run as `questions`. A store writes and reads every run by the same limit.
-- **The total line** (stdout's last; `--work`'s last): sources, unparsed, stalled, exceptions, unanswered,
-  unansweredAlike, uncompared, uncharged, runs, differences, `crashed: {base, head}` (stalls that ended the process, not
-  the unit limit), the unit multiple, the safety net in seconds, `memory` (with `nodeOptions` where `NODE_OPTIONS` asked
-  another heap) and the Node version.
-- **A stall's record** (`--out`, and the source's `--work` line): its reason (`units`, or how the process ended), the
-  run it cut as `at: {tree, mode, check}` (`null` between runs, #1965), with `--store` the cut run's certificate, and,
-  where the base's process ended, the head's own outcome on each later run (`afterBase`).
+- **The total line** (stdout's last; `--work`'s last): the area, generators, sources, unparsed, stalled, exceptions,
+  unanswered, unansweredAlike, uncompared, uncharged, runs, differences, `crashed: {base, head}` (stalls that ended the
+  process, not the unit limit), modes, the unit multiple, the safety net in seconds, `memory` (with `nodeOptions` where
+  `NODE_OPTIONS` asked another heap) and the Node version.
+- **A stall's record** (`--out`, and the source's `--work` line): its reason (`units`, or how the process ended),
+  `at: {tree, mode, check}` (#1965): the tree it was on and the run it cut, each `null` where unknown (a stall between
+  runs, a stored base's crash), and, where the base's process ended, the head's own outcome on each later run
+  (`afterBase`). A stored shard's line keeps a stall over the unit limit's cut run as its certificate (`cut`).
 - **Exit codes:**
   - 0: nothing differs, throws, stalls, is left unanswered, uncompared or uncharged;
   - 1: something to read: a difference, an exception, a stall (a crash of the base among them), or a run left
@@ -102,12 +103,12 @@ nodes from there on stay unanswered (`publicationHashes`'s `unanswered`, #1499),
 admitted types stopped. A publication run's unit limit grants the same 64 per cell its tree's oracle reports so far
 (`questionWork`; `limitOf` in `run-contract.mjs`, by which a store writes and reads the run too, its report kept as the
 run's `questions`), so the oracle's stop comes first wherever a question reports its cells before the runner's limit; one
-question's own cost is the runner's to bound. A run with any on either tree agrees only where both trees left
-the same count unanswered and published the same parts up to them (#1592): the bound is the same on both trees, so
-what it leaves unanswered is too. What both answered is compared too (`prefix`: the answers and the record, unless
-either's answers stopped at a binding, each occurrence both answered, and the route): where it differs, the run is a
-difference. Such a run is counted apart (`unansweredAlike`); any other is neither agreement nor an
-exception: the runner writes it to `--out` and counts it apart (`unanswered`). Each such run records why on each tree
+question's own cost is the runner's to bound. A run with any on either tree is first compared on what both
+trees answered (`prefix`: the answers and the record, unless either's answers stopped at a binding, each occurrence both
+answered, and the route): where that differs, the run is a difference, counted and recorded as one. Otherwise it agrees
+only where both trees left the same count unanswered and published the same parts up to them (#1592): the bound is the
+same on both trees, so what it leaves unanswered is too. That run is counted apart (`unansweredAlike`); any other is
+neither agreement nor an exception: the runner writes it to `--out` and counts it apart (`unanswered`). Each such run records why on each tree
 (`by`, on `--out` and the source's `--work` line, and on a stored run), with the first node or the binding left:
 `questions` (the analysis finished and the oracle's questions passed their bound; their per-cell cost rises by a log
 factor, #1941), `memory` (their room in the heap passed: the core keeps its answers, about 450 bytes a cell, so the

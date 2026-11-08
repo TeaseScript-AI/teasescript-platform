@@ -198,7 +198,7 @@ function areaOf(generator) {
  * `head`, `null` where the tree did not run it here), the base being the stored one where one tree ran: not recorded
  * before #1647, its stored units since (`ms` none).
  */
-function runOf({ mode, check, work, allowance = [], ms, running }) {
+function runOf({ mode, check, work, allowance = [], ms, running, baseCut }) {
   const tree = (index) =>
     ms[index] === null && (index === 1 || work[index] === null)
       ? null
@@ -206,7 +206,8 @@ function runOf({ mode, check, work, allowance = [], ms, running }) {
           work: work[index],
           allowance: allowance[index] ?? null,
           ms: ms[index],
-          done: running !== index,
+          // (a stored base's run cut over the unit limit is no run it ended)
+          done: running !== index && !(index === 0 && baseCut === true),
         };
   return work.length === 2
     ? { mode, check, base: tree(0), head: tree(1) }
@@ -701,7 +702,8 @@ const artefacts = new Map(
 );
 for (const [place, was] of replay) {
   const is = rerun.get(place) ?? was;
-  for (const left of is.unanswered ?? []) {
+  // (a run whose answered parts differ is a difference, counted as one; only its growth leaves it out)
+  for (const left of (is.unanswered ?? []).filter(({ differs }) => differs !== true)) {
     const reasons = [left.by?.base, left.by?.head]
       .filter((by) => by != null)
       .map((by) => by.reason);
@@ -758,8 +760,9 @@ for (const [place, was] of replay) {
   if (sized === null) continue;
   const [, shape, size] = sized;
   const area = nameOf(is.area);
-  if (!growth.has(area)) growth.set(area, { series: new Map(), residual: new Set() });
-  const { series, residual } = growth.get(area);
+  if (!growth.has(area))
+    growth.set(area, { series: new Map(), residual: new Set(), unmeasured: new Set() });
+  const { series, residual, unmeasured } = growth.get(area);
   const stopped = new Set([
     ...(is.unanswered ?? []).map(({ mode, check }) => `${mode} ${check}`),
     ...(is.afterBase ?? [])
@@ -776,14 +779,20 @@ for (const [place, was] of replay) {
       residual.add(name);
       continue;
     }
-    if (!(run.base.work > 0 && run.head.work > 0)) continue;
+    // (a tree without a work ledger records no units: its series named apart, unmeasured)
+    if (!(run.base.work > 0 && run.head.work > 0)) {
+      unmeasured.add(name);
+      continue;
+    }
     if (!series.has(name)) series.set(name, new Map());
     series.get(name).set(Number(size), run.head.work / run.base.work);
   }
   for (const { mode, check } of is.afterBase ?? [])
     if (mode !== undefined) residual.add(`${is.generator} ${shape} ${mode} ${check}`);
 }
-for (const [area, { series, residual }] of [...growth].sort(([a], [b]) => a.localeCompare(b))) {
+for (const [area, { series, residual, unmeasured }] of [...growth].sort(([a], [b]) =>
+  a.localeCompare(b),
+)) {
   const measured = [];
   for (const [name, ratios] of series) {
     const sizes = [...ratios.keys()].sort((a, b) => a - b);
@@ -805,6 +814,7 @@ for (const [area, { series, residual }] of [...growth].sort(([a], [b]) => a.loca
       flagged: flagged.length,
       worst: flagged.slice(0, 5),
       residual: { series: residual.size, named: [...residual].sort() },
+      unmeasured: { series: unmeasured.size, named: [...unmeasured].sort() },
     }),
   );
 }

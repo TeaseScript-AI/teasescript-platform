@@ -68,7 +68,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isRecordedQuestions, isRecordedReason, limitOf } from "./run-contract.mjs";
+import { isRecordedQuestions, isRecordedReason, limitOf, UNKNOWN_REASON } from "./run-contract.mjs";
 import { generatorFolders, generatorsOf, holdsGenerators, placeOf } from "./sources.mjs";
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
@@ -920,8 +920,9 @@ function storedOf(sources, units) {
   const runs = sources.flatMap((source) => Object.values(source.runs));
   const reasons = {};
   for (const { value } of runs) {
-    const by = value?.unansweredBy;
-    if (by === undefined) continue;
+    if (!(value?.unanswered > 0)) continue;
+    // (a run stored before #1837 named no reason: `unknown`, as the runner reads it)
+    const by = value.unansweredBy ?? { reason: UNKNOWN_REASON };
     const reason = by.binding === undefined ? by.reason : `${by.reason} (binding)`;
     reasons[reason] = (reasons[reason] ?? 0) + 1;
   }
