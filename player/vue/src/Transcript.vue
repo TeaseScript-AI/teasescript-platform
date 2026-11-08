@@ -624,7 +624,6 @@ onMounted(() => {
               class="transcript-foreground"
               :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }"
             >
-              <p v-if="!entries.length" class="transcript-empty">No messages yet.</p>
               <slot name="foreground" />
             </div>
           </div>
@@ -749,11 +748,6 @@ onMounted(() => {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
-}
-.transcript-empty {
-  padding: 1rem;
-  font-size: 0.875rem;
-  color: var(--muted-foreground);
 }
 .return-to-latest {
   position: absolute;

@@ -2704,8 +2704,9 @@ async function debugExportScenario(cdp, origin, profile) {
   await openPicker(cdp);
   await setInputFiles(cdp, "[data-composer-file]", [picture]);
   await useImage(cdp);
-  await waitFor(cdp, `!!document.querySelector('[data-runtime-failure]')`, 8_000, "No error line");
-  await physicalClick(cdp, "[data-runtime-failure-details]");
+  const details = `[...document.querySelectorAll('[data-sonner-toast] [data-button]')].find((button) => button.textContent.trim() === 'Details')`;
+  await waitFor(cdp, `!!${details}`, 8_000, "No error notice with Details");
+  await physicalClickOn(cdp, details, "the error notice's Details");
   await waitFor(
     cdp,
     `document.querySelector('[data-session-error-summary]')?.textContent.includes('In main.tease, line 10.') === true`,
@@ -2886,9 +2887,9 @@ async function rewindScenario(cdp, origin) {
 /**
  * Debug's rewind switches as the Player shows them (DEBUGGER.md "Rewind"), through the development preview's slow and
  * failing restart gate (`?rewindGate`): a pending Return disables what it refuses at once, marks the Player busy and
- * announces itself, and its animation shows only after the delay; Debug off's reinstatement that fails at its gate
- * offers Retry return to session, also with Debug off, which brings the session back. In light and dark, on a desktop
- * and a phone; with `PLAYER_SMOKE_SCREENSHOTS` naming a folder, it saves the animation and the retry there.
+ * announces itself, and its animation shows only after the delay, moving nothing; Debug off's reinstatement that fails
+ * at its gate shows the error once, in its notice, whose Retry return to session brings the session back. In light and
+ * dark, on a desktop and a phone; with `PLAYER_SMOKE_SCREENSHOTS` naming a folder, it saves the animation and the retry.
  */
 async function rewindSwitchScenario(cdp, origin) {
   const folder = process.env.PLAYER_SMOKE_SCREENSHOTS ?? null;
@@ -2901,6 +2902,18 @@ async function rewindSwitchScenario(cdp, origin) {
   const choice = (label) =>
     `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === '${label}')`;
   const theme = `document.documentElement.dataset.playerTheme`;
+  // The boxes a switch must not move, to the pixel: the transcript and the composer, and with `inspected` also the
+  // Debug bar and the transcript's last row.
+  const boxes = (inspected) =>
+    value(
+      cdp,
+      `JSON.stringify([
+        document.querySelector('.transcript-scroll'),
+        document.querySelector('[data-composer-shell]'),
+        ...(${inspected} ? [document.querySelector('[data-rewind-inspection]'), [...document.querySelectorAll('.transcript-scroll [data-index]')].at(-1)] : []),
+      ].map((element) => { const box = element?.getBoundingClientRect(); return box ? [box.x, box.y, box.width, box.height] : null; }))`,
+    );
+  const retry = `[...document.querySelectorAll('[data-sonner-toast] [data-button]')].find((button) => button.textContent.trim() === 'Retry return to session')`;
   // Back to the first answer through the given gate, the state shown for inspection, in theme `mode`.
   const inspect = async (gate, mode) => {
     await navigate(cdp, `${origin}/player/?package=rewind&dev&rewindGate=${gate}`);
@@ -2929,6 +2942,8 @@ async function rewindSwitchScenario(cdp, origin) {
     ]) {
       await setViewport(cdp, width, height);
       await inspect("slow", mode);
+      const still = await boxes(true);
+      const outer = await boxes(false);
       // Return waits at its slow gate: at once, what it refuses is disabled, the Player is busy and says so, and no
       // animation shows yet.
       await physicalClick(cdp, "[data-rewind-return]");
@@ -2952,19 +2967,26 @@ async function rewindSwitchScenario(cdp, origin) {
         }),
         `A pending Return, ${mode} ${device}: its refused controls disabled, busy, announced, no animation yet`,
       );
+      assertEqual(await boxes(true), still, `A pending Return, ${mode} ${device}: nothing moved`);
       await waitFor(
         cdp,
         `!!document.querySelector('[data-rewind-switch-indicator]')`,
         1_400,
         `A pending Return, ${mode} ${device}: no animation once it lasted`,
       );
+      assertEqual(await boxes(true), still, `The animation, ${mode} ${device}: it moved something`);
       await save(`animation-${mode}-${device}`);
       await waitFor(
         cdp,
         `!document.querySelector('[data-rewind-inspection]') && !!${choice("Left")}`,
       );
-      // Debug off's reinstatement fails at its gate: the failure stops the Player, and Retry return to session shows,
-      // with Debug off.
+      assertEqual(
+        await boxes(false),
+        outer,
+        `The animation gone, ${mode} ${device}: the transcript or the composer moved`,
+      );
+      // Debug off's reinstatement fails at its gate: the failure stops the Player, and its error notice offers Retry
+      // return to session, with Debug off.
       await inspect("fail", mode);
       // The Debug panel opens from the tools: on a phone, from the drawer that Show sidebar opens, through its Tools menu.
       if (device === "phone") {
@@ -2983,7 +3005,7 @@ async function rewindSwitchScenario(cdp, origin) {
       await physicalClick(cdp, "[data-debug-active]");
       await waitFor(
         cdp,
-        `!!document.querySelector('[data-rewind-retry]')`,
+        `!!${retry}`,
         8_000,
         `A failed reinstatement, ${mode} ${device}: no retry`,
       );
@@ -2999,7 +3021,7 @@ async function rewindSwitchScenario(cdp, origin) {
         await delay(500);
         await waitFor(
           cdp,
-          visible("[data-rewind-retry]"),
+          `${retry}?.checkVisibility() === true`,
           8_000,
           `The retry, ${mode} ${device}: not shown`,
         );
@@ -3007,12 +3029,20 @@ async function rewindSwitchScenario(cdp, origin) {
         await physicalClick(cdp, '[data-tools-focus="launcher:Debug"]');
         await waitFor(cdp, `!document.querySelector('[data-tool="Debug"]')`);
       }
+      assertEqual(
+        await value(
+          cdp,
+          `document.body.innerText.split('The Player ran into an error.').length - 1`,
+        ),
+        1,
+        `A failed reinstatement, ${mode} ${device}: its error shows once`,
+      );
       await save(`retry-${mode}-${device}`);
-      // The retry brings the session Back left back, which takes input again.
-      await physicalClick(cdp, "[data-rewind-retry]");
+      // The retry brings the session Back left back, which takes input again, and withdraws the error.
+      await physicalClickOn(cdp, retry, "the error notice's Retry return to session");
       await waitFor(
         cdp,
-        `!document.querySelector('[data-rewind-retry]') && !!${choice("Left")} && !${choice("Left")}.disabled`,
+        `!document.querySelector('[data-sonner-toast][data-type="error"]') && !!${choice("Left")} && !${choice("Left")}.disabled`,
         8_000,
         `The retry, ${mode} ${device}: the session did not come back`,
       );

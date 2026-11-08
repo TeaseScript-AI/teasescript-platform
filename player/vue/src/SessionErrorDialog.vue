@@ -30,7 +30,7 @@ const props = defineProps<{
   debugAvailable: boolean;
 }>();
 const open = defineModel<boolean>("open", { required: true });
-const emit = defineEmits<{ export: []; debug: []; returnFocus: [] }>();
+const emit = defineEmits<{ export: []; debug: [] }>();
 
 const line = computed(() => (props.failure === null ? null : props.failure.span.start.line + 1));
 // The failing line without its indentation, split around the failing expression: the span's columns on its first line,
@@ -84,10 +84,9 @@ function handOver(next: "export" | "debug") {
   if (next === "export") emit("export");
   else emit("debug");
 }
-// Opened without a trigger, the dialog returns focus to the error line; a dialog or panel it handed over to keeps it.
+// Closed, the dialog returns focus to the Details it opened from; a dialog or panel it handed over to keeps it.
 function returnFocus(event: Event) {
-  event.preventDefault();
-  if (!handedOver) emit("returnFocus");
+  if (handedOver) event.preventDefault();
 }
 </script>
 

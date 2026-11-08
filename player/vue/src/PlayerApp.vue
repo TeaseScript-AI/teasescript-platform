@@ -36,7 +36,6 @@ import { usePlayerDebug } from "./usePlayerDebug";
 import { debugStageImage } from "./debugStageImage";
 import { playerRuntimeCalls } from "../../runtime-view.js";
 import DebugExportDialog from "./DebugExportDialog.vue";
-import RuntimeFailure from "./RuntimeFailure.vue";
 import SessionEndDialog from "./SessionEndDialog.vue";
 import SessionErrorDialog from "./SessionErrorDialog.vue";
 import RandomDrawPicker from "./RandomDrawPicker.vue";
@@ -251,9 +250,8 @@ const debugTool: PlayerTool = { name: "Debug", icon: Bug };
 const abTestsTool: PlayerTool = { name: "A/B tests", icon: SquareSplitHorizontal };
 const toolsShell = ref<InstanceType<typeof PlayerToolsShell> | null>(null);
 // Session end and failure (PLAYER-UI "Session end and failure"). An ordinary end opens the end dialog by itself; the
-// error dialog opens only from the error line or its notice, which stays until a new session starts. Like the debug
-// export, each opening of either dialog mounts it anew, so it stays above Settings or the notification panel.
-const runtimeEnd = ref<InstanceType<typeof RuntimeFailure> | null>(null);
+// error dialog opens only from the error's notice, which stays until a new session starts. Like the debug export, each
+// opening of either dialog mounts it anew, so it stays above Settings or the notification panel.
 const endDialogOpen = ref(false);
 const endDialogOpening = ref(0);
 watch(props.player.endings, () => {
@@ -310,14 +308,31 @@ function showErrorDetails() {
   errorDialogOpen.value = true;
 }
 watch(
-  () => [session.value?.state.failure ?? null, props.player.hostError.value] as const,
-  ([failure, hostError]) => {
+  () =>
+    [
+      session.value?.state.failure ?? null,
+      props.player.hostError.value,
+      props.player.rewind.returnFailed.value,
+    ] as const,
+  ([failure, hostError, returnFailed], previous) => {
     if (failure === null && hostError === null) {
       errorDialogOpen.value = false;
       props.player.withdrawNotice(playerNoticeKeys.sessionError);
-    } else
+    } else if (
+      previous?.[2] === true &&
+      !returnFailed &&
+      previous[0] === failure &&
+      previous[1] === hostError
+    )
+      // A retried return keeps its notice, whose toast the retry closed, until it succeeds or fails anew.
+      return;
+    else
       props.player.publishNotice(
-        playerNotices.sessionError(failure === null ? "player" : "script", showErrorDetails),
+        playerNotices.sessionError(
+          failure === null ? "player" : "script",
+          showErrorDetails,
+          returnFailed ? () => void props.player.rewind.retryReturn() : undefined,
+        ),
       );
   },
 );
@@ -693,7 +708,6 @@ async function toggleFullscreen() {
             :debug-available="debug.time.value !== null && !!session?.state.failure"
             @export="openDebugExport"
             @debug="void openFailureInDebug()"
-            @return-focus="runtimeEnd?.focus()"
           />
           <RandomDrawPicker
             v-if="randomPicker"
@@ -769,29 +783,20 @@ async function toggleFullscreen() {
           @update:session="player.update"
         >
           <template #end>
-            <RuntimeFailure
-              v-if="!failure && player.activation.value === null"
-              ref="runtimeEnd"
-              :state="session?.state ?? null"
-              :host-error="player.hostError.value"
-              @details="showErrorDetails"
-            />
-            <!-- Closest to the composer, also below a failure the inspected state shows. -->
-            <RewindInspection
-              v-if="debug.rewind.value && player.rewind.inspecting.value"
-              :rewind="debug.rewind.value"
-              :adopting="player.rewind.adopting.value"
-              :working="player.rewind.working.value"
-              :switching="player.rewind.switching.value !== null"
-            />
-            <!-- The Player's own: it stays after Debug off, where a failed return to the session is retried. -->
+            <!-- The Player's own, so it stays after Debug off; it holds Debug's bar while a state is inspected. -->
             <RewindStatus
               :busy="player.rewind.switching.value !== null"
               :announcement="player.rewind.switchAnnouncement.value"
               :indicator="player.rewind.switchIndicator.value"
-              :return-failed="player.rewind.returnFailed.value"
-              @retry="player.rewind.retryReturn()"
-            />
+              :bar="!!debug.rewind.value && player.rewind.inspecting.value"
+            >
+              <RewindInspection
+                v-if="debug.rewind.value && player.rewind.inspecting.value"
+                :rewind="debug.rewind.value"
+                :working="player.rewind.working.value"
+                :switching="player.rewind.switching.value !== null"
+              />
+            </RewindStatus>
           </template>
         </RuntimeInteraction>
       </PlayerComposition>

@@ -12,6 +12,8 @@ export interface PlayerNotice {
   readonly message: string;
   /** One control the player may activate, such as retrying audio; it runs from the player's click. */
   readonly action?: { readonly label: string; readonly run: () => void };
+  /** Opens more about the notice, such as an error's dialog, as **Details**; unlike `action`, it leaves the toast open. */
+  readonly details?: () => void;
   /**
    * `false` for a notice whose action is the player's only way to recover, such as retrying blocked audio the script
    * waits for; its producer withdraws it once the condition resolves. Notices are dismissible otherwise.
@@ -109,15 +111,23 @@ export const playerNotices = {
         ? "This image request needs a camera, which cannot be used here."
         : `The camera cannot be used here. Choose ${skip} to answer without an image.`,
   }),
-  /** The session stopped because of a script error, or the Player itself failed; the action shows the error's details. */
-  sessionError: (cause: "script" | "player", showDetails: () => void): PlayerNotice => ({
+  /**
+   * The session stopped because of a script error, or the Player itself failed; Details shows the error. `retry`, after
+   * a failed return to the session (DEBUGGER.md "Rewind"), retries that return, the only way back to it but a new Start.
+   */
+  sessionError: (
+    cause: "script" | "player",
+    showDetails: () => void,
+    retry?: () => void,
+  ): PlayerNotice => ({
     key: playerNoticeKeys.sessionError,
     level: "error",
     message:
       cause === "script"
         ? "The script stopped because of an error."
         : "The Player ran into an error.",
-    action: { label: "Details", run: showDetails },
+    ...(retry && { action: { label: "Retry return to session", run: retry }, dismissible: false }),
+    details: showDetails,
   }),
   /**
    * A media file the script refers to is not in the package (`missing`), or the browser cannot load or decode it

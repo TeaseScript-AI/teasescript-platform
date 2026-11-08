@@ -2,11 +2,10 @@
 import { toRef } from "vue";
 import { toast } from "vue-sonner";
 import { Toaster } from "@/components/ui/sonner";
-import type { PlayerNoticeLevel } from "../../notices.js";
 import type { PlayerNotification } from "./usePlayerNotifications.js";
-import { usePlayerToasts } from "./usePlayerToasts.js";
+import { toastOptions, usePlayerToasts } from "./usePlayerToasts.js";
 
-// Temporary toasts for new Player notices (PLAYER-UI "Player notices"); the notification panel keeps every notice.
+// Toasts for new Player notices (PLAYER-UI "Player notices"); the notification panel keeps every notice.
 const props = defineProps<{
   notifications: readonly PlayerNotification[];
   /** Notifications up to this sequence were seen in the panel, which replaces their toasts. */
@@ -15,7 +14,6 @@ const props = defineProps<{
 }>();
 
 const toasterId = "player-notices";
-const durations: Record<PlayerNoticeLevel, number> = { info: 5000, warning: 8000, error: 10000 };
 const offset = {
   top: "calc(var(--player-top-control-size) + 2 * var(--player-edge-space))",
   left: "var(--player-edge-space)",
@@ -24,12 +22,7 @@ const offset = {
 
 usePlayerToasts(toRef(props, "notifications"), toRef(props, "seenSequence"), {
   show: (id, notice) =>
-    toast[notice.level](notice.message, {
-      id,
-      toasterId,
-      duration: durations[notice.level],
-      ...(notice.action && { action: { label: notice.action.label, onClick: notice.action.run } }),
-    }),
+    toast[notice.level](notice.message, { id, toasterId, ...toastOptions(notice) }),
   dismiss: (id) => toast.dismiss(id),
 });
 </script>

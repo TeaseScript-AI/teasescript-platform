@@ -25,6 +25,15 @@ let usePlayerToasts: (
   seenSequence: Readonly<Ref<number>>,
   sink: ToastSink,
 ) => void;
+interface ToastButton {
+  label: string;
+  onClick(event: Pick<Event, "preventDefault">): void;
+}
+let toastOptions: (notice: PlayerNotice) => {
+  duration: number;
+  action?: ToastButton;
+  cancel?: ToastButton;
+};
 
 // Load the real Vue composables through the existing build tool, like the Player session host tests.
 before(async () => {
@@ -36,10 +45,13 @@ before(async () => {
   );
   assert.equal(typeof module.usePlayerNotifications, "function");
   assert.equal(typeof toasts.usePlayerToasts, "function");
+  assert.equal(typeof toasts.toastOptions, "function");
   // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
   usePlayerNotifications = module.usePlayerNotifications as typeof usePlayerNotifications;
   // EVIDENCE: validation: the toast export was checked callable just above, from the same real source build.
   usePlayerToasts = toasts.usePlayerToasts as typeof usePlayerToasts;
+  // EVIDENCE: validation: the options export was checked callable just above, from the same real source build.
+  toastOptions = toasts.toastOptions as typeof toastOptions;
 });
 
 function setup(context: TestContext) {
@@ -143,4 +155,32 @@ test("a publication withdrawn or seen before its toast mounts never shows", asyn
   notifications.markSeen();
   await settle();
   assert.deepEqual(toasts, []);
+});
+
+test("an error's toast stays: its action closes it, its Details leaves it open", () => {
+  const runs: string[] = [];
+  const prevented: boolean[] = [];
+  const click = (button: ToastButton | undefined) => {
+    let defaultPrevented = false;
+    button?.onClick({ preventDefault: () => (defaultPrevented = true) });
+    prevented.push(defaultPrevented);
+  };
+  const warning = toastOptions(playerNotices.audioBlocked(() => runs.push("audio")));
+  assert.equal(warning.duration, 8000);
+  click(warning.action);
+  const error = toastOptions(
+    playerNotices.sessionError(
+      "player",
+      () => runs.push("details"),
+      () => runs.push("retry"),
+    ),
+  );
+  assert.equal(error.duration, Infinity);
+  // Sonner closes its toast after its cancel button's click always, and after its action button's unless prevented.
+  assert.equal(error.cancel?.label, "Retry return to session");
+  assert.equal(error.action?.label, "Details");
+  click(error.cancel);
+  click(error.action);
+  assert.deepEqual(runs, ["audio", "retry", "details"]);
+  assert.deepEqual(prevented, [false, false, true]);
 });

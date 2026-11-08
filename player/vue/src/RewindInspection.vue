@@ -11,7 +11,6 @@ import type { DebugRewind } from "./useDebugRewind";
 // what was answered here before, and offers Forward, Resume, and Return to session. Back is each answer's Back to here.
 const props = defineProps<{
   rewind: DebugRewind;
-  adopting: boolean;
   working: boolean;
   /** Whether a switch of the rewind is under way (`switching`), which refuses every control here. */
   switching: boolean;
@@ -40,9 +39,6 @@ const idle = computed(() => !props.working && !props.switching && !props.rewind.
         Answered before: {{ earlier }}
       </p>
       <p v-else class="min-w-0 flex-1">An earlier state, paused. New input continues from here.</p>
-      <p v-if="adopting" class="w-full text-muted-foreground" role="status" data-rewind-adopting>
-        Restoring this state's saved data…
-      </p>
       <p
         v-if="rewind.problem.value"
         class="w-full text-destructive"

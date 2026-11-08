@@ -50,4 +50,13 @@ test("only a recovery notice the player must act on is not dismissible", () => {
   assert.equal(playerNotices.audioBlocked(() => {}).dismissible, false);
   assert.equal(playerNotices.storageUnavailable().dismissible, undefined);
   assert.equal(playerNotices.storageWriteFailed().dismissible, undefined);
+  assert.equal(playerNotices.sessionError("player", () => {}).dismissible, undefined);
+  // After a failed return to the session, its retry is the only way back but a new Start.
+  const retry = playerNotices.sessionError(
+    "player",
+    () => {},
+    () => {},
+  );
+  assert.equal(retry.action?.label, "Retry return to session");
+  assert.equal(retry.dismissible, false);
 });

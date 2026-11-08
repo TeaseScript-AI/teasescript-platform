@@ -106,9 +106,12 @@ function clearAll() {
                       </template>
                       <time :datetime="new Date(entry.publishedAt).toISOString()">{{ age(entry.publishedAt) }}</time>
                     </p>
-                    <span v-if="entry.notice.action" class="player-notification-action">
-                      <Button variant="outline" size="sm" :data-notice-action="entry.notice.key" @click="entry.notice.action.run()">
+                    <span v-if="entry.notice.action || entry.notice.details" class="player-notification-action">
+                      <Button v-if="entry.notice.action" variant="outline" size="sm" :data-notice-action="entry.notice.key" @click="entry.notice.action.run()">
                         {{ entry.notice.action.label }}
+                      </Button>
+                      <Button v-if="entry.notice.details" variant="outline" size="sm" :data-notice-details="entry.notice.key" @click="entry.notice.details()">
+                        Details
                       </Button>
                     </span>
                   </div>
@@ -219,6 +222,9 @@ function clearAll() {
   font-weight: 600;
 }
 .player-notification-action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-block-start: 6px;
 }
 </style>

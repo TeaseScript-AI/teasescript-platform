@@ -528,11 +528,11 @@ open it again. While the dialog is open the session stays behind it, so its last
 with Close or Escape, returns to the [start page](#session-start-and-user-activation), whose Start begins a new session
 and takes focus.
 
-When a script error stops the session, a line above the composer says "The script stopped because of an error." and
-offers **Details**. An exception of the Player itself also stops the session until the next Start: it no longer runs,
-observes time, or takes input; its captures, cameras, and media end; and late answers and reports, including save
-acknowledgements, are dropped. The line then says "The Player ran into an error." An error notice with
-**Details** supplements the line until a new session starts. Both open one error dialog, which never opens by itself. It
+When a script error stops the session, its error [notice](#player-notices) says "The script stopped because of an
+error." and offers **Details**, until a new session starts; nothing else shows the error. An exception of the Player
+itself also stops the session until the next Start: it no longer runs, observes time, or takes input; its captures,
+cameras, and media end; and late answers and reports, including save acknowledgements, are dropped. The notice then says
+"The Player ran into an error." **Details** opens the error dialog, which never opens by itself. It
 shows "Script error" and "In rules.tease, line 3.", then **Technical details**, collapsed, with the error code and the
 runtime's message ("TSR036: Division by zero: '1 / zero' has no result because 'zero' is 0. Check that 'zero' is not 0
 first."), the failing line with the failing expression marked, when the host supplied the script's source, and, for an
@@ -540,9 +540,9 @@ error inside a function, called file, or timer, media, or button block, the call
 main.tease:6". After a Player exception it shows "Player error" and "The script did not cause this.", with the error's
 name as its technical detail. **Download debug export** and, for a script error while Debug runs, **Open in Debug**
 close it and open the debug export dialog, or the Debug panel's Now tab, which names the error and its statement;
-**Close** returns focus to the line. Apart from those hand-overs, each dialog closes only with **Close** or Escape.
-Media warnings are notices, never failures. The transcript and Stage stay for inspection, with the transcript's end
-scrolling clear of the line. The dialogs fit narrow screens, and their buttons are at least 44px tall.
+**Close** returns focus to **Details**. Apart from those hand-overs, each dialog closes only with **Close** or Escape.
+Media warnings are notices, never failures. The transcript and Stage stay for inspection. The dialogs fit narrow
+screens, and their buttons are at least 44px tall.
 
 The error dialog, Player Settings, and the Debug panel open one **Download debug export** dialog for a developer
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-export)). The technical report is always included; each personal category is a
@@ -566,9 +566,11 @@ withdraws, so repeated causes do not stack.
 Notices belong to the Player, not the story, so they never appear in the conversation. A new or replaced notice shows
 as a temporary toast (shadcn-vue Sonner) at the top centre of the window, below the Player's top controls, whether or
 not a side panel is open; on a narrow screen the toast spans the window and may cover the timer. Each toast shows a level icon (info, warning, or error), its text, and at
-most one action control that runs from the player's click (such as **Enable audio**). Up to three toasts show as a
-stack with the newest in front; the pointer expands the stack and pauses expiry. Info toasts expire after 5 seconds,
-warnings after 8, and errors after 10; swiping a toast away hides it sooner. Hiding or expiry removes only the toast.
+most one action control that runs from the player's click (such as **Enable audio**) and closes the toast, and, for an
+error, **Details**, which leaves it open. Up to three toasts show as a stack with the newest in front; the pointer
+expands the stack and pauses expiry. Info toasts expire after 5 seconds and warnings after 8; an error's toast stays
+until its condition resolves or the panel is opened. Swiping a toast away hides it sooner. Hiding or expiry removes only
+the toast.
 The toasts are announced politely, errors included.
 
 The notification bell in the top controls opens the notification panel, which lists every current notice, newest
@@ -584,7 +586,8 @@ The current conditions are blocked audio (warning, with **Enable audio**), brows
 Start withdraws it), a session this browser cannot keep for a reload (warning, withdrawn once a later state is kept), an image request that allows only the camera where no camera can be used (warning,
 withdrawn when the request ends), a media file the script refers to that the Player cannot use (warning, see
 [Stage and media presentation](#stage-and-media-presentation)), and a session stopped by an error (error, with
-**Details**; see [Session end and failure](#session-end-and-failure)). Each level also has a theme status colour, following
+**Details**; see [Session end and failure](#session-end-and-failure)), which after a failed return to the session from
+Debug's [rewind](../DEBUGGER.md#rewind) needs action: **Retry return to session**. Each level also has a theme status colour, following
 the usual convention: info blue, warning orange, error red. A toast uses the level's soft tint as its surface and its
 solid tone for the border and icon; a panel entry uses the same tint with a solid mark along its start edge and a solid
 icon; and the bell's dot takes the most severe level that needs attention. The development preview's Visual Lab shows every level.
