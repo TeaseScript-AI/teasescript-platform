@@ -25,15 +25,15 @@ import { fileURLToPath } from "node:url";
 // `opener`; any other line, one whose values sit in a string or a call (`Number(684)`, `Number("684")`) or are split
 // across lines included, is refused naming the fix: write the values as literals in a declared form, or declare the
 // form here. So is an edit after which `pin` finds fewer pins, a file whose scan ends inside a string, template,
-// comment or regular expression, and a changed pin line the scan places in one though alone it reads as code. A form's
-// numbers outside its `input` part are its expected values. A line whose expected values a removed line of the suite's
-// base pins held is unchanged (an input, a word or the layout changed); any other is a new or re-pinned value and needs
-// a changed comment line, where the "N units more or fewer since #…" ground is written: in the block above it (up to a
-// blank line, a closing line or the test's start), or in its header, the comment above its test and at its start, or,
-// for a pin outside a test, the comment above the line its declared `ground` finds. Exit 1 naming each refusal. It
-// judges that the ground was touched, not whether it is true: the reviewer does. A listed-site count (`listed`) names
-// its site by its reason, which the kept and key-ids tests require, and is not read; nor is a suite not yet committed,
-// which has no base.
+// comment or regular expression, and a changed pin line the scan starts in one, unless alone it is a comment and
+// nothing else. A form's numbers outside its `input` part are its expected values. A line whose expected values a
+// removed line of the suite's base pins held is unchanged (an input, a word or the layout changed); any other is a new
+// or re-pinned value and needs a changed comment line, where the "N units more or fewer since #…" ground is written: in
+// the block above it (up to a blank line, a closing line or the test's start), or in its header, the comment above its
+// test and at its start, or, for a pin outside a test, the comment above the line its declared `ground` finds. Exit 1
+// naming each refusal. It judges that the ground was touched, not whether it is true: the reviewer does. A listed-site
+// count (`listed`) names its site by its reason, which the kept and key-ids tests require, and is not read; nor is a
+// suite not yet committed, which has no base.
 //
 // The list is the authority. Its test (`pin-suites.test.mjs`) requires each `pin` and `ground` to find a line, each
 // line of today's pins to take a declared form, and each pin to have a header (outside a test, at its `ground`); it
@@ -462,6 +462,16 @@ export function groundsOf(scan, raw, at, ground) {
 const linesText = ({ from, to }) => (from === to ? `line ${from}` : `lines ${from}–${to}`);
 
 /**
+ * Whether a line's scan stands without the text above it: the line starts outside every string, template and comment,
+ * or, scanned alone, it is blank or a comment and nothing else.
+ */
+export function corroborated(scannedLine, raw) {
+  if (scannedLine.top) return true;
+  const alone = scanned(raw)[0];
+  return alone.code.trim() === "" && (alone.comment || raw.trim() === "");
+}
+
+/**
  * The base side of a change: the base lines inside its pins (`inside`), and the expected values each removed one held,
  * as a multiset of their texts (`held`).
  */
@@ -524,17 +534,11 @@ export function refusalsOf(file, baseText, headText, diff, suite) {
   };
   for (const line of added) {
     if (!inside.has(line)) continue;
-    // (a line the scan places in a comment, string or template, but which alone reads as code with a number: the scan
-    // may have misread something above it, so the line is refused rather than skipped)
-    const alone = scanned(raw[line - 1])[0];
-    if (
-      (!scan[line - 1].top || scan[line - 1].comment) &&
-      !/^\s*(?:\*|\/\/|\/\*)/u.test(raw[line - 1]) &&
-      /\d/u.test(alone.code) &&
-      !/\d/u.test(scan[line - 1].code)
-    ) {
+    // (a line the scan starts inside a comment, string or template is read only when alone it is a comment and nothing
+    // else: the scan may have misread something above it, so any other such line is refused rather than skipped)
+    if (!corroborated(scan[line - 1], raw[line - 1])) {
       out.push(
-        `${file}:${line}: the scan reads this changed pin line as in a comment, string or template, though alone it reads as code${of}.\n` +
+        `${file}:${line}: the scan starts this changed pin line inside a comment, string or template, and alone it is more than a comment${of}.\n` +
           `  Rewrite what the scan misreads above it, or teach it to \`scanOf\` in tools/repository-checks/pin-suites.mjs.`,
       );
       continue;
