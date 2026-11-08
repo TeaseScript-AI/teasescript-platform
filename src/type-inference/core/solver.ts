@@ -709,17 +709,24 @@ export class Solver {
   /**
    * A proof demand's items and proof: the demand yielded, so its reader depends on it (and reruns on a changed proof)
    * as on any demand, and its proof as the solver holds it once the items are in: finished, a member's provisional one,
-   * or `null`, none (no run of it returned yet; after a stop, any unfinished one: only looked up, nothing run).
+   * or `null`, none (no run of it returned yet; after a stop, any unfinished one: only looked up, nothing run); and
+   * whether it is a member of a component still being solved (`open`: its proof, if any, is provisional, #1072 A2).
    */
   public *proven<P extends Proof>(
     demand: ProofDemand<P>,
-  ): Work<{ readonly items: readonly Item[]; readonly proof: P | null }> {
+  ): Work<{ readonly items: readonly Item[]; readonly proof: P | null; readonly open: boolean }> {
     const items = yield demand;
     const finished = this.#proofs.get(demand.key);
-    const held = finished ?? (this.#running ? (this.#active.get(demand.key)?.proof ?? null) : null);
+    const active =
+      finished === undefined && this.#running ? this.#active.get(demand.key) : undefined;
     // EVIDENCE: invariant: a key is one demand's identity, so the proof held under it is what its demand's runs return.
-    const proof = held as P | null;
-    return { items, proof };
+    const proof = (finished ?? active?.proof ?? null) as P | null;
+    return { items, proof, open: active !== undefined };
+  }
+
+  /** Whether a top-level demand is running (a computation inside it may yield, never run another: `run`). */
+  public get running(): boolean {
+    return this.#running;
   }
 
   /** The finished demands with the work each cost, in the order they finished. */
