@@ -49,6 +49,7 @@ import {
   publishedAnswers,
   publishedRoute,
   publishedUpToOrder,
+  stopSet,
 } from "./helpers/type-core-oracles.js";
 
 /*
@@ -1094,6 +1095,143 @@ test("a deeper read below a place replaced by objects keeps each object's absenc
           );
         }
       });
+});
+
+/**
+ * #1948, #1585: a path below a property of a place replaced by closed objects answers as the place's levels do at every
+ * depth: in every mode, each read's contract equals its levels' items, merged (`levelsAt`, a fold of every object at
+ * each step down), so reading the objects holding its first property keeps each holder's answer at the path, the
+ * others' one `missing`, its earliest literal writer and its place among the holders' answers. The objects lack the
+ * property before, between and after its holders, the earliest lacking object is stored after the first, the holders
+ * merge at successive steps (and one stored between two others it merges with, each beside objects of a property of
+ * their own, so that their reads pay for the index), and the holders' values are host data, an empty list, an object
+ * without the step and a list read at its element; the paths are read once in order and again in reverse, so the
+ * later reads come from the index and the fold it keeps. Each source's prefix is indexed but two objects holding the
+ * same property, whose levels answer every read; with the sharing on, the merges' and the issue's indexes keep the
+ * holders' fold at a path of two steps.
+ */
+test("a path below a property of a place replaced by objects answers as its levels do at every depth, in every mode (#1948, #1585)", () => {
+  const sources: readonly {
+    readonly name: string;
+    readonly source: string;
+    readonly reads: readonly string[];
+  }[] = [
+    {
+      name: "the issue's shape (#1585)",
+      source:
+        "let value:integer = 1\nlet root = {f0: {n: value}}\nroot = {f1: {n: value}}\nroot = {f2: {n: value}}\nroot = {f3: {n: value}}\nexit",
+      reads: ["f0.n", "f1.n", "f2.n", "f3.n", "f0.absent", "absent.n"],
+    },
+    {
+      name: "lacking around its holders",
+      source:
+        'let root = {g: 1}\nroot = {f: {n: 1}}\nroot = {h: true}\nroot = {f: {n: "s"}}\nroot = {g: 2}\nexit',
+      reads: ["f.n", "f.absent", "g.n", "h.n"],
+    },
+    {
+      name: "the earliest lacking stored after the first",
+      source:
+        "let early = {g: 1}\nlet late = {k: 2}\nlet root = {f: {n: 1}}\nroot = late\nroot = early\nroot = {f: {n: 2.5}}\nexit",
+      reads: ["f.n", "k.n", "g.n"],
+    },
+    {
+      name: "merged at successive steps",
+      source:
+        'let root = {f: {q: {n: 1}}, g: 1}\nroot = {f: {q: {n: 1}}, g: "s"}\nroot = {f: {q: {n: 2}}, g: true}\nroot = {h: {q: {n: 1}}, g: 1}\nroot = {h0: 1}\nroot = {h1: 1}\nroot = {h2: 1}\nexit',
+      reads: ["f.q.n", "f.q", "f.q.absent", "f.absent.n"],
+    },
+    {
+      name: "merged with one stored between",
+      source:
+        'let root = {f: {q: {n: 1}, x: 1}, g: 1}\nroot = {f: {q: {n: 1}, x: "s"}, g: 2}\nroot = {f: {q: {n: 1}, x: 1}, g: "z"}\nroot = {h: 1}\nroot = {h0: 1}\nroot = {h1: 1}\nroot = {h2: 1}\nexit',
+      reads: ["f.q.n", "f.q.absent", "f.x", "f.q"],
+    },
+    {
+      name: "host data, an empty list and an object without the step",
+      source:
+        "let root = {f: {n: hostValue}}\nroot = {f: {n: []}}\nroot = {f: {}}\nroot = {g: 1}\nexit",
+      reads: ["f.n", "f.n.element", "f.absent"],
+    },
+    {
+      name: "every object holding the property",
+      source:
+        'let first = {inside: {tone: 1}}\nlet second = {inside: {tone: "bad"}}\nlet root = second\nroot = first\nexit',
+      reads: ["inside.tone", "inside", "inside.absent"],
+    },
+    {
+      name: "a list read at its element",
+      source:
+        "let t:integer = 1\nlet root = {f0: [t]}\nroot = {f1: [t]}\nroot = {f2: [t]}\nroot = {f3: [t]}\nexit",
+      reads: ["f0.element", "f1.element", "f3.element", "absent.element"],
+    },
+  ];
+  const differing: string[] = [];
+  const indexed = new Set<string>();
+  const deep = new Set<string>();
+  for (const { name, source, reads } of sources) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null, name);
+    for (const mode of MODES)
+      inMode(mode, () => {
+        const pass = narrowingPass(request);
+        const root = bindingOf(pass, "root");
+        const prefix = keyOf(root, []);
+        for (const read of [...reads, ...[...reads].reverse()]) {
+          const path = read.split(".");
+          const asked = pass.solver.run(pass.contract.contractOf(keyOf(root, path)));
+          const levels = pass.solver.run(levelsAt(pass.contract, prefix, stepsRest(path)));
+          if (itemsText(asked) !== itemsText(mergeItems(levels, pass.program.scope)))
+            differing.push(`${name}: ${read} ${JSON.stringify(mode)}`);
+        }
+        const held = pass.contract.propertyIndexes.get(pass.contract.prefixStores(prefix));
+        if (held === undefined || !("folds" in held)) return;
+        indexed.add(name);
+        if ([...held.folds.keys()].some((key) => key.includes("."))) deep.add(name);
+      });
+  }
+  assert.deepEqual(differing, []);
+  // (objects holding the same properties are never indexed: their index would fold every source)
+  const names = sources
+    .map(({ name }) => name)
+    .filter((name) => name !== "every object holding the property")
+    .sort();
+  assert.deepEqual([...indexed].sort(), names);
+  // (the merges' and the issue's reads keep their holders' fold; a read the positions route makes one step at a time
+  // reaches the prefix as a read of the property itself, which keeps none)
+  for (const name of [
+    "merged at successive steps",
+    "merged with one stored between",
+    "the issue's shape (#1585)",
+  ])
+    assert.ok(deep.has(name), name);
+});
+
+/**
+ * #1948: the property index is built only where the folds its reads save pay for its construction. Two objects holding
+ * the same property, replaced in turn and read below it (the stops area's `1249-astra-copy-and-cycle-cases`), keep
+ * their levels as before #1948, so each of these sources completes its decision at demand allowance 256 in the mode
+ * where main completes it there: a regression oracle of that area's stops check.
+ */
+test("two objects holding the same property, read below it, complete at the demand allowance they did before #1948", () => {
+  const first =
+    'let first={inside:{tone:1}}\nlet second={inside:{tone:"bad"}}\nlet result=second\n';
+  const cases = [
+    { source: `${first}result=first\nexit\n`, mode: 2 },
+    { source: `${first}result=first\nsay result.inside.tone\nexit\n`, mode: 0 },
+    { source: `${first}say result.inside.tone\nresult=first\nexit\n`, mode: 0 },
+    {
+      source:
+        'let a={tone:1,inner:null}\na.inner=a\nlet bad={inner:{tone:"bad"}}\nlet other=a\nother=bad\nsay other.inner.tone\nexit\n',
+      mode: 1,
+    },
+  ];
+  for (const { source, mode } of cases)
+    assert.deepEqual(
+      stopSet([{ path: "main.tease", source }], MODES[mode]!, ["hostValue", "hostOther"], 256)
+        ?.stops,
+      [],
+      `${source} mode ${mode}`,
+    );
 });
 
 /**

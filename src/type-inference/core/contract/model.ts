@@ -100,8 +100,8 @@ export interface PrefixLevels {
    * member (`closedObject`): a property below the prefix is read from its property index (`propertyItems`).
    */
   readonly closed: boolean;
-  /** #1456: whether a property below it has been read; its first read is the levels' alone (`propertyItems`). */
-  read: boolean;
+  /** #1456: how many times a property below it has been read; its first read is the levels' alone (`propertyItems`). */
+  reads: number;
 }
 
 /**
@@ -120,22 +120,25 @@ export interface PropertySource {
  * #1456: a prefix's property index, once per its stores (`Contract.propertyIndexes`): its sources in order, and those
  * F11's `missing` names in their writers' order (F28, with the sharing on too: #1323); per property's path below the
  * prefix (`pathAt`), the sources holding it, in order; and, as a property is asked, F11's witness of those without it
- * (`propertyLack`).
+ * (`propertyLack`) and its holders' groups at each path asked below it.
  */
 export interface PropertyIndex {
   readonly sources: readonly PropertySource[];
   readonly byWriter: readonly PropertySource[];
   readonly holders: ReadonlyMap<number, readonly PropertySource[]>;
   readonly lacking: Map<number, PropertyLack>;
+  /** #1948: with the sharing on, per path below the prefix, its first step's holders' groups there (`holderGroups`). */
+  readonly folds: Map<string, readonly LevelGroup[]>;
 }
 
 /**
  * #1456: a prefix of closed objects whose properties its levels read until the index pays (`propertyItems`), from
- * its second property read on: the reads made so far, and the index's size, its sources' property names.
+ * the read whose folds could first pay for the least index on: its sources' property names.
  */
 export interface PropertyReads {
-  asked: number;
   readonly names: number;
+  /** #1948: its sources' distinct property names, counted where the reads could first pay for the index. */
+  distinct?: number;
 }
 
 /** F11 at a prefix's property: the earliest writer of a source without it, and the first one's position (-1: none). */
