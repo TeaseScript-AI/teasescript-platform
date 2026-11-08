@@ -959,3 +959,11 @@ test("a step's drop goes to the history it was sent to, and none once that histo
     "enroll",
   ]);
 });
+
+test("after a loss a new session still ends the inspection, and sends nothing", () => {
+  const lost = play(INSPECTING, ["lost"]);
+  assert.equal(lost.world.state.inspecting, true, "the lost page keeps what it showed");
+  const { world, batches } = play(lost.world, ["newSession"]);
+  assert.equal(world.state.inspecting, false, "the new session is no inspection");
+  assert.deepEqual(kinds(batches), []);
+});
