@@ -6,8 +6,11 @@ import { Project, ts } from "ts-morph";
  * The derivation inventory's guard (TABLE r4.138, r4.143), syntactic and scoped by name (TABLE r4.182). `OBLIGATION_SITES`
  * lists every derivation of admission's that creates an obligation; a stop before admission settled runs each in the
  * fresh pass. A derivation of `Admission`'s or `Consumers`' is a member of the class with a body (a method, a getter and
- * setter pair as one, a property holding a function), or a function of its files (the entry, and the parts in the
- * folder beside it) with a parameter typed as the class: a method whose body moved there, known by its declaration. A
+ * setter pair as one, a property holding a function), or a function of its declared files (`admissionFiles`,
+ * `consumersFiles`: the entry, the parts in the folder beside it, and for `Admission` also `core/inherited/`, A4's
+ * folder) with a parameter typed as the class: a method whose body moved there, known by its declaration. A module of
+ * `src/type-inference/core/` outside those files with a function taking `Admission` and a reference the inventory cannot
+ * weigh is refused by name, in place of each such reference. A
  * public method whose one statement forwards to the function of its name is that function, its arguments its own
  * parameters. The guarded members are known by the compiler's symbols: every member of `Admission` per the type
  * checker (a constructor's parameter properties, accessors and overloads, each with all its declarations), `readChecks`
@@ -46,22 +49,29 @@ const ADMISSION = "src/type-inference/core/admission.ts";
 const CONSUMERS = "src/type-inference/core/consumers.ts";
 const CORE = "src/type-inference/core";
 
-/** A split file's files: the entry, which holds the class, and its parts in the folder beside it, where there is one. */
-function splitFiles(root, entry) {
-  const parts = entry.replace(/\.ts$/, "");
-  return [
-    entry,
-    ...(existsSync(resolve(root, parts))
-      ? readdirSync(resolve(root, parts))
-          .filter((name) => name.endsWith(".ts"))
-          .sort()
-          .map((name) => `${parts}/${name}`)
-      : []),
-  ];
+/** A folder's `.ts` files, sorted; none where there is no folder. */
+function folderFiles(root, folder) {
+  return existsSync(resolve(root, folder))
+    ? readdirSync(resolve(root, folder))
+        .filter((name) => name.endsWith(".ts"))
+        .sort()
+        .map((name) => `${folder}/${name}`)
+    : [];
 }
 
-/** The admission files: the entry and its parts. */
-export const admissionFiles = (root) => splitFiles(root, ADMISSION);
+/** A split file's files: the entry, which holds the class, and its parts in the folder beside it, where there is one. */
+function splitFiles(root, entry) {
+  return [entry, ...folderFiles(root, entry.replace(/\.ts$/, ""))];
+}
+
+/**
+ * The admission files: the entry, its parts, and `core/inherited/` (A4's state and resolver, whose functions take
+ * `Admission`: #1072 A2). A module taking `Admission` elsewhere is refused by name: its folder is added here, or it moves.
+ */
+export const admissionFiles = (root) => [
+  ...splitFiles(root, ADMISSION),
+  ...folderFiles(root, `${CORE}/inherited`),
+];
 
 /** The consumers files: the entry and its parts. */
 export const consumersFiles = (root) => splitFiles(root, CONSUMERS);
@@ -1068,5 +1078,34 @@ export function obligationInventoryDiagnostics(program, root, files) {
   for (const name of files.hostReads.keys())
     if (!members.has(name))
       report(host, `HOST_READS lists AdmissionHost.${name}, which the interface does not have.`);
+  // (a module taking `Admission` outside its declared files, with references there the inventory cannot weigh: one
+  // finding naming the rule in place of them)
+  const declared = new Set([...admissionFiles, ...consumerFiles]);
+  const fileNameOf = (sourceFile) => relative(root, sourceFile.fileName).split(sep).join("/");
+  const flagged = new Set(diagnostics.map((diagnostic) => diagnostic.fileName));
+  const outside = new Map();
+  for (const sourceFile of scopeFiles) {
+    if (declared.has(sourceFile) || !flagged.has(fileNameOf(sourceFile))) continue;
+    sourceFile.forEachChild((node) => {
+      const functions = ts.isFunctionDeclaration(node)
+        ? [node]
+        : ts.isVariableStatement(node)
+          ? node.declarationList.declarations.map(functionOf).filter((fn) => fn !== undefined)
+          : [];
+      for (const fn of functions)
+        if (!outside.has(sourceFile) && fn.parameters.some((p) => typedAs(p, admissionClass)))
+          outside.set(sourceFile, fn);
+    });
+  }
+  if (outside.size === 0) return diagnostics;
+  const names = new Set([...outside.keys()].map(fileNameOf));
+  const kept = diagnostics.filter((diagnostic) => !names.has(diagnostic.fileName));
+  diagnostics.length = 0;
+  diagnostics.push(...kept);
+  for (const fn of outside.values())
+    report(
+      fn,
+      "Unproved: a module taking Admission outside admission's declared files: add its folder to admissionFiles or move it.",
+    );
   return diagnostics;
 }

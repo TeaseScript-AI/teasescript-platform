@@ -599,7 +599,7 @@ export class Values {
 
   /**
    * G3 3a: a value's read at a path with its position (`#position`'s proof), `null` where it stands at none (a read
-   * through no wrapper, outside positions): A2's scan past wrappers asks it (`admission/inherited.ts`).
+   * through no wrapper, outside positions): A2's scan past wrappers asks it (`inherited/inherited.ts`).
    */
   public *valuePosition(
     value: PlaceId,
