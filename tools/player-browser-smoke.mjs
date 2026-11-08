@@ -3020,9 +3020,11 @@ async function rewindSwitchScenario(cdp, origin) {
         `A failed reinstatement, ${mode} ${device}: its error once, no empty-transcript text, its permanent button held`,
       );
       await save(`retry-${mode}-${device}`);
-      // The retry brings the session Back left back, which takes input again, and withdraws the error.
-      // The retry, which the failing gate holds, closes its toast; the panel does not offer it again while it runs.
+      // The retry, which the failing gate holds, closes its toast, and the panel does not offer it again while it runs;
+      // it brings the session Back left back, which takes input again, and withdraws the error.
       await physicalClickOn(cdp, retry, "the error notice's Retry return to session");
+      // Once its toast has gone, so the panel opens on a settled page.
+      await waitFor(cdp, `!document.querySelector('[data-sonner-toast][data-type="error"]')`);
       await physicalClick(cdp, "[data-notification-bell]");
       const pendingRetry = `JSON.stringify({ retry: document.querySelector('[data-notice-action="session-error"]')?.disabled ?? 'none', announced: document.querySelector('[data-rewind-announcement]')?.textContent.trim() })`;
       await waitFor(
@@ -3031,7 +3033,9 @@ async function rewindSwitchScenario(cdp, origin) {
         2_000,
         `A pending retry, ${mode} ${device}: the panel still offers it`,
       ).catch(async (error) => {
-        throw new Error(`${error.message}: ${await value(cdp, pendingRetry)}`);
+        await save(`pending-retry-failure-${mode}-${device}`);
+        const state = `JSON.stringify({ shown: ${pendingRetry}, open: document.querySelector('[data-notification-bell]')?.getAttribute('aria-expanded'), notices: document.querySelectorAll('[data-player-notice]').length, focus: document.activeElement?.outerHTML.slice(0, 120) })`;
+        throw new Error(`${error.message}: ${await value(cdp, state)}`);
       });
       await waitFor(
         cdp,
