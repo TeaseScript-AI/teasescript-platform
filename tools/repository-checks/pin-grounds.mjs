@@ -1,38 +1,47 @@
 import { ts } from "ts-morph";
 
 // The ground check of the pins `pin-suites.mjs` lists (`pin-suites.mjs --check-grounds` runs it): a pinned value that
-// is new or moved needs a changed comment where its ground is written, "N units more or fewer since #…".
+// is new or moved needs a changed comment where its ground is written, "N units more or fewer since #…". It proves that
+// every change to a declared pin's text carries its ground; it does not prove that the pin runs. Whether it runs is the
+// suite's to show (a live assertion that disagrees fails in CI), and the reviewer's.
 //
 // It reads each changed file holding a suite's pins, at the merge-base and at the head, with the TypeScript parser that
 // `ts-morph` exports (`import { ts } from "ts-morph"`, a development dependency already): no type checker, no
 // evaluation. `GROUNDS` declares, for each suite, where its expected values sit: the test or top-level `const` that
-// owns them (by its title or name, found once), the expressions inside it that hold them, and the header whose comment
-// grounds them all. An assertion is read where it runs as its test runs (its own statement in the test's body, or in a
-// loop's body there), and only while each name its actual operand reads is declared once in the test. A reader takes
-// only literal values in its declared shapes: a numeric literal, or one counter snapshot string (`"checks 142 …"`), in
-// the declared arrays and objects, each object's properties plain and named once. Any other expression there (a call, a
-// name, arithmetic, a template, a concatenation, a spread, a property not declared) is refused, naming the value and
-// the fix; so is a file that does not parse, at the base or at the head, an owner missing or found twice, and a shape
-// the reader does not know. Nothing passes by its layout: line breaks, comments and formatting do not change what is
-// read.
+// owns them (by its title or name, found once; a test taking options, which may skip it, is refused), the expressions
+// inside it that hold them, and the header whose comment grounds them all. Every assertion of a declared form in its
+// test (its declared actual operand, parentheses, casts and spacing aside, or an expected operand of its declared
+// shape) must be the one pin: written exactly, its own statement in the test's body or in a loop's body there, after no
+// `return` or `throw` of its blocks, each name its actual operand reads declared once in the test (enums and imports
+// included). Any other is refused naming its line, never dropped. A reader takes only literal values in its declared
+// shapes: a numeric literal, or one counter snapshot string (`"checks 142 …"`), in the declared arrays and objects,
+// each object's properties plain and named once. Any other expression there (a call, a name, arithmetic, a template, a
+// concatenation, a spread, a property not declared) is refused, naming the value and the fix; so is a file that does
+// not parse, at the base or at the head, an owner missing or found twice, and a shape the reader does not know. Nothing
+// passes by its layout: line breaks, comments and formatting do not change what is read.
 //
 // Each record (a row of values, f18's object with each value labelled by its field, one counter snapshot) is compared
 // by its owner, its place (with the name or index that tells it from its siblings: a closure row's or a work-c case's
-// name, a family's or a shape's `name`, a position elsewhere) and its values. A head record whose values a base record
-// of the same owner and place held is unchanged, each base record matching one head record; any other head record is
-// new or re-pinned and needs a touched comment: a comment on lines of its own, with an added line of the change among
-// them (lines counted by `\n`, as Git counts them), either leading the record or a container of it up to the statement
-// of its owner that holds it, or leading its owner's header (a test, and the test's first statement; or the declared
-// anchor of a pin outside a test). It judges that the ground was touched, not whether it is true: the reviewer does. A
+// name, a family's or a shape's `name`, a position elsewhere) and its values in order. A head record whose values a
+// base record of the same owner and place held is unchanged, each base record matching one head record; any other head
+// record is new or re-pinned and needs a touched comment: a comment on lines of its own, with an added line of the
+// change among them (lines counted by `\n`, as Git counts them), either leading the record or a container of it up to
+// the statement of its owner that holds it, or leading its owner's header (a test, and the test's first statement; or
+// the declared anchor of a pin outside a test). It judges that the ground was touched, not whether it is true: the
+// reviewer does. An owner renamed in place is refused, as its base cannot be found: rename it in a change of its own. A
 // suite whose pins are listed sites (`listed`) is not read: each site's reason names it, as its own test requires. A
 // value changed after its declaration, by other code, is not read: the declared literal is the pin.
 //
-// A change to this file or to its readers runs `node --test tools/repository-checks/pin-grounds.full.test.mjs`, every
-// expected value moved by one, and quotes its result.
+// Its tests read the frozen suite texts of their fixture, generated by `pin-grounds.generate.mjs` (its header says from
+// what), never the live suites, so a re-pin on main leaves them green. A change to this file or to its readers runs
+// `node --test tools/repository-checks/pin-grounds.full.test.mjs`, every expected value moved by one, and quotes its
+// result.
 
 const COUNTERS = /^[A-Za-z]+ \d+(?: [A-Za-z]+ \d+)*$/u;
 const FIX_SHAPE =
   "Write the value as a literal in its declared shape, or declare the shape in tools/repository-checks/pin-grounds.mjs.";
+const FIX_FORM =
+  "Keep one assertion of the declared form, written as declared where its test runs, or declare the form in tools/repository-checks/pin-grounds.mjs.";
 const FIX_OWNER =
   "Restore it, or update its declaration in tools/repository-checks/pin-grounds.mjs.";
 
@@ -97,7 +106,13 @@ const declarationsIn = (node, name) =>
         ts.isParameter(child) ||
         ts.isBindingElement(child) ||
         ts.isFunctionDeclaration(child) ||
-        ts.isClassDeclaration(child)) &&
+        ts.isClassDeclaration(child) ||
+        ts.isEnumDeclaration(child) ||
+        ts.isModuleDeclaration(child) ||
+        ts.isImportClause(child) ||
+        ts.isImportSpecifier(child) ||
+        ts.isNamespaceImport(child) ||
+        ts.isImportEqualsDeclaration(child)) &&
       child.name !== undefined &&
       ts.isIdentifier(child.name) &&
       child.name.text === name,
@@ -319,8 +334,14 @@ const inTest = (title, read) => (reading) => {
   const test = reading.one(testsTitled(reading.source, title), `the test "${title}…"`);
   if (test === undefined) return;
   const body = bodyOf(test);
-  if (body === undefined) {
-    reading.refuse(test, `the test "${title}…" has no block body`, FIX_OWNER);
+  if (body === undefined || test.expression.arguments.length !== 2) {
+    reading.refuse(
+      test,
+      body === undefined
+        ? `the test "${title}…" has no block body`
+        : `the test "${title}…" takes options (it may be skipped): its pins are not read`,
+      FIX_OWNER,
+    );
     return;
   }
   reading.in({ name: title, header: [test, body.statements[0]].filter(Boolean), scope: body }, () =>
@@ -357,30 +378,88 @@ const inDeclaration = (name, anchor, read) => (reading) => {
 };
 
 /**
- * Each `assert.<method>(<actual>, <expected>, …)` in `body`, its expected operand read by `read`: one at least, and a
- * second is another record of the same place, new unless the base held its values.
+ * The one `assert.<method>(<actual>, <expected>, …)` in `body` that is its pin, its expected operand read by `read`.
+ * Every assertion of the declared form in the test (`assert.<method>` whose actual operand is the declared one,
+ * parentheses, casts and spacing aside, or whose expected operand takes the declared shape, `shape`) must be that one
+ * pin: written exactly, its own statement where the test runs (`runsInTest`), after no `return` or `throw` of its
+ * blocks, and alone; any other is refused, naming its line, never dropped.
  */
-const assertion = (method, actual, describe, read) => (reading, body) => {
-  const calls = within(body, (node) => isAssert(node, method, actual) && runsInTest(node, body));
-  if (calls.length === 0) reading.one(calls, `the assertion assert.${method}(${describe}, …)`);
-  for (const call of calls) {
-    // (a name the actual operand reads but does not declare, declared twice in the test, may bind a decoy)
-    const actualOperand = call.arguments[0];
-    const names = new Set(
-      within(actualOperand, (node) => ts.isIdentifier(node) && !isPropertyName(node))
-        .map((node) => node.text)
-        .filter((name) => declarationsIn(actualOperand, name).length === 0),
-    );
-    const twice = [...names].filter((name) => declarationsIn(body, name).length > 1);
-    if (twice.length > 0)
+const assertion = (method, actual, describe, read, shape) => (reading, body) => {
+  const calls = within(
+    body,
+    (node) =>
+      isAssertCall(node, method) &&
+      (actual(unwrapped(node.arguments[0])) || shape(unwrapped(node.arguments[1]))),
+  );
+  const pins = calls.filter(
+    (call) => actual(call.arguments[0]) && runsInTest(call, body) && !afterExit(call, body),
+  );
+  for (const call of calls)
+    if (call !== pins[0])
       reading.refuse(
         call,
-        `assert.${method}(${describe})'s ${twice.join(", ")} is declared more than once in the test`,
-        FIX_OWNER,
+        pins.includes(call)
+          ? `a second assert.${method}(${describe}) in the test`
+          : `an assert.${method}(${describe}) that is not read as the pin (in a branch, a function, a block of its own or after a return or throw, or written another way)`,
+        FIX_FORM,
       );
-    else read(call.arguments[1], `assert.${method}(${describe})`);
-  }
+  if (pins.length === 0 && calls.length === 0)
+    reading.one(calls, `the assertion assert.${method}(${describe}, …)`);
+  const call = pins[0];
+  if (call === undefined || calls.length !== 1) return;
+  // (a name the actual operand reads but does not declare, declared twice in the test, may bind a decoy)
+  const actualOperand = call.arguments[0];
+  const names = new Set(
+    within(actualOperand, (node) => ts.isIdentifier(node) && !isPropertyName(node))
+      .map((node) => node.text)
+      .filter((name) => declarationsIn(actualOperand, name).length === 0),
+  );
+  const twice = [...names].filter((name) => declarationsIn(body, name).length > 1);
+  if (twice.length > 0)
+    reading.refuse(
+      call,
+      `assert.${method}(${describe})'s ${twice.join(", ")} is declared more than once in the test`,
+      FIX_OWNER,
+    );
+  else read(call.arguments[1], `assert.${method}(${describe})`);
 };
+
+/** An `assert.<method>(…)` call with two operands at least. */
+const isAssertCall = (node, method) =>
+  ts.isCallExpression(node) &&
+  ts.isPropertyAccessExpression(node.expression) &&
+  node.expression.getText() === `assert.${method}` &&
+  node.arguments.length >= 2;
+
+/** An expression without the parentheses, non-null marks and casts around it. */
+function unwrapped(node) {
+  while (
+    ts.isParenthesizedExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isSatisfiesExpression(node)
+  )
+    node = node.expression;
+  return node;
+}
+
+/** Whether a `return` or `throw` statement comes before an assertion's statement in one of its blocks in the test. */
+function afterExit(call, body) {
+  for (
+    let statement = call.parent;
+    statement !== body && statement !== undefined;
+    statement = statement.parent
+  ) {
+    const block = statement.parent;
+    if (block === undefined || !ts.isBlock(block)) continue;
+    for (const before of block.statements) {
+      if (before === statement) break;
+      if (ts.isReturnStatement(before) || ts.isThrowStatement(before)) return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Whether an assertion runs as the test runs: its own statement, in the test's body or in loops' bodies there, with no
@@ -402,20 +481,40 @@ const isPropertyName = (node) =>
   (ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) ||
   (ts.isPropertyAssignment(node.parent) && node.parent.name === node);
 
-const named = (text) => (node) => node.getText() === text;
+/** Whether an expression is exactly `text`, spacing aside. */
+const named = (text) => (node) => node.getText().replace(/\s+/gu, "") === text.replace(/\s+/gu, "");
+
+/** The declared shapes of an expected operand, for finding every assertion of the declared form. */
+const isNumber = (node) => ts.isNumericLiteral(unwrapped(node));
+const holdsNumbers = (node) =>
+  ts.isArrayLiteralExpression(node) &&
+  within(node, (child) => ts.isNumericLiteral(child)).length > 0;
+const hasTotal = (node) =>
+  ts.isObjectLiteralExpression(node) && propertyOf(node, "total") !== undefined;
 
 /**
- * Where each suite's expected values sit, by the file holding them: `read(reading)`, or `listed` for listed sites.
+ * Where each suite's expected values sit, by the file holding them: the owners it reads (`owners`, each a test's title
+ * or a declaration's name), and `read(reading)`; or `listed` for listed sites.
  */
 export const GROUNDS = {
   "tests/type-core-candidate.test.ts": {
+    owners: [
+      "an integer-only use of a written number place is the current checker's error at every use",
+    ],
     read: (reading) =>
       inTest(
         "an integer-only use of a written number place is the current checker's error at every use",
-        assertion("deepEqual", named("units"), "units", (node, place) => reading.row(node, place)),
+        assertion(
+          "deepEqual",
+          named("units"),
+          "units",
+          (node, place) => reading.row(node, place),
+          holdsNumbers,
+        ),
       )(reading),
   },
   "tests/type-core-closure.test.ts": {
+    owners: ["OUTSIDE"],
     read: inDeclaration(
       "OUTSIDE",
       (reading) =>
@@ -439,23 +538,30 @@ export const GROUNDS = {
     ),
   },
   "tests/type-core-contract-capture.test.ts": {
+    owners: ["the capture ends at the first store whose contract leaves the slice's depth"],
     read: (reading) =>
       inTest(
         "the capture ends at the first store whose contract leaves the slice's depth",
-        assertion("equal", named("budget.total"), "budget.total", (node, place) => {
-          const value = reading.number(node, place);
-          if (value !== undefined) reading.record(place, [value], node);
-        }),
+        assertion(
+          "equal",
+          named("budget.total"),
+          "budget.total",
+          (node, place) => {
+            const value = reading.number(node, place);
+            if (value !== undefined) reading.record(place, [value], node);
+          },
+          isNumber,
+        ),
       )(reading),
   },
   "tests/type-core-f18.test.ts": {
+    owners: ["a literal default keeps the contract's own walk"],
     read: (reading) =>
       inTest(
         "a literal default keeps the contract's own walk",
         assertion(
           "deepEqual",
-          (actual) =>
-            ts.isObjectLiteralExpression(actual) && propertyOf(actual, "total") !== undefined,
+          hasTotal,
           "{ total, decisions, default }",
           (node, place) => {
             // (each value labelled by its field, so a value moved between fields is a change)
@@ -475,21 +581,28 @@ export const GROUNDS = {
             });
             if (known && !values.includes(undefined)) reading.record(place, values, node);
           },
+          hasTotal,
         ),
       )(reading),
   },
   "tests/type-core-key-ids.test.ts": { listed: true },
   "tests/type-core-kept.test.ts": { listed: true },
   "tests/type-core-work-a.test.ts": {
+    owners: ["a long copied key's store check charges its positions' work"],
     read: (reading) =>
       inTest(
         "a long copied key's store check charges its positions' work",
-        assertion("deepEqual", named("measured"), "measured", (node, place) =>
-          reading.rows(node, place, 2),
+        assertion(
+          "deepEqual",
+          named("measured"),
+          "measured",
+          (node, place) => reading.rows(node, place, 2),
+          holdsNumbers,
         ),
       )(reading),
   },
   "tests/helpers/type-core-families.ts": {
+    owners: ["OUTPUT_BOUND_FAMILIES"],
     read: inDeclaration(
       "OUTPUT_BOUND_FAMILIES",
       (reading) =>
@@ -526,6 +639,11 @@ export const GROUNDS = {
     ),
   },
   "tests/type-core-work-c.test.ts": {
+    owners: [
+      "a deep read asks its one holder's source by reference",
+      "a prefix of closed objects read once has main's counters",
+      "a prefix the cheap checks refuse walks no holder's marks",
+    ],
     read: (reading) => {
       inTest("a deep read asks its one holder's source by reference", (reading, body) =>
         reading.declaredArray(body, "shapes", "the deep read's shapes", (shape) => {
@@ -571,9 +689,11 @@ export const GROUNDS = {
         "a prefix the cheap checks refuse walks no holder's marks",
         assertion(
           "deepEqual",
-          () => true,
-          "the four modes' totals",
+          (actual) =>
+            ts.isCallExpression(actual) && named("[false, true].flatMap")(actual.expression),
+          "[false, true].flatMap(…)",
           (node, place) => reading.row(node, place),
+          holdsNumbers,
         ),
       )(reading);
     },
@@ -650,7 +770,9 @@ export function refusalsOf(file, baseText, headText, added) {
   const out = [];
   for (const { line, what } of base.refusals)
     out.push(
-      `${file}: at the base, line ${line}: ${what}.\n  Its pins cannot be compared there: check the base you named.`,
+      what.endsWith("is not found") && head.refusals.length === 0
+        ? `${file}: ${what} at the base: an owner renamed or new here.\n  Its pins cannot be compared: rename an owner in a change of its own, with its values unchanged.`
+        : `${file}: at the base, line ${line}: ${what}.\n  Its pins cannot be compared there: check the base you named.`,
     );
   for (const { line, what, fix } of head.refusals) out.push(`${file}:${line}: ${what}.\n  ${fix}`);
   const held = new Map();

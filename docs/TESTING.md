@@ -200,9 +200,11 @@ only with its ground: the comment above it says how many units more or fewer and
 reviewer checks that no part of the change is a repeated question, work the core already did once, done again.
 `--check-grounds` refuses a new or re-pinned value whose comment did not change, reading each value by its place in its
 suite's declared shape (`pin-grounds.mjs`); a pin written outside those shapes (a call, a name, arithmetic, a template)
-is refused, not missed: write the literal, or declare the shape. A change to `pin-grounds.mjs` or its readers runs
-`node --test tools/repository-checks/pin-grounds.full.test.mjs` and quotes its result in its pull request. A change to a
-test helper lists only a suite whose pins it holds, not every suite that imports it.
+is refused, not missed: write the literal, or declare the shape. It proves that every change to a declared pin's text
+carries its ground, not that the pin runs: that is the suite's to show in CI, and the reviewer's. A change to
+`pin-grounds.mjs` or its readers runs `node --test tools/repository-checks/pin-grounds.full.test.mjs` and quotes its
+result in its pull request. A change to a test helper lists only a suite whose pins it holds, not every suite that
+imports it.
 
 ## Test admission and consolidation
 
