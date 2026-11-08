@@ -69,6 +69,11 @@ const COUNTED = {
     line: (w) => `// ${w}`,
     wrap: (body) => `<template><p>x</p></template>\n<script setup lang="ts">\n${body}\n</script>\n`,
   },
+  "Vue script in a component the parser reports an error for": {
+    file: "player/Broken.vue",
+    line: (w) => `// ${w}`,
+    wrap: (body) => `<template><p></template>\n<script setup lang="ts">\n${body}\n</script>\n`,
+  },
 };
 const NOT_COUNTED = {
   string: { file: "src/string.ts", line: (w) => `const s = "// ${w}";` },
@@ -90,6 +95,11 @@ const NOT_COUNTED = {
   "block comment opened by a slash": { file: "src/slash.ts", line: (w) => `/*/ ${w} */` },
   // Inside a character class a regular expression can hold `//` and the word, as a text search would read them.
   "regular expression": { file: "src/regex.ts", line: (w) => `const r = /[//${w}]/;` },
+  "Vue script setup with src, which Vue refuses": {
+    file: "player/Refused.vue",
+    line: (w) => `// ${w}`,
+    wrap: (body) => `<script setup src="./plain.ts">\n${body}\n</script>\n`,
+  },
   "Vue script inside an HTML comment": {
     file: "src/Commented.vue",
     line: (w) => `// ${w}`,
@@ -201,6 +211,7 @@ const SCOPES = Object.entries(FORMS).flatMap(([form, { hides, line }]) =>
 
 let fixture;
 let result;
+let warnings;
 before(() => {
   const { files, untracked, expected } = directiveFixture();
   const big = `export function big() {\n${"  void 0;\n".repeat(1100)}}\n`;
@@ -226,6 +237,7 @@ before(() => {
   const r = run(fixture.root, "--json");
   assert.equal(r.status, 0, r.stderr);
   result = JSON.parse(r.stdout);
+  warnings = r.stderr;
 });
 
 test("a directive counts only as a comment, in each carrier, at its line", () => {
@@ -233,6 +245,14 @@ test("a directive counts only as a comment, in each carrier, at its line", () =>
     assert.deepEqual(result.sites[kind].toSorted(), fixture.expected[kind].toSorted(), kind);
     assert.equal(result.counters[kind], fixture.expected[kind].length);
   }
+});
+
+test("a .vue file the parser reports errors for is named once on stderr, and still counts", () => {
+  // Its counted blocks are checked with the directive family; here, the note and the exit status.
+  assert.deepEqual(warnings.trim().split("\n").toSorted(), [
+    "counters: player/Broken.vue: Element is missing end tag.; counted the script blocks Vue returned",
+    'counters: player/Refused.vue: <script setup> cannot use the "src" attribute because its syntax will be ambiguous outside of the component.; counted the script blocks Vue returned',
+  ]);
 });
 
 test("each node:test skip and todo form counts, and calls that only look like one do not", () => {
@@ -329,6 +349,10 @@ test("a missing list is absent, and a list of another shape or a ROOT that is no
 // pending signals from /proc/<pid>/status) and job-control signals (SIGSTOP, SIGCONT). Where that file does not exist
 // the test cannot observe the child, and says so instead of failing.
 const CHILDREN = `/proc/${process.pid}/task/${process.pid}/children`;
+// The test owns the report from its first instruction: this preload, written to the test's own temporary folder and
+// given only to its one run of the tool through NODE_OPTIONS, makes structure-report stop itself before any of its own
+// code runs. The test therefore always finds it held, whatever the scheduling, until the test resumes it.
+const HOLD = `if (process.argv[1]?.endsWith("structure-report.mjs")) process.kill(process.pid, "SIGSTOP");\n`;
 test(
   "SIGTERM is passed on to structure-report, and the tool removes its temporary folder and exits 143",
   {
@@ -338,15 +362,21 @@ test(
   },
   async () => {
     const temporary = mkdtempSync(path.join(tmpdir(), "counters-test-"));
-    folders.push(temporary);
+    const own = mkdtempSync(path.join(tmpdir(), "counters-test-"));
+    folders.push(temporary, own);
+    const hold = path.join(own, "hold.cjs");
+    writeFileSync(hold, HOLD);
     const counting = spawn(process.execPath, [tool, fixture.root], {
-      env: { ...process.env, TMPDIR: temporary },
+      env: {
+        ...process.env,
+        TMPDIR: temporary,
+        NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${JSON.stringify(hold)}`,
+      },
       stdio: "ignore",
     });
-    const exited = new Promise((resolve) =>
-      counting.on("exit", (code, signal) => resolve(code ?? signal)),
-    );
-    // A wait, not a bound on speed: poll until the predicate holds, failing only after 30 s.
+    let exit = null;
+    counting.on("exit", (code, signal) => (exit = code ?? signal));
+    // Every step is one wait that fails after 30 s: a bound on waiting, not a claim about speed.
     const until = async (what, predicate) => {
       for (
         const end = Date.now() + 30000;
@@ -365,32 +395,36 @@ test(
         return "";
       }
     };
+    // Every thread stopped: only then does a signal sent to the report wait as pending instead of being handled.
+    const held = (pid) => {
+      try {
+        return readdirSync(`/proc/${pid}/task`).every((tid) =>
+          /^State:\s*T/mu.test(read(`/proc/${pid}/task/${tid}/status`)),
+        );
+      } catch {
+        return false;
+      }
+    };
     let report = null;
     try {
-      // The report child: started just after the temporary folder, and stopped before it can finish.
-      report = await until("the structure-report child", () =>
+      report = await until("the structure-report child, held at its start", () =>
         read(`/proc/${counting.pid}/task/${counting.pid}/children`)
           .split(" ")
           .filter(Boolean)
           .map(Number)
-          .find((pid) => read(`/proc/${pid}/cmdline`).includes("structure-report.mjs")),
-      );
-      process.kill(report, "SIGSTOP");
-      // Every thread stopped: a signal sent to a process whose stop is still in progress can be handled by a thread
-      // that has not stopped yet, so it would not wait as pending.
-      await until("the report to stop", () =>
-        readdirSync(`/proc/${report}/task`).every((tid) =>
-          /^State:\s*T/mu.test(read(`/proc/${report}/task/${tid}/status`)),
-        ),
+          .find(
+            (pid) => read(`/proc/${pid}/cmdline`).includes("structure-report.mjs") && held(pid),
+          ),
       );
       counting.kill("SIGTERM");
-      // The tool passes the signal on: it waits as pending on the stopped report (signal 15, bit 14 of ShdPnd).
+      // The tool passes the signal on: it waits as pending on the held report (signal 15, bit 14 of ShdPnd).
       await until("SIGTERM pending on the report", () => {
         const pending = /^ShdPnd:\s*([0-9a-f]+)$/mu.exec(read(`/proc/${report}/status`));
         return pending && (BigInt(`0x${pending[1]}`) & (1n << 14n)) !== 0n;
       });
       process.kill(report, "SIGCONT");
-      assert.equal(await exited, 143);
+      await until("the tool to exit", () => exit !== null);
+      assert.equal(exit, 143);
       assert.deepEqual(readdirSync(temporary), []);
     } finally {
       counting.kill("SIGKILL");

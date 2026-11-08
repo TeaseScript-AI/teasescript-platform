@@ -8,9 +8,11 @@
 // ROOT, by default the current directory, is the top folder of a Git checkout. Its working tree is read: for the
 // directives and tests only the files Git tracks, as structure-report reads them.
 //
-// - Directives are comments in code files (.ts .tsx .mts .cts .js .jsx .mjs .cjs, and the script blocks of .vue
-//   files as Vue's SFC parser finds them), found with TypeScript's parser, so text in a string, template literal, regular expression or JSX text is
-//   never a comment. A lint disable is a comment whose text after `//` or `/*` and any spaces begins with the word
+// - Directives are comments in code files (.ts .tsx .mts .cts .js .jsx .mjs .cjs, and the script blocks that Vue's SFC
+//   parser returns for a .vue file), found with TypeScript's parser, so text in a string, template literal, regular
+//   expression or JSX text is never a comment. A .vue file the parser reports errors for (a component Vue refuses,
+//   kept as a fixture) still counts the blocks it returns, and is named once on stderr; a block Vue refuses adds
+//   nothing, and a `src` block's file counts as a file of its own. A lint disable is a comment whose text after `//` or `/*` and any spaces begins with the word
 //   `oxlint-disable` or `eslint-disable`, bare or with `-line` or `-next-line`. A `@ts-` directive is one whose text
 //   after `//`, `///` or `/*`, any further `*`, and any spaces begins with `@ts-expect-error` or `@ts-ignore`. Each
 //   comment counts once.
@@ -31,7 +33,7 @@
 // --json prints {root, commit, counters, sites}: `commit` is ROOT's HEAD (null before the first commit), `counters`
 // the values above, and `sites` the `file:line` of every directive and test site.
 // Exit status: 0 when printed, 2 when it cannot run: ROOT is no checkout's top folder, a list file is not JSON of the
-// shape named above, a .vue file does not parse, or structure-report fails. On SIGINT or SIGTERM it stops
+// shape named above, or structure-report fails. On SIGINT or SIGTERM it stops
 // structure-report, removes its temporary folder and exits 130 or 143.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -182,7 +184,9 @@ function piecesOf(file, text) {
   if (!file.endsWith(".vue")) return [{ name: file, text, line: 0 }];
   const { descriptor, errors } = parseVue(text, { filename: file });
   if (errors.length > 0)
-    throw new CannotRun(`${file} does not parse as a Vue file: ${errors[0].message}`);
+    console.error(
+      `counters: ${file}: ${String(errors[0].message ?? errors[0])}; counted the script blocks Vue returned`,
+    );
   return [descriptor.script, descriptor.scriptSetup]
     .filter(Boolean)
     .map((block) => ({
