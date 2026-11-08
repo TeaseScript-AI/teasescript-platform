@@ -186,7 +186,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "resume",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#11": [
+  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#7": [
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
@@ -362,7 +362,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "composition",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > MediaLoadQueue:callback.1": [
+  "player/vue/src/session/useSessionMedia.ts useSessionMedia > MediaLoadQueue:callback.1": [
     "own observation",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
@@ -494,23 +494,23 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "clock: keepCapture",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#10": [
+  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#6": [
     "none",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#3": [
+  "player/vue/src/session/useSessionMedia.ts useSessionMedia > watchMedia > watch:callback#3": [
     "own observation",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#7 > then:callback.1": [
+  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#3 > then:callback.1": [
     "none",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#7 > then:callback.2": [
+  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#3 > then:callback.2": [
     "none",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#7 > yieldThenReport > setTimeout:callback":
+  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#3 > yieldThenReport > setTimeout:callback":
     ["none", ["BridgeClient.request"]],
   "player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > catchUp > function": [
     "clock scheduling",
@@ -567,7 +567,8 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
   "player/lock-service.ts LockService > #present > wake {wake}": "own observation",
   "player/vue/src/session/useCallView.ts useCallView {followCallView}": "lifecycle",
   "player/vue/src/usePlayerSession.ts usePlayerSession > then:callback {bridgeLost}": "lifecycle",
-  "player/vue/src/usePlayerSession.ts usePlayerSession {catchUp}": "clock scheduling",
+  "player/vue/src/session/useSessionMedia.ts useSessionMedia > watchMedia {catchUp}":
+    "clock scheduling",
   "player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > scheduleWakeUp {catchUp}":
     "clock scheduling",
   "player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock {catchUp}": "clock scheduling",
@@ -661,6 +662,8 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerSession.ts usePlayerSession {flushTracing}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {setDebugMode}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {setDebugTracing}",
+  "player/vue/src/session/useSessionMedia.ts useSessionMedia {ownedSection}",
+  "player/vue/src/session/useSessionMedia.ts useSessionMedia {reportHostError}",
 ];
 
 /**
@@ -998,7 +1001,7 @@ const OBSERVATION_USES: readonly string[] = [
   "requestObservation <- player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > catchUp [returned]",
   "requestObservation <- player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > end [unawaited]",
   "requestObservation <- player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > requestObservation [exposed]",
-  "before <- player/vue/src/usePlayerSession.ts usePlayerSession > requestObservation [returned]",
+  "before <- player/vue/src/session/useSessionMedia.ts useSessionMedia > requestObservation [returned]",
   "before <- player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > setDebugMode [unawaited]",
   "before <- player/vue/src/session/useRandomControl.ts useRandomControl > setRandomControl [unawaited]",
   "before <- player/vue/src/usePlayerSession.ts usePlayerSession > useEventListener:callback.2 [unawaited]",
@@ -1015,8 +1018,8 @@ test("every use of the observation API is awaited, returned, handled or exposed 
     { file: CLOCK, path: "useRuntimeSceneClock > before", name: "before" },
     { file: SESSION, path: "usePlayerSession > observeForInput", name: "observeForInput" },
     {
-      file: SESSION,
-      path: "usePlayerSession > requestObservation",
+      file: "player/vue/src/session/useSessionMedia.ts",
+      path: "useSessionMedia > requestObservation",
       name: "requestObservation (device)",
     },
   ];

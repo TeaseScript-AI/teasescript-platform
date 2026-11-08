@@ -245,6 +245,7 @@ const SESSION_FILES: readonly string[] = [
   "player/vue/src/usePlayerSession.ts",
   "player/vue/src/session/useRandomControl.ts",
   "player/vue/src/session/useDebugModeAndTrace.ts",
+  "player/vue/src/session/useSessionMedia.ts",
 ];
 const ACTIVATION_FILES = [
   ...SESSION_FILES,
@@ -336,7 +337,7 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "clears the Debug mode asked, only while it is still this request's",
   "useDebugModeAndTrace.ts: useDebugModeAndTrace > applyDebugMode: then bridgeOf.request.finally":
     READMITS,
-  "usePlayerSession.ts: usePlayerSession > primeAudio: catch element.play":
+  "useSessionMedia.ts: useSessionMedia > primeAudio: catch element.play":
     "drops a blocked play; nothing follows",
   "usePlayerSession.ts: usePlayerSession > settlePlanJson: catch bridge.client.request":
     "drops the plan JSON's refusal; nothing follows",

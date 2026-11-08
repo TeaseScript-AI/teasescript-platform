@@ -130,7 +130,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     settleAdoption: EDIT,
     applySavedDataEdit: EDIT,
     clearScriptStorage: EDIT,
-    storeImageFile: EDIT,
     "usePlayerSession.rememberScriptName": EDIT,
     "usePlayerSession.images.discard": EDIT,
     sameMedium:
@@ -143,6 +142,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     applyDebugMode: SESSION,
     debugView: SESSION,
   },
+  "session/useSessionMedia.ts": { storeImageFile: EDIT, "useSessionMedia.watchMedia": SETUP },
   "session/useRandomControl.ts": {
     useRandomControl: SETUP,
     sendRandomRequest: SESSION,

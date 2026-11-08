@@ -546,6 +546,7 @@ const COMPOSABLE_FILES = [
   "player/vue/src/usePlayerSession.ts",
   "player/vue/src/session/useRandomControl.ts",
   "player/vue/src/session/useDebugModeAndTrace.ts",
+  "player/vue/src/session/useSessionMedia.ts",
 ] as const;
 /** The text of the session composable's files, one after another. */
 function composableText(): string {
