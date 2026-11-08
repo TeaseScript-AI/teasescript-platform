@@ -100,6 +100,41 @@ const expectStart = (messages, start, present = true) =>
     `${present ? "missing" : "unexpected"} "${start}":\n${messages.join("\n")}`,
   );
 
+test("A4's folder is among admission's declared files: its derivations count; outside that set a module taking Admission is refused by name", () => {
+  const inherited = "src/type-inference/core/inherited/";
+  const findings = (declared) => {
+    const project = new Project({
+      tsConfigFilePath: resolve(repositoryRoot, "tsconfig.json"),
+      skipAddingFilesFromTsConfig: true,
+    });
+    const admission = admissionFiles(repositoryRoot);
+    const consumers = consumersFiles(repositoryRoot);
+    for (const file of [...admission, ...consumers])
+      project.addSourceFileAtPath(resolve(repositoryRoot, file));
+    project.resolveSourceFileDependencies();
+    return obligationInventoryDiagnostics(project.getProgram().compilerObject, repositoryRoot, {
+      admission: declared ? admission : admission.filter((file) => !file.startsWith(inherited)),
+      consumers,
+      scope: admission.filter((file) => file.startsWith(inherited)),
+      reads: READS,
+      hostReads: HOST_READS,
+    });
+  };
+  assert.ok(admissionFiles(repositoryRoot).includes(`${inherited}inherited.ts`));
+  assert.deepEqual(findings(true), []);
+  // (its folder left out: one finding per module, naming the rule, in place of each reference it cannot weigh)
+  const outside = findings(false);
+  assert.deepEqual(outside.map((finding) => finding.fileName).sort(), [
+    `${inherited}inherited.ts`,
+    `${inherited}waiting.ts`,
+  ]);
+  for (const finding of outside)
+    assert.equal(
+      finding.message,
+      "Unproved: a module taking Admission outside admission's declared files: add its folder to admissionFiles or move it.",
+    );
+});
+
 test("a call from an obligation-creating consumer method into an unlisted Admission method fails, whatever its name", () => {
   const messages = messagesWith({
     [ADMISSION]: (text) =>
