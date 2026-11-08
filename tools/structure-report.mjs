@@ -5,18 +5,19 @@
 //   node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]
 //   node tools/structure-report.mjs [ROOT…] --diff BASE [--json FILE]
 //
-// ROOT defaults to src, player, tests, tools and playground; each is a component, whose top level is the code files
-// directly in it, and no other folder counts as a top level. Only files Git tracks are read. Functions are measured in
+// ROOT selects what is read, by default the five components: src, player, tests, tools and playground. A component's top
+// level is the code files directly in it; no other folder counts as a top level, whichever ROOT selects it. Only files
+// Git tracks are read. A file's lines are counted as an editor shows them: a final newline ends the last line. Functions are measured in
 // TypeScript and JavaScript files; the script blocks of .vue files are not parsed.
 //
 // Without --diff: the whole tree's signals, the top N of each (files over 1000 lines, folders over 20 files, top levels
 // over 12, functions over 150 lines, names a letter apart). --json writes them all; --compare counts each against an
 // earlier --json.
 //
-// With --diff BASE: only the signals the change since BASE (from its merge-base with HEAD) adds to, each against
-// BASE's own tree: a file over 1000 lines that it adds lines to, a function over 150 lines whose lines include one it
-// adds, a folder over 20 files or a top level over 12 that it adds a file to, a pair of names a letter apart that BASE
-// did not have, and a file gaining over 300 lines. A change adds to a signal whether it crosses the line or the base
+// With --diff BASE: only the signals the change since the merge base (`git merge-base BASE HEAD`) adds to, each
+// against the merge base's tree: a file over 1000 lines that it adds lines to, a function over 150 lines whose lines
+// include one it adds, a folder over 20 files or a top level over 12 that it adds a file to, a pair of names a letter
+// apart that the merge base did not have, and a file gaining over 300 lines. A change adds to a signal whether it crosses the line or the base
 // was already over it. A file it only moves (Git's rename detection) adds no lines and no file. Only the changed files
 // are parsed. --json writes those lines too, for a READY to quote.
 import { execFileSync } from "node:child_process";
@@ -31,6 +32,7 @@ const SIGNALS = {
   folderFiles: 20,
   topLevelFiles: 12,
 };
+const COMPONENTS = ["src", "player", "tests", "tools", "playground"];
 const CODE = /\.(ts|tsx|mts|cts|js|mjs|cjs|vue)$/;
 const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/;
 
@@ -46,11 +48,15 @@ const top = Number(option("--top") ?? 10);
 const jsonOut = option("--json");
 const compareWith = option("--compare");
 const diffBase = option("--diff");
-const roots = args.length > 0 ? args : ["src", "player", "tests", "tools", "playground"];
+const roots =
+  args.length > 0
+    ? args.map((root) => path.posix.normalize(root).replace(/\/+$/u, "") || ".")
+    : COMPONENTS;
 
 const git = (...gitArgs) =>
   execFileSync("git", gitArgs, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-const lineCount = (text) => text.split("\n").length;
+const lineCount = (text) =>
+  (text.match(/\n/gu)?.length ?? 0) + (text === "" || text.endsWith("\n") ? 0 : 1);
 
 /** Each function of `text` (a `file` of a parsed language) over the signal's length: its name, first line and lines. */
 function longFunctionsOf(file, text) {
@@ -201,7 +207,7 @@ function changeSignals(base) {
   for (const dir of [...grownFolders].sort()) {
     const count = headFolders.get(dir) ?? 0;
     const was = baseFolders.get(dir) ?? 0;
-    if (roots.includes(dir)) {
+    if (COMPONENTS.includes(dir)) {
       if (count > SIGNALS.topLevelFiles)
         found.push({
           signal: "top level",
@@ -254,12 +260,11 @@ if (diffBase) {
       .filter((f) => f.lines > SIGNALS.fileLines)
       .sort((a, b) => b.lines - a.lines),
     broadFolders: [...folders]
-      .filter(([dir]) => !roots.includes(dir))
+      .filter(([dir]) => !COMPONENTS.includes(dir))
       .map(([dir, count]) => ({ dir, files: count }))
       .filter((f) => f.files > SIGNALS.folderFiles)
       .sort((a, b) => b.files - a.files),
-    broadTopLevels: roots
-      .map((dir) => ({ dir, files: folders.get(dir) ?? 0 }))
+    broadTopLevels: COMPONENTS.map((dir) => ({ dir, files: folders.get(dir) ?? 0 }))
       .filter((f) => f.files > SIGNALS.topLevelFiles)
       .sort((a, b) => b.files - a.files),
     longFunctions: longFunctions.sort((a, b) => b.lines - a.lines),
