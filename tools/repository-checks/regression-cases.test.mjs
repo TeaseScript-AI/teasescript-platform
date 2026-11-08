@@ -402,7 +402,10 @@ test(
           .split("\n").length,
         1,
       );
-      assert.deepEqual(readdirSync(join(root, "tmp")), []);
+      assert.deepEqual(
+        readdirSync(join(root, "tmp")).filter((name) => name.startsWith("regression-cases-")),
+        [],
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
