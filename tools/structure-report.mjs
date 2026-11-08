@@ -27,7 +27,10 @@
 // 100644 and 100755) are measured, so a symlink and a submodule are not; a name that is not UTF-8 stops the report
 // (exit 2). The lines it adds, by file and position, are the `+` lines of each file's own `git diff -M -U0
 // --inter-hunk-context=0`, each hunk's body read inside its header's counts, with `GIT_DIFF_OPTS` removed from Git's
-// environment; their count per file is `git diff --numstat`'s, which the tool checks (exit 2 when they differ). A
+// environment; their count per file is `git diff -M -U0 --inter-hunk-context=0 --numstat`'s, which the tool checks. The
+// two run with the same context because Git trims a common tail to the context before it diffs, so a line it can
+// place in either of two spots (a lone `}`) can count as added at one context and as kept at another. A file whose
+// counts still differ, or whose patch ends inside a hunk, is reported as not measured, and the report goes on. A
 // file's text is its blob (`git cat-file blob`). Every `git diff` runs with --no-ext-diff, --no-textconv, --no-color
 // and --no-relative, whatever the user's configuration says.
 //
@@ -35,9 +38,14 @@
 // count; rename detection's similarity threshold (50% by default) and its limit decide what a move is, so an edited
 // move below them counts as a deletion and an addition; and attributes can make a file binary, which adds no lines.
 //
-// Exit status: 0 when the report is printed; 2, with the usage, when --top, --json, --compare or --diff has no value
-// (it is the last argument, or the argument after it starts with `--`) or is given twice, before anything is read or
-// written; 2 when --diff cannot read the change as Git wrote it.
+// Options: each of --top, --json, --compare and --diff takes a value, as the next argument or after `=`
+// (`--json=FILE`); --top's is a whole number. Every other argument is a root; one that starts with `-` is refused as an
+// unknown option, so a root of that name is written `./-name`.
+//
+// Exit status: 0 when the report is printed, a --diff report with files it could not measure included; 2, with the
+// usage, before anything is read or written, when an option has no value (it is the last argument, the argument after
+// it starts with `-`, or nothing follows its `=`), is given twice, or is unknown, or --top's value is not a whole
+// number; 2 when --diff cannot read the change's names (a name that is not UTF-8).
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -63,23 +71,29 @@ const refuse = (message) => {
   process.exit(2);
 };
 /**
- * The command line, read once from left to right: each of the options that take a value consumes the argument after it,
- * which must be there and must not start with `--`, and is given at most once; every other argument is a root.
+ * The command line, read once from left to right: each option takes its value after `=` or as the argument after it,
+ * which must be there and must not start with `-`, and is given at most once; an argument that starts with `-` and is
+ * no option is refused; every other argument is a root.
  */
 const rootArgs = [];
 const options = new Map();
 for (let i = 2; i < process.argv.length; i++) {
   const arg = process.argv[i];
-  if (!["--top", "--json", "--compare", "--diff"].includes(arg)) {
+  if (!arg.startsWith("-")) {
     rootArgs.push(arg);
     continue;
   }
-  const value = process.argv[i + 1];
-  if (value === undefined || value.startsWith("--")) refuse(`${arg} takes a value`);
-  if (options.has(arg)) refuse(`${arg} is given twice`);
-  options.set(arg, value);
-  i++;
+  const equals = arg.indexOf("=");
+  const name = equals < 0 ? arg : arg.slice(0, equals);
+  if (!["--top", "--json", "--compare", "--diff"].includes(name)) refuse(`unknown option ${name}`);
+  const value = equals < 0 ? process.argv[++i] : arg.slice(equals + 1);
+  if (value === undefined || value === "" || (equals < 0 && value.startsWith("-")))
+    refuse(`${name} takes a value`);
+  if (options.has(name)) refuse(`${name} is given twice`);
+  options.set(name, value);
 }
+if (options.has("--top") && !/^\d+$/u.test(options.get("--top")))
+  refuse(`--top takes a whole number, not ${options.get("--top")}`);
 const top = Number(options.get("--top") ?? 10);
 const jsonOut = options.get("--json");
 const compareWith = options.get("--compare");
@@ -304,6 +318,32 @@ function regularFilesAt(ref) {
   return files;
 }
 
+/**
+ * Git's own count of each file's added lines (`-` for a binary file), the check on the hunks `changeSignals` reads, at
+ * their context: `<added>\t<deleted>\t<name>`, or for a move `<added>\t<deleted>\t` and then its two names, each a field
+ * of its own.
+ */
+function gitAddedLines(mergeBase) {
+  const numstat = fieldsOf(
+    gitDiff("-M", "-U0", "--inter-hunk-context=0", "--numstat", "-z", mergeBase, "HEAD"),
+  );
+  const gitAdded = new Map();
+  for (let i = 0; i < numstat.length;) {
+    const record = numstat[i];
+    const firstTab = record.indexOf(9);
+    const nameStart = record.indexOf(9, firstTab + 1) + 1;
+    const added = record.subarray(0, firstTab).toString("latin1");
+    if (nameStart === record.length) {
+      gitAdded.set(nameOf(numstat[i + 2]), added);
+      i += 3;
+    } else {
+      gitAdded.set(nameOf(record.subarray(nameStart)), added);
+      i += 1;
+    }
+  }
+  return gitAdded;
+}
+
 /** The signals the change from the merge base to `HEAD` adds to, each `{ signal, line }` with the line it prints. */
 function changeSignals(base) {
   const mergeBase = git("merge-base", base, "HEAD").trim();
@@ -332,24 +372,11 @@ function changeSignals(base) {
       i += 2;
     }
   }
-  // Git's own count of each file's added lines (`-` for a binary file), the check on the hunks read below:
-  // `<added>\t<deleted>\t<name>`, or for a move `<added>\t<deleted>\t` and then its two names, each a field of its own.
-  const numstat = fieldsOf(gitDiff("-M", "--numstat", "-z", mergeBase, "HEAD"));
-  const gitAdded = new Map();
-  for (let i = 0; i < numstat.length;) {
-    const record = numstat[i];
-    const firstTab = record.indexOf(9);
-    const nameStart = record.indexOf(9, firstTab + 1) + 1;
-    const added = record.subarray(0, firstTab).toString("latin1");
-    if (nameStart === record.length) {
-      gitAdded.set(nameOf(numstat[i + 2]), added);
-      i += 3;
-    } else {
-      gitAdded.set(nameOf(record.subarray(nameStart)), added);
-      i += 1;
-    }
-  }
-  /** The line numbers `change` adds to its file, from its own patch, checked against `--numstat`. */
+  const gitAdded = gitAddedLines(mergeBase);
+  /**
+   * The line numbers `change` adds to its file, from its own patch, checked against `--numstat`; `null` when the two
+   * disagree or a hunk ends before its counts, so the file is reported as not measured.
+   */
   const addedLinesOf = (change) => {
     const paths = change.code === "R" ? [change.old, change.file] : [change.file];
     const patch = gitDiff(
@@ -361,13 +388,19 @@ function changeSignals(base) {
       "--",
       ...paths.map((file) => `:(literal)${file}`),
     ).toString("utf8");
-    const lines = addedLinesOfPatch(patch);
+    let lines;
+    try {
+      lines = addedLinesOfPatch(patch);
+    } catch (error) {
+      if (!(error instanceof CannotRun)) throw error;
+      return { unread: "a hunk ends before its counts" };
+    }
     const counted = gitAdded.get(change.file);
     if (String(lines.length) !== (counted === "-" ? "0" : counted))
-      throw new CannotRun(
-        `structure-report: the hunks of ${shown(change.file)} add ${lines.length} lines, but git diff --numstat counts ${counted}: the patch was not read as Git wrote it`,
-      );
-    return lines;
+      return {
+        unread: `its hunks add ${lines.length} lines, git diff --numstat counts ${counted}`,
+      };
+    return { lines };
   };
   const blob = (ref, file) => git("cat-file", "blob", `${ref}:${file}`);
 
@@ -377,7 +410,15 @@ function changeSignals(base) {
     .sort((one, other) => (one.file < other.file ? -1 : one.file > other.file ? 1 : 0));
   for (const change of relevant) {
     const { file } = change;
-    const added = addedLinesOf(change);
+    const read = addedLinesOf(change);
+    if (read.unread !== undefined) {
+      found.push({
+        signal: "unread",
+        line: `file whose change the report could not read as Git wrote it, not measured: ${shown(file)} (${read.unread})`,
+      });
+      continue;
+    }
+    const added = read.lines;
     if (added.length === 0) continue;
     const text = blob("HEAD", file);
     const lines = lineCount(text);
