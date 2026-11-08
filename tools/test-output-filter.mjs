@@ -86,9 +86,17 @@ if (unmatched.length > 0) {
 
 // Node's command line sorts the files it runs, so the full suite goes through a runner that keeps the costly files
 // first: started late, one of them would run alone at the end.
+// Beside the spec reporter, `test-in-flight.mjs` names on standard error a test still running long after it began.
 const nodeArguments = fullSuite
   ? [join(import.meta.dirname, "run-test-files.mjs"), ...testFiles]
-  : ["--test", "--test-reporter=spec", ...testFiles];
+  : [
+      "--test",
+      "--test-reporter=spec",
+      "--test-reporter-destination=stdout",
+      `--test-reporter=${join(import.meta.dirname, "test-in-flight.mjs")}`,
+      "--test-reporter-destination=stderr",
+      ...testFiles,
+    ];
 // (without `TEST_FULL_OUTPUT`: a test that runs this filter itself chooses its own output)
 const { TEST_FULL_OUTPUT: _, ...environment } = process.env;
 const child = spawn(process.execPath, nodeArguments, {
