@@ -80,6 +80,7 @@ test(
   { timeout: 30_000 },
   () => {
     const directory = mkdtempSync(join(tmpdir(), "check-changed-"));
+    const main = mkdtempSync(join(tmpdir(), "check-changed-main-"));
     try {
       const run = (...args) => spawnSync("git", args, { cwd: directory, encoding: "utf8" });
       run("init", "-q");
@@ -96,15 +97,30 @@ test(
       );
       writeFileSync(join(directory, "a.mjs"), "export const a = 1;\n");
       const tool = fileURLToPath(new URL("./check-changed.mjs", import.meta.url));
-      const result = spawnSync(process.execPath, [tool, "--base", "HEAD"], {
-        cwd: directory,
-        encoding: "utf8",
-      });
-      assert.equal(result.status, 2, result.stderr);
-      assert.match(result.stderr, /no node_modules: (?:link|link it)/u);
-      assert.doesNotMatch(result.stdout, /PASS|FAIL/u);
+      const refusal = (main) => {
+        const result = spawnSync(process.execPath, [tool, "--base", "HEAD"], {
+          cwd: directory,
+          encoding: "utf8",
+          env: { ...process.env, TEASESCRIPT_MAIN: main },
+        });
+        assert.equal(result.status, 2, result.stderr);
+        assert.doesNotMatch(result.stdout, /PASS|FAIL/u);
+        return result.stderr;
+      };
+      // main's checkout, as TEASESCRIPT_MAIN names it: its node_modules when it has one, else the merge-base's tree
+      mkdirSync(join(main, "with", "node_modules"), { recursive: true });
+      mkdirSync(join(main, "without"));
+      assert.equal(
+        refusal(join(main, "with")),
+        `check-changed: no node_modules: link it with \`ln -s ${join(main, "with", "node_modules")} node_modules\`\n`,
+      );
+      assert.match(
+        refusal(join(main, "without")),
+        /no node_modules: link `\$\(sx-tree [0-9a-f]{40}\)\/node_modules`, or run `npm ci`/u,
+      );
     } finally {
       rmSync(directory, { recursive: true, force: true });
+      rmSync(main, { recursive: true, force: true });
     }
   },
 );

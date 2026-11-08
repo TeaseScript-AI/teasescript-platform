@@ -29,7 +29,10 @@ import { costlyTestSeconds } from "./costly-test-files.mjs";
 // prune` and the temporary folder's cleanup.
 //
 // Exit status: 0 when every check passed, 1 when one failed, 2 when the checks cannot run (no base, a merge conflict,
-// a leftover it may not remove, or no `node_modules`, which it never installs: it names the fix).
+// a leftover it may not remove, or no `node_modules`, which it never installs: it names the fix). The fix it names is
+// a link to main's `node_modules` in the checkout `TEASESCRIPT_MAIN` names (by default
+// `/opt/teasescript-agents/teasescript-main/current`) when that folder has one, else the merge-base's tree from
+// `sx-tree`, or `npm ci`.
 
 /** The projects a changed path can belong to, each with the npm scripts or commands that check it. */
 export const PROJECTS = {
@@ -274,10 +277,13 @@ function enterMerge(ref, cleanups) {
 async function check(cleanups) {
   const { merged, ref } = options(process.argv.slice(2));
   if (!existsSync("node_modules")) {
-    const lxc = "/opt/agent-stack/teasescript-main/current/node_modules";
+    const main = join(
+      process.env.TEASESCRIPT_MAIN || "/opt/teasescript-agents/teasescript-main/current",
+      "node_modules",
+    );
     cannotRun(
-      existsSync(lxc)
-        ? `no node_modules: link it with \`ln -s ${lxc} node_modules\``
+      existsSync(main)
+        ? `no node_modules: link it with \`ln -s ${main} node_modules\``
         : `no node_modules: link \`$(sx-tree ${spawnSync("git", ["merge-base", "HEAD", ref], { encoding: "utf8" }).stdout.trim() || "<merge-base SHA>"})/node_modules\`, or run \`npm ci\``,
     );
   }
