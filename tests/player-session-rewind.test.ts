@@ -125,6 +125,7 @@ interface RewindHost {
       readonly complete: boolean;
     } | null;
     readonly rewoundWhileDebugging: { restoredSceneTimeMs: number; rewindCount: number } | null;
+    readonly editedWhileDebugging: { firstEditSceneTimeMs: number; editCount: number } | null;
   }>;
 }
 interface Rewind {
@@ -2383,4 +2384,73 @@ test("an obsolete Back gate's failure leaves no problem on the replacement's his
   context.after(() => again.stop());
   await settle(context);
   assert.equal(rewind.problem.value, null);
+});
+
+/*
+ * L5h.3b, orchestrator 2's ruling on 21.7: while a rewind lifecycle gate is pending, a debug export captures the shown
+ * publication's marks, never the candidate's. One row per pending state: a prepared step whose commit is not yet
+ * acknowledged, an adoption begun and not settled, and a reinstatement waiting at its restart gate.
+ */
+test("an export while a rewind gate is pending takes the shown publication's marks", async (context) => {
+  const marksOf = async (host: RewindHost) => {
+    const candidate = await host.debugExportCandidate(
+      () => ({}),
+      () => true,
+    );
+    assert.ok(candidate !== null, "the export is a candidate");
+    return { rewound: candidate.rewoundWhileDebugging, edited: candidate.editedWhileDebugging };
+  };
+  const shownMarks = (host: RewindHost) => ({
+    rewound: shownView(host).marks.rewoundWhileDebugging,
+    edited: shownView(host).marks.editedWhileDebugging,
+  });
+
+  await context.test("a prepared step, its commit not yet acknowledged", async (subtest) => {
+    const { host, rewind } = createHost(subtest, memoryStorage().provider);
+    await start(subtest, host);
+    await choose(subtest, host, "One");
+    const bridge = await host.bridge;
+    const held = holdRead(subtest, bridge, "rewindCommit", "reply", false);
+    const stepped = backTo(rewind, 0);
+    await held.arrived;
+    // Whatever shows while the commit is not acknowledged, the export takes its marks.
+    assert.deepEqual(await marksOf(host), shownMarks(host));
+    held.release();
+    assert.equal(await stepped, true);
+  });
+
+  await context.test("an adoption begun and not settled", async (subtest) => {
+    const storage = memoryStorage();
+    const { host, rewind } = createHost(subtest, storage.provider);
+    await start(subtest, host);
+    await choose(subtest, host, "One");
+    assert.equal(await backTo(rewind, 0), true);
+    const release = storage.holdReplaces();
+    const chosen = choose(subtest, host, "Two");
+    await settle(subtest);
+    const shown = shownMarks(host);
+    // The inspected state shows while its adoption is under way: rewound once.
+    assert.equal(shown.rewound?.rewindCount, 1);
+    assert.deepEqual(await marksOf(host), shown);
+    release();
+    await chosen;
+  });
+
+  await context.test("a reinstatement waiting at its restart gate", async (subtest) => {
+    const made = createHost(subtest, memoryStorage().provider);
+    const { host, rewind } = made;
+    await start(subtest, host);
+    await choose(subtest, host, "One");
+    assert.equal(await backTo(rewind, 0), true);
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    host.rewind.beforeRestart = () => gate;
+    made.debug.stop();
+    await settle(subtest);
+    const shown = shownMarks(host);
+    assert.equal(shown.rewound?.rewindCount, 1, "the inspected state still shows");
+    assert.deepEqual(await marksOf(host), shown);
+    open();
+    await settle(subtest);
+  });
 });

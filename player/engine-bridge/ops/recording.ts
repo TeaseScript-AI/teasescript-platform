@@ -44,7 +44,7 @@ const isTicketArgs = (args: unknown): args is { readonly ticket: string } =>
   isRecord(args) && exactly(args, ["ticket"]) && typeof args.ticket === "string";
 
 /** The ticket of kind `kind` held under `ticket`; throws for an unknown, released or other kind of ticket. */
-export function heldTicket<K extends HeldTicket["kind"]>(
+function heldTicket<K extends HeldTicket["kind"]>(
   context: PlayerOpsContext,
   ticket: string,
   kind: K,
