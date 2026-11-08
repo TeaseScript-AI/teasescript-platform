@@ -125,13 +125,11 @@ test(
       assert.deepEqual(
         findings
           .map((line) => {
-            const crossing = /^(\S+): (B\d) \(.*\), but this imports '(.*)'$/u.exec(line);
+            const crossing = /^(\S+): (B\d) \(.*\): .*, but this imports '(.*)'$/u.exec(line);
             if (crossing)
               return `${crossing[1]} ${crossing[2]} ${crossing[3].replace(/^.*node_modules\/([^/]+)\/.*$/u, "package $1")}`;
-            const cycle = /^\S+: (\d+) files reach each other .*?: (.*): break the cycle/u.exec(
-              line,
-            );
-            if (cycle) return `cycle ${cycle[2]}`;
+            const cycle = /without cycles\): (.*): break the cycle/u.exec(line);
+            if (cycle) return `cycle ${cycle[1]}`;
             return line;
           })
           .sort(),
