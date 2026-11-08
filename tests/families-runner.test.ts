@@ -133,12 +133,9 @@ test("the corpus runner fails four identical exceptions instead of counting them
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line));
-    // each named on stderr with its source and mode, and kept with both trees' exceptions (beside the line that names a
-    // NODE_OPTIONS heap, which the central queue sets, #1956)
+    // each named on stderr with its source and mode, and kept with both trees' exceptions
     assert.deepEqual(
-      lines(result.stderr)
-        .filter(({ notice }) => notice === undefined)
-        .map(({ source, mode, check }) => `${source} ${mode} ${check}`),
+      lines(result.stderr).map(({ source, mode, check }) => `${source} ${mode} ${check}`),
       modes,
     );
     const kept = lines(readFileSync(out, "utf8"));
@@ -4680,7 +4677,7 @@ export function publicationHashes(files) {
 }
 `;
 
-test("the stall index prints a growth line per area: a series whose head-over-base units rise 1 % or more a doubling flagged, a series with a stopped run left out as the residual; and a NODE_OPTIONS heap other than --memory is said on one stderr line, the total naming memory (#1837's F22, #1956)", () => {
+test("the stall index prints a growth line per area: a series whose head-over-base units rise 1 % or more a doubling flagged, a series with a stopped run left out as the residual; and a NODE_OPTIONS heap other than --memory is named beside it in the total (#1837's F22, #1956)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
     const built = (name: string, head: boolean) => {
@@ -4708,16 +4705,14 @@ test("the stall index prints a growth line per area: a series whose head-over-ba
       { encoding: "utf8", env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=3000" } },
     );
     assert.equal(ran.status, 1, ran.stderr);
-    assert.equal(JSON.parse(ran.stdout.trim().split("\n").at(-1)!).memory, 2048);
-    const notice = ran.stderr
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line))
-      .filter((line) => line.notice !== undefined);
+    const ended = JSON.parse(ran.stdout.trim().split("\n").at(-1)!);
+    assert.deepEqual([ended.memory, ended.nodeOptions], [2048, { memory: 3000 }]);
+    // (the work record's last line the same total, and nothing of it on stderr, whose lines are JSON records)
     assert.deepEqual(
-      notice.map(({ memory, nodeOptions }) => [memory, nodeOptions]),
-      [[2048, { memory: 3000 }]],
+      JSON.parse(readFileSync(work, "utf8").trim().split("\n").at(-1)!).total,
+      ended,
     );
+    assert.doesNotMatch(ran.stderr, /NODE_OPTIONS|nodeOptions/);
     const judged = spawnSync(process.execPath, [stalls, work], { encoding: "utf8" });
     const growth = judged.stdout
       .trim()
