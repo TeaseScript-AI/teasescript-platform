@@ -1201,7 +1201,7 @@ function warningChecks(
 /**
  * The plan's checks only warnings a stop deferred owe (#2081): the checks the stop's warning says run while the script
  * plays instead, each check field of the plan once, a part check each. A check a published warning or a boundary also
- * owes runs anyway, and its own warning says so.
+ * owes runs whether or not the analysis stops: it is not one the stop moved.
  */
 function movedChecks(
   checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
