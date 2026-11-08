@@ -136,34 +136,38 @@ function partHashes(oracle, files, mode, globals) {
 }
 
 /**
- * The heap `options` (a `NODE_OPTIONS` value) asks, in MB, or none: its options as Node splits them (on spaces, a
- * double-quoted part one token with its quotes removed and `\` escaping the next character in it), the last
- * `--max-old-space-size` (or `_` for `-`) winning, its value after `=` or as the next option.
+ * The heap `options` (a `NODE_OPTIONS` value) asks, in MB, or none: its options as Node's own parser of that variable
+ * splits them (a space outside double quotes ends an option, a double quote toggles quoting and is dropped, a
+ * backslash inside quotes takes the next character as it is, and an option begins only with a character it holds),
+ * the last `--max-old-space-size=` (or `_` for `-`) winning. Node takes the value only after `=`: given as the next
+ * option, it refuses it, and starts no process.
  */
 function heapOf(options) {
   const tokens = [];
-  let token = null;
   let quoted = false;
+  let fresh = true;
   for (let index = 0; index < options.length; index += 1) {
-    const char = options[index];
-    if (quoted && char === "\\") {
+    let char = options[index];
+    if (char === "\\" && quoted) {
       index += 1;
-      token = (token ?? "") + (options[index] ?? "");
+      // (a trailing backslash: Node refuses the whole value, and starts no process)
+      if (index === options.length) return undefined;
+      char = options[index];
+    } else if (char === " " && !quoted) {
+      fresh = true;
+      continue;
     } else if (char === '"') {
       quoted = !quoted;
-      token ??= "";
-    } else if (!quoted && /\s/.test(char)) {
-      if (token !== null) tokens.push(token);
-      token = null;
-    } else token = (token ?? "") + char;
+      continue;
+    }
+    if (fresh) tokens.push(char);
+    else tokens[tokens.length - 1] += char;
+    fresh = false;
   }
-  if (token !== null) tokens.push(token);
   let heap;
-  for (const [index, option] of tokens.entries()) {
-    const named = /^--max[-_]old[-_]space[-_]size(?:=(.*))?$/.exec(option);
-    if (named === null) continue;
-    const value = named[1] ?? tokens[index + 1];
-    if (/^\d+$/.test(value ?? "")) heap = Number(value);
+  for (const option of tokens) {
+    const value = /^--max[-_]old[-_]space[-_]size=(\d+)$/.exec(option)?.[1];
+    if (value !== undefined) heap = Number(value);
   }
   return heap;
 }

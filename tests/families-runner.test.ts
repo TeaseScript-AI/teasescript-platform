@@ -4798,6 +4798,24 @@ test("the stall index prints a growth line per area: a series whose head-over-ba
     assert.equal(ran.status, 1, ran.stderr);
     const ended = JSON.parse(ran.stdout.trim().split("\n").at(-1)!);
     assert.deepEqual([ended.memory, ended.nodeOptions], [2048, { memory: 3000 }]);
+    // (each form as Node itself splits NODE_OPTIONS: a tab is no separator, so the heap after it is part of the title)
+    for (const [options, asked] of [
+      ['--max-old-space-size=2048 --max_old_space_size="3000"', 3000],
+      ["--max-old-space-size=2048 --title=x\t--max-old-space-size=3000", undefined],
+      ['--max-old-space-size=2048 "--max-old-space-size=3000"', 3000],
+    ] as const) {
+      const said = spawnSync(
+        process.execPath,
+        [runner, folder, built("b1", false), built("h1", true)],
+        { encoding: "utf8", env: { ...process.env, NODE_OPTIONS: options } },
+      );
+      const total = JSON.parse(said.stdout.trim().split("\n").at(-1)!);
+      assert.deepEqual(
+        total.nodeOptions,
+        asked === undefined ? undefined : { memory: asked },
+        options,
+      );
+    }
     // (the work record's last line the same total, and nothing of it on stderr, whose lines are JSON records)
     assert.deepEqual(
       JSON.parse(readFileSync(work, "utf8").trim().split("\n").at(-1)!).total,
