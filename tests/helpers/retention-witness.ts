@@ -52,6 +52,10 @@ export function runRetentionChild(
     process.execPath,
     [
       "--expose-gc",
+      // Without V8's background threads: a background compile job holds the closure it optimizes, its environment
+      // included, until the main thread installs the code, so under load it kept a connection's data past the child's
+      // collection, data the code under test no longer held (#1947).
+      "--single-threaded",
       `--heap-snapshot-string-limit=${STRING_LIMIT}`,
       fileURLToPath(script),
       JSON.stringify(cases),
