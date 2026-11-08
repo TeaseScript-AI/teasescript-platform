@@ -64,6 +64,19 @@ export function useFailureRecording() {
     ticket(): { readonly bridge: PlayerBridge; readonly ticket: string } | null {
       return state.kind === "captured" ? state : null;
     },
+    /**
+     * The recording a debug export selects, once a capture under way settled: the failure's ticket; `none` when it
+     * settled unavailable, which never means the recorder's later recording; `current` when no Player error captured.
+     */
+    async selection(): Promise<
+      "current" | "none" | { readonly bridge: PlayerBridge; readonly ticket: string }
+    > {
+      if (state.kind === "pending") await state.settled;
+      // The settlement replaced the state; `state` is read again here.
+      const settled: FailureState = state;
+      if (settled.kind === "captured") return settled;
+      return settled.kind === "unavailable" ? "none" : "current";
+    },
     /** Retires the activation's failure recording, at the next activation or the Player's disposal. */
     retire(): void {
       generation += 1;

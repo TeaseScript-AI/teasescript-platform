@@ -41,12 +41,14 @@ export const HOST_OPS = {
   },
   releaseTransfer: { planJson: "cleanup of a ticket, which holds no plan JSON", read: false },
   captureRecording: {
-    planJson: "a held session's recording under a ticket; its plan stays in the host, no plan JSON",
+    planJson:
+      "a held session's recording under a ticket, which its reply does not carry; no plan JSON",
     read: true,
   },
   releaseRecording: { planJson: "cleanup of a ticket, which holds no plan JSON", read: false },
   captureExport: {
-    planJson: "a debug export's capture under a ticket; its plan stays in the host, no plan JSON",
+    planJson:
+      "a debug export's capture under a ticket; its reply's recording carries its compiled plan as data, with no plan JSON",
     read: false,
   },
   exportPrepare: { planJson: "a plan's hash and replay checkpoints; no plan JSON", read: false },

@@ -69,11 +69,11 @@ function withUnenumerableLists(body) {
 
 /**
  * What a scenario made: the session (`null` for none) with its state as an export takes it, taken now (`null` when it
- * cannot be exported), its recording, how its photo reads go, and the Player error.
+ * cannot be exported), its recording, how its photo reads go, the Player error, and the rewound mark.
  */
-function made(api, session, recording, photoRead, hostError) {
+function made(api, session, recording, photoRead, hostError, rewound = null) {
   const snapshot = session === null ? null : api.playerRuntimeSnapshotOrNull(session);
-  return { session, snapshot, recording, photoRead, hostError };
+  return { session, snapshot, recording, photoRead, hostError, rewound };
 }
 
 /**
@@ -150,6 +150,43 @@ export const SCENARIOS = [
         const session = api.advancePlayerRuntimeTime(waiting, 5_000);
         return made(api, session, recorder.recording(), "none", null);
       }),
+  },
+  {
+    name: "an unavailable end without a failure",
+    choices: ALL,
+    make: (api) =>
+      withUnenumerableLists(() => {
+        const recorder = new api.DebugRecorder();
+        const waiting = api.createPlayerRuntimeSession(
+          'let xs = (1..=1500).toList()\nwait 1 s\nlet name = askText "Name"\nexit',
+          { recorder },
+        );
+        const session = api.advancePlayerRuntimeTime(waiting, 5_000);
+        return made(api, session, recorder.recording(), "none", null);
+      }),
+  },
+  {
+    // The recording up to a Player error, kept while Debug's rewind shows an earlier state of the session.
+    name: "the first failure's recording with a rewound state shown",
+    choices: ALL,
+    make: (api) => {
+      const { recorder } = failed(api);
+      const atError = recorder.recording();
+      let earlier = api.createPlayerRuntimeSession(FAILING);
+      earlier = api.answeredByPlayerInput(earlier, "send", () =>
+        api.submitPlayerRuntimeComposer(earlier, SECRET),
+      ).session;
+      const shown = api.restorePlayerRuntimeSessionAt(
+        earlier.plan,
+        JSON.stringify(api.playerRuntimeSnapshot(earlier)),
+        earlier.events,
+        new api.DebugRecorder(),
+      );
+      return made(api, shown, atError, "ok", "TypeError", {
+        restoredSceneTimeMs: shown.state.observedSessionTimeMs,
+        rewindCount: 1,
+      });
+    },
   },
   {
     name: "a skip freeze",

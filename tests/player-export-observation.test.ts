@@ -50,6 +50,12 @@ async function bridgeOn(transport: Value<"transport">): Promise<PlayerBridge> {
 
 interface Observed {
   readonly identity: unknown;
+  /** The captured state's saved value of the edit's key, `absent` without it; `null` with no state. */
+  readonly stored: number | "absent" | null;
+  /** The captured state's failure; the session never fails here. */
+  readonly failure: null;
+  /** The selected recording's calls, by kind; `null` with none. */
+  readonly calls: readonly string[] | null;
   readonly edited: boolean;
   readonly incident: unknown;
   readonly recording: "held" | "none";
@@ -102,8 +108,13 @@ async function runCase(c: { readonly [A in Axis]: Value<A> }): Promise<Observed>
         () => false,
         () => true,
       );
+    const saved = captured.snapshot?.scriptStorage.find((entry) => entry.key === "edited");
     return {
       identity: captured.identity,
+      stored:
+        captured.snapshot === null ? null : saved === undefined ? "absent" : Number(saved.value),
+      failure: captured.failure === null ? null : (assert.fail("the session never fails"), null),
+      calls: captured.recording?.operations.map((operation) => operation.kind) ?? null,
       edited: captured.marks?.editedWhileDebugging != null,
       incident:
         captured.incident === null
@@ -134,6 +145,13 @@ function expected(c: { readonly [A in Axis]: Value<A> }): Observed {
           stop: stoppedBefore ? 1 : null,
         }
       : { run: 1, session: null, revision: null, eventsThrough: null, stop: null },
+    // The state as the capture took it, with the edit's value when it was applied; no session, no state.
+    stored: withSession ? (c.edit === "edited" ? 1 : "absent") : null,
+    failure: null,
+    // The Start's run, then the edit, which the recording keeps; the selected ticket is the same recording.
+    calls: withSession
+      ? ["run", ...(c.edit === "edited" ? ["applyExternalStorageEdit"] : [])]
+      : null,
     // The mark of an applied edit, which the stop keeps (R2-3); no session, no marks.
     edited: withSession && c.edit === "edited",
     // The run's first committed incident, once the stop committed before the capture; with no session too.

@@ -115,8 +115,9 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
       },
     },
     // A debug export's capture of the named session, or of none, with the recording `current` (the session's own, by its
-    // engine) or held under a recording ticket. Refused when a stop of the run is still committing (retry) or the current
-    // recording's provenance is not proved; never with another recording or state in its place.
+    // engine), `none` (proved absent, as a Player error's capture that settled unavailable), or one held under a
+    // recording ticket. Refused when a stop of the run is still committing (retry) or the current recording's provenance
+    // is not proved; never with another recording or state in its place.
     captureExport: {
       session: "none",
       checkArguments: (args) =>
@@ -124,6 +125,7 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
         exactly(args, ["session", "recording"]) &&
         (args.session === null || typeof args.session === "string") &&
         (args.recording === "current" ||
+          args.recording === "none" ||
           (isRecord(args.recording) &&
             exactly(args.recording, ["ticket"]) &&
             typeof args.recording.ticket === "string")),
@@ -131,7 +133,7 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
         const selector = args as {
           readonly session: string | null;
-          readonly recording: "current" | { readonly ticket: string };
+          readonly recording: "current" | "none" | { readonly ticket: string };
         };
         const held = selector.session === null ? null : heldSession(sessions, selector.session);
         const run = held === null ? owner.current : held.run;
@@ -141,9 +143,9 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
         // The session at its latest publication, made ready for this op as every op does.
         const current = held?.sessionForOperation() ?? null;
         let recording: DebugRecording | null = null;
-        if (selector.recording !== "current")
+        if (typeof selector.recording === "object")
           recording = heldTicket(context, selector.recording.ticket, "recording").recording;
-        else if (current !== null) {
+        else if (selector.recording === "current" && current !== null) {
           const capture = context.recorder.capture(current.engine);
           if (capture.kind === "stale")
             return {

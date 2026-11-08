@@ -26,7 +26,7 @@ export const VALID_VALUES: Readonly<Record<ValueClass, readonly [unknown, ...unk
   integer: [1],
   nullableInteger: [1, null],
   boolean: [true, false],
-  selector: ["current", { ticket: "r1" }],
+  selector: ["current", "none", { ticket: "r1" }],
 };
 
 /** One form of an op's arguments: its required fields, and any optional ones, with their value classes. */

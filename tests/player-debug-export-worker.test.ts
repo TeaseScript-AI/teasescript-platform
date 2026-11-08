@@ -33,7 +33,7 @@ const FOLDER = resolve(process.cwd(), "tests/fixtures/debug-export-equivalence")
 const scenarios = await import(pathToFileURL(resolve(FOLDER, "scenarios.mjs")).href);
 const SCRIPT: string = scenarios.WITNESS;
 
-/** The session's export, assembled from the host's capture with every category chosen, as its file's text. */
+/** The session's export, assembled from the host's capture with replay and its prerequisites chosen, as its file's text. */
 async function exportText(bridge: PlayerBridge): Promise<{ text: string; release: () => void }> {
   const prepared = await bridge.client.request("prepare", {
     source: { kind: "source", script: SCRIPT },

@@ -29,6 +29,7 @@ interface Made {
   readonly snapshot: RuntimeSnapshot | null;
   readonly recording: recorder.DebugRecording | null;
   readonly hostError: string | null;
+  readonly rewound: { readonly restoredSceneTimeMs: number; readonly rewindCount: number } | null;
 }
 interface Fixture {
   readonly base: string;
@@ -78,7 +79,7 @@ test("each scenario's export file is the one the base's assembler wrote", async 
     release: () => {},
     hostError: made.hostError,
     editedWhileDebugging: null,
-    rewoundWhileDebugging: null,
+    rewoundWhileDebugging: made.rewound,
     ...scenarios.SHOWN,
   });
   const names: string[] = [];

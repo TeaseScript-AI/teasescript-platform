@@ -310,7 +310,7 @@ export class PlayerBridge {
    */
   async captureExport<T>(
     session: PlayerSession | null,
-    recording: "current" | { readonly ticket: string },
+    recording: "current" | "none" | { readonly ticket: string },
     deliver: (reply: ExportCaptureReply, shown: PlayerSession | null) => T,
   ): Promise<T> {
     if (session !== null) this.#own(session);

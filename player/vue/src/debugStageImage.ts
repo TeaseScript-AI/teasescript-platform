@@ -22,10 +22,12 @@ export function debugStageImage(
   readonly path: string | null;
   readonly captured: boolean;
 } {
-  const image = player.stageImage.value;
-  const observed = player.stageImageObservation.value;
+  // The image and video are the described session's; the load reports describe the browser as it is now.
   const session = shown.session === undefined ? player.session.value : shown.session;
-  const video = session === null ? null : playerRuntimeMedia(session.state).stage.videoMediaId;
+  const stage = session === null ? null : playerRuntimeMedia(session.state).stage;
+  const image = stage?.image ?? null;
+  const observed = player.stageImageObservation.value;
+  const video = stage?.videoMediaId ?? null;
   const captured = image !== null && isCapturedMediaReference(image);
   return {
     status: debugStageImageStatus({

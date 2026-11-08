@@ -38,7 +38,7 @@ const candidateOf = (made) => ({
   recording: made.recording,
   hostError: made.hostError,
   editedWhileDebugging: null,
-  rewoundWhileDebugging: null,
+  rewoundWhileDebugging: made.rewound,
   ...SHOWN,
 });
 

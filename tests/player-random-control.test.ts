@@ -519,7 +519,7 @@ const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string,
     ["introduceNow(requireBridge(), () => given, marks ?? NO_MARKS)", "restore: a raw restore"],
     ["return introduceNow(", "by kind: `startedSession`'s factory, with `random`"],
     [
-      "return host.start(create.plan, startOptions, true, random, nextRun(host))",
+      "return host.start(create.plan, startOptions, true, random, runOf())",
       "by kind: `startedSession`'s held plan",
     ],
     ["show: (next, paused) => showRewound(next, { paused })", "restore: the rewind owner's show"],

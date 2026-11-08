@@ -76,10 +76,12 @@ interface RewindHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(
-    create: (recording: {
-      readonly recorder: DebugRecorder;
-      readonly debugTrace?: RuntimeDebugContext;
-    }) => PlayerRuntimeSession,
+    create:
+      | ((recording: {
+          readonly recorder: DebugRecorder;
+          readonly debugTrace?: RuntimeDebugContext;
+        }) => PlayerRuntimeSession)
+      | { readonly plan: string; readonly options: () => PlayerRuntimeSessionOptions },
   ): void;
   activate(): void;
   reportHostError(error: unknown): void;
@@ -2501,4 +2503,75 @@ test("a debug export's incident is the run's: kept through Back and Return, gone
     { hostError: null, rewound: 0 },
     "a new run has no incident",
   );
+});
+
+/*
+ * L5h.3b, Sol code r1: B1, a Player error whose recording capture failed exports no recording, never the one the host
+ * began at a restored state; B2, an activation that fails before its Start reaches the host commits its incident in a
+ * run of its own, also after an earlier failed activation.
+ */
+test("a Player error whose recording capture failed exports no recording, also after Back", async (context) => {
+  const made = createHost(context, memoryStorage().provider);
+  const { host, rewind } = made;
+  await start(context, host);
+  await choose(context, host, "One");
+  const bridge = await host.bridge;
+  const request = bridge.client.request.bind(bridge.client);
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) =>
+    args[0] === "captureRecording"
+      ? Promise.reject(new Error("The capture failed."))
+      : request(...args),
+  );
+  host.reportHostError(new TypeError("A component failed."));
+  await settle(context);
+  assert.equal(await backTo(rewind, 0), true);
+  const candidate = await host.debugExportCandidate(
+    () => ({}),
+    () => true,
+  );
+  assert.equal(candidate.hostError, "TypeError");
+  assert.equal(
+    candidate.recording,
+    null,
+    "the failure's recording is unavailable, not the restored one's",
+  );
+});
+
+test("a Start that fails before it reaches the host commits its incident in its own run", async (context) => {
+  const made = createHost(context, memoryStorage().provider);
+  const { host } = made;
+  const exported = async () =>
+    (
+      await host.debugExportCandidate(
+        () => ({}),
+        () => true,
+      )
+    ).hostError;
+  await host.loadScriptStorage();
+  const bridge = await host.bridge;
+  const prepared = await bridge.client.request("prepare", { source: { kind: "source", script } });
+  // EVIDENCE: fixture: `prepare` of a source replies with its held plan's token.
+  const plan = (prepared.result as { readonly plan: string }).plan;
+  // A fresh Player whose first Start's options throw.
+  host.prepare({
+    plan,
+    options: () => {
+      throw new TypeError("The options could not be read.");
+    },
+  });
+  host.activate();
+  await settle(context);
+  assert.equal(host.hostError.value, "TypeError");
+  assert.equal(await exported(), "TypeError");
+  // A later Start whose options throw another error: its own run, so its own incident.
+  host.prepare({
+    plan,
+    options: () => {
+      throw new RangeError("The options are out of range.");
+    },
+  });
+  host.activate();
+  await settle(context);
+  assert.equal(host.hostError.value, "RangeError");
+  assert.equal(await exported(), "RangeError");
 });

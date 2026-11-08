@@ -10,7 +10,8 @@ import { pathToFileURL } from "node:url";
  * - every begin of a recording converges on the recorder's one begin, from a route this file classifies;
  * - every host restart of the recorder is one of the routes the restart gate (`beforeRestart`) covers, and the gate's
  *   hook is read only by the rewind owner;
- * - the replies of the failure capture and of the export capture each reach one settle function, and nothing else.
+ * - the replies of the failure capture and of the export capture each reach one settle function, and nothing else;
+ * - every route that publishes, stops or binds a session supplies the export observation, classified.
  * What they claim is the wiring. That a restart waits for the gate's settlement is the rewind lifecycle's runtime claim,
  * and that no stale capture shows is the export observation family's.
  */
@@ -136,4 +137,54 @@ test("the failure capture's and the export capture's replies each reach one sett
     failure,
     /\.read\(stopped, "captureRecording"\)\.then\(\s*\(reply\) => settle\(bridge, of, reply\),\s*\(\) => settle\(bridge, of, null\),\s*\);/u,
   );
+});
+
+const HELD = "player/engine-bridge/ops/session.ts";
+
+/**
+ * Each route that supplies the export observation its facts (§21.4 family 1), by the observation it supplies: every
+ * publication passes `publish`, every Player error stop the host's halt, and every session binds its run as it is made
+ * or handed over. An unclassified or stale route fails.
+ */
+const OBSERVATION_ROUTES: Readonly<Record<string, string>> = {
+  [`${HELD} HeldSession > publish <- ${HELD} HeldSession > introduce`]:
+    "an introduction's first publication",
+  [`${HELD} HeldSession > publish <- ${HELD} HeldSession > adoptResult > view`]:
+    "an op's new revision (`adoptResult`)",
+  [`${HELD} HeldSession > publish <- ${HELD} sessionOps > adoptCatchUp > sessionOp:callback#5.2`]:
+    "a catch-up's adoption",
+  [`${HELD} HeldSession > publish <- player/engine-bridge/in-process.ts hatch > adopt`]:
+    "the in-process facade's adoption",
+  [`${HELD} HeldSession > stopRequested <- player/engine-bridge/worker-host.ts startBridgeHost > halt`]:
+    "a halt with stop arguments, on receipt",
+  [`${HELD} HeldSession > atStop <- player/engine-bridge/worker-host.ts startBridgeHost > stopPayload`]:
+    "the halt's acknowledgement, once the work running at the stop settled",
+  [`${HELD} HeldSession > bindRun <- ${HELD} HeldSession > constructor`]:
+    "every route that makes a session, before it publishes",
+  [`${HELD} HeldSession > bindRun <- ${HELD} sessionOps > beginRecording > sessionOp:callback#9.2`]:
+    "Continue's handoff of a session the Player held already",
+};
+
+test("every publication, stop and binding route of the export observation is classified", () => {
+  const found = callers([
+    { file: HELD, path: "HeldSession > publish" },
+    { file: HELD, path: "HeldSession > stopRequested" },
+    { file: HELD, path: "HeldSession > atStop" },
+    { file: HELD, path: "HeldSession > bindRun" },
+  ]);
+  assert.deepEqual(found, Object.keys(OBSERVATION_ROUTES).sort(), "an unclassified or stale route");
+  // The routes that make a session, each binding inside the constructor: Start, an introduction, a kept restore, and a
+  // history restore.
+  const made = ["in-process.ts", "ops/persistence.ts", "ops/session.ts", "ops/history.ts"].map(
+    (file) => {
+      const text = readFileSync(resolve(process.cwd(), "player/engine-bridge", file), "utf8");
+      return [file, text.match(/new HeldSession\(/gu)?.length ?? 0] as const;
+    },
+  );
+  assert.deepEqual(made, [
+    ["in-process.ts", 1],
+    ["ops/persistence.ts", 1],
+    ["ops/session.ts", 1],
+    ["ops/history.ts", 1],
+  ]);
 });
