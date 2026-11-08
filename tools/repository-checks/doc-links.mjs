@@ -16,7 +16,7 @@ import { VFile } from "vfile";
 //
 // It runs in `check:pretest` and in `tools/check-changed.mjs`, for every change.
 //
-// It launches nothing: it runs unified-engine in this process, with remark as the processor and remark-gfm and
+// Only Git is launched: unified-engine runs in this process, with remark as the processor and remark-gfm and
 // remark-validate-links (`repository: false`, so absolute URLs, this repository's included, are not checked) as its
 // only plugins. No configuration file and no ignore file is searched for (`detectConfig` and `detectIgnore` off), and
 // nothing is written. The files are Git's list (`git ls-files --cached --others --exclude-standard`) of `*.md` entries
@@ -31,7 +31,8 @@ import { VFile } from "vfile";
 // link uses it.
 //
 // Exit status: 0 when remark reports nothing, 1 when it reports a link that does not resolve (or another problem, in
-// its report), 2 when it cannot run.
+// its report), 2 when it cannot run. A missing or broken installed package stops Node before the check starts, with
+// Node's own exit 1.
 
 const root = process.cwd();
 
@@ -50,7 +51,7 @@ function markdownFiles() {
   } catch (error) {
     throw new CannotRun(`doc-links: cannot list the Markdown files with Git: ${error.message}`);
   }
-  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   const names = new Set();
   let start = 0;
   for (let end = listed.indexOf(0); end !== -1; end = listed.indexOf(0, start)) {

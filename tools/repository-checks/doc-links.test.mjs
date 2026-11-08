@@ -42,7 +42,7 @@ const run = (root) => spawnSync(process.execPath, [tool], { cwd: root, encoding:
 const reported = (stderr) =>
   stderr
     .split("\n")
-    .filter((line) => /^\S+\.md$/u.test(line))
+    .filter((line) => /^[^ ]\S*\.md$/u.test(line))
     .sort();
 const BROKEN = "[bad](missing.md)\n";
 /**
@@ -71,6 +71,8 @@ test("remark reads exactly Git's regular Markdown files, with no configuration o
     "--version=.md": BROKEN,
     "[ab].md": BROKEN,
     "star*.md": BROKEN,
+    // a name starting with U+FEFF, which a decoder drops by default
+    "\ufeffbom.md": BROKEN,
   });
   try {
     // what Git does not list, or lists as no regular file: an ignored `b.md`, which a glob of `[ab].md` would match, a
@@ -96,12 +98,13 @@ test("remark reads exactly Git's regular Markdown files, with no configuration o
         "pkg/y.md",
         "skipped.md",
         "star*.md",
+        "\ufeffbom.md",
       ].sort(),
       result.stderr,
     );
     assert.match(result.stderr, /Cannot find file `gone\.md`/u);
-    // each of the six files with a link to `missing.md` is read and checked, none refused as ignored
-    assert.equal(result.stderr.match(/Cannot find file `missing\.md`/gu)?.length, 6, result.stderr);
+    // each of the seven files with a link to `missing.md` is read and checked, none refused as ignored
+    assert.equal(result.stderr.match(/Cannot find file `missing\.md`/gu)?.length, 7, result.stderr);
     assert.equal(
       result.stderr.trim().split("\n").at(-1),
       "doc-links: remark reports the problems above: fix each link, or the file or heading it names",
