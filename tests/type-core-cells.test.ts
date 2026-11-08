@@ -91,41 +91,46 @@ test("the core gives the expected record for every record of the cells it comple
  * with an `N` cell is asserted, by the test above.
  */
 test("each stage 3b record held by name exists, has an N cell, and differs in every mode exactly as its cause does (#1073 U6)", () => {
-  // (a reason's signature: what its cause's differences are, independently of the map that names it)
-  const signatures = new Map<string, (lines: readonly string[]) => boolean>([
+  // (each hold's reason found independently of the map that names it, one cause per hold: a record a reviewer or the
+  // owner assigned by name, else the one class its differences fall in)
+  const assigned = new Map<string, string>([
+    ["cp9-cells/r42/guard/holding-path", "U4's consumer remainder (#2025)"],
+    ["cp9-cells/r46/guard/branch-holding-path/guarded", "U4's consumer remainder (#2025)"],
+    ["cp9-cells/3b/review-early/s2-same-location-compound-loop", "U4's consumer remainder (#2025)"],
     [
-      "the route rule's corridor across locations (#1938)",
-      (lines) => lines.some((line) => line.startsWith("missing required check ")),
+      "cp9-cells/r46/guard/arithmetic-unary/guarded",
+      "a fixture expectation awaiting its ruling (#2025)",
     ],
     [
-      "a written optional load's definite number error (#1173, listed in #1938)",
-      (lines) =>
-        lines.some((line) => line.startsWith("missing required check ")) &&
-        lines.some((line) => line.startsWith("missing check integer-check ")),
+      "cp9-cells/3b/invalidation/clear/changed",
+      "a fixture expectation awaiting its ruling (#2025)",
     ],
-    [
-      "a static warning of S9b's otherwise (#1737)",
-      (lines) =>
-        lines.every(
-          (line) =>
-            line.startsWith("extra diagnostic static warning ") ||
-            line === "outcome valid, got warning",
-        ),
-    ],
-    [
-      "a context word under an unrelated test (#2024)",
-      (lines) => lines.length > 0 && lines.every((line) => line.startsWith("missing context ")),
-    ],
-    [
-      "a fixture expectation defect (#2025)",
-      (lines) => lines.includes("outcome warning-runtime-check, got valid"),
-    ],
-    // (the owner-ruled holds, U4's, the outliers' and the crossover's, carry no mechanical signature: their pinned
-    // differences are the check)
-    ["U4's consumer remainder (#2025)", () => true],
-    ["a fixture expectation awaiting its ruling (#2025)", () => true],
-    ["the numeric crossover (#1173, #2025)", () => true],
+    ["cp9-cells/3b/invalidation/sort/changed", "a fixture expectation awaiting its ruling (#2025)"],
+    ["cp9-cells/r49/sharing/record-aliases/guarded", "the numeric crossover (#1173, #2025)"],
+    ["cp9-cells/3b/loop/break/changed", "a fixture expectation defect (#2025)"],
   ]);
+  const causeOf = (name: string, lines: readonly string[]): string => {
+    const named = assigned.get(name);
+    if (named !== undefined) return named;
+    const required = lines.some((line) => line.startsWith("missing required check "));
+    if (required && lines.some((line) => line.startsWith("missing check integer-check ")))
+      return "a written optional load's definite number error (#1173, listed in #1938)";
+    if (required) return "the route rule's corridor across locations (#1938)";
+    if (
+      lines.length > 0 &&
+      lines.every(
+        (line) =>
+          line.startsWith("extra diagnostic static warning ") ||
+          line === "outcome valid, got warning",
+      )
+    )
+      return "a static warning of S9b's otherwise (#1737)";
+    if (lines.length > 0 && lines.every((line) => line.startsWith("missing context ")))
+      return "a context word under an unrelated test (#2024)";
+    return "no known cause";
+  };
+  // (the differences as a multiset: the comparison compares entries regardless of their order)
+  const sorted = (lines: readonly string[]): string => JSON.stringify([...lines].sort());
   const byName = new Map(records.map((record) => [record.name, record]));
   const wrong: string[] = [];
   for (const [name, hold] of HELD_S10_RECORDS) {
@@ -136,11 +141,8 @@ test("each stage 3b record held by name exists, has an N cell, and differs in ev
     }
     if (!record.cells.some((cell) => /^N\d/.test(cell))) wrong.push(`${name}: no N cell`);
     if (heldBack(record) !== hold.reason) wrong.push(`${name}: held by another reason`);
-    const signature = signatures.get(hold.reason);
-    if (signature === undefined)
-      wrong.push(`${name}: a reason without a signature (${hold.reason})`);
-    else if (!signature(hold.differences))
-      wrong.push(`${name}: its differences are not ${hold.reason}'s`);
+    const cause = causeOf(name, hold.differences);
+    if (cause !== hold.reason) wrong.push(`${name}: held as ${hold.reason}, its cause is ${cause}`);
     const request = coreRequest(record.files);
     assert.ok(request !== null, name);
     for (const mode of MODES) {
@@ -148,7 +150,7 @@ test("each stage 3b record held by name exists, has an N cell, and differs in ev
         record.expected,
         inMode(mode, () => compactAnalysis(request)),
       );
-      if (JSON.stringify(differences) !== JSON.stringify(hold.differences))
+      if (sorted(differences) !== sorted(hold.differences))
         wrong.push(
           `${name} in ${JSON.stringify(mode)}: ${JSON.stringify(differences)}, its hold names ${JSON.stringify(hold.differences)}`,
         );
