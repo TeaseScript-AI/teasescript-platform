@@ -33,7 +33,7 @@
 // places its file lists (`items.mjs sources`, #1826), its `--work` record named `items <hash>` in place of a shard.
 // Prints one JSON line per generator and a total: sources, unparsed, stalled, exceptions, unanswered, unansweredAlike,
 // uncompared, uncharged, modes, runs, differences.
-import { fork } from "node:child_process";
+import { fork, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
@@ -44,6 +44,7 @@ import {
   writeSync,
 } from "node:fs";
 import path from "node:path";
+import { getHeapStatistics } from "node:v8";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   beginShard,
@@ -136,40 +137,16 @@ function partHashes(oracle, files, mode, globals) {
 }
 
 /**
- * The heap `options` (a `NODE_OPTIONS` value) asks, in MB, or none: its options as Node's own parser of that variable
- * splits them (a space outside double quotes ends an option, a double quote toggles quoting and is dropped, a
- * backslash inside quotes takes the next character as it is, and an option begins only with a character it holds),
- * the last `--max-old-space-size=` (or `_` for `-`) winning. Node takes the value only after `=`: given as the next
- * option, it refuses it, and starts no process.
+ * The heap limit, in MB, V8 gives a Node process started as this one is (its environment, `NODE_OPTIONS` included) with
+ * `args`: V8's own figure, read in that process, so that `NODE_OPTIONS` is read by Node itself, never by this runner.
  */
-function heapOf(options) {
-  const tokens = [];
-  let quoted = false;
-  let fresh = true;
-  for (let index = 0; index < options.length; index += 1) {
-    let char = options[index];
-    if (char === "\\" && quoted) {
-      index += 1;
-      // (a trailing backslash: Node refuses the whole value, and starts no process)
-      if (index === options.length) return undefined;
-      char = options[index];
-    } else if (char === " " && !quoted) {
-      fresh = true;
-      continue;
-    } else if (char === '"') {
-      quoted = !quoted;
-      continue;
-    }
-    if (fresh) tokens.push(char);
-    else tokens[tokens.length - 1] += char;
-    fresh = false;
-  }
-  let heap;
-  for (const option of tokens) {
-    const value = /^--max[-_]old[-_]space[-_]size=(\d+)$/.exec(option)?.[1];
-    if (value !== undefined) heap = Number(value);
-  }
-  return heap;
+function heapLimitWith(args) {
+  const said = spawnSync(
+    process.execPath,
+    [...args, "-p", "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)"],
+    { encoding: "utf8" },
+  );
+  return Number(said.stdout.trim());
 }
 
 /**
@@ -529,9 +506,14 @@ if (process.argv[2] === "--child") {
   const timeout = seconds * 1000;
   const memory = Number(option("memory") ?? DEFAULTS.memory);
   // (each source's process gets `--memory` as its heap, whatever heap `NODE_OPTIONS` sets, as the central queue sets
-  // one on every job: the total names `memory`, and beside it the heap `NODE_OPTIONS` asked where that differs, so the
-  // override is never silent, #1956)
-  const asked = heapOf(process.env.NODE_OPTIONS ?? "") ?? memory;
+  // one on every job: the total names `memory`, and beside it, where `NODE_OPTIONS` names a heap, the heap limit V8 gives
+  // this runner's own process (`nodeOptions.heapLimit`), wherever it differs from a source's process's, so the override
+  // is never silent; both limits as V8 reads them, #1956)
+  const nodeOptions = /old[-_]space[-_]size/.test(process.env.NODE_OPTIONS ?? "")
+    ? Math.round(getHeapStatistics().heap_size_limit / 2 ** 20)
+    : undefined;
+  const differing =
+    nodeOptions !== undefined && nodeOptions !== heapLimitWith([`--max-old-space-size=${memory}`]);
   if (store !== undefined && options.has("only"))
     refused("--store stores whole shards: drop --only");
   const itemized = options.has("items") || options.has("items-from-env");
@@ -1217,7 +1199,7 @@ if (process.argv[2] === "--child") {
     units,
     timeout: seconds,
     memory,
-    ...(asked === memory ? {} : { nodeOptions: { memory: asked } }),
+    ...(differing ? { nodeOptions: { heapLimit: nodeOptions } } : {}),
     node: process.version,
   };
   if (storing !== undefined) {

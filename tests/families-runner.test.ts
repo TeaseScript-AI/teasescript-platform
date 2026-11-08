@@ -4797,12 +4797,30 @@ test("the stall index prints a growth line per area: a series whose head-over-ba
     );
     assert.equal(ran.status, 1, ran.stderr);
     const ended = JSON.parse(ran.stdout.trim().split("\n").at(-1)!);
-    assert.deepEqual([ended.memory, ended.nodeOptions], [2048, { memory: 3000 }]);
-    // (each form as Node itself splits NODE_OPTIONS: a tab is no separator, so the heap after it is part of the title)
-    for (const [options, asked] of [
-      ['--max-old-space-size=2048 --max_old_space_size="3000"', 3000],
-      ["--max-old-space-size=2048 --title=x\t--max-old-space-size=3000", undefined],
-      ['--max-old-space-size=2048 "--max-old-space-size=3000"', 3000],
+    // (V8's own heap limit for each NODE_OPTIONS, as Node reads it: the runner reads none of it itself)
+    const limitOf = (options: string, ...args: string[]) =>
+      Number(
+        spawnSync(
+          process.execPath,
+          [
+            ...args,
+            "-p",
+            "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)",
+          ],
+          { encoding: "utf8", env: { ...process.env, NODE_OPTIONS: options } },
+        ).stdout.trim(),
+      );
+    const two = '--max-old-space-size=2048 --max_old_space_size="3000"';
+    assert.deepEqual([ended.memory, ended.nodeOptions], [2048, { heapLimit: limitOf(two) }]);
+    assert.ok(limitOf(two) > limitOf(two, "--max-old-space-size=2048"));
+    // (each form Node takes: a quoted value, a signed one, one after quoted spaces, a quoted option; a tab is no
+    // separator, so the heap after it is part of the title and the limit is 2,048's: none named)
+    for (const [options, named] of [
+      ["--max-old-space-size=2048 --max-old-space-size=+3000", true],
+      ['--max-old-space-size=2048 --max-old-space-size=" 3000"', true],
+      ['--max-old-space-size=2048 "--max-old-space-size=3000"', true],
+      ["--max-old-space-size=2048 --title=x\t--max-old-space-size=3000", false],
+      ["--max-old-space-size=2048", false],
     ] as const) {
       const said = spawnSync(
         process.execPath,
@@ -4812,7 +4830,7 @@ test("the stall index prints a growth line per area: a series whose head-over-ba
       const total = JSON.parse(said.stdout.trim().split("\n").at(-1)!);
       assert.deepEqual(
         total.nodeOptions,
-        asked === undefined ? undefined : { memory: asked },
+        named ? { heapLimit: limitOf(options) } : undefined,
         options,
       );
     }
