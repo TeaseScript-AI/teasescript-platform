@@ -45,6 +45,7 @@ const PLACES = {
   "tests/place.test.ts": false,
   "tests/families/place.mjs": false,
   "tools/place.mjs": false,
+  "src/place.mts": true,
   "src/place.mjs": false,
 };
 

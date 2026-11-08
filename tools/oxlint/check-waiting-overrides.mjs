@@ -1,130 +1,188 @@
+import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
-// An `overrides` entry of `.oxlintrc.json` whose rules are all `off` is a waiting list (docs/LINTING.md "Waiting
-// lists"): its files' findings of those rules wait for a cleanup. Each listed file must still have a finding of one of
-// the rules it turns off, so the list only shrinks. The check runs oxlint once, `--type-aware` as `run.mjs` does, with
-// every rule any waiting list turns off on (with the options the configuration gives it, else as `error`), over every
-// listed file, and reports each listed file none of its entry's rules finds anything in. A listed path that is not a
-// linted file, a glob included, is reported too: a waiting list names files, never patterns.
+// The waiting lists of `.oxlintrc.json` (docs/LINTING.md "Waiting lists"): an `overrides` entry whose rules are all
+// off. Each path a waiting entry lists has a finding that oxlint reports without that entry and not with it; a path for
+// which oxlint reports no such finding is refused, as is a path that is not a linted file.
+//
+// The check lets oxlint resolve its own configuration. For each waiting entry it runs oxlint (`--type-aware`, as
+// `run.mjs` does) over the entry's files twice: with the configuration, and with a copy that leaves the entry out,
+// written beside it (`overrides` paths resolve from the configuration's folder) under a name unique to the run and
+// removed at the end, also on SIGINT, SIGTERM and SIGHUP. A finding of the second run that the first lacks keeps its
+// file listed.
+//
+// "Off" is a severity oxlint's schema (`AllowWarnDeny`, `node_modules/oxlint/configuration_schema.json`) says turns a
+// rule off: "allow", "off" or 0, alone or first in an array. A severity the schema does not have is refused, in any
+// entry.
 
-const severity = (setting) => (Array.isArray(setting) ? setting[0] : setting);
-const isOff = (setting) => severity(setting) === "off" || severity(setting) === 0;
+/** The severities oxlint's `AllowWarnDeny` has, and those of them that turn a rule off. */
+const SEVERITIES = new Set(["allow", "off", "warn", "error", "deny", 0, 1, 2]);
+const OFF = new Set(["allow", "off", 0]);
+const severityOf = (setting) => (Array.isArray(setting) ? setting[0] : setting);
 
-/** The code oxlint reports a configured rule's findings under: `x/y` as `x(y)`, a bare name as `eslint(y)`. */
-const codeOf = (rule) => (rule.includes("/") ? rule.replace("/", "(") + ")" : `eslint(${rule})`);
+/** Each string value of `text` (strict JSON) with its path of keys and indexes, and its offset. */
+function stringsOf(text) {
+  const found = [];
+  let at = 0;
+  const space = () => {
+    while (/\s/u.test(text[at] ?? "")) at += 1;
+  };
+  const string = () => {
+    const start = at;
+    at += 1;
+    while (text[at] !== '"') at += text[at] === "\\" ? 2 : 1;
+    at += 1;
+    return { start, value: JSON.parse(text.slice(start, at)) };
+  };
+  const value = (path) => {
+    space();
+    if (text[at] === "{") {
+      at += 1;
+      space();
+      if (text[at] === "}") return void (at += 1);
+      for (;;) {
+        space();
+        const { value: key } = string();
+        space();
+        at += 1;
+        value([...path, key]);
+        space();
+        if (text[at++] === "}") return;
+      }
+    }
+    if (text[at] === "[") {
+      at += 1;
+      space();
+      if (text[at] === "]") return void (at += 1);
+      for (let index = 0; ; index += 1) {
+        value([...path, index]);
+        space();
+        if (text[at++] === "]") return;
+      }
+    }
+    if (text[at] === '"') return void found.push({ path, start: string().start });
+    while (at < text.length && !/[\s,}\]]/u.test(text[at])) at += 1;
+  };
+  value([]);
+  return found;
+}
 
-/** The rules an entry turns off, by name up to three, else by count. */
-const waitsFor = (rules) =>
-  rules.length <= 3
-    ? rules.join(", ").replace(/, ([^,]*)$/u, " and $1")
-    : `the ${rules.length} rules its overrides entry turns off`;
-
-/** `findings` in the configuration's order. */
-const inOrder = (findings) =>
-  findings.sort((one, other) => one.line - other.line || one.column - other.column);
-
-/** The 1-based line and column of `file`'s name in the `index`-th overrides entry of the configuration's text. */
-function positionOf(configText, index, file) {
-  let from = configText.indexOf('"overrides"');
-  for (let entry = 0; entry <= index; entry += 1) from = configText.indexOf('"files"', from + 1);
-  const at = configText.indexOf(JSON.stringify(file), from);
-  const before = configText.slice(0, at);
-  return { line: before.split("\n").length, column: at - before.lastIndexOf("\n") };
+/** Each diagnostic of oxlint's JSON output, as one string: its file, code, place and message. */
+function diagnosticsOf(result) {
+  let diagnostics;
+  try {
+    ({ diagnostics } = JSON.parse(result.stdout));
+  } catch {
+    throw new Error(
+      `check-waiting-overrides: oxlint printed no findings to read (exit ${result.status}):\n${result.stdout}${result.stderr}`,
+    );
+  }
+  return diagnostics.map(
+    ({ filename, code, message, labels }) =>
+      `${filename}\n${code}\n${labels?.[0]?.span?.offset ?? ""}\n${message}`,
+  );
 }
 
 /**
- * The findings of the waiting lists in `configText` (the text of `.oxlintrc.json` at `root`): each `{ fileName, line,
- * column, message }`. `linted` is the set of files `npm run lint` lints, relative to `root`; `executable` is oxlint's.
+ * The findings of the waiting lists in the configuration `configFile` (relative to `root`, its text `configText`):
+ * each `{ fileName, line, column, message }`. `linted` is the set of files `npm run lint` lints, relative to `root`;
+ * `executable` is oxlint's.
  */
-export function checkWaitingOverrides(root, configText, linted, executable) {
+export function checkWaitingOverrides(root, configFile, configText, linted, executable) {
   const config = JSON.parse(configText);
-  const waiting = (config.overrides ?? [])
-    .map((entry, index) => ({ ...entry, index }))
-    .filter(
-      ({ rules }) => Object.keys(rules ?? {}).length > 0 && Object.values(rules).every(isOff),
-    );
+  const strings = stringsOf(configText);
   const findings = [];
-  const report = (index, file, message) =>
-    findings.push({ fileName: ".oxlintrc.json", ...positionOf(configText, index, file), message });
+  /** A finding at the string whose path is `path` (the entry itself when no such string is found). */
+  const report = (path, message) => {
+    const at = strings.find((each) => each.path.join("\n") === path.join("\n"))?.start ?? 0;
+    const before = configText.slice(0, at);
+    findings.push({
+      fileName: configFile,
+      line: before.split("\n").length,
+      column: at - before.lastIndexOf("\n"),
+      message,
+    });
+  };
 
-  const rules = {};
-  const files = new Set();
-  for (const { index, files: listed, rules: off } of waiting) {
-    for (const rule of Object.keys(off)) {
-      const setting = config.rules?.[rule];
-      rules[rule] = Array.isArray(setting) && !isOff(setting) ? setting : "error";
-    }
-    for (const file of listed)
-      if (linted.has(file)) files.add(file);
-      else
+  const overrides = config.overrides ?? [];
+  for (const [index, entry] of overrides.entries())
+    for (const [rule, setting] of Object.entries(entry.rules ?? {}))
+      if (!SEVERITIES.has(severityOf(setting)))
         report(
-          index,
-          file,
-          `'${file}' is in an overrides entry that only turns rules off, but no linted file has that path: a waiting list names files, never patterns`,
+          ["overrides", index, "files", 0],
+          `the overrides entry's rule '${rule}' has the severity ${JSON.stringify(severityOf(setting))}, which oxlint's AllowWarnDeny does not have: write "off" (or "allow" or 0) to turn it off, or "error"`,
         );
-  }
-  if (files.size === 0) return inOrder(findings);
+  // oxlint does not run on a configuration whose severity it cannot parse
+  if (findings.length > 0) return findings;
+  const waiting = overrides
+    .map((entry, index) => ({ entry, index }))
+    .filter(
+      ({ entry }) =>
+        Object.keys(entry.rules ?? {}).length > 0 &&
+        Object.values(entry.rules).every((setting) => OFF.has(severityOf(setting))),
+    );
 
-  // the rules alone, with the plugins that define them; every category off
-  const folder = mkdtempSync(join(tmpdir(), "waiting-overrides-"));
+  const probe = `.oxlintrc.probe-${process.pid}-${randomBytes(4).toString("hex")}.json`;
+  const remove = () => rmSync(join(root, probe), { force: true });
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"].map((signal) => {
+    const onSignal = () => {
+      remove();
+      process.kill(process.pid, signal);
+    };
+    process.once(signal, onSignal);
+    return [signal, onSignal];
+  });
+  const lint = (file, files) =>
+    diagnosticsOf(
+      spawnSync(
+        process.execPath,
+        [
+          executable,
+          "--config",
+          file,
+          "--disable-nested-config",
+          "--type-aware",
+          "-f",
+          "json",
+          ...files,
+        ],
+        { cwd: root, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
+      ),
+    );
   try {
-    const probe = join(folder, "oxlintrc.json");
-    writeFileSync(
-      probe,
-      JSON.stringify({
-        ...(config.plugins === undefined ? {} : { plugins: config.plugins }),
-        ...(config.jsPlugins === undefined
-          ? {}
-          : {
-              jsPlugins: config.jsPlugins.map((plugin) => ({
-                ...plugin,
-                specifier: isAbsolute(plugin.specifier)
-                  ? plugin.specifier
-                  : resolve(root, plugin.specifier),
-              })),
-            }),
-        categories: { correctness: "off" },
-        rules,
-      }),
-    );
-    const result = spawnSync(
-      process.execPath,
-      [
-        executable,
-        "--config",
-        probe,
-        "--disable-nested-config",
-        "--type-aware",
-        "-f",
-        "json",
-        ...files,
-      ],
-      { cwd: root, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
-    );
-    let diagnostics;
-    try {
-      ({ diagnostics } = JSON.parse(result.stdout));
-    } catch {
-      throw new Error(
-        `check-waiting-overrides: oxlint printed no findings to read (exit ${result.status}):\n${result.stdout}${result.stderr}`,
-      );
-    }
-    const found = new Set(diagnostics.map(({ filename, code }) => `${filename}\n${code}`));
-    for (const { index, files: listed, rules: off } of waiting) {
-      const codes = Object.keys(off).map(codeOf);
-      for (const file of listed)
-        if (files.has(file) && !codes.some((code) => found.has(`${file}\n${code}`)))
+    for (const { entry, index } of waiting) {
+      const files = [];
+      for (const [position, file] of entry.files.entries())
+        if (linted.has(file)) files.push(file);
+        else
           report(
-            index,
-            file,
-            `'${file}' waits for ${waitsFor(Object.keys(off))}, but none of them finds anything in it: remove it from that overrides entry`,
+            ["overrides", index, "files", position],
+            `'${file}' is in an overrides entry that only turns rules off, but no linted file has that path: a waiting list names files, never patterns`,
+          );
+      if (files.length === 0) continue;
+      writeFileSync(
+        join(root, probe),
+        JSON.stringify({ ...config, overrides: overrides.filter((_, at) => at !== index) }),
+      );
+      const kept = new Set(lint(configFile, files));
+      const needed = new Set(
+        lint(probe, files)
+          .filter((diagnostic) => !kept.has(diagnostic))
+          .map((diagnostic) => diagnostic.split("\n")[0]),
+      );
+      const rules = Object.keys(entry.rules);
+      for (const [position, file] of entry.files.entries())
+        if (files.includes(file) && !needed.has(file))
+          report(
+            ["overrides", index, "files", position],
+            `'${file}' waits for ${rules.length <= 3 ? rules.join(", ") : `the ${rules.length} rules its overrides entry turns off`}, but oxlint reports nothing more in it without that entry: remove it from the entry`,
           );
     }
   } finally {
-    rmSync(folder, { recursive: true, force: true });
+    remove();
+    for (const [signal, onSignal] of signals) process.off(signal, onSignal);
   }
-  return inOrder(findings);
+  return findings.sort((one, other) => one.line - other.line || one.column - other.column);
 }

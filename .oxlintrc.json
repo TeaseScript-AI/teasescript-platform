@@ -91,7 +91,11 @@
       }
     },
     {
-      "files": ["src/**/*.ts", "player/**/*.ts", "tests/helpers/**/*.ts"],
+      "files": [
+        "src/**/*.{ts,tsx,mts,cts}",
+        "player/**/*.{ts,tsx,mts,cts}",
+        "tests/helpers/**/*.{ts,tsx,mts,cts}"
+      ],
       "rules": {
         "typescript/no-base-to-string": "error",
         "typescript/restrict-template-expressions": "error"

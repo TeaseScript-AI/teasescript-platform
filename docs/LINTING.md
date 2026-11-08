@@ -26,7 +26,8 @@ findings of these rules wait for another open pull request or a cleanup are a [w
     such as an `async` event listener or an `if (promise)`; handle the promise inside the callback, ending it with
     `.catch`. TypeScript types `.finally`'s callback as returning `void`, so the rule refuses a callback that returns a
     promise even though `finally` awaits it; write `try … finally` with `await` there.
-- On the TypeScript in `src/`, `player/` and `tests/helpers/`, which is product code and the shared oracles:
+- On the TypeScript files (`.ts`, `.tsx`, `.mts`, `.cts`) in `src/`, `player/` and `tests/helpers/`, which are product
+  code and the shared oracles:
   - `typescript/restrict-template-expressions`: a template literal may interpolate a string, number, bigint, boolean,
     `null`, `undefined`, `any`, `RegExp`, `Error` or `URL`, and may not interpolate an object, array, function,
     `unknown` or `never`. A `never` usually means that a type guard narrowed more than it proves.
@@ -42,16 +43,19 @@ findings of these rules wait for another open pull request or a cleanup are a [w
   shows it. If these two rules' findings need their type in the one-line form, it is added to those findings alone,
   never by switching every finding to `-f default`.
 
-On the LXC, at a load of 8 to 20 (2026-11-08), `npm run lint` took 47–52 s with these rules and 40–43 s without, and
-the largest process peaked at about 1.7 GB either way. Beside the other checks of `tools/check-changed.mjs` its step
-took 113 s, against 70 s without; the pre-push check runs it as CI does.
+On the LXC (2026-11-08), `npm run lint` took 47–52 s with these rules and 40–43 s without them, run alone at a load
+of 8 to 20, and 46 s with them and the waiting-list check below at a load of 6 to 11. The largest process peaked at
+about 1.7 GB in each. Inside `tools/check-changed.mjs`, beside its other checks, the lint step took 113 s with these
+rules, and 70 s without them in another run at a similar load. The pre-push check runs lint as CI does.
 
 ## Waiting lists
 
-An `overrides` entry whose rules are all `off` is a waiting list: the findings of those rules in its files wait for
-another open pull request or a cleanup. It names files, never patterns. `tools/oxlint/check-waiting-overrides.mjs`, in
-`npm run lint`, refuses a listed file that none of the entry's rules finds anything in any more, and a listed path that
-is not a linted file, so each list only shrinks.
+An `overrides` entry whose rules are all off (`"allow"`, `"off"` or `0`, oxlint's `AllowWarnDeny`) is a waiting list:
+the findings of those rules in its files wait for another open pull request or a cleanup. It names files, never
+patterns. `tools/oxlint/check-waiting-overrides.mjs`, in `npm run lint`, checks that each path a waiting entry lists has
+a finding that oxlint reports without that entry and not with it, and refuses a path that is not a linted file. A
+severity oxlint's schema does not have is refused in any entry. An entry is added only for a finding that waits, so
+that with the check each list shrinks.
 
 ## Comment forecasts
 

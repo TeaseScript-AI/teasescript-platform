@@ -47,6 +47,7 @@ for (const diagnostic of [
   ...checkSiteKeys(repositoryRoot),
   ...checkWaitingOverrides(
     repositoryRoot,
+    ".oxlintrc.json",
     readFileSync(resolve(repositoryRoot, ".oxlintrc.json"), "utf8"),
     new Set(files),
     executable,
