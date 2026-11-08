@@ -156,9 +156,12 @@ function options(argv) {
 /** The prefix of every temporary worktree `--merged` makes. */
 const TEMPORARY_PREFIX = join(tmpdir(), "check-changed-merged-");
 
-/** Main's `node_modules`, in the checkout `TEASESCRIPT_MAIN` names in `env`; unset or empty, the LXC's own. */
+/**
+ * Main's `node_modules`, as an absolute path, so a named `ln -s` reads it as its target and never as an option: in the
+ * checkout `TEASESCRIPT_MAIN` names in `env`, relative to the working folder; unset or empty, the LXC's own.
+ */
 export function mainNodeModules(env) {
-  return join(
+  return resolve(
     env.TEASESCRIPT_MAIN || "/opt/teasescript-agents/teasescript-main/current",
     "node_modules",
   );

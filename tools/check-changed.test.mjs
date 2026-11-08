@@ -132,6 +132,20 @@ test(
         realpathSync(join(directory, "node_modules")),
         realpathSync(join(spaced, "node_modules")),
       );
+      // a relative checkout whose name starts with `-`: named by its absolute path, so `ln` reads no option
+      rmSync(join(directory, "node_modules"));
+      mkdirSync(join(directory, "-main", "node_modules"), { recursive: true });
+      const dashed = /link it with `(.*)`\n$/u.exec(refusal("-main"))?.[1];
+      assert.equal(
+        dashed,
+        `ln -s ${join(realpathSync(directory), "-main", "node_modules")} node_modules`,
+      );
+      const relinked = spawnSync("sh", ["-c", dashed], { cwd: directory, encoding: "utf8" });
+      assert.equal(relinked.status, 0, relinked.stderr);
+      assert.equal(
+        realpathSync(join(directory, "node_modules")),
+        realpathSync(join(directory, "-main", "node_modules")),
+      );
     } finally {
       rmSync(directory, { recursive: true, force: true });
       rmSync(main, { recursive: true, force: true });
@@ -424,6 +438,10 @@ test("main's node_modules come from TEASESCRIPT_MAIN, and unset or empty from th
   assert.equal(mainNodeModules({}), lxc);
   assert.equal(mainNodeModules({ TEASESCRIPT_MAIN: "" }), lxc);
   assert.equal(mainNodeModules({ TEASESCRIPT_MAIN: "/srv/main/" }), "/srv/main/node_modules");
+  assert.equal(
+    mainNodeModules({ TEASESCRIPT_MAIN: "-main" }),
+    join(process.cwd(), "-main", "node_modules"),
+  );
   assert.equal(shellWord("/opt/a-b/c_d.e/node_modules"), "/opt/a-b/c_d.e/node_modules");
   assert.equal(shellWord("/tmp/with spaces/it's"), "'/tmp/with spaces/it'\\''s'");
 });
