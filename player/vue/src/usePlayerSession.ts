@@ -315,6 +315,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The recording up to a Player error, kept for a debug export until the next Start, when Debug's rewind begins the
   // recorder anew at a restored state.
   let failureRecording: DebugRecording | null = null;
+  // Every stop since the last Start, by its identity (the activation token its report took), and the stops each failed
+  // reinstatement gate of Debug's rewind made, by the history it would reinstate.
+  let stops: number[] = [];
+  const reinstatementStops = new Map<number, number[]>();
   /** The recording a debug export shows: the one up to a Player error, else the host's recorder's. */
   const exportedRecording = () =>
     failureRecording ?? (bridge === null ? null : heldRecording(bridge));
@@ -341,7 +345,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * is the shown one, else the one still beginning: a Continue's restored session at once, a Start's once its reply
    * names it. Its last publication then shows, and the stop renders after it; input stops at once (`stopped`).
    */
-  function reportHostError(error: unknown) {
+  function reportHostError(error: unknown): number {
     const name = error instanceof Error ? error.name : "Error";
     console.error("[player] host error", error);
     const restoring = continuing;
@@ -350,13 +354,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     activationToken += 1;
     beginning.value = false;
     const stop = activationToken;
+    stops.push(stop);
     const target = session.value ?? restoring;
     // A Continue still beginning beside a shown session runs nothing more either.
     if (restoring !== null && restoring !== target) void bridgeOf(restoring).halt(restoring);
-    if (target !== null) return stopAt(target, name, stop);
+    if (target !== null) {
+      stopAt(target, name, stop);
+      return stop;
+    }
     if (starting === null) {
       hostError.value = name;
-      return;
+      return stop;
     }
     haltUntil(stop);
     void starting.then(
@@ -366,6 +374,27 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (stop === activationToken) hostError.value ??= name;
       },
     );
+    return stop;
+  }
+  /**
+   * Reports the failure of Debug off's reinstatement gate for history `history` as any host failure does, and keeps its
+   * stop under that history: the reinstatement's later success clears it (`reinstated`).
+   */
+  function reportReinstatementFailure(error: unknown, history: number) {
+    const stop = reportHostError(error);
+    reinstatementStops.set(history, [...(reinstatementStops.get(history) ?? []), stop]);
+  }
+  /**
+   * History `history`'s reinstatement succeeded: the stops its failed gates made clear, with their failure card, only
+   * when they are every stop since the last Start; any other Player error, earlier or later, stays.
+   */
+  function reinstated(history: number) {
+    const own = reinstatementStops.get(history) ?? [];
+    reinstatementStops.delete(history);
+    if (own.length === 0 || !stops.every((stop) => own.includes(stop))) return;
+    stops = [];
+    hostError.value = null;
+    failureRecording = null;
   }
   /**
    * Stops at `target`: once its store froze at the host's acknowledgement, its last publication is the shown session,
@@ -643,7 +672,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     show: (next, paused) => showRewound(next, { paused }),
     // Read at each call, so a host or a test can put its own gate there.
     beforeRestart: () => rewindApi.beforeRestart(),
-    reportHostError: (error) => reportHostError(error),
+    reportHostError: (error) => void reportHostError(error),
+    reportReinstatementFailure,
+    reinstated,
   });
   // While Debug's rewind shows a restored state (DEBUGGER.md "Rewind"), nothing runs on its own: the clock stands, media
   // hold their position, and load reports and capture requests wait, until new input adopts the state as the session.
@@ -3235,6 +3266,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       });
     hostError.value = null;
     failureRecording = null;
+    stops = [];
+    reinstatementStops.clear();
     let begun: PlayerSession | Promise<PlayerSession>;
     // `begin` records the click's capture: it reads it before its first await, a Start in its factory or options.
     clicked = sample;

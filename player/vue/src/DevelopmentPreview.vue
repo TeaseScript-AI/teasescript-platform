@@ -117,6 +117,21 @@ const player = usePlayerSession(
       },
 );
 
+// `?rewindGate=slow` holds each restart gate of Debug's rewind for 1.5 s, so a switch lasts long enough to show its
+// animation; `?rewindGate=fail` fails the second one, Debug off's reinstatement after a Back, so its retry shows
+// (DEBUGGER.md "Rewind"). The Player reads the gate at each call (`rewind.beforeRestart`).
+const rewindGate = query.get("rewindGate");
+if (rewindGate === "slow" || rewindGate === "fail") {
+  const gate = player.rewind.beforeRestart.bind(player.rewind);
+  let asked = 0;
+  player.rewind.beforeRestart = async () => {
+    asked += 1;
+    if (rewindGate === "fail" && asked === 2) throw new Error("The restart gate failed (rewindGate=fail).");
+    if (rewindGate === "slow") await new Promise((resolve) => setTimeout(resolve, 1_500));
+    return gate();
+  };
+}
+
 // Notice preview: the Player's own wording for real conditions, plus an error sample that no condition reports yet.
 const sampleNotices: readonly PlayerNotice[] = [
   { key: "preview-error", level: "error", message: "The camera stopped unexpectedly." },

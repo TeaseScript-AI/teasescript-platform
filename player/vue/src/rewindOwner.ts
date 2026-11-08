@@ -36,6 +36,10 @@ export interface RewindOwnerHost {
   /** The restart gate (`rewind.beforeRestart()`), read at each call. */
   readonly beforeRestart: () => void | Promise<void>;
   readonly reportHostError: (error: unknown) => void;
+  /** Reports the failure of history `history`'s reinstatement gate, whose stop its later success clears. */
+  readonly reportReinstatementFailure: (error: unknown, history: number) => void;
+  /** History `history`'s reinstatement succeeded: the stops only its failed gates made clear. */
+  readonly reinstated: (history: number) => void;
 }
 
 /**
@@ -349,8 +353,24 @@ export function createRewindOwner(host: RewindOwnerHost) {
     }
     const mayShow = () => host.ready() && host.generation() === generation;
     void Promise.resolve(gated).then(
-      () => dispatch({ kind: "gateSettled", gate: which, id, ok: true, mayShow: mayShow() }),
+      () => {
+        const { history } = state;
+        const { actions } = dispatch({
+          kind: "gateSettled",
+          gate: which,
+          id,
+          ok: true,
+          mayShow: mayShow(),
+        });
+        if (
+          which === "reinstate" &&
+          history !== null &&
+          actions.some((a) => a.kind === "showParked")
+        )
+          host.reinstated(history);
+      },
       (error: unknown) => {
+        const { history } = state;
         // A failure is reported only when the function says so (`reportFailure`): a step's as its problem, a Return's
         // or a reinstatement's as the Player's host failure. An obsolete gate's says nothing.
         const { actions } = dispatch({
@@ -363,6 +383,8 @@ export function createRewindOwner(host: RewindOwnerHost) {
         if (!actions.some((action) => action.kind === "reportFailure")) return;
         if (which === "step")
           problem.value = error instanceof Error ? error.message : String(error);
+        else if (which === "reinstate" && history !== null)
+          host.reportReinstatementFailure(error, history);
         else host.reportHostError(error);
       },
     );

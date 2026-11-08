@@ -2453,29 +2453,57 @@ for (const kind of [
     });
   });
 
-test("a failed reinstatement offers its retry over the Player's lifetime, which returns to the session", async (context) => {
-  const made = createHost(context, memoryStorage().provider);
-  const { host } = made;
-  const reported: unknown[] = [];
-  reportsInto(context, reported);
-  await start(context, host);
-  await choose(context, host, "One");
-  const live = shownView(host);
-  assert.equal(await backTo(made.rewind, 0), true);
-  // Debug off, whose restart gate fails.
-  const original = host.rewind.beforeRestart.bind(host.rewind);
-  host.rewind.beforeRestart = () => Promise.reject(new Error("The restart gate failed."));
-  made.debug.stop();
-  await settle(context);
-  assert.equal(reported.length, 1, "the failure is reported");
-  assert.equal(host.rewind.returnFailed.value, true, "the retry is offered, with Debug off");
-  // The retry goes through the gate again: the offer goes once the return begins, and the session returns.
-  host.rewind.beforeRestart = original;
-  assert.equal(host.rewind.retryReturn(), true);
-  assert.equal(host.rewind.returnFailed.value, false, "the offer goes once the return begins");
-  assert.equal(host.rewind.switching.value, "returning");
-  await settle(context);
-  assert.equal(shownView(host).lineage, live.lineage, "the session Back left shows again");
-  assert.equal(host.rewind.inspecting.value, false);
-  assert.equal(host.stopped.value, false, "and takes input again");
-});
+for (const other of [
+  "none",
+  "an earlier Player error",
+  "a later Player error",
+  "a retry that fails again",
+] as const)
+  test(`a failed reinstatement offers its retry over the Player's lifetime (${other})`, async (context) => {
+    const made = createHost(context, memoryStorage().provider);
+    const { host } = made;
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
+    await start(context, host);
+    await choose(context, host, "One");
+    const live = shownView(host);
+    assert.equal(await backTo(made.rewind, 0), true);
+    if (other === "an earlier Player error") {
+      host.reportHostError(new Error("An earlier Player error."));
+      await settle(context);
+    }
+    // Debug off, whose restart gate fails: its report stops the Player.
+    const original = host.rewind.beforeRestart.bind(host.rewind);
+    const failing = () => Promise.reject(new Error("The restart gate failed."));
+    host.rewind.beforeRestart = failing;
+    made.debug.stop();
+    await settle(context);
+    assert.equal(host.stopped.value, true, "the gate's failure stops the Player");
+    assert.equal(host.rewind.returnFailed.value, true, "the retry is offered, with Debug off");
+    if (other === "a later Player error") {
+      host.reportHostError(new Error("A later Player error."));
+      await settle(context);
+    }
+    if (other === "a retry that fails again") {
+      assert.equal(host.rewind.retryReturn(), true);
+      await settle(context);
+      assert.equal(host.stopped.value, true, "the stop stays");
+      assert.equal(reported.length, 2, "with the new gate's report");
+      assert.equal(host.rewind.returnFailed.value, true, "and the retry is offered again");
+    }
+    // The retry goes through the gate again: the offer goes once the return begins, and the session returns.
+    host.rewind.beforeRestart = original;
+    assert.equal(host.rewind.retryReturn(), true);
+    assert.equal(host.rewind.returnFailed.value, false, "the offer goes once the return begins");
+    assert.equal(host.rewind.switching.value, "returning");
+    await settle(context);
+    assert.equal(shownView(host).lineage, live.lineage, "the session Back left shows again");
+    assert.equal(host.rewind.inspecting.value, false);
+    // Only this reinstatement's stops clear; any other Player error stays.
+    const others = other === "an earlier Player error" || other === "a later Player error";
+    assert.equal(
+      host.stopped.value,
+      others,
+      others ? "the other error stays" : "it takes input again",
+    );
+  });
