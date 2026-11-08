@@ -72,8 +72,9 @@ const FILES = {
   "player/p.ts": "export const p = 1;\n",
   // B3, twice: player/vue/ and a built-in; the Vue project's cruise also reaches this file, through uses-adapter.ts
   "player/adapter.ts":
-    'import { w } from "./vue/src/widget.js";\nimport fs from "node:fs";\nexport const x = [w, fs];\n',
+    'import { w } from "./vue/src/widget.js";\nimport { o } from "@/other";\nimport fs from "node:fs";\nexport const x = [w, o, fs];\n',
   "player/vue/src/widget.ts": "export const w = 1;\n",
+  "player/vue/src/other.ts": "export const o = 1;\n",
   "player/vue/src/uses-adapter.ts": 'import { x } from "../../adapter";\nexport const y = x;\n',
   // a Node file may import Node's built-ins
   "player/engine-bridge/node-host.ts":
@@ -120,7 +121,7 @@ test(
       const result = spawnSync(process.execPath, [tool], { cwd: root, encoding: "utf8" });
       assert.equal(result.status, 1, result.stdout + result.stderr);
       const findings = result.stderr.trim().split("\n");
-      assert.equal(findings.pop(), "check:imports: 9 findings");
+      assert.equal(findings.pop(), "check:imports: 10 findings");
       // each finding once, by what it names: the Vue project's cruise reaching player/adapter.ts adds nothing
       assert.deepEqual(
         findings
@@ -134,6 +135,8 @@ test(
           })
           .sort(),
         [
+          // the root project cannot resolve `@/`; the Vue project's cruise, reaching this file, can: only the owner's reading counts
+          "player/adapter.ts B3 @/other",
           "player/adapter.ts B3 fs",
           "player/adapter.ts B3 player/vue/src/widget.ts",
           "src/crosses.ts B1 player/p.ts",
