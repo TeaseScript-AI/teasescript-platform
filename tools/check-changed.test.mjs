@@ -94,8 +94,11 @@ test(
   },
 );
 
-/** A repository with a base branch `main` and a branch `feature` off it, each changing `a.mjs` as `edit` says. */
-function repository({ conflict = false, slowOxlint = false } = {}) {
+/**
+ * A repository with a base branch `main` and a branch `feature` off it, each changing `a.mjs` as `edit` says; `core`
+ * also changes a file of the type core on `feature`.
+ */
+function repository({ conflict = false, slowOxlint = false, core = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "check-changed-repo-"));
   const run = (...args) => spawnSync("git", args, { cwd: directory, encoding: "utf8" });
   const write = (path, text) => {
@@ -109,11 +112,18 @@ function repository({ conflict = false, slowOxlint = false } = {}) {
   write(".gitignore", "node_modules/\n");
   // (the checks the merge runs: oxlint waits when asked, so a signal meets a running check)
   write("tools/oxlint/run.mjs", slowOxlint ? "setTimeout(() => {}, 60_000);\n" : "\n");
+  // (a stand-in for the pin-suite mapper that says how it was asked)
+  write(
+    "tools/repository-checks/pin-suites.mjs",
+    'console.log(`listed for ${process.argv.slice(2).join(" ")}`);\n',
+  );
   run("add", ".");
   run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base");
   run("switch", "-q", "-c", "feature");
   write("a.mjs", "export const a = 2;\n");
-  run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-am", "feature");
+  if (core) write("src/type-inference/core/answers.ts", "export const answers = 1;\n");
+  run("add", ".");
+  run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "feature");
   if (conflict) {
     run("switch", "-q", "main");
     write("a.mjs", "export const a = 3;\n");
@@ -224,6 +234,36 @@ test(
     } finally {
       for (const path of [directory, elsewhere, unregistered])
         rmSync(path, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "a change to the type core prints the pin-suite mapper's list, and another change does not run it",
+  { timeout: 30_000 },
+  () => {
+    for (const core of [true, false]) {
+      const { directory } = repository({ core });
+      try {
+        const result = spawnSync(process.execPath, [tool, "--base", "main"], {
+          cwd: directory,
+          encoding: "utf8",
+          env: environment,
+        });
+        const base = spawnSync("git", ["merge-base", "HEAD", "main"], {
+          cwd: directory,
+          encoding: "utf8",
+        }).stdout.trim();
+        if (core) {
+          assert.match(result.stdout, /^PASS {2}pin suites +\d+\.\ds$/mu, result.stderr);
+          assert.match(
+            result.stdout,
+            new RegExp(`--- pin suites ---\\nlisted for --base ${base}\\n`, "u"),
+          );
+        } else assert.doesNotMatch(result.stdout, /pin suites/u);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
     }
   },
 );
