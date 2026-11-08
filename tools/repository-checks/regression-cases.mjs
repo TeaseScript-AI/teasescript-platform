@@ -84,7 +84,7 @@ export function verdict(cases, outcomes, loadErrors) {
 /** The explanation of each verdict but `witness`, in the line a case that is not one gets. */
 const EXPLAINED = {
   passed: "passed at the base, so it does not witness the defect",
-  "other failure": "failed at the base for another reason than `atBase` names",
+  "other failure": "failed at the base for another reason than `atBase` names; its error's first line",
   "did not finish": "did not finish at the base",
   "did not run": "did not run at the base",
 };

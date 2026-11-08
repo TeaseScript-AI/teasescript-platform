@@ -222,7 +222,7 @@ test(
       assert.deepEqual(lines, [
         "tests/bridge.test.ts: 'a case of no merged pull request' names #99, which is neither this pull request (#7) nor one merged into the base: name the pull request whose fix it witnesses",
         "tests/bridge.test.ts: 'an own op passes' (#7) passed at the base, so it does not witness the defect",
-        "tests/bridge.test.ts: 'captureKeep refuses a foreign session' (#7) failed at the base for another reason than `atBase` names: Expected values to be strictly deep-equal:",
+        "tests/bridge.test.ts: 'captureKeep refuses a foreign session' (#7) failed at the base for another reason than `atBase` names; its error's first line: Expected values to be strictly deep-equal:",
         lines.find((line) =>
           line.startsWith(
             "tests/imports.test.ts: 'the error is the fix's class' (#7) did not run at the base: ",

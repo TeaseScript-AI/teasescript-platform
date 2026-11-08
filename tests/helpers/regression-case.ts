@@ -18,8 +18,10 @@ export interface RegressionDeclaration {
   readonly pr: number;
   /**
    * The failure at the base: it must match the whole first line of the message of the error the case throws there, as
-   * `/Missing expected rejection \(ForeignSessionError\)\./` does `assert.rejects`'s. Name what the fix adds by string
-   * (`{ name: "ForeignSessionError" }`), not by import, or the file does not load at the base.
+   * `/Missing expected rejection \(ForeignSessionError\)\./` does `assert.rejects`'s. The tool anchors it, so it has no
+   * `^` or `$`. A generic first line, as `assert.deepStrictEqual`'s, needs the assertion's own message naming the
+   * witness. Name what the fix adds by string (`{ name: "ForeignSessionError" }`), not by import, or the file does not
+   * load at the base.
    */
   readonly atBase: RegExp;
 }
