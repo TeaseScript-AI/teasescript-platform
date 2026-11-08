@@ -190,7 +190,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/useSessionRewind.ts useSessionRewind > followSessions > tryOnScopeDispose:callback":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > importSavedData > owned:callback > commit:callback#2":
+  "player/vue/src/session/persistence/useSavedDataTransfer.ts useSavedDataTransfer > importSavedData > owned:callback > commit:callback#2":
     ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback > replaceSession > admit:callback#1":
     ["creation", ["BridgeClient.request"]],
@@ -686,6 +686,11 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerSession.ts usePlayerSession {settleKeepAttempt}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {settlePlanJson}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {toStartPage}",
+  "player/vue/src/session/persistence/useSavedDataTransfer.ts useSavedDataTransfer > importSavedData {importSavedData}",
+  "player/vue/src/session/persistence/useSavedDataTransfer.ts useSavedDataTransfer {endSession}",
+  "player/vue/src/session/persistence/useSavedDataTransfer.ts useSavedDataTransfer {prepareStart}",
+  "player/vue/src/session/persistence/useSavedDataTransfer.ts useSavedDataTransfer {retireRewind}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {importSavedData}",
 ];
 
 /**

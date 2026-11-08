@@ -59,6 +59,8 @@ const BOUNDARY: Readonly<Record<string, string>> = {
     "binds the script's own saved values and photos to an operation while the debug room is shown",
 };
 
+/** The module the unbound helpers are in: the saved data's import. */
+const UNBOUND_MODULE = "session/persistence/useSavedDataTransfer.ts";
 /**
  * Helpers an operation calls that write without its ownership, and why: none of this page's state retires them. Each
  * must stay a helper of its own, taking no ownership, so the check sees where the operation hands work over.
@@ -107,13 +109,10 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     supersede: SESSION,
     ownedSection: SESSION,
     "usePlayerSession.readSavedData": READ,
-    savedScripts: READ,
-    reviewSavedDataImport: READ,
     reviewedImport: READ,
     exportSession: READ,
     "usePlayerSession.savedPhoto": READ,
     resolveAsset: READ,
-    ownStoredMedia: READ,
     readTransfer: TRANSFER,
     discardSessionReview: TRANSFER,
     "usePlayerSession.rememberScriptName": EDIT,
@@ -127,6 +126,11 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     issueTracing: SESSION,
     applyDebugMode: SESSION,
     debugView: SESSION,
+  },
+  "session/persistence/useSavedDataTransfer.ts": {
+    savedScripts: READ,
+    reviewSavedDataImport: READ,
+    ownStoredMedia: READ,
   },
   "session/persistence/useKeptSession.ts": {
     keptStore: RESOURCE,
@@ -849,7 +853,8 @@ function check(text: string, module = MAIN) {
   const unclassified = [...reached]
     .filter(
       ([place]) =>
-        !(module === MAIN && Object.hasOwn(UNBOUND, place)) && !Object.hasOwn(outside, place),
+        !(module === UNBOUND_MODULE && Object.hasOwn(UNBOUND, place)) &&
+        !Object.hasOwn(outside, place),
     )
     .map(([place, line]) => `${module}: ${place}, line ${line}`);
   return { found: new Set(found.keys()), failures, reached, unclassified, source };
@@ -866,11 +871,13 @@ test("every persistence operation reaches stores and the host only through its o
   const modules = checkedModules();
   const found = new Set(modules.flatMap((checked) => [...checked.found]));
   for (const name of OPERATIONS) assert.ok(found.has(name), `${name} is an operation of the host`);
-  const text = readFileSync(resolve(process.cwd(), HOST_ROOT, MAIN), "utf8");
+  const text = HOST_MODULES()
+    .map((module) => readFileSync(resolve(process.cwd(), HOST_ROOT, module), "utf8"))
+    .join("\n");
   for (const name of Object.keys(UNBOUND))
     assert.ok(
       new RegExp(`async function ${name}\\((?![^)]*Ownership)`).test(text),
-      `${name} is a helper of ${MAIN} that takes no ownership`,
+      `${name} is a helper of the host that takes no ownership`,
     );
   assert.deepEqual(
     modules.flatMap(({ module, failures }) => failures.map((failure) => `${module}: ${failure}`)),
@@ -893,7 +900,7 @@ test("every place of the host that reaches a store or the host is an operation, 
   );
   for (const { module, reached, found } of modules) {
     const outside = Object.keys(OUTSIDE[module] ?? {});
-    const unbound = module === MAIN ? Object.keys(UNBOUND) : [];
+    const unbound = module === UNBOUND_MODULE ? Object.keys(UNBOUND) : [];
     for (const place of [...outside, ...unbound])
       assert.ok(reached.has(place), `${place} reaches no store or host in ${module}`);
     for (const place of outside) assert.ok(!found.has(place), `${place} takes an ownership`);
@@ -903,6 +910,7 @@ test("every place of the host that reaches a store or the host is an operation, 
     Object.keys(BOUNDARY),
     Object.keys(UNBOUND),
     Object.keys(OUTSIDE[MAIN] ?? {}),
+    Object.keys(OUTSIDE[UNBOUND_MODULE] ?? {}),
   ].flat();
   assert.equal(new Set(main).size, main.length, "a place in two tables");
 });

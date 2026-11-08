@@ -43,11 +43,11 @@ import SavedDataExport from "./SavedDataExport.vue";
 import SavedDataImport from "./SavedDataImport.vue";
 import type {
   PlayerTransferRead,
-  SavedDataImportReview,
   SessionExport,
   SessionImportReview,
   SessionTransferRead,
 } from "./usePlayerSession";
+import type { SavedDataImportReview } from "./session/persistence/useSavedDataTransfer";
 import type { SavedScript, StorageBundle } from "../../storage-transfer.js";
 import {
   computed,
