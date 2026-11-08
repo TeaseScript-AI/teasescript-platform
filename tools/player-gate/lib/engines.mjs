@@ -47,8 +47,8 @@ export function phoneBattery(serial) {
   };
 }
 
-/** The desktop viewport every desktop sample uses; the Pixel uses the phone's own. */
-const DESKTOP = { width: 1280, height: 800 };
+/** The desktop viewport every desktop sample uses, the browser smoke's; the Pixel uses the phone's own. */
+const DESKTOP = { width: 1440, height: 900 };
 
 /**
  * Opens `engine`. Its `page()` gives a fresh page: on the desktop in a fresh context (no cache, no storage), on the

@@ -8,8 +8,8 @@ import {
   activate,
   answer,
   ENABLED_CONTROL,
+  hasEnabledControl,
   readGate,
-  UnknownControl,
   waitForState,
 } from "../lib/player.mjs";
 import { firstSave, playable, publishesAfter, turnTimes, workerStart } from "../lib/measure.mjs";
@@ -54,12 +54,12 @@ async function servedBytes(page, cold) {
 }
 
 /** From the instrumented variant's log: Start's request → reply, and how many requests each turn sent. */
-function bridgeTimes(log, answered) {
-  const post = log.find((entry) => entry.dir === "post" && entry.op === "start");
+function bridgeTimes(startLog, log, answered) {
+  const post = startLog.find((entry) => entry.dir === "post" && entry.op === "start");
   const reply =
     post === undefined
       ? undefined
-      : log.find((entry) => entry.dir === "reply" && entry.id === post.id);
+      : startLog.find((entry) => entry.dir === "reply" && entry.id === post.id);
   const starts = answered
     .filter((entry) => entry.sentAt !== undefined)
     .map((entry) => entry.sentAt);
@@ -101,38 +101,10 @@ export async function session({
     const memory = [];
     if (heap !== null) memory.push({ at: "playable", ...(await heap()) });
 
-    const answered = [];
-    for (let turn = 0; turn < turns; turn += 1) {
-      const gate = await readGate(page);
-      const before = gate.states.at(-1);
-      if (before.ended || before.failed) break;
-      const sentAt = await page.evaluate(() => performance.now());
-      let what;
-      try {
-        what = await answer(opened, page, before, turn);
-      } catch (error) {
-        if (error instanceof UnknownControl) {
-          answered.push({ turn, ok: false, reason: error.message });
-          break;
-        }
-        throw error;
-      }
-      const fingerprint = JSON.stringify([before.buttons, before.composer?.hint ?? null]);
-      try {
-        await waitForState(
-          page,
-          `(state) => state.ended || state.failed || ((${ENABLED_CONTROL})(state) && (JSON.stringify([state.buttons, state.composer?.hint ?? null]) !== ${JSON.stringify(fingerprint)} || window.__gate.rows.some((row) => row.speaker !== "user" && row.t > ${sentAt})))`,
-          TURN_MS,
-          `Turn ${turn} did not settle`,
-        );
-      } catch (error) {
-        answered.push({ turn, ok: false, reason: error.message, ...what });
-        break;
-      }
-      answered.push({ turn, sentAt, before, ...what });
-    }
-    if (heap !== null) memory.push({ at: "afterTurns", ...(await heap()) });
-
+    // The cold page's numbers, once the first interaction is kept (the first save).
+    const keptBy = Date.now() + 15_000;
+    while (publishesAfter(await readGate(page), pressedAt).length === 0 && Date.now() < keptBy)
+      await page.waitForTimeout(100);
     const coldGate = await readGate(page);
     const cold = playable(coldGate, pressedAt);
     // The minimal probe (the A/A run's other arm) records no transactions, so it has no first save.
@@ -140,29 +112,15 @@ export async function session({
       probe === "minimal"
         ? null
         : firstSave(coldGate, cold.pressMs ?? pressedAt, coldGate.longTasks);
-    const turnResults = answered.map((entry) =>
-      entry.ok === false
-        ? entry
-        : {
-            turn: entry.turn,
-            kind: entry.kind,
-            of: entry.of ?? null,
-            ...turnTimes(coldGate, entry.sentAt, entry.before),
-          },
-    );
     const bytes = cold.ok ? await servedBytes(page, cold) : [];
-    const bridgeLog = instrumented
+    const worker = workerStart(coldGate);
+    const startLog = instrumented
       ? await page.evaluate(() => globalThis.__gateBridgeLog ?? null)
       : null;
-    if (instrumented && bridgeLog === null)
+    if (instrumented && startLog === null)
       throw new Error("The instrumented build logged no bridge traffic");
-    const worker = workerStart(coldGate);
 
-    // The repeat: once the last state is kept, a reload and Continue.
-    const lastTurn = answered.at(-1)?.sentAt ?? pressedAt;
-    const keptBy = Date.now() + 15_000;
-    while (publishesAfter(await readGate(page), lastTurn).length === 0 && Date.now() < keptBy)
-      await page.waitForTimeout(100);
+    // The repeat: a reload and Continue of the kept session, before the turns, which may end the script.
     await page.reload({ waitUntil: "commit" });
     const reloadedAt = await page.evaluate(() => performance.now());
     let repeat;
@@ -173,23 +131,65 @@ export async function session({
     } catch (error) {
       repeat = { ok: false, reason: error.message };
     }
+
+    // The turns, on the continued session. A turn ends at its settlement, at the script's end, or once nothing
+    // has changed for 10 s with nothing to answer (the path ended without an end dialog).
+    const answered = [];
+    for (let turn = 0; repeat.ok && turn < turns; turn += 1) {
+      const before = (await readGate(page)).states.at(-1);
+      if (before.ended || before.failed || !hasEnabledControl(before)) break;
+      const sentAt = await page.evaluate(() => performance.now());
+      let what;
+      try {
+        what = await answer(opened, page, before, turn);
+      } catch (error) {
+        answered.push({ turn, ok: false, reason: error.message });
+        break;
+      }
+      const fingerprint = JSON.stringify([before.buttons, before.composer?.hint ?? null]);
+      try {
+        await waitForState(
+          page,
+          `(state) => state.ended || state.failed || ((${ENABLED_CONTROL})(state) && (JSON.stringify([state.buttons, state.composer?.hint ?? null]) !== ${JSON.stringify(fingerprint)} || window.__gate.rows.some((row) => row.speaker !== "user" && row.t > ${sentAt}))) || (!(${ENABLED_CONTROL})(state) && Math.max(state.t, window.__gate.rows.at(-1)?.t ?? 0) < performance.now() - 10000)`,
+          TURN_MS,
+          `Turn ${turn} did not settle`,
+        );
+      } catch (error) {
+        answered.push({ turn, ok: false, reason: error.message, ...what });
+        break;
+      }
+      answered.push({ turn, sentAt, before, ...what });
+    }
     if (heap !== null) {
-      memory.push({ at: "end", ...(await heap()) });
+      memory.push({ at: "afterTurns", ...(await heap()) });
       memory.push({ at: "endAfterGc", ...(await heap(true)) });
     }
     const repeatGate = await readGate(page);
+    const turnResults = answered.map((entry) =>
+      entry.ok === false
+        ? entry
+        : {
+            turn: entry.turn,
+            kind: entry.kind,
+            of: entry.of ?? null,
+            ...turnTimes(repeatGate, entry.sentAt, entry.before),
+          },
+    );
+    const turnsLog = instrumented
+      ? await page.evaluate(() => globalThis.__gateBridgeLog ?? [])
+      : null;
     return {
       ok:
         cold.ok &&
         (save === null || save.ok !== false) &&
         repeat.ok &&
-        turnResults.every((entry) => entry.ok !== false),
+        turnResults.every((entry) => entry.ok !== false || entry.reason === undefined),
       cold,
       repeat,
       firstSave: save,
       turns: turnResults,
       worker,
-      ...(bridgeLog === null ? {} : { bridge: bridgeTimes(bridgeLog, answered) }),
+      ...(startLog === null ? {} : { bridge: bridgeTimes(startLog, turnsLog, answered) }),
       memory,
       bytes,
       errors: [...coldGate.errors, ...repeatGate.errors],

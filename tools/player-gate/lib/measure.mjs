@@ -59,8 +59,15 @@ export function turnTimes(gate, sentAt, before) {
         )),
   );
   const scriptRow = gate.rows.find((row) => row.speaker !== "user" && row.t > submission.t);
+  // The driver waited for this turn: without a new control it ended the path (nothing left to answer).
   if (settled === undefined || settled.frame === undefined)
-    return { ok: false, reason: "the turn did not settle" };
+    return {
+      ok: true,
+      endedPath: true,
+      submissionMs: submission.ts,
+      feedbackMs: change?.frame === undefined ? null : change.frame - submission.ts,
+      settledMs: null,
+    };
   return {
     ok: true,
     submissionMs: submission.ts,

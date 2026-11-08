@@ -39,14 +39,58 @@ export async function waitForState(page, predicate, timeoutMs, what) {
   }
 }
 
-/** Presses the element at `selector` (its `index`th match) with real input: a tap on the Pixel, a mouse click elsewhere. */
+/**
+ * Presses the element at `selector` (its `index`th match) with real input, a tap on the Pixel and a mouse click
+ * elsewhere, once it is enabled, scrolled into view, uncovered at its centre, and its box has held still for two
+ * frames (an entering control moves), as the browser smoke's `pressPoint` waits; fails after 2 s.
+ */
 export async function press(opened, page, selector, index = 0) {
-  const box = await page.locator(selector).nth(index).boundingBox();
-  if (box === null) throw new Error(`'${selector}' #${index} has no box`);
-  const x = box.x + box.width / 2;
-  const y = box.y + box.height / 2;
-  if (opened.engine === "pixel") await page.touchscreen.tap(x, y);
-  else await page.mouse.click(x, y);
+  const box = await page.evaluate(
+    ({ selector, index }) =>
+      new Promise((resolve) => {
+        const deadline = performance.now() + 2000;
+        let last = null;
+        let still = 0;
+        let scrolled = false;
+        let centred = false;
+        const check = () => {
+          const element = document.querySelectorAll(selector)[index];
+          const ready =
+            !!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
+            !element.matches(":disabled");
+          if (ready && !scrolled) {
+            scrolled = true;
+            element.scrollIntoView({ block: "nearest", inline: "nearest" });
+          }
+          let rect = ready ? element.getBoundingClientRect() : null;
+          // The press must land on the control itself, not on whatever covers it or outside the viewport.
+          const hit =
+            rect &&
+            document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          if (rect && !(hit && (hit === element || element.contains(hit)))) {
+            // Covered (the transcript stopped following under the composer) or outside the viewport: centred in its
+            // scroller once, as a player scrolls to it.
+            if (!centred) {
+              centred = true;
+              element.scrollIntoView({ block: "center", inline: "nearest" });
+            }
+            rect = null;
+          }
+          const place = rect && [rect.left, rect.top, rect.width, rect.height].join();
+          still = place && place === last ? still + 1 : 0;
+          last = place;
+          if (still >= 2)
+            return resolve({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+          if (performance.now() < deadline) return requestAnimationFrame(check);
+          resolve(null);
+        };
+        requestAnimationFrame(check);
+      }),
+    { selector, index },
+  );
+  if (box === null) throw new Error(`'${selector}' #${index} is not visible, enabled and still`);
+  if (opened.engine === "pixel") await page.touchscreen.tap(box.x, box.y);
+  else await page.mouse.click(box.x, box.y);
 }
 
 /** Starts (or continues) the session the start page offers, `label` being `Start` or `Continue`. Resolves when pressed. */
@@ -66,16 +110,11 @@ function typedAnswer(composer) {
 }
 
 /**
- * Answers the shown control for turn `turn`: the composer when it is enabled (its prefill kept, else `typedAnswer`),
- * else the enabled button at `turn` modulo their count. Resolves with what it answered.
+ * Answers the shown control for turn `turn`: the enabled button at `turn` modulo their count, else the composer when
+ * it asks (its prefill kept, else `typedAnswer`). Resolves with what it answered.
  */
 export async function answer(opened, page, state, turn) {
-  if (state.composer?.enabled && state.composer.asks) {
-    const input = page.locator("[data-composer-input]");
-    if ((await input.inputValue()) === "") await input.fill(typedAnswer(state.composer));
-    await input.press("Enter");
-    return { kind: "composer" };
-  }
+  // Buttons first: a choice or a showButton leaves the composer open too (buttons-only, where typing answers nothing).
   const enabled = state.buttons
     .map((button, index) => ({ ...button, index }))
     .filter((button) => button.enabled);
@@ -83,6 +122,12 @@ export async function answer(opened, page, state, turn) {
     const chosen = enabled[turn % enabled.length];
     await press(opened, page, "[data-foreground-controls] button", chosen.index);
     return { kind: "button", label: chosen.label, of: enabled.length };
+  }
+  if (state.composer?.enabled && state.composer.asks) {
+    const input = page.locator("[data-composer-input]");
+    if ((await input.inputValue()) === "") await input.fill(typedAnswer(state.composer));
+    await input.press("Enter");
+    return { kind: "composer" };
   }
   throw new UnknownControl(`no control the driver answers: ${JSON.stringify(state)}`);
 }
