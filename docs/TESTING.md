@@ -657,6 +657,22 @@ published.
 
 A frozen failure matches no publication, so it is judged by its recorded successful prefix replayed.
 
+### The L5 gate's K/F tapes
+
+`tests/gate/` drives real packages through the bridge for the L5 activation gate. One typed candidate table
+(`candidates.ts`) proposes finite, ordered requests for every kind of foreground presentation and pending action; the
+engine decides; the driver (`driver.ts`) records every request and reply on the client (`tape.ts`), declines and their
+publications included, and ends a tape `halted`, `failed` or `cut` (250 accepted inputs, a complete prefix for this
+policy) or `unsupported`, `refused` or `stalled` (incomplete, reported as such). The adapter oracle (`oracle.ts`)
+judges every tape against the adapter, and the fixed tape replays on every backend, failing at its first differing
+entry. Coverage is what the tapes ran, never what they could reach.
+
+`tests/player-gate-tapes.test.ts` holds the structural claim (the table, the outcome readings and `ADAPTER_OPS` cover
+the same ops) and bounded runtime witnesses generated from the engine's guards, with their controls' mutants. The
+workload runs outside CI on a queue worker: `node tools/player-gate/tapes/record.mjs --out DIR --f DIR --k DIR
+[--shard I/N]` in a built tree records, judges and replays every F and K package; `census.mjs` counts the accepted ops
+and rows and picks the browser and Pixel cover set.
+
 ## Implemented Phase 1 deterministic property harness
 
 The repository keeps one small deterministic campaign around the current public
