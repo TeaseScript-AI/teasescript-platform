@@ -27,12 +27,14 @@
 // is complete under the rule status shares (`storedRuns`); it is refused as status refuses it otherwise (exit 1 or 2).
 // A stored run holds its charged units and allowance (a plan 2 area's, #1647), a stall over the unit limit the run it
 // cut. `--work` keeps a record of each source: each run's charged work (the units its analyses charge their work
-// ledgers), allowance and milliseconds on each tree (with `--baseline`, the stored base's units first), a stalled run's
-// up to the stall, and what the source counted (#1564), which `stalls.mjs` reads; `--only` runs the sources of the area
-// that a stall index lists; `--items` (or `--items-from-env`, an item pool's batch in `$SX_ITEMS`) the sources whose
-// places its file lists (`items.mjs sources`, #1826), its `--work` record named `items <hash>` in place of a shard.
-// Prints one JSON line per generator and a total: sources, unparsed, stalled, exceptions, unanswered, unansweredAlike,
-// uncompared, uncharged, modes, runs, differences.
+// ledgers), allowance, milliseconds and peak heap on each tree (with `--baseline`, the stored base's units first), a
+// stalled run's up to the stall, and what the source counted (#1564), which `stalls.mjs` reads; `--only` runs the
+// sources of the area that a stall index lists; `--items` (or `--items-from-env`, an item pool's batch in `$SX_ITEMS`)
+// the sources whose places its file lists (`items.mjs sources`, #1826), its `--work` record named `items <hash>` in
+// place of a shard. A run whose peak heap passes `NEAR_CAP` of a source's process's heap limit is near the cap: counted
+// (`nearCap`) and named in `--out`, advisory only (`run-contract.mjs`). Prints one JSON line per generator and a total:
+// sources, unparsed, stalled, exceptions, unanswered, unansweredAlike, uncompared, uncharged, modes, runs, differences,
+// and what each tree's build lacks of what the runner reads (`capabilities`).
 import { fork, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -62,7 +64,14 @@ import {
   sourceFault,
   storedRuns,
 } from "./baselines.mjs";
-import { isRecordedReason, limitOf, questionsOf, UNKNOWN_REASON } from "./run-contract.mjs";
+import {
+  capabilitiesOf,
+  isNearCap,
+  isRecordedReason,
+  limitOf,
+  questionsOf,
+  UNKNOWN_REASON,
+} from "./run-contract.mjs";
 import { generatorsOf, placeOf, sourceKey } from "./sources.mjs";
 
 /** A tree's oracle library, from its `dist/`. */
@@ -319,6 +328,13 @@ if (process.argv[2] === "--child") {
   let limit = Infinity;
   let next = Infinity;
   let running = null;
+  // (a run's peak heap: its used heap sampled at each `STEP` units charged and as it ends)
+  let peak = 0;
+  let sampleAt = Infinity;
+  const sample = () => {
+    const used = process.memoryUsage().heapUsed;
+    if (used > peak) peak = used;
+  };
   const write = (fields) => {
     if (record === undefined) return;
     try {
@@ -346,6 +362,10 @@ if (process.argv[2] === "--child") {
     const { charge } = ledger.prototype;
     ledger.prototype.charge = function (counter, units = 1) {
       spent += units;
+      if (spent >= sampleAt) {
+        sampleAt = spent + STEP;
+        sample();
+      }
       if (Number.isInteger(this.allowance) && this.allowance > (allowance ?? 0)) {
         allowance = this.allowance;
         limit = multiple * allowance;
@@ -363,8 +383,8 @@ if (process.argv[2] === "--child") {
     };
   }
   /**
-   * Tree `tree`'s result of the source's run `index` (`run`), its units, allowance and milliseconds added to `used`,
-   * through one call whether or not they are recorded, so that an exception's stack is the same.
+   * Tree `tree`'s result of the source's run `index` (`run`), its units, allowance, milliseconds and peak heap (MiB)
+   * added to `used`, through one call whether or not they are recorded, so that an exception's stack is the same.
    */
   const counted = (seq, index, tree, mode, check, run, used) => {
     const measured = ledgers[tree] !== null;
@@ -379,9 +399,15 @@ if (process.argv[2] === "--child") {
     limit = Infinity;
     next = measured && record !== undefined ? STEP : Infinity;
     write({ work: measured ? 0 : null, allowance: null });
+    peak = 0;
+    sampleAt = STEP;
     const started = performance.now();
     const result = attempt(() => digest(run(trees[tree])));
     const ms = Math.round(performance.now() - started);
+    sample();
+    sampleAt = Infinity;
+    // (in MiB, exact: a binary fraction, never rounded before it is judged near the cap)
+    used.peak.push(peak / 2 ** 20);
     used.work.push(measured ? spent : null);
     used.allowance.push(measured ? allowance : null);
     used.ms.push(ms);
@@ -424,10 +450,12 @@ if (process.argv[2] === "--child") {
           continue;
         }
         // compared by hash, so that the base's text is not held while the head runs
-        const used = { work: [], allowance: [], ms: [], questions: [] };
+        const used = { work: [], allowance: [], ms: [], questions: [], peak: [] };
         const results = [];
         for (const tree of trees.keys()) {
-          await sent({ start: { run: index, tree, mode: label, check } });
+          // (with the peaks of the trees that ended this run, so that a stall on a later tree keeps them)
+          const peaks = used.peak.length === 0 ? {} : { peaks: [...used.peak] };
+          await sent({ start: { run: index, tree, mode: label, check, ...peaks } });
           results.push(counted(seq, index, tree, label, check, run, used));
         }
         index += 1;
@@ -525,11 +553,13 @@ if (process.argv[2] === "--child") {
   // (`nodeOptions.heapLimit`), where `NODE_OPTIONS` changes the heap at all (its limit other than without it) and that
   // limit differs from a source's process's, so the override is never silent. Each limit is V8's own, read by a probe
   // process, so no form of `NODE_OPTIONS` is read by this runner; a probe that fails is said so (`probe: "failed"`), #1956)
+  // (a source's process's heap limit, V8's own figure, against which a run's peak is near the cap: `isNearCap`)
+  const heapLimit = heapLimitWith(memory);
   const nodeOptions = (() => {
     if ((process.env.NODE_OPTIONS ?? "").trim() === "") return undefined;
-    const [alone, none, source] = ["alone", "none", memory].map(heapLimitWith);
-    if ([alone, none, source].includes(undefined)) return { probe: "failed" };
-    return alone !== none && alone !== source ? { heapLimit: alone } : undefined;
+    const [alone, none] = ["alone", "none"].map(heapLimitWith);
+    if ([alone, none, heapLimit].includes(undefined)) return { probe: "failed" };
+    return alone !== none && alone !== heapLimit ? { heapLimit: alone } : undefined;
   })();
   if (store !== undefined && options.has("only"))
     refused("--store stores whole shards: drop --only");
@@ -762,10 +792,12 @@ if (process.argv[2] === "--child") {
       start?.mode === undefined ? {} : { mode: start.mode, check: start.check };
     return {
       after: [
-        ...alone.runs.map(({ result, mode, check }) => ({
+        // (each with its peak heap, MiB, where the run ended)
+        ...alone.runs.map(({ result, mode, check }, at) => ({
           mode,
           check,
           head: aloneOutcome(check, result),
+          ...(alone.spent[at]?.peak === undefined ? {} : { peak: alone.spent[at].peak[0] }),
         })),
         ...(alone.uncharged === undefined
           ? []
@@ -918,13 +950,23 @@ if (process.argv[2] === "--child") {
     baseline !== undefined ? ["head"] : roots.length === 2 ? ["base", "head"] : ["base"];
   /** Whether a stall's reason (its text) is a crash: the process ended (a fatal V8 error, a signal), not the unit limit. */
   const crashed = (stall) => typeof stall === "string" && stall !== "units";
+  // (what each tree's build lacks of what this runner reads, by its part: `capabilitiesOf`)
+  const capabilities = Object.fromEntries(
+    await Promise.all(
+      roots.map(async (root, at) => [
+        treeNames[at],
+        capabilitiesOf({ oracle: await oracles(root), ledger: await ledgerOf(root) }),
+      ]),
+    ),
+  );
   /**
-   * A head's run of a `--work` record (one tree's units, allowance and milliseconds) with the stored base's first: its
-   * units and allowance on that run where the stored line (`kept`) holds them (a plan 2 area's ended run, or the run
-   * its stall over the unit limit cut), else none; its milliseconds none, as no time is stored (#1647).
+   * A head's run of a `--work` record (one tree's units, allowance, milliseconds and peak heap) with the stored base's
+   * first: its units and allowance on that run where the stored line (`kept`) holds them (a plan 2 area's ended run, or
+   * the run its stall over the unit limit cut), else none; its milliseconds and peak heap none, as neither is stored
+   * (#1647).
    */
   const besideStored = (
-    { mode, check, work: [units], allowance: [allowance], ms: [ms], running },
+    { mode, check, work: [units], allowance: [allowance], ms: [ms], peak, running },
     kept,
   ) => {
     const id = `${mode} ${check}`;
@@ -935,6 +977,7 @@ if (process.argv[2] === "--child") {
       work: [was?.work ?? null, units],
       allowance: [was?.allowance ?? null, allowance],
       ms: [null, ms],
+      ...(peak === undefined ? {} : { peak: [null, peak[0]] }),
       ...(running === undefined ? {} : { running: 1 }),
       // (the stored base's run cut over the unit limit: its units, not a run it ended, #1837)
       ...(kept?.runs[id] === undefined && was !== undefined ? { baseCut: true } : {}),
@@ -953,7 +996,14 @@ if (process.argv[2] === "--child") {
     "differences",
   ];
   const zeros = () => Object.fromEntries(counts.map((key) => [key, 0]));
-  const total = { area, generators: 0, ...zeros(), crashed: { base: 0, head: 0 }, modes: 4 };
+  const total = {
+    area,
+    generators: 0,
+    ...zeros(),
+    crashed: { base: 0, head: 0 },
+    nearCap: { base: 0, head: 0 },
+    modes: 4,
+  };
   // (sources where the head crashed and the base did not: exit 3, #1837's F24)
   let headOnly = 0;
   // `--work`: what ran, then one line per source, then the total
@@ -978,6 +1028,9 @@ if (process.argv[2] === "--child") {
       ...(baseline === undefined ? {} : { stored: { units: storedUnits } }),
       timeout: seconds,
       memory,
+      // (a source's process's heap limit, against which a run's peak is near the cap, and what each tree's build lacks)
+      heapLimit: heapLimit ?? null,
+      capabilities,
       // what the comparison is (stalls.mjs merges only records of one): the sources' sizes, the area's plan (the hash of
       // every source's place in its order, whichever shard or index runs), the stop runs' allowances, the unit limit's
       // multiple, each generator's checks, and each tree as compared (`comparedOf`; a stored base as its baseline's
@@ -997,7 +1050,12 @@ if (process.argv[2] === "--child") {
   });
   let sequence = 0;
   for (const { name, checks, sources } of generators) {
-    const row = { generator: name, ...zeros(), crashed: { base: 0, head: 0 } };
+    const row = {
+      generator: name,
+      ...zeros(),
+      crashed: { base: 0, head: 0 },
+      nearCap: { base: 0, head: 0 },
+    };
     for (const source of sources) {
       const before = { ...row };
       row.sources += 1;
@@ -1118,6 +1176,28 @@ if (process.argv[2] === "--child") {
       if (crashes.base) row.crashed.base += 1;
       if (crashes.head) row.crashed.head += 1;
       if (crashes.head && !crashes.base) headOnly += 1;
+      // (each ended run whose peak heap on a tree is near its process's cap, a tree's that ended a run a stall then cut
+      // on a later tree and the head's runs alone after the base's crash among them: advisory, counted a source a tree
+      // and named in `--out`, never a stall or an exit status)
+      const near = [
+        ...reply.spent.flatMap(({ mode, check, peak = [] }) =>
+          peak.map((mib, at) => ({ mode, check, tree: treeNames[at], peak: mib })),
+        ),
+        // (the trees that ended the run a stall cut, before the tree it was on)
+        ...(reply.cutAt?.peaks ?? []).map((mib, at) => ({
+          mode: reply.cutAt.mode,
+          check: reply.cutAt.check,
+          tree: treeNames[at],
+          peak: mib,
+        })),
+        ...(afterBase ?? [])
+          .filter(({ peak }) => peak !== undefined)
+          .map(({ mode, check, peak }) => ({ mode, check, tree: "head", peak })),
+      ].filter(({ peak }) => isNearCap(peak, heapLimit));
+      for (const tree of ["base", "head"])
+        if (near.some((run) => run.tree === tree)) row.nearCap[tree] += 1;
+      if (near.length > 0)
+        record({ generator: name, source: source.name, nearCap: near, heapLimit, ...inputs });
       const failed =
         baseline === undefined ? reply.thrown : either(kept?.thrown?.runner, reply.thrown?.runner);
       // a run that reached the safety net does work no ledger charges (#1647, #1424): named by its run (and tree), a
@@ -1199,6 +1279,7 @@ if (process.argv[2] === "--child") {
           ...(stalled === undefined ? {} : { stalled }),
           ...(at === undefined ? {} : { at }),
           ...(crashes.base || crashes.head ? { crashed: crashes } : {}),
+          ...(near.length === 0 ? {} : { nearCap: near }),
           ...(afterBase === undefined ? {} : { afterBase }),
           ...(uncharged === undefined ? {} : { uncharged }),
           ...(left.length === 0 ? {} : { unanswered: left }),
@@ -1207,7 +1288,10 @@ if (process.argv[2] === "--child") {
     console.log(JSON.stringify(row));
     total.generators += 1;
     for (const key of counts) total[key] += row[key];
-    for (const tree of ["base", "head"]) total.crashed[tree] += row.crashed[tree];
+    for (const tree of ["base", "head"]) {
+      total.crashed[tree] += row.crashed[tree];
+      total.nearCap[tree] += row.nearCap[tree];
+    }
   }
   for (const { child } of Object.values(slots)) child?.kill();
   if (progress !== undefined) rmSync(pathOf(progress, "outside"), { force: true });
@@ -1216,13 +1300,17 @@ if (process.argv[2] === "--child") {
     units,
     timeout: seconds,
     memory,
+    heapLimit: heapLimit ?? null,
     ...(nodeOptions === undefined ? {} : { nodeOptions }),
+    capabilities,
     node: process.version,
   };
   if (storing !== undefined) {
-    // the shard whole, its total last, with what made it
+    // the shard whole, its total last, with what made it: never a peak, which is not the same on every machine, nor
+    // what this runner read of the tree
     const runner = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url)));
-    const made = { ...ended, ...storing.made, runner: runner.digest("hex") };
+    const { nearCap: _peaks, heapLimit: _limit, capabilities: _read, ...stored } = ended;
+    const made = { ...stored, ...storing.made, runner: runner.digest("hex") };
     const published = await endShard(storing.claim, storing.lines, made);
     // (foreign contents or a retired baseline, found at publication: nothing is published)
     if (published.refused !== undefined) refused(published.refused);

@@ -28,11 +28,27 @@ What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise;
   - why its oracle left questions unanswered: `questions`, `memory`, `read-depth`, `stopped`, or `unknown` from a library
     that names none, each with the first node left or the binding where the answers' own questions stopped;
   - its limit (`limitOf`): `units` × its allowance, plus, for a publication run, its oracle's 64 units for each cell its
-    questions returned, kept with the run as `questions`. A store writes and reads every run by the same limit.
+    questions returned, kept with the run as `questions`. A store writes and reads every run by the same limit;
+  - its peak heap on each tree (`peak`, MiB, exact, on the source's `--work` line, and on each of the head's runs alone
+    after the base's crash, `afterBase`): the used heap sampled every 65,536 units its tree's ledger charges and as it
+    ends, so it holds garbage not yet collected and varies with when the collector runs. A run is near the cap (`isNearCap`) where its peak passes `NEAR_CAP`, 80 %, of the heap
+    limit V8 gives a source's process (`heapLimit` in the total line, what an abort is against). The ground: at the
+    default 2,048 MB the highest peak sampled over 36 runs near the cap (W19-sources, W24-varied and W24-alias-group at
+    256 to 1,024, every mode) was 79 % of that limit, and the oracle's `memory` stop holds its questions about 512 MiB
+    under it. Near the cap is advisory: counted, named, never a stall or an exit status, and never stored;
+  - what each tree's build lacks of what the runner reads (`capabilitiesOf`): `publicationHashes` (else the publication's
+    whole text is held), `QUESTION_UNITS_PER_CELL` and `questionWork` (else no question grant), `WorkLedger` (else no
+    units and no unit limit). A tree that lacks one still runs; a compiled test asserts the built tree lacks none.
 - **The total line** (stdout's last; `--work`'s last): the area, generators, sources, unparsed, stalled, exceptions,
   unanswered, unansweredAlike, uncompared, uncharged, runs, differences, `crashed: {base, head}` (stalls that ended the
-  process, not the unit limit), modes, the unit multiple, the safety net in seconds, `memory` (with `nodeOptions` where
-  `NODE_OPTIONS` asked another heap) and the Node version.
+  process, not the unit limit), `nearCap: {base, head}` (sources with a run near the cap on that tree), modes, the unit
+  multiple, the safety net in seconds, `memory` (with `nodeOptions` where `NODE_OPTIONS` asked another heap),
+  `heapLimit` (MiB, null where its probe failed), `capabilities` (each tree's lacks, by its part) and the Node version.
+  Each generator's line counts `crashed` and `nearCap` the same way; the `--work` record's first line holds `heapLimit`
+  and `capabilities` too.
+- **A source near the cap** (`--out`, and the source's `--work` line): its runs near the cap, each with its mode, check,
+  tree and peak, and in `--out` `heapLimit`. `stalls.mjs` prints those of the `--work` records it reads as one advisory
+  line (`nearCap`: runs, sources, first witness); a `--out` file it reads gives its stalls alone.
 - **A stall's record** (`--out`, and the source's `--work` line): its reason (`units`, or how the process ended),
   `at: {tree, mode, check}` (#1965): the tree it was on and the run it cut, each `null` where unknown (a stall between
   runs, a stored base's crash), and, where the base's process ended, the head's own outcome on each later run
@@ -52,7 +68,8 @@ What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise;
   twice; a sum of the shards' own totals counts each repeat. Its growth lines are advisory.
 - **A stored baseline's identity:** its MANIFEST (the `src/` tree, the oracle library, the lockfile, Node) and each
   area's PLAN (the limits above, the allowances, each generator's checks, each shard's places). The runner's own source,
-  `--work` records and `--out` files are no part of it. `baselines.mjs state` reports, for each stored area, its runs
+  `--work` records and `--out` files are no part of it, nor are peaks, `nearCap`, `heapLimit` or `capabilities`, which a
+  stored shard's total line leaves out. `baselines.mjs state` reports, for each stored area, its runs
   left unanswered by reason and those within a question grant.
 
 ## Running an area
