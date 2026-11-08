@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
@@ -97,9 +105,16 @@ test(
 /**
  * A repository with a base branch `main` and a branch `feature` off it, each changing `a.mjs` as `edit` says. `core`
  * also changes a file of the type core on `feature` ("added" or "deleted", the file being on `main` for the latter);
- * `mapper` is the stand-in pin-suite mapper's exit code.
+ * `mapper` is code the stand-in pin-suite mapper runs after its line. `passing` leaves `a.mjs` as it was and gives every
+ * other check a stand-in that passes, so the mapper's verdict alone decides the run.
  */
-function repository({ conflict = false, slowOxlint = false, core = false, mapper = "" } = {}) {
+function repository({
+  conflict = false,
+  slowOxlint = false,
+  core = false,
+  mapper = "",
+  passing = false,
+} = {}) {
   const directory = mkdtempSync(join(tmpdir(), "check-changed-repo-"));
   const run = (...args) => spawnSync("git", args, { cwd: directory, encoding: "utf8" });
   const write = (path, text) => {
@@ -120,10 +135,16 @@ function repository({ conflict = false, slowOxlint = false, core = false, mapper
   );
   if (core === "deleted")
     write("src/type-inference/core/answers.ts", "export const answers = 1;\n");
+  if (passing)
+    for (const path of [
+      "tools/repository-checks/doc-links.mjs",
+      "tools/repository-checks/imports.mjs",
+    ])
+      write(path, "\n");
   run("add", ".");
   run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base");
   run("switch", "-q", "-c", "feature");
-  write("a.mjs", "export const a = 2;\n");
+  if (!passing) write("a.mjs", "export const a = 2;\n");
   if (core === "added") write("src/type-inference/core/answers.ts", "export const answers = 1;\n");
   if (core === "deleted") rmSync(join(directory, "src/type-inference/core/answers.ts"));
   run("add", "-A");
@@ -137,6 +158,11 @@ function repository({ conflict = false, slowOxlint = false, core = false, mapper
   // A stand-in `node_modules` whose Prettier is the pinned one and does nothing.
   write("node_modules/prettier/package.json", JSON.stringify({ version: "0.0.0" }));
   write("node_modules/prettier/bin/prettier.cjs", "\n");
+  if (passing) {
+    write("node_modules/knip/bin/knip.js", "\n");
+    write("node_modules/.bin/tsc", "#!/bin/sh\nexit 0\n");
+    chmodSync(join(directory, "node_modules/.bin/tsc"), 0o755);
+  }
   return { directory, worktrees: () => run("worktree", "list").stdout.trim().split("\n").length };
 }
 
@@ -279,22 +305,32 @@ test(
   },
 );
 
-test("a pin-suite mapper that fails fails the run, its output printed", { timeout: 30_000 }, () => {
-  const { directory } = repository({
-    core: "added",
-    mapper: 'console.error("no merge-base"); process.exitCode = 2;\n',
-  });
-  try {
-    const result = spawnSync(process.execPath, [tool, "--base", "main"], {
-      cwd: directory,
-      encoding: "utf8",
-      env: environment,
-    });
-    assert.equal(result.status, 1, result.stderr);
-    assert.match(result.stdout, /^FAIL {2}pin suites /mu);
-    // (its stdout and stderr arrive in either order)
-    assert.match(result.stdout, /--- pin suites ---\n[^]*no merge-base\n/u);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
+test(
+  "the pin-suite mapper's verdict alone decides a run whose other checks pass, its output printed",
+  { timeout: 30_000 },
+  () => {
+    for (const fails of [false, true]) {
+      const { directory } = repository({
+        core: "added",
+        passing: true,
+        mapper: fails ? 'console.error("no merge-base"); process.exitCode = 2;\n' : "",
+      });
+      try {
+        const result = spawnSync(process.execPath, [tool, "--base", "main"], {
+          cwd: directory,
+          encoding: "utf8",
+          env: environment,
+        });
+        assert.equal(result.status, fails ? 1 : 0, result.stdout + result.stderr);
+        assert.deepEqual(
+          result.stdout.match(/^FAIL {2}\S.*$/gmu)?.map((line) => line.split(/ {2,}/u)[1]) ?? [],
+          fails ? ["pin suites"] : [],
+        );
+        // (its stdout and stderr arrive in either order)
+        if (fails) assert.match(result.stdout, /--- pin suites ---\n[^]*no merge-base\n/u);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  },
+);
