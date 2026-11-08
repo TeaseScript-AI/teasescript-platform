@@ -338,10 +338,7 @@ function changeSignals(base) {
 
   const found = [];
   const relevant = changes
-    .filter(
-      ({ code, file, newMode }) =>
-        code !== "D" && REGULAR.has(newMode) && selected(file) && headFiles.has(file),
-    )
+    .filter(({ code, file }) => code !== "D" && selected(file) && headFiles.has(file))
     .sort((one, other) => (one.file < other.file ? -1 : one.file > other.file ? 1 : 0));
   for (const change of relevant) {
     const { file } = change;
