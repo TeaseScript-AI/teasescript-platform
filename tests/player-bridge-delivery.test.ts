@@ -347,16 +347,21 @@ function unowned(holder: Readonly<Record<string, unknown>>, path: string): strin
   });
 }
 
-/** Whether every field of `T`, recursively, is an owned registry or behaviour: `true`, or the offending field's name. */
+/**
+ * Whether every field of `T`, recursively, is an owned registry or behaviour: `true`, or the offending field's name. An
+ * object with no fields, or an opaque one, is no proof of ownership and fails.
+ */
 type AllOwned<T> = {
   [Field in keyof T]-?: T[Field] extends (...args: never[]) => infer _Result
     ? true
     : T[Field] extends OwnedMap<infer _Key, infer _Value> | OwnedCell<infer _Item>
       ? true
       : T[Field] extends object
-        ? [Exclude<AllOwned<T[Field]>, true>] extends [never]
-          ? true
-          : Field
+        ? [keyof T[Field]] extends [never]
+          ? Field
+          : [Exclude<AllOwned<T[Field]>, true>] extends [never]
+            ? true
+            : Field
         : Field;
 }[keyof T];
 type ContextFields = Omit<
@@ -370,11 +375,14 @@ const FINDS: readonly [
   Finds<{ extra: Map<string, string> }>,
   Finds<{ caches: { trace: Map<string, string> } }>,
   Finds<{ count: number }>,
-] = [true, true, true];
+  Finds<{ extra: {} }>,
+  Finds<{ caches: { extra: {} } }>,
+  Finds<{ extra: object }>,
+] = [true, true, true, true, true, true];
 
 test("every field of a connection's context, recursively, is an owned registry or classified by its exact path", () => {
   assert.equal(ALL_OWNED, true);
-  assert.deepEqual(FINDS, [true, true, true]);
+  assert.deepEqual(FINDS, [true, true, true, true, true, true]);
   assert.deepEqual(unowned({ ...playerOpsContext() }, ""), []);
   // A raw map on the context, one nested under an exempt name, an empty object and an unclassified field are found.
   const context = playerOpsContext();
@@ -441,22 +449,31 @@ const isCollection = (node: ts.Expression | undefined): boolean => {
 /** The module-scope state of `text` (module `module`), by `module › binding`. */
 function moduleState(module: string, text: string): string[] {
   const source = ts.createSourceFile(module, text, ts.ScriptTarget.Latest, true);
-  const found: string[] = [];
+  const found = new Set<string>();
+  /** Every collection made in `node`, wherever it sits, as `binding`'s: a function's body is per call, not visited. */
+  const collect = (node: ts.Node, binding: string) => {
+    if (ts.isFunctionLike(node)) return;
+    if (ts.isExpression(node) && isCollection(node)) found.add(`${module} › ${binding}`);
+    ts.forEachChild(node, (child) => collect(child, binding));
+  };
   for (const statement of source.statements) {
     if (ts.isVariableStatement(statement)) {
       const mutable = (statement.declarationList.flags & ts.NodeFlags.Const) === 0;
-      for (const declaration of statement.declarationList.declarations)
-        if (mutable || isCollection(declaration.initializer))
-          found.push(`${module} › ${declaration.name.getText(source)}`);
-    }
-    if (ts.isClassDeclaration(statement))
+      for (const declaration of statement.declarationList.declarations) {
+        const binding = declaration.name.getText(source);
+        if (mutable) found.add(`${module} › ${binding}`);
+        if (declaration.initializer !== undefined) collect(declaration.initializer, binding);
+      }
+    } else if (ts.isClassDeclaration(statement)) {
       for (const member of statement.members)
-        if (ts.isPropertyDeclaration(member) && isCollection(member.initializer))
-          found.push(
-            `${module} › ${statement.name?.text ?? "(class)"}.${member.name.getText(source)}`,
+        if (ts.isPropertyDeclaration(member) && member.initializer !== undefined)
+          collect(
+            member.initializer,
+            `${statement.name?.text ?? "(class)"}.${member.name.getText(source)}`,
           );
+    } else collect(statement, "(statement)");
   }
-  return found;
+  return [...found];
 }
 
 function engineBridgeModules(): string[] {
@@ -486,13 +503,31 @@ test("every module-scope binding of the engine bridge that can hold state across
     [],
     "classified, but no such binding",
   );
-  // A module-level map, a module-level `let` a registry could be stashed in, and a class field are found.
+  // A module-level map, also wrapped in an object or a call, a module-level `let` a registry could be stashed in, and a
+  // class field, also wrapped, are found; a function's own map is not.
   assert.deepEqual(
     moduleState(
       "ops/transfer.ts",
-      "const unowned = new Map<string, unknown>(); let stash = null; class Caches { readonly trace = new Map(); }",
+      [
+        "const unowned = new Map<string, unknown>();",
+        "const held = { tickets: new Map() };",
+        "const list = { tickets: [] };",
+        "const sealed = Object.seal(new Map());",
+        "let stash = null;",
+        "class Caches { readonly trace = new Map(); readonly holder = { tickets: new Map() }; }",
+        "function local() { const per = new Map(); return per; }",
+        "export const ops = { run: () => new Map() };",
+      ].join("\n"),
     ),
-    ["ops/transfer.ts › unowned", "ops/transfer.ts › stash", "ops/transfer.ts › Caches.trace"],
+    [
+      "ops/transfer.ts › unowned",
+      "ops/transfer.ts › held",
+      "ops/transfer.ts › list",
+      "ops/transfer.ts › sealed",
+      "ops/transfer.ts › stash",
+      "ops/transfer.ts › Caches.trace",
+      "ops/transfer.ts › Caches.holder",
+    ],
   );
 });
 
