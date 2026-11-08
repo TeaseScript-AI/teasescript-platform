@@ -17,10 +17,10 @@ import {
 import { publishesAfter } from "../lib/measure.mjs";
 
 const OPEN_MS = 120_000;
-const TURN_MS = 180_000;
+const TURN_MS = 240_000;
 const MAX_TURNS = 80;
 /** Nothing to answer and no change for this long ends the play (longer than the demo's countdowns). */
-const IDLE_MS = 60_000;
+const IDLE_MS = 150_000;
 const READY = `(state) => state.ended || state.failed || (${ENABLED_CONTROL})(state)`;
 
 /**

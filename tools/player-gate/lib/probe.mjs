@@ -28,8 +28,10 @@ export function gateProbe(config) {
 
   // Errors, as the smoke counts them: console errors, uncaught errors and unhandled rejections.
   const consoleError = window.console.error;
+  // WebKit also logs the ResizeObserver loop notice, which the smoke does not count as an error either.
   window.console.error = (...args) => {
-    gate.errors.push({ t: now(), text: args.map(String).join(" ") });
+    const text = args.map(String).join(" ");
+    if (!text.startsWith("ResizeObserver loop")) gate.errors.push({ t: now(), text });
     consoleError.apply(window.console, args);
   };
   window.addEventListener("error", (event) => {
