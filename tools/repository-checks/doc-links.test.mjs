@@ -148,7 +148,12 @@ const launch = (root, ends = "0") =>
   spawnSync(process.execPath, [tool], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, REMARK_ENDS: ends },
+    // a PATH without this Node's folder: the wrapper puts it there
+    env: {
+      ...process.env,
+      REMARK_ENDS: ends,
+      PATH: [dirname(gitPath), "/usr/bin", "/bin"].join(delimiter),
+    },
   });
 
 test("remark is started with the pinned options, on this Node, and its end decides the status", () => {
