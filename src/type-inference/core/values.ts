@@ -448,7 +448,8 @@ export class Values {
         narrowedItems(g.form, read.items, program.scope, this.#testSpelling(g.form)),
       );
     // (G holds and no definition answers the read: G's kinds under the one word the read without G names, since a
-    // test that holds removes kinds, not the read's cause (#2024); a read with no word, or several, leaves G's items)
+    // test that holds removes kinds, not the read's cause (#2024); a read with no word, or several, leaves G's items:
+    // several is data from outside the script beside a store, and that data, which may itself be empty, is the cause)
     const worded = read.items.filter((item) => item.tag !== "empty" && item.context !== null);
     const word = worded[0]?.context ?? null;
     if (word === null || worded.some((item) => item.context !== word))

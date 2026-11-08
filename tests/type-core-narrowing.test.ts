@@ -1658,7 +1658,8 @@ test("a test that holds removes kinds, not the read's cause: its read's warning 
   ] as const)
     assert.equal(answer(source), warned(source, "xs.first", "loop", check), name);
   // the family: each test that holds, each store whose word explains the read, each selection, against the same
-  // program without its test, which names one word
+  // program without its test; the word equals the untested read's, or `unknown` where that read carries two words (the
+  // host-data rows below)
   for (const form of ["xs != null", "xs is list"])
     for (const [event, word] of [
       ["a loop's store", "loop"],
@@ -1686,7 +1687,7 @@ test("a test that holds removes kinds, not the read's cause: its read's warning 
     `warning-runtime-check, member-read ${first} branch, member-read ${last} loop, empty-check xs ${first}, empty-check xs ${last}`,
   );
   // a read without its test whose items carry two words keeps G's items: data from outside the script, `unknown` with its
-  // reasons' word, beside the loop store's list, `loop` (#2024's condition 1, the lead's choice pending)
+  // reasons' word, beside the loop store's list, `loop` (#2024, the lead's ruling 2: `unknown` is the true cause there)
   const host = (head: string): string =>
     `let xs = hostValue\n${head}repeat 2 {\n    say xs.first\n    xs = []\n}${head === "" ? "" : "\n}"}\nexit\n`;
   const later = "written-target 9 later";
@@ -1702,7 +1703,7 @@ test("a test that holds removes kinds, not the read's cause: its read's warning 
       nulls
         ? `warning-runtime-check, ${later}, member-read ${at} unknown, member-read ${at} unknown, ${copies}, null-check xs ${at}, empty-check xs ${at}`
         : `warning-runtime-check, ${later}, member-read ${at} unknown, ${copies}, empty-check xs ${at}`,
-      name,
+      `${name}: \`unknown\`, since host data may itself be empty; the store's \`loop\` would hide that cause`,
     );
   }
 });
