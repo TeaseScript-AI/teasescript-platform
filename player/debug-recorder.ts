@@ -83,11 +83,14 @@ interface PublishedLog {
 /** How much of a session the recorder keeps; diagnostic retention, not a limit on scripts. */
 export interface DebugRecorderLimits {
   readonly operations: number;
-  /** Characters of recorded arguments as JSON. */
-  readonly argumentBytes: number;
+  /** UTF-16 code units of the recorded arguments as JSON (`String.length`). */
+  readonly argumentCodeUnits: number;
 }
 
-const DEFAULT_LIMITS: DebugRecorderLimits = { operations: 4096, argumentBytes: 2 * 1024 * 1024 };
+const DEFAULT_LIMITS: DebugRecorderLimits = {
+  operations: 4096,
+  argumentCodeUnits: 2 * 1024 * 1024,
+};
 
 /**
  * Records the engine calls of one Player's sessions so a debug export can replay them: an anchor snapshot and every
@@ -119,7 +122,7 @@ export class DebugRecorder {
   /** The log: an anchor and the calls since, which reach the session's state unless `#broken`. */
   #anchor: RuntimeSnapshot | null = null;
   #operations: DebugOperation[] = [];
-  #argumentBytes = 0;
+  #argumentCodeUnits = 0;
   /** Whether a call since the anchor could not be logged; the Player's next call then starts the log again. */
   #broken = false;
   /** Exports the session's current state. */
@@ -141,7 +144,7 @@ export class DebugRecorder {
     readonly anchor: RuntimeSnapshot | null;
     readonly operations: DebugOperation[];
     readonly count: number;
-    readonly argumentBytes: number;
+    readonly argumentCodeUnits: number;
     readonly broken: boolean;
     readonly current: (() => RuntimeSnapshot) | null;
     readonly published: PublishedLog | null;
@@ -169,7 +172,7 @@ export class DebugRecorder {
     this.#owner = owner;
     this.#anchor = anchor;
     this.#operations = [];
-    this.#argumentBytes = 0;
+    this.#argumentCodeUnits = 0;
     this.#broken = false;
     this.#current = current;
     // A recording may begin at a paused draw, whose call is not in the log.
@@ -191,7 +194,7 @@ export class DebugRecorder {
       anchor: this.#anchor,
       operations: this.#operations,
       count: this.#operations.length,
-      argumentBytes: this.#argumentBytes,
+      argumentCodeUnits: this.#argumentCodeUnits,
       broken: this.#broken,
       current: this.#current,
       published: this.#published,
@@ -218,7 +221,7 @@ export class DebugRecorder {
     staged.operations.length = staged.count;
     this.#anchor = staged.anchor;
     this.#operations = staged.operations;
-    this.#argumentBytes = staged.argumentBytes;
+    this.#argumentCodeUnits = staged.argumentCodeUnits;
     this.#broken = staged.broken;
     this.#current = staged.current;
     this.#published = staged.published;
@@ -416,7 +419,7 @@ export class DebugRecorder {
     input: () => RuntimeSnapshot,
     args: readonly unknown[],
     continuation: boolean,
-  ): { readonly args: unknown[]; readonly bytes: number } | null {
+  ): { readonly args: unknown[]; readonly codeUnits: number } | null {
     // A call that continues one the log could not keep cannot be replayed either.
     if (this.#plan === null || (this.#broken && continuation)) return null;
     try {
@@ -436,8 +439,8 @@ export class DebugRecorder {
         this.#skip("A call's arguments could not be copied exactly.", input);
         return null;
       }
-      const bytes = json.length;
-      if (bytes > this.#limits.argumentBytes) {
+      const codeUnits = json.length;
+      if (codeUnits > this.#limits.argumentCodeUnits) {
         this.#skip("A recorded call was larger than the recording keeps.", input);
         return null;
       }
@@ -446,14 +449,14 @@ export class DebugRecorder {
       if (
         !continuation &&
         (this.#operations.length + 2 > this.#limits.operations ||
-          this.#argumentBytes + bytes > this.#limits.argumentBytes)
+          this.#argumentCodeUnits + codeUnits > this.#limits.argumentCodeUnits)
       )
         this.#restart(input);
-      this.#argumentBytes += bytes;
+      this.#argumentCodeUnits += codeUnits;
       // A copy: the recording must not change when the Player reuses an object it passed.
       const copy: unknown = JSON.parse(json);
       if (!Array.isArray(copy)) throw new TypeError("The arguments are not a list.");
-      return { args: copy, bytes };
+      return { args: copy, codeUnits };
     } catch {
       if (owner === this.#owner) this.#skip("The recorder could not copy a call.", null);
       return null;
@@ -475,7 +478,7 @@ export class DebugRecorder {
         paused: this.#paused,
       };
     this.#operations = [];
-    this.#argumentBytes = 0;
+    this.#argumentCodeUnits = 0;
     this.#broken = false;
   }
 

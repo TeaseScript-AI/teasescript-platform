@@ -538,14 +538,14 @@ function dueDelayStep(
   return { kind: "observe", nowMs, reports };
 }
 
-/** Checkpoint JSON equality, reporting where the bytes first differ rather than both complete checkpoints. */
+/** Checkpoint JSON equality, reporting the code-unit offset where they first differ rather than both complete checkpoints. */
 function assertSameCheckpoint(actual: string, expected: string, context: string): void {
   if (actual === expected) return;
   let index = 0;
   while (index < actual.length && actual[index] === expected[index]) index += 1;
   const around = (text: string) => text.slice(Math.max(0, index - 120), index + 120);
   assert.fail(
-    `${context} differs at byte ${index}:\n  actual:   ${around(actual)}\n  expected: ${around(expected)}`,
+    `${context} differs at code-unit offset ${index}:\n  actual:   ${around(actual)}\n  expected: ${around(expected)}`,
   );
 }
 

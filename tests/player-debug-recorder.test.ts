@@ -374,7 +374,7 @@ test("a failure freezes the recording, from the first run on, and a too large ca
     JSON.stringify(jumpedResult),
   );
 
-  const small = new DebugRecorder({ argumentBytes: 50 });
+  const small = new DebugRecorder({ argumentCodeUnits: 50 });
   const asking = createPlayerRuntimeSession('let name = askText "Name"\nexit', { recorder: small });
   submitPlayerRuntimeComposer(asking, "x".repeat(100));
   assert.deepEqual(
@@ -718,7 +718,7 @@ test("after a call the recording could not keep, an error still continues from t
     'let pick = askChoice again: "Again"',
     "exit",
   ].join("\n");
-  const small = new DebugRecorder({ argumentBytes: 50 });
+  const small = new DebugRecorder({ argumentCodeUnits: 50 });
   const answered = submitPlayerRuntimeComposer(
     startedWithScopesUsedUp(asking, 0, small),
     "x".repeat(100),
@@ -749,7 +749,7 @@ test("after a call the recording could not keep, an error still continues from t
     'say "${name}", instant',
     "exit",
   ].join("\n");
-  const session = startedWithScopesUsedUp(checked, 0, new DebugRecorder({ argumentBytes: 50 }));
+  const session = startedWithScopesUsedUp(checked, 0, new DebugRecorder({ argumentCodeUnits: 50 }));
   continues(session, () => submitPlayerRuntimeComposer(session, "x".repeat(100)));
   const continued = submitPlayerRuntimeComposer(session, "ok")!.session;
   assert.equal(continued.state.status, "halted");
@@ -760,7 +760,7 @@ test("after a call the recording could not keep, an error still continues from t
     startedWithScopesUsedUp(
       `let first = askText "First"\n${checked}`,
       0,
-      new DebugRecorder({ argumentBytes: 50 }),
+      new DebugRecorder({ argumentCodeUnits: 50 }),
     ),
     "a".repeat(100),
   )!.session;
@@ -1088,7 +1088,7 @@ test("a resolution whose continuation throws leaves the session at the paused st
 });
 
 test("a call the recorder cannot keep while a draw is paused leaves recovery of the paused state intact", () => {
-  const recorder = new DebugRecorder({ argumentBytes: 128 });
+  const recorder = new DebugRecorder({ argumentCodeUnits: 128 });
   let session = createPlayerRuntimeSession(
     'let t = timer(duration: (1..=2) s, async: true, repeat: true) {\n  say "${random()}", instant\n}\nwait 10 s\nexit',
     { recorder },
