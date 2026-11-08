@@ -309,7 +309,8 @@ export class HeldSession implements HostSession, ObservedSession {
       session: this.observation,
     });
     const incident = committed.kind === "incident" ? committed.incident : null;
-    this.stoppedBy = args.stop;
+    // The first stop froze the session; a later one changes neither it nor the run's incident.
+    this.stoppedBy ??= args.stop;
     return Object.freeze({
       ...view,
       diagnostic: Object.freeze({ run: args.run, stop: args.stop }),
