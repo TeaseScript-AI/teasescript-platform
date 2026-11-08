@@ -166,6 +166,7 @@ test(
         "src/shrink.ts": lines(1003),
         "src/header.ts": `export const t = \`\nfirst\n\`;\n${longFunction("written", 160)}\n`,
         "outside/moving.ts": lines(400),
+        "src/before-move.ts": lines(1001),
       });
       git("add", "-A");
       git("commit", "-q", "-m", "base");
@@ -181,7 +182,11 @@ test(
         "src/header.ts": readFileSync(join(root, "src/header.ts"), "utf8")
           .replace("first", "++ b/denominator.ts;")
           .replace("const v5 = 5;", "const v5 = 55;"),
+        // a move with one line more, to a name with two tabs after a letter that is not ASCII: `--numstat` writes a
+        // move's two names as fields of their own
+        "src/café\t\tname.ts": `${lines(1001)}\nexport const added = 1;`,
       });
+      rmSync(join(root, "src/before-move.ts"));
       // a move from outside the roots into src/: no lines added
       renameSync(join(root, "outside/moving.ts"), join(root, "src/arrived.ts"));
       git("add", "-A");
@@ -199,7 +204,7 @@ test(
         json.change.map(({ line }) => line).sort(),
         [
           "function over 150 lines that the change writes into: src/header.ts:4 written (160 lines)",
-          ...NAMES.map(
+          ...[...NAMES, "src/café\t\tname.ts"].map(
             (name) =>
               `file over 1000 lines that the change adds to: ${shown(name)} (1002, was 1001)`,
           ),
@@ -245,10 +250,10 @@ function history(base, change, setUp = () => {}) {
   return { root, git, base: baseCommit };
 }
 
-const changeOf = (root, base, env = process.env) => {
+const changeOf = (root, base, env = process.env, roots = []) => {
   const result = spawnSync(
     process.execPath,
-    [tool, "--diff", base, "--json", join(root, "change.json")],
+    [tool, ...roots, "--diff", base, "--json", join(root, "change.json")],
     { cwd: root, encoding: "utf8", env },
   );
   assert.equal(result.status, 0, result.stdout + result.stderr);
@@ -292,6 +297,30 @@ test("--diff measures Git's committed regular files: a function's last line, mer
       "function over 150 lines that the change writes into: src/clean.ts:1 kept (160 lines)",
       "function over 150 lines that the change writes into: src/edge.ts:1 edge (160 lines)",
       "file over 1000 lines that the change adds to: src/hunks.ts (1001, was 1001)",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--diff places a function by Git's lines, and keeps a name's leading U+FEFF", () => {
+  // a lone carriage return, U+2028 and U+2029 end a line for TypeScript, not for Git
+  const prefix = "/* one\rtwo\u2028three\u2029four */\n";
+  const { root, base } = history(
+    {
+      "src/apart.ts": `${prefix}${longFunction("apart", 160)}\n`,
+      "\ufeffbom.ts": `${lines(1001)}\n`,
+    },
+    {
+      // the function's first line, Git's line 2
+      "src/apart.ts": `${prefix}${longFunction("written", 160)}\n`,
+      "\ufeffbom.ts": `${lines(1001)}\nexport const added = 1;\n`,
+    },
+  );
+  try {
+    assert.deepEqual(changeOf(root, base, process.env, ["."]), [
+      "function over 150 lines that the change writes into: src/apart.ts:2 written (160 lines)",
+      "file over 1000 lines that the change adds to: \ufeffbom.ts (1002, was 1001)",
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });

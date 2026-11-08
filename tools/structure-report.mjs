@@ -7,7 +7,8 @@
 //
 // ROOT selects what is read, by default the five components: src, player, tests, tools and playground. A component's
 // top level is the code files directly in it; no other folder counts as a top level, whichever ROOT selects it. Only
-// files Git tracks are read. A file's lines are counted as an editor shows them: a final newline ends the last line.
+// files Git tracks are read. Lines are Git's, for files and functions alike: a newline (LF) alone ends one, and a final
+// newline ends the last line.
 // Functions are measured in TypeScript and JavaScript files; the script blocks of .vue files are not parsed.
 //
 // Without --diff: the whole tree's signals, the top N of each (files over 1000 lines, folders over 20 files, top levels
@@ -16,8 +17,8 @@
 //
 // With --diff BASE: only the signals the change from the merge base (`git merge-base BASE HEAD`) to `HEAD` adds to,
 // each against the merge base's tree: a file over 1000 lines that it adds lines to, a function over 150 lines whose
-// lines include one it adds, a folder over 20 files or a top level over 12 that it adds a file to, a pair of names a
-// letter apart that the merge base did not have, and a file gaining over 300 lines. A change adds to a signal whether
+// lines include one it adds, a folder over 20 files or a top level over 12 that it adds a file to (one Git lists as
+// added: a symlink or submodule turned into a regular file is not), a pair of names a letter apart that the merge base did not have, and a file gaining over 300 lines. A change adds to a signal whether
 // it crosses the line or the base was already over it. Both sides are Git's committed trees, never the working tree:
 // commit first. Only the changed files are parsed. --json writes those lines too, for a READY to quote.
 //
@@ -76,18 +77,33 @@ const gitBytes = (...gitArgs) => execFileSync("git", gitArgs, { maxBuffer: 256 *
 const lineCount = (text) =>
   (text.match(/\n/gu)?.length ?? 0) + (text === "" || text.endsWith("\n") ? 0 : 1);
 
-/** Each function of `text` (a `file` of a parsed language) over the signal's length: its name, first line and lines. */
+/**
+ * Each function of `text` (a `file` of a parsed language) over the signal's length: its name, first line and lines,
+ * Git's lines. TypeScript also ends a line at a lone carriage return, U+2028 and U+2029, so its own line numbers are
+ * not used.
+ */
 function longFunctionsOf(file, text) {
   const found = [];
+  const starts = [0];
+  for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) starts.push(at + 1);
+  /** The line of offset `at`: how many lines start at or before it. */
+  const lineOf = (at) => {
+    let [low, high] = [0, starts.length];
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (starts[middle] <= at) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false);
   const visit = (node) => {
     if (ts.isFunctionLike(node) && "body" in node && node.body) {
-      const start = source.getLineAndCharacterOfPosition(node.getStart(source)).line;
-      const end = source.getLineAndCharacterOfPosition(node.getEnd()).line;
-      const span = end - start + 1;
+      const start = lineOf(node.getStart(source));
+      const span = lineOf(node.getEnd()) - start + 1;
       if (span > SIGNALS.functionLines) {
         const name = node.name && ts.isIdentifier(node.name) ? node.name.text : "(anonymous)";
-        found.push({ file, name, line: start + 1, lines: span });
+        found.push({ file, name, line: start, lines: span });
       }
     }
     ts.forEachChild(node, visit);
@@ -177,31 +193,28 @@ const gitDiff = (...diffArgs) =>
 /** Why the report cannot be trusted: exit 2. */
 class CannotRun extends Error {}
 
-const utf8 = new TextDecoder("utf-8", { fatal: true });
-/**
- * Git's NUL-separated `bytes` as fields, each name decoded exactly, or refused: the report reads UTF-8 names only. A
- * field's name follows its first `tabs` tabs (its metadata before them is ASCII); a field with fewer is all name.
- */
-function namesOf(bytes, tabs = 0) {
+/** Git's NUL-separated `bytes` as its fields, each still bytes. */
+function fieldsOf(bytes) {
   const fields = [];
   let start = 0;
   for (let end = bytes.indexOf(0); end !== -1; end = bytes.indexOf(0, start)) {
-    const field = bytes.subarray(start, end);
+    fields.push(bytes.subarray(start, end));
     start = end + 1;
-    let at = 0;
-    for (let tab = 0; tab < tabs && at !== -1; tab += 1) at = field.indexOf(9, at) + 1 || -1;
-    // a field with fewer tabs is a name of its own, as a rename's two names after `--numstat`'s counts
-    const nameStart = at === -1 ? 0 : at;
-    const name = field.subarray(nameStart);
-    try {
-      fields.push(field.subarray(0, nameStart).toString("latin1") + utf8.decode(name));
-    } catch {
-      throw new CannotRun(
-        `structure-report: Git names a file that is not UTF-8 (bytes ${name.toString("hex")}): the report reads UTF-8 names only`,
-      );
-    }
   }
   return fields;
+}
+
+// `ignoreBOM` keeps a name's leading U+FEFF, which the decoder drops otherwise
+const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+/** A name Git writes as `bytes`, decoded exactly, or refused: the report reads UTF-8 names only. */
+function nameOf(bytes) {
+  try {
+    return utf8.decode(bytes);
+  } catch {
+    throw new CannotRun(
+      `structure-report: Git names a file that is not UTF-8 (bytes ${bytes.toString("hex")}): the report reads UTF-8 names only`,
+    );
+  }
 }
 
 /** A name as the report prints it: as is, or quoted when it holds a control character such as a newline or tab. */
@@ -262,12 +275,11 @@ export function addedLinesOfPatch(patch) {
  */
 function regularFilesAt(ref) {
   const files = new Map();
-  for (const entry of namesOf(gitBytes("ls-tree", "-r", "-z", ref, "--", ...roots), 1)) {
-    const [meta, name] = [
-      entry.slice(0, entry.indexOf("\t")),
-      entry.slice(entry.indexOf("\t") + 1),
-    ];
-    const [mode] = meta.split(" ");
+  // `<mode> <type> <object>\t<name>`
+  for (const entry of fieldsOf(gitBytes("ls-tree", "-r", "-z", ref, "--", ...roots))) {
+    const tab = entry.indexOf(9);
+    const [mode] = entry.subarray(0, tab).toString("latin1").split(" ");
+    const name = nameOf(entry.subarray(tab + 1));
     if (REGULAR.has(mode) && CODE.test(name)) files.set(name, mode);
   }
   return files;
@@ -282,35 +294,39 @@ function changeSignals(base) {
 
   // Names, modes and status come only from Git's NUL-separated raw list, over the whole tree, so that a file moved in
   // from outside the roots is a move: `:<old mode> <new mode> <old blob> <new blob> <status>`, then one or two names.
-  const raw = namesOf(gitDiff("-M", "--raw", "-z", mergeBase, "HEAD"));
+  const raw = fieldsOf(gitDiff("-M", "--raw", "-z", mergeBase, "HEAD"));
   const changes = [];
   for (let i = 0; i < raw.length;) {
-    const [oldMode, newMode, , , code] = raw[i].slice(1).split(" ");
+    const [oldMode, newMode, , , code] = raw[i].toString("latin1").slice(1).split(" ");
     if (code.startsWith("R")) {
-      changes.push({ code: "R", oldMode, newMode, old: raw[i + 1], file: raw[i + 2] });
-      i += 3;
-    } else {
       changes.push({
-        code,
+        code: "R",
         oldMode,
         newMode,
-        old: code === "A" ? null : raw[i + 1],
-        file: raw[i + 1],
+        old: nameOf(raw[i + 1]),
+        file: nameOf(raw[i + 2]),
       });
+      i += 3;
+    } else {
+      const file = nameOf(raw[i + 1]);
+      changes.push({ code, oldMode, newMode, old: code === "A" ? null : file, file });
       i += 2;
     }
   }
-  // Git's own count of each file's added lines (`-` for a binary file), the check on the hunks read below.
-  const numstat = namesOf(gitDiff("-M", "--numstat", "-z", mergeBase, "HEAD"), 2);
+  // Git's own count of each file's added lines (`-` for a binary file), the check on the hunks read below:
+  // `<added>\t<deleted>\t<name>`, or for a move `<added>\t<deleted>\t` and then its two names, each a field of its own.
+  const numstat = fieldsOf(gitDiff("-M", "--numstat", "-z", mergeBase, "HEAD"));
   const gitAdded = new Map();
   for (let i = 0; i < numstat.length;) {
-    const [added, , ...name] = numstat[i].split("\t");
-    const file = name.join("\t");
-    if (file === "") {
-      gitAdded.set(numstat[i + 2], added);
+    const record = numstat[i];
+    const firstTab = record.indexOf(9);
+    const nameStart = record.indexOf(9, firstTab + 1) + 1;
+    const added = record.subarray(0, firstTab).toString("latin1");
+    if (nameStart === record.length) {
+      gitAdded.set(nameOf(numstat[i + 2]), added);
       i += 3;
     } else {
-      gitAdded.set(file, added);
+      gitAdded.set(nameOf(record.subarray(nameStart)), added);
       i += 1;
     }
   }
@@ -369,7 +385,7 @@ function changeSignals(base) {
         line: `file gaining over ${SIGNALS.addedLines} lines: +${added.length} ${shown(file)}`,
       });
   }
-  // a new regular file adds to its folder; a moved one does not
+  // a file Git lists as added adds to its folder; a moved one, and an entry whose type changed, do not
   const [headFolders, baseFolders] = [
     folderCounts([...headFiles.keys()]),
     folderCounts([...baseFiles.keys()]),
