@@ -82,7 +82,9 @@ test("each scenario's export file is the one the base's assembler wrote", async 
     ...scenarios.SHOWN,
   });
   const names: string[] = [];
-  for (const scenario of scenarios.SCENARIOS as readonly { readonly name: string }[]) {
+  // EVIDENCE: fixture: `scenarios.mjs` declares each scenario with its `name`.
+  const declared = scenarios.SCENARIOS as readonly { readonly name: string }[];
+  for (const scenario of declared) {
     const expected = fixture.scenarios.find((each) => each.name === scenario.name);
     assert.ok(expected !== undefined, `${scenario.name} is in the fixture`);
     assert.deepEqual(

@@ -98,11 +98,6 @@ export interface SessionSection {
   readonly session: PlayerSession;
 }
 
-/**
- * The Player's side of the engine bridge: the sessions it holds, each with its store, and the requests that operate
- * them. Every reply's publication goes to its session's store as it arrives (`ReplyHook`), so the store applies
- * publications in the host's order also when a transport delivers some early (the in-process facade's flush).
- */
 /** Whether `view`, the store's view of a session, is the publication `identity` names, with its stop identity. */
 function matches(view: PlayerSession | null, identity: ExportIdentity): boolean {
   return (
@@ -114,6 +109,11 @@ function matches(view: PlayerSession | null, identity: ExportIdentity): boolean 
   );
 }
 
+/**
+ * The Player's side of the engine bridge: the sessions it holds, each with its store, and the requests that operate
+ * them. Every reply's publication goes to its session's store as it arrives (`ReplyHook`), so the store applies
+ * publications in the host's order also when a transport delivers some early (the in-process facade's flush).
+ */
 export class PlayerBridge {
   readonly #client: BridgeClient;
   /**
@@ -320,7 +320,7 @@ export class PlayerBridge {
     deliver: (reply: ExportCaptureReply, shown: PlayerSession | null) => T,
   ): Promise<T> {
     if (session !== null) this.#own(session);
-    let delivered: { readonly value: T } | null = null;
+    const delivered: { outcome?: { readonly value: T } } = {};
     await this.#client.request(
       "captureExport",
       { session: session?.id ?? null, recording },
@@ -332,13 +332,14 @@ export class PlayerBridge {
           const view = session === null ? null : this.latest(session);
           if (session !== null && reply.kind === "captured" && !matches(view, reply.identity)) {
             void this.releaseRecording(reply.ticket).catch(() => {});
-            delivered = { value: deliver({ kind: "refused", reason: "identity" }, view) };
-          } else delivered = { value: deliver(reply, view) };
+            delivered.outcome = { value: deliver({ kind: "refused", reason: "identity" }, view) };
+          } else delivered.outcome = { value: deliver(reply, view) };
         },
       },
     );
-    if (delivered === null) throw new Error("The export capture's reply was not delivered.");
-    return (delivered as { readonly value: T }).value;
+    if (delivered.outcome === undefined)
+      throw new Error("The export capture's reply was not delivered.");
+    return delivered.outcome.value;
   }
 
   /** What export `ticket`'s file needs of the engine (`exportPrepare`): its plan's hash, and with `replay`, replay data. */
@@ -524,8 +525,7 @@ export class PlayerBridge {
     const acknowledged = this.#client
       .signal("halt", stop, session.id, (result) =>
         store.freeze(
-          // EVIDENCE: validation: a Player session's `halt` acknowledgement carries a `CallViewReply`, a `StopReply` for
-          // a Player error stop, or `null`.
+          // EVIDENCE: validation: a Player session's `halt` acknowledgement carries a call view, with a stop's identity.
           result.result as CallViewReply | StopReply | null,
         ),
       )

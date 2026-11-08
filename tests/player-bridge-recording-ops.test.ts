@@ -53,10 +53,20 @@ async function onBoth<T>(body: (bridge: PlayerBridge) => Promise<T>): Promise<[T
 
 type Answer = { readonly answer: unknown } | { readonly name: string; readonly message: string };
 
+/** What a row compares of a result: plain data. */
+type Answered = string | number | boolean | object | null;
+/** `value` as plain data; anything else as its text. */
+function answered(value: unknown): Answered {
+  if (value === null || typeof value === "object") return value;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+    return value;
+  return String(value);
+}
+
 /** The answer of `request`, its result projected by `project`, or its refusal. */
 async function answerOf(
   request: Promise<{ readonly result: unknown }>,
-  project: (result: unknown) => unknown = (result) => result,
+  project: (result: unknown) => Answered = answered,
 ): Promise<Answer> {
   try {
     return { answer: project((await request).result) };
@@ -141,11 +151,13 @@ test("a halt refuses malformed stop arguments, and a valid stop or none halts", 
     answers["valid"] = await answerOf(
       bridge.client.signal("halt", { error: "TypeError", run: 1, stop: 1 }, stopped.id),
       (result) =>
-        typeof result === "object" && result !== null ? Object.keys(result).sort() : result,
+        typeof result === "object" && result !== null
+          ? Object.keys(result).sort()
+          : answered(result),
     );
     const plain = await bridge.start(plan, { wallClockMs: 0 }, false);
     answers["none"] = await answerOf(bridge.client.signal("halt", null, plain.id), (result) =>
-      typeof result === "object" && result !== null ? Object.keys(result).sort() : result,
+      typeof result === "object" && result !== null ? Object.keys(result).sort() : answered(result),
     );
     return answers;
   });
@@ -169,7 +181,9 @@ test("the recording ops' outcomes answer as written, in-process and in a Worker"
     const plan = await preparedPlan(Promise.resolve(bridge), PLAN);
     const outcomes: Record<string, unknown> = {};
     const kind = (result: unknown) =>
-      typeof result === "object" && result !== null && "kind" in result ? result.kind : result;
+      answered(
+        typeof result === "object" && result !== null && "kind" in result ? result.kind : result,
+      );
     await bridge.beginRun(1, null);
     const recorded = await bridge.start(plan, { wallClockMs: 0 }, true);
     // A second session, started without the recorder, whose engine the recorder does not record.
@@ -177,12 +191,13 @@ test("the recording ops' outcomes answer as written, in-process and in a Worker"
     const captured = await bridge.read(recorded, "captureRecording");
     outcomes["captureRecording recorded"] = {
       ...captured,
-      ticket: typeof (captured as { ticket?: unknown }).ticket,
+      ticket: "ticket" in captured ? typeof captured.ticket : "absent",
     };
     outcomes["captureRecording unrecorded"] = await bridge.read(unrecorded, "captureRecording");
     const ticket = captured.kind === "captured" ? captured.ticket : "";
     const exported = (session: string | null, recording: unknown) =>
       answerOf(bridge.client.request("captureExport", { session, recording }), (result) => {
+        // EVIDENCE: fixture: `captureExport` replies with `ExportCaptureReply`, read here only in these fields.
         const reply = result as {
           kind: string;
           ticket?: string;
@@ -208,12 +223,14 @@ test("the recording ops' outcomes answer as written, in-process and in a Worker"
       session: recorded.id,
       recording: "current",
     });
+    // EVIDENCE: fixture: a capture of a held session with its current recording is `captured`, with its ticket.
     const held = (exportTicket.result as { ticket: string }).ticket;
     outcomes["captureExport an export ticket as recording"] = await exported(recorded.id, {
       ticket: held,
     });
     const prepared = (replay: boolean, of: string) =>
       answerOf(bridge.client.request("exportPrepare", { ticket: of, replay }), (result) => {
+        // EVIDENCE: fixture: `exportPrepare` replies with `PreparedExport`, read here only in these fields.
         const parts = result as {
           contentHash: unknown;
           checkpointRole: unknown;

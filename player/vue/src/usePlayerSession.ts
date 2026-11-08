@@ -2828,10 +2828,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
 
   /**
-   * Readies the page for a rewind step's commit or a reinstatement, which begins the host's recording anew: after a
-   * Player error, the recording up to the error is kept for the debug export first. Its callers await what it returns.
-   */
-  /**
    * Decides a debug export's capture in its reply's hook (`captureExport`, which matched a session's capture against the
    * store's view): it is the candidate only while the dialog wants it, no stop is under way here, and it is of what
    * shows: the shown lineage, or for no session, the same run and still no session. Events and transcript come from the
@@ -2889,6 +2885,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       });
     });
   }
+  /**
+   * Readies the page for a rewind step's commit or a reinstatement, which begins the host's recording anew: after a
+   * Player error, the recording up to the error is kept for the debug export first. Its callers await what it returns.
+   */
   function beforeRewindRestart(): void | Promise<void> {
     // The recording up to a Player error is captured before the host begins the recorder anew.
     return failureRecording.beforeRestart();

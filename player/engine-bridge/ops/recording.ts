@@ -79,10 +79,8 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
       checkArguments: (args) => isRecord(args) && exactly(args, ["run"]) && isRun(args.run),
       run: (args) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        advanceExportObservation(owner, {
-          kind: "retire",
-          run: (args as { readonly run: number }).run,
-        });
+        const { run } = args as { readonly run: number };
+        advanceExportObservation(owner, { kind: "retire", run });
         return { result: null };
       },
     },

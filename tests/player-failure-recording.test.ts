@@ -34,8 +34,9 @@ function fakeBridge() {
     },
     releaseRecording: async (ticket: string) => void released.push(ticket),
   };
-  // EVIDENCE: fixture: the owner calls only `read` and `releaseRecording` of a bridge, which this fake has.
-  return { bridge: bridge as unknown as PlayerBridge, reads, released };
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner calls only `read` and `releaseRecording` of a bridge, which this fake has.
+  const typed = bridge as unknown as PlayerBridge;
+  return { bridge: typed, reads, released };
 }
 
 /** The reply each settlement gives the capture with ticket `ticket`. */
@@ -63,7 +64,7 @@ interface Outcome {
 
 async function runCase(settlement: Settlement, before: Before): Promise<Outcome> {
   const { bridge, reads, released } = fakeBridge();
-  // EVIDENCE: fixture: the owner reads only a stopped session's `connection`.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads only a stopped session's `connection`.
   const stopped = { connection: bridge } as unknown as PlayerSession;
   const owner = useFailureRecording();
   owner.stopped(stopped);
@@ -125,7 +126,7 @@ test("the failure recording latches its first capture, a restart waits for it, a
 
 test("a retired activation's ticket is released, and the next activation captures anew", async () => {
   const { bridge, reads, released } = fakeBridge();
-  // EVIDENCE: fixture: the owner reads only a stopped session's `connection`.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads only a stopped session's `connection`.
   const stopped = { connection: bridge } as unknown as PlayerSession;
   const owner = useFailureRecording();
   owner.stopped(stopped);

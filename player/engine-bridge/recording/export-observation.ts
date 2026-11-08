@@ -1,3 +1,5 @@
+import { exactly, isRecord } from "../argument-checks.js";
+
 /*
  * The export observation (L5h.3b): what a debug export of a session observes in the host, decided by one function,
  * `advanceExportObservation`, over closed observations. A diagnostic run is the Player activation that a Start or a
@@ -31,14 +33,12 @@ export function runIncident(owner: ExportObservation, run: number | null): Expor
 
 /** Whether `value` is a halt's stop arguments: an error name, and whole run and stop numbers. */
 export function isStopArguments(value: unknown): value is StopArguments {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const keys = Object.keys(value);
-  const { error, run, stop } = value as Record<string, unknown>;
   return (
-    keys.length === 3 &&
-    typeof error === "string" &&
-    Number.isSafeInteger(run) &&
-    Number.isSafeInteger(stop)
+    isRecord(value) &&
+    exactly(value, ["error", "run", "stop"]) &&
+    typeof value.error === "string" &&
+    Number.isSafeInteger(value.run) &&
+    Number.isSafeInteger(value.stop)
   );
 }
 

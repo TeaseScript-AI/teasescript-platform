@@ -158,7 +158,7 @@ test("a debug export's capture observes the identity, marks, incident and record
 
 test("the observation's deciding function holds a stop pending until its commit, keeps the first incident, and forgets a retired run", () => {
   const owner = new ExportObservation();
-  const session = { run: null, observation: null } as { run: number | null; observation: unknown };
+  const session: { run: number | null; observation: unknown } = { run: null, observation: null };
   const stop = (at: number, error = "TypeError") => ({ error, run: 1, stop: at });
   // EVIDENCE: fixture: an observed session is its run and latest observation, which this literal has.
   const observed = session as ObservedSession;
