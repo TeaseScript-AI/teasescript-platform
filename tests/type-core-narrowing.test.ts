@@ -1624,6 +1624,69 @@ test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 P
   );
 });
 
+test("a test that holds removes kinds, not the read's cause: its read's warning names the word the read without it names (#2024)", () => {
+  // (a program's outcome, its diagnostics' kinds, sites and context words, and its checks, alike in four modes)
+  const answer = (source: string): string => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const answers = MODES.map((mode) => {
+      const { outcome, diagnostics, checks } = inMode(mode, () => compactAnalysis(request));
+      return [
+        outcome,
+        ...diagnostics.map((d) => `${d.kind} ${d.site.offset} ${d.context}`),
+        ...checks.map((c) => `${c.kind} ${c.target} ${c.site.offset}`),
+      ].join(", ");
+    });
+    for (const [index, other] of answers.entries())
+      assert.equal(other, answers[0], `${source} ${JSON.stringify(MODES[index])}`);
+    return answers[0]!;
+  };
+  // (a read's one warning and its check at the read)
+  const warned = (source: string, read: string, word: string, check = "empty-check"): string => {
+    const at = source.indexOf(read);
+    return `warning-runtime-check, member-read ${at} ${word}, ${check} xs ${at}`;
+  };
+  // the fixture record cp9-cells/3b/review-early/astra-r2-fence-6 and the issue's three controls
+  const loop = (head: string, store = "xs = []"): string =>
+    `let xs = [1]\n${head} {\n    repeat 2 {\n        say xs.first\n        ${store}\n    }\n}\nexit\n`;
+  const untested = "let xs = [1]\nrepeat 2 {\n    say xs.first\n    xs = []\n}\nexit\n";
+  for (const [name, source, check] of [
+    ["the record: a null test that holds", loop("if xs != null"), "empty-check"],
+    ["no test", untested, "empty-check"],
+    ["a test of the emptiness itself", loop("if xs.length > 0"), "empty-check"],
+    ["a null test a null store fails (U5)", loop("if xs != null", "xs = null"), "null-check"],
+  ] as const)
+    assert.equal(answer(source), warned(source, "xs.first", "loop", check), name);
+  // the family: each test that holds, each store whose word explains the read, each selection, against the same
+  // program without its test, which names one word
+  for (const form of ["xs != null", "xs is list"])
+    for (const [event, word] of [
+      ["a loop's store", "loop"],
+      ["a branch's store", "branch"],
+    ] as const)
+      for (const selection of ["first", "last"]) {
+        const read = `xs.${selection}`;
+        const body =
+          word === "loop"
+            ? `repeat 2 {\n    say ${read}\n    xs = []\n}`
+            : `if askBoolean "b" { xs = [] }\nsay ${read}`;
+        const twin = `let xs = [1]\n${body}\nexit\n`;
+        const tested = `let xs = [1]\nif ${form} {\n${body}\n}\nexit\n`;
+        const name = `${form}, ${event}, ${read}`;
+        assert.equal(answer(twin), warned(twin, read, word), `${name}: without the test`);
+        assert.equal(answer(tested), warned(tested, read, word), name);
+      }
+  // two reads under one test whose reads without it name different words keep their own: a narrowed read's class is
+  // keyed by its read's snapshot (`readSnapshot`: the exact path's signature at its node), which fixes that read's word
+  const both =
+    'let xs = [1]\nif xs != null {\n    if askBoolean "b" { xs = [] }\n    say xs.first\n    repeat 2 {\n        say xs.last\n        xs = []\n    }\n}\nexit\n';
+  const [first, last] = [both.indexOf("xs.first"), both.indexOf("xs.last")];
+  assert.equal(
+    answer(both),
+    `warning-runtime-check, member-read ${first} branch, member-read ${last} loop, empty-check xs ${first}, empty-check xs ${last}`,
+  );
+});
+
 /** The work one query charges, at k = 64 and 128, per doubling of the source: about 2 for linear work. */
 function queryDoubling(source: (k: number) => string, marker: string, delta: number): number {
   const [small, large] = [64, 128].map((k) => {

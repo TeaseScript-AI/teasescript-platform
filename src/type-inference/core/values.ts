@@ -402,12 +402,12 @@ export class Values {
   }
 
   /**
-   * A read that takes its narrowing G (N2, S10 part 2b): where G holds, G's items, or, where the exact path's
-   * definition D reaches the read, D's value (after G's entry: a preserving store there, the read's nearest candidate,
-   * §13.2 (2)) or D's value filtered by G's form (before it); where G fails, the read as before, marked (§3.2's
-   * fallback). A demand per read. The read, G's items and N2's query are always asked, so what it reads never depends
-   * on what they answer. G's kinds never wait on the read's own component (`narrowingValue`); were they still being
-   * solved, the read would ask N2 with no preserving store, the conservative answer.
+   * A read that takes its narrowing G (N2, S10 part 2b): where G holds, G's items under the read's own word, or, where
+   * the exact path's definition D reaches the read, D's value (after G's entry: a preserving store there, the read's
+   * nearest candidate, §13.2 (2)) or D's value filtered by G's form (before it); where G fails, the read as before,
+   * marked (§3.2's fallback). A demand per read. The read, G's items and N2's query are always asked, so what it reads
+   * never depends on what they answer. G's kinds never wait on the read's own component (`narrowingValue`); were they
+   * still being solved, the read would ask N2 with no preserving store, the conservative answer.
    */
   *#narrowedRead(narrowed: NarrowedRead, node: FlowNode | null): Work<readonly Item[]> {
     const { program, contract, guards, solver } = this.pass;
@@ -447,7 +447,16 @@ export class Values {
         root,
         narrowedItems(g.form, read.items, program.scope, this.#testSpelling(g.form)),
       );
-    return contract.entered(root, items);
+    // (G holds and no definition answers the read: G's kinds under the one word the read without G names, since a
+    // test that holds removes kinds, not the read's cause (#2024); a read with no word, or several, leaves G's items)
+    const worded = read.items.filter((item) => item.tag !== "empty" && item.context !== null);
+    const word = worded[0]?.context ?? null;
+    if (word === null || worded.some((item) => item.context !== word))
+      return contract.entered(root, items);
+    return contract.entered(
+      root,
+      items.map((item): Item => (item.tag === "empty" ? item : { ...item, context: word })),
+    );
   }
 
   /**
