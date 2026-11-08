@@ -154,6 +154,9 @@ test(
         "src/café.ts",
         "src/-dash.ts",
         "src/[bracket].ts",
+        // a pathspec glob that would also match the next name
+        "src/star*.ts",
+        "src/starry.ts",
       ];
       write(root, {
         ".gitattributes": "*.ts diff=dup\n",
