@@ -176,6 +176,47 @@ The local fragmented-class rule catches direct interpolation/concatenation in Vu
 `require-static-classes`, it permits safe helpers; it does not resolve arbitrary helper bodies, aliased
 class builders or data flow. Review those paths when changing them.
 
+Disabled controls take the theme's `text-disabled`, `surface-disabled` and `border-disabled` roles from one unlayered
+rule in `player/vue/src/style.css`, which overrides Tailwind's layered utilities. An opacity class on the element's own
+disabled state therefore never shows, or with `!important` overrides the theme's disabled treatment.
+`design/no-disabled-opacity` refuses both:
+- **Routes.** It reads class text from four routes only: a static `class`, a `:class` expression, a direct
+  `v-bind="{ … }"` object's statically named `class` property, and the arguments of `cn`, `clsx` and `cva`. Class text
+  built elsewhere (helpers, spreads, data flow) is not read; the fragmented-class rule shares these routes.
+- **Recognition.** Every class that names `opacity` must parse under a closed class grammar (`plugin.mjs`); one it cannot
+  read, with quotes, a backslash or unbalanced brackets, is refused by name.
+- **Admission.** The variants before an opacity utility are admitted only in a closed set of forms that cannot select
+  the element's own disabled state (`ADMITTED_VARIANTS`): breakpoints, media and direction, element states,
+  pseudo-elements (only as the last variant, as Tailwind nests what follows one), `aria-*`, data attributes other than
+  `data-disabled`, and `group-*`/`peer-*`, which read another element.
+- **Refusals.** `disabled`, `data-disabled`, `data-[disabled…]` and arbitrary selectors naming `:disabled`, `[disabled]`
+  or `[data-disabled]` are refused as overridden; any other variant, such as another arbitrary selector or `not-*`, by
+  name until a row admits it.
+
+`aria-disabled` stays admitted: the shared rule does not cover it, and it marks controls that dim while busy yet keep
+focus.
+
+The rule's tests check it against Tailwind's own output (`tools/design-lint/oracle.mjs`).
+- **The oracle.** Tailwind compiles each tested class with the Player's `style.css`. `postcss` finds the selector of
+  each `opacity` declaration, and `postcss-selector-parser` reads its subject compounds, expanding `:is()` and
+  `:where()`.
+- **Its verdicts.** A class is refused when a subject holds `:disabled`, `[disabled]` or `[data-disabled…]`, or when
+  its selector holds anything outside the oracle's inventory of known subject atoms: a nested rule, `:not`, or a
+  functional pseudo-class with another argument than the admitted variants emit. Every admitted tested class must
+  compile cleanly.
+- **What the tests cover.** A generated family of spellings × variant order × utility spellings, a matrix of 88
+  admitted representatives in both orders, and each route.
+
+Named residuals:
+- a class the grammar reads but Tailwind reads differently, with the oracle rows as its check (an admitted class for
+  which Tailwind emits no CSS sets no opacity);
+- parameterised admitted forms beyond the tested rows;
+- a utility that sets opacity without naming it.
+
+The oracle uses Tailwind's `__unstable__loadDesignSystem`, as `@shadcn/lint` does, so a Tailwind upgrade that changes
+that API fails the oracle tests loudly. Then update `loadTailwind` in `oracle.mjs` to the new API, or pin Tailwind until
+it can be. Keep the rule's tests running against Tailwind's output, never without the oracle.
+
 These checks do not inspect CSS declarations, compute contrast, validate author colors, or prove visual
 consistency. Scoped/global CSS, runtime style objects and externally supplied classes still need review
 and relevant browser checks. `no-inline-styles` stays off because authored styles, virtualizer offsets

@@ -41,6 +41,7 @@
     "player/**/*.ts",
     "player/vue/**/*.{css,vue}",
     "tests/**/*.ts",
+    "tools/design-lint/**/*.mjs",
     "tools/oxlint/**/*.mjs",
     "tools/oxlint/**/*.ts",
     "tools/local-agent/**/*.{cjs,mjs}"
