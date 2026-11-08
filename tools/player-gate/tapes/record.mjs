@@ -2,8 +2,9 @@
 // in-process host (`tests/gate/driver.ts`), the adapter oracle's judgment (`tests/gate/oracle.ts`), and a replay in a
 // fresh Node Worker (`tests/gate/tape.ts`). Writes each tape, one report line per package and the mechanism census.
 // Run in a built tree (`dist/tests/gate/`):
-//   node tools/player-gate/tapes/record.mjs --out DIR [--f DIR] [--k DIR] [--shard I/N]
-// --f: F-interactive's input catalogs (one JSON per package); --k: K's package folders. Exit 0 when every tape agrees
+//   node tools/player-gate/tapes/record.mjs --out DIR [--f DIR] [--k DIR] [--fixtures DIR] [--shard I/N]
+// --f: F-interactive's input catalogs (one JSON per package); --k: K's package folders; --fixtures: the gate's own
+// sources (`tests/gate/fixtures/*.tease`, family G), one per mechanism group the corpus never meets. Exit 0 when every tape agrees
 // with the oracle and replays unchanged, 1 when one does not (an incomplete outcome is reported, not a failure).
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
@@ -17,10 +18,12 @@ const { values } = parseArgs({
     out: { type: "string" },
     f: { type: "string" },
     k: { type: "string" },
+    fixtures: { type: "string" },
     shard: { type: "string", default: "1/1" },
   },
 });
-if (!values.out) throw new Error("usage: record.mjs --out DIR [--f DIR] [--k DIR] [--shard I/N]");
+if (!values.out)
+  throw new Error("usage: record.mjs --out DIR [--f DIR] [--k DIR] [--fixtures DIR] [--shard I/N]");
 const dist = resolve("dist");
 const load = (path) => import(pathToFileURL(join(dist, path)).href);
 const { createInProcessBackend } = await load("player/engine-bridge/in-process.js");
@@ -66,6 +69,17 @@ if (values.k)
           unreadableFiles: catalog.unreadable,
         };
       },
+    });
+if (values.fixtures)
+  for (const file of readdirSync(values.fixtures)
+    .filter((name) => name.endsWith(".tease"))
+    .sort())
+    packages.push({
+      family: "G",
+      name: file.slice(0, -6),
+      project: async () => ({
+        files: [{ path: "main.tease", source: readFileSync(join(values.fixtures, file), "utf8") }],
+      }),
     });
 const [shard, shards] = values.shard.split("/").map(Number);
 const mine = packages.filter((_, index) => index % shards === shard - 1);

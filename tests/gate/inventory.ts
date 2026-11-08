@@ -3,9 +3,10 @@ import type {
   InteractionTemporalKind,
   InteractionUiPayload,
 } from "../../src/plan/model.js";
-import type {
-  RuntimeLockActionSnapshot,
-  RuntimePendingActionSnapshot,
+import {
+  CAPTURE_UNAVAILABLE_REASONS,
+  type RuntimeLockActionSnapshot,
+  type RuntimePendingActionSnapshot,
 } from "../../src/runtime/actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "../../src/runtime/events.js";
 import { CANDIDATE_OPS, type CandidateOp } from "./candidates.js";
@@ -95,7 +96,6 @@ const SETTLEMENTS = {
   "mediaPlayback:completed:failed": true,
   "storageWrite:completed:stored": true,
   "storageWrite:completed:failed": true,
-  "capture:completed": true,
   "fileStore:completed:stored": true,
   "fileStore:completed:read": true,
   "fileStore:completed:hashed": true,
@@ -113,17 +113,27 @@ const SETTLEMENTS = {
   "media:finished": true,
   "media:stopped": true,
   "permanentButton:removed": true,
-} as const satisfies Record<SettlementKey<Settlement>, true>;
+} as const satisfies Record<SettlementKey<Exclude<Settlement, { actionKind: "capture" }>>, true>;
+/** A capture's settlement by what it gave: a photo, or no camera with its reason. */
+const CAPTURES = [
+  "capture:completed:captured",
+  ...CAPTURE_UNAVAILABLE_REASONS.map((reason) => `capture:completed:unavailable:${reason}`),
+];
 
-/** A settlement's key: its action kind, its settlement kind and its outcome, when it has one. */
-const settlementKey = (settlement: Settlement): string =>
-  [
+/** A settlement's key: its action kind, its settlement kind and its outcome (a capture's: what it gave), if any. */
+const settlementKey = (settlement: Settlement): string => {
+  if (settlement.actionKind === "capture")
+    return settlement.result !== null
+      ? "capture:completed:captured"
+      : `capture:completed:unavailable:${settlement.unavailableReason ?? "unknown"}`;
+  return [
     settlement.actionKind,
     settlement.settlementKind,
     "outcome" in settlement ? settlement.outcome : undefined,
   ]
     .filter((part) => part !== undefined)
     .join(":");
+};
 
 const prefixed = (prefix: string, keys: Readonly<Record<string, true>>) =>
   Object.keys(keys).map((key) => `${prefix} ${key}`);
@@ -133,8 +143,33 @@ export const MECHANISMS: readonly string[] = [
   ...prefixed("shown", SHOWN),
   ...prefixed("event", EVENTS),
   ...prefixed("settlement", SETTLEMENTS),
+  ...CAPTURES.map((key) => `settlement ${key}`),
   ...CANDIDATE_OPS.map((op) => `accepted ${op}`),
+  "accepted answerImage",
+  "host openUrl tab",
 ];
+
+/**
+ * What this policy cannot meet, with its reason (the tape plan §5, and what the gate fixtures showed): the census
+ * names these beside its computed gaps, and they stay named coverage residuals, never claims that a state is unreachable.
+ */
+export const POLICY_RESIDUALS: Readonly<Record<string, string>> = {
+  "accepted answerImage": "no candidate answers an image in this policy",
+  "settlement capture:completed:captured": "the table answers a capture unavailable only",
+  "host openUrl tab": "the tab an `openUrl` opens is a host effect outside the bridge",
+  "settlement fileStore:completed:stored": "the table answers a file store failed only",
+  "settlement fileStore:completed:read": "the table answers a file store failed only",
+  "settlement fileStore:completed:hashed": "the table answers a file store failed only",
+  "settlement lock:completed:locked": "the table answers a lock's work failed only",
+  "settlement lock:completed:opened": "the table answers a lock's work failed only",
+  "settlement lock:completed:notOpened": "the table answers a lock's work failed only",
+  "settlement lock:completed:unreadable": "the table answers a lock's work failed only",
+  "settlement chatPacingGate:skipped": "pacing is time only in this policy; no candidate skips it",
+  "settlement interaction:timedOut": "the table answers a timed interaction before time moves",
+  "settlement storageWrite:completed:failed": "the table completes a storage write as stored only",
+  "settlement mediaPlayback:completed:failed": "the table reports a medium loaded only",
+  "event scriptStorageEdited": "an external storage edit is no op the tapes send",
+};
 
 const shownKind = (action: RuntimePendingActionSnapshot): ShownKind => {
   if (action.kind === "lock") return `lock:${action.phase}`;

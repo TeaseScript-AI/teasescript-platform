@@ -1,0 +1,7 @@
+// The gate's form-field fixture: one field of each kind the corpus never shows, all required, and a cancel button.
+let answers = askForm "Settings", cancel: "Back", fields: {
+    amount: { type: "number" }, name: { type: "text" }, level: ["Low", "High"],
+    day: { type: "date" }, moment: { type: "time" }, when: { type: "datetime" }
+}
+say "Submitted", instant
+exit

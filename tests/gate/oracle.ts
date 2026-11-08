@@ -62,6 +62,13 @@ function publicationDifference(
   return null;
 }
 
+/** Whether `reply`, of a session-free request (`prepare`, the final capture), carries no session envelope or publication. */
+const sessionFree = (reply: TapeReply & { ok: true }) =>
+  reply.session === null &&
+  reply.revision === null &&
+  reply.eventsThrough === null &&
+  reply.view === null;
+
 /**
  * Judges `entries` (a tape of `project` started with `options`) against the adapter; `null` when all agree. With
  * `complete`, the tape must end in a final capture that agrees.
@@ -80,6 +87,8 @@ export function judgeTape(
     const reply = entry.reply;
     if (entry.op === "prepare") {
       if (!reply.ok) return differ("prepare was refused");
+      if (!sessionFree(reply))
+        return differ("prepare's reply carries a session envelope or publication");
       // EVIDENCE: validation: `prepare` replies from the same build with a `PrepareResult`.
       const result = reply.result as { kind: string; diagnostics?: unknown };
       if (result.kind !== (compiled.plan === null ? "notCompiled" : "prepared"))
@@ -102,7 +111,9 @@ export function judgeTape(
       const capture = reply.ok
         ? (reply.result as { revision: number; eventsThrough: number; checkpointJson: string })
         : null;
-      if (capture === null) return differ("the final capture was refused");
+      if (capture === null || !reply.ok) return differ("the final capture was refused");
+      if (!sessionFree(reply))
+        return differ("the final capture's reply carries a session envelope or publication");
       if (capture.revision !== session.revision || capture.eventsThrough !== session.events.length)
         return differ("the final capture's revision or events cursor differs from the adapter's");
       if (capture.checkpointJson !== createPlayerRuntimeRestorePoint(session).checkpointJson)

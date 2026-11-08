@@ -14,7 +14,7 @@ import {
   type CandidateOp,
 } from "./gate/candidates.js";
 import { driveTape, isComplete, type TapeRun } from "./gate/driver.js";
-import { inventoryOf, MECHANISMS } from "./gate/inventory.js";
+import { inventoryOf, MECHANISMS, POLICY_RESIDUALS } from "./gate/inventory.js";
 import { judgeTape } from "./gate/oracle.js";
 import { OUTCOMES } from "./gate/outcomes.js";
 import { TAPE_START } from "./gate/start.js";
@@ -54,6 +54,10 @@ interface State {
   readonly outcome: string;
   /** Behind the timer, when its tick changes what is accepted. */
   readonly timed?: { readonly accepted: readonly string[]; readonly outcome: string };
+  /** Accepted inputs after which the tape is cut, when not the driver's own. */
+  readonly cut?: number;
+  /** Further facts the tape must show, read from its own entries. */
+  readonly facts?: (run: TapeRun) => void;
 }
 
 type Interaction = Extract<PlayerCriticalState["foregroundAction"], { kind: "interaction" }>;
@@ -84,6 +88,39 @@ const integerForm = (field: string) => `let x = askForm fields: { n: { ${field} 
 const FORM_BOUNDED = integerForm('type: "integer", min: 10, max: 20');
 /** The editor open on the form's field: the table's own "open field" step. */
 const editorOpen = (state: PlayerCriticalState) => formField(state)?.editor?.fieldId === "n";
+
+/** A permanent button whose block shows 25 buttons, behind 60 main buttons: pressed at 10, busy at 20 and 30, idle at 40. */
+const BUSY = [
+  'showPermanentButton "Help" {',
+  ...Array.from({ length: 25 }, (_, index) => ` showButton "Handler ${index}"`),
+  "}",
+  ...Array.from({ length: 60 }, (_, index) => `showButton "Main ${index}"`),
+  "exit",
+].join("\n");
+
+/**
+ * Each permanent-button press the tape attempted: the button label the foreground showed just before it (a handler's
+ * button while the block runs, a main one while it is idle) and the press's result kind.
+ */
+function presses(run: TapeRun): { readonly shown: string | null; readonly result: unknown }[] {
+  let shown: string | null = null;
+  const found = [];
+  for (const entry of run.entries) {
+    if (entry.op === "pressPermanentButton" && entry.reply.ok)
+      found.push({ shown, result: resultKind(entry.reply.result) });
+    // EVIDENCE: validation: a reply's view is a bridge publication, with the session's whole state.
+    const view = (entry.reply.ok ? entry.reply.view : null) as {
+      state?: PlayerCriticalState;
+    } | null;
+    const ui = view?.state === undefined ? undefined : interaction(view.state)?.ui;
+    if (view?.state !== undefined) shown = ui?.kind === "button" ? ui.buttonLabel : null;
+  }
+  return found;
+}
+
+/** A reply result's `kind`, when it has one. */
+const resultKind = (result: unknown) =>
+  typeof result === "object" && result !== null && "kind" in result ? result.kind : undefined;
 
 const STATES: readonly State[] = [
   {
@@ -276,7 +313,50 @@ const STATES: readonly State[] = [
     accepted: ["stepTime", "completeStorageWrite"],
     outcome: "halted",
   },
+  {
+    axis: "permanent button",
+    state: "idle → busy → idle",
+    body: BUSY,
+    cut: 42,
+    shows: (s) =>
+      s.backgroundActions.some((action) => action.kind === "permanentButton") &&
+      interaction(s)?.ui.kind === "button",
+    accepted: [...Array.from({ length: 10 }, () => "activateButton"), "pressPermanentButton"],
+    declined: { "pressPermanentButton:busy": 2 },
+    outcome: "cut",
+    // Busy exactly while the block's buttons show, pressed while a main button shows.
+    facts: (run) =>
+      assert.deepEqual(
+        presses(run).map(({ shown, result }) => [shown?.split(" ")[0], result]),
+        [
+          ["Main", "pressed"],
+          ["Handler", "busy"],
+          ["Handler", "busy"],
+          ["Main", "pressed"],
+        ],
+      ),
+  },
 ];
+
+/** The witness axes and their values, declared apart from the states: the family is exactly these, each composed. */
+const AXES: Readonly<Record<string, readonly string[]>> = {
+  lock: ["work", "ask without cancel", "ask with cancel"],
+  form: [
+    "required unbounded",
+    "bounded 10-20",
+    "editor open",
+    "unchanged edit",
+    "prefilled",
+    "bounded 40-50",
+    "optional only",
+  ],
+  image: ["skippable", "mandatory"],
+  media: ["awaiting load", "playing"],
+  time: ["delay", "pacing gate"],
+  host: ["storage write during a delay"],
+  "permanent button": ["idle → busy → idle"],
+};
+const COMPOSITIONS = ["", " + timer"];
 
 interface Case extends State {
   readonly source: string;
@@ -368,14 +448,23 @@ test("the table, the outcomes and the oracle cover the same ops", () => {
   const oracle: Readonly<Record<CandidateOp, unknown>> = ADAPTER_OPS;
   for (const op of CANDIDATE_OPS)
     assert.ok(Object.hasOwn(oracle, op), `'${op}' has no oracle path`);
+  for (const residual of Object.keys(POLICY_RESIDUALS))
+    assert.ok(MECHANISMS.includes(residual), `the residual '${residual}' is no inventory key`);
+});
+
+test("the witnesses are exactly the declared axis values, each alone and behind a timer", () => {
+  const declared = Object.entries(AXES).flatMap(([axis, values]) =>
+    values.flatMap((value) => COMPOSITIONS.map((composition) => `${axis}/${value}${composition}`)),
+  );
+  assert.deepEqual(CASES.map(name).sort(), declared.sort());
 });
 
 for (const axisCase of CASES)
   test(`witness ${name(axisCase)}`, async () => {
-    const run = await record(
-      axisCase.source,
-      axisCase.setup === undefined ? {} : { candidates: withSetup(axisCase.setup) },
-    );
+    const run = await record(axisCase.source, {
+      ...(axisCase.setup === undefined ? {} : { candidates: withSetup(axisCase.setup) }),
+      ...(axisCase.cut === undefined ? {} : { cut: axisCase.cut }),
+    });
     const shown = stateAt(run, axisCase.at ?? 0);
     assert.ok(axisCase.shows(shown), "the session shows the intended state at its point");
     assert.equal(
@@ -387,24 +476,14 @@ for (const axisCase of CASES)
     for (const [key, times] of Object.entries(axisCase.declined ?? {}))
       assert.equal(run.census.declined[key], times, key);
     assert.equal(run.outcome.kind, axisCase.outcome, JSON.stringify(run.outcome));
+    axisCase.facts?.(run);
     await assertJudged(axisCase.source, run);
     for (const key of inventoryOf(run.entries))
       assert.ok(MECHANISMS.includes(key), `${key} is not in the inventory's list`);
   });
 
-/** A reply result's `kind`, when it has one. */
-const resultKind = (result: unknown) =>
-  typeof result === "object" && result !== null && "kind" in result ? result.kind : undefined;
-
 const formSource = (min: number, max: number) =>
   integerForm(`type: "integer", min: ${min}, max: ${max}`);
-const BUSY = [
-  'showPermanentButton "Help" {',
-  ...Array.from({ length: 25 }, (_, index) => ` showButton "Handler ${index}"`),
-  "}",
-  ...Array.from({ length: 60 }, (_, index) => `showButton "Main ${index}"`),
-  "exit",
-].join("\n");
 const without =
   (rows: (row: string) => boolean): Candidates =>
   (session, accepted) =>
@@ -596,7 +675,7 @@ test("control null decline: a mandatory image's skip is a recorded null, and the
   );
 });
 
-test("control publication: dropped events, a shifted start, another revision and a lost capture each fail the oracle", async () => {
+test("control publication: dropped events, a shifted start, another revision, a lost capture and a session-free reply with an envelope each fail the oracle", async () => {
   const source =
     'say "One", instant\nshowButton "Go"\nsay "Two", instant\nsay "Three", instant\nshowButton "End"\nexit';
   const run = await record(source);
@@ -650,6 +729,24 @@ test("control publication: dropped events, a shifted start, another revision and
     judgeTape(project(source), TAPE_START, run.entries.slice(0, -1), { complete: true })?.what,
     "a complete tape without its final capture",
   );
+  // The session-free replies (prepare, the final capture) carry no session envelope or publication.
+  const startReply = run.entries[started]?.reply;
+  assert.ok(startReply?.ok);
+  const capture = run.entries.length - 1;
+  const prepare = run.entries.findIndex((entry) => entry.op === "prepare");
+  for (const [index, change, what] of [
+    [capture, { revision: 100 }, "the final capture's"],
+    [capture, { eventsThrough: 100 }, "the final capture's"],
+    [capture, { view: startReply.view }, "the final capture's"],
+    [prepare, { view: startReply.view }, "prepare's"],
+  ] as const)
+    assert.equal(
+      oracleOn(
+        source,
+        mutated(run.entries, index, (r) => ({ ...r, ...change })),
+      ),
+      `${what} reply carries a session envelope or publication`,
+    );
 });
 
 test("control preparation: a false notCompiled fails the oracle; a real compile failure agrees and replays", async () => {

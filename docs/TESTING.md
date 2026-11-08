@@ -671,7 +671,8 @@ replays on every backend, failing at its first differing entry. Coverage is what
 `tests/player-gate-tapes.test.ts` holds the structural claim (the table, the outcome readings and `ADAPTER_OPS` cover
 the same ops) and bounded runtime witnesses generated from the engine's guards, with their controls' mutants. The
 workload runs outside CI on a queue worker: `node tools/player-gate/tapes/record.mjs --out DIR --f DIR --k DIR
-[--shard I/N]` in a built tree records, judges and replays every F and K package, preparation-only ones included, and
+--fixtures tests/gate/fixtures [--shard I/N]` in a built tree records, judges and replays every F and K package and
+the gate's fixtures (one small source per mechanism group the corpus never meets), preparation-only ones included, and
 reports what each tape met (`inventory.ts`); `census.mjs` counts every mechanism, lists those no tape met and those met
 only in incomplete tapes, and picks the browser and Pixel cohorts.
 
