@@ -120,13 +120,15 @@ export interface PropertySource {
  * #1456: a prefix's property index, once per its stores (`Contract.propertyIndexes`): its sources in order, and those
  * F11's `missing` names in their writers' order (F28, with the sharing on too: #1323); per property's path below the
  * prefix (`pathAt`), the sources holding it, in order; and, as a property is asked, F11's witness of those without it
- * (`propertyLack`).
+ * (`propertyLack`) and its holders' groups at each path asked below it.
  */
 export interface PropertyIndex {
   readonly sources: readonly PropertySource[];
   readonly byWriter: readonly PropertySource[];
   readonly holders: ReadonlyMap<number, readonly PropertySource[]>;
   readonly lacking: Map<number, PropertyLack>;
+  /** #1948: with the sharing on, per path below the prefix, its first step's holders' groups there (`holderGroups`). */
+  readonly folds: Map<string, readonly LevelGroup[]>;
 }
 
 /**

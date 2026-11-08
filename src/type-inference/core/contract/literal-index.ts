@@ -706,7 +706,7 @@ export function propertyIndex(
         : 0,
   );
   contract.keep(4);
-  return { sources, byWriter, holders, lacking: new Map() };
+  return { sources, byWriter, holders, lacking: new Map(), folds: new Map() };
 }
 
 /**

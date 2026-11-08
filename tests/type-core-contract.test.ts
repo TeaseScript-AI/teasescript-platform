@@ -1097,6 +1097,96 @@ test("a deeper read below a place replaced by objects keeps each object's absenc
 });
 
 /**
+ * #1948, #1585: a path below a property of a place replaced by closed objects answers as the place's levels do at every
+ * depth: in every mode, each read's contract equals its levels' items, merged (`levelsAt`, a fold of every object at
+ * each step down), so reading the objects holding its first property keeps each holder's answer at the path, the
+ * others' one `missing`, its earliest literal writer and its place among the holders' answers. The objects lack the
+ * property before, between and after its holders, the earliest lacking object is stored after the first, the holders
+ * merge at successive steps (and one stored between two others it merges with), and the holders' values are host
+ * data, an empty list, an object without the step and a list read at its element; the paths are read once in order and
+ * again in reverse, so the later reads come from the index and the fold it keeps. With the sharing on, each source's
+ * index answers a path of two or more steps.
+ */
+test("a path below a property of a place replaced by objects answers as its levels do at every depth, in every mode (#1948, #1585)", () => {
+  const sources: readonly {
+    readonly name: string;
+    readonly source: string;
+    readonly reads: readonly string[];
+  }[] = [
+    {
+      name: "the issue's shape (#1585)",
+      source:
+        "let value:integer = 1\nlet root = {f0: {n: value}}\nroot = {f1: {n: value}}\nroot = {f2: {n: value}}\nroot = {f3: {n: value}}\nexit",
+      reads: ["f0.n", "f1.n", "f2.n", "f3.n", "f0.absent", "absent.n"],
+    },
+    {
+      name: "lacking around its holders",
+      source:
+        'let root = {g: 1}\nroot = {f: {n: 1}}\nroot = {h: true}\nroot = {f: {n: "s"}}\nroot = {g: 2}\nexit',
+      reads: ["f.n", "f.absent", "g.n", "h.n"],
+    },
+    {
+      name: "the earliest lacking stored after the first",
+      source:
+        "let early = {g: 1}\nlet late = {k: 2}\nlet root = {f: {n: 1}}\nroot = late\nroot = early\nroot = {f: {n: 2.5}}\nexit",
+      reads: ["f.n", "k.n", "g.n"],
+    },
+    {
+      name: "merged at successive steps",
+      source:
+        'let root = {f: {q: {n: 1}}, g: 1}\nroot = {f: {q: {n: 1}}, g: "s"}\nroot = {f: {q: {n: 2}}, g: true}\nroot = {f: {q: {n: 1}}, h: 1}\nexit',
+      reads: ["f.q.n", "f.q", "f.q.absent", "f.absent.n"],
+    },
+    {
+      name: "merged with one stored between",
+      source:
+        'let root = {f: {q: {n: 1}, x: 1}, g: 1}\nroot = {f: {q: {n: 1}, x: "s"}, g: 2}\nroot = {f: {q: {n: 1}, x: 1}, g: "z"}\nroot = {h: 1}\nexit',
+      reads: ["f.q.n", "f.q.absent", "f.x", "f.q"],
+    },
+    {
+      name: "host data, an empty list and an object without the step",
+      source:
+        "let root = {f: {n: hostValue}}\nroot = {f: {n: []}}\nroot = {f: {}}\nroot = {g: 1}\nexit",
+      reads: ["f.n", "f.n.element", "f.absent"],
+    },
+    {
+      name: "a list read at its element",
+      source:
+        "let t:integer = 1\nlet root = {f0: [t]}\nroot = {f1: [t]}\nroot = {f2: [t]}\nroot = {f3: [t]}\nexit",
+      reads: ["f0.element", "f1.element", "f3.element", "absent.element"],
+    },
+  ];
+  const differing: string[] = [];
+  const deep = new Set<string>();
+  for (const { name, source, reads } of sources) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null, name);
+    for (const mode of MODES)
+      inMode(mode, () => {
+        const pass = narrowingPass(request);
+        const root = bindingOf(pass, "root");
+        const prefix = keyOf(root, []);
+        for (const read of [...reads, ...[...reads].reverse()]) {
+          const path = read.split(".");
+          const asked = pass.solver.run(pass.contract.contractOf(keyOf(root, path)));
+          const levels = pass.solver.run(levelsAt(pass.contract, prefix, stepsRest(path)));
+          if (itemsText(asked) !== itemsText(mergeItems(levels, pass.program.scope)))
+            differing.push(`${name}: ${read} ${JSON.stringify(mode)}`);
+        }
+        const held = pass.contract.propertyIndexes.get(pass.contract.prefixStores(prefix));
+        if (
+          held !== undefined &&
+          "folds" in held &&
+          [...held.folds.keys()].some((key) => key.includes("."))
+        )
+          deep.add(name);
+      });
+  }
+  assert.deepEqual(differing, []);
+  assert.deepEqual([...deep].sort(), sources.map(({ name }) => name).sort());
+});
+
+/**
  * #1456: the property index is the pass's, made again from the prefix's stores in each pass: a component reaching it
  * through a wrapper, replayed in a fresh pass through its names' packet from its first and its last member (each
  * making the paths in its own order), answers as it did; and a pass that made other paths first and asks the

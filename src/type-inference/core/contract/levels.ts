@@ -6,11 +6,12 @@ import {
   restPart,
   restRef,
   restTo,
+  someStepOf,
   stepsRest,
   type Rest,
 } from "./key-ids.js";
 import type { Contract } from "../contract.js";
-import { keyPlace, type Key } from "../definitions.js";
+import { keyPlace, SELECTED_TEXT, SELECTED_VALUE, type Key } from "../definitions.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
 import { EMPTY, firstWriter, mergeItems, REASON, type Item, type Writer } from "../items.js";
 import { stepName } from "../program.js";
@@ -37,6 +38,8 @@ import type {
   PrefixEntry,
   PrefixLevels,
   PrefixStores,
+  PropertyIndex,
+  PropertySource,
 } from "./model.js";
 
 // A prefix's levels (§4.6): its entries grouped at a path, and a literal's structure by path.
@@ -167,13 +170,23 @@ function closedObject(contract: Contract, entry: PrefixEntry): boolean {
 }
 
 /**
- * #1456: a prefix's contributions at a property below it where its entries are closed objects (`PrefixLevels.closed`),
- * from its property index (`propertyIndex`): the answers of the sources holding the property alone (each entry by
- * itself, the sharing off; on, their groups at the path, folded from theirs as `groupsAt` folds, never kept as the
- * prefix's, whose complete list a deeper path folds), and F11's one `missing` for those without it, with the earliest
- * literal writer, standing where the first of them stands among the holders (`propertyLack`); `null` for any other
- * prefix or path, which its levels answer, and for the prefix's reads before its index pays: its first at the levels'
- * own cost, so a prefix read once costs what its levels do, each later one until the reads reach the index's size.
+ * #1456: a prefix's contributions at a path below it whose first step is a property, where its entries are closed
+ * objects (`PrefixLevels.closed`), from its property index (`propertyIndex`): the answers of the sources holding the
+ * property alone (each entry by itself at the path, the sharing off; on, their groups at the path, folded from theirs
+ * one step at a time as `groupsAt` folds, never kept as the prefix's), and F11's one `missing` for those without it,
+ * with the earliest literal writer, standing where the first of them stands among the holders (`propertyLack`); `null`
+ * for any other prefix or path (a selection below the property: each entry by itself, `contractAlong`), which its
+ * levels answer, and for the prefix's reads before its index pays: its first at the levels' own cost, so a prefix
+ * read once costs what its levels do, each later one until the reads reach the index's size.
+ *
+ * #1948, #1585: the same at any depth below the property. What this reasons about lasts the pass's index of the
+ * prefix's settled stores (`Contract.propertyIndexes`): the prefix's groups it was made from, and the F11 `missing`
+ * it places where the first source without the property stands. Such a source is a closed object lacking the
+ * property, so its read at every path below the property is that `missing`, with its own object's writer, and nothing
+ * below; and each group's fold key holds its root object's property names at every path below the prefix
+ * (`foldGroups`' `above`), so a holder's group never merges with a group without the property at any of them. The
+ * groups the full fold makes at the path from the prefix's are then the holders' fold's, in the same order with the
+ * same members, and the others' items its one `missing`.
  */
 export function* propertyItems(
   contract: Contract,
@@ -182,7 +195,8 @@ export function* propertyItems(
   rest: Rest,
   flow: FlowSink | null = null,
 ): Work<readonly Item[] | null> {
-  if (rest.length !== 1 || !propertyOnly(rest.at(0)!)) return null;
+  if (rest.length === 0 || !propertyOnly(rest.at(0)!)) return null;
+  if (someStepOf(rest, (step) => step === SELECTED_VALUE || step === SELECTED_TEXT)) return null;
   const levels = prefixLevels(contract, asked, stores);
   if (!levels.closed) return null;
   const { work } = contract.pass.program;
@@ -237,14 +251,9 @@ export function* propertyItems(
       for (const item of yield* contract.entryAt(source.entry!, rest, flow)) out.push(item);
     }
   else {
-    contract.keep(holders.length);
     // (a fold's group stands where its first holder does: the holders in order, each group's first among them)
     let first = 0;
-    for (const group of foldGroups(
-      contract,
-      rest,
-      holders.map((source) => source.group!),
-    )) {
+    for (const group of holderGroups(contract, index, holders, rest)) {
       work.charge("invSteps");
       while (holders[first]!.group!.literal !== group.literal) first += 1;
       before(holders[first]!.at);
@@ -254,6 +263,36 @@ export function* propertyItems(
   }
   before(Infinity);
   return out;
+}
+
+/**
+ * #1948: a property's holders' groups at a path below a prefix of closed objects (`propertyItems`), the path's first
+ * step the property: folded from the holders' groups at the prefix one step at a time, as `groupsAt` folds every
+ * group, so each group's members stand in the order its parents merged at each step (a fold made at the path alone
+ * would merge them in the holders' order). Once per index and path, so the reads of the path's group share its members'
+ * name (`membersKey`) as they do at `groupsAt`'s; never kept as the prefix's groups, whose complete list a read
+ * without the index folds.
+ */
+function holderGroups(
+  contract: Contract,
+  index: PropertyIndex,
+  holders: readonly PropertySource[],
+  path: Rest,
+): readonly LevelGroup[] {
+  const memoKey = joinParts(restPart(path));
+  const known = index.folds.get(memoKey);
+  if (known !== undefined) return known;
+  contract.keepText(memoKey.length);
+  contract.keep(path.length === 1 ? holders.length : 1);
+  const groups = foldGroups(
+    contract,
+    path,
+    path.length === 1
+      ? holders.map((source) => source.group!)
+      : holderGroups(contract, index, holders, restTo(contract, path, path.length - 1)),
+  );
+  index.folds.set(memoKey, groups);
+  return groups;
 }
 
 /**
@@ -378,8 +417,8 @@ export function groupsAt(
 }
 
 /**
- * `groupsAt`'s fold at a path of the groups one step above it (`parents`), the marks collected; for a property of a
- * prefix of closed objects, its holders' groups alone (`propertyItems`).
+ * `groupsAt`'s fold at a path of the groups one step above it (`parents`), the marks collected; for a path below a
+ * property of a prefix of closed objects, its holders' groups alone (`propertyItems`).
  */
 function foldGroups(
   contract: Contract,
