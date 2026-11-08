@@ -159,7 +159,7 @@ export class InheritedProof implements Proof {
 function inheritedProof(admission: Admission, key: CanonicalKey): ProofDemand<InheritedProof> {
   const site = admission.pass.program.places[keyPlace(key)]?.site ?? null;
   return {
-    key: `a4|${isKeyId(key) ? `k${key}` : `t${key}`}`,
+    key: joinParts("a4", isKeyId(key) ? `k${key}` : `t${key}`),
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
