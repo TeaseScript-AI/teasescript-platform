@@ -20,7 +20,7 @@ import type {
   PlayerTransferRead,
   SessionImportReview,
   SessionTransferRead,
-} from "./usePlayerSession";
+} from "./session/persistence/useSessionTransfer";
 import type { SavedDataImportReview } from "./session/persistence/useSavedDataTransfer";
 
 // Imports saved data or a session exported from another Player, as a file or pasted text. Saved data goes into the

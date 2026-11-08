@@ -556,6 +556,7 @@ const COMPOSABLE_FILES = [
   "player/vue/src/session/persistence/useSavedValues.ts",
   "player/vue/src/session/persistence/useKeptSession.ts",
   "player/vue/src/session/persistence/useSavedDataTransfer.ts",
+  "player/vue/src/session/persistence/useSessionTransfer.ts",
 ] as const;
 /** The text of the session composable's files, one after another. */
 function composableText(): string {

@@ -109,16 +109,10 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     supersede: SESSION,
     ownedSection: SESSION,
     "usePlayerSession.readSavedData": READ,
-    reviewedImport: READ,
-    exportSession: READ,
     "usePlayerSession.savedPhoto": READ,
     resolveAsset: READ,
-    readTransfer: TRANSFER,
-    discardSessionReview: TRANSFER,
     "usePlayerSession.rememberScriptName": EDIT,
     "usePlayerSession.images.discard": EDIT,
-    sameMedium:
-      "compares a held photo's bytes with an imported one's, by position: it reaches no store",
   },
   "session/useActivationRun.ts": { "useActivationRun.retire": READ },
   "session/useCallView.ts": { viewCalls: SESSION },
@@ -126,6 +120,15 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     issueTracing: SESSION,
     applyDebugMode: SESSION,
     debugView: SESSION,
+  },
+  "session/persistence/useSessionTransfer.ts": {
+    useSessionTransfer: READ,
+    reviewedImport: READ,
+    exportSession: READ,
+    readTransfer: TRANSFER,
+    discardSessionReview: TRANSFER,
+    sameMedium:
+      "compares a held photo's bytes with an imported one's, by position: it reaches no store",
   },
   "session/persistence/useSavedDataTransfer.ts": {
     savedScripts: READ,

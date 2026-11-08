@@ -192,10 +192,15 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/persistence/useSavedDataTransfer.ts useSavedDataTransfer > importSavedData > owned:callback > commit:callback#2":
     ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback > replaceSession > admit:callback#1":
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > importSession > owned:callback > replaceSession > admit:callback#1":
     ["creation", ["BridgeClient.request"]],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback > replaceSession > admit:callback#2":
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > importSession > owned:callback > replaceSession > admit:callback#2":
     ["creation", ["BridgeClient.request"]],
+  // A session read for an import, released by the dialog that no longer imports it; a transfer's own, like its read.
+  "player/vue/src/usePlayerSession.ts usePlayerSession > discardSessionReview": [
+    "read",
+    ["BridgeClient.request"],
+  ],
   "player/vue/src/usePlayerSession.ts usePlayerSession > readTransfer": [
     "read",
     ["BridgeClient.request"],
@@ -397,11 +402,9 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "creation",
     ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback": [
-    "creation",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
-  ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback > replaceSession > commit:callback#4":
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > importSession > owned:callback":
+    ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > importSession > owned:callback > replaceSession > commit:callback#4":
     ["creation", ["BridgeClient.request"]],
   "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > keepIn > admit:callback": [
     "none",
@@ -691,6 +694,22 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/persistence/useSavedDataTransfer.ts useSavedDataTransfer {prepareStart}",
   "player/vue/src/session/persistence/useSavedDataTransfer.ts useSavedDataTransfer {retireRewind}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {importSavedData}",
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > discardSessionReview {discardSessionReview}",
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > exportSession {exportSession}",
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > importSession {importSession}",
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > readTransfer {readTransfer}",
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > reviewSessionImport {reviewSessionImport}",
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer {endSession}",
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer {prepareKept}",
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer {retireRewind}",
+  "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer {settlePlanJson}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > prepareKept {prepareKept}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > settlePlanJson {settlePlanJson}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {discardSessionReview}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {exportSession}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {importSession}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {readTransfer}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {reviewSessionImport}",
 ];
 
 /**

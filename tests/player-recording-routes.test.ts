@@ -251,6 +251,7 @@ const SESSION_FILES: readonly string[] = [
   "player/vue/src/session/persistence/useSavedValues.ts",
   "player/vue/src/session/persistence/useKeptSession.ts",
   "player/vue/src/session/persistence/useSavedDataTransfer.ts",
+  "player/vue/src/session/persistence/useSessionTransfer.ts",
 ];
 const ACTIVATION_FILES = [
   ...SESSION_FILES,

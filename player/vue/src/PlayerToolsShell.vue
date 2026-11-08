@@ -46,7 +46,7 @@ import type {
   SessionExport,
   SessionImportReview,
   SessionTransferRead,
-} from "./usePlayerSession";
+} from "./session/persistence/useSessionTransfer";
 import type { SavedDataImportReview } from "./session/persistence/useSavedDataTransfer";
 import type { SavedScript, StorageBundle } from "../../storage-transfer.js";
 import {
