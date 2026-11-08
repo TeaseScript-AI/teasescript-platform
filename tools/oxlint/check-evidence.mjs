@@ -1,5 +1,7 @@
 import { ts } from "ts-morph";
 
+import { scriptsOf } from "./comments.mjs";
+
 const blanketRuleNames = new Set([
   "all",
   "correctness",
@@ -76,13 +78,22 @@ function validateAllowedDirective(text) {
 }
 
 /**
- * Checks actual comments in a JavaScript or TypeScript source file for bounded lint exceptions.
+ * Checks actual comments in a JavaScript or TypeScript source file, or a `.vue` file's `<script>` blocks, for bounded
+ * lint exceptions.
  *
  * @param {string} fileName
  * @param {string} sourceText
  * @returns {{ fileName: string, line: number, column: number, message: string }[]}
  */
 export function checkEvidenceComments(fileName, sourceText) {
+  if (!fileName.endsWith(".vue")) return checkScript(fileName, sourceText, 0);
+  return scriptsOf(fileName, sourceText).flatMap(({ text, lineOffset }) =>
+    checkScript(fileName, text, lineOffset),
+  );
+}
+
+/** The exceptions of one script, `lineOffset` the lines of its file before it. */
+function checkScript(fileName, sourceText, lineOffset) {
   const scriptKind = ts.getScriptKindFromFileName(fileName) || ts.ScriptKind.TS;
   const sourceFile = ts.createSourceFile(
     fileName,
@@ -114,7 +125,7 @@ export function checkEvidenceComments(fileName, sourceText) {
         const location = sourceFile.getLineAndCharacterOfPosition(range.pos);
         diagnostics.push({
           fileName,
-          line: location.line + 1,
+          line: location.line + 1 + lineOffset,
           column: location.character + 1,
           message,
         });

@@ -1,4 +1,3 @@
-import { globSync } from "node:fs";
 import { ts } from "ts-morph";
 
 import { lintFiles } from "./files.mjs";
@@ -7,12 +6,9 @@ import { lintFiles } from "./files.mjs";
 // other file whole), and each script's comments, through the TypeScript scanner, so strings and code are never read
 // as comments.
 
-/** The files the comment checks read: the linted files and the `.vue` files. */
-export function checkedFiles(root) {
-  return [
-    ...lintFiles(),
-    ...globSync("**/*.vue", { cwd: root, exclude: ["node_modules/**", "dist/**"] }),
-  ].sort();
+/** The files the comment checks read: the linted files, `.vue` included. */
+export function checkedFiles() {
+  return lintFiles();
 }
 
 /** `text`'s scripts, each parsed, with the line of the file it starts on (0 for a whole file). */

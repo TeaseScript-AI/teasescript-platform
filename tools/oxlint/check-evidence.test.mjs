@@ -128,3 +128,26 @@ const value = 1; // eslint-disable-line anti-slop/example
     ],
   );
 });
+
+test("reads a .vue file's script blocks only, at their lines in the file", () => {
+  const sourceText = `<template>
+  <!-- // eslint-disable-next-line no-console -->
+  <p>// oxlint-disable-next-line anti-slop/example</p>
+</template>
+<script setup lang="ts">
+// oxlint-disable-next-line anti-slop/example
+const first = value;
+</script>
+<script lang="ts">
+/* eslint-disable */
+</script>
+`;
+
+  assert.deepEqual(
+    checkEvidenceComments("Fixture.vue", sourceText).map(({ line, column }) => ({ line, column })),
+    [
+      { line: 6, column: 1 },
+      { line: 10, column: 1 },
+    ],
+  );
+});
