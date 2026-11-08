@@ -56,6 +56,7 @@ test("only a recovery notice the player must act on is not dismissible", () => {
     run: () => {},
     enabled: () => true,
   });
+  assert.equal(retry.message, "Couldn't return to the session.");
   assert.equal(retry.action?.label, "Retry return to session");
   assert.equal(retry.dismissible, false);
 });

@@ -35,10 +35,10 @@ const idle = computed(() => !props.working && !props.switching && !props.rewind.
       data-rewind-inspection
     >
       <Badge variant="secondary" data-rewind-fork>Debug fork</Badge>
-      <p v-if="earlier !== null" class="min-w-0 flex-1 break-words" data-rewind-earlier>
+      <p v-if="earlier !== null" class="rewind-lead min-w-0 flex-1 break-words" data-rewind-earlier>
         Answered before: {{ earlier }}
       </p>
-      <p v-else class="min-w-0 flex-1">An earlier state, paused. New input continues from here.</p>
+      <p v-else class="rewind-lead min-w-0 flex-1">An earlier state, paused. New input continues from here.</p>
       <p
         v-if="rewind.problem.value"
         class="w-full text-destructive"
@@ -79,6 +79,7 @@ const idle = computed(() => !props.working && !props.switching && !props.rewind.
         <Tooltip>
           <TooltipTrigger as-child>
             <Button
+              :variant="idle ? 'default' : 'outline'"
               class="min-h-11"
               :disabled="!idle"
               data-rewind-return
@@ -103,5 +104,11 @@ const idle = computed(() => !props.working && !props.switching && !props.rewind.
 .rewind-inspection > * {
   max-width: 36rem;
   pointer-events: auto;
+}
+/* Where a switch's animation has no room beside the bar, it shows at the end of this first line (RewindStatus.vue). */
+@container (width < 41rem) {
+  .rewind-lead {
+    padding-inline-end: 28px;
+  }
 }
 </style>

@@ -3352,6 +3352,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     switchIndicator: computed(() => switchIndicator.value),
     /** Whether Debug off's reinstatement failed at its gate, which `retryReturn` retries; for the Player's lifetime. */
     returnFailed: computed(() => rewindOwner.reinstatement.value === "failed"),
+    /**
+     * Whether a return to the session waits or failed: the state it leaves stays shown, inert, also while the failure
+     * stops the session, until the return succeeds or a new Start replaces it.
+     */
+    returnUnresolved: computed(() => rewindOwner.reinstatement.value !== null),
     /** Retries the failed reinstatement through its gate; returns whether it began. */
     retryReturn: () => rewindOwner.retryReturn(),
     /** Whether a restored state is shown for inspection, which runs only once input adopts it. */

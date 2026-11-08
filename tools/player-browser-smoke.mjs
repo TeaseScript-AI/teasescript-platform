@@ -2943,6 +2943,7 @@ async function rewindSwitchScenario(cdp, origin) {
             permanent: document.querySelectorAll('[data-permanent-button]').length > 0 && [...document.querySelectorAll('[data-permanent-button]')].every((button) => button.getAttribute('aria-disabled') === 'true'),
             busy: document.querySelector('[data-rewind-status]')?.getAttribute('aria-busy'),
             announced: document.querySelector('[data-rewind-announcement]')?.textContent.trim(),
+            composer: document.querySelector('[data-composer-input]')?.disabled,
           })`,
         ),
         JSON.stringify({
@@ -2950,6 +2951,7 @@ async function rewindSwitchScenario(cdp, origin) {
           permanent: true,
           busy: "true",
           announced: "Returning to session",
+          composer: true,
         }),
         `A pending Return, ${mode} ${device}: its refused controls disabled, busy, announced`,
       );
@@ -3006,18 +3008,25 @@ async function rewindSwitchScenario(cdp, origin) {
         await physicalClick(cdp, '[data-tools-focus="launcher:Debug"]');
         await waitFor(cdp, `!document.querySelector('[data-tool="Debug"]')`);
       }
-      // The error shows once, in its notice; the transcript it left empty says nothing; the stopped session's permanent
-      // button is held.
+      // The error shows once, in its notice, and the empty transcript says nothing; the state the return left stays,
+      // inert, its permanent button too.
       assertEqual(
         await value(
           cdp,
           `JSON.stringify({
-            texts: ['The Player ran into an error.', 'No messages yet'].map((text) => document.body.innerText.split(text).length - 1),
+            texts: ["Couldn't return to the session.", 'No messages yet'].map((text) => document.body.innerText.split(text).length - 1),
+            choices: [...document.querySelectorAll('[data-foreground-controls] button')].map((button) => button.textContent.trim() + (button.disabled ? ' held' : '')),
+            composer: document.querySelector('[data-composer-input]')?.disabled,
             permanent: document.querySelectorAll('[data-permanent-button]').length > 0 && [...document.querySelectorAll('[data-permanent-button]')].every((button) => button.getAttribute('aria-disabled') === 'true'),
           })`,
         ),
-        JSON.stringify({ texts: [1, 0], permanent: true }),
-        `A failed reinstatement, ${mode} ${device}: its error once, no empty-transcript text, its permanent button held`,
+        JSON.stringify({
+          texts: [1, 0],
+          choices: ["Red held", "Blue held"],
+          composer: true,
+          permanent: true,
+        }),
+        `A failed reinstatement, ${mode} ${device}: its error once, no empty-transcript text, the state it left inert`,
       );
       await save(`retry-${mode}-${device}`);
       // The retry, which the failing gate holds, closes its toast, and the panel does not offer it again while it runs;

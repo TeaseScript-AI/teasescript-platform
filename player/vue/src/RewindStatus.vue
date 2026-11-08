@@ -4,8 +4,8 @@ import { Loader2 } from "@lucide/vue";
 // Debug's rewind switches over the Player's lifetime (DEBUGGER.md "Rewind"), so also with Debug off: a polite live
 // region names the switch under way, and a small loading animation shows once it has lasted (`indicator`). The
 // animation is an overlay that takes no layout space, so nothing moves when it comes or goes: beside the Debug bar,
-// the default slot, where there is room, on the bar's top edge where there is not, and on the composer's top edge
-// without the bar.
+// the default slot, where there is room, at the end of the bar's first line where there is not (the bar keeps it
+// free), and on the composer's top edge without the bar.
 defineProps<{
   busy: boolean;
   announcement: string;
@@ -56,12 +56,14 @@ defineProps<{
   left: calc(100% + 8px);
   transform: translateY(-50%);
 }
-/* Without room beside the bar (36rem at most, plus the animation and its gap on either side): on its top edge. */
+/* Without room beside the bar (36rem at most, plus the animation and its gap on either side): at the end of its first
+   line, inside its 8px padding. */
 @container (width < 41rem) {
   .rewind-status-bar .rewind-switch-indicator {
-    top: 0;
+    top: 10px;
     left: auto;
-    right: 8px;
+    right: 10px;
+    transform: none;
   }
 }
 </style>

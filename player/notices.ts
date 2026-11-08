@@ -131,7 +131,9 @@ export const playerNotices = {
     message:
       cause === "script"
         ? "The script stopped because of an error."
-        : "The Player ran into an error.",
+        : retry
+          ? "Couldn't return to the session."
+          : "The Player ran into an error.",
     ...(retry && {
       action: { label: "Retry return to session", run: retry.run, enabled: retry.enabled },
       dismissible: false,

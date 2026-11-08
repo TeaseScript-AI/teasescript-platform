@@ -767,9 +767,10 @@ async function toggleFullscreen() {
           </slot>
         </template>
 
-        <!-- A session a Player error stopped takes no input; its transcript stays. -->
+        <!-- A session a Player error stopped takes no input; its transcript stays, and so does the state a failed return
+             leaves, inert. -->
         <RuntimeInteraction
-          :session="player.stopped.value ? null : session"
+          :session="player.stopped.value && !player.rewind.returnUnresolved.value ? null : session"
           :reset="player.interactionReset.value"
           :transcript-key="transcript.key"
           :entries="transcript.entries"
@@ -780,7 +781,7 @@ async function toggleFullscreen() {
           :input-section="player.inputSection"
           :prepare-input="player.prepareInput"
           :hold-form-drafts="player.rewind.inspecting.value"
-          :held="player.rewind.inputHeld.value"
+          :held="player.rewind.inputHeld.value || player.rewind.returnFailed.value"
           :images="player.images"
           :capture="player.imageCapture"
           :debug-countdown="debug.countdownText.value"

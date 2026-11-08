@@ -579,6 +579,16 @@ defineExpose({ focusInput, selectInput, openPicker });
 .composer-form:has(> [data-composer-attach]) {
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
+/* Disabled, the field takes the shared disabled roles like the Player's other disabled controls, its placeholder too. */
+.conversation-glass:has([data-composer-input]:disabled) {
+  border-color: var(--theme-border-disabled);
+  background: var(--theme-surface-disabled);
+  backdrop-filter: none;
+}
+.conversation-glass [data-composer-input]:disabled::placeholder,
+.conversation-glass:has([data-composer-input]:disabled) .composer-hint {
+  color: var(--theme-text-disabled);
+}
 .conversation-glass[data-drop-active] {
   outline: 2px dashed var(--focus-ring);
   outline-offset: var(--player-focus-offset);
