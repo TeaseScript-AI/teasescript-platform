@@ -181,9 +181,9 @@ export function staleLink(cwd) {
 /**
  * The command that links main's `node_modules` into `cwd`, or `null` when there is none: in the checkout
  * `TEASESCRIPT_MAIN` names in `env` (relative to `cwd`), unset or empty `fallback`. The folder is named by the path the
- * system opens for the configured one (`realpath`, which follows a link before a `..` after it), absolute, so `ln` reads
- * it as its target and never as an option, and as one shell word. Over a stale link (`staleLink`) the command replaces
- * that link (`ln -sfn`); it never replaces anything else.
+ * system opens for the configured one (`realpath`, which follows a link before a `..` after it), absolute, so `ln`
+ * reads it as its target and never as an option, and as one shell word. Over a stale link (`staleLink`) the command
+ * replaces that link (`ln -sfn`); it never replaces anything else.
  */
 export function mainLinkCommand(env, cwd, fallback = MAIN_CHECKOUT) {
   const main = env.TEASESCRIPT_MAIN || fallback;

@@ -23,7 +23,6 @@ import {
   MAIN_CHECKOUT,
   mainLinkCommand,
   projectsFor,
-  shellWord,
   staleLink,
   removeTemporaryWorktree,
   unknownToCostly,
