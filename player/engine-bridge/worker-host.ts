@@ -23,7 +23,11 @@ export interface HostSession {
   /** The session's revision now. */
   readonly revision: number;
   /** What `halt`'s acknowledgement carries for the session, when its kind of session gives anything. */
-  atStop?(): StopPayload;
+  atStop?(args: unknown): StopPayload;
+  /** Whether a halt's non-null arguments are this session's stop arguments; a halt without arguments is a plain stop. */
+  checkStop?(args: unknown): boolean;
+  /** A halt with arguments `args` arrived for the session, before the work running at it settled. */
+  stopRequested?(args: unknown): void;
 }
 
 /** What a session's stop acknowledgement carries: its kind of session defines it, and that kind's client reads it. */
@@ -346,9 +350,9 @@ export function startBridgeHost(
    * What the stop of session `id` froze, read once its last op ran (the Player's: the stopped publication's call view).
    * A fault reading it still acknowledges the stop, without it.
    */
-  function stopPayload(id: string): StopPayload {
+  function stopPayload(id: string, args: unknown): StopPayload {
     try {
-      return held.get(id)?.atStop?.() ?? null;
+      return held.get(id)?.atStop?.(args) ?? null;
     } catch {
       return null;
     }
@@ -360,7 +364,7 @@ export function startBridgeHost(
    */
   function halt(request: BridgeRequest): void {
     const acknowledge = () => {
-      const result = stopPayload(request.session!);
+      const result = stopPayload(request.session!, request.args);
       try {
         reply(request, { ok: true, revision: null, eventsThrough: null, result, view: null });
       } catch {
@@ -368,14 +372,16 @@ export function startBridgeHost(
       }
     };
     try {
-      if (request.args !== null)
+      const value = request.session === null ? undefined : held.get(request.session);
+      if (request.args !== null && !(value?.checkStop?.(request.args) ?? false))
         return refuse(request, refusal("arguments", "Malformed arguments for 'halt'."));
-      if (request.session === null || !held.has(request.session))
+      if (value === undefined)
         return refuse(
           request,
           refusal("session", "The request names no session the Worker holds."),
         );
-      halted.add(request.session);
+      halted.add(request.session!);
+      if (request.args !== null) value.stopRequested?.(request.args);
     } catch {
       return;
     }

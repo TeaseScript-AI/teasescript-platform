@@ -318,6 +318,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The error name of an exception of the Player itself, such as one at Start; it stays until the next Start. Such an
   // exception stops the session where it stands (see `stopped`).
   const hostError = ref<string | null>(null);
+  // The diagnostic run of the latest Start or Continue (`ExportObservation`): the host binds its sessions to it, and a
+  // Player error stop commits the run's incident there. `null` before the first activation.
+  let run: number | null = null;
+  /** Begins the next run in the host before the activation's session exists, ending the run before it. */
+  function beginRun(host: PlayerBridge) {
+    const retires = run;
+    run = host.nextRun();
+    void host.beginRun(run, retires).catch(() => {});
+  }
+  /** The stop arguments of a Player error `name` at stop `stop`, in the current run; `null` outside any run. */
+  const stopOf = (name: string, stop: number) => (run === null ? null : { error: name, run, stop });
   // From a Player error stop until the host acknowledged it (a round trip with a Worker): input stops, nothing renders.
   // It belongs to the stop `haltingStop` names: only that stop ends it, and a later activation retires it.
   const halting = ref(false);
@@ -349,8 +360,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // A Continue still beginning beside a shown session runs nothing more either.
     if (restoring !== null && restoring !== target) void bridgeOf(restoring).halt(restoring);
     if (target !== null) return stopAt(target, name, stop);
+    // Without a session to stop, the run's incident is committed by itself.
+    const incident = () => {
+      const args = stopOf(name, stop);
+      if (args !== null) void bridge?.commitIncident(args).catch(() => {});
+    };
     if (starting === null) {
       hostError.value = name;
+      incident();
       return;
     }
     haltUntil(stop);
@@ -358,7 +375,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       (started) => stopAt(started, name, stop),
       () => {
         endHalting(stop);
-        if (stop === activationToken) hostError.value ??= name;
+        if (stop !== activationToken) return;
+        hostError.value ??= name;
+        incident();
       },
     );
   }
@@ -368,7 +387,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function stopAt(target: PlayerSession, name: string, stop: number) {
     const host = bridgeOf(target);
-    const acknowledged = host.halt(target);
+    const acknowledged = host.halt(target, stopOf(name, stop));
     const commit = () => {
       if (disposed || stop !== activationToken) return endHalting(stop);
       // The final publication shows, then the stop; the halt holds the session stopped until then, so nothing reacting
@@ -1179,6 +1198,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
     lastRandom = undefined;
     bridge?.unclaim(claim);
+    if (bridge !== null && run !== null) void bridge.retireRun(run).catch(() => {});
     disposed = true;
     supersede();
     // The host's JSON of the plans this page prepared, written or waiting for its task, is not needed any more.
@@ -3230,6 +3250,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       });
     hostError.value = null;
     failureRecording = null;
+    beginRun(bridge);
     let begun: PlayerSession | Promise<PlayerSession>;
     // `begin` records the click's capture: it reads it before its first await, a Start in its factory or options.
     clicked = sample;

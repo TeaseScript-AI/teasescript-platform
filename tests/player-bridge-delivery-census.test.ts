@@ -32,6 +32,8 @@ const CONNECTION_STATE = new Set([
   "traceIntent",
   "transferCount",
   "random",
+  // The debug export's runs and stops: diagnostic connection state, which allocates nothing a client holds.
+  "exportObservation",
 ]);
 
 /**
@@ -111,7 +113,7 @@ type AllOwned<T> = {
 }[keyof T];
 type ContextFields = Omit<
   PlayerOpsContext,
-  "delivery" | "recorder" | "trace" | "traceId" | "traceIntent" | "transferCount" | "random"
+  "delivery" | "recorder" | "trace" | "traceId" | "traceIntent" | "transferCount" | "random" | "exportObservation"
 >;
 const ALL_OWNED: [Exclude<AllOwned<ContextFields>, true>] extends [never] ? true : false = true;
 // Its negative controls: a raw map, at the top or nested, and a scalar field are found.
@@ -181,6 +183,8 @@ const MODULE_STATE: Readonly<Record<string, string>> = {
   "history/core.ts › HistoryCore.#lastSequence":
     "a history's last sequence per log, private to its core, which the registry owns",
   "history/registry.ts › NOTHING": "a frozen constant",
+  "recording/export-observation.ts › ExportObservation.runs":
+    "a debug export's runs and stops, diagnostic connection state the context's `exportObservation` holds",
   "history/snapshots.ts › SnapshotStore.#memory":
     "a history's snapshots in memory, private to its store, which its core owns",
   "history/snapshots.ts › SnapshotStore.#spilled":

@@ -41,7 +41,14 @@ import {
 } from "../connection-state.js";
 import { planMetadata, type PlanMetadata } from "../plan-facts.js";
 import { NO_MARKS, marksAfterEdit, type HistoryMarks } from "../../debug-history-marks.js";
-import type { CallViewReply, Introduction, Publication } from "../session-protocol.js";
+import type { CallViewReply, Introduction, Publication, StopReply } from "../session-protocol.js";
+import {
+  advanceExportObservation,
+  isStopArguments,
+  runIncident,
+  type ObservedSession,
+  type SessionObservation,
+} from "../recording/export-observation.js";
 import type { BridgeOp, BridgeOps, HostSession, OpOutcome } from "../worker-host.js";
 
 /** What adopting an op's result session did (`HeldSession.adoptResult`). */
@@ -59,7 +66,7 @@ const KEPT: Adoption = Object.freeze({ kind: "kept" });
  */
 let nextHistoryKey = 1;
 
-export class HeldSession implements HostSession {
+export class HeldSession implements HostSession, ObservedSession {
   #current: PlayerRuntimeSession;
   #delivered = 0;
   readonly #connection: PlayerOpsContext;
@@ -82,6 +89,10 @@ export class HeldSession implements HostSession {
   #marks: HistoryMarks;
   /** The key Debug's rewind history names this session's lineage by (`HistoryRegistry`). */
   readonly historyKey = `l${nextHistoryKey++}`;
+  /** The diagnostic run the session belongs to (`ExportObservation`), bound as it is made; `null` outside any run. */
+  run: number | null = null;
+  /** The session's latest publication as the export observes it. */
+  observation: SessionObservation | null = null;
 
   constructor(
     session: PlayerRuntimeSession,
@@ -96,6 +107,14 @@ export class HeldSession implements HostSession {
     this.#marks = marks;
     this.#owner = owner;
     this.#control = control;
+    // Every route that makes a session binds it to the Player's current run before it publishes.
+    this.bindRun();
+  }
+
+  /** Binds the session to the connection's current run, as it is made and as Continue hands an existing one over. */
+  bindRun(): void {
+    const owner = this.#connection.exportObservation;
+    advanceExportObservation(owner, { kind: "bindSession", session: this, run: owner.current });
   }
 
   /**
@@ -208,6 +227,13 @@ export class HeldSession implements HostSession {
     const through = next.events.length;
     this.#delivered = through;
     const { calls, ...state } = next.state;
+    const owner = this.#connection.exportObservation;
+    advanceExportObservation(owner, {
+      kind: "publication",
+      session: this,
+      revision: next.revision,
+      eventsThrough: through,
+    });
     return Object.freeze({
       revision: next.revision,
       state: Object.freeze(state),
@@ -217,6 +243,8 @@ export class HeldSession implements HostSession {
       instructions: instructionFacts(next, this.viewingCalls),
       callView: this.viewingCalls ? Object.freeze({ calls }) : null,
       marks: this.#marks,
+      diagnostic: Object.freeze({ run: this.run, stop: null }),
+      incident: runIncident(owner, this.run),
       history,
     });
   }
@@ -247,9 +275,39 @@ export class HeldSession implements HostSession {
     });
   }
 
-  /** What `halt`'s acknowledgement carries: the call view of the publication the stop froze, viewed or not. */
-  atStop(): CallViewReply {
-    return this.callView(true);
+  /** Whether `args` are a Player error stop's (`StopArguments`); a plain halt, as of a superseded session, has none. */
+  checkStop(args: unknown): boolean {
+    return isStopArguments(args);
+  }
+
+  /** A Player error stop of this session arrived: the run's capture waits for its commit. */
+  stopRequested(args: unknown): void {
+    if (!isStopArguments(args)) return;
+    advanceExportObservation(this.#connection.exportObservation, {
+      kind: "stopRequested",
+      stop: args,
+    });
+  }
+
+  /**
+   * What `halt`'s acknowledgement carries: the call view of the publication the stop froze, viewed or not; for a Player
+   * error stop, also its diagnostic identity and the run's incident, which the stop commits now, as the work running at
+   * it settled.
+   */
+  atStop(args: unknown = null): CallViewReply | StopReply {
+    const view = this.callView(true);
+    if (!isStopArguments(args)) return view;
+    const committed = advanceExportObservation(this.#connection.exportObservation, {
+      kind: "stopCommitted",
+      stop: args,
+      session: this.observation,
+    });
+    const incident = committed.kind === "incident" ? committed.incident : null;
+    return Object.freeze({
+      ...view,
+      diagnostic: Object.freeze({ run: args.run, stop: args.stop }),
+      incident,
+    });
   }
 
   /** The session's first publication, from cursor 0, with its fixed fields; nothing was handed out before it. */
@@ -531,6 +589,8 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
     beginRecording: sessionOp(
       (args) => args === null,
       (held) => {
+        // Continue hands over a session the Player held already: it joins the run Continue began.
+        held.bindRun();
         beginRecordingAt(held, context);
         return { result: null, view: null };
       },

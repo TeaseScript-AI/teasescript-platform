@@ -176,6 +176,8 @@ test("a store applies publications by revision and requires their events to cont
     instructions: {},
     callView: null,
     marks: NO_MARKS,
+    diagnostic: { run: null, stop: null },
+    incident: null,
     history: [],
     planToken: plan,
     metadata: null,
@@ -191,6 +193,8 @@ test("a store applies publications by revision and requires their events to cont
     instructions: {},
     callView: null,
     marks: NO_MARKS,
+    diagnostic: { run: null, stop: null },
+    incident: null,
     history: [],
   });
   // An eventless publication still applies: its revision is new.

@@ -9,6 +9,7 @@ import type { StorageCapture } from "./ops/history.js";
 import type { HistoryMarks } from "../debug-history-marks.js";
 import type { HistoryDelta } from "./history/core.js";
 import type { DebugRecordingEnd } from "../debug-recorder.js";
+import type { DiagnosticIdentity, ExportIncident } from "./recording/export-observation.js";
 import type { PlayerRuntimeState } from "../runtime-adapter.js";
 
 /*
@@ -38,6 +39,15 @@ export interface CallViewReply {
   readonly callView: PlayerCallView | null;
 }
 
+/**
+ * What a Player error stop's acknowledgement carries: the stopped publication's call view, its diagnostic identity with
+ * the stop, and the run's committed incident.
+ */
+export interface StopReply extends CallViewReply {
+  readonly diagnostic: DiagnosticIdentity;
+  readonly incident: ExportIncident | null;
+}
+
 /** One publication of a session: its state, its revision, and its events after the cursor `from`. */
 export interface Publication {
   readonly revision: number;
@@ -54,6 +64,10 @@ export interface Publication {
   readonly callView: PlayerCallView | null;
   /** The session's marks for a debug export, as the host holds them (`HeldSession.marks`). */
   readonly marks: HistoryMarks;
+  /** The diagnostic run the session belongs to, and no stop: a stop's identity comes with its acknowledgement. */
+  readonly diagnostic: DiagnosticIdentity;
+  /** The run's committed Player error incident (`ExportObservation`), or `null` while it has none. */
+  readonly incident: ExportIncident | null;
   /** The changes of Debug's rewind history this publication made, oldest first; empty for most. */
   readonly history: readonly HistoryDelta[];
 }

@@ -4,6 +4,11 @@ import type { PlayerOpsContext } from "../player-ops.js";
 import type { RecordingCaptureReply } from "../session-protocol.js";
 import type { BridgeOps } from "../worker-host.js";
 import { heldSession } from "./persistence.js";
+import {
+  advanceExportObservation,
+  isStopArguments,
+  type StopArguments,
+} from "../recording/export-observation.js";
 
 /*
  * The recording ticket contract (L5h.3b): a capture of a session's recording, frozen under a ticket of the connection's
@@ -23,6 +28,8 @@ export interface RecordingTicket {
 /** The connection's tickets (`PlayerOpsContext.recordings`), by kind. */
 export type HeldTicket = RecordingTicket;
 
+const isRun = (value: unknown): value is number => Number.isSafeInteger(value);
+
 const isTicketArgs = (args: unknown): args is { readonly ticket: string } =>
   isRecord(args) && exactly(args, ["ticket"]) && typeof args.ticket === "string";
 
@@ -39,7 +46,52 @@ export function heldTicket<K extends HeldTicket["kind"]>(
 }
 
 export function recordingOps(context: PlayerOpsContext): BridgeOps {
+  const owner = context.exportObservation;
   return {
+    // A Start or a Continue begins diagnostic run `run`, before any of its sessions exists; `retires` ends the run before.
+    beginRun: {
+      session: "none",
+      checkArguments: (args) =>
+        isRecord(args) &&
+        exactly(args, ["run", "retires"]) &&
+        isRun(args.run) &&
+        (args.retires === null || isRun(args.retires)),
+      run: (args) => {
+        // EVIDENCE: validation: checkArguments accepted these arguments before run.
+        const { run, retires } = args as { readonly run: number; readonly retires: number | null };
+        advanceExportObservation(owner, { kind: "beginRun", run, retires });
+        return { result: null };
+      },
+    },
+    // The Player's disposal ends its run.
+    retireRun: {
+      session: "none",
+      checkArguments: (args) => isRecord(args) && exactly(args, ["run"]) && isRun(args.run),
+      run: (args) => {
+        // EVIDENCE: validation: checkArguments accepted these arguments before run.
+        advanceExportObservation(owner, {
+          kind: "retire",
+          run: (args as { readonly run: number }).run,
+        });
+        return { result: null };
+      },
+    },
+    // A Player error before its run had a session: the run's incident, with no session to stop.
+    commitIncident: {
+      session: "none",
+      checkArguments: isStopArguments,
+      run: (args) => {
+        // EVIDENCE: validation: checkArguments accepted stop arguments before run.
+        const stop = args as StopArguments;
+        advanceExportObservation(owner, { kind: "stopRequested", stop });
+        const committed = advanceExportObservation(owner, {
+          kind: "stopCommitted",
+          stop,
+          session: null,
+        });
+        return { result: committed.kind === "incident" ? committed.incident : null };
+      },
+    },
     // The named session's recording, kept under a new ticket when the recorder records that session's engine.
     captureRecording: {
       session: "none",

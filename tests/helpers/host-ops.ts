@@ -45,6 +45,12 @@ export const HOST_OPS = {
     read: true,
   },
   releaseRecording: { planJson: "cleanup of a ticket, which holds no plan JSON", read: false },
+  beginRun: { planJson: "a debug export's diagnostic run; no plan", read: false },
+  retireRun: { planJson: "a debug export's diagnostic run; no plan", read: false },
+  commitIncident: {
+    planJson: "a debug export's incident of a run with no session; no plan",
+    read: false,
+  },
   debugTracing: { planJson: "the connection's value trace", read: false },
   debugView: { planJson: "a held session's trace view", read: true },
   restartTrace: { planJson: "a held session's trace, begun anew", read: false },

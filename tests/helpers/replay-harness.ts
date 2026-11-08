@@ -48,6 +48,8 @@ const PUBLICATION_FIELDS: Readonly<Record<keyof Publication, "compared" | "not c
   instructions: "not compared",
   callView: "not compared",
   marks: "not compared",
+  diagnostic: "compared",
+  incident: "compared",
   history: "not compared",
 };
 

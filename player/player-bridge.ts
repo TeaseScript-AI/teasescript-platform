@@ -16,7 +16,9 @@ import type {
   Publication,
   ReadOp,
   ReadOps,
+  StopReply,
 } from "./engine-bridge/session-protocol.js";
+import type { StopArguments } from "./engine-bridge/recording/export-observation.js";
 import type { PlayerSession } from "./runtime-view.js";
 import type { HistoryMarks } from "./debug-history-marks.js";
 import { SessionStore } from "./session-store.js";
@@ -266,6 +268,31 @@ export class PlayerBridge {
     return this.open(reply.session!, reply.view as Introduction);
   }
 
+  #runs = 0;
+  /** The next number of a diagnostic run on this connection (`beginRun`), counted as rewind histories are. */
+  nextRun(): number {
+    this.#runs += 1;
+    return this.#runs;
+  }
+
+  /**
+   * Begins diagnostic run `run` in the host, before the Start or Continue that makes it creates any session, and ends
+   * `retires`, the Player's run before it (`ExportObservation`). Ordered before the requests sent after it.
+   */
+  async beginRun(run: number, retires: number | null): Promise<void> {
+    await this.#client.request("beginRun", { run, retires });
+  }
+
+  /** Ends diagnostic run `run` (`retireRun`), as the Player that began it is disposed of. */
+  async retireRun(run: number): Promise<void> {
+    await this.#client.request("retireRun", { run });
+  }
+
+  /** Commits a Player error of a run that has no session to stop (`commitIncident`). */
+  async commitIncident(stop: StopArguments): Promise<void> {
+    await this.#client.request("commitIncident", stop);
+  }
+
   /** Lets go of the recording or export held under `ticket` (`releaseRecording`); an unknown one changes nothing. */
   async releaseRecording(ticket: string): Promise<void> {
     await this.#client.request("releaseRecording", { ticket });
@@ -429,20 +456,22 @@ export class PlayerBridge {
   deliverInTransit: ((session: string) => void) | null = null;
 
   /**
-   * Stops `session` at a Player error. The host refuses whatever the session has not run (`halt`), so late answers and
+   * Stops `session` at a Player error, `stop` naming the error with its run and stop (`null` for a session that is only
+   * superseded). The host refuses whatever the session has not run (`halt`), so late answers and
    * reports are dropped; the store still applies the replies to ops the host ran, which arrive before the host's
    * acknowledgement, and freezes there. What is shown is then what the host ran, which its recording and export hold.
    * Resolves once frozen: at once in-process, a round trip later with a Worker.
    */
-  halt(session: PlayerSession): Promise<void> {
+  halt(session: PlayerSession, stop: StopArguments | null = null): Promise<void> {
     const store = this.store(this.#own(session));
     if (store === null || store.halted) return Promise.resolve();
     store.stopping();
     const acknowledged = this.#client
-      .signal("halt", null, session.id, (result) =>
+      .signal("halt", stop, session.id, (result) =>
         store.freeze(
-          // EVIDENCE: validation: a Player session's `halt` acknowledgement carries a `CallViewReply` or `null`.
-          result.result as CallViewReply | null,
+          // EVIDENCE: validation: a Player session's `halt` acknowledgement carries a `CallViewReply`, a `StopReply` for
+          // a Player error stop, or `null`.
+          result.result as CallViewReply | StopReply | null,
         ),
       )
       .then(

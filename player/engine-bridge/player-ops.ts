@@ -24,6 +24,7 @@ import { resourceOps } from "./ops/resources.js";
 import { sessionOps } from "./ops/session.js";
 import { traceOps } from "./ops/trace.js";
 import { HistoryRegistry } from "./history/registry.js";
+import { ExportObservation } from "./recording/export-observation.js";
 import type { DebugHistorySpill } from "./history/snapshots.js";
 import { openDebugHistorySpill } from "../debug-history-indexeddb.js";
 import type { BridgeOps, HostSessions } from "./worker-host.js";
@@ -149,6 +150,8 @@ export interface PlayerOpsContext {
   readonly transfers: OwnedMap<string, TransferTicket>;
   /** Counts the tickets this connection gave out. */
   transferCount: number;
+  /** What a debug export observes of the connection's runs and stops (`recording/export-observation.ts`). */
+  readonly exportObservation: ExportObservation;
   /** Captured recordings and debug exports, by ticket, until released (`ops/recording.ts`). */
   readonly recordings: OwnedMap<string, HeldTicket>;
   /** A new ticket of `recordings`; the connection never gives one out twice. */
@@ -194,6 +197,7 @@ export function playerOpsContext(
     }),
     transfers: new OwnedMap(delivery),
     transferCount: 0,
+    exportObservation: new ExportObservation(),
     recordings: new OwnedMap(delivery),
     nextTicket: () => `r${nextTicket++}`,
     random: {

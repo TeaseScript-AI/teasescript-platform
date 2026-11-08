@@ -44,6 +44,10 @@ import type {
 import type { InstructionFact, InstructionFacts } from "./engine-bridge/instruction-facts.js";
 import type { PlayerCallView, PlayerCriticalState } from "./engine-bridge/session-protocol.js";
 import type { HistoryMarks } from "./debug-history-marks.js";
+import type {
+  DiagnosticIdentity,
+  ExportIncident,
+} from "./engine-bridge/recording/export-observation.js";
 import type { HistoryDelta } from "./engine-bridge/history/core.js";
 import type { PlayerBridge } from "./player-bridge.js";
 
@@ -96,6 +100,13 @@ export interface PlayerSession extends PlayerSessionView {
   readonly callView: PlayerCallView | null;
   /** The session's marks for a debug export, as the host holds them with this publication. */
   readonly marks: HistoryMarks;
+  /**
+   * The publication's diagnostic identity for a debug export: the session's run, and the Player error stop that froze it
+   * (`SessionStore.freeze`), else no stop.
+   */
+  readonly diagnostic: DiagnosticIdentity;
+  /** The run's committed Player error incident as the host holds it with this publication, or `null`. */
+  readonly incident: ExportIncident | null;
   /** The changes of Debug's rewind history this publication made, oldest first. */
   readonly history: readonly HistoryDelta[];
   /** The key Debug's rewind history names this session's event log by. */
