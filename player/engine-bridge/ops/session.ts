@@ -230,6 +230,8 @@ export class HeldSession implements HostSession, ObservedSession {
     this.#delivered = through;
     const { calls, ...state } = next.state;
     const owner = this.#connection.exportObservation;
+    // The export observes what the engine holds, which a failed delivery does not undo, unlike the history's record of
+    // what the page was shown: the capture's identity match then refuses until a publication the page applied.
     advanceExportObservation(owner, {
       kind: "publication",
       session: this,
