@@ -176,6 +176,9 @@ interface Endings {
   readonly labels: Map<number, number[]>;
 }
 
+/** An `if` arm's feasibility for the route rule's default (`NarrowingRoutes.#infeasible`). */
+type ArmFeasibility = "feasible" | "infeasible" | "unavailable";
+
 /** A condition's own guards of a text and kind (`#ownGuarded`): their starts sorted, and the furthest end by each. */
 interface OwnGuards {
   readonly from: readonly number[];
@@ -254,7 +257,7 @@ export class NarrowingRoutes {
   /** Whether the program holds an `if` arm infeasible by entry narrowing (`#holdsInfeasible`), made on the first query. */
   #holds: boolean | null = null;
   /** Per arm, whether its entry's narrowing leaves a tested read no kind (`#infeasible`). */
-  readonly #infeasibleArms = new Map<TreeBlock, boolean>();
+  readonly #infeasibleArms = new Map<TreeBlock, ArmFeasibility>();
   /** Per `if` or `while`, its condition's tests as facts (`#conditionFacts`). */
   readonly #conditions = new Map<TreeStatement, ConditionFacts | null>();
 
@@ -649,11 +652,12 @@ export class NarrowingRoutes {
 
   /**
    * The route rule's default (Sol's F2 on #1937, then Codex r6 and r7; the lead's ruling; #1938 designs the precise
-   * rule): the certificate promotes to an error only where no callable of the program holds an `if` arm infeasible by
-   * entry narrowing (N1's forms over the core's items, `#infeasible`), so none on the use's witness chain or among the
-   * callables whose results or defaults reach it does; otherwise the use keeps main's warning. An arm it does not prove
-   * counts as feasible: a constant condition, a loop's exit, a `switch` case, another location's test, an element
-   * location. One answer per program, from the `if`s `#testing` finds once.
+   * rule): the certificate promotes to an error only where no live `if` arm of the program's admitted callables is
+   * infeasible by entry narrowing (N1's forms over the core's items, `#infeasible`) or has a stopped tested read, so none
+   * on the use's witness chain or among the callables whose results or defaults reach it does; otherwise the use keeps
+   * main's warning. An uncalled function contributes no live arm. An arm it does not prove counts as feasible: a
+   * comparison that is constant outside N1's forms (`o.k == 1`), a loop's exit, a `switch` case, another location's
+   * test. One answer per program, from the `if`s `#testing` finds once.
    */
   *#holdsInfeasible(): Work<boolean> {
     this.#work.charge("eventSteps");
@@ -663,7 +667,7 @@ export class NarrowingRoutes {
     let holds = false;
     for (const statement of each(work, "eventSteps", this.#ifs)) {
       for (const arm of each(work, "eventSteps", statement.arms))
-        if (arm.live && (yield* this.#infeasible(arm))) {
+        if (arm.live && (yield* this.#infeasible(arm)) !== "feasible") {
           holds = true;
           break;
         }
@@ -674,17 +678,20 @@ export class NarrowingRoutes {
   }
 
   /**
-   * Whether an `if`'s arm is one no run enters: a test of its condition (N1's form, `atEntry`) whose narrowing removes
-   * every kind its read holds at the condition. Unknown and stopped kinds, and an empty answer, prove nothing. One
-   * answer per arm.
+   * Whether an `if`'s arm is one no run enters (`infeasible`): a test of its condition (N1's form, `atEntry`) whose
+   * narrowing removes every kind its read holds at the condition. `unavailable`, which blocks the route rule's promotion
+   * (Sol's final F1 on #1937, the lead's ruling), where a tested read's answer is missing: a stopped decision's (the
+   * `budget` reason), an `unknown` without the `external` reason (admission lacking items, #2009, #2011), or empty.
+   * `feasible` where the kinds are known and the narrowing leaves some, or the read is external data: an `unknown` with
+   * the `external` reason is an answer, a value of any kind, so the arm is entered. One answer per arm.
    */
-  *#infeasible(arm: TreeBlock): Work<boolean> {
+  *#infeasible(arm: TreeBlock): Work<ArmFeasibility> {
     this.#work.charge("eventSteps");
     const known = this.#infeasibleArms.get(arm);
     if (known !== undefined) return known;
     const work = this.#work;
     const owner = arm.owner;
-    let dead = false;
+    let answer: ArmFeasibility = "feasible";
     const facts = owner?.statement.kind === "ifStatement" ? this.#conditionFacts(owner) : null;
     // (each location's narrowings at the entry once: a condition may test one location many times)
     const seen = new Set<string>();
@@ -695,25 +702,36 @@ export class NarrowingRoutes {
         for (const g of each(work, "eventSteps", this.index.atEntry(arm.entry, fact.location))) {
           const items = yield* this.pass.values.keyItems(g.key, g.input);
           if (
+            items.length === 0 ||
+            some(
+              work,
+              "eventSteps",
+              items,
+              (item) =>
+                (item.reasons & REASON.budget) !== 0 ||
+                (item.tag === "unknown" && (item.reasons & REASON.external) === 0),
+            )
+          ) {
+            answer = "unavailable";
+            break;
+          }
+          if (
             items.length > 0 &&
             !some(
               work,
               "eventSteps",
               items,
-              (item) =>
-                item.tag === "unknown" ||
-                (item.reasons & REASON.budget) !== 0 ||
-                !removes(g.form, item.tag, work),
+              (item) => item.tag === "unknown" || !removes(g.form, item.tag, work),
             )
           ) {
-            dead = true;
+            answer = "infeasible";
             break;
           }
         }
-        if (dead) break;
+        if (answer !== "feasible") break;
       }
-    this.#infeasibleArms.set(arm, dead);
-    return dead;
+    this.#infeasibleArms.set(arm, answer);
+    return answer;
   }
 
   /** X7's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged. */

@@ -35,7 +35,7 @@ import type { TypeAnalysisRequest, TypeCheckResult } from "../src/type-inference
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { CARRIER_KINDS, type CarrierKind } from "../src/type-inference/core/carriers.js";
-import { withTestAllowance } from "../src/type-inference/core/budget.js";
+import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import {
   checkedResult,
   coreCheckResult,
@@ -4000,11 +4000,55 @@ test("in a program holding an arm its entry narrowing leaves no kind no route pr
       wrong.push(`${expected ? "error" : "warning"} expected (${name}): ${source}`);
     covered.add(`sibling | ${name}`);
   }
+  // (the unavailable axis, Sol's final F1 on #1937 and the lead's ruling: a tested read whose answer is missing blocks
+  // promotion, at a demand allowance that stops its decision and at the natural one; external data's answer does not)
+  const realRoute = "let n = 1\nif hostValue is boolean { n = null }\n";
+  const UNAVAILABLE: readonly (readonly [string, string, number | null, boolean])[] = [
+    [
+      "a stopped tested read",
+      "function g { let o = {k: 1}\nlet r = null\nif o != null { r = 1 }\nreturn r }\nfunction h { return g() }\nrepeat h() {}\nexit\n",
+      64,
+      false,
+    ],
+    [
+      "a stopped tested read, natural allowance",
+      "function g { let o = {k: 1}\nlet r = null\nif o != null { r = 1 }\nreturn r }\nfunction h { return g() }\nrepeat h() {}\nexit\n",
+      null,
+      false,
+    ],
+    [
+      "a tested read admission has no items for (#2009)",
+      `${realRoute}let box = {first: {k: 1}}\nif box.first != null { say "y" }\nrepeat n {}\nexit\n`,
+      null,
+      false,
+    ],
+    [
+      "a tested read of external data, the control",
+      `${realRoute}if hostValue != null { say "y" }\nrepeat n {}\nexit\n`,
+      null,
+      true,
+    ],
+  ];
+  for (const [name, source, allowance, expected] of UNAVAILABLE) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const [error, warning] = inBothOrders(() => {
+      const run = () => analyseCore(request).diagnostics;
+      const diagnostics = allowance === null ? run() : withTestDemandAllowance(allowance, run);
+      return [
+        diagnostics.some((d) => d.class === "compile-error"),
+        diagnostics.some((d) => d.class === "warning-runtime-check"),
+      ] as const;
+    });
+    if (error !== expected || (!expected && !warning))
+      wrong.push(`${expected ? "error" : "warning"} expected (${name}): ${source}`);
+    covered.add(`unavailable | ${name}`);
+  }
   assert.deepEqual(wrong, []);
-  // (the coverage check: every feasibility, form, polarity and position, and every sibling, each once)
+  // (the coverage check: every feasibility, form, polarity and position, every sibling and every unavailable cell)
   assert.equal(
     covered.size,
-    Object.keys(FEASIBILITY).length * FORMS.length * 2 * 2 + SIBLINGS.length,
+    Object.keys(FEASIBILITY).length * FORMS.length * 2 * 2 + SIBLINGS.length + UNAVAILABLE.length,
   );
 });
 
