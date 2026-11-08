@@ -25,7 +25,8 @@
 // - The lists count their entries: the `files` of each `.oxlintrc.json` override that is a waiting list (docs/LINTING.md
 //   "Waiting lists", by tools/oxlint/check-waiting-overrides.mjs's `isWaitingEntry`), the items of
 //   tools/oxlint/comment-forecasts-allowed.json, comment-declarations-waiting.json and comment-external-names.json
-//   (a list that may grow), and the sum of the counts in comment-citations.json. A list whose file does not exist is
+//   (a list that may grow), the entries of tools/repository-checks/imports-waiting.json (value cycles and boundary
+//   crossings waiting), and the sum of the counts in comment-citations.json. A list whose file does not exist is
 //   null, printed "absent"; an `overrides` or `files` field left out counts 0, and one of another type is malformed.
 // - The structure signals are this checkout's tools/structure-report.mjs run in ROOT, so one definition measures any
 //   ROOT: its counts of large files, broad folders and long functions, and the largest of the files and the longest of
@@ -54,6 +55,7 @@ const LISTS = {
   forecastsAllowed: "tools/oxlint/comment-forecasts-allowed.json",
   declarationsWaiting: "tools/oxlint/comment-declarations-waiting.json",
   externalNames: "tools/oxlint/comment-external-names.json",
+  importsWaiting: "tools/repository-checks/imports-waiting.json",
 };
 const CITATIONS = "tools/oxlint/comment-citations.json";
 
@@ -365,6 +367,7 @@ async function main(argv) {
   console.log(`Comment citations: ${value(c.citations)}`);
   console.log(`Comment declarations waiting: ${value(c.declarationsWaiting)}`);
   console.log(`Comment external names (may grow): ${value(c.externalNames)}`);
+  console.log(`Imports waiting (cycles and crossings): ${value(c.importsWaiting)}`);
   console.log(`Files over ${signals.fileLines} lines: ${c.largeFiles}`);
   console.log(`Folders over ${signals.folderFiles} files: ${c.broadFolders}`);
   console.log(`Functions over ${signals.functionLines} lines: ${c.longFunctions}`);
