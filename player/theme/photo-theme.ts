@@ -1,7 +1,7 @@
 import { Hct, argbFromRgb } from "@material/material-color-utilities";
 import type { OklchColor } from "./color.js";
 import { tonalColor } from "./material.js";
-import type { PhotoSurfaces, SurfaceTones } from "./palette.js";
+import { MODE_SURFACES, type PhotoSurfaces } from "./palette.js";
 import type { PhotoSwatches, SwatchName } from "./node-vibrant/swatches.js";
 
 /**
@@ -15,8 +15,6 @@ export interface PhotoColours {
   readonly surfaces: PhotoSurfaces;
   /** The accent seed in the photo's colour, or `null` when the photo has too little colour for one. */
   readonly accent: OklchColor | null;
-  /** How strongly the background's far edges darken (dark mode) or pale (light mode) around the photo, 0..1. */
-  readonly vignette: number;
 }
 
 export const PHOTO_FAMILIES = ["vibrant", "muted", "large-vibrant"] as const;
@@ -74,27 +72,6 @@ function surfaceSwatches(swatches: PhotoSwatches, mode: Mode, choice: PhotoColou
 
 const ACCENT_SWATCHES: readonly SwatchName[] = ["Vibrant", "DarkVibrant", "LightVibrant"];
 
-interface ModeColours {
-  readonly tones: SurfaceTones;
-  /** The most chroma the surfaces take: a vivid photo still gives a calm Player. */
-  readonly chroma: number;
-  readonly vignette: number;
-}
-
-// Dark: a coloured canvas a little lighter than the theme's, with darker message bubbles on it.
-const DARK: ModeColours = {
-  tones: { canvas: 18, chrome: 13, raised: 11, floating: 26, control: 22 },
-  chroma: 28,
-  vignette: 0.6,
-};
-// Light: a light canvas in the photo's colour with lighter bubbles on it, and paler edges around the photo, so the
-// centre around the photo reads deeper than the edges ("subtle", owner, 2026-10-13). The canvas tone stays where
-// secondary text on it keeps its contrast.
-const LIGHT: ModeColours = {
-  tones: { canvas: 89, chrome: 94, raised: 98, floating: 99, control: 97 },
-  chroma: 22,
-  vignette: 0.7,
-};
 // Below this HCT chroma the photo counts as grey: the Player stays neutral at its photo tones instead of tinting with
 // noise.
 const GREY_CHROMA = 4;
@@ -120,19 +97,16 @@ export function photoColours(
 ): PhotoColours | null {
   const surface = hct(swatches, surfaceSwatches(swatches, mode, choice));
   if (!surface) return null;
-  const colours = mode === "dark" ? DARK : LIGHT;
   const grey = surface.chroma < GREY_CHROMA;
   const accent = hct(swatches, ACCENT_SWATCHES);
   return {
     surfaces: {
       hue: grey ? 0 : surface.hue,
-      chroma: grey ? 0 : Math.min(surface.chroma, colours.chroma),
-      tones: colours.tones,
+      chroma: grey ? 0 : Math.min(surface.chroma, MODE_SURFACES[mode].chroma),
     },
     accent:
       accent && accent.chroma >= ACCENT_PHOTO_CHROMA
         ? tonalColor(accent.hue, Math.max(accent.chroma, ACCENT_MIN_CHROMA), ACCENT_TONE)
         : null,
-    vignette: colours.vignette,
   };
 }

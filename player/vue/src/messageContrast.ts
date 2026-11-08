@@ -47,13 +47,13 @@ export function backdropBehind(element: Element | null) {
 }
 
 /**
- * The background as its vignette paints it at full strength, where the Stage photo colours the Player (`style.css`
- * darkens the far edges in dark mode and pales them in light mode), or `null` without one. Text on the background can
- * sit anywhere between `canvas` and this.
+ * The background as its vignette paints it at full strength (`style.css` darkens the far edges in dark mode and pales
+ * them in light mode, with or without a Stage photo), or `null` without a vignette. Text on the background can sit
+ * anywhere between `canvas` and this.
  */
 export function vignetteEdge(element: Element, canvas: string) {
   const strength = Number.parseFloat(
-    getComputedStyle(element).getPropertyValue("--photo-vignette"),
+    getComputedStyle(element).getPropertyValue("--player-vignette"),
   );
   if (!(strength > 0)) return null;
   const [red, green, blue] = paint(resolveColour(element, "var(--photo-edge, black)", "black"));

@@ -674,10 +674,13 @@ least the set share of the photo's measured pixels, else a Muted-family swatch t
 small detail does not colour the Player. A photo without a swatch of that family takes the other family's, the larger
 Vibrant one first. The background,
 message bubbles, composer, buttons, and tools follow the photo together. The background is deepest in colour around
-the photo; towards its far edges it darkens in dark mode and pales in light mode. With the Photo accent A/B test's A,
+what the Stage shows: the photo, or an image request's preview or the camera view over it, which keep the photo's
+colour; without any, the middle of the Stage. Towards its far edges it darkens in dark mode and pales in
+light mode. With the Photo accent A/B test's A,
 the accent (Send, the preselected ring, and the other accent marks) takes the photo's hue too; B, the default, keeps the
 theme's accent, as does a photo with too little colour. A grey photo makes the Player neutral at the
-same tones. Without a Stage image, also when one fails to load, the theme's own colours apply. A new photo and its
+same tones. Without a Stage image, also when one fails to load, the theme's own colour for the mode applies, at the
+same tones and up to the same colourfulness as a photo's. A new photo and its
 colour appear together: while the photo is downloaded once, decoded, and measured, the previous photo and its colour
 stay, and then the photo and the colour change at once. If the colour is not ready shortly after the photo is, the
 photo shows with the previous colour, and its own colour follows. After Start, the Player downloads every Stage image
@@ -1330,8 +1333,8 @@ custom surface.
 ## Default themes
 
 The Standard Player generates its semantic colour roles from a theme intent (`player/theme/palette.ts`) and applies
-them before components consume them. The defaults are a warm light theme (surface hue `70°`, `50%` tint, maximum
-surface chroma `8.5`, rose accent `#D63B61`) and a cool dark theme (surface hue `240°`, otherwise the same surface
+them before components consume them. The defaults are a warm light theme (surface hue `70°`, tint `75%` of the
+mode's chroma cap, rose accent `#D63B61`) and a cool dark theme (surface hue `240°`, otherwise the same surface
 intent, blue accent `#2255EE`). Switching light/dark applies that mode's default palette and keeps the contrast
 choice. A Stage photo's colours replace the surface intent while it shows
 ([Stage and media presentation](#stage-and-media-presentation)). Generated values and contrast targets remain
