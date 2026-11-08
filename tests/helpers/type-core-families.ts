@@ -6930,3 +6930,63 @@ export const COPY_CHAIN_SOURCES: readonly { readonly name: string; readonly sour
       })),
   ),
 ];
+
+/**
+ * #1948: the property index's pay rule (`propertyItems`) over a family: k objects stored into one place in turn, each
+ * read below a property after the stores, by how the objects hold the read properties, in which mix they are read and
+ * how often. The
+ * index is built only where its reads save what it costs, so each family's work grows with its source as `main`'s does
+ * (`main`: its growth, measured once, where it is steeper than the gate's bound).
+ */
+const PAY_HOLDINGS = {
+  // (every object holds the read property: an index saves no read)
+  every: { object: (i: number) => `{p: {n: hostValue}, q${i}: 1}`, read: (j: number) => `p.m${j}` },
+  // (no object holds it: an index saves every object a read)
+  none: { object: (i: number) => `{f${i}: hostValue}`, read: (j: number) => `m${j}.n` },
+  // (one object each holds a distinct property, read in turn)
+  distinct: {
+    object: (i: number) => `{f${i}: {n: hostValue}}`,
+    read: (j: number, k: number) => `f${j % k}.n${Math.floor(j / k)}`,
+  },
+  // (Codex r2's F1: every object holds the same k properties, each read at an absent one)
+  shared: {
+    object: (_: number, k: number) => `{${fields(k, () => "hostValue")}}`,
+    read: (j: number) => `m${j}`,
+  },
+  // (two properties every object holds beside one of its own, read in turn)
+  mixed: {
+    object: (i: number) => `{s0: {n: hostValue}, s1: {n: hostValue}, f${i}: {n: hostValue}}`,
+    read: (j: number, k: number) =>
+      j % 2 === 0 ? `s${(j >> 1) % 2}.n${j}` : `f${(j >> 1) % k}.n${j}`,
+  },
+  // (one property every object holds beside one of its own: one read in k below its own, the rest below the shared)
+  "rare-own": {
+    object: (i: number) => `{common: {n: hostValue}, f${i}: {n: hostValue}}`,
+    read: (j: number, k: number) => (j % k === 0 ? `f${(j / k) % k}.n` : `common.m${j}`),
+  },
+  // (the same objects, one read in k below the shared property, the rest below their own)
+  "rare-common": {
+    object: (i: number) => `{common: {n: hostValue}, f${i}: {n: hostValue}}`,
+    read: (j: number, k: number) => (j % k === 0 ? `common.m${j}` : `f${j % k}.m${j}`),
+  },
+} as const;
+
+/** The reads of each family: below the index's first bound, at it, and k² past it. */
+const PAY_READS = { below: () => 2, at: () => 3, past: (k: number) => k * k } as const;
+
+export const PAY_RULE_FAMILIES: readonly WorkFamily[] = Object.entries(PAY_HOLDINGS).flatMap(
+  ([holding, { object, read }]) =>
+    Object.entries(PAY_READS).map(([reads, count]): WorkFamily => ({
+      name: `pay-${holding}-${reads}`,
+      measures: `#1948: k objects, ${holding} holding the read property, read ${reads} the index's bound`,
+      program: (k) =>
+        main(
+          lines(
+            `let root = ${object(0, k)}`,
+            rows(k - 1, (i) => `root = ${object(i + 1, k)}`),
+            rows(count(k), (j) => `let r${j}: integer = root.${read(j, k)}`),
+            "exit",
+          ),
+        ),
+    })),
+);
