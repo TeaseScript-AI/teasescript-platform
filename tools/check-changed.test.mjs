@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -17,7 +18,9 @@ import {
   PROJECTS,
   UNKNOWN_TO_COSTLY,
   checksOf,
+  mainNodeModules,
   projectsFor,
+  shellWord,
   removeTemporaryWorktree,
   unknownToCostly,
 } from "./check-changed.mjs";
@@ -117,6 +120,17 @@ test(
       assert.match(
         refusal(join(main, "without")),
         /no node_modules: link `\$\(sx-tree [0-9a-f]{40}\)\/node_modules`, or run `npm ci`/u,
+      );
+      // a checkout whose path needs quoting: the named command, run as it is printed, makes the link
+      const spaced = join(main, "with spaces, it's");
+      mkdirSync(join(spaced, "node_modules"), { recursive: true });
+      const named = /link it with `(.*)`\n$/u.exec(refusal(spaced))?.[1];
+      assert.ok(named !== undefined);
+      const linked = spawnSync("sh", ["-c", named], { cwd: directory, encoding: "utf8" });
+      assert.equal(linked.status, 0, linked.stderr);
+      assert.equal(
+        realpathSync(join(directory, "node_modules")),
+        realpathSync(join(spaced, "node_modules")),
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -404,3 +418,12 @@ test(
     }
   },
 );
+
+test("main's node_modules come from TEASESCRIPT_MAIN, and unset or empty from the LXC's checkout", () => {
+  const lxc = "/opt/teasescript-agents/teasescript-main/current/node_modules";
+  assert.equal(mainNodeModules({}), lxc);
+  assert.equal(mainNodeModules({ TEASESCRIPT_MAIN: "" }), lxc);
+  assert.equal(mainNodeModules({ TEASESCRIPT_MAIN: "/srv/main/" }), "/srv/main/node_modules");
+  assert.equal(shellWord("/opt/a-b/c_d.e/node_modules"), "/opt/a-b/c_d.e/node_modules");
+  assert.equal(shellWord("/tmp/with spaces/it's"), "'/tmp/with spaces/it'\\''s'");
+});

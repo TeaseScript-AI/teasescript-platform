@@ -156,6 +156,19 @@ function options(argv) {
 /** The prefix of every temporary worktree `--merged` makes. */
 const TEMPORARY_PREFIX = join(tmpdir(), "check-changed-merged-");
 
+/** Main's `node_modules`, in the checkout `TEASESCRIPT_MAIN` names in `env`; unset or empty, the LXC's own. */
+export function mainNodeModules(env) {
+  return join(
+    env.TEASESCRIPT_MAIN || "/opt/teasescript-agents/teasescript-main/current",
+    "node_modules",
+  );
+}
+
+/** `text` as one shell word: as it is when it holds only safe characters, else in single quotes. */
+export function shellWord(text) {
+  return /^[\w./@%+=:,-]+$/u.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`;
+}
+
 /**
  * Removes `directory`, a temporary worktree of the repository at `repository`, and returns `null`; or, when
  * `directory` is not one this tool made (its absolute path under `TEMPORARY_PREFIX`) and registered as a worktree of
@@ -277,13 +290,10 @@ function enterMerge(ref, cleanups) {
 async function check(cleanups) {
   const { merged, ref } = options(process.argv.slice(2));
   if (!existsSync("node_modules")) {
-    const main = join(
-      process.env.TEASESCRIPT_MAIN || "/opt/teasescript-agents/teasescript-main/current",
-      "node_modules",
-    );
+    const main = mainNodeModules(process.env);
     cannotRun(
       existsSync(main)
-        ? `no node_modules: link it with \`ln -s ${main} node_modules\``
+        ? `no node_modules: link it with \`ln -s ${shellWord(main)} node_modules\``
         : `no node_modules: link \`$(sx-tree ${spawnSync("git", ["merge-base", "HEAD", ref], { encoding: "utf8" }).stdout.trim() || "<merge-base SHA>"})/node_modules\`, or run \`npm ci\``,
     );
   }
