@@ -7,6 +7,7 @@ import type {
   InheritedCopy,
   Listing,
   ListingNode,
+  NextSteps,
   OpenStep,
   Stops,
 } from "../admission/model.js";
@@ -114,6 +115,13 @@ export class ReceivingDomain {
     { readonly list: readonly InheritedCopy[]; readonly index: ByPath<number> }
   >();
   cycleLandings = new WeakMap<ReadonlySet<string>, ByPath<readonly string[]>>();
+  /**
+   * #1948: per place and copy path, its copies there by the next step of a longer path their sources can land
+   * (`nextStepCopies`); per source and strip, the steps past the strip its landings take, `null` where unproved
+   * (`sourceSteps`).
+   */
+  nextSteps = new Map<string, NextSteps>();
+  sourceSteps = new Map<string, ReadonlySet<string> | null>();
   cycleMembers: Map<number, PlaceId[]> | null = null;
   /** Per place, its seeds' paths at or below each prefix (`seedsUnder`), and its stores taken again (`#retakenOf`). */
   seedIndex = new Map<PlaceId, Map<string, string[]>>();
