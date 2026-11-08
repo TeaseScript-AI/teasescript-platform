@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { Loader2 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
@@ -14,6 +15,8 @@ const props = defineProps<{
   working: boolean;
   /** Whether a switch of the rewind is under way (`switching`), which refuses every control here. */
   switching: boolean;
+  /** Whether the switch under way shows its loading animation, at the end of the first line (RewindStatus.vue). */
+  indicator: boolean;
 }>();
 
 const state = computed(() => props.rewind.state.value);
@@ -35,10 +38,18 @@ const idle = computed(() => !props.working && !props.switching && !props.rewind.
       data-rewind-inspection
     >
       <Badge variant="secondary" data-rewind-fork>Debug fork</Badge>
-      <p v-if="earlier !== null" class="rewind-lead min-w-0 flex-1 break-words" data-rewind-earlier>
-        Answered before: {{ earlier }}
-      </p>
-      <p v-else class="rewind-lead min-w-0 flex-1">An earlier state, paused. New input continues from here.</p>
+      <div class="rewind-lead min-w-0 flex-1">
+        <p v-if="earlier !== null" class="break-words" data-rewind-earlier>Answered before: {{ earlier }}</p>
+        <p v-else>An earlier state, paused. New input continues from here.</p>
+        <span
+          v-if="indicator"
+          class="rewind-switch-indicator rounded-full border bg-background p-0.5 text-muted-foreground shadow-sm"
+          aria-hidden="true"
+          data-rewind-switch-indicator
+        >
+          <Loader2 class="size-4 animate-spin" />
+        </span>
+      </div>
       <p
         v-if="rewind.problem.value"
         class="w-full text-destructive"
@@ -105,10 +116,15 @@ const idle = computed(() => !props.working && !props.switching && !props.rewind.
   max-width: 36rem;
   pointer-events: auto;
 }
-/* Where a switch's animation has no room beside the bar, it shows at the end of this first line (RewindStatus.vue). */
-@container (width < 41rem) {
-  .rewind-lead {
-    padding-inline-end: 28px;
-  }
+/* The end of the first line stays free for a switch's animation, so it takes no layout space when it comes. */
+.rewind-lead {
+  position: relative;
+  padding-inline-end: 28px;
+}
+.rewind-switch-indicator {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 50%;
+  transform: translateY(-50%);
 }
 </style>

@@ -2889,16 +2889,24 @@ async function rewindScenario(cdp, origin) {
  * failing restart gate (`?rewindGate`): a pending Return disables what it refuses at once, marks the Player busy and
  * announces itself; Debug off's reinstatement that fails at its gate shows the error once, in its notice, whose Retry
  * return to session brings the session back. In light and dark, on a desktop and a phone; with
- * `PLAYER_SMOKE_SCREENSHOTS` naming a folder, it saves the animation and the retry there, for the visual check by eye
- * (TESTING.md "Player browser and visual verification"), which also judges the animation's delay and that it moves
- * nothing.
+ * `PLAYER_SMOKE_SCREENSHOTS` naming a folder, it saves the animation, the retry, and on a desktop the composer live and
+ * held there, for the visual check by eye (TESTING.md "Player browser and visual verification"), which also judges the
+ * animation's delay and that it moves nothing.
  */
 async function rewindSwitchScenario(cdp, origin) {
   const folder = process.env.PLAYER_SMOKE_SCREENSHOTS ?? null;
-  const save = async (name) => {
+  // The page, or with `selector` only the element it matches.
+  const save = async (name, selector = null) => {
     if (folder === null) return;
     await mkdir(folder, { recursive: true });
-    const shot = await cdp.call("Page.captureScreenshot", { format: "png" });
+    const clip =
+      selector === null
+        ? null
+        : await value(
+            cdp,
+            `(() => { const box = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: box.x, y: box.y, width: box.width, height: box.height, scale: 1 }; })()`,
+          );
+    const shot = await cdp.call("Page.captureScreenshot", { format: "png", ...(clip && { clip }) });
     await writeFile(join(folder, `${name}.png`), Buffer.from(shot.result.data, "base64"));
   };
   const choice = (label) =>
@@ -2934,6 +2942,7 @@ async function rewindSwitchScenario(cdp, origin) {
       await setViewport(cdp, width, height);
       await inspect("slow", mode);
       // Return waits at its slow gate: at once, what it refuses is disabled, and the Player is busy and says so.
+      if (device === "desktop") await save(`composer-live-${mode}`, "[data-composer-shell]");
       await physicalClick(cdp, "[data-rewind-return]");
       assertEqual(
         await value(
@@ -2955,6 +2964,7 @@ async function rewindSwitchScenario(cdp, origin) {
         }),
         `A pending Return, ${mode} ${device}: its refused controls disabled, busy, announced`,
       );
+      if (device === "desktop") await save(`composer-held-${mode}`, "[data-composer-shell]");
       if (folder !== null) {
         // The screenshot waits for the animation, which is not timed here.
         await waitFor(cdp, `!!document.querySelector('[data-rewind-switch-indicator]')`);

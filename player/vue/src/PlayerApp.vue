@@ -802,6 +802,7 @@ async function toggleFullscreen() {
                 :rewind="debug.rewind.value"
                 :working="player.rewind.working.value"
                 :switching="player.rewind.switching.value !== null"
+                :indicator="player.rewind.switchIndicator.value"
               />
             </RewindStatus>
           </template>
