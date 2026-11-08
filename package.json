@@ -19,7 +19,8 @@
     "test:compiled": "node ./tools/test-output-filter.mjs",
     "test": "npm run build && node ./tools/test-output-filter.mjs",
     "check": "npm run check:pretest && BUILD_SOURCEMAPS=0 npm test",
-    "check:pretest": "node tools/run-parallel.mjs format:check lint lint:design test:lint:design test:lint knip test:build:typescript test:verification test:families",
+    "check:pretest": "node tools/run-parallel.mjs format:check lint lint:design test:lint:design test:lint knip check:doc-links test:build:typescript test:verification test:families",
+    "check:doc-links": "node tools/repository-checks/doc-links.mjs",
     "knip": "knip",
     "lint": "node tools/oxlint/run.mjs",
     "lint:design": "eslint --config eslint.design.config.mjs player/vue/src --ext .vue,.ts --max-warnings 0",
@@ -37,7 +38,7 @@
     "test:player:preview": "node tools/player-preview-checks.mjs",
     "test:player:firefox-camera": "node tools/player-firefox-camera.mjs",
     "dev:player": "vite --config player/vue/vite.config.ts",
-    "test:verification": "node --test tools/run-parallel.test.mjs tools/test-shards.test.mjs tools/check-changed.test.mjs tools/check-shas.test.mjs tools/ci-test-counts.test.mjs tools/counters.test.mjs tools/benchmark-runtime.test.mjs tools/knip-entries.test.mjs",
+    "test:verification": "node --test tools/run-parallel.test.mjs tools/test-shards.test.mjs tools/check-changed.test.mjs tools/check-shas.test.mjs tools/ci-test-counts.test.mjs tools/counters.test.mjs tools/benchmark-runtime.test.mjs tools/knip-entries.test.mjs tools/repository-checks/doc-links.test.mjs",
     "test:families": "node tests/families/check.mjs",
     "test:lint:design": "node --test tools/design-lint/test.mjs"
   },
@@ -55,6 +56,9 @@
     "knip": "6.34.0",
     "oxlint": "1.81.0",
     "prettier": "3.9.6",
+    "remark-cli": "12.0.1",
+    "remark-gfm": "4.0.1",
+    "remark-validate-links": "13.1.0",
     "shadcn-vue": "2.8.2",
     "tailwindcss": "4.3.3",
     "ts-morph": "28.0.0",
@@ -81,5 +85,16 @@
     "tw-animate-css": "1.4.0",
     "vue": "3.5.41",
     "vue-sonner": "2.0.9"
+  },
+  "remarkConfig": {
+    "plugins": [
+      "remark-gfm",
+      [
+        "remark-validate-links",
+        {
+          "repository": false
+        }
+      ]
+    ]
   }
 }
