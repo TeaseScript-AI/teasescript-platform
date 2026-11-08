@@ -75,8 +75,10 @@ import {
   arrayStrip,
   carried,
   carriedBy,
+  carriedByRead,
   keepsOwn,
   keepsOwnRead,
+  type DispatchReads,
   type CarrierRole,
   type Dispatch,
   type StepsStrip,
@@ -888,12 +890,39 @@ export class Admission {
 
   /** `keepsOwn` with the receiver's decision a read (`Read`, #1072 A2). */
   public keepsOwnRead(value: PlaceId): Reads<boolean> {
-    const { contract } = this.pass;
-    const runRead = <T>(work: () => Work<T>): Reads<T> => this.runRead(work);
-    return keepsOwnRead(this.pass.program, value, function* (receiver) {
-      return heldReference(yield* runRead(() => contract.valueReceiver(receiver)));
-    });
+    return keepsOwnRead(this.pass.program, value, (receiver) =>
+      this.#dispatchReads.reference(receiver),
+    );
   }
+
+  /** `carriersOf` with the value side's decisions reads (`Read`, #1072 A2). */
+  public *carriersOfRead(
+    value: PlaceId,
+    strip: readonly string[],
+  ): Reads<readonly (readonly [PlaceId, readonly string[], CarrierRole, number])[]> {
+    const { program } = this.pass;
+    return (yield* carriedByRead(
+      program,
+      value,
+      arrayStrip(program, strip),
+      this.#dispatchReads,
+    )).map(([operand, below, role, position]) => [operand, below.steps, role, position] as const);
+  }
+
+  /** `#dispatch` with its decisions reads (`Read`, #1072 A2): run now outside a solver run, yielded inside one. */
+  readonly #dispatchReads: DispatchReads = ((admission) => ({
+    *kinds(of) {
+      const items = yield* admission.runRead(() => admission.pass.contract.contractOfValue(of));
+      return new Set(items.map((item) => item.tag));
+    },
+    *reference(receiver) {
+      const decided = yield* admission.runRead(() =>
+        admission.pass.contract.valueReceiver(receiver),
+      );
+      return heldReference(decided);
+    },
+    joined: (operand) => admission.pass.lists.joined(operand),
+  }))(this);
 
   /** A literal's term at one step: an object's property by its step, a collection's element; built once per literal. */
   public termAt(term: TypeTerm, step: string): TypeTerm | undefined {
