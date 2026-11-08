@@ -383,31 +383,70 @@ test("a name that is not UTF-8, and hunks that --numstat does not count, stop th
   }
 });
 
-test("an option without its value stops the report with the usage, and writes nothing", () => {
+const USAGE =
+  "usage: node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]\n" +
+  "       node tools/structure-report.mjs [ROOT…] --diff BASE [--json FILE]\n";
+/** Command lines the report refuses, with its reason: each option that takes a value, missing or repeated. */
+const REFUSED = [
+  [["--top"], "--top takes a value"],
+  [["--json"], "--json takes a value"],
+  [["--compare"], "--compare takes a value"],
+  [["--diff"], "--diff takes a value"],
+  [["src", "--json"], "--json takes a value"],
+  // the next argument is another option, still on the command line when it is read
+  [["--json", "--compare", "earlier.json"], "--json takes a value"],
+  [["--top", "--json", "out.json"], "--top takes a value"],
+  [["--compare", "--diff", "HEAD"], "--compare takes a value"],
+  [["--diff", "--top", "3"], "--diff takes a value"],
+  // a second occurrence, without its value or with one
+  [["--top", "2", "--top"], "--top takes a value"],
+  [["--json", "first.json", "--json"], "--json takes a value"],
+  [["--json", "first.json", "--json", "second.json"], "--json is given twice"],
+  [["--compare", "a.json", "--compare", "b.json"], "--compare is given twice"],
+  [["--diff", "HEAD", "--diff", "HEAD"], "--diff is given twice"],
+  [["--top", "2", "--top", "3"], "--top is given twice"],
+];
+
+test("an option without its value, or given twice, stops the report with the usage, and writes nothing", () => {
   const root = mkdtempSync(join(tmpdir(), "structure-report-"));
-  const usage =
-    "usage: node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]\n" +
-    "       node tools/structure-report.mjs [ROOT…] --diff BASE [--json FILE]\n";
   try {
-    for (const [args, missing] of [
-      [["--top"], "--top"],
-      [["--json"], "--json"],
-      [["--compare"], "--compare"],
-      [["--diff"], "--diff"],
-      [["src", "--json"], "--json"],
-      [["--json", "--top", "3"], "--json"],
-      [["--diff", "--json", "out.json"], "--diff"],
+    for (const [args, refusal] of REFUSED) {
+      const result = spawnSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+      assert.equal(result.status, 2, args.join(" "));
+      assert.equal(result.stdout, "", args.join(" "));
+      assert.equal(result.stderr, `structure-report: ${refusal}\n${USAGE}`, args.join(" "));
+      assert.deepEqual(readdirSync(root), [], `${args.join(" ")}: nothing is written`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("in a repository, a refused command line reads and writes nothing, its other options and roots included", () => {
+  const { root, git, base } = history(
+    { "src/sample.ts": "export const x = 1;\n" },
+    { "src/sample.ts": "export const x = 2;\n" },
+  );
+  try {
+    for (const [args, refusal] of [
+      // the argument after --json is an option, whose own value follows: neither becomes the destination
+      [["--json", "--top", "3", "src/sample.ts"], "--json takes a value"],
+      [["--json", "--compare", "earlier.json"], "--json takes a value"],
+      [["--diff", "--json", "out.json", base], "--diff takes a value"],
+      [["--json", "first.json", "--json", "second.json", "--diff", base], "--json is given twice"],
+      [["--diff", base, "--diff"], "--diff takes a value"],
     ]) {
       const result = spawnSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
       assert.equal(result.status, 2, args.join(" "));
       assert.equal(result.stdout, "", args.join(" "));
+      assert.equal(result.stderr, `structure-report: ${refusal}\n${USAGE}`, args.join(" "));
       assert.equal(
-        result.stderr,
-        `structure-report: ${missing} takes a value\n${usage}`,
-        args.join(" "),
+        git("status", "--porcelain", "--untracked-files=all"),
+        "",
+        `${args.join(" ")}: nothing is written`,
       );
-      assert.deepEqual(readdirSync(root), [], `${args.join(" ")}: nothing is written`);
     }
+    assert.equal(readFileSync(join(root, "src/sample.ts"), "utf8"), "export const x = 2;\n");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
