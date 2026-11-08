@@ -33,7 +33,8 @@ function* inheritedSteps(
   }
   const key = keyAtRef(contract, from, path);
   const known = admission.inherited.get(key);
-  const term = known !== undefined ? known : yield key;
+  // EVIDENCE: invariant: a key yielded is resumed with its inherited type.
+  const term = known !== undefined ? known : ((yield key) as TypeTerm | null);
   // (#1901: whether its copy reads its written type at its own root, `Admission.inheritedOwn`, read at the key made
   // for the term, once it is resolved)
   if (own !== undefined) own.value = term !== null && admission.inheritedOwn.get(key) === true;
