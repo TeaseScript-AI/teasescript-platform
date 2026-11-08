@@ -18,6 +18,7 @@ import type {
 import type * as RuntimeView from "../player/runtime-view.js";
 import type { PlayerSession } from "../player/runtime-view.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
+import { clockTicket } from "./helpers/clock-ticket.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import { deliveryOwner } from "../player/engine-bridge/delivery.js";
@@ -672,14 +673,20 @@ test("a jump another publication overtook seeks media to what shows, not to the 
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   const issuer = player.session.value!;
-  await bridge.request(issuer, "stepTime", { targetMs: 1_100 });
-  // The jump's reply arrived, but before the jump publishes, an observation of 2 s of playback overtakes it.
-  const jumped = bridge.latest(issuer)!;
-  const playing = view.playerRuntimeMedia(jumped.state).media[0]!;
-  audio.currentTime = 2;
-  await bridge.request(issuer, "observeTime", {
-    atMs: 2_000,
-    media: [{ mediaId: playing.mediaId, segment: playing.segment, progressMs: 2_000 }],
+  // The jump and the observation that overtakes it share one section of the session, as the Player's own dependent
+  // chains do: each request takes its basis when it is sent, and the Player's own observations, every 100 ms while
+  // the audio plays, wait outside the section instead of moving the session between or under the two (#2066).
+  const jumped = await bridge.section(issuer, clockTicket(), async (section) => {
+    await section.send("stepTime", { targetMs: 1_100 });
+    // The jump's reply arrived, but before the jump publishes, an observation of 2 s of playback overtakes it.
+    const reply = section.session;
+    const playing = view.playerRuntimeMedia(reply.state).media[0]!;
+    audio.currentTime = 2;
+    await section.send("observeTime", {
+      atMs: 2_000,
+      media: [{ mediaId: playing.mediaId, segment: playing.segment, progressMs: 2_000 }],
+    });
+    return reply;
   });
   player.update(bridge.latest(issuer)!);
   player.publishJump(jumped);
