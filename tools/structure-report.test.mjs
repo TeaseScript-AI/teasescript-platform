@@ -44,6 +44,8 @@ test(
       write(root, {
         "src/over.ts": lines(1001),
         "src/under.ts": lines(999),
+        // exactly 1000 lines, the last ended by a newline: not over 1000
+        "src/exact.ts": `${lines(1000)}\n`,
         "src/quiet.ts": lines(1500),
         "src/functions.ts": `${longFunction("written", 160)}\n${longFunction("untouched", 160)}\n`,
         ...folder("src/wide", 21),
@@ -73,6 +75,10 @@ test(
         "const v5 = 55;",
       );
       writeFileSync(join(root, "src/functions.ts"), functions);
+      writeFileSync(
+        join(root, "src/exact.ts"),
+        `${lines(1000).replace("x500 = 500", "x500 = 5000")}\n`,
+      );
       // a move into a folder over 20: no file and no lines added
       renameSync(join(root, "src/moving.ts"), join(root, "src/target/moving.ts"));
       git("add", "-A");
@@ -103,6 +109,16 @@ test(
       );
       // the whole tree's report counts each component's top level
       assert.match(report(), /^Top levels over 12 files: 1\n {2}14 {2}tools\/$/mu);
+      // a ROOT selects what is read, never what is a top level: only the five components are, written either way
+      assert.deepEqual(report("tools/", "--diff", base).trim().split("\n").slice(1), [
+        "  top level over 12 files that the change adds to: tools/ (14, was 13)",
+      ]);
+      assert.deepEqual(report("src/wide", "--diff", base).trim().split("\n").slice(1), [
+        "  folder over 20 files that the change adds to: src/wide/ (22, was 21)",
+      ]);
+      const selected = report("src/wide");
+      assert.match(selected, /^Folders over 20 files: 1\n {2}22 {2}src\/wide\/$/mu);
+      assert.match(selected, /^Top levels over 12 files: 0$/mu);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
