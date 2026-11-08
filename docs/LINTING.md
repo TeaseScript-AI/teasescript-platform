@@ -177,9 +177,15 @@ The local fragmented-class rule catches direct interpolation/concatenation in Vu
 class builders or data flow. Review those paths when changing them.
 
 Disabled controls take the theme's `text-disabled`, `surface-disabled` and `border-disabled` roles from one unlayered
-rule in `player/vue/src/style.css`, which overrides Tailwind's layered utilities. The local disabled-opacity rule
-refuses a `disabled:opacity-*` or `data-[disabled]:opacity-*` class, which would never show. `aria-disabled` is outside
-it: the shared rule does not cover it, and it marks controls that dim while busy yet keep focus.
+rule in `player/vue/src/style.css`, which overrides Tailwind's layered utilities, so an opacity class under a disabled
+variant would never show. The local disabled-opacity rule admits the variants before an opacity utility only in a
+closed set of forms that cannot select the control's own disabled state (`ADMITTED_VARIANTS` in
+`tools/design-lint/plugin.mjs`): breakpoints, media and direction, element states and pseudo-elements, `aria-*`, data
+attributes other than `data-disabled`, and `group-*`/`peer-*`, which read another element. It refuses every other
+variant: `disabled`, `data-disabled`, `data-[disabled…]` and arbitrary selectors naming `:disabled` or `[disabled]` as
+overridden, any other form, such as another arbitrary selector or `not-*`, by name until a row admits it.
+`aria-disabled` stays admitted: the shared rule does not cover it, and it marks controls that dim while busy yet keep
+focus.
 
 These checks do not inspect CSS declarations, compute contrast, validate author colors, or prove visual
 consistency. Scoped/global CSS, runtime style objects and externally supplied classes still need review
