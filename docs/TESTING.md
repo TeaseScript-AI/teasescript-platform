@@ -663,15 +663,17 @@ A frozen failure matches no publication, so it is judged by its recorded success
 (`candidates.ts`) proposes finite, ordered requests for every kind of foreground presentation and pending action; the
 engine decides; the driver (`driver.ts`) records every request and reply on the client (`tape.ts`), declines and their
 publications included, and ends a tape `halted`, `failed` or `cut` (250 accepted inputs, a complete prefix for this
-policy) or `unsupported`, `refused` or `stalled` (incomplete, reported as such). The adapter oracle (`oracle.ts`)
-judges every tape against the adapter, and the fixed tape replays on every backend, failing at its first differing
-entry. Coverage is what the tapes ran, never what they could reach.
+policy, each closed by a final capture) or incomplete, reported as such (`notPrepared`, `unsupported`, `refused`,
+`stalled`, a `thrown` request that ended the session, a `captureFailed`, a `harnessError`). The adapter oracle
+(`oracle.ts`) judges every tape against the adapter, keeping its own revision and event cursor, and the fixed tape
+replays on every backend, failing at its first differing entry. Coverage is what the tapes ran, never what they could reach.
 
 `tests/player-gate-tapes.test.ts` holds the structural claim (the table, the outcome readings and `ADAPTER_OPS` cover
 the same ops) and bounded runtime witnesses generated from the engine's guards, with their controls' mutants. The
 workload runs outside CI on a queue worker: `node tools/player-gate/tapes/record.mjs --out DIR --f DIR --k DIR
-[--shard I/N]` in a built tree records, judges and replays every F and K package; `census.mjs` counts the accepted ops
-and rows and picks the browser and Pixel cover set.
+[--shard I/N]` in a built tree records, judges and replays every F and K package, preparation-only ones included, and
+reports what each tape met (`inventory.ts`); `census.mjs` counts every mechanism, lists those no tape met and those met
+only in incomplete tapes, and picks the browser and Pixel cohorts.
 
 ## Implemented Phase 1 deterministic property harness
 

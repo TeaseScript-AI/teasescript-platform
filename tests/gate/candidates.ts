@@ -13,6 +13,12 @@ import {
   type PlayerSessionView,
 } from "../../player/runtime-view.js";
 import type { RuntimePendingActionSnapshot } from "../../src/runtime/actions/model.js";
+import type { MediaLoadReport } from "../../src/runtime/operations/media-reports.js";
+import type {
+  PlayerCaptureAnswer,
+  PlayerFileStoreAnswer,
+  PlayerLockAnswer,
+} from "../../player/runtime-adapter.js";
 
 /*
  * The K/F tape driver's candidate table (the L5 gate's tape plan, design round 1's construction): one row per kind of
@@ -21,38 +27,92 @@ import type { RuntimePendingActionSnapshot } from "../../src/runtime/actions/mod
  * and the driver (`driver.ts`) records every attempt and its reply.
  */
 
-/** Every op a candidate can be, and so every op the tapes send besides `start`. */
-export const CANDIDATE_OPS = [
-  "submitComposer",
-  "selectChoice",
-  "activateButton",
-  "stepFormField",
-  "submitForm",
-  "cancelForm",
-  "skipImage",
-  "openUrl",
-  "closePopup",
-  "closeExport",
-  "pressPermanentButton",
-  "completeStorageWrite",
-  "answerCapture",
-  "answerFileStore",
-  "answerLock",
-  "reportMediaLoad",
-  "stepTime",
-] as const;
-export type CandidateOp = (typeof CANDIDATE_OPS)[number];
+/** Each candidate op's arguments, as its host op checks them (`ops/input.ts`, `ops/resources.ts`, `ops/media.ts`, `ops/session.ts`). */
+interface CandidateArgs {
+  readonly submitComposer: {
+    readonly actionId: number;
+    readonly text: string;
+    readonly input: null;
+  };
+  readonly selectChoice: {
+    readonly actionId: number;
+    readonly optionId: string;
+    readonly input: null;
+  };
+  readonly activateButton: { readonly actionId: number; readonly input: null };
+  readonly stepFormField: {
+    readonly actionId: number;
+    readonly fieldId: string;
+    readonly draft: string | null;
+  };
+  readonly submitForm: {
+    readonly actionId: number;
+    readonly draft: string | null;
+    readonly input: null;
+  };
+  readonly cancelForm: { readonly actionId: number; readonly input: null };
+  readonly skipImage: { readonly actionId: number; readonly input: null };
+  readonly openUrl: { readonly actionId: number; readonly input: null };
+  readonly closePopup: { readonly actionId: number; readonly input: null };
+  readonly closeExport: { readonly actionId: number; readonly input: null };
+  readonly pressPermanentButton: { readonly buttonId: number };
+  readonly completeStorageWrite: { readonly actionId: number; readonly stored: boolean };
+  readonly answerCapture: {
+    readonly actionId: number;
+    readonly answer: PlayerCaptureAnswer;
+    readonly held: null;
+  };
+  readonly answerFileStore: {
+    readonly actionId: number;
+    readonly answer: PlayerFileStoreAnswer;
+    readonly held: null;
+  };
+  readonly answerLock: {
+    readonly actionId: number;
+    readonly answer: PlayerLockAnswer;
+    readonly held: null;
+  };
+  readonly reportMediaLoad: { readonly mediaId: number; readonly report: MediaLoadReport };
+  readonly stepTime: { readonly targetMs: number };
+}
+export type CandidateOp = keyof CandidateArgs;
+
+/** Every op a candidate can be, and so every op the tapes send besides `start` (one entry per `CandidateArgs` op). */
+const OPS = {
+  submitComposer: true,
+  selectChoice: true,
+  activateButton: true,
+  stepFormField: true,
+  submitForm: true,
+  cancelForm: true,
+  skipImage: true,
+  openUrl: true,
+  closePopup: true,
+  closeExport: true,
+  pressPermanentButton: true,
+  completeStorageWrite: true,
+  answerCapture: true,
+  answerFileStore: true,
+  answerLock: true,
+  reportMediaLoad: true,
+  stepTime: true,
+} as const satisfies Record<CandidateOp, true>;
+// EVIDENCE: validation: `OPS` has exactly the keys of `CandidateArgs` (`satisfies Record<CandidateOp, true>`).
+export const CANDIDATE_OPS = Object.keys(OPS) as readonly CandidateOp[];
 
 /** Where a candidate stands in the session-wide order: active host work, a permanent button, the foreground, time. */
 export type CandidateGroup = "host" | "button" | "foreground" | "time";
 
-export interface Candidate {
-  readonly op: CandidateOp;
-  readonly args: Readonly<Record<string, unknown>>;
-  readonly group: CandidateGroup;
-  /** The row and the value that built it, for the tape's census. */
-  readonly row: string;
-}
+/** One proposed request: its op with that op's arguments, its place in the order, and the row that built it. */
+export type Candidate = {
+  readonly [O in CandidateOp]: {
+    readonly op: O;
+    readonly args: CandidateArgs[O];
+    readonly group: CandidateGroup;
+    /** The row and the value class that built it, for the tape's census. */
+    readonly row: string;
+  };
+}[CandidateOp];
 
 /** The pinned moment every tape starts at (UTC), whose date and time are the date and time answers. */
 export const TAPE_WALL_CLOCK_MS = Date.UTC(2026, 10, 8, 12);
@@ -61,9 +121,9 @@ const PINNED_TIME = "12:00";
 const TEXT_ANSWERS = ["test", "yes", "1"];
 const NUMBER_ANSWERS = ["5", "1", "10", "30", "0"];
 /** The permanent-button cadence: a shown button is pressed on every tenth accepted input. */
-export const BUTTON_CADENCE = 10;
+const BUTTON_CADENCE = 10;
 /** The duration a medium reports when it is loaded. */
-export const MEDIA_DURATION_MS = 6000;
+const MEDIA_DURATION_MS = 6000;
 
 type ForegroundKind = PlayerForegroundPresentation["kind"];
 type Foreground<K extends ForegroundKind> = PlayerForegroundPresentation extends infer P
@@ -81,20 +141,29 @@ interface Shown {
   readonly actionId: number;
 }
 
-/** The ops that record how the player answered (`input`); the form's field steps do not (`ops/input.ts`). */
-const NO_INPUT: ReadonlySet<CandidateOp> = new Set(["stepFormField"]);
+/** The foreground ops, which answer the presented action. */
+type InteractionOp = {
+  readonly [O in CandidateOp]: CandidateArgs[O] extends {
+    readonly actionId: number;
+    readonly input: null;
+  }
+    ? O
+    : never;
+}[CandidateOp];
 
-const interaction = (
-  op: CandidateOp,
+const interaction = <O extends InteractionOp>(
+  op: O,
   shown: Shown,
   row: string,
-  extra: Record<string, unknown> = {},
-): Candidate => ({
-  op,
-  args: { actionId: shown.actionId, ...extra, ...(NO_INPUT.has(op) ? {} : { input: null }) },
-  group: "foreground",
-  row,
-});
+  extra: Omit<CandidateArgs[O], "actionId" | "input">,
+): Candidate =>
+  // EVIDENCE: validation: `args` is `CandidateArgs[O]` (the action ID, `extra`, and no `input`), the op's own arguments.
+  ({
+    op,
+    args: { actionId: shown.actionId, ...extra, input: null },
+    group: "foreground",
+    row,
+  }) as Candidate;
 const typed = (
   shown: Shown,
   row: string,
@@ -136,7 +205,7 @@ function fieldAnswers(
 }
 
 /** The foreground rows: one per kind of `PlayerForegroundPresentation`; a new kind fails `tsc` here. */
-export const FOREGROUND_ROWS: {
+const FOREGROUND_ROWS: {
   readonly [K in ForegroundKind]: (
     shown: Shown,
     presented: Foreground<K>,
@@ -159,10 +228,10 @@ export const FOREGROUND_ROWS: {
   "ask-datetime": (shown, presented) =>
     typed(shown, "ask-datetime", [`${PINNED_DATE}T${PINNED_TIME}`], presented.prefill),
   "ask-password": (shown) => typed(shown, "ask-password", ["gate"], undefined),
-  "show-button": (shown) => [interaction("activateButton", shown, "show-button")],
-  "open-url": (shown) => [interaction("openUrl", shown, "open-url")],
-  popup: (shown) => [interaction("closePopup", shown, "popup")],
-  "export-text": (shown) => [interaction("closeExport", shown, "export-text")],
+  "show-button": (shown) => [interaction("activateButton", shown, "show-button", {})],
+  "open-url": (shown) => [interaction("openUrl", shown, "open-url", {})],
+  popup: (shown) => [interaction("closePopup", shown, "popup", {})],
+  "export-text": (shown) => [interaction("closeExport", shown, "export-text", {})],
   form: (shown) => {
     const form = playerRuntimeForm(shown.session);
     const candidates = [interaction("submitForm", shown, "form:as drafted", { draft: null })];
@@ -175,12 +244,12 @@ export const FOREGROUND_ROWS: {
         field.state === null &&
         editor?.fieldId !== field.id
       )
-        candidates.push(
-          interaction("stepFormField", shown, "form:open field", {
-            fieldId: field.id,
-            draft: null,
-          }),
-        );
+        candidates.push({
+          op: "stepFormField",
+          args: { actionId: shown.actionId, fieldId: field.id, draft: null },
+          group: "foreground",
+          row: "form:open field",
+        });
     // Whatever the editor holds: a refused draft stays in it (and is published), and the next answers still follow.
     if (editor !== null && !editor.optional)
       for (const answer of fieldAnswers(
@@ -190,26 +259,38 @@ export const FOREGROUND_ROWS: {
         editor.inputMode,
       ))
         candidates.push(interaction("submitForm", shown, answer.row, { draft: answer.text }));
-    if (form?.cancel) candidates.push(interaction("cancelForm", shown, "form:cancel"));
+    if (form?.cancel) candidates.push(interaction("cancelForm", shown, "form:cancel", {}));
     return candidates;
   },
   // This policy represents no image answer: a mandatory image has no candidate (unsupported by this policy).
   "ask-image": (shown, presented) =>
-    presented.skip === null ? [] : [interaction("skipImage", shown, "ask-image:skip")],
+    presented.skip === null ? [] : [interaction("skipImage", shown, "ask-image:skip", {})],
 };
 
-const resource = (
-  op: CandidateOp,
-  actionId: number,
-  row: string,
-  answer: Record<string, unknown>,
-): Candidate => ({ op, args: { actionId, answer, held: null }, group: "host", row });
+const capture = (actionId: number, row: string, answer: PlayerCaptureAnswer): Candidate => ({
+  op: "answerCapture",
+  args: { actionId, answer, held: null },
+  group: "host",
+  row,
+});
+const fileStore = (actionId: number, row: string, answer: PlayerFileStoreAnswer): Candidate => ({
+  op: "answerFileStore",
+  args: { actionId, answer, held: null },
+  group: "host",
+  row,
+});
+const lock = (actionId: number, row: string, answer: PlayerLockAnswer): Candidate => ({
+  op: "answerLock",
+  args: { actionId, answer, held: null },
+  group: "host",
+  row,
+});
 
 /**
  * The pending rows: one per kind of `RuntimePendingActionSnapshot`; a new kind fails `tsc` here. A row gives the host
  * requests that action asks for now; an interaction is the foreground's, and timed work only waits for time.
  */
-export const PENDING_ROWS: {
+const PENDING_ROWS: {
   readonly [K in PendingKind]: (
     session: PlayerSessionView,
     action: Extract<RuntimePendingActionSnapshot, { kind: K }>,
@@ -249,7 +330,7 @@ export const PENDING_ROWS: {
   capture: (session, action) =>
     activePlayerRuntimeCapture(session.state)?.actionId === action.actionId
       ? [
-          resource("answerCapture", action.actionId, "capture:unavailable", {
+          capture(action.actionId, "capture:unavailable", {
             kind: "unavailable",
             reason: "unconfigured",
           }),
@@ -257,20 +338,15 @@ export const PENDING_ROWS: {
       : [],
   fileStore: (session, action) =>
     activePlayerRuntimeFileStore(session.state)?.actionId === action.actionId
-      ? [resource("answerFileStore", action.actionId, "fileStore:failed", { kind: "failed" })]
+      ? [fileStore(action.actionId, "fileStore:failed", { kind: "failed" })]
       : [],
   lock: (session, action) => {
     if (activePlayerRuntimeLock(session.state)?.actionId !== action.actionId) return [];
     return action.phase === "work"
-      ? [
-          resource("answerLock", action.actionId, "lock:work failed", {
-            kind: "failed",
-            reason: "unavailable",
-          }),
-        ]
+      ? [lock(action.actionId, "lock:work failed", { kind: "failed", reason: "unavailable" })]
       : [
-          resource("answerLock", action.actionId, "lock:ask submitted", { kind: "submitted" }),
-          resource("answerLock", action.actionId, "lock:ask cancelled", { kind: "cancelled" }),
+          lock(action.actionId, "lock:ask submitted", { kind: "submitted" }),
+          lock(action.actionId, "lock:ask cancelled", { kind: "cancelled" }),
         ];
   },
 };

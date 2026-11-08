@@ -1,85 +1,131 @@
 // The K/F tapes' mechanism census and the browser and Pixel cover sets (the gate's tape plan §4–§5), from the report
-// lines `record.mjs` wrote: per op and per row (the table row and value that proposed an accepted input), how many
-// complete prefixes and how many incomplete tapes accepted it, and which ops were only declined; then the smallest
-// greedy set of complete-prefix tapes covering every op and row met, always with the named packages.
-//   node tools/player-gate/tapes/census.mjs --out DIR [--always NAME,...] REPORT.jsonl...
+// lines `record.mjs` wrote. Per mechanism (`tests/gate/inventory.ts`: an action kind shown, an event kind, a
+// settlement, an accepted op), how many complete prefixes and how many incomplete tapes met it; the mechanisms no tape
+// met and those met only in incomplete tapes, listed apart; the proposal rows that made accepted inputs; and each
+// cohort: its fixed packages, then the K packages a greedy pass over complete prefixes adds until every mechanism a
+// complete prefix met is covered. Run in a built tree:
+//   node tools/player-gate/tapes/census.mjs --out DIR --always NAME,... --pixel-f NAME,... REPORT.jsonl...
+// The browser cohort fixes F's compiling packages and --always; the Pixel cohort F's --pixel-f ones and --always.
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 const { values, positionals } = parseArgs({
-  options: { out: { type: "string" }, always: { type: "string", default: "" } },
+  options: {
+    out: { type: "string" },
+    always: { type: "string", default: "" },
+    "pixel-f": { type: "string", default: "" },
+  },
   allowPositionals: true,
 });
+const { MECHANISMS } = await import(pathToFileURL(resolve("dist/tests/gate/inventory.js")).href);
 const lines = positionals.flatMap((file) =>
   readFileSync(file, "utf8")
     .split("\n")
     .filter((line) => line.trim() !== "")
     .map((line) => JSON.parse(line)),
 );
-const census = {
-  ops: {},
-  rows: {},
-  declinedOnly: [],
-  outcomes: {},
-  packages: lines.length,
-  disagreements: [],
-};
-const add = (table, key, complete) => {
-  table[key] ??= { completeTapes: 0, incompleteTapes: 0 };
-  table[key][complete ? "completeTapes" : "incompleteTapes"] += 1;
-};
-for (const line of lines) {
-  census.outcomes[line.outcome.kind] = (census.outcomes[line.outcome.kind] ?? 0) + 1;
-  for (const op of Object.keys(line.accepted)) add(census.ops, op, line.complete);
-  for (const row of Object.keys(line.mechanisms)) add(census.rows, row, line.complete);
-  if (line.oracle !== null || line.workerReplay !== null) census.disagreements.push(line.package);
-}
-const declinedOps = new Set(
-  lines.flatMap((line) => Object.keys(line.declined).map((key) => key.split(":")[0])),
-);
-census.declinedOnly = [...declinedOps].filter((op) => !(op in census.ops)).sort();
+const names = (list) => list.split(",").filter(Boolean);
 
-// The cover set: the named packages, then complete prefixes greedily, each adding the most uncovered ops and rows.
-const always = values.always.split(",").filter(Boolean);
-const mechanismsOf = (line) => [
-  ...Object.keys(line.accepted).map((op) => `op ${op}`),
+const mechanisms = Object.fromEntries(
+  MECHANISMS.map((key) => [key, { completeTapes: 0, incompleteTapes: 0 }]),
+);
+const rows = {};
+const outcomes = {};
+for (const line of lines) {
+  outcomes[line.outcome.kind] = (outcomes[line.outcome.kind] ?? 0) + 1;
+  const side = line.complete ? "completeTapes" : "incompleteTapes";
+  for (const key of line.inventory) {
+    // A key outside `MECHANISMS` is a gap in the inventory's list, reported rather than dropped.
+    mechanisms[key] ??= { completeTapes: 0, incompleteTapes: 0, unlisted: true };
+    mechanisms[key][side] += 1;
+  }
+  for (const row of Object.keys(line.mechanisms)) {
+    rows[row] ??= { completeTapes: 0, incompleteTapes: 0 };
+    rows[row][side] += 1;
+  }
+}
+const keys = Object.keys(mechanisms).sort();
+const absent = keys.filter(
+  (key) => mechanisms[key].completeTapes + mechanisms[key].incompleteTapes === 0,
+);
+const incompleteOnly = keys.filter(
+  (key) => mechanisms[key].completeTapes === 0 && mechanisms[key].incompleteTapes > 0,
+);
+
+// A cohort: the fixed packages, then complete K prefixes greedily, each adding the most uncovered mechanisms and rows.
+const metBy = (line) => [
+  ...line.inventory,
   ...Object.keys(line.mechanisms).map((row) => `row ${row}`),
 ];
-const wanted = new Set(lines.filter((line) => line.complete).flatMap(mechanismsOf));
-const chosen = lines.filter((line) => always.includes(line.package));
-const covered = new Set(chosen.flatMap(mechanismsOf));
-for (;;) {
-  const best = lines
-    .filter((line) => line.complete && !chosen.includes(line))
-    .map((line) => ({
-      line,
-      gain: mechanismsOf(line).filter(
-        (mechanism) => wanted.has(mechanism) && !covered.has(mechanism),
-      ).length,
-    }))
-    .sort((a, b) => b.gain - a.gain || a.line.package.localeCompare(b.line.package))[0];
-  if (best === undefined || best.gain === 0) break;
-  chosen.push(best.line);
-  for (const mechanism of mechanismsOf(best.line)) covered.add(mechanism);
+const wanted = new Set(lines.filter((line) => line.complete).flatMap(metBy));
+function cohort(fixed) {
+  const chosen = [...fixed];
+  const covered = new Set(chosen.flatMap(metBy));
+  for (;;) {
+    const best = lines
+      .filter((line) => line.family === "K" && line.complete && !chosen.includes(line))
+      .map((line) => ({
+        line,
+        gain: metBy(line).filter((key) => wanted.has(key) && !covered.has(key)).length,
+      }))
+      .sort((a, b) => b.gain - a.gain || a.line.package.localeCompare(b.line.package))[0];
+    if (best === undefined || best.gain === 0) break;
+    chosen.push(best.line);
+    for (const key of metBy(best.line)) covered.add(key);
+  }
+  return {
+    packages: chosen.map((line) => ({
+      family: line.family,
+      package: line.package,
+      fixed: fixed.includes(line),
+      projectSha256: line.projectSha256,
+      tapeSha256: line.tapeSha256,
+    })),
+    uncovered: [...wanted].filter((key) => !covered.has(key)).sort(),
+  };
 }
-census.cover = chosen.map((line) => ({
-  family: line.family,
-  package: line.package,
-  projectSha256: line.projectSha256,
-  tapeSha256: line.tapeSha256,
-}));
-census.uncovered = [...wanted].filter((mechanism) => !covered.has(mechanism)).sort();
+const pixelF = names(values["pixel-f"]);
+for (const name of [...names(values.always), ...pixelF])
+  if (!lines.some((line) => line.package === name))
+    throw new Error(`no report line for the named package ${name}`);
+const always = lines.filter((line) => names(values.always).includes(line.package));
+const census = {
+  packages: lines.length,
+  outcomes,
+  mechanisms,
+  absent,
+  incompleteOnly,
+  rows,
+  cohorts: {
+    browser: cohort([
+      ...lines.filter((line) => line.family === "F" && line.preparation === "prepared"),
+      ...always,
+    ]),
+    pixel: cohort([
+      ...lines.filter((line) => line.family === "F" && pixelF.includes(line.package)),
+      ...always,
+    ]),
+  },
+  disagreements: lines
+    .filter((line) => line.oracle !== "agrees" || line.workerReplay !== "agrees")
+    .map((line) => ({
+      family: line.family,
+      package: line.package,
+      oracle: line.oracle,
+      workerReplay: line.workerReplay,
+    })),
+};
 writeFileSync(join(values.out, "census.json"), JSON.stringify(census, null, 2));
 console.log(
   JSON.stringify({
     packages: census.packages,
-    outcomes: census.outcomes,
-    ops: Object.keys(census.ops).length,
-    rows: Object.keys(census.rows).length,
-    declinedOnly: census.declinedOnly,
-    cover: census.cover.length,
-    uncovered: census.uncovered.length,
+    outcomes,
+    absent: absent.length,
+    incompleteOnly: incompleteOnly.length,
+    browser: census.cohorts.browser.packages.length,
+    pixel: census.cohorts.pixel.packages.length,
     disagreements: census.disagreements.length,
   }),
 );

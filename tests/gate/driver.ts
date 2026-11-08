@@ -14,7 +14,7 @@ import { recordClient, type TapeEntry } from "./tape.js";
  */
 
 /** Accepted inputs after which a tape is cut. */
-export const TAPE_CUT = 250;
+const TAPE_CUT = 250;
 
 export type TapeOutcome =
   | { readonly kind: "halted" | "failed" | "cut" }
@@ -22,6 +22,8 @@ export type TapeOutcome =
   | { readonly kind: "unsupported"; readonly reason: string }
   | { readonly kind: "refused"; readonly reason: string }
   | { readonly kind: "stalled"; readonly reason: string }
+  | { readonly kind: "thrown"; readonly reason: string }
+  | { readonly kind: "captureFailed"; readonly reason: string }
   | { readonly kind: "harnessError"; readonly reason: string };
 
 /** Halted, failed and cut tapes are complete prefixes for this policy and cut; the others are not. */
@@ -119,7 +121,8 @@ export async function driveTape(
           if (!(error instanceof BridgeRequestError)) throw error;
           // A refused request (a basis, an argument, a thrown op) is recorded and declined; a session it ended ends the tape.
           count(declined, `${next.op}:${error.name}`);
-          if (error.ended) return finish({ kind: "failed" });
+          // A thrown request that ended the session is no engine failure the script reached: the tape is incomplete.
+          if (error.ended) return finish({ kind: "thrown", reason: `${next.op}: ${error.name}` });
           lastDeclined = { candidate: next, reason: error.name };
           continue;
         }
@@ -170,20 +173,27 @@ export async function driveTape(
 
 const key = (candidate: Candidate) => `${candidate.op} ${JSON.stringify(candidate.args)}`;
 
-/** The tape's final capture, recorded as an entry: the session's checkpoint, read session-free after its requests. */
+/**
+ * The tape's final capture, recorded as an entry: the session's checkpoint, read session-free after its requests. A
+ * capture that fails leaves the tape incomplete (`captureFailed`), whatever outcome it had.
+ */
 async function captured(
   bridge: PlayerBridge,
   session: PlayerSession,
   run: TapeRun,
 ): Promise<TapeRun> {
-  const entries = [...run.entries];
   const recorder = recordClient(bridge.client);
+  let failure: string | null = null;
   try {
     await bridge.read(session, "captureCheckpoint");
-  } catch {
-    // A capture the host refuses is recorded as its refusal.
+  } catch (error) {
+    failure = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   } finally {
     recorder.stop();
   }
-  return { ...run, entries: [...entries, ...recorder.entries] };
+  return {
+    ...run,
+    entries: [...run.entries, ...recorder.entries],
+    ...(failure === null ? {} : { outcome: { kind: "captureFailed", reason: failure } }),
+  };
 }

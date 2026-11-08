@@ -27,6 +27,8 @@ export type TapeReply =
       readonly code: string | null;
       readonly message: string;
       readonly ended: boolean | null;
+      /** The error's details, as the client delivers them (`BridgeRequestError.info`). */
+      readonly info: unknown;
     };
 
 export interface TapeEntry {
@@ -63,6 +65,7 @@ function refusalOf(error: unknown): TapeReply {
       code: error.code,
       message: error.message,
       ended: error.ended,
+      info: asJson(error.info),
     };
   return {
     ok: false,
@@ -71,6 +74,7 @@ function refusalOf(error: unknown): TapeReply {
     code: null,
     message: error instanceof Error ? error.message : String(error),
     ended: null,
+    info: null,
   };
 }
 
@@ -95,7 +99,15 @@ export function recordClient(client: BridgeClient): {
     };
     entries.push({
       ...base,
-      reply: { ok: false, name: "pending", kind: null, code: null, message: "", ended: null },
+      reply: {
+        ok: false,
+        name: "pending",
+        kind: null,
+        code: null,
+        message: "",
+        ended: null,
+        info: null,
+      },
     });
     try {
       const result = await request(op, args, options);

@@ -32,6 +32,7 @@ const { driveTape, isComplete } = await load("tests/gate/driver.js");
 const { judgeTape } = await load("tests/gate/oracle.js");
 const { replayTape } = await load("tests/gate/tape.js");
 const { TAPE_START } = await load("tests/gate/start.js");
+const { inventoryOf } = await load("tests/gate/inventory.js");
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
 const WORKER = pathToFileURL(join(dist, "player/engine-bridge/node-worker.js"));
 
@@ -50,7 +51,10 @@ if (values.f)
       },
     });
 if (values.k)
-  for (const name of readdirSync(values.k).sort())
+  for (const name of readdirSync(values.k, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort())
     packages.push({
       family: "K",
       name,
@@ -68,6 +72,7 @@ const mine = packages.filter((_, index) => index % shards === shard - 1);
 
 mkdirSync(join(values.out, "tapes"), { recursive: true });
 const sha256 = (text) => createHash("sha256").update(text).digest("hex");
+
 let disagreements = 0;
 for (const entry of mine) {
   const started = performance.now();
@@ -92,16 +97,14 @@ for (const entry of mine) {
     join(values.out, "tapes", `${entry.family}-${entry.name}.json.gz`),
     gzipSync(tapeJson),
   );
-  let oracle = null;
-  let worker = null;
-  if (run.outcome.kind !== "notPrepared") {
-    oracle = judgeTape(project, TAPE_START, run.entries);
-    const bridge = new PlayerBridge(await connectBridge(nodeWorkerPort(WORKER, BUILD), BUILD));
-    try {
-      worker = await replayTape(bridge.client, run.entries);
-    } finally {
-      bridge.client.terminate();
-    }
+  // Every tape is judged and replayed, a preparation-only one too.
+  const oracle = judgeTape(project, TAPE_START, run.entries, { complete: isComplete(run.outcome) });
+  const bridge = new PlayerBridge(await connectBridge(nodeWorkerPort(WORKER, BUILD), BUILD));
+  let worker;
+  try {
+    worker = await replayTape(bridge.client, run.entries);
+  } finally {
+    bridge.client.terminate();
   }
   if (oracle !== null || worker !== null) disagreements += 1;
   const line = {
@@ -116,10 +119,11 @@ for (const entry of mine) {
     accepted: run.census.accepted,
     declined: run.census.declined,
     mechanisms: run.census.rows,
+    inventory: inventoryOf(run.entries),
     status: run.census.status,
     observedMs: run.census.observedMs,
-    oracle: oracle === null ? null : { index: oracle.index, op: oracle.op, what: oracle.what },
-    workerReplay: worker === null ? null : { index: worker.index, op: worker.op },
+    oracle: oracle === null ? "agrees" : { index: oracle.index, op: oracle.op, what: oracle.what },
+    workerReplay: worker === null ? "agrees" : { index: worker.index, op: worker.op },
     seconds: Math.round(performance.now() - started) / 1000,
   };
   appendFileSync(

@@ -304,15 +304,7 @@ const presented =
       ? { session, outcome: { kind: "staleAction", actionId: args["actionId"] } }
       : answer(session, args);
 
-export const ADAPTER_OPS: Readonly<
-  Record<
-    string,
-    (
-      session: PlayerRuntimeSession,
-      args: Record<string, unknown>,
-    ) => { readonly session: PlayerRuntimeSession; readonly outcome: unknown } | null
-  >
-> = {
+export const ADAPTER_OPS = {
   observeTime: (session, args) => {
     // EVIDENCE: validation: the host accepted `atMs` as a scene time (`ops/session.ts`).
     const atMs = args["atMs"] as number;
@@ -320,7 +312,7 @@ export const ADAPTER_OPS: Readonly<
     const media = args["media"] as readonly MediaProgressReport[];
     return observePlayerRuntimeTime(session, atMs, media);
   },
-  selectChoice: (session, args) => {
+  selectChoice: presented((session, args) => {
     // EVIDENCE: validation: the host accepted `optionId` as a string and `input` as an answer input (`ops/input.ts`).
     const optionId = args["optionId"] as string;
     // EVIDENCE: validation: as above.
@@ -329,7 +321,7 @@ export const ADAPTER_OPS: Readonly<
     return input === null
       ? select(session)
       : answeredByPlayerInput(session, input, () => select(session));
-  },
+  }),
   // The ops the L5 gate's K/F tapes send (`tests/gate/candidates.ts`), each as its host op calls the adapter, from the
   // arguments the host accepted (`ops/input.ts`, `ops/resources.ts`, `ops/media.ts`, `ops/session.ts`). The tapes send
   // no `input`, so none is recorded as how the player answered.
@@ -402,7 +394,13 @@ export const ADAPTER_OPS: Readonly<
     const next = stepPlayerRuntimeTime(session, args["targetMs"] as number);
     return { session: next, outcome: { moved: next !== session } };
   },
-};
+} satisfies Readonly<Record<string, AdapterCall>>;
+
+/** `ADAPTER_OPS` by op name, for a request whose op is a string: `undefined` for an op the oracle has no path for. */
+export function adapterCall(op: string): AdapterCall | undefined {
+  const calls: Readonly<Record<string, AdapterCall>> = ADAPTER_OPS;
+  return Object.hasOwn(calls, op) ? calls[op] : undefined;
+}
 
 /**
  * Fails unless every one of `requests` (a session's after the cut) is an engine input the oracle replays, also when the
@@ -438,7 +436,7 @@ export function adapterReplay(
     const ended = request.ended;
     assert.ok(ended !== null, `request ${index} (${request.op}) after the cut had not ended`);
     assertEngineInputs([request]);
-    const call = ADAPTER_OPS[request.op]!;
+    const call = adapterCall(request.op)!;
     if (!ended.ok && ended.refused) continue;
     // EVIDENCE: validation: every op the Player sends takes an object of arguments.
     const args = request.args as Record<string, unknown>;
