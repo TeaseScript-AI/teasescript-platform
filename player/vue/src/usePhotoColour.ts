@@ -47,8 +47,8 @@ function useVignetteGeometry(
     image.value = stageImage(stage.value);
     if (!canvas.value) return;
     const origin = canvas.value.getBoundingClientRect();
-    if (!image.value) {
-      // No photo: the middle of the Stage.
+    // No photo, or one that failed to load (as `Stage.vue` tells a failure): the middle of the Stage.
+    if (!image.value || (image.value.complete && image.value.naturalWidth === 0)) {
       if (stage.value) set(stage.value.getBoundingClientRect(), origin);
       return;
     }
