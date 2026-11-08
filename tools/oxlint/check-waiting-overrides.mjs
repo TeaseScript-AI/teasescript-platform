@@ -22,6 +22,11 @@ const SEVERITIES = new Set(["allow", "off", "warn", "error", "deny", 0, 1, 2]);
 const OFF = new Set(["allow", "off", 0]);
 const severityOf = (setting) => (Array.isArray(setting) ? setting[0] : setting);
 
+/** Whether an `overrides` entry is a waiting list: it has rules, and each is off. */
+export const isWaitingEntry = (entry) =>
+  Object.keys(entry.rules ?? {}).length > 0 &&
+  Object.values(entry.rules).every((setting) => OFF.has(severityOf(setting)));
+
 /** Each string value of `text` (strict JSON) with its path of keys and indexes, and its offset. */
 function stringsOf(text) {
   const found = [];
@@ -118,11 +123,7 @@ export function checkWaitingOverrides(root, configFile, configText, linted, exec
   if (findings.length > 0) return findings;
   const waiting = overrides
     .map((entry, index) => ({ entry, index }))
-    .filter(
-      ({ entry }) =>
-        Object.keys(entry.rules ?? {}).length > 0 &&
-        Object.values(entry.rules).every((setting) => OFF.has(severityOf(setting))),
-    );
+    .filter(({ entry }) => isWaitingEntry(entry));
 
   const probe = `.oxlintrc.probe-${process.pid}-${randomBytes(4).toString("hex")}.json`;
   const remove = () => rmSync(join(root, probe), { force: true });
