@@ -32,15 +32,14 @@ import {
 } from "../argument-checks.js";
 import { instructionFacts } from "../instruction-facts.js";
 import type { RandomControlOptions } from "../../../src/runtime/random/random-control.js";
+import { type PlayerOpsContext } from "../player-ops.js";
 import {
   alignRandom,
   isRandomIntent,
   ownedRandom,
-  planMetadata,
-  type PlanMetadata,
-  type PlayerOpsContext,
   type RandomIntent,
-} from "../player-ops.js";
+} from "../connection-state.js";
+import { planMetadata, type PlanMetadata } from "../plan-facts.js";
 import type { CallViewReply, Introduction, Publication } from "../session-protocol.js";
 import type { BridgeOp, BridgeOps, HostSession, OpOutcome } from "../worker-host.js";
 

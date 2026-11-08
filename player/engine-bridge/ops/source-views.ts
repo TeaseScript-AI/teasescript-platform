@@ -5,7 +5,7 @@ import {
   type SourceDebugSidecar,
 } from "../../../src/runtime/debug/source-sidecar.js";
 import type { FileCode } from "../../random-draw-code.js";
-import type { DrawCode } from "../../vue/src/randomDrawPresentation.js";
+import type { DrawCode } from "../../draw-code.js";
 import { exactly, isRecord, isStringArray } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
 import { type DeliveryOwner, OwnedCell, OwnedMap } from "../delivery.js";

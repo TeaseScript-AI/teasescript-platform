@@ -8,7 +8,7 @@ import {
   type CodeSegment,
   type CodeTokenClass,
   type DrawCode,
-} from "./vue/src/randomDrawPresentation.js";
+} from "./draw-code.js";
 
 /*
  * The code Debug's random-draw picker shows (DEBUGGER.md "Random draws"), made in the engine's Worker: the draw's file
