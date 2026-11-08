@@ -215,7 +215,7 @@ test("with no Markdown remark is not started, and outside a Git checkout the run
       env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(outside) },
     });
     assert.equal(noGit.status, 2);
-    assert.match(noGit.stderr, /^doc-links: cannot list the Markdown files with Git: /u);
+    assert.match(noGit.stderr, /^doc-links: cannot list the Markdown files with Git: /mu);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
