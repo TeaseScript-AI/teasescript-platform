@@ -590,11 +590,11 @@ test("a kind of work the clock's table does not hold throws, whatever the clock'
     }
 });
 
-// #1983: the clock opens every section (`section`), under a row of `SECTION_WORK`, and observes what the row needs at
-// the section's turn, before its body. Exclusions, decided where named: which row a sender names is visible at its call
-// site and reviewed; that `runInput`'s target check, intent and tab run after the observation's reply is
-// `player-runtime-input.test.ts` ("a blocked tab posts no answer…"); that a service's delivery settles its answer on a
-// `null` observation is `player-session-camera.test.ts` ("a capture whose section finds its session retired…").
+// #1983: `clock.section` opens its section under a `SECTION_WORK` row and observes what that row needs at the turn,
+// before its body. Exclusions, decided where named: which row a sender names is visible at its call site and reviewed;
+// that `runInput`'s target check, intent and tab run after the observation's reply is `player-runtime-input.test.ts`
+// ("a blocked tab posts no answer…"); that a service's delivery settles its answer on a `null` observation is
+// `player-session-camera.test.ts` ("a capture whose section finds its session retired…").
 
 /** Each kind of section work, as the clock's table names it. */
 const SECTION_ROWS = [

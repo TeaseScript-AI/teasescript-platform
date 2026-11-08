@@ -54,9 +54,9 @@ const SECTION_WORK = Object.freeze({
 } as const);
 export type SectionWork = keyof typeof SECTION_WORK;
 
-/** The clock's ticket for a section it opens; the clock is the one maker, and passes each straight to its section. */
+/** Creates the ticket the clock passes straight to the bridge for each section it opens. */
 function mintClockTicket(): ClockTicket {
-  // EVIDENCE: fixture: the scene clock is the one maker of tickets, which are checked by type only.
+  // EVIDENCE: fixture: `ClockTicket` is type-only, with no runtime key; this value only meets the section APIs' check.
   return {} as ClockTicket;
 }
 
