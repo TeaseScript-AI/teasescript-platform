@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 // The Markdown links (docs/TESTING.md "Normal and diagnostic verification"): remark-validate-links reports every
 // relative link and heading anchor in the Markdown files that Git tracks or does not ignore that does not resolve.
@@ -10,9 +10,10 @@ import { join } from "node:path";
 //
 // It runs in `check:pretest` and in `tools/check-changed.mjs`, for every change.
 //
-// It runs remark-cli with the plugins of package.json's `remarkConfig`: remark-gfm, and remark-validate-links with
-// `repository: false`, so absolute URLs, this repository's included, are not checked. The files are Git's list
-// (`git ls-files --cached --others --exclude-standard`) of `*.md` files, those that exist in the working tree.
+// It runs remark-cli's `remark` (from `node_modules/.bin`, on this Node) with the plugins of package.json's
+// `remarkConfig`: remark-gfm, and remark-validate-links with `repository: false`, so absolute URLs, this repository's
+// included, are not checked. The files are Git's list (`git ls-files --cached --others --exclude-standard`) of `*.md`
+// files, those that exist in the working tree.
 //
 // Outside the claim, as remark-validate-links does not read them as GitHub does: raw-HTML links (`<a href>`), and
 // GitHub's view forms: `?plain=1` and `?raw=1`, a folder's README anchors, and a heading GitHub's sanitizer filters a
@@ -43,18 +44,16 @@ if (files.length === 0) {
   process.exit(0);
 }
 
-const result = spawnSync(
-  process.execPath,
-  [
-    join(root, "node_modules/remark-cli/cli.js"),
-    "--frail",
-    "--quiet",
-    "--no-stdout",
-    "--no-color",
-    ...files,
-  ],
-  { cwd: root, stdio: "inherit" },
-);
+const result = spawnSync("remark", ["--frail", "--quiet", "--no-stdout", "--no-color", ...files], {
+  cwd: root,
+  stdio: "inherit",
+  env: {
+    ...process.env,
+    PATH: [join(root, "node_modules/.bin"), dirname(process.execPath), process.env.PATH].join(
+      delimiter,
+    ),
+  },
+});
 if (result.error !== undefined || result.signal !== null) {
   console.error(`doc-links: remark-cli did not run: ${result.error?.message ?? result.signal}`);
   process.exit(2);
