@@ -176,6 +176,11 @@ The local fragmented-class rule catches direct interpolation/concatenation in Vu
 `require-static-classes`, it permits safe helpers; it does not resolve arbitrary helper bodies, aliased
 class builders or data flow. Review those paths when changing them.
 
+Disabled controls take the theme's `text-disabled`, `surface-disabled` and `border-disabled` roles from one unlayered
+rule in `player/vue/src/style.css`, which overrides Tailwind's layered utilities. The local disabled-opacity rule
+refuses a `disabled:opacity-*` or `data-[disabled]:opacity-*` class, which would never show. `aria-disabled` is outside
+it: the shared rule does not cover it, and it marks controls that dim while busy yet keep focus.
+
 These checks do not inspect CSS declarations, compute contrast, validate author colors, or prove visual
 consistency. Scoped/global CSS, runtime style objects and externally supplied classes still need review
 and relevant browser checks. `no-inline-styles` stays off because authored styles, virtualizer offsets

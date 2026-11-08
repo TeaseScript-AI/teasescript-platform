@@ -88,4 +88,47 @@ const noFragmentedClasses = {
     );
   },
 };
-export default { rules: { "no-fragmented-classes": noFragmentedClasses } };
+// Disabled controls take the theme's disabled roles from one unlayered rule in `style.css` (native `:disabled`, and
+// `[data-disabled]` menu items, at opacity 1), which overrides Tailwind's layered utilities. A `disabled:opacity-*` or
+// `data-[disabled]:opacity-*` class on a Player control therefore never shows and misleads. `aria-disabled` stays
+// outside this rule: the shared rule does not cover it, and it marks controls that dim while busy yet keep focus
+// (LockDialog, PasswordField).
+const disabledOpacity = /^!?(?:disabled|data-\[disabled\]|data-disabled):!?-?opacity-/;
+const noDisabledOpacity = {
+  meta: {
+    type: "problem",
+    schema: [],
+    messages: {
+      opacity:
+        "Disabled controls take the theme's disabled roles from style.css; an opacity class here is overridden and misleads.",
+    },
+  },
+  create(context) {
+    function check(node, text) {
+      if (text.split(/\s+/).some((token) => disabledOpacity.test(token)))
+        context.report({ node, messageId: "opacity" });
+    }
+    const visitors = {
+      Literal(node) {
+        if (typeof node.value === "string" && classContext(node)) check(node, node.value);
+      },
+      TemplateLiteral(node) {
+        if (classContext(node))
+          check(node, node.quasis.map((quasi) => quasi.value.cooked ?? "").join(" "));
+      },
+    };
+    const template = {
+      ...visitors,
+      VAttribute(node) {
+        if (!node.directive && node.key.name === "class" && node.value)
+          check(node, node.value.value);
+      },
+    };
+    return (
+      context.sourceCode.parserServices.defineTemplateBodyVisitor?.(template, visitors) ?? visitors
+    );
+  },
+};
+export default {
+  rules: { "no-fragmented-classes": noFragmentedClasses, "no-disabled-opacity": noDisabledOpacity },
+};

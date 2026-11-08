@@ -122,6 +122,28 @@ test("authored appearance, virtualization and non-class strings are legitimate",
   );
 });
 
+test("an overridden disabled opacity class is refused, in each form", async () => {
+  for (const token of ["disabled:opacity-50", "data-[disabled]:opacity-50"]) {
+    await rejects(vue(`<button class="${token}" />`), "design/no-disabled-opacity");
+    await rejects(
+      `import { cva } from 'class-variance-authority'; export const variants = cva('${token}');`,
+      "design/no-disabled-opacity",
+      tsFile,
+    );
+  }
+});
+
+test("other opacity, and busy dimming through aria-disabled, remain valid", async () => {
+  assert.deepEqual(
+    await messages(
+      vue(
+        `<button class="disabled:pointer-events-none aria-disabled:opacity-50 data-[state=closed]:opacity-0" /><div :class="{ 'opacity-50': busy }" />`,
+      ),
+    ),
+    [],
+  );
+});
+
 test("inline configuration cannot silence errors", async () => {
   for (const directive of [
     "eslint-disable",
