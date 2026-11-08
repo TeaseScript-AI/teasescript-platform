@@ -132,14 +132,6 @@ function within(node, accept) {
   return found;
 }
 
-/** An `assert.<method>(…)` call whose first argument `actual` accepts. */
-const isAssert = (node, method, actual) =>
-  ts.isCallExpression(node) &&
-  ts.isPropertyAccessExpression(node.expression) &&
-  node.expression.getText() === `assert.${method}` &&
-  node.arguments.length >= 2 &&
-  actual(node.arguments[0]);
-
 /** A property assignment of an object literal by its name, or `undefined`. */
 const propertyOf = (object, name) =>
   object.properties.find(
