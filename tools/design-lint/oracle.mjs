@@ -103,7 +103,9 @@ function subjectCompounds(selector) {
 
 /** One subject atom: `"own"` (a disabled predicate), `"known"`, or `"unknown"`. */
 function atomKind(node) {
-  if (node.type === "attribute") return DISABLED_ATTRIBUTES.has(node.attribute) ? "own" : "known";
+  // HTML attribute names are case-insensitive: `[DISABLED]` matches a disabled control too.
+  if (node.type === "attribute")
+    return DISABLED_ATTRIBUTES.has(node.attribute.toLowerCase()) ? "own" : "known";
   if (["class", "tag", "universal", "id", "comment"].includes(node.type)) return "known";
   if (node.type !== "pseudo") return "unknown";
   if (node.value === ":disabled") return "own";

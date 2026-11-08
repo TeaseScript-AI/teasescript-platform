@@ -121,7 +121,7 @@ const noFragmentedClasses = {
 // rule refuses both, so disabled controls keep the theme's treatment.
 //
 // The variants before an opacity utility are admitted only in the forms below, none of which selects the element's
-// own disabled state; a pseudo-element only as the last variant, as Tailwind nests what follows one. A disabled
+// own disabled state; a pseudo-element only as the last variant, as some compositions after one are nested. A disabled
 // variant is refused, and so is every other variant, such as an arbitrary selector (`[&:not(:enabled)]` selects a
 // disabled control too), `not-*`, `has-*` or `in-*`: nothing here shows that it cannot select one. A form that can be
 // shown so takes a row here and in `test.mjs`, whose oracle checks the forms against Tailwind's output.
@@ -216,7 +216,7 @@ const noDisabledOpacity = {
       unclassified:
         "'{{variant}}' before an opacity class is not a form this rule admits, as nothing shows that it cannot select a disabled control (tools/design-lint/plugin.mjs, ADMITTED_VARIANTS).",
       misplaced:
-        "'{{variant}}' is a pseudo-element before another variant; Tailwind nests what follows it, which this rule does not read. Put the pseudo-element last, next to the utility.",
+        "'{{variant}}' is a pseudo-element before another variant; some such compositions are nested, which this rule does not read. Put the pseudo-element last, next to the utility.",
       unreadable:
         "'{{variant}}' names opacity in a form this rule cannot read, such as quotes, a backslash or unbalanced brackets; write it in a form the class grammar in tools/design-lint/plugin.mjs reads, or add the form there.",
     },

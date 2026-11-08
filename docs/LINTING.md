@@ -187,7 +187,7 @@ disabled state therefore never shows, or with `!important` overrides the theme's
   read, with quotes, a backslash or unbalanced brackets, is refused by name.
 - **Admission.** The variants before an opacity utility are admitted only in a closed set of forms that cannot select
   the element's own disabled state (`ADMITTED_VARIANTS`): breakpoints, media and direction, element states,
-  pseudo-elements (only as the last variant, as Tailwind nests what follows one), `aria-*`, data attributes other than
+  pseudo-elements (only as the last variant, as some compositions after one are nested), `aria-*`, data attributes other than
   `data-disabled`, and `group-*`/`peer-*`, which read another element.
 - **Refusals.** `disabled`, `data-disabled`, `data-[disabled…]` and arbitrary selectors naming `:disabled`, `[disabled]`
   or `[data-disabled]` are refused as overridden; any other variant, such as another arbitrary selector or `not-*`, by
