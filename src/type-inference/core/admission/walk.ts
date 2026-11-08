@@ -24,6 +24,7 @@ import { sharing } from "../sharing.js";
 import type { EvaluationKey, Expansion, Part, Stop, Stops, Via, ViaChain } from "./model.js";
 import { permittedAt } from "./permitted.js";
 import { fieldsOf, sourceOf } from "./structure.js";
+import { readNow, type Reads } from "../inherited/reads.js";
 
 // The store walk: a stored value's contributions by the path they stand at, the bindings it copies, their order.
 
@@ -284,11 +285,23 @@ export function writtenSource(
   admission: Admission,
   value: PlaceId,
   strip: readonly string[],
-): {
+): WrittenSource | null {
+  return readNow(writtenSourceRead(admission, value, strip));
+}
+
+/** A written copy's source (`writtenSource`). */
+interface WrittenSource {
   readonly term: TypeTerm | null;
   readonly from: PlaceId | null;
   readonly strip: readonly string[];
-} | null {
+}
+
+/** `writtenSource` with the receivers' decisions reads (`Read`, #1072 A2). */
+export function* writtenSourceRead(
+  admission: Admission,
+  value: PlaceId,
+  strip: readonly string[],
+): Reads<WrittenSource | null> {
   const { program, contract } = admission.pass;
   const binding = program.occurrenceOf.get(value);
   if (binding !== undefined) {
@@ -303,7 +316,7 @@ export function writtenSource(
   if (term === null && !admission.inheriting.has(place)) return null;
   // (a projection of a receiver that may be a reference is the runtime's member, no copy: F19a)
   for (let at = value; program.projOf.has(at); at = program.projOf.get(at)!.owner)
-    if (admission.keepsOwn(at)) return null;
+    if (yield* admission.keepsOwnRead(at)) return null;
   const steps = keyStepsIn(contract, key);
   if (someStep(steps, (step) => dictList(step) !== undefined)) return null;
   // (a copy's strip keeps an array: a cursor's steps copied out, `stepsArray`, for a source it keeps)
