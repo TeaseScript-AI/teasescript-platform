@@ -288,10 +288,12 @@ async function check(cleanups) {
       `projects: ${[...projects].join(", ") || "none"}\n`,
   );
 
-  // (a deleted core file counts too, which `changed`, holding the files that exist, leaves out)
-  const coreChanged = [...git("diff", "--name-only", mergeBase).split("\n"), ...changed].some(
-    (path) => path.startsWith(CORE),
-  );
+  // (a deleted core file counts too, which `changed`, holding the files that exist, leaves out, and a file moved out of
+  // the core, whose old path only `--no-renames` lists)
+  const coreChanged = [
+    ...git("diff", "--name-only", "--no-renames", mergeBase).split("\n"),
+    ...changed,
+  ].some((path) => path.startsWith(CORE));
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const formatted = changed.filter((path) => FORMATTED.test(path));
   const [formatter, ...formatterArgs] = prettier();

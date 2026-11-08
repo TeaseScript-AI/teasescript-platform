@@ -104,7 +104,8 @@ test(
 
 /**
  * A repository with a base branch `main` and a branch `feature` off it, each changing `a.mjs` as `edit` says. `core`
- * also changes a file of the type core on `feature` ("added" or "deleted", the file being on `main` for the latter);
+ * also changes a file of the type core on `feature` ("added", or "deleted" or "renamed" out of the core, the file being
+ * on `main` for those);
  * `mapper` is code the stand-in pin-suite mapper runs after its line. `passing` leaves `a.mjs` as it was and gives every
  * other check a stand-in that passes, so the mapper's verdict alone decides the run.
  */
@@ -133,7 +134,7 @@ function repository({
     "tools/repository-checks/pin-suites.mjs",
     `console.log(\`listed for \${process.argv.slice(2).join(" ")}\`);\n${mapper}`,
   );
-  if (core === "deleted")
+  if (core === "deleted" || core === "renamed")
     write("src/type-inference/core/answers.ts", "export const answers = 1;\n");
   if (passing)
     for (const path of [
@@ -147,6 +148,8 @@ function repository({
   if (!passing) write("a.mjs", "export const a = 2;\n");
   if (core === "added") write("src/type-inference/core/answers.ts", "export const answers = 1;\n");
   if (core === "deleted") rmSync(join(directory, "src/type-inference/core/answers.ts"));
+  if (core === "renamed")
+    run("mv", "src/type-inference/core/answers.ts", "src/type-inference/answers.ts");
   run("add", "-A");
   run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "feature");
   if (conflict) {
@@ -269,11 +272,11 @@ test(
 );
 
 test(
-  "a change to the type core prints the pin-suite mapper's list, plain and merged, a deletion too, and another change does not run it",
+  "a change to the type core prints the pin-suite mapper's list, plain and merged, a deletion and a move out of it too, and another change does not run it",
   { timeout: 60_000 },
   () => {
     for (const merged of [false, true])
-      for (const core of ["added", "deleted", false]) {
+      for (const core of ["added", "deleted", "renamed", false]) {
         const { directory } = repository({ core });
         try {
           const result = spawnSync(
