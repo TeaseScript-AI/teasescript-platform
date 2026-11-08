@@ -432,7 +432,9 @@ function mixedSentence(
   // the steps to the property that differs, and the collections below it
   const property = path.findLastIndex((step) => step !== "element" && step !== "entry");
   // (each layer between them optional where it may hold null, #1765: `optional`'s flags for the steps after the first;
-  // each side's own steps where they differ, a dict's layer its `entry`, #1762)
+  // each side's own steps where they differ, a dict's layer its `entry`, #1762, a set's its `member`, #1825)
+  const layer = (step: string | undefined): "list" | "set" | "dict" =>
+    step === "entry" ? "dict" : step === "member" ? "set" : "list";
   const nested = (
     types: readonly ItemTag[],
     optional: readonly boolean[] = [],
@@ -441,11 +443,10 @@ function mixedSentence(
     const below = steps.slice(property + 1);
     let written = typeText(types);
     for (let at = below.length - 1; at >= 0; at -= 1) {
-      written =
-        written === null ? null : collectionText(below[at] === "entry" ? "dict" : "list", written);
+      written = written === null ? null : collectionText(layer(below[at]), written);
       if (written !== null && at > 0 && optional[at - 1] === true) written = `${written}?`;
     }
-    const outer = below[0] === "entry" ? "dict" : "list";
+    const outer = layer(below[0]);
     return below.length === 0 || written === null
       ? described(types)
       : `${VALUE_KINDS[outer].description} (${written})`;
