@@ -46,6 +46,7 @@ import {
   advanceExportObservation,
   ensureRun,
   isRunBegin,
+  RetiredRunError,
   isStopArguments,
   runIncident,
   type RunBegin,
@@ -290,20 +291,23 @@ export class HeldSession implements HostSession, ObservedSession {
   /**
    * A Player error stop of this session arrived: the run's capture waits for its commit. The stopped session is the
    * stop's run's, also a Continue's restored session the error stopped before Continue handed it over (`bindRun`).
+   * `false` for a stop of a run that ended, which changes nothing and is refused (`halt`); a plain halt is admitted.
    */
-  stopRequested(args: unknown): void {
-    if (!isStopArguments(args)) return;
+  stopRequested(args: unknown): boolean {
+    if (!isStopArguments(args)) return true;
     const owner = this.#connection.exportObservation;
     // The stop's run begins here when the host has not seen it, as when its Continue failed before its handoff.
-    ensureRun(owner, args);
+    if (!ensureRun(owner, args)) return false;
     advanceExportObservation(owner, { kind: "bindSession", session: this, run: args.run });
-    advanceExportObservation(owner, { kind: "stopRequested", stop: args });
+    return (
+      advanceExportObservation(owner, { kind: "stopRequested", stop: args }).kind === "admitted"
+    );
   }
 
   /**
    * What `halt`'s acknowledgement carries: the call view of the publication the stop froze, viewed or not; for a Player
    * error stop, also its diagnostic identity and the run's incident, which the stop commits now, as the work running at
-   * it settled.
+   * it settled. A stop whose run ended meanwhile commits nothing and carries the call view only.
    */
   atStop(args: unknown = null): CallViewReply | StopReply {
     const view = this.callView(true);
@@ -313,7 +317,8 @@ export class HeldSession implements HostSession, ObservedSession {
       stop: args,
       session: this.observation,
     });
-    const incident = committed.kind === "incident" ? committed.incident : null;
+    if (committed.kind !== "incident") return view;
+    const { incident } = committed;
     // The first stop froze the session; a later one changes neither it nor the run's incident.
     this.stoppedBy ??= args.stop;
     return Object.freeze({
@@ -469,9 +474,9 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
           readonly random?: StartRandom;
           readonly run?: RunBegin;
         };
-        // The Start's run begins before its session, which binds to it.
-        if (run !== undefined)
-          advanceExportObservation(context.exportObservation, { kind: "beginRun", ...run });
+        // The Start's run begins before its session, which binds to it; a Start of a run that ended starts nothing.
+        if (run !== undefined && !ensureRun(context.exportObservation, run))
+          throw new RetiredRunError(run.run);
         const instructions = context.plans.get(plan);
         if (instructions === undefined) throw new Error(`No plan '${plan}' is held.`);
         const control = startRandom(context, random);
@@ -610,8 +615,8 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
         // Continue hands over a session the Player held already: it begins Continue's run, which the session joins.
         // EVIDENCE: validation: the op's check admitted `null` or a run's begin.
         const run = args as RunBegin | null;
-        if (run !== null)
-          advanceExportObservation(context.exportObservation, { kind: "beginRun", ...run });
+        if (run !== null && !ensureRun(context.exportObservation, run))
+          throw new RetiredRunError(run.run);
         held.bindRun();
         beginRecordingAt(held, context);
         return { result: null, view: null };

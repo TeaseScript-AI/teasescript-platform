@@ -8,6 +8,11 @@ import { exactly, isRecord } from "../argument-checks.js";
  * stop is the run's incident, which later stops never replace. A capture while a stop of its run is pending is refused
  * for retry, so pending never reads as a proved absence of error. Diagnostic connection state: it allocates nothing a
  * client holds.
+ *
+ * Retirement is absorbing. The connection's runs are numbered upward (`PlayerBridge`'s allocation), and one Player at a
+ * time owns the connection, so a run begun ends every earlier one: `retiredThrough` is the highest run that ended, and
+ * a begin, stop or commit of a run at or below it is refused before any effect, also when it arrives late or before the
+ * host saw its run begin. Every adapter of a run's begin or stop consumes that admission (design round r2).
  */
 
 /** A Player error that stopped a session: its error name, its run and stop, and the session's observation then. */
@@ -44,13 +49,27 @@ export function isStopArguments(value: unknown): value is StopArguments {
 }
 
 /**
- * Begins run `begin.run`, ending `begin.retires`, unless the owner saw it already. Every host message that names an
+ * Admits run `begin.run`: whether it is the live run, begun now or already. Every host message that names an
  * activation's run carries its begin (a Start's, an introduction's and Continue's handoff, a halt's and an incident's
- * stop arguments), and goes through here or `beginRun` first: whichever reaches the host first begins the run.
+ * stop arguments) and goes through here first, so whichever reaches the host first begins the run and a repeat of the
+ * live run changes nothing. `false` for a run that ended (`retiredThrough`): its message has no effect.
  */
-export function ensureRun(owner: ExportObservation, begin: RunBegin): void {
-  if (owner.runs.has(begin.run)) return;
-  advanceExportObservation(owner, { kind: "beginRun", run: begin.run, retires: begin.retires });
+export function ensureRun(owner: ExportObservation, begin: RunBegin): boolean {
+  const outcome = advanceExportObservation(owner, {
+    kind: "beginRun",
+    run: begin.run,
+    retires: begin.retires,
+  });
+  return outcome.kind === "admitted";
+}
+
+/** What a host op of an ended run throws, before any effect: a late or retired activation's begin or incident. */
+export class RetiredRunError extends Error {
+  readonly code = "retired";
+  constructor(run: number) {
+    super(`Diagnostic run ${run} has ended.`);
+    this.name = "RetiredRunError";
+  }
 }
 
 /** An activation's run, which a Start, Continue's handoff or an introduction carries: its number, and the run it ends. */
@@ -97,11 +116,13 @@ interface Run {
   incident: ExportIncident | null;
 }
 
-/** The connection's export observation: its runs, by their number. */
+/** The connection's export observation: its live runs, by their number, and how far runs ended. */
 export class ExportObservation {
   readonly runs = new Map<number, Run>();
-  /** The run the Player began last: a session introduced now binds to it. */
+  /** The run the Player began last, while it lives: a session introduced now binds to it. */
   current: number | null = null;
+  /** Every run through this number ended, begun or not; none of them begins again. */
+  retiredThrough = 0;
 }
 
 export type Observation =
@@ -131,14 +152,18 @@ export type Observation =
 
 export type ObservationOutcome =
   | { readonly kind: "recorded" }
+  /** A begin or stop of a live run: what the adapter goes on with. */
+  | { readonly kind: "admitted" }
+  /** A begin, stop or commit of a run that ended: nothing changed. */
+  | { readonly kind: "refused" }
   /** The run's incident after a commit, or as a capture reads it: `null` when the run committed none. */
   | { readonly kind: "incident"; readonly incident: ExportIncident | null }
   /** A capture met a stop of its run that is not committed yet: it is refused for retry. */
   | { readonly kind: "pending" };
 
 /**
- * Decides observation `observation` of `owner`. A stop or capture of a run the owner does not hold (never begun, or
- * retired) records nothing and reads no incident: the conservative default never invents one.
+ * Decides observation `observation` of `owner`. A stop of a run that ended is refused; a capture of a run the owner
+ * does not hold (never begun, or ended) reads no incident: the conservative default never invents one.
  */
 export function advanceExportObservation(
   owner: ExportObservation,
@@ -146,11 +171,15 @@ export function advanceExportObservation(
 ): ObservationOutcome {
   switch (observation.kind) {
     case "beginRun": {
-      if (observation.retires !== null) owner.runs.delete(observation.retires);
-      if (!owner.runs.has(observation.run))
-        owner.runs.set(observation.run, { pending: new Set(), incident: null });
-      owner.current = observation.run;
-      return { kind: "recorded" };
+      const { run } = observation;
+      if (run <= owner.retiredThrough) return { kind: "refused" };
+      if (run === owner.current) return { kind: "admitted" };
+      // Runs are numbered upward and one Player owns the connection: a newer run ends every earlier one, the
+      // activation's declared predecessor (`retires`) among them, begun or not.
+      retireThrough(owner, run - 1);
+      owner.runs.set(run, { pending: new Set(), incident: null });
+      owner.current = run;
+      return { kind: "admitted" };
     }
     case "bindSession": {
       observation.session.run = observation.run;
@@ -162,13 +191,16 @@ export function advanceExportObservation(
       return { kind: "recorded" };
     }
     case "stopRequested": {
-      owner.runs.get(observation.stop.run)?.pending.add(observation.stop.stop);
-      return { kind: "recorded" };
+      const run = owner.runs.get(observation.stop.run);
+      if (run === undefined) return { kind: "refused" };
+      run.pending.add(observation.stop.stop);
+      return { kind: "admitted" };
     }
     case "stopCommitted": {
       const { stop, session } = observation;
+      // Rechecked at the commit: a run that ended while the stop's work settled commits nothing.
       const run = owner.runs.get(stop.run);
-      if (run === undefined) return { kind: "incident", incident: null };
+      if (run === undefined) return { kind: "refused" };
       run.pending.delete(stop.stop);
       run.incident ??= {
         errorName: stop.error,
@@ -187,9 +219,16 @@ export function advanceExportObservation(
       return { kind: "incident", incident: run.incident };
     }
     case "retire": {
-      owner.runs.delete(observation.run);
-      if (owner.current === observation.run) owner.current = null;
+      retireThrough(owner, observation.run);
       return { kind: "recorded" };
     }
   }
+}
+
+/** Ends every run through `run`; a later, live run stays. */
+function retireThrough(owner: ExportObservation, run: number): void {
+  if (run <= owner.retiredThrough) return;
+  owner.retiredThrough = run;
+  for (const each of owner.runs.keys()) if (each <= run) owner.runs.delete(each);
+  if (owner.current !== null && owner.current <= run) owner.current = null;
 }

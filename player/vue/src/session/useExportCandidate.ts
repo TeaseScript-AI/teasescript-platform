@@ -8,6 +8,7 @@ import {
 import type { ExportCaptureReply } from "../../../engine-bridge/session-protocol.js";
 import type { PlayerBridge } from "../../../player-bridge.js";
 import type { PlayerSession } from "../../../runtime-view.js";
+import type { ActivationRun } from "./useActivationRun.js";
 
 /*
  * A debug export's candidate (L5h.3b): captured in the host (`captureExport`), decided in the capture's reply hook
@@ -27,12 +28,11 @@ export function useExportCandidate(options: {
   readonly session: Readonly<Ref<PlayerSession | null>>;
   /** The Player's engine bridge, or `null` before it is ready. */
   readonly bridge: () => PlayerBridge | null;
-  /** The recording a Player error's capture selects (`useFailureRecording.selection`). */
-  readonly failureSelection: () => Promise<
-    "current" | "none" | { readonly bridge: PlayerBridge; readonly ticket: string }
-  >;
-  /** The diagnostic run of the latest activation, or `null`. */
-  readonly run: () => number | null;
+  /**
+   * The activations' runs (`useActivationRun`): the export is of the live one, with the recording its failure
+   * recording selects, and only while it lives.
+   */
+  readonly activation: { current(): ActivationRun | null; admits(origin: ActivationRun): boolean };
   /** Whether a Player error stop is under way here, until the host acknowledged it. */
   readonly halting: Readonly<Ref<boolean>>;
   readonly build: DebugExportCandidate["build"];
@@ -45,11 +45,13 @@ export function useExportCandidate(options: {
   /**
    * Decides a capture in its reply's hook (`captureExport`, which matched a session's capture against the store's view):
    * it is the candidate only while the dialog wants it, no stop is under way here, and it is of what shows: the shown
-   * lineage, or for no session, the same run and still no session. Events and transcript come from the store's view,
-   * marks and incident only from the capture. Otherwise its ticket is released.
+   * lineage, or for no session, the same run and still no session, and of the activation it began in (`origin`), while
+   * that lives. Events and transcript come from the store's view, marks and incident only from the capture. Otherwise
+   * its ticket is released.
    */
   function deliver(
     host: PlayerBridge,
+    origin: ActivationRun | null,
     current: PlayerSession | null,
     reply: ExportCaptureReply,
     view: PlayerSession | null,
@@ -61,9 +63,9 @@ export function useExportCandidate(options: {
     const release = () => void host.releaseRecording(reply.ticket).catch(() => {});
     const matches =
       current === null
-        ? session.value === null && reply.identity.run === options.run()
+        ? session.value === null && reply.identity.run === (origin?.begin.run ?? null)
         : view !== null && session.value?.lineage === current.lineage;
-    if (!live() || halting.value || !matches) {
+    if (!live() || halting.value || !matches || !lives(origin)) {
       release();
       return null;
     }
@@ -97,6 +99,10 @@ export function useExportCandidate(options: {
     };
   }
 
+  /** Whether the activation `origin` still lives; without an activation, nothing retires. */
+  const lives = (origin: ActivationRun | null) =>
+    origin === null ? options.activation.current() === null : options.activation.admits(origin);
+
   /** Resolves once no Player error stop is under way here (`halting`). */
   function stopShown(): Promise<void> {
     if (!halting.value) return Promise.resolve();
@@ -120,8 +126,11 @@ export function useExportCandidate(options: {
     details: ExportDetails,
     live: () => boolean,
   ): Promise<DebugExportCandidate | null> {
-    // A Player error's capture under way settles first: the export then selects what it settled to.
-    const failed = await options.failureSelection();
+    // A Player error's capture under way settles first: the export then selects what it settled to. The export is of
+    // the activation it began in, and asks nothing more once that retired.
+    const origin = options.activation.current();
+    const failed = origin === null ? "current" : await origin.failure.selection();
+    if (!lives(origin)) return null;
     const current = session.value;
     const host = current?.connection ?? options.bridge();
     if (host === null) return null;
@@ -134,13 +143,13 @@ export function useExportCandidate(options: {
           : "none";
     const capture = () =>
       host.captureExport(current, recording, (reply, view) =>
-        deliver(host, current, reply, view, details, live),
+        deliver(host, origin, current, reply, view, details, live),
       );
     let frozen = await capture();
     // A stop of the run was still committing: once it shows, the capture is tried once more.
     if (frozen === PENDING_CAPTURE) {
       await stopShown();
-      frozen = live() ? await capture() : null;
+      frozen = live() && lives(origin) ? await capture() : null;
     }
     if (frozen === PENDING_CAPTURE || frozen === null) return null;
     // Until the dialog holds the candidate, this owns its ticket: a construction that fails releases it.

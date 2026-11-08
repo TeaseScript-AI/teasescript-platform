@@ -74,8 +74,8 @@ function ownerOver(readPhoto: (reference: string) => Promise<CapturedMediaRecord
   const owner = useExportCandidate({
     session: shallowRef(view),
     bridge: () => typed,
-    failureSelection: async () => "current",
-    run: () => 1,
+    // No activation: the recording is the current one, and nothing retires the export.
+    activation: { current: () => null, admits: () => false },
     halting: ref(false),
     build: { commit: null, dirty: null, mode: "development", appVersion: "0" },
     package: { id: null, version: null },

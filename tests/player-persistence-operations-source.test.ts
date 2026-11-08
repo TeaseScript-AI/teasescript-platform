@@ -141,9 +141,11 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     sameMedium:
       "compares a held photo's bytes with an imported one's, by position: it reaches no store",
   },
+  "session/useActivationRun.ts": { "useActivationRun.retire": READ },
   "session/useCallView.ts": { viewCalls: SESSION },
   "session/useExportCandidate.ts": {
     useExportCandidate: READ,
+    lives: READ,
     release: READ,
     deliver: READ,
     "deliver.prepare": READ,

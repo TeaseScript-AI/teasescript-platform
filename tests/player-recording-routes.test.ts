@@ -11,7 +11,8 @@ import { pathToFileURL } from "node:url";
  * - every host restart of the recorder is one of the routes the restart gate (`beforeRestart`) covers, and the gate's
  *   hook is read only by the rewind owner;
  * - the replies of the failure capture and of the export capture each reach one settle function, and nothing else;
- * - every route that publishes, stops or binds a session supplies the export observation, classified.
+ * - every route that publishes, stops or binds a session supplies the export observation, classified;
+ * - every page sender of an activation's diagnostic work checks that activation's admission itself.
  * What they claim is the wiring. That a restart waits for the gate's settlement is the rewind lifecycle's runtime claim,
  * and that no stale capture shows is the export observation family's.
  */
@@ -135,7 +136,49 @@ test("the failure capture's and the export capture's replies each reach one sett
   );
   assert.match(
     failure,
-    /\.read\(stopped, "captureRecording"\)\.then\(\s*\(reply\) => settle\(bridge, of, reply\),\s*\(\) => settle\(bridge, of, null\),\s*\);/u,
+    /\.read\(stopped, "captureRecording"\)\.then\(\s*\(reply\) => settle\(bridge, reply\),\s*\(\) => settle\(bridge, null\),\s*\);/u,
+  );
+});
+
+// Design round r2's page half: every place the page sends an activation's diagnostic work (its error halt's and its
+// incident's stop arguments, its incident, its failure capture) checks that activation's admission there itself, and
+// only an activation's begin and the Player's disposal begin or retire a record. Wiring only: that a retired
+// activation sends nothing is the completion-lifetime family's runtime claim (`player-session-rewind.test.ts`).
+test("the page's diagnostic senders each check their activation's admission, and only Start and disposal change it", () => {
+  const SESSION = "player/vue/src/usePlayerSession.ts usePlayerSession";
+  const OWNER = "player/vue/src/session/useActivationRun.ts";
+  const senders = callers([
+    { file: "player/player-bridge.ts", path: "PlayerBridge > commitIncident" },
+    { file: OWNER, path: "stopArguments" },
+    {
+      file: "player/vue/src/session/useFailureRecording.ts",
+      path: "useFailureRecording > stopped",
+    },
+  ]);
+  assert.deepEqual(senders, [
+    `player/player-bridge.ts PlayerBridge > commitIncident <- ${SESSION} > reportHostError > incident`,
+    `${OWNER} stopArguments <- ${SESSION} > reportHostError > incident`,
+    `${OWNER} stopArguments <- ${SESSION} > stopAt`,
+    `player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped <- ${SESSION} > stopAt`,
+  ]);
+  const admitting = new Set(
+    callers([{ file: OWNER, path: "useActivationRun > admits" }]).map(
+      (each) => each.split(" <- ")[1],
+    ),
+  );
+  for (const sender of senders) {
+    const caller = sender.split(" <- ")[1]!;
+    assert.ok(admitting.has(caller), `${caller} checks its activation's admission`);
+  }
+  assert.deepEqual(
+    callers([
+      { file: OWNER, path: "useActivationRun > begin" },
+      { file: OWNER, path: "useActivationRun > retire" },
+    ]),
+    [
+      `${OWNER} useActivationRun > begin <- ${SESSION} > startFrom`,
+      `${OWNER} useActivationRun > retire <- ${SESSION} > tryOnScopeDispose:callback#1`,
+    ],
   );
 });
 

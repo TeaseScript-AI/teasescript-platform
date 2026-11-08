@@ -124,7 +124,7 @@ test("the failure recording latches its first capture, a restart waits for it, a
   assert.deepEqual(coverageGaps(cases, observed, { tuples: true }), []);
 });
 
-test("a retired activation's ticket is released, and the next activation captures anew", async () => {
+test("a retired activation's ticket is released, it captures nothing more, and the next activation's captures anew", async () => {
   const { bridge, reads, released } = fakeBridge();
   // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads only a stopped session's `connection`.
   const stopped = { connection: bridge } as unknown as PlayerSession;
@@ -136,8 +136,13 @@ test("a retired activation's ticket is released, and the next activation capture
   owner.retire();
   assert.deepEqual(released, ["r1"]);
   assert.equal(owner.ticket(), null);
+  // Retirement is terminal: a later stop of the retired activation captures nothing.
   owner.stopped(stopped);
+  assert.equal(reads.length, 1);
+  const next = useFailureRecording();
+  next.stopped(stopped);
   reads[1]!.settle(replyOf("captured", "r2"));
   await turn();
-  assert.equal(owner.ticket()?.ticket, "r2");
+  assert.equal(next.ticket()?.ticket, "r2");
+  assert.equal(owner.ticket(), null);
 });

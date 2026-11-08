@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 import { effectScope, nextTick, type Ref } from "vue";
 
 import type { HistoryPoint } from "../player/engine-bridge/history/core.js";
@@ -86,6 +87,7 @@ interface RewindHost {
   activate(): void;
   prepareRestore(given: PlayerRuntimeSession): void;
   reportHostError(error: unknown): void;
+  setDebugTracing(on: boolean): void;
   readonly hostError: Readonly<Ref<string | null>>;
   toStartPage(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
@@ -136,6 +138,7 @@ interface RewindHost {
     readonly rewoundWhileDebugging: { restoredSceneTimeMs: number; rewindCount: number } | null;
     readonly editedWhileDebugging: { firstEditSceneTimeMs: number; editCount: number } | null;
     readonly hostError: string | null;
+    release(): void;
   }>;
 }
 interface Rewind {
@@ -187,8 +190,9 @@ let createInProcessBackend: (build: {
   readonly appVersion: null;
 }) => PlayerBridge;
 let BridgeLostError: typeof ClientModule.BridgeLostError;
-// The diagnostic runs a bridge of that backend holds (`heldRuns`).
+// The diagnostic runs and the tickets a bridge of that backend holds (`heldRuns`, `heldTickets`).
 let heldRuns: (bridge: PlayerBridge) => number[];
+let heldTickets: (bridge: PlayerBridge) => string[];
 let usePlayerDebug: (
   player: RewindHost,
   initial: { readonly menu: boolean; readonly autoSkip: boolean },
@@ -213,6 +217,9 @@ before(async () => {
   assert.equal(typeof facade.heldRuns, "function");
   // EVIDENCE: validation: as above, its callable facade.
   heldRuns = facade.heldRuns as typeof heldRuns;
+  assert.equal(typeof facade.heldTickets, "function");
+  // EVIDENCE: validation: as above, its callable facade.
+  heldTickets = facade.heldTickets as typeof heldTickets;
   // EVIDENCE: validation: as above.
   BridgeLostError = client.BridgeLostError as typeof BridgeLostError;
   assert.equal(typeof debug.usePlayerDebug, "function");
@@ -2540,21 +2547,29 @@ test("a debug export's incident is the run's: kept through Back and Return, gone
  * began at a restored state; B2, an activation that fails before its Start reaches the host commits its incident in a
  * run of its own, also after an earlier failed activation.
  */
-test("a Player error whose recording capture failed exports no recording, also after Back", async (context) => {
+test("a Player error whose recording capture failed exports no recording, also after Back and a later error", async (context) => {
   const made = createHost(context, memoryStorage().provider);
   const { host, rewind } = made;
   await start(context, host);
   await choose(context, host, "One");
   const bridge = await host.bridge;
   const request = bridge.client.request.bind(bridge.client);
-  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) =>
-    args[0] === "captureRecording"
+  const selected: unknown[] = [];
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    if (args[0] === "captureExport") {
+      // EVIDENCE: fixture: `captureExport`'s arguments name the recording it selects.
+      const { recording } = args[1] as { readonly recording: unknown };
+      selected.push(recording);
+    }
+    return args[0] === "captureRecording"
       ? Promise.reject(new Error("The capture failed."))
-      : request(...args),
-  );
+      : request(...args);
+  });
   host.reportHostError(new TypeError("A component failed."));
   await settle(context);
   assert.equal(await backTo(rewind, 0), true);
+  host.reportHostError(new RangeError("A later failure."));
+  await settle(context);
   const candidate = await host.debugExportCandidate(
     () => ({}),
     () => true,
@@ -2565,18 +2580,67 @@ test("a Player error whose recording capture failed exports no recording, also a
     null,
     "the failure's recording is unavailable, not the restored one's",
   );
+  assert.deepEqual(selected, ["none"]);
+  // No failure ticket: the export's is the connection's first.
+  assert.deepEqual(heldTickets(bridge), ["r1"]);
+  candidate.release();
+  await settle(context);
+  assert.deepEqual(heldTickets(bridge), []);
+  made.scope.stop();
+  await settle(context);
+  assert.deepEqual(
+    { runs: heldRuns(bridge), tickets: heldTickets(bridge) },
+    { runs: [], tickets: [] },
+  );
+});
+
+test("a Player error's captured recording stays the export's through Back and a later error, and goes with the Player", async (context) => {
+  const made = createHost(context, memoryStorage().provider);
+  const { host, rewind } = made;
+  await start(context, host);
+  await choose(context, host, "One");
+  const bridge = await host.bridge;
+  const request = bridge.client.request.bind(bridge.client);
+  let captures = 0;
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    if (args[0] === "captureRecording") captures += 1;
+    return request(...args);
+  });
+  host.reportHostError(new TypeError("A component failed."));
+  await settle(context);
+  assert.deepEqual(heldTickets(bridge), ["r1"]);
+  assert.equal(await backTo(rewind, 0), true);
+  host.reportHostError(new RangeError("A later failure."));
+  await settle(context);
+  const candidate = await host.debugExportCandidate(
+    () => ({}),
+    () => true,
+  );
+  assert.equal(candidate.hostError, "TypeError");
+  assert.deepEqual(heldTickets(bridge), ["r1", "r2"]);
+  candidate.release();
+  await settle(context);
+  assert.deepEqual(heldTickets(bridge), ["r1"]);
+  assert.equal(captures, 1, "the first error's capture is the only one");
+  made.scope.stop();
+  await settle(context);
+  assert.deepEqual(
+    { runs: heldRuns(bridge), tickets: heldTickets(bridge) },
+    { runs: [], tickets: [] },
+  );
 });
 
 test("a Start that fails before it reaches the host commits its incident in its own run", async (context) => {
   const made = createHost(context, memoryStorage().provider);
   const { host } = made;
-  const exported = async () =>
-    (
-      await host.debugExportCandidate(
-        () => ({}),
-        () => true,
-      )
-    ).hostError;
+  const exported = async () => {
+    const candidate = await host.debugExportCandidate(
+      () => ({}),
+      () => true,
+    );
+    candidate.release();
+    return candidate.hostError;
+  };
   await host.loadScriptStorage();
   const bridge = await host.bridge;
   const prepared = await bridge.client.request("prepare", { source: { kind: "source", script } });
@@ -2593,6 +2657,8 @@ test("a Start that fails before it reaches the host commits its incident in its 
   await settle(context);
   assert.equal(host.hostError.value, "TypeError");
   assert.equal(await exported(), "TypeError");
+  // Its run, the connection's first, with no older one; no session.
+  assert.deepEqual(heldRuns(bridge), [1]);
   // A later Start whose options throw another error: its own run, so its own incident.
   host.prepare({
     plan,
@@ -2604,6 +2670,12 @@ test("a Start that fails before it reaches the host commits its incident in its 
   await settle(context);
   assert.equal(host.hostError.value, "RangeError");
   assert.equal(await exported(), "RangeError");
+  made.scope.stop();
+  await settle(context);
+  assert.deepEqual(
+    { runs: heldRuns(bridge), tickets: heldTickets(bridge) },
+    { runs: [], tickets: [] },
+  );
 });
 
 test("a debug export copies the shown publication's events and transcript, after Back and Return too", async (context) => {
@@ -2737,9 +2809,12 @@ test("each activation's run reaches the host once, however the activation ends, 
         }
         host.activate();
       } else if (c.activation === "factoryStart")
-        host.prepare(() => {
+        host.prepare((recording) => {
           if (c.failure === "afterHost" && c.path === "commitIncident") throw failed;
-          return createPlayerRuntimeSession(script, host.scriptStorageOptions());
+          return createPlayerRuntimeSession(script, {
+            ...host.scriptStorageOptions(),
+            ...recording,
+          });
         });
       else {
         const prepared = await bridge.client.request("prepare", {
@@ -2765,13 +2840,33 @@ test("each activation's run reaches the host once, however the activation ends, 
       }
       if (c.failure !== "none")
         assert.notEqual(host.hostError.value, null, "the activation failed");
+      // Each run's export shows its own error, and the successful run after it none.
+      const exported = async () => {
+        const candidate = await host.debugExportCandidate(
+          () => ({}),
+          () => true,
+        );
+        candidate.release();
+        return candidate.hostError;
+      };
+      const errors = [await exported()];
       held.push(heldRuns(bridge));
       await start(subtest, host);
+      errors.push(await exported());
       held.push(heldRuns(bridge));
       made.scope.stop();
       await settle(subtest);
       held.push(heldRuns(bridge));
       assert.deepEqual(held, [[1], [2], [3], []]);
+      // A held Start of a plan the host does not hold fails there, with the host's `Error`.
+      const own =
+        c.failure === "none"
+          ? null
+          : c.activation === "heldStart" && c.path === "commitIncident" && c.failure === "afterHost"
+            ? "Error"
+            : "TypeError";
+      assert.deepEqual(errors, [own, null]);
+      assert.deepEqual(heldTickets(bridge), []);
     });
     observed.push(coordinates);
   }
@@ -2784,5 +2879,467 @@ test("each activation's run reaches the host once, however the activation ends, 
       { tuples: true },
     ),
     [],
+  );
+});
+
+/*
+ * L5h.3b, design round r2: an activation's completions act only while the activation lives (`useActivationRun`), and
+ * the host refuses whatever names a run that ended (`ExportObservation.retiredThrough`). Generated over where a
+ * completion is in transit when its Player error is reported × how the activation retires × its successor × when the
+ * held replies arrive × what the last live Player exports. The host's actual replies are held in transit, in order, as
+ * an ordered channel holds them; requests still reach the host. Expectations come from the coordinates: the runs and
+ * tickets the host holds, the diagnostic work the page starts after the retirement, the incident each export shows,
+ * and that no stale reply changes the successor. Excluded, with where it is decided: a lost connection, which serves no
+ * request, so no completion of it reaches a host (`player-bridge-loss.test.ts`); a failure capture that settles
+ * unavailable, refused or lost, which holds no ticket to leak (`player-failure-recording.test.ts`); the full composable
+ * over a Worker (L5i.7).
+ */
+const LIFETIME_AXES = {
+  boundary: ["startReply", "continueReply", "haltAck", "captureReply"],
+  retirement: ["none", "replacement", "disposal"],
+  successor: ["absent", "samePlayer", "newPlayer"],
+  order: ["beforeRetirement", "afterRetirement", "afterSuccessor"],
+  observation: ["none", "export", "restoreExport"],
+} as const;
+type LifetimeCase = {
+  readonly [A in keyof typeof LIFETIME_AXES]: (typeof LIFETIME_AXES)[A][number];
+};
+
+/** A case's coordinates as the case they name. */
+function asLifetimeCase(coordinates: Coordinates): LifetimeCase {
+  // EVIDENCE: invariant: `product` gives the declared axes' values.
+  return coordinates as LifetimeCase;
+}
+
+/** Why a combination is no case, or `null` for a feasible one. */
+function lifetimeInfeasible(c: LifetimeCase): string | null {
+  if (c.retirement === "none" && (c.successor !== "absent" || c.order !== "beforeRetirement"))
+    return "nothing retires the activation: its replies arrive, and no successor begins";
+  if ((c.successor === "samePlayer") !== (c.retirement === "replacement"))
+    return "a successor in the same Player is the replacement that retires the activation";
+  if (c.successor === "newPlayer" && c.retirement !== "disposal")
+    return "a new Player claims the connection only once the first gave it up";
+  if (c.successor === "absent" && c.order === "afterSuccessor") return "no successor begins";
+  if (c.retirement === "replacement" && c.order === "afterRetirement")
+    return "the successor's begin is the retirement: nothing comes between them";
+  if (
+    c.retirement === "replacement" &&
+    c.order === "afterSuccessor" &&
+    (c.boundary === "startReply" || c.boundary === "continueReply")
+  )
+    return "a later activation begins only once the one in flight settled (`begunInFlight`)";
+  const live = c.retirement === "none" || c.successor !== "absent";
+  if (!live && c.observation !== "none") return "no Player lives to export";
+  if (live && c.observation === "none") return "the live Player exports";
+  if (
+    c.retirement === "none" &&
+    c.observation === "restoreExport" &&
+    (c.boundary === "startReply" || c.boundary === "continueReply")
+  )
+    return "an activation its error stopped before any input of its own has no earlier point to go Back to";
+  return null;
+}
+
+/** The host's replies held in transit, in order: the in-process transport delivers each in a microtask of its own. */
+function holdTransport(context: TestContext) {
+  const deliveries: (() => void)[] = [];
+  const real = globalThis.queueMicrotask;
+  const scheduling = context.mock.method(
+    globalThis,
+    "queueMicrotask",
+    (callback: () => void) => void deliveries.push(callback),
+  );
+  return {
+    /** Lets the oldest held reply through. */
+    passOne: () => deliveries.splice(0, 1).forEach((deliver) => real(deliver)),
+    release() {
+      scheduling.mock.restore();
+      for (const deliver of deliveries.splice(0)) real(deliver);
+    },
+  };
+}
+
+/** What the page posts over `bridge`, in order, with the retirement count it was posted after. */
+function postsOf(context: TestContext, bridge: PlayerBridge) {
+  const posts: { readonly op: string; readonly args: unknown; readonly phase: number }[] = [];
+  const state = { phase: 0 };
+  const request = bridge.client.request.bind(bridge.client);
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    posts.push({ op: args[0], args: args[1], phase: state.phase });
+    return request(...args);
+  });
+  const signal = bridge.client.signal.bind(bridge.client);
+  context.mock.method(bridge.client, "signal", (...args: Parameters<typeof signal>) => {
+    posts.push({ op: args[0], args: args[1], phase: state.phase });
+    return signal(...args);
+  });
+  return {
+    posts,
+    /** Marks the retirement: what is posted from now on is after it. */
+    retired: () => void (state.phase = 1),
+    /** The page's diagnostic work after the retirement: error halts, incidents, failure captures; plain halts apart. */
+    afterRetirement() {
+      const after = posts.filter((post) => post.phase === 1);
+      return {
+        diagnosticHalts: after.filter((post) => post.op === "halt" && post.args !== null).length,
+        incidents: after.filter((post) => post.op === "commitIncident").length,
+        captures: after.filter((post) => post.op === "captureRecording").length,
+        plainHalts: after.filter((post) => post.op === "halt" && post.args === null).length,
+        released: after
+          .filter((post) => post.op === "releaseRecording")
+          .map((post) => {
+            // EVIDENCE: fixture: `releaseRecording`'s arguments name its ticket.
+            const { ticket } = post.args as { readonly ticket: string };
+            return ticket;
+          }),
+      };
+    },
+  };
+}
+
+/** The diagnostic run a Player session belongs to, as its publication carries it. */
+function runOfShown(host: RewindHost): number | null {
+  // EVIDENCE: fixture: a host session's publication carries its diagnostic identity (`Publication.diagnostic`).
+  const shown = host.session.value as {
+    readonly diagnostic?: { readonly run: number | null };
+  } | null;
+  return shown?.diagnostic?.run ?? null;
+}
+
+/** A further Player on `bridge`, as a page that claims the connection after another gave it up. */
+async function playerOn(context: TestContext, bridge: PlayerBridge) {
+  const scope = effectScope();
+  const host = scope.run(() =>
+    usePlayerSession({
+      bridge: Promise.resolve(bridge),
+      scriptStorage: memoryStorage().provider,
+      debugHistorySpill: async () => null,
+    }),
+  )!;
+  const debug = effectScope();
+  const rewind = debug.run(() => useDebugRewind(host))!;
+  const stop = () => {
+    debug.stop();
+    scope.stop();
+  };
+  context.after(stop);
+  await host.bridge;
+  return { host, rewind, stop };
+}
+
+/** What a lifetime case observes. */
+interface LifetimeObserved {
+  readonly carrier: { readonly run: number; readonly retires: number | null } | null;
+  readonly runsWhileLive: readonly number[];
+  readonly afterRetirement: ReturnType<ReturnType<typeof postsOf>["afterRetirement"]> | null;
+  readonly successorUntouched: boolean | null;
+  readonly pageError: string | null;
+  readonly shownRun: number | null;
+  readonly exported: {
+    readonly hostError: string | null;
+    readonly during: readonly string[];
+    readonly after: readonly string[];
+  } | null;
+  readonly finalRuns: readonly number[];
+  readonly finalTickets: readonly string[];
+}
+
+/** What each lifetime case must give, from its coordinates alone. */
+function lifetimeExpected(c: LifetimeCase): LifetimeObserved {
+  // The first Start is run 1; Continue's activation is run 2 after it.
+  const own = c.boundary === "continueReply" ? 2 : 1;
+  const successor = c.successor !== "absent";
+  const retired = c.retirement !== "none";
+  // The activation's failure capture is posted with its halt, unless a Start's reply is what waits: its stop target
+  // comes only with that reply, which a retired activation no longer acts on.
+  const captured = c.boundary !== "startReply" || c.order === "beforeRetirement" || !retired;
+  // The export's own ticket follows the failure capture's, when one was allocated.
+  const exportTicket = captured ? "r2" : "r1";
+  return {
+    carrier: { run: own, retires: own === 1 ? null : own - 1 },
+    runsWhileLive: retired ? (successor ? [own + 1] : []) : [own],
+    afterRetirement: retired
+      ? {
+          diagnosticHalts: 0,
+          incidents: 0,
+          captures: 0,
+          // A Start's late session of a retired activation is only stopped.
+          plainHalts:
+            c.boundary === "startReply" &&
+            c.retirement === "disposal" &&
+            c.order !== "beforeRetirement"
+              ? 1
+              : 0,
+          // The retired activation's failure ticket goes, whenever its capture settles; then the export's own.
+          released: [
+            ...(captured ? ["r1"] : []),
+            ...(c.observation === "none" ? [] : [exportTicket]),
+          ],
+        }
+      : null,
+    successorUntouched: c.order === "afterSuccessor" ? true : null,
+    pageError: retired ? null : "TypeError",
+    shownRun: c.observation === "none" ? null : retired ? own + 1 : own,
+    exported:
+      c.observation === "none"
+        ? null
+        : retired
+          ? { hostError: null, during: [exportTicket], after: [] }
+          : { hostError: "TypeError", during: ["r1", "r2"], after: ["r1"] },
+    finalRuns: [],
+    finalTickets: [],
+  };
+}
+
+test("an activation's completions act only while it lives, whichever reply is in transit when it retires", async (context) => {
+  const cases = product({ ...LIFETIME_AXES }).filter(
+    (coordinates) => lifetimeInfeasible(asLifetimeCase(coordinates)) === null,
+  );
+  const observed: Coordinates[] = [];
+  for (const coordinates of cases) {
+    const c = asLifetimeCase(coordinates);
+    await context.test(Object.values(c).join(" "), async (subtest) => {
+      const made = createHost(subtest, memoryStorage().provider, { lossy: true });
+      const first = { host: made.host, rewind: made.rewind, stop: () => made.scope.stop() };
+      const bridge = await first.host.bridge;
+      await first.host.loadScriptStorage();
+      const traffic = postsOf(subtest, bridge);
+      const failed = new TypeError("The activation failed.");
+      let transport: ReturnType<typeof holdTransport>;
+      if (c.boundary === "startReply") {
+        const prepared = await bridge.client.request("prepare", {
+          source: { kind: "source", script },
+        });
+        // EVIDENCE: fixture: `prepare` of a source replies with its held plan's token.
+        const plan = (prepared.result as { readonly plan: string }).plan;
+        transport = holdTransport(subtest);
+        first.host.prepare({ plan, options: () => first.host.scriptStorageOptions() });
+        first.host.activate();
+        await settle(subtest);
+        assert.equal(first.host.session.value, null, "the Start's reply waits in transit");
+      } else if (c.boundary === "continueReply") {
+        await start(subtest, first.host);
+        const shown = first.host.session.value!;
+        first.host.prepareRestore(
+          restorePlayerRuntimeSessionAt(
+            onHost((session: PlayerRuntimeSession) => session.plan)(shown),
+            JSON.stringify(playerRuntimeSnapshot(shown)),
+            shown.events,
+          ),
+        );
+        transport = holdTransport(subtest);
+        first.host.activate();
+        await settle(subtest);
+      } else {
+        await start(subtest, first.host);
+        await choose(subtest, first.host, "One");
+        transport = holdTransport(subtest);
+      }
+      first.host.reportHostError(failed);
+      await settle(subtest);
+      // The capture's reply waits behind the halt's acknowledgement, which arrives first.
+      if (c.boundary === "captureReply") {
+        transport.passOne();
+        await settle(subtest);
+      }
+      const carrierPost = traffic.posts.find(
+        (post) =>
+          (post.op === "halt" && post.args !== null) ||
+          post.op === "commitIncident" ||
+          post.op === "start" ||
+          post.op === "beginRecording",
+      );
+      const startRun = (args: unknown) => {
+        // EVIDENCE: fixture: a Start's arguments carry its run's begin.
+        const { run } = args as { readonly run: unknown };
+        return run;
+      };
+      const carrierArgs =
+        carrierPost === undefined
+          ? null
+          : carrierPost.op === "start"
+            ? startRun(carrierPost.args)
+            : carrierPost.args;
+      // EVIDENCE: fixture: the carriers this file's activations post hold a run's begin.
+      const begin = carrierArgs as { readonly run: number; readonly retires: number | null } | null;
+      let live = c.retirement === "none" ? first : null;
+      const later: { player: Awaited<ReturnType<typeof playerOn>> | null } = { player: null };
+      let untouched: boolean | null = null;
+      const retire = async () => {
+        traffic.retired();
+        if (c.retirement === "disposal") first.stop();
+        else {
+          await start(subtest, first.host);
+          live = first;
+        }
+        await settle(subtest);
+      };
+      const begin2 = async () => {
+        if (c.successor === "newPlayer") {
+          later.player = await playerOn(subtest, bridge);
+          await start(subtest, later.player.host);
+          live = later.player;
+        }
+      };
+      if (c.order === "beforeRetirement") {
+        transport.release();
+        await settle(subtest);
+      }
+      if (c.retirement !== "none") await retire();
+      if (c.order !== "afterSuccessor") {
+        transport.release();
+        await settle(subtest);
+      }
+      await begin2();
+      if (c.order === "afterSuccessor") {
+        // The successor's own replies wait behind the stale ones and then show: what stale work could change is the
+        // shown lineage, its run and the page's error.
+        const shownOf = (host: RewindHost) => ({
+          // EVIDENCE: fixture: a host session's publication carries its lineage.
+          lineage: (host.session.value as { readonly lineage?: string } | null)?.lineage,
+          run: runOfShown(host),
+          error: host.hostError.value,
+        });
+        const before = shownOf(live!.host);
+        transport.release();
+        await settle(subtest);
+        untouched = isDeepStrictEqual(shownOf(live!.host), before);
+      }
+      const runsWhileLive = heldRuns(bridge);
+      let exported: LifetimeObserved["exported"] = null;
+      let shownRun: number | null = null;
+      if (live !== null) {
+        const player: { host: RewindHost; rewind: Rewind } = live;
+        if (c.retirement !== "none") await choose(subtest, player.host, "One");
+        if (c.observation === "restoreExport") assert.equal(await backTo(player.rewind, 0), true);
+        shownRun = runOfShown(player.host);
+        const candidate = await player.host.debugExportCandidate(
+          () => ({}),
+          () => true,
+        );
+        const during = heldTickets(bridge);
+        candidate.release();
+        await settle(subtest);
+        exported = { hostError: candidate.hostError, during, after: heldTickets(bridge) };
+      }
+      const pageError = live === null ? null : live.host.hostError.value;
+      first.stop();
+      later.player?.stop();
+      await settle(subtest);
+      assert.deepEqual(
+        {
+          carrier: begin === null ? null : { run: begin.run, retires: begin.retires },
+          runsWhileLive,
+          afterRetirement: c.retirement === "none" ? null : traffic.afterRetirement(),
+          successorUntouched: untouched,
+          pageError,
+          shownRun,
+          exported,
+          finalRuns: heldRuns(bridge),
+          finalTickets: heldTickets(bridge),
+        },
+        lifetimeExpected(c),
+      );
+    });
+    observed.push(coordinates);
+  }
+  assert.deepEqual(
+    coverageGaps(
+      product({ ...LIFETIME_AXES }).filter(
+        (coordinates) => lifetimeInfeasible(asLifetimeCase(coordinates)) === null,
+      ),
+      observed,
+      { tuples: true },
+    ),
+    [],
+  );
+});
+
+/** Holds the replies of `op` on `bridge` until `release(error)`: the host's answer, or `error` in its place. */
+function holdOp(context: TestContext, bridge: PlayerBridge, op: string) {
+  let open!: (error: Error | null) => void;
+  const gate = new Promise<Error | null>((resolve) => (open = resolve));
+  const request = bridge.client.request.bind(bridge.client);
+  const held = { count: 0 };
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    if (args[0] !== op) return request(...args);
+    held.count += 1;
+    const answered = request(...args);
+    return gate.then((error) => (error === null ? answered : Promise.reject(error)));
+  });
+  return { held: () => held.count, release: (error: Error | null = null) => open(error) };
+}
+
+// Design round r2: Continue's asynchronous handlers keep the activation they began in. A trace restart that fails only
+// after a successor began stops nothing of the successor.
+test("a Continue's trace restart that fails after a successor began reports nothing to the successor", async (context) => {
+  const { host } = createHost(context, memoryStorage().provider);
+  const bridge = await host.bridge;
+  host.setDebugTracing(true);
+  await settle(context);
+  await start(context, host);
+  const shown = host.session.value!;
+  host.prepareRestore(
+    restorePlayerRuntimeSessionAt(
+      onHost((session: PlayerRuntimeSession) => session.plan)(shown),
+      JSON.stringify(playerRuntimeSnapshot(shown)),
+      shown.events,
+    ),
+  );
+  const restart = holdOp(context, bridge, "restartTrace");
+  host.activate();
+  await settle(context);
+  assert.equal(runOfShown(host), 2, "the Continue's run");
+  assert.equal(restart.held(), 1, "its trace restart waits");
+  await start(context, host);
+  const traffic = postsOf(context, bridge);
+  traffic.retired();
+  restart.release(new Error("The trace could not restart."));
+  await settle(context);
+  assert.deepEqual(
+    {
+      error: host.hostError.value,
+      run: runOfShown(host),
+      runs: heldRuns(bridge),
+      after: traffic.afterRetirement(),
+    },
+    {
+      error: null,
+      run: 3,
+      runs: [3],
+      after: { diagnosticHalts: 0, incidents: 0, captures: 0, plainHalts: 0, released: [] },
+    },
+  );
+});
+
+// Design round r2: an export keeps the activation it began in. One that waits for a Player error's capture while its
+// activation retires gives no candidate and holds nothing.
+test("an export that waits for a failure capture while its activation retires gives no candidate and holds no ticket", async (context) => {
+  const { host } = createHost(context, memoryStorage().provider);
+  const bridge = await host.bridge;
+  await start(context, host);
+  await choose(context, host, "One");
+  const capture = holdOp(context, bridge, "captureRecording");
+  host.reportHostError(new TypeError("A component failed."));
+  await settle(context);
+  const traffic = postsOf(context, bridge);
+  const pending = host.debugExportCandidate(
+    () => ({}),
+    () => true,
+  );
+  await settle(context);
+  assert.equal(capture.held(), 1, "the export waits for the failure capture");
+  await start(context, host);
+  capture.release();
+  await settle(context);
+  const candidate = await pending;
+  await settle(context);
+  assert.deepEqual(
+    {
+      candidate,
+      exports: traffic.posts.filter((post) => post.op === "captureExport").length,
+      tickets: heldTickets(bridge),
+    },
+    { candidate: null, exports: 0, tickets: [] },
   );
 });

@@ -26,8 +26,11 @@ export interface HostSession {
   atStop?(args: unknown): StopPayload;
   /** Whether a halt's non-null arguments are this session's stop arguments; a halt without arguments is a plain stop. */
   checkStop?(args: unknown): boolean;
-  /** A halt with arguments `args` arrived for the session, before the work running at it settled. */
-  stopRequested?(args: unknown): void;
+  /**
+   * A halt with arguments `args` arrived for the session, before the work running at it settled: whether the session
+   * admits it. A refused stop changed nothing, and the halt is refused before it halts the session.
+   */
+  stopRequested?(args: unknown): boolean;
 }
 
 /** What a session's stop acknowledgement carries: its kind of session defines it, and that kind's client reads it. */
@@ -380,8 +383,9 @@ export function startBridgeHost(
           request,
           refusal("session", "The request names no session the Worker holds."),
         );
+      if (request.args !== null && !(value.stopRequested?.(request.args) ?? true))
+        return refuse(request, refusal("session", "The halt names a diagnostic run that ended."));
       halted.add(request.session!);
-      if (request.args !== null) value.stopRequested?.(request.args);
     } catch {
       return;
     }

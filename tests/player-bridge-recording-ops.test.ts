@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
-import { compilePlayerProject } from "../player/compile-project.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import { NO_MARKS } from "../player/debug-history-marks.js";
+import { heldRuns, introduceNow } from "../player/engine-bridge/in-process.js";
 import { connectBridge, openBridge, type ClientPort } from "../player/engine-bridge/client.js";
 import {
   closeConnection,
@@ -294,6 +297,15 @@ test("the recording ops' outcomes answer as written, in-process and in a Worker"
         retires: null,
       }),
     );
+    // The refusal changed nothing of the live run: its first incident stays.
+    outcomes["commitIncident live run after the refusal"] = await answerOf(
+      bridge.client.request("commitIncident", {
+        error: "RangeError",
+        run: 9,
+        stop: 2,
+        retires: null,
+      }),
+    );
     return outcomes;
   });
   assert.deepEqual(remote, inProcess);
@@ -350,10 +362,148 @@ test("the recording ops' outcomes answer as written, in-process and in a Worker"
     "commitIncident unbegun run": {
       answer: { errorName: "TypeError", run: 9, stop: 1, revision: null, eventsThrough: null },
     },
+    // Run 9 began after run 1, which ended then: its incident is refused, before any effect, and never begins it anew.
     "commitIncident retired run": {
-      answer: { errorName: "TypeError", run: 1, stop: 9, revision: null, eventsThrough: null },
+      name: "RetiredRunError",
+      message: "Diagnostic run 1 has ended.",
+    },
+    "commitIncident live run after the refusal": {
+      answer: { errorName: "TypeError", run: 9, stop: 1, revision: null, eventsThrough: null },
     },
   });
+});
+
+/*
+ * Design round r2's host half: retirement is absorbing. A run the Player retired before the host saw any carrier of it
+ * begins nowhere: every carrier (a Start's, Continue's handoff, an incident's, a halt's) is refused before any effect,
+ * with no session, recorder, binding or halt; a later run's observation then stays its own across replays of the
+ * retired run and a late retirement of it. The in-process introduction is the facade's, so in-process only.
+ */
+test("a run retired before the host saw it begins through no carrier, and a later run's observation stays its own", async () => {
+  const RETIRED = { name: "RetiredRunError", message: "Diagnostic run 1 has ended." };
+  const ENDED_HALT = {
+    name: "BridgeRefusal",
+    message: "The halt names a diagnostic run that ended.",
+  };
+  const run1 = { run: 1, retires: null };
+  const stopOf = (run: number, stop: number) => ({ error: "TypeError", run, stop, retires: null });
+  const [inProcess, remote] = await onBoth(async (bridge) => {
+    const plan = await preparedPlan(Promise.resolve(bridge), PLAN);
+    const outcomes: Record<string, unknown> = {};
+    // The identity a session's capture reports, and whether the session still runs (no halt took it).
+    const observe = async (session: { readonly id: string }) => {
+      const reply = await bridge.client.request("captureExport", {
+        session: session.id,
+        recording: "none",
+      });
+      // EVIDENCE: fixture: a capture of a held session replies `captured`, with its identity and ticket.
+      const captured = reply.result as {
+        readonly identity: {
+          readonly session: string | null;
+          readonly run: number | null;
+          readonly stop: number | null;
+        };
+        readonly incident: unknown;
+        readonly ticket: string;
+      };
+      await bridge.releaseRecording(captured.ticket);
+      const runs = await bridge.client
+        .request("viewCalls", { on: false }, { session: session.id, basis: null })
+        .then(
+          () => true,
+          () => false,
+        );
+      const { session: id, run, stop } = captured.identity;
+      return { identity: { session: id, run, stop }, incident: captured.incident, runs };
+    };
+    await bridge.retireRun(1);
+    // A session outside any run, which the replays below name.
+    const outside = await bridge.start(plan, { wallClockMs: 0 }, false);
+    outcomes["start"] = await answerOf(
+      bridge.client.request("start", {
+        plan,
+        options: { wallClockMs: 0 },
+        recording: true,
+        run: run1,
+      }),
+    );
+    outcomes["beginRecording"] = await answerOf(bridge.request(outside, "beginRecording", run1));
+    outcomes["commitIncident"] = await answerOf(
+      bridge.client.request("commitIncident", stopOf(1, 1)),
+    );
+    outcomes["halt"] = await answerOf(bridge.client.signal("halt", stopOf(1, 2), outside.id));
+    outcomes["outside, after"] = await observe(outside);
+    // A real later run, then the retired run's replays and a late retirement of it.
+    const later = await bridge.start(plan, { wallClockMs: 0 }, true, undefined, {
+      run: 2,
+      retires: 1,
+    });
+    const before = await observe(later);
+    outcomes["replayed start"] = await answerOf(
+      bridge.client.request("start", {
+        plan,
+        options: { wallClockMs: 0 },
+        recording: true,
+        run: run1,
+      }),
+    );
+    outcomes["replayed incident"] = await answerOf(
+      bridge.client.request("commitIncident", stopOf(1, 3)),
+    );
+    outcomes["replayed halt"] = await answerOf(
+      bridge.client.signal("halt", stopOf(1, 4), later.id),
+    );
+    await bridge.retireRun(1);
+    outcomes["later, unchanged"] = isDeepStrictEqual(await observe(later), before)
+      ? before
+      : "changed";
+    return outcomes;
+  });
+  assert.deepEqual(remote, inProcess);
+  const untouched = {
+    identity: { session: "s1", run: null, stop: null },
+    incident: null,
+    runs: true,
+  };
+  assert.deepEqual(inProcess, {
+    start: RETIRED,
+    beginRecording: RETIRED,
+    commitIncident: RETIRED,
+    halt: ENDED_HALT,
+    // Bound to no run, unhalted: the refused carriers changed nothing of it, and the refused Start made no session.
+    "outside, after": untouched,
+    "replayed start": RETIRED,
+    "replayed incident": RETIRED,
+    "replayed halt": ENDED_HALT,
+    "later, unchanged": {
+      identity: { session: "s2", run: 2, stop: null },
+      incident: null,
+      runs: true,
+    },
+  });
+});
+
+test("an in-process introduction of a retired run makes nothing", async () => {
+  const bridge = await inProcessBridge();
+  await bridge.retireRun(1);
+  let made = 0;
+  assert.throws(
+    () =>
+      introduceNow(
+        bridge,
+        () => {
+          made += 1;
+          return createPlayerRuntimeSession('say "Hello", instant\nexit');
+        },
+        NO_MARKS,
+        undefined,
+        undefined,
+        { run: 1, retires: null },
+      ),
+    { name: "RetiredRunError" },
+  );
+  assert.equal(made, 0, "the factory never ran");
+  assert.deepEqual(heldRuns(bridge), []);
 });
 
 /*

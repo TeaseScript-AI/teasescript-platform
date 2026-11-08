@@ -81,6 +81,7 @@ const FACADE_EXPORTS = {
     "heldPlan",
     "heldRecording",
     "heldRuns",
+    "heldTickets",
   ],
 } as const;
 

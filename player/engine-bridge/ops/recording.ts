@@ -9,6 +9,7 @@ import { heldSession } from "./persistence.js";
 import {
   advanceExportObservation,
   ensureRun,
+  RetiredRunError,
   isStopArguments,
   type StopArguments,
 } from "../recording/export-observation.js";
@@ -71,16 +72,16 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
         return { result: null };
       },
     },
-    // A Player error before its run had a session: the run's incident, with no session to stop.
     // A Player error with no session to stop: its run begins here when the host has not seen it, as when its
-    // activation failed before its first host request, ending the run before it.
+    // activation failed before its first host request, ending the run before it. An incident of a run that ended is
+    // refused before any effect.
     commitIncident: {
       session: "none",
       checkArguments: isStopArguments,
       run: (args) => {
         // EVIDENCE: validation: checkArguments accepted stop arguments before run.
         const stop = args as StopArguments;
-        ensureRun(owner, stop);
+        if (!ensureRun(owner, stop)) throw new RetiredRunError(stop.run);
         advanceExportObservation(owner, { kind: "stopRequested", stop });
         const committed = advanceExportObservation(owner, {
           kind: "stopCommitted",
