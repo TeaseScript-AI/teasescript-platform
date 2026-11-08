@@ -1,11 +1,4 @@
-import {
-  createCheckpoint,
-  type InstructionPlan,
-  type InterpreterEvent,
-  type RuntimeCheckpoint,
-  type RuntimeFailureSnapshot,
-  type RuntimeSnapshot,
-} from "../src/index.js";
+import type { InterpreterEvent, RuntimeFailureSnapshot, RuntimeSnapshot } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { capturedMediaReferences } from "./captured-media-persistence.js";
 import {
@@ -19,10 +12,10 @@ import {
   type DebugPackage,
   type DebugPhoto,
   type DebugPhotoUse,
-  type DebugReplay,
   type DebugSelection,
 } from "./debug-export.js";
 import type { DebugRecording } from "./debug-recorder.js";
+import type { PreparedExport } from "./engine-bridge/recording/export-replay.js";
 import { capturedMediaReferencesIn } from "./kept-sessions.js";
 import type { PlayerTranscriptEntryPresentation } from "./model.js";
 
@@ -35,7 +28,6 @@ export interface DebugExportCandidate {
   readonly build: Pick<DebugBuild, "commit" | "dirty" | "mode" | "appVersion">;
   readonly package: Pick<DebugPackage, "id" | "version">;
   readonly session: {
-    readonly plan: InstructionPlan;
     /** The session's state, or `null` when it cannot be exported, such as one with a list too long to enumerate. */
     readonly snapshot: RuntimeSnapshot | null;
     /** How the session failed, as it shows it, also when its state cannot be exported; `null` when it did not. */
@@ -44,6 +36,11 @@ export interface DebugExportCandidate {
     readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
   } | null;
   readonly recording: DebugRecording | null;
+  /**
+   * Prepares in the host what needs the engine (`exportPrepare`): the plan's hash, and when `replay` is chosen, the
+   * replay data, of the recording's plan before the shown one.
+   */
+  readonly prepare: (replay: boolean) => Promise<PreparedExport>;
   /** The error name of an exception of the Player itself that stopped the session. */
   readonly hostError: string | null;
   /** The session's "Edited while debugging" mark from Debug's storage editor; `null` when it was not edited. */
@@ -182,8 +179,7 @@ export async function assembleDebugExport(
   const { session, recording } = candidate;
   const parts: DebugExportPart[] = [];
   const omissions: string[] = [];
-  const { snapshot, failure, replaySnapshot } = exportedStates(candidate);
-  const plan = recording?.plan ?? session?.plan ?? null;
+  const { snapshot, failure } = exportedStates(candidate);
   const incident = describeIncident(
     failure,
     candidate.hostError === null ? null : scrub(candidate.hostError),
@@ -249,16 +245,10 @@ export async function assembleDebugExport(
     });
   }
 
-  let checkpoint: RuntimeCheckpoint | null = null;
-  let checkpointRole: DebugExport["checkpointRole"] = null;
-  let replay: DebugReplay | null = null;
-  if (choices.replay && plan !== null) {
-    ({ checkpoint, checkpointRole, replay } = replayData(
-      plan,
-      replaySnapshot,
-      recording,
-      omissions,
-    ));
+  const prepared = await candidate.prepare(choices.replay);
+  let { checkpoint, checkpointRole, replay } = prepared;
+  omissions.push(...prepared.omissions);
+  if (choices.replay) {
     if (checkpoint !== null && containsSecretText({ checkpoint, replay })) {
       checkpoint = null;
       checkpointRole = null;
@@ -301,7 +291,7 @@ export async function assembleDebugExport(
     format: "teasescript-debug-export",
     version: DEBUG_EXPORT_VERSION,
     build: { ...candidate.build, ...debugBuildRevisions() },
-    package: { ...candidate.package, contentHash: plan === null ? null : await planHash(plan) },
+    package: { ...candidate.package, contentHash: prepared.contentHash },
     incident,
     editedWhileDebugging: candidate.editedWhileDebugging,
     rewoundWhileDebugging: candidate.rewoundWhileDebugging,
@@ -381,59 +371,6 @@ function describeIncident(
     column: null,
     hostError,
   };
-}
-
-/**
- * The checkpoint and recorded calls, or the last good state when the current one cannot be checkpointed, also when it
- * could not be exported (`null`).
- */
-function replayData(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot | null,
-  recording: DebugRecording | null,
-  omissions: string[],
-): Pick<DebugExport, "checkpoint" | "checkpointRole" | "replay"> {
-  const calls = (anchorSnapshot: RuntimeSnapshot | null): DebugReplay | null =>
-    recording === null
-      ? null
-      : {
-          anchorSnapshot,
-          operations: recording.operations,
-          complete: recording.complete,
-          reason: recording.reason,
-        };
-  if (recording === null) omissions.push("No engine calls were recorded for this session.");
-  const current = snapshot === null ? null : checkpointOrNull(plan, snapshot);
-  if (current !== null)
-    return {
-      checkpoint: current,
-      checkpointRole: "current",
-      replay: calls(recording?.anchorSnapshot ?? null),
-    };
-  if (recording === null) {
-    omissions.push("The current state could not be checkpointed.");
-    return { checkpoint: null, checkpointRole: null, replay: null };
-  }
-  omissions.push(
-    "The current state could not be checkpointed; the export carries the last good state instead.",
-  );
-  return {
-    checkpoint: createCheckpoint(plan, recording.anchorSnapshot),
-    checkpointRole: "lastGood",
-    replay: calls(null),
-  };
-}
-
-/** A checkpoint of `snapshot`, or `null` when the engine's validation refuses the state. */
-function checkpointOrNull(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
-): RuntimeCheckpoint | null {
-  try {
-    return createCheckpoint(plan, snapshot);
-  } catch {
-    return null;
-  }
 }
 
 /** Stands in for a value whose category the player did not choose. */
@@ -677,21 +614,6 @@ function removePaths(text: string): string {
   let result = text;
   for (const pattern of PATH_PATTERNS) result = result.replace(pattern, " [removed]");
   return result;
-}
-
-/** The SHA-256 of the compiled plan, identifying the script's content; `null` where the browser cannot hash. */
-async function planHash(plan: InstructionPlan): Promise<string | null> {
-  const subtle = typeof crypto === "undefined" ? undefined : crypto.subtle;
-  if (subtle === undefined) return null;
-  try {
-    const digest = await subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(serializeValidatedRuntimeJson(plan)),
-    );
-    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  } catch {
-    return null;
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

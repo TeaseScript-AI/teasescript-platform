@@ -8,7 +8,8 @@ import type { RandomTriedView } from "./ops/random.js";
 import type { StorageCapture } from "./ops/history.js";
 import type { HistoryMarks } from "../debug-history-marks.js";
 import type { HistoryDelta } from "./history/core.js";
-import type { DebugRecordingEnd } from "../debug-recorder.js";
+import type { DebugRecording, DebugRecordingEnd } from "../debug-recorder.js";
+import type { RuntimeFailureSnapshot, RuntimeSnapshot } from "../../src/index.js";
 import type { DiagnosticIdentity, ExportIncident } from "./recording/export-observation.js";
 import type { PlayerRuntimeState } from "../runtime-adapter.js";
 
@@ -98,6 +99,35 @@ export type RecordingCaptureReply =
     }
   | { readonly kind: "stale" }
   | { readonly kind: "none" };
+
+/** What a debug export's capture names as its session's observation: matched against the main side's store view. */
+export interface ExportIdentity {
+  readonly run: number | null;
+  readonly session: string | null;
+  readonly revision: number | null;
+  readonly eventsThrough: number | null;
+  /** The Player error stop that froze the session, or `null`. */
+  readonly stop: number | null;
+}
+
+/**
+ * A debug export's capture (`captureExport`): frozen under `ticket` with the shown session's state, marks and failure,
+ * the run's incident and the selected recording; `pending` while a stop of the run commits (retry); `refused` when the
+ * current recording's provenance is not proved.
+ */
+export type ExportCaptureReply =
+  | {
+      readonly kind: "captured";
+      readonly ticket: string;
+      readonly identity: ExportIdentity;
+      readonly snapshot: RuntimeSnapshot | null;
+      readonly failure: RuntimeFailureSnapshot | null;
+      readonly marks: HistoryMarks | null;
+      readonly incident: ExportIncident | null;
+      readonly recording: DebugRecording | null;
+    }
+  | { readonly kind: "pending" }
+  | { readonly kind: "refused" };
 
 /**
  * The host's session-free reads (`PlayerBridge.read`), each op with its arguments and its result: a read of an op this

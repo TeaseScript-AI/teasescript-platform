@@ -45,6 +45,11 @@ export const HOST_OPS = {
     read: true,
   },
   releaseRecording: { planJson: "cleanup of a ticket, which holds no plan JSON", read: false },
+  captureExport: {
+    planJson: "a debug export's capture under a ticket; its plan stays in the host, no plan JSON",
+    read: false,
+  },
+  exportPrepare: { planJson: "a plan's hash and replay checkpoints; no plan JSON", read: false },
   beginRun: { planJson: "a debug export's diagnostic run; no plan", read: false },
   retireRun: { planJson: "a debug export's diagnostic run; no plan", read: false },
   commitIncident: {

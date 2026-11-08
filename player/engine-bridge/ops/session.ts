@@ -93,6 +93,8 @@ export class HeldSession implements HostSession, ObservedSession {
   run: number | null = null;
   /** The session's latest publication as the export observes it. */
   observation: SessionObservation | null = null;
+  /** The Player error stop that froze the session (`atStop`), or `null`: a debug export's diagnostic identity. */
+  stoppedBy: number | null = null;
 
   constructor(
     session: PlayerRuntimeSession,
@@ -303,6 +305,7 @@ export class HeldSession implements HostSession, ObservedSession {
       session: this.observation,
     });
     const incident = committed.kind === "incident" ? committed.incident : null;
+    this.stoppedBy = args.stop;
     return Object.freeze({
       ...view,
       diagnostic: Object.freeze({ run: args.run, stop: args.stop }),

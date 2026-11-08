@@ -17,7 +17,9 @@ import type {
   ReadOp,
   ReadOps,
   StopReply,
+  ExportCaptureReply,
 } from "./engine-bridge/session-protocol.js";
+import type { PreparedExport } from "./engine-bridge/recording/export-replay.js";
 import type { StopArguments } from "./engine-bridge/recording/export-observation.js";
 import type { PlayerSession } from "./runtime-view.js";
 import type { HistoryMarks } from "./debug-history-marks.js";
@@ -291,6 +293,40 @@ export class PlayerBridge {
   /** Commits a Player error of a run that has no session to stop (`commitIncident`). */
   async commitIncident(stop: StopArguments): Promise<void> {
     await this.#client.request("commitIncident", stop);
+  }
+
+  /**
+   * Captures a debug export of `session`, or of none, with the recording `recording` selects (`captureExport`), after the
+   * session's earlier requests. `deliver` decides the candidate in the reply's hook, with the store's view of the session
+   * then: before the request's promise resolves and before another reply applies.
+   */
+  async captureExport<T>(
+    session: PlayerSession | null,
+    recording: "current" | { readonly ticket: string },
+    deliver: (reply: ExportCaptureReply, shown: PlayerSession | null) => T,
+  ): Promise<T> {
+    let delivered: { readonly value: T } | null = null;
+    await this.#client.request(
+      "captureExport",
+      { session: session?.id ?? null, recording },
+      {
+        ...(session === null ? {} : { after: session.id }),
+        onReply: (result) => {
+          // EVIDENCE: validation: `captureExport` replies from the same build with `ExportCaptureReply`.
+          const reply = result.result as ExportCaptureReply;
+          delivered = { value: deliver(reply, session === null ? null : this.latest(session)) };
+        },
+      },
+    );
+    if (delivered === null) throw new Error("The export capture's reply was not delivered.");
+    return (delivered as { readonly value: T }).value;
+  }
+
+  /** What export `ticket`'s file needs of the engine (`exportPrepare`): its plan's hash, and with `replay`, replay data. */
+  async exportPrepare(ticket: string, replay: boolean): Promise<PreparedExport> {
+    const reply = await this.#client.request("exportPrepare", { ticket, replay });
+    // EVIDENCE: validation: `exportPrepare` replies from the same build with `PreparedExport`.
+    return reply.result as PreparedExport;
   }
 
   /** Lets go of the recording or export held under `ticket` (`releaseRecording`); an unknown one changes nothing. */

@@ -1,7 +1,9 @@
 import type { DebugRecording, DebugRecordingEnd } from "../../debug-recorder.js";
 import { exactly, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
-import type { RecordingCaptureReply } from "../session-protocol.js";
+import type { ExportCaptureReply, RecordingCaptureReply } from "../session-protocol.js";
+import { playerRuntimeSnapshotOrNull } from "../../runtime-adapter.js";
+import { prepareExport, type ExportFrozen } from "../recording/export-replay.js";
 import type { BridgeOps } from "../worker-host.js";
 import { heldSession } from "./persistence.js";
 import {
@@ -25,8 +27,16 @@ export interface RecordingTicket {
   readonly epoch: number;
 }
 
+/**
+ * A debug export's capture, frozen: the shown session's state and failure (none without a session), its marks, the
+ * run's incident, the selected recording, and the plan the export identifies (the recording's before the shown one's).
+ */
+export interface ExportTicket extends ExportFrozen {
+  readonly kind: "export";
+}
+
 /** The connection's tickets (`PlayerOpsContext.recordings`), by kind. */
-export type HeldTicket = RecordingTicket;
+export type HeldTicket = RecordingTicket | ExportTicket;
 
 const isRun = (value: unknown): value is number => Number.isSafeInteger(value);
 
@@ -116,6 +126,83 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
           complete: capture.recording.complete,
         };
         return { result };
+      },
+    },
+    // A debug export's capture of the named session, or of none, with the recording `current` (the session's own, by its
+    // engine) or held under a recording ticket. Refused when a stop of the run is still committing (retry) or the current
+    // recording's provenance is not proved; never with another recording or state in its place.
+    captureExport: {
+      session: "none",
+      checkArguments: (args) =>
+        isRecord(args) &&
+        exactly(args, ["session", "recording"]) &&
+        (args.session === null || typeof args.session === "string") &&
+        (args.recording === "current" ||
+          (isRecord(args.recording) &&
+            exactly(args.recording, ["ticket"]) &&
+            typeof args.recording.ticket === "string")),
+      run: (args, sessions) => {
+        // EVIDENCE: validation: checkArguments accepted these arguments before run.
+        const selector = args as {
+          readonly session: string | null;
+          readonly recording: "current" | { readonly ticket: string };
+        };
+        const held = selector.session === null ? null : heldSession(sessions, selector.session);
+        const run = held === null ? owner.current : held.run;
+        const decided = advanceExportObservation(owner, { kind: "capture", run });
+        if (decided.kind === "pending") return { result: decided satisfies ExportCaptureReply };
+        const incident = decided.kind === "incident" ? decided.incident : null;
+        let recording: DebugRecording | null = null;
+        if (selector.recording !== "current")
+          recording = heldTicket(context, selector.recording.ticket, "recording").recording;
+        else if (held !== null) {
+          const capture = context.recorder.capture(held.publication.engine);
+          if (capture.kind === "stale")
+            return { result: { kind: "refused" } satisfies ExportCaptureReply };
+          if (capture.kind === "captured") recording = capture.recording;
+        }
+        const current = held?.sessionForOperation() ?? null;
+        const snapshot = current === null ? null : playerRuntimeSnapshotOrNull(current);
+        const plan =
+          recording?.plan ?? (held === null ? null : (context.plans.get(held.planToken) ?? null));
+        const ticket = context.nextTicket();
+        context.recordings.set(ticket, {
+          kind: "export",
+          plan,
+          session: held === null ? null : { snapshot },
+          recording,
+        });
+        const result: ExportCaptureReply = {
+          kind: "captured",
+          ticket,
+          identity: {
+            run,
+            session: selector.session,
+            revision: held?.observation?.revision ?? null,
+            eventsThrough: held?.observation?.eventsThrough ?? null,
+            stop: held?.stoppedBy ?? null,
+          },
+          snapshot,
+          failure: current?.state.failure ?? null,
+          marks: held?.marks ?? null,
+          incident,
+          recording,
+        };
+        return { result };
+      },
+    },
+    // What an export ticket's file needs of the engine: its plan's hash and, with `replay`, its replay data.
+    exportPrepare: {
+      session: "none",
+      checkArguments: (args) =>
+        isRecord(args) &&
+        exactly(args, ["ticket", "replay"]) &&
+        typeof args.ticket === "string" &&
+        typeof args.replay === "boolean",
+      run: async (args) => {
+        // EVIDENCE: validation: checkArguments accepted these arguments before run.
+        const { ticket, replay } = args as { readonly ticket: string; readonly replay: boolean };
+        return { result: await prepareExport(heldTicket(context, ticket, "export"), replay) };
       },
     },
     // Lets go of a ticket of any kind; releasing one already released, or unknown, changes nothing.

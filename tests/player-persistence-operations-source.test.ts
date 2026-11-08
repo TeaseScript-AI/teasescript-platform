@@ -242,6 +242,8 @@ const BRIDGE = {
   historyTimeline: "host",
   historyStep: "host",
   releaseRecording: "host",
+  captureExport: "host",
+  exportPrepare: "host",
   beginRun: "host",
   retireRun: "host",
   commitIncident: "host",
