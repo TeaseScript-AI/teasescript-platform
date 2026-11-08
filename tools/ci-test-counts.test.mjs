@@ -103,6 +103,35 @@ test("a recorded run's summaries are added up per job and step, then over the ru
   );
 });
 
+/** Lines of run 42462610771's `gh run view --log` (#1999), fetched when GitHub no longer had its per-step logs. */
+const UNNAMED = [
+  "check-1\tUNKNOWN STEP\t2026-11-08T08:22:03.3275767Z ##[group]Run npm ci --no-audit --no-fund",
+  "check-1\tUNKNOWN STEP\t2026-11-08T08:22:10.7710550Z ##[group]Run npm test -- --shard=1/3",
+  "check-1\tUNKNOWN STEP\t2026-11-08T08:27:25.4551576Z ℹ tests 2070",
+  "check-1\tUNKNOWN STEP\t2026-11-08T08:27:25.4552424Z ℹ pass 2070",
+  "check-1\tUNKNOWN STEP\t2026-11-08T08:27:25.4552755Z ℹ fail 0",
+  "check-1\tUNKNOWN STEP\t2026-11-08T08:27:25.4558069Z ℹ skipped 0",
+  "check-1\tUNKNOWN STEP\t2026-11-08T08:27:28.6764778Z ##[group]Run npm run oracle:test",
+  "check-1\tUNKNOWN STEP\t2026-11-08T08:29:06.3217763Z ℹ tests 255",
+  "check-1\tUNKNOWN STEP\t2026-11-08T08:29:06.3218202Z ℹ pass 254",
+  "check-1\tUNKNOWN STEP\t2026-11-08T08:29:06.3218407Z ℹ fail 0",
+  "check-1\tUNKNOWN STEP\t2026-11-08T08:29:06.3218969Z ℹ skipped 1",
+].join("\n");
+
+test("a run whose per-step logs GitHub no longer has names each step by the command it ran, and says why", () => {
+  assert.deepEqual(
+    countsOf(UNNAMED).map(({ step, tests, pass, skipped }) => [step, tests, pass, skipped]),
+    [
+      ["run: npm test -- --shard=1/3", 2070, 2070, 0],
+      ["run: npm run oracle:test", 255, 254, 1],
+    ],
+  );
+  const { status, out } = check(UNNAMED);
+  assert.equal(status, 0, out);
+  assert.match(out, /GitHub no longer has this run's per-step logs/u);
+  assert.doesNotMatch(check(RECORDED).out, /per-step logs/u);
+});
+
 test("a summary that counts a failure, or logs without one, exit 1; bad arguments exit 2", () => {
   const failing = RECORDED.replace("ℹ pass 2106", "ℹ pass 2105").replace(
     /(shard 2 of 2\t\S+ ℹ fail) 0/u,
