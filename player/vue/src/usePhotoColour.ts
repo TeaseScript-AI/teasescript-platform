@@ -86,13 +86,38 @@ export function usePhotoColour(
   const root = document.documentElement;
   const fading = ref(false);
   let fadeTimer: ReturnType<typeof setTimeout> | undefined;
+  // Each change's fade, so that the end of an earlier one, or one after unmounting, changes nothing.
+  let fadeGeneration = 0;
   // Every change fades: the first photo, the next one, the theme's return, and another mode. Authored colours adapt to
   // the background once it has settled, so they can lack contrast during the fade.
   watch(colours, () => {
     clearTimeout(fadeTimer);
+    const generation = ++fadeGeneration;
     fading.value = true;
-    fadeTimer = setTimeout(() => (fading.value = false), PHOTO_FADE_TIMES[fadeTime.value] + 100);
+    fadeTimer = setTimeout(() => void endFade(generation), PHOTO_FADE_TIMES[fadeTime.value] + 100);
   });
+  /**
+   * Ends the fade once its transitions, on the root and the canvas, have finished: they start in a frame after the
+   * change, which a busy page can delay past the timer, and the authored colours adapt to the background as it ends.
+   * (`getAnimations` first applies pending style changes, so it also finds transitions that have not started yet.)
+   */
+  async function endFade(generation: number) {
+    const canvas = elements.canvas.value;
+    const own = (target: Element | null) =>
+      target === root || (canvas !== undefined && target !== null && canvas.contains(target));
+    const running = document
+      .getAnimations()
+      .filter(
+        (animation) =>
+          animation instanceof CSSTransition &&
+          animation.playState === "running" &&
+          animation.effect instanceof KeyframeEffect &&
+          own(animation.effect.target),
+      );
+    // A transition cancelled or replaced meanwhile rejects its `finished`; the fade still ends.
+    await Promise.allSettled(running.map((animation) => animation.finished));
+    if (generation === fadeGeneration) fading.value = false;
+  }
   watchEffect(() => {
     const vignette = colours.value?.vignette;
     root.toggleAttribute("data-photo-colour", vignette !== undefined);
@@ -103,6 +128,7 @@ export function usePhotoColour(
   });
   onBeforeUnmount(() => {
     clearTimeout(fadeTimer);
+    fadeGeneration += 1;
     root.removeAttribute("data-photo-colour");
     root.removeAttribute("data-photo-fade");
     root.style.removeProperty("--photo-vignette");
