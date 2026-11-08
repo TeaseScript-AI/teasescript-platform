@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { connectBridge } from "../player/engine-bridge/client.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
@@ -25,7 +28,10 @@ import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
 const PLAYER_WORKER = new URL("../player/engine-bridge/node-worker.js", import.meta.url);
-const SCRIPT = 'let name = askText "Name?"\nsave "name" as name\nsay "Hi ${name}", instant\nexit';
+const FOLDER = resolve(process.cwd(), "tests/fixtures/debug-export-equivalence");
+// The equivalence family's scenarios (`scenarios.mjs`): the witness's script, and what its file is compared with.
+const scenarios = await import(pathToFileURL(resolve(FOLDER, "scenarios.mjs")).href);
+const SCRIPT: string = scenarios.WITNESS;
 
 /** The session's export, assembled from the host's capture with every category chosen, as its file's text. */
 async function exportText(bridge: PlayerBridge): Promise<{ text: string; release: () => void }> {
@@ -48,8 +54,8 @@ async function exportText(bridge: PlayerBridge): Promise<{ text: string; release
       reply.kind !== "captured" || view === null
         ? null
         : {
-            build: { commit: "abc", dirty: false, mode: "production", appVersion: "0.0.0" },
-            package: { id: "development-package:witness", version: null },
+            build: scenarios.BUILD,
+            package: scenarios.PACKAGE,
             session: {
               snapshot: reply.snapshot,
               failure: reply.failure,
@@ -62,13 +68,7 @@ async function exportText(bridge: PlayerBridge): Promise<{ text: string; release
             hostError: reply.incident?.errorName ?? null,
             editedWhileDebugging: reply.marks?.editedWhileDebugging ?? null,
             rewoundWhileDebugging: reply.marks?.rewoundWhileDebugging ?? null,
-            player: {},
-            host: {
-              stage: { status: "hidden", path: null },
-              media: [],
-              notices: [],
-              debugLog: null,
-            },
+            ...scenarios.SHOWN,
           },
   );
   assert.ok(candidate !== null, "the capture is the candidate");
@@ -78,7 +78,8 @@ async function exportText(bridge: PlayerBridge): Promise<{ text: string; release
   for (const category of ["savedValues", "answers", "sessionText", "replay"] as const)
     choices = chooseDebugCategory(choices, frozen, category, true);
   const { exported } = await assembleDebugExport(frozen, choices);
-  return { text: await (await debugExportFile(exported, false)).text(), release: frozen.release };
+  const file = await debugExportFile(exported, false);
+  return { text: await file.text(), release: frozen.release };
 }
 
 test("a Worker session's debug export holds a complete replay that replays offline, the same as in-process", async () => {
@@ -99,4 +100,17 @@ test("a Worker session's debug export holds a complete replay that replays offli
   assert.equal(exported.checkpointRole, "current");
   assert.equal(replayDebugExport(exported).kind, "reproduced");
   assert.equal(remote.text, inProcess.text, "byte-equal to the in-process export");
+  // EVIDENCE: fixture: `generate.mjs` writes rows of this shape.
+  const fixture = JSON.parse(readFileSync(resolve(FOLDER, "fixture.json"), "utf8")) as {
+    readonly scenarios: readonly {
+      readonly name: string;
+      readonly files: readonly { readonly file: string }[];
+    }[];
+  };
+  const pinned = fixture.scenarios.find((each) => each.name.startsWith("witness"));
+  assert.equal(
+    remote.text,
+    pinned?.files[0]?.file,
+    "byte-equal to the base's file of the same session",
+  );
 });
