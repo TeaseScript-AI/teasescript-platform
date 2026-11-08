@@ -9,7 +9,15 @@ import {
 const seconds = (file) => costlyTestSeconds[file] ?? otherTestSeconds;
 const byCost = (a, b) => seconds(b) - seconds(a) || (a < b ? -1 : a > b ? 1 : 0);
 
-/** The seconds shard `index` of `count` spends before its tests: CI's last test job runs the pre-test checks first. */
+/**
+ * The seconds shard `index` of `count` spends before its tests: CI's last test job runs the pre-test checks first.
+ *
+ * Left out: the first test job's regression-cases step (`.github/workflows/ci.yml`, "Regression cases at the base
+ * (reported)"). It runs on pull requests only, after that shard's tests, and ends at once unless a changed test file
+ * declares a regression case. In 84 pull-request runs (2026-11-08) it took 0 or 1 seconds. Weighting the first shard by
+ * 1 second moves one file and changes no shard's end. Count it as the pre-test checks are counted when CI's runs show
+ * it taking longer.
+ */
 const startSeconds = (index, count) => (count > 1 && index === count ? pretestSeconds : 0);
 
 /**
