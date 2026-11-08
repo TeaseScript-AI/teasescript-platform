@@ -9,3 +9,13 @@ export function lintFiles() {
     exclude: ["node_modules/**", "dist/**", "coverage/**", ".git/**"],
   }).sort();
 }
+
+/** The options `npm run lint` (`run.mjs`) runs oxlint with, before the files: the type-aware rules included. */
+export const OXLINT_OPTIONS = [
+  "--config",
+  ".oxlintrc.json",
+  "--disable-nested-config",
+  "--type-aware",
+  "--report-unused-disable-directives-severity",
+  "error",
+];

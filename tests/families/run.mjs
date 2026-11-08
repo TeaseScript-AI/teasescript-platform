@@ -347,7 +347,7 @@ if (process.argv[2] === "--child") {
   };
   // an exception outside the runs (the runner's own, or a library without `MODES`) is the source's exception, not a
   // stall: the process that ends with it would say only its exit code
-  process.on("message", async (message) => {
+  const answer = async (message) => {
     let reply;
     try {
       reply = await compared(message);
@@ -355,6 +355,14 @@ if (process.argv[2] === "--child") {
       reply = { thrown: { runner: thrownText(error) } };
     }
     process.send(reply);
+  };
+  // a reply that cannot be made (`thrownText` of a value without a string form) ends the process, as an unhandled
+  // rejection would, with the error on stderr
+  process.on("message", (message) => {
+    answer(message).catch((error) => {
+      console.error(error);
+      process.exit(1);
+    });
   });
 } else {
   // each option takes one value but a flag (`FLAGS`); the other arguments are the area and its trees
