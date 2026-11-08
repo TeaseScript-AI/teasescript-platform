@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -67,5 +76,41 @@ test("an option the tool does not take is refused, not ignored", () => {
     const run = spawnSync(process.execPath, [tool, ...args], { cwd: ROOT, encoding: "utf8" });
     assert.equal(run.status, 2, `${args.join(" ")}: ${run.stderr}`);
     assert.match(run.stderr, /use \[--base <ref>\] \[--run\] \[--check-grounds\]/u);
+  }
+});
+
+test("a file moved out of the core lists every pinning suite (#2049)", { timeout: 30_000 }, () => {
+  const directory = mkdtempSync(join(tmpdir(), "pin-suites-"));
+  const git = (...args) => spawnSync("git", args, { cwd: directory, encoding: "utf8" });
+  try {
+    mkdirSync(join(directory, "tools/repository-checks"), { recursive: true });
+    for (const tool of ["pin-suites.mjs", "pin-grounds.mjs"])
+      copyFileSync(
+        join(ROOT, "tools/repository-checks", tool),
+        join(directory, "tools/repository-checks", tool),
+      );
+    symlinkSync(join(ROOT, "node_modules"), join(directory, "node_modules"));
+    writeFileSync(join(directory, ".gitignore"), "node_modules\n");
+    mkdirSync(join(directory, "src/type-inference/core"), { recursive: true });
+    writeFileSync(
+      join(directory, "src/type-inference/core/answers.ts"),
+      "export const answers = 1;\n",
+    );
+    git("init", "-q");
+    git("add", ".");
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base");
+    git("mv", "src/type-inference/core/answers.ts", "src/type-inference/answers.ts");
+    const run = spawnSync(
+      process.execPath,
+      ["tools/repository-checks/pin-suites.mjs", "--base", "HEAD"],
+      { cwd: directory, encoding: "utf8" },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(
+      run.stdout,
+      new RegExp(`1 core file changed .*; ${PIN_SUITES.length} pinning suites:`, "u"),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
