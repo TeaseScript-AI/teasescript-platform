@@ -45,11 +45,13 @@ jobs:
           BUILD_SOURCEMAPS: "0"
           TEST_FILE_SECONDS: ${{ runner.temp }}/test-file-seconds.json
         run: npm test -- --shard=1/3
-      # Each regression case the pull request declares (`tests/helpers/regression-case.ts`) must fail at its base as it
-      # declares (`tools/repository-checks/regression-cases.mjs`, docs/TESTING.md "Regression-test rule"). It reuses the
-      # build above, and ends at once when no changed test file declares a case. The base is the merge's first parent.
-      - name: Regression cases fail at the base
+      # How the regression cases the pull request declares (`tests/helpers/regression-case.ts`) end at its base, reported,
+      # not enforced (`tools/repository-checks/regression-cases.mjs`, docs/TESTING.md "Regression-test rule"): the step
+      # never fails the job. It reuses the build above, and ends at once when no changed test file declares a case. The
+      # base is the merge's first parent.
+      - name: Regression cases at the base (reported)
         if: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: true
         env:
           PR: ${{ github.event.pull_request.number }}
         run: node tools/repository-checks/regression-cases.mjs --base "$(git rev-parse HEAD^1)" --pr "$PR"

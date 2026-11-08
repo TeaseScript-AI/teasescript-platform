@@ -17,45 +17,50 @@ import { fileURLToPath } from "node:url";
 
 import { ts } from "ts-morph";
 
-// Runs the regression cases a pull request declares (`tests/helpers/regression-case.ts`) against its base, and refuses
-// each that does not fail there with the failure it declares (CI, on pull requests, after a test job's build):
+// Runs the regression cases a pull request declares (`tests/helpers/regression-case.ts`) against its base, and reports
+// how each ends there against the failure it declares (CI, on pull requests, after a test job's build). The report is
+// evidence, not a gate: CI's step never fails the job.
 //
 //   node tools/repository-checks/regression-cases.mjs --base <base commit> --pr <number>
 //
-// The invariant: every declaration is one case, identified by its call site, and each selected one is executed once at
-// the base, alone, its outcome recorded by the helper. In the head's checkout, after its `npm run build:typescript`:
+// In the head's checkout, after its `npm run build:typescript`:
 // 1. The changed test files are those `git diff --diff-filter=d <base>...HEAD` names under `tests/` as `*.test.ts`; if
 //    none mentions `regressionCase`, it ends.
 // 2. Their compiled files run in list mode: the helper registers no test, and records each `regressionCase` call with
 //    its call site in the compiled file (line and column, from the caller's stack frame) and its occurrence there. A
 //    list run that fails (a file that does not load, a suite that throws, a declaration that cannot be read) is
-//    refused, quoting its error.
-// 3. Every `regressionCase(…)` call site in a compiled file, as TypeScript parses it, must have a recorded declaration,
-//    and every declaration a call site: a call inside a test's body, or in a suite that never runs, is refused, named by
-//    its source line. A declaration must have a whole `pr` of 1 or more, and an `atBase` whose flags are `i`, `u` or
-//    `v` at most.
+//    reported, quoting its error.
+// 3. Every `regressionCase(…)` call site in a compiled file, as TypeScript parses it, should have a recorded
+//    declaration, and every declaration a call site: a call inside a test's body, or in a suite that never runs, is
+//    reported, named by its source line. A declaration must have a whole `pr` of 1 or more, and an `atBase` whose flags
+//    are `i`, `u` or `v` at most.
 // 4. A case of `--pr` is selected. A case of another pull request is one merged into the base (a commit subject ending
 //    `(#N)` in `git log <base>`): it is not selected, so it is registered without `only` and does not run. Any other
-//    number is refused.
+//    number is reported.
 // 5. A detached worktree of the base gets the head's `tests/` in place of its own and the head's `node_modules`. It is
 //    compiled with `tsc` (which emits despite type errors, as a test naming what the fix adds has one at the base), and
-//    its Player test bundles, which `tests/helpers/player-modules.ts` loads, are built with
-//    `vite build --config player/vue/vite.test-modules.config.ts`. The same compiler makes the same call sites. Its
-//    compiled files run in base mode, the selected ids alone (`only`); the helper records when each starts and how it
-//    ends, so no other test can stand in for it.
+//    its Player test bundles, which `tests/helpers/player-modules.ts` loads, are built with `vite build --config
+//    player/vue/vite.test-modules.config.ts`. Its compiled files run in base mode, the selected ids alone (`only`); the
+//    helper records when each starts and how it ends, and a case its runner cancelled as not finished.
 // 6. `verdict` judges each selected case: a witness when it threw an error whose message's first line (cut at the first
 //    CR LF, LF, CR, U+2028 or U+2029) `atBase` matches whole. Anything else is not: it passed, failed for another
-//    reason, did not finish (it started and did not end), or did not run (it did not start: its file or a hook failed).
+//    reason, did not finish (it started and did not end, or was cancelled), or did not run (it did not start: its file
+//    or a hook failed).
 //
-// Bounded: a case that loads a module the head adds to the bundles' list fails at the base with `Cannot find module`,
-// reported as another reason than `atBase` names; and the base is compiled and bundled with the head's `node_modules`.
+// What the report does not establish, so it is not enforced: that an id names the same declaration at the base (the
+// base's own compilation can move a call site, and a loop can register its rows in another order); that every way of
+// calling `regressionCase` registers or is found (an alias called inside a test is neither); and that the selected
+// cases run alone (another `only` test in the file runs too). A case that loads a module the head adds to the bundles'
+// list fails at the base with `Cannot find module`, reported as another reason than `atBase` names; and the base is
+// compiled and bundled with the head's `node_modules`.
 //
 // Its scratch folder, with the base worktree, is `<tmp>/regression-cases-<pid>-<random>`. It installs no signal
 // handler: interrupted, it stops by the signal; the next run removes what an interrupted run left, each such folder
 // whose owner process is no longer alive.
 //
-// Exit status: 0 when every selected case is a witness, 1 when one is not or a declaration is refused, 2 when it cannot
-// run (a missing option, a base it cannot check out, compile or bundle).
+// Exit status: 0 when every selected case is a witness, 1 when one is not or a declaration is refused (for a local run;
+// CI does not fail on it), 2 when it cannot run (a missing option, source maps on, a base it cannot check out, compile
+// or bundle).
 
 const root = process.cwd();
 
@@ -219,13 +224,17 @@ async function main(argv) {
     .filter(
       (file) => file !== "" && readFileSync(join(root, file), "utf8").includes("regressionCase"),
     );
+  sweepScratch();
   if (changed.length === 0) {
     console.log("regression-cases: no changed test file declares a regression case");
     return 0;
   }
 
-  sweepScratch();
   // a stack frame names the compiled file's positions only without source maps
+  if (process.sourceMapsEnabled)
+    throw new CannotRun(
+      "regression-cases: source maps are on, so stack frames name the sources, not the compiled call sites: run it without --enable-source-maps",
+    );
   process.env.NODE_OPTIONS = (process.env.NODE_OPTIONS ?? "").replace(
     /--enable-source-maps\b/gu,
     "",

@@ -300,16 +300,18 @@ tool anchors it at both ends, so write the line without `^` and `$`; its flags m
   ``assert.deepStrictEqual(actual, row.expected, `#1828 ${row.name}`)`` with `atBase` `/#1828 nested set/`.
 
 On a pull request, CI's `check-1` runs the cases it declares against its base after its build
-(`tools/repository-checks/regression-cases.mjs`), and nothing else of the base: not `check:pretest`, other tests, or the
-cost table. A case is its `regressionCase` call, by its place in the compiled file, so declare it at a file's top level
-or in a `describe`, never inside a test or a skipped suite: a call that did not register is refused, as is a file whose
-declarations cannot be listed. Each case selected must fail at the base with its line, by the helper's own record, and
-one that passes, fails for another reason, does not finish, or does not run fails the job. A case of another pull
-request does not run when that one is merged into the base (a commit subject ending `(#N)` in the base's `git log`), and
-is refused otherwise, so a stacked pull request that changes a file holding its unmerged parent's cases is refused. Name
-what the fix adds by string (`{ name: "ForeignSessionError" }`), not by import, or the file does not load at the base.
-The base is compiled with `tsc` and its Player test bundles are built, so a case may load a Player module
-(`tests/helpers/player-modules.ts`). Not covered: a case that loads a module the head adds to the bundles' list
+(`tools/repository-checks/regression-cases.mjs`), and reports how each ends there; the report is evidence for the
+review, not a gate, and the step never fails the job. A case is its `regressionCase` call, by its place in the compiled
+file, so declare it at a file's top level or in a `describe`, never inside a test or a skipped suite. The report names a
+call that did not register, a file whose declarations cannot be listed, and each selected case that passes at the base,
+fails for another reason, does not finish, or does not run. A case of another pull request does not run when that one is
+merged into the base (a commit subject ending `(#N)` in the base's `git log`), and is reported otherwise. Name what the
+fix adds by string (`{ name: "ForeignSessionError" }`), not by import, or the file does not load at the base. The base
+is compiled with `tsc` and its Player test bundles are built, so a case may load a Player module
+(`tests/helpers/player-modules.ts`). What the report does not establish, which is why it is not enforced: that an id
+names the same declaration at the base (the base's compilation can move a call site, and a loop can register its rows in
+another order), that every way of calling `regressionCase` is found, and that the selected cases run alone (another
+`only` test in the file runs too). A case that loads a module the head adds to the bundles' list
 (`player/vue/vite.test-modules.config.ts`) fails at the base with `Cannot find module`, another reason than its
 `atBase`; and the base is compiled and bundled with the head's `node_modules`. Interrupted, the tool stops by the
 signal; the next run removes what an interrupted run left. Declaring is opt-in; no rule requires it. The step is in

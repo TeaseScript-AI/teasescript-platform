@@ -6,13 +6,14 @@ import { fileURLToPath } from "node:url";
 /*
  * A regression case: a test that witnesses a fix, declared with the failure it gives without that fix
  * (`docs/TESTING.md` "Regression-test rule"). CI runs the cases a pull request declares against its base, through
- * `tools/repository-checks/regression-cases.mjs`, and each must fail there with that failure.
+ * `tools/repository-checks/regression-cases.mjs`, and reports how each ends there; it does not fail on the report.
  *
  * Outside that tool the case is plain `test(name, fn)`. The tool sets `REGRESSION_CASES`, which this module reads once,
  * to a JSON object:
  * - `{ mode: "list", records }` registers no test: each call appends its declaration to the file `records`;
  * - `{ mode: "base", records, selected }` registers each case whose id `selected` lists alone (`only`), and appends to
- *   `records` when it starts and how it ends; every other case is registered without `only`, so the run skips it.
+ *   `records` when it starts and how it ends, unless its runner ended it first; every other case is registered without
+ *   `only`, so the run skips it.
  * A case's id is its call site in the compiled file (`file:line:column` of the call's `regressionCase`, as the caller's
  * stack frame names it) and its occurrence there: `dist/tests/x.test.js:12:1#1`.
  */
@@ -119,9 +120,11 @@ export function regressionCase(
     try {
       await fn(context);
     } catch (error) {
-      record({ failed: firstLine(error instanceof Error ? error.message : String(error)) });
+      // a case its runner already ended (timed out, cancelled) did not finish, whatever it settles with
+      if (!context.signal.aborted)
+        record({ failed: firstLine(error instanceof Error ? error.message : String(error)) });
       throw error;
     }
-    record({ passed: true });
+    if (!context.signal.aborted) record({ passed: true });
   });
 }

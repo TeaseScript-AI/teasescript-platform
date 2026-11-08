@@ -355,6 +355,21 @@ describe("a hook", () => {
   });
   regressionCase("after a failing hook", { pr: 7, atBase: /defect/ }, () => {});
 });
+for (const row of ["looped witness", "looped pass"])
+  regressionCase(row, { pr: 7, atBase: at }, () => {
+    if (row === "looped witness") assert.throws(() => new Bridge().latest(foreign), { name: "ForeignSessionError" });
+  });
+`;
+// a case its suite's timeout cancels at the base, which throws `atBase`'s line after that: it did not finish
+const CANCELLED = `import { setTimeout as delay } from "node:timers/promises";
+import { describe } from "node:test";
+${HELPER}
+describe("a suite with a short timeout", { timeout: 20 }, () => {
+  regressionCase("a cancelled case", { pr: 7, atBase: /defect/ }, async () => {
+    await delay(100);
+    throw new Error("defect");
+  });
+});
 `;
 // a file that imports what only the fix has, so it does not load at the base
 const IMPORTS = `import assert from "node:assert/strict";
@@ -373,6 +388,7 @@ test(
       "tests/verdicts.test.ts": VERDICTS,
       "tests/imports.test.ts": IMPORTS,
       "tests/player.test.ts": PLAYER,
+      "tests/cancel.test.ts": CANCELLED,
     });
     try {
       const result = run("--base", base, "--pr", "7");
@@ -391,11 +407,13 @@ test(
         "tests/verdicts.test.ts:17: 'an own op passes' (#7) passed at the base, so it does not witness the defect",
         "tests/verdicts.test.ts:33: 'a CR message' (#7) failed at the base for another reason than `atBase` names; its error's first line: unrelated",
         "tests/verdicts.test.ts:40: 'after a failing hook' (#7) did not run at the base: it did not start: a hook failed before it",
+        "tests/verdicts.test.ts:43: 'looped pass' (#7) passed at the base, so it does not witness the defect",
+        "tests/cancel.test.ts:6: 'a cancelled case' (#7) started at the base and did not end",
       ]);
       assert.match(
         result.stdout,
         new RegExp(
-          `^regression-cases: 3 of 8 cases of #7 fail at ${base.slice(0, 12)} as they declare; historical cases of #3 not run\\n$`,
+          `^regression-cases: 4 of 11 cases of #7 fail at ${base.slice(0, 12)} as they declare; historical cases of #3 not run\\n$`,
           "u",
         ),
       );
@@ -411,6 +429,41 @@ test(
         readdirSync(join(root, "tmp")).filter((name) => name.startsWith("regression-cases-")),
         [],
       );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "a dead owner's scratch is swept even when nothing is declared, and source maps stop the run",
+  { timeout: 120_000 },
+  () => {
+    const { root, base, env, run } = repository({
+      "tests/plain.test.ts": 'import { test } from "node:test";\ntest("plain", () => {});\n',
+    });
+    try {
+      const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+      const left = join(root, "tmp", `regression-cases-${dead}-01234567`);
+      mkdirSync(left);
+      const nothing = run("--base", base, "--pr", "7");
+      assert.equal(
+        nothing.stdout,
+        "regression-cases: no changed test file declares a regression case\n",
+      );
+      assert.equal(existsSync(left), false);
+      write(root, {
+        "tests/declared.test.ts": `${HELPER}regressionCase("x", { pr: 7, atBase: /defect/ }, () => {});\n`,
+      });
+      execFileSync("git", ["add", "-A"], { cwd: root });
+      execFileSync("git", ["commit", "-q", "-m", "declared"], { cwd: root });
+      const mapped = spawnSync(
+        process.execPath,
+        ["--enable-source-maps", tool, "--base", base, "--pr", "7"],
+        { cwd: root, encoding: "utf8", env },
+      );
+      assert.equal(mapped.status, 2, mapped.stdout + mapped.stderr);
+      assert.match(mapped.stderr, /source maps are on/u);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
