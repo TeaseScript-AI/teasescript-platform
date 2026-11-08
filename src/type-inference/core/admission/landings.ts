@@ -1405,7 +1405,9 @@ function copyIndex(
 /**
  * A place's copies whose paths stand above a path (strictly), and with `under` those at or below it too, in the
  * copies' order (`landed`, `landedBelow`): the path's prefixes looked up, never every copy for each path, or the
- * copies tested where they are no more than the prefixes; each copy taken or tested charged here.
+ * copies tested where they are no more than the prefixes; each copy taken or tested charged here. Without `under`
+ * (`landed`), a prefix's copies only where their sources may land the path (`nextStepCopies`); `landedBelow`'s walk
+ * keeps every one, its listings recording the tasks it walks.
  */
 function copiesAlong(
   admission: Admission,
@@ -1435,8 +1437,15 @@ function copiesAlong(
     // (a record's prefixes spelled by their record, charged as `keptText` charges an array's)
     const text = stepsPrefixText(path, length);
     keepText(admission.work, text.length);
+    const at = length < path.length ? index.at.get(text) : undefined;
     const found =
-      length < path.length ? index.at.get(text) : under ? index.under.get(text) : undefined;
+      at !== undefined && !under
+        ? nextStepCopies(admission, place, list, text, at, path.at(length)!)
+        : length < path.length
+          ? at
+          : under
+            ? index.under.get(text)
+            : undefined;
     for (const position of found ?? []) {
       work.charge("indexSteps");
       positions.push(position);
@@ -1447,6 +1456,122 @@ function copiesAlong(
     positions.sort((a, b) => a - b);
   }
   return positions.map((position) => list[position]!);
+}
+
+/**
+ * #1948: of a place's copies at a path (`bucket`, their positions in its copy list), those strictly above a longer path
+ * `landed` asks, whose next step past the bucket's path is `step`, that may land it: those whose sources land past
+ * their strips at `step` (`sourceSteps`), and each one whose source's landings are not proved; in the copies' order.
+ * A copy left out has a source that lands nothing at its translated path, so `landedOwn`'s frame would take it to a
+ * `false`: no answer changes, only the copies tried. The bucket's first scan, and each later one until its scans reach
+ * the index's size (its copies and their sources' seeds), takes every copy, as before; the index lasts its receiving
+ * domain's admission (`ReceivingDomain.reset`).
+ */
+function nextStepCopies(
+  admission: Admission,
+  place: PlaceId,
+  list: readonly InheritedCopy[],
+  text: string,
+  bucket: readonly number[],
+  step: string,
+): readonly number[] {
+  // (a step holding the separator: landings' texts do not split at its name)
+  if (step.includes(".")) return bucket;
+  const domain = admission.pass.receivingDomain;
+  const work = admission.pass.program.work;
+  const key = joinParts(place, text);
+  let state = domain.nextSteps.get(key);
+  if (state === undefined) {
+    keepText(admission.work, key.length);
+    keep(admission.work, 1);
+    domain.nextSteps.set(key, (state = { scans: 0, size: -1, next: null, any: [] }));
+  }
+  if (state.next === null) {
+    state.scans += 1;
+    if (state.scans === 1) return bucket;
+    if (state.size < 0) {
+      const { seeds } = inheritance(admission);
+      let size = bucket.length;
+      for (const position of bucket) {
+        work.charge("indexSteps");
+        size += seeds.get(list[position]!.from)?.size ?? 0;
+      }
+      state.size = size;
+    }
+    if (state.scans * bucket.length < state.size) return bucket;
+    const next = new Map<string, number[]>();
+    const any: number[] = [];
+    for (const position of bucket) {
+      work.charge("indexSteps");
+      const copy = list[position]!;
+      const steps = sourceSteps(admission, copy.from, copy.strip);
+      keep(admission.work, steps === null ? 1 : steps.size);
+      if (steps === null) any.push(position);
+      else
+        for (const at of steps) {
+          const along = next.get(at);
+          if (along === undefined) next.set(at, [position]);
+          else along.push(position);
+        }
+    }
+    keep(admission.work, next.size);
+    state.next = next;
+    state.any = any;
+  }
+  const along = state.next.get(step) ?? [];
+  const any = state.any;
+  if (any.length === 0) return along;
+  if (along.length === 0) return any;
+  // (both in the copies' order: merged, each position charged where `copiesAlong` takes it)
+  keep(admission.work, along.length + any.length);
+  const out: number[] = [];
+  for (let i = 0, j = 0; i < along.length || j < any.length;)
+    out.push(
+      j >= any.length || (i < along.length && along[i]! < any[j]!) ? along[i++]! : any[j++]!,
+    );
+  return out;
+}
+
+/**
+ * #1948: the first steps past `strip` of a source's landings, where they are proved to be its seeds alone: a place in
+ * no cycle of copies, no copy landing in it, and answering through no other (`passThrough`), so `landedOwn` answers a
+ * path in it by its seeds alone; `null` for any other place, each copy of which is taken. Once per source and strip.
+ */
+function sourceSteps(
+  admission: Admission,
+  source: PlaceId,
+  strip: readonly string[],
+): ReadonlySet<string> | null {
+  const domain = admission.pass.receivingDomain;
+  const prefix = keptText(admission.work, strip);
+  const key = joinParts(source, prefix);
+  const known = domain.sourceSteps.get(key);
+  if (known !== undefined) return known;
+  keepText(admission.work, key.length);
+  const { seeds, owned, cycleOf, fed, wholes } = inheritance(admission);
+  const work = admission.pass.program.work;
+  work.charge("indexSteps");
+  let found: Set<string> | null = null;
+  if (
+    !cycleOf.has(source) &&
+    !fed.has(source) &&
+    !wholes.has(source) &&
+    copiesOf(admission, source).length === 0 &&
+    (owned.get(source)?.size ?? 0) === 0 &&
+    !copyForest(admission).parent.has(source)
+  ) {
+    found = new Set();
+    for (const text of seeds.get(source)?.keys() ?? []) {
+      work.charge("indexSteps");
+      // (a seed strictly below the strip: its step past it)
+      if (strip.length === 0 ? text === "" : !text.startsWith(`${prefix}.`)) continue;
+      found.add(
+        keptSplit(admission.work, strip.length === 0 ? text : text.slice(prefix.length + 1))[0]!,
+      );
+    }
+  }
+  domain.sourceSteps.set(key, found);
+  return found;
 }
 
 /** A member of a cycle of copies' landed paths by path (`Inheritance.cycles`, `landedBelow`), once per landing. */
