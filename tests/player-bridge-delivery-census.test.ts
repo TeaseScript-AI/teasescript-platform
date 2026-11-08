@@ -113,7 +113,14 @@ type AllOwned<T> = {
 }[keyof T];
 type ContextFields = Omit<
   PlayerOpsContext,
-  "delivery" | "recorder" | "trace" | "traceId" | "traceIntent" | "transferCount" | "random" | "exportObservation"
+  | "delivery"
+  | "recorder"
+  | "trace"
+  | "traceId"
+  | "traceIntent"
+  | "transferCount"
+  | "random"
+  | "exportObservation"
 >;
 const ALL_OWNED: [Exclude<AllOwned<ContextFields>, true>] extends [never] ? true : false = true;
 // Its negative controls: a raw map, at the top or nested, and a scalar field are found.
