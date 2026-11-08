@@ -4186,6 +4186,136 @@ test("a publication run's unit limit grants its oracle's units per cell its ques
 });
 
 /**
+ * A built tree's library whose publication answers every source alike, without the grant's exports where `bare`. Where
+ * `heavy`, its publication of `heavy` in the source-order sharing-on mode holds 82 % of its process's heap limit while
+ * it charges 70,000 units (past one sampling step), then lets go of it and collects, so its later runs start low.
+ */
+const peakLibrary = (
+  heavy: boolean,
+  bare: boolean,
+): string => `import { getHeapStatistics } from "node:v8";
+import { WorkLedger } from "../../src/type-inference/core/budget.js";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+${bare ? "" : "export const QUESTION_UNITS_PER_CELL = 64;\nexport const questionWork = () => ({ units: 0, cells: 0 });"}
+export function publicationHashes(files, mode) {
+  const ledger = new WorkLedger(1000000);
+  if (${heavy} && files[0].source === "heavy" && !mode.reversed && !mode.unshared) {
+    const limit = getHeapStatistics().heap_size_limit;
+    let held = [];
+    while (getHeapStatistics().used_heap_size < 0.82 * limit) held.push(new Array(1 << 14).fill(1.5));
+    ledger.charge("frames", 70000);
+    held = null;
+    globalThis.gc();
+  } else ledger.charge("frames", 300);
+  return { parts: [files[0].source], unanswered: 0 };
+}
+`;
+
+test("a run's peak heap is near the cap past 80 % of V8's heap limit, a synthetic peak either side of it", async () => {
+  const { isNearCap, NEAR_CAP } = await import(pathToFileURL(contract).href);
+  assert.equal(NEAR_CAP, 0.8);
+  // (2,144 MiB, the limit V8 gives a 2,048 MB process: 80 % is 1,715.2)
+  assert.equal(isNearCap(1715, 2144), false);
+  assert.equal(isNearCap(1716, 2144), true);
+  // (never where either is unknown: a failed heap probe, a run with no peak)
+  assert.equal(isNearCap(1716, undefined), false);
+  assert.equal(isNearCap(null, 2144), false);
+});
+
+test("the runner records each run's peak heap, counts and names a source near the cap on its tree without making it a stall or changing the exit status, and names what each tree's build lacks (the checks proposal's items 25 and 26)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const built = (name: string, heavy: boolean, bare: boolean) => {
+      const tree = join(directory, name);
+      mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
+      mkdirSync(join(tree, "dist", "src", "type-inference", "core"), { recursive: true });
+      writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(join(tree, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
+      writeFileSync(
+        join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
+        peakLibrary(heavy, bare),
+      );
+      return tree;
+    };
+    const base = built("base", false, true);
+    const head = built("head", true, false);
+    const folder = join(directory, "area");
+    mkdirSync(folder);
+    writeFileSync(
+      join(folder, "g.mjs"),
+      'export const cases = [["light", "light"], ["heavy", "heavy"]];\n',
+    );
+    const out = join(directory, "out.jsonl");
+    const work = join(directory, "work.jsonl");
+    const ran = spawnSync(
+      process.execPath,
+      [runner, folder, base, head, "--memory", "512", "--out", out, "--work", work],
+      { encoding: "utf8" },
+    );
+    // (near the cap is advisory: nothing differs, so the exit status is 0)
+    assert.equal(ran.status, 0, ran.stderr);
+    const [row, total] = ran.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(row.nearCap, { base: 0, head: 1 });
+    assert.deepEqual(total.nearCap, { base: 0, head: 1 });
+    assert.equal(total.stalled, 0);
+    const limit = total.heapLimit;
+    assert.ok(Number.isInteger(limit) && limit > 512, String(limit));
+    assert.deepEqual(total.capabilities, {
+      base: ["QUESTION_UNITS_PER_CELL", "questionWork"],
+      head: [],
+    });
+    // (`--out` names the heavy source's one run near the cap, the head's, with its peak and the limit)
+    const named = readFileSync(out, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(named.length, 1);
+    assert.equal(named[0].source, "heavy");
+    assert.equal(named[0].heapLimit, limit);
+    assert.deepEqual(
+      named[0].nearCap.map(
+        ({ mode, check, tree }: { mode: string; check: string; tree: string }) => [
+          mode,
+          check,
+          tree,
+        ],
+      ),
+      [["src-on", "publication", "head"]],
+    );
+    assert.ok(named[0].nearCap[0].peak > 0.8 * limit, JSON.stringify(named[0]));
+    // (the work record: the limit and the lacks first; each run's peak on each tree, the light ones far under it)
+    const lines = readFileSync(work, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(lines[0].work.heapLimit, limit);
+    assert.deepEqual(lines[0].work.capabilities, total.capabilities);
+    const [light, heavy] = lines.slice(1, -1);
+    assert.equal(light.nearCap, undefined);
+    for (const run of light.runs)
+      for (const peak of run.peak) assert.ok(peak < 0.8 * limit, String(peak));
+    assert.equal(heavy.runs.length, 4);
+    assert.ok(heavy.runs[0].peak[1] > 0.8 * limit && heavy.runs[0].peak[0] < 0.8 * limit);
+    assert.deepEqual(heavy.nearCap.length, 1);
+    assert.deepEqual(lines.at(-1).total, total);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("the built tree's oracle library and work ledger give the families runner all it reads (capabilitiesOf, the checks proposal's item 26)", async () => {
+  const { capabilitiesOf } = await import(pathToFileURL(contract).href);
+  const oracle = await import("./helpers/type-core-oracles.js");
+  const { WorkLedger } = await import("../src/type-inference/core/budget.js");
+  assert.deepEqual(capabilitiesOf({ oracle, ledger: WorkLedger }), []);
+});
+
+/**
  * A built tree's library whose publication of `aborts`, `head-slow` and `head-dies` ends the process as V8's heap abort
  * does, in the sharing-off source-order mode, where `aborting`; else answers them, `aborts` leaving 2 nodes unanswered
  * (`memory`) in the reversed modes, `head-slow` waiting 6 s and `head-dies` aborting in the sharing-on reversed mode.
