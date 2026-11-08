@@ -119,6 +119,31 @@ const ALLOWED = {
     cwd: [exactly(0), "reads the working folder"],
   },
   processes: {
+    "the heap probe": [
+      (call, { importedFrom }) => {
+        const [command, args, options] = call.arguments;
+        const elements =
+          args !== undefined && ts.isArrayLiteralExpression(args) ? args.elements : [];
+        const script =
+          "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)";
+        const heap = elements.length === 3 ? [elements[0]] : [];
+        return (
+          importedFrom(call.expression) !== undefined &&
+          command !== undefined &&
+          command.getText() === "process.execPath" &&
+          (elements.length === 2 || elements.length === 3) &&
+          heap.every((element) => /^`--max-old-space-size=\$\{\w+\}`$/.test(element.getText())) &&
+          literal(elements.at(-2)) === "-p" &&
+          literal(elements.at(-1)) === script &&
+          onlyOptions(
+            options,
+            (key, value) =>
+              key === "encoding" || (key === "env" && value.getText() === "withoutOptions"),
+          )
+        );
+      },
+      "a Node process that prints V8's heap limit and ends (the runner's `heapLimitWith`, #1956), in this process's environment or that without `NODE_OPTIONS`: it writes nothing",
+    ],
     "the gate's lock holder": [
       (call, { importedFrom }) => {
         const [command, args, options] = call.arguments;
@@ -157,13 +182,15 @@ const ALLOWED = {
               ["serialization", "stdio"].includes(key) ||
               (key === "execArgv" &&
                 ts.isArrayLiteralExpression(value) &&
-                value.elements.every((element) =>
-                  /^`--max-old-space-size=\$\{\w+\}`$/.test(element.getText()),
+                value.elements.every(
+                  (element) =>
+                    /^`--max-old-space-size=\$\{\w+\}`$/.test(element.getText()) ||
+                    literal(element) === "--expose-gc",
                 )),
           )
         );
       },
-      "the runner's own module (`--child`), whose writes are this module's and so listed, with a heap limit as its only `execArgv`",
+      "the runner's own module (`--child`), whose writes are this module's and so listed, with a heap limit and `--expose-gc` (which lets it collect, writing nothing, #1837) as its only `execArgv`",
     ],
   },
   loads: {

@@ -19,13 +19,13 @@ import {
   spanRef,
 } from "../contract/key-ids.js";
 import { keyLane } from "../contract/lanes.js";
-import { landed, landedKey, passThrough, passThroughKey } from "./landings.js";
-import type { Frontier, Inheriting, Stop, Stops, Waiting } from "./model.js";
-import { permittedAt, unrestricted } from "./permitted.js";
-import { inputsAt, inputsOf, scanAt } from "./scan.js";
+import { landed, landedKey, passThrough, passThroughKey } from "../admission/landings.js";
+import type { Frontier, Inheriting, Stop, Stops, Waiting } from "../admission/model.js";
+import { permittedAt, unrestricted } from "../admission/permitted.js";
+import { inputsAt, inputsOf, scanAt } from "../admission/scan.js";
 import { cycleOf, inheritedInto, join } from "./waiting.js";
-import { copySources, stopsOf } from "./walk.js";
-import { wholeOf } from "./eligibility.js";
+import { copySources, stopsOf } from "../admission/walk.js";
+import { wholeOf } from "../admission/eligibility.js";
 import { positions } from "../positions.js";
 
 // A4 through copies: the written type an unwritten place's decision inherits, from the graph of copies.
@@ -202,17 +202,50 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
     let closed = "";
     // (the type the top scan waited on, given to it as it goes on)
     let given: TypeTerm | null = null;
-    // the top scan's type is taken, the scan below it goes on, or is taken again where its cycle grew meanwhile
+    // (#1931: the finished scans of a cycle still waiting below them, in the order they finished, kept only once the
+    // cycle closes: a scan that reads one waits on the cycle, as on a waiting scan, whichever key was asked first)
+    const deferred: { readonly key: CanonicalKey; readonly term: TypeTerm | null }[] = [];
+    const deferredKeys = new Set<CanonicalKey>();
+    // the top scan's type is taken (deferred while its cycle waits below it), the scan below it goes on, or is taken
+    // again where its cycle grew meanwhile
     const resolved = (term: TypeTerm | null, own = false): void => {
       const done = pending.pop()!;
       keepText(admission.work, done.key.length);
-      admission.inherited.set(done.key, term);
+      // (#1901's record is the finished scan's at once: a pass-through scan below reads it with the type it is given)
       admission.inheritedOwn.set(done.key, term !== null && own);
       waiting.delete(done.key);
       const below = pending.at(-1);
+      // (a cycle's waiting scans are one run of the stack, as `join` makes it, so it waits on exactly where the scan
+      // below is in it; its deferred scans finished last, so each is kept once, from the end)
+      const cycle = cycleOf(admission, done.key);
+      if (cycle !== "" && below !== undefined && cycleOf(admission, below.key) === cycle) {
+        deferred.push({ key: done.key, term });
+        deferredKeys.add(done.key);
+      } else {
+        admission.inherited.set(done.key, term);
+        while (
+          cycle !== "" &&
+          deferred.length > 0 &&
+          cycleOf(admission, deferred.at(-1)!.key) === cycle
+        ) {
+          const kept = deferred.pop()!;
+          deferredKeys.delete(kept.key);
+          admission.inherited.set(kept.key, kept.term);
+        }
+      }
       if (below !== undefined && below.cycle !== cycleOf(admission, below.key))
         pending[pending.length - 1] = scan(below.key);
       given = term;
+    };
+    // (the position of the lowest waiting scan in a deferred key's cycle: the stack walked down its run)
+    const lowest = (member: CanonicalKey): number => {
+      const cycle = cycleOf(admission, member);
+      let at = pending.length - 1;
+      for (; at >= 0 && cycleOf(admission, pending[at]!.key) !== cycle; at -= 1)
+        admission.pass.program.work.charge("checks");
+      for (; at > 0 && cycleOf(admission, pending[at - 1]!.key) === cycle; at -= 1)
+        admission.pass.program.work.charge("checks");
+      return at;
     };
     while (pending.length > 0) {
       const top = pending.at(-1)!;
@@ -228,7 +261,7 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
         continue;
       }
       const needed = step.value;
-      const from = waiting.get(needed);
+      const from = waiting.get(needed) ?? (deferredKeys.has(needed) ? lowest(needed) : undefined);
       if (from !== undefined) {
         const cycle = joinParts(top.key, needed);
         // (a scan that asks again across the cycle just closed inherits nothing: it never waits on itself twice)
@@ -247,6 +280,9 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
       waiting.set(needed, pending.length);
       pending.push(scan(needed));
     }
+    // (the asked key is the stack's bottom, so its cycle, the last one open, closed as it was taken)
+    if (deferred.length > 0)
+      throw new Error(`The inherited type of '${deferred[0]!.key}' was never kept.`);
   } finally {
     admission.resolving = false;
   }

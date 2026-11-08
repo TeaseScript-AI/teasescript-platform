@@ -162,7 +162,7 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/admission/inherited.ts",
+    "file": "src/type-inference/core/inherited/inherited.ts",
     "kind": "docblock",
     "text": "Whether a written type a copy decides at a prefix of a path leaves the path unrestricted (A4 through copies, the",
     "waits": "the O4 lead's cleanup"
@@ -306,7 +306,7 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/receiving-domain.ts",
+    "file": "src/type-inference/core/inherited/receiving-domain.ts",
     "kind": "reference",
     "text": "#retakenOf",
     "waits": "the O4 lead's cleanup"
@@ -394,18 +394,6 @@
     "kind": "docblock",
     "text": "A source's typed loads and parses as its plan reads them (`load` and `expected` lines, `plannedContent`), or how the",
     "waits": "#1937"
-  },
-  {
-    "file": "player/engine-bridge/ops/session.ts",
-    "kind": "docblock",
-    "text": "L5b's ops: Start, Continue, time (observe, step, catch-up) and pacing skip, and the recording's start. Each wraps",
-    "waits": "#1999 (lane 3, L5i.6), which changes this file"
-  },
-  {
-    "file": "player/vue/src/usePlayerSession.ts",
-    "kind": "reference",
-    "text": "adoptInspected",
-    "waits": "#1999 (lane 3, L5i.6), which changes this file"
   },
   {
     "file": "tools/runtime-oracle/materialize.mjs",

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { getHeapStatistics } from "node:v8";
 
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import { keyIdPath } from "../../src/type-inference/core/contract/key-ids.js";
@@ -161,20 +162,38 @@ function compareSites(a: readonly number[], b: readonly number[]): number {
  * One analysis's part: its answers (the outcome and diagnostics with the checks that owe the runtime nothing,
  * `checkedResult`, and the checks) and every binding's admitted types at its root and its element (`text`); the record
  * alone, its answers and the same serialized (`record`); and whether each of its lists is in source order of its sites
- * (r4.86 (1)).
+ * (r4.86 (1)). The admitted types are the oracle's own questions (`Questions`, two cells a binding; `questions`, a
+ * publication's meter, else one of their own): where they stop, it throws `AnswersStopped`, never publishing answers
+ * asked again on a stopped analysis. The answers and the checks are the backend's questions, which stop past the
+ * finished analysis's allowance as the backend's do (`asked`).
  */
 export function publishedAnswers(
   answers: Answers,
   bindings: readonly PlaceId[],
   request: CoreAnalysisRequest,
+  questions = new Questions(),
 ): { readonly text: string; readonly record: string; readonly sited: boolean } {
-  // (every question past the finished analysis's allowance stops there, as the backend's do: `asked`)
   return asked(answers, (answers) => {
-    const admitted = bindings.map((place) => [
-      place,
-      answers.place(place, []).admitted,
-      answers.place(place, ["element"]).admitted,
-    ]);
+    const admitted: unknown[] = [];
+    for (const [index, place] of bindings.entries())
+      try {
+        admitted.push(
+          questions.ask(
+            answers,
+            () => [
+              place,
+              answers.place(place, []).admitted,
+              answers.place(place, ["element"]).admitted,
+            ],
+            () => 2,
+          ),
+        );
+      } catch (error) {
+        throw new AnswersStopped(
+          { reason: stopOf(answers, error), binding: place },
+          bindings.length - index,
+        );
+      }
     // (with the checks that owe the runtime nothing, as the compiler reads them)
     const checked = checkedResult(answers, request);
     const paths = request.files.map((file) => file.path);
@@ -208,6 +227,17 @@ export function publishedAnswers(
       sited,
     };
   });
+}
+
+/** `publishedAnswers`' own questions stopped (`by`), with `left` bindings unanswered. */
+class AnswersStopped extends Error {
+  public constructor(
+    public readonly by: UnansweredBy,
+    public readonly left: number,
+  ) {
+    super(`The published answers' questions stopped (${by.reason}).`);
+    this.name = "AnswersStopped";
+  }
 }
 
 /** An item with all its marks, writer, context and ingress leaves. */
@@ -265,25 +295,198 @@ function* occurrenceAnswers(
 }
 
 /**
- * Why a publication's oracle left nodes unanswered (`answeredOccurrences`), and the first node it left: the families
+ * Why a publication's oracle left questions unanswered (`answeredOccurrences`, `publishedAnswers`), and the first
+ * node it left, or the binding where its answers' own questions stopped (then every node is left too): the families
  * runner counts each reason apart (`tests/families/README.md`); a reason a tree's oracle does not give is `unknown` there.
  */
-export interface UnansweredBy {
-  readonly reason: "questions" | "stopped";
-  readonly node: number;
+export type UnansweredBy =
+  | { readonly reason: QuestionStop; readonly node: number }
+  | { readonly reason: QuestionStop; readonly binding: PlaceId };
+
+/**
+ * Why the oracle's own questions stopped: `questions` past their bound (`Questions`) or the analysis's work, `memory`
+ * past their room in the heap, `read-depth` past the read-depth limit, after an analysis that finished each way;
+ * `stopped` where the analysis itself stopped in one of its phases (`budget.stoppedIn`, not `questions`).
+ */
+type QuestionStop = "questions" | "memory" | "read-depth" | "stopped";
+
+/**
+ * #1837: K, the units the oracle's own questions may spend per cell they return (an occurrence's answer, its element's
+ * and each property's) beyond the program's allowance. About 1.3× the largest measured (49.83, `r3-root-copies` at
+ * k = 512), whose per-cell cost still rises by a log factor (#1941).
+ *
+ * @public (the families runner reads it from a built tree, not by an import: its grant to a publication run)
+ */
+export const QUESTION_UNITS_PER_CELL = 64;
+
+/**
+ * #1837: the heap the core keeps per cell the oracle's questions return (its memo of the answers), as the oracle counts
+ * it: about 1.4× the largest measured live heap per answered cell (453.7 bytes, `W24-varied` at k = 1,024; flat over k
+ * 256 → 1,024 on the three families measured, so linear in the output, as the units are).
+ */
+export const QUESTION_BYTES_PER_CELL = 640;
+
+/**
+ * The heap the oracle's questions leave to the analysis, the route and what V8 has yet to collect: 1.5 GiB. The
+ * analysis finishes before any question is asked, so the oracle cannot cap its heap; with sharing off it grows about
+ * ×3.6 a doubling (#1603), to 1,089 MiB at `W19-sources` k = 1,024, and V8 needs room beyond it to collect.
+ */
+const QUESTION_HEAP_RESERVE = 1_536 * 2 ** 20;
+
+/** Beside the questions, what V8 needs to collect where a run starts with more live than the reserve: 512 MiB. */
+const QUESTION_HEAP_HEADROOM = 512 * 2 ** 20;
+
+/**
+ * The questions' room in the heap, taken when a publication's meter is made, before its analysis (`Questions`): this
+ * process's V8 heap limit (fixed by its `--max-old-space-size`, as the families runner sets it) less the reserve, so
+ * that a stop lands at the same cell on every run. Only where the heap in use then passes the reserve and the process
+ * can collect (`--expose-gc`, as the runner's child has it) is the live heap after a collection taken: where that too
+ * passes the reserve, what ran before the publication still holds it, and the room is what is left beside it, less the
+ * headroom, so that the run ends as `memory` instead of in V8's abort. Or a test's (`withQuestionMemory`).
+ */
+let questionRoom: number | null = null;
+function heapRoom(): number {
+  if (questionRoom !== null) return questionRoom;
+  const { heap_size_limit: limit, used_heap_size: used } = getHeapStatistics();
+  // EVIDENCE: `globalThis.gc` exists only under `--expose-gc`, so its type is unknown here and is checked below.
+  const collect = (globalThis as { readonly gc?: unknown }).gc;
+  if (used <= QUESTION_HEAP_RESERVE || typeof collect !== "function")
+    return limit - QUESTION_HEAP_RESERVE;
+  collect();
+  const live = getHeapStatistics().used_heap_size;
+  return live <= QUESTION_HEAP_RESERVE
+    ? limit - QUESTION_HEAP_RESERVE
+    : limit - live - QUESTION_HEAP_HEADROOM;
 }
 
 /**
+ * Releases what V8 keeps of the last exception thrown: until its stack is formatted, an error holds its frames and their
+ * receivers, so one thrown and caught inside an analysis keeps the whole analysis reachable after it returns (1.1 GB
+ * at `W19-sources` k = 1,024 with sharing off), until another exception replaces it (#1837).
+ */
+function releaseLastException(): void {
+  try {
+    throw new Error("released");
+  } catch {
+    // (only the throw matters: it replaces V8's record of the last exception)
+  }
+}
+
+/** Test-only: `run` with the oracle's questions given `room` bytes of heap. */
+export function withQuestionMemory<T>(room: number, run: () => T): T {
+  const outer = questionRoom;
+  questionRoom = room;
+  try {
+    return run();
+  } finally {
+    questionRoom = outer;
+  }
+}
+
+/** The oracle's own questions' bound: the program's allowance (`null`) or a test's, and K (`withQuestionBound`). */
+let questionBound: { readonly allowance: number | null; readonly perCell: number } = {
+  allowance: null,
+  perCell: QUESTION_UNITS_PER_CELL,
+};
+
+/** Test-only: `run` with the oracle's questions bounded by `allowance` plus `perCell` per cell returned. */
+export function withQuestionBound<T>(allowance: number | null, perCell: number, run: () => T): T {
+  const outer = questionBound;
+  questionBound = { allowance, perCell };
+  try {
+    return run();
+  } finally {
+    questionBound = outer;
+  }
+}
+
+/** What the latest publication's questions spent and returned so far (`questionWork`). */
+let questionsSoFar = { units: 0, cells: 0 };
+
+/**
+ * The units the latest publication's own questions spent apart and the cells they returned, so far: the families
+ * runner grants a publication run `QUESTION_UNITS_PER_CELL` per cell reported here beyond its limit (#1837).
+ *
+ * @public (the families runner reads it from a built tree, not by an import)
+ */
+export function questionWork(): { readonly units: number; readonly cells: number } {
+  return questionsSoFar;
+}
+
+/** The oracle's own questions stopped (`Questions`), and why. */
+class QuestionsStopped extends Error {
+  public constructor(public readonly reason: "questions" | "memory" | "read-depth") {
+    super(`The oracle's questions stopped (${reason}).`);
+    this.name = "QuestionsStopped";
+  }
+}
+
+/**
+ * #1837: the oracle's own questions to a finished analysis, each run apart (`Answers.apart`: finishing work, which never
+ * stops the analysis nor counts to its allowance) and metered on their own. They stop (`QuestionsStopped`) at the
+ * question after which the units they spent pass the bound: the program's allowance plus K per cell returned so far
+ * (`withQuestionBound`); or where `QUESTION_BYTES_PER_CELL` per cell returned passes their room in the heap
+ * (`memory`), so that they end before V8 runs out of it. Checked between questions, so no question is cut midway; the
+ * families runner's limit bounds one question's own cost. A question that passes the read-depth limit or the analysis's work (a decision's restart)
+ * stops them there too. Each publication's questions are one meter (`questionWork`).
+ */
+class Questions {
+  #units = 0;
+  #cells = 0;
+  /** The questions' room in the heap, taken before the analysis (`heapRoom`). */
+  readonly #room = heapRoom();
+
+  public constructor() {
+    questionsSoFar = { units: 0, cells: 0 };
+  }
+
+  /** `question`'s answer, asked apart, with its cells (`cells`) counted: `QuestionsStopped` past the bound. */
+  public ask<T>(answers: Answers, question: () => T, cells: (answer: T) => number): T {
+    // (the budget's record is brought up to date by each `apart`: what came between two questions is not theirs)
+    answers.apart(() => undefined);
+    const before = answers.budget.finishing;
+    let answer: T;
+    try {
+      answer = answers.apart(question);
+    } catch (error) {
+      if (!(error instanceof BudgetExhausted)) throw error;
+      throw new QuestionsStopped(error.limit === "read-depth" ? "read-depth" : "questions");
+    }
+    this.#units += answers.budget.finishing - before;
+    this.#cells += cells(answer);
+    questionsSoFar = { units: this.#units, cells: this.#cells };
+    const allowance = questionBound.allowance ?? answers.budget.allowance;
+    if (this.#units > allowance + questionBound.perCell * this.#cells)
+      throw new QuestionsStopped("questions");
+    if (QUESTION_BYTES_PER_CELL * this.#cells > this.#room) throw new QuestionsStopped("memory");
+    return answer;
+  }
+}
+
+/** Why the oracle's questions to `answers` stopped at `error` (`QuestionStop`); any other error is thrown again. */
+function stopOf(answers: Answers, error: unknown): QuestionStop {
+  if (!(error instanceof QuestionsStopped)) throw error;
+  // (stopped only where the analysis itself stopped in a phase of its own; one that finished, a limit such as
+  // nesting reached or not, has no such phase, and its later questions are the oracle's)
+  const phase = answers.budget.stoppedIn;
+  return phase === null || phase === "questions" ? error.reason : "stopped";
+}
+
+/** An occurrence answer's cells: its own, its element's and each property's (`occurrenceAnswer`). */
+const cellsOf = (answer: unknown[] | null): number =>
+  answer === null
+    ? 0
+    : 1 + (answer[5] === null ? 0 : 1) + (Array.isArray(answer[6]) ? answer[6].length : 0);
+
+/**
  * Every occurrence's answer (`occurrenceAnswer`, its items in their order), each mapped by `each` as it is made, up to
- * the node whose questions pass the analysis's allowance after it finished: the oracle's own stop (#1499 charges its
- * property-name walk), not the analysis's. That node and every one after it stay unanswered (`unanswered`, their
- * count), never asked again on the stopped answers, whose `unknown` answers would agree wherever both trees stop alike.
- * Why (`unansweredBy`): `questions` where the analysis had finished and its later questions exhausted the allowance,
- * `stopped` where the analysis itself stopped in one of its phases (`budget.stoppedIn`, not `questions`), each with the
- * first node unanswered.
+ * the node at which the oracle's own questions stop (`Questions`), not the analysis. That node and every one after it
+ * stay unanswered (`unanswered`, their count), never asked again on the stopped answers, whose `unknown` answers would
+ * agree wherever both trees stop alike; why (`unansweredBy`, `QuestionStop`), with the first node unanswered.
  */
 function answeredOccurrences<Occurrence>(
   answers: Answers,
+  questions: Questions,
   each: (text: string) => Occurrence,
 ): {
   readonly occurrences: readonly Occurrence[];
@@ -296,17 +499,12 @@ function answeredOccurrences<Occurrence>(
   for (const [index, node] of nodes.entries()) {
     let answer: unknown[] | null;
     try {
-      answer = occurrenceAnswer(answers, node, items);
+      answer = questions.ask(answers, () => occurrenceAnswer(answers, node, items), cellsOf);
     } catch (error) {
-      if (!(error instanceof BudgetExhausted)) throw error;
-      // (stopped only where the analysis itself stopped in a phase of its own; one that finished, a limit such as
-      // nesting reached or not, has no such phase, and its later questions are the oracle's)
-      const phase = answers.budget.stoppedIn;
-      const reason = phase === null || phase === "questions" ? "questions" : "stopped";
       return {
         occurrences,
         unanswered: nodes.length - index,
-        unansweredBy: { reason, node: node.id },
+        unansweredBy: { reason: stopOf(answers, error), node: node.id },
       };
     }
     if (answer !== null) occurrences.push(each(JSON.stringify(answer)));
@@ -321,9 +519,12 @@ export function occurrences(answers: Answers, order: (items: string[]) => string
 
 /**
  * What a program publishes with two orders set aside (TABLE r4.185, G5's stops whose own entries merge into one): the
- * order of the items in an answer and of the kinds in a decided admitted type. Every binding's admitted type and decider
- * site at its root, its element and each known property two levels down; every occurrence's answer (`occurrences`, its
- * items sorted). Its questions spend the analysis's allowance and stop there (`asked`).
+ * order of the items in an answer and of the kinds in a decided admitted type. Every binding's admitted type and
+ * decider site at its root, its element and each known property two levels down; every occurrence's answer
+ * (`occurrences`, its items sorted). Test-only, for small sources (`type-core-oracles.test.ts`,
+ * `type-core-contract.test.ts`), never a publication the families runner reads; their questions are not under the
+ * oracle's own bound (`Questions`): past the finished analysis's allowance they are asked again on the stopped analysis
+ * (`asked`), so the text holds the stopped answers with no mark of the stop.
  */
 export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[]): string {
   return asked(answers, (answers) => upToOrder(answers, bindings));
@@ -357,8 +558,9 @@ function upToOrder(answers: Answers, bindings: readonly PlaceId[]): string {
 /**
  * #1610's identity, the order of property names being author-facing (an absent property's message lists them as the
  * search finds them, `toJson` walks them so): each binding's property names two levels down in that order, the bindings
- * in the order given, and every diagnostic's message. Its questions spend the analysis's allowance and stop there
- * (`asked`).
+ * in the order given, and every diagnostic's message. For small sources: their questions are not under the oracle's own
+ * bound (`Questions`): past the finished analysis's allowance they are asked again on the stopped analysis (`asked`),
+ * so the text holds the stopped answers with no mark of the stop.
  */
 export function orderedNames(
   answers: Answers,
@@ -386,8 +588,9 @@ export function orderedNames(
 
 /**
  * A program's outcome, diagnostics and checks, and every expression occurrence's answer (its offset, route, place,
- * obligations and items whole, each with its ingress leaves), in their order. Its questions spend the analysis's
- * allowance and stop there (`asked`).
+ * obligations and items whole, each with its ingress leaves), in their order. For small sources: their questions are
+ * not under the oracle's own bound (`Questions`): past the finished analysis's allowance they are asked again on the
+ * stopped analysis (`asked`), so the text holds the stopped answers with no mark of the stop.
  */
 export function everyAnswer(answers: Answers): string {
   return asked(answers, allAnswers);
@@ -409,8 +612,9 @@ function allAnswers(answers: Answers): string {
 
 /**
  * Every occurrence's items with their writers and their ingress leaves sorted (#1196: each ingress names its own leaf,
- * whatever order the leaves are found in), one line per node. Its questions spend the analysis's allowance and stop
- * there (`asked`).
+ * whatever order the leaves are found in), one line per node. For small sources: their questions are not under the
+ * oracle's own bound (`Questions`): past the finished analysis's allowance they are asked again on the stopped analysis
+ * (`asked`), so the text holds the stopped answers with no mark of the stop.
  */
 export function ingressAnswers(answers: Answers): string {
   return asked(answers, ingressLines);
@@ -591,7 +795,7 @@ export function publishedRoute(
 
 /** A publication's parts (`publicationParts`), each the JSON text of its element of the whole, in the whole's order. */
 export interface PublicationParts {
-  /** `publishedAnswers`'s text and record. */
+  /** `publishedAnswers`'s text and record; `null`'s text where its own questions stopped. */
   readonly answers: string;
   readonly record: string;
   /** Every occurrence's answer, one part each, in their order, up to the oracle's own stop (`unanswered`). */
@@ -599,19 +803,20 @@ export interface PublicationParts {
   /** The candidate route's plan or rejection. */
   readonly route: string;
   /**
-   * The nodes the oracle's own questions left unanswered (`answeredOccurrences`), apart from the parts: 0 when it
-   * answered all. How the families runner compares a publication with any: `tests/families/README.md`.
+   * What the oracle's own questions left unanswered (`Questions`), apart from the parts: the nodes from the first left,
+   * after the bindings left where the answers' questions stopped; 0 when it answered all. How the families runner
+   * compares a publication with any: `tests/families/README.md`.
    */
   readonly unanswered: number;
-  /** Why, where `unanswered` is not 0 (`answeredOccurrences`). */
+  /** Why, where `unanswered` is not 0 (`answeredOccurrences`, `publishedAnswers`). */
   readonly unansweredBy?: UnansweredBy;
 }
 
 /**
  * A publication's elements as JSON texts, each occurrence's text mapped by `each` as it is made, so that a caller who
- * keeps less than the text never holds them all. The answers' questions to the finished analysis spend its allowance and
- * stop there (`asked`), as the backend's do; the occurrences' questions end at the oracle's own stop
- * (`answeredOccurrences`). `null` when the files do not parse or resolve.
+ * keeps less than the text never holds them all. The backend's questions to the finished analysis spend its allowance
+ * and stop there (`asked`), as the backend's do; the oracle's own, the admitted types' and the occurrences', run apart
+ * and end at their own stop (`Questions`). `null` when the files do not parse or resolve.
  */
 function publishedElements<Occurrence>(
   files: readonly SourceFile[],
@@ -632,19 +837,57 @@ function publishedElements<Occurrence>(
     .filter(({ kind }) => kind.kind === "binding")
     .map((place) => place.id);
   return inMode(mode, () => {
-    const answers = analyseCore(request);
-    const published = publishedAnswers(answers, bindings, request);
-    const route = publishedRoute(files, globals);
-    const { occurrences, unanswered, unansweredBy } = answeredOccurrences(answers, each);
-    return {
-      answers: JSON.stringify(published.text),
-      record: JSON.stringify(published.record),
-      occurrences,
-      route: JSON.stringify(route.text),
-      unanswered,
-      ...(unansweredBy === undefined ? {} : { unansweredBy }),
-    };
+    // (the analysis's parts first, its answers dropped when they end; then the route's compile, so that the two
+    // analyses' heaps are never held at once: with sharing off each can take a gigabyte, #1603)
+    const analysed = analysedElements(request, bindings, each);
+    releaseLastException();
+    const route = JSON.stringify(publishedRoute(files, globals).text);
+    // (and the route's own analysis, held the same way after its compile returns)
+    releaseLastException();
+    return { ...analysed, route };
   });
+}
+
+/**
+ * `publishedElements`' parts of the analysis of `request`: its answers and record (`publishedAnswers`) and every
+ * occurrence's answer up to the oracle's own stop, its answers held only while they are asked.
+ */
+function analysedElements<Occurrence>(
+  request: CoreAnalysisRequest,
+  bindings: readonly PlaceId[],
+  each: (text: string) => Occurrence,
+): {
+  readonly answers: string;
+  readonly record: string;
+  readonly occurrences: readonly Occurrence[];
+  readonly unanswered: number;
+  readonly unansweredBy?: UnansweredBy;
+} {
+  // (one meter for the publication's own questions, reported from before its analysis: `questionWork`)
+  const questions = new Questions();
+  const answers = analyseCore(request);
+  let published: ReturnType<typeof publishedAnswers>;
+  try {
+    published = publishedAnswers(answers, bindings, request, questions);
+  } catch (error) {
+    if (!(error instanceof AnswersStopped)) throw error;
+    // (its answers' questions stopped: no answers nor record, and every node unanswered after the bindings left)
+    return {
+      answers: "null",
+      record: "null",
+      occurrences: [],
+      unanswered: error.left + answers.graph.nodes.length,
+      unansweredBy: error.by,
+    };
+  }
+  const { occurrences, unanswered, unansweredBy } = answeredOccurrences(answers, questions, each);
+  return {
+    answers: JSON.stringify(published.text),
+    record: JSON.stringify(published.record),
+    occurrences,
+    unanswered,
+    ...(unansweredBy === undefined ? {} : { unansweredBy }),
+  };
 }
 
 /**
@@ -701,7 +944,7 @@ export function publicationHashes(
  * What `files` publish in `mode`, exactly (the G3 and #1405 evidence's publication): the answers (`publishedAnswers`'s
  * text and record), every occurrence's answer in its order, and the candidate route's plan or rejection, as one JSON
  * array (`publicationParts` joined), with a fifth element `{"unanswered": <count>}` where the oracle's own questions
- * stopped (`answeredOccurrences`), so that text never equals a publication answered in full; `null` when the files do
+ * stopped (`Questions`), so that text never equals a publication answered in full; `null` when the files do
  * not parse or resolve.
  *
  * @public (the generator corpus's runner reads it from a built tree, not by an import)

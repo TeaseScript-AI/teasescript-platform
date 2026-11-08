@@ -1,4 +1,4 @@
-import type { PlaceId, TypeTerm } from "../graph.js";
+import type { PlaceId, TypeTerm } from "../../graph.js";
 import type {
   ByPath,
   CopyForest,
@@ -9,9 +9,9 @@ import type {
   ListingNode,
   OpenStep,
   Stops,
-} from "./admission/model.js";
-import type { CanonicalKey } from "./contract/key-ids.js";
-import type { Definition, Key } from "./definitions.js";
+} from "../admission/model.js";
+import type { CanonicalKey } from "../contract/key-ids.js";
+import type { Definition, Key } from "../definitions.js";
 
 /**
  * A4, the written type a copy of a written binding brings into an unwritten place (r4.75 (1), TABLE r4.375): its state, one

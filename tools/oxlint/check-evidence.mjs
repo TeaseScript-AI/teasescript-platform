@@ -1,5 +1,7 @@
 import { ts } from "ts-morph";
 
+import { scriptsOf, sfcErrorsOf } from "./comments.mjs";
+
 const blanketRuleNames = new Set([
   "all",
   "correctness",
@@ -76,13 +78,43 @@ function validateAllowedDirective(text) {
 }
 
 /**
- * Checks actual comments in a JavaScript or TypeScript source file for bounded lint exceptions.
+ * Checks actual comments in a JavaScript or TypeScript source file, or a `.vue` file's `<script>` blocks, for bounded
+ * lint exceptions.
  *
  * @param {string} fileName
  * @param {string} sourceText
  * @returns {{ fileName: string, line: number, column: number, message: string }[]}
  */
 export function checkEvidenceComments(fileName, sourceText) {
+  if (!fileName.endsWith(".vue")) return checkScript(fileName, sourceText);
+  // A block that Vue's parser refuses is not among the scripts below, though oxlint lints it: a file Vue cannot parse
+  // may hold no lint directive.
+  const [error] = sfcErrorsOf(fileName, sourceText);
+  const directive =
+    error === undefined ? null : /(?:oxlint|eslint)-(?:disable|enable)/u.exec(sourceText);
+  if (directive !== null) {
+    const before = sourceText.slice(0, directive.index).split("\n");
+    return [
+      {
+        fileName,
+        line: before.length,
+        column: before.at(-1).length + 1,
+        message: `Vue cannot parse this file (${error}), so its lint directives cannot be checked: fix the file, or remove the directive.`,
+      },
+    ];
+  }
+  return scriptsOf(fileName, sourceText).flatMap(({ text, lineOffset, columnOffset }) =>
+    checkScript(fileName, text).map((diagnostic) => ({
+      ...diagnostic,
+      line: diagnostic.line + lineOffset,
+      // a script's first line starts after its tag
+      column: diagnostic.line === 1 ? diagnostic.column + columnOffset : diagnostic.column,
+    })),
+  );
+}
+
+/** The exceptions of one script, at its own lines and columns. */
+function checkScript(fileName, sourceText) {
   const scriptKind = ts.getScriptKindFromFileName(fileName) || ts.ScriptKind.TS;
   const sourceFile = ts.createSourceFile(
     fileName,

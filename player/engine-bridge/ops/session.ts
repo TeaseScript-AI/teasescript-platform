@@ -354,7 +354,7 @@ export function sessionOp(
   };
 }
 
-/**
+/*
  * L5b's ops: Start, Continue, time (observe, step, catch-up) and pacing skip, and the recording's start. Each wraps
  * the adapter's function of the same work; `basis` is the revision the caller acted on.
  */

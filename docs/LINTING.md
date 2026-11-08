@@ -2,7 +2,8 @@
 
 The lint policy catches discarded type evidence and straightforward JavaScript mistakes while preserving runtime
 validation. `.oxlintrc.json` is the executable rule/severity list; all selected rules are errors. `npm run lint` checks
-TypeScript and JavaScript source, tests, playground code, and tooling, including the vendored rules themselves.
+TypeScript and JavaScript source, tests, playground code, and tooling, including the vendored rules themselves, and the
+`<script>` blocks of `.vue` files.
 Dependency, build, coverage, and Git directories are excluded. `npm run check` includes lint and rule fixtures.
 
 ## Correctness category
@@ -17,7 +18,7 @@ findings of these rules wait for another open pull request or a cleanup are a [w
 
 `npm run lint` runs oxlint with `--type-aware`: four rules read TypeScript's types through `oxlint-tsgolint`.
 
-- On every linted file:
+- On every linted TypeScript and JavaScript file:
   - `typescript/no-floating-promises`: a promise is awaited, returned, ended with `.catch` or with a `.then` that has a
     rejection handler, or marked ignored with `void`. node:test's `test`, `describe`, `it` and `suite` are exempt, as
     the runner awaits them. The exemption matches by name, so it also covers a test's `t.test(…)` subtests, which
@@ -38,7 +39,13 @@ findings of these rules wait for another open pull request or a cleanup are a [w
   there.
 - The `correctness` category's other type-aware rules are off: this policy has not chosen them, and `.oxlintrc.json`
   lists them.
-- `.vue` files are not covered: oxlint lints no `.vue` file, and tsgolint reads only the TypeScript program.
+- `.vue` files: these four rules do not reach them, because tsgolint reads only the TypeScript program. oxlint's other
+  rules read their `<script>` blocks with its own loader. The [exception check](#evidence-and-exceptions) reads them
+  as Vue's parser finds them, and refuses a lint directive in a file that Vue cannot parse.
+  Vue handles a promise that a component's template handler, `watch` callback or lifecycle hook returns: a rejection in
+  a component inside `PlayerApp.vue` reaches `PlayerApp.vue`'s `onErrorCaptured`, which reports it, and one in
+  `PlayerApp.vue`'s own reaches Vue's default handler, as no `app.config.errorHandler` is set. #2023 lists the
+  components' session and data functions as composable candidates; in a composable, these rules reach them.
 - In agent sessions oxlint prints one line per finding, which leaves out the type a coercion rule refused; `-f default`
   shows it. If these two rules' findings need their type in the one-line form, it is added to those findings alone,
   never by switching every finding to `-f default`.

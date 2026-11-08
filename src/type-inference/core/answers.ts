@@ -25,7 +25,7 @@ import { keyLabel } from "./consumers/names.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
 import { Closure, type ClosureCounts } from "./admission/closure.js";
 import type { ReceivingObligation, ReceivingResult } from "./admission/receiving.js";
-import { ReceivingDomain } from "./receiving-domain.js";
+import { ReceivingDomain } from "./inherited/receiving-domain.js";
 import {
   compareDemandNames,
   exportNames,
