@@ -1,11 +1,12 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { GROUNDS, refusalsOf } from "./pin-grounds.mjs";
 
-// The suites that pin the type core's exact work, and the focused list a change needs:
+// The suites that pin the type core's exact work, the focused list a change needs, and the ground a re-pin needs:
 //
-//   node tools/repository-checks/pin-suites.mjs [--base <ref>] [--run]
+//   node tools/repository-checks/pin-suites.mjs [--base <ref>] [--run] [--check-grounds]
 //
 // `PIN_SUITES` declares the suites: each one pins a whole-analysis count (a work total, a table of totals or of `main`'s
 // recorded work as bounds, a count of listed copy or construction sites), so any change under `src/type-inference/core/`
@@ -16,7 +17,10 @@ import { fileURLToPath } from "node:url";
 //
 // Without options it prints the pinning suites the changes reach, one `dist/tests/…` line each, or `none`; exit 0.
 // `--run` runs them through `tools/test-output-filter.mjs` (built tests are needed: `npm run build:typescript`); exit 1
-// when one fails. Exit 2 on another option, or when the changes cannot be read (no merge-base).
+// when one fails. `--check-grounds` reads each changed file holding a suite's pins, at the merge-base and at the head,
+// by `pin-grounds.mjs`, whose header says what it refuses; exit 1 naming each refusal, with the time the reading took.
+// A file new since the merge-base has no base and is not read. Exit 2 on another option, or when the changes cannot be
+// read (no merge-base, a base file Git cannot show).
 //
 // The list is the authority. Its test (`pin-suites.test.mjs`) requires each suite's `pin` to find a line in the file
 // holding its pins, and finds three pin forms by their text (`PIN_FORMS`): an `assert.equal` of `.total` to a literal of
@@ -117,6 +121,18 @@ export function builtOf(file) {
   return `dist/${file.replace(/\.ts$/u, ".js")}`;
 }
 
+/** The head lines a `git diff -U0` added. */
+export function addedLines(diff) {
+  const added = [];
+  let line = 0;
+  for (const text of diff.split("\n")) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/u.exec(text);
+    if (hunk !== null) line = Number(hunk[1]);
+    else if (text.startsWith("+") && !text.startsWith("+++")) added.push(line++);
+  }
+  return added;
+}
+
 function git(root, ...args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 1 << 28 });
 }
@@ -133,11 +149,14 @@ function main(argv) {
   const at = argv.indexOf("--base");
   const ref = at >= 0 ? argv[at + 1] : "origin/main";
   const unknown = argv.filter(
-    (arg, index) => arg !== "--run" && !(at >= 0 && (index === at || index === at + 1)),
+    (arg, index) =>
+      arg !== "--run" &&
+      arg !== "--check-grounds" &&
+      !(at >= 0 && (index === at || index === at + 1)),
   );
   if (unknown.length > 0 || (at >= 0 && ref === undefined)) {
     console.error(
-      `pin-suites: unknown ${unknown.join(" ") || "--base without a ref"}: use [--base <ref>] [--run]`,
+      `pin-suites: unknown ${unknown.join(" ") || "--base without a ref"}: use [--base <ref>] [--run] [--check-grounds]`,
     );
     return 2;
   }
@@ -165,6 +184,39 @@ function main(argv) {
       console.log(`  ${builtOf(suite.file).padEnd(width)}  ${suite.pins}`);
   }
   let status = 0;
+  if (argv.includes("--check-grounds")) {
+    const files = Object.keys(GROUNDS).filter(
+      (file) => !GROUNDS[file].listed && paths.includes(file),
+    );
+    const start = performance.now();
+    const refusals = [];
+    let read = 0;
+    for (const file of files) {
+      const shown = spawnSync("git", ["cat-file", "-e", `${mergeBase}:${file}`], { cwd: root });
+      if (shown.status !== 0) continue;
+      if (!existsSync(join(root, file))) {
+        refusals.push(
+          `${file}: deleted, with its pins.\n  Restore it, or update its declaration in tools/repository-checks/pin-grounds.mjs.`,
+        );
+        continue;
+      }
+      read += 1;
+      refusals.push(
+        ...refusalsOf(
+          file,
+          git(root, "show", `${mergeBase}:${file}`),
+          readFileSync(join(root, file), "utf8"),
+          addedLines(git(root, "diff", "-U0", mergeBase, "--", file)),
+        ),
+      );
+    }
+    const seconds = ((performance.now() - start) / 1000).toFixed(1);
+    for (const refusal of refusals) console.log(`pin-suites: ${refusal}`);
+    console.log(
+      `pin-suites: grounds: ${read} changed pin file${read === 1 ? "" : "s"} read in ${seconds}s, ${refusals.length} refusal${refusals.length === 1 ? "" : "s"}`,
+    );
+    if (refusals.length > 0) status = 1;
+  }
   if (argv.includes("--run") && suites.length > 0) {
     const run = spawnSync(
       process.execPath,
