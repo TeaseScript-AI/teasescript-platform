@@ -4234,6 +4234,11 @@ test("a base whose run ends its process leaves the head's runs from that one on 
       .map((line) => JSON.parse(line));
     const aborted = lines.find((line) => line.source === "aborts");
     assert.match(aborted.stalled, /FATAL ERROR: .*heap out of memory/);
+    // (the run the stall cut, named: its tree, mode and check, #1965; a crash of the base, counted, #1837's F24)
+    assert.deepEqual(aborted.at, { tree: "base", mode: "src-off", check: "publication" });
+    assert.deepEqual(aborted.crashed, { base: true, head: false });
+    // (four base crashes, one of them with the head crashing alone after it: no head-only crash, so exit 1, not 3)
+    assert.deepEqual(lines.at(-1).total.crashed, { base: 4, head: 1 });
     // (the source-order runs both trees ended; from the base's abort on, the head's own outcome per run)
     assert.deepEqual(aborted.afterBase, [
       { mode: "src-off", check: "publication", head: { answered: true } },
@@ -4404,8 +4409,9 @@ test("a store writes and reads a publication run by the runner's own limit, its 
       join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
       storedGrantLibrary,
     );
-    const folder = join(directory, "grants");
-    mkdirSync(folder);
+    // (the area inside the tree, where `state` finds its areas)
+    const folder = join(tree, "tests", "families", "grants");
+    mkdirSync(folder, { recursive: true });
     writeFileSync(
       join(folder, "g.mjs"),
       `export const cases = ${JSON.stringify(["admitted", "over", "ungranted"].map((name) => [name, name]))};\n`,
@@ -4457,6 +4463,21 @@ test("a store writes and reads a publication run by the runner's own limit, its 
     const against = run(tree, "--baseline", area);
     assert.equal(against.status, 1, against.stderr);
     assert.doesNotMatch(against.stderr, /refused|is not one a store writes/);
+    // (state reports what the verified shard stores: its runs, none left unanswered, four within their grant, and the
+    // two stalls over the limit)
+    const stated = spawnSync(process.execPath, [baselines, "state", tree, store, "--read-only"], {
+      encoding: "utf8",
+    });
+    const grantsLine = stated.stdout
+      .trim()
+      .split("\n")
+      .map((text) => JSON.parse(text))
+      .find((entry) => entry.area === "grants");
+    assert.deepEqual(
+      grantsLine?.runs,
+      { count: 4, reasons: {}, granted: 4, overLimit: 2 },
+      stated.stdout,
+    );
     // (the same check, row by row: one unit over the limit with its grant, a run with no cells reported over the plain
     // limit, a grant on a run that is no publication, and a cut within its limit are all refused)
     const { sourceFault } = await import(pathToFileURL(baselines).href);
@@ -4483,6 +4504,222 @@ test("a store writes and reads a publication run by the runner's own limit, its 
       [{ ...line("over"), cut: { ...line("over").cut, work: 4640 } }, "a cut within its limit"],
     ] as const)
       assert.notEqual(sourceFault(refused, 4), undefined, why);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A built tree's library whose publications answer with parts `A`, `R`, each occurrence's and `T`, as `kind` says:
+ * the base and the head the same (`same`), or the head with its second occurrence's answer otherwise (`other`); and
+ * each tree leaving nodes unanswered after the occurrences it answers, by source: `both-answered` none on either
+ * tree, `one-unanswered` the base answering three occurrences and the head two (2 left), `both-unanswered` each two (1
+ * left); a head that crashes alone where `crash` (its source-order sharing-on run of `head-crash`, the base's ended).
+ */
+const prefixLibrary = (
+  head: boolean,
+  kind: "same" | "other",
+): string => `import { createHash } from "node:crypto";
+import { writeSync } from "node:fs";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+const hash = (text) => createHash("sha256").update(text).digest("hex");
+export function publicationHashes(files, mode) {
+  const source = files[0].source;
+  if (${head} && source === "head-crash" && !mode.reversed && !mode.unshared) {
+    writeSync(2, "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory\\n");
+    process.exit(134);
+  }
+  const answered = { "both-answered": 3, "one-unanswered": ${head} ? 2 : 3, "both-unanswered": 2 }[source] ?? 3;
+  const occurrences = ["o1", "o2", "o3"].slice(0, answered).map((text, index) =>
+    ${head} && "${kind}" === "other" && index === 1 ? "changed" : text,
+  );
+  const parts = ["A", "R", ...occurrences, "T"].map(hash);
+  const left = { "both-answered": 0, "one-unanswered": ${head} ? 2 : 0, "both-unanswered": 1 }[source] ?? 0;
+  return left === 0
+    ? { parts, unanswered: 0 }
+    : { parts, unanswered: left, unansweredBy: { reason: "memory", node: 9 } };
+}
+`;
+
+test("what both trees answered is compared where either left nodes unanswered, a differing answer a difference; a head crash where the base ran is named, counted and exits 3 (#1837, #1965, F24)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const built = (name: string, head: boolean, kind: "same" | "other") => {
+      const tree = join(directory, name);
+      mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
+      writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(
+        join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
+        prefixLibrary(head, kind),
+      );
+      return tree;
+    };
+    const base = built("base", false, "same");
+    const area = (name: string, sources: string[]) => {
+      const folder = join(directory, name);
+      mkdirSync(folder);
+      writeFileSync(
+        join(folder, "g.mjs"),
+        `export const cases = ${JSON.stringify(sources.map((source) => [source, source]))};\n`,
+      );
+      return folder;
+    };
+    const rows = ["both-answered", "one-unanswered", "both-unanswered"];
+    const outOf = (folder: string, head: string, name: string) => {
+      const [out, work] = [join(directory, `${name}.jsonl`), join(directory, `${name}.work.jsonl`)];
+      const ran = spawnSync(
+        process.execPath,
+        [runner, folder, base, head, "--out", out, "--work", work],
+        { encoding: "utf8" },
+      );
+      const read = (file: string) =>
+        existsSync(file)
+          ? readFileSync(file, "utf8")
+              .trim()
+              .split("\n")
+              .map((line) => JSON.parse(line))
+          : [];
+      return { status: ran.status, stderr: ran.stderr, out: read(out), work: read(work) };
+    };
+    const prefixes = area("prefixes", rows);
+    // (the same answers: the answered one agrees; the unanswered ones agree on what both answered)
+    const same = outOf(prefixes, built("same", true, "same"), "same");
+    assert.equal(same.status, 1, same.stderr);
+    const unanswered = (
+      out: { source: string; prefix?: string; difference?: unknown }[],
+      source: string,
+    ) => out.filter((line) => line.source === source);
+    assert.deepEqual(unanswered(same.out, "both-answered"), []);
+    assert.deepEqual(
+      unanswered(same.out, "one-unanswered").map(({ prefix }) => prefix),
+      ["equal", "equal", "equal", "equal"],
+    );
+    assert.deepEqual(same.work.find((line) => line.source === "both-unanswered").counts, {
+      runs: 4,
+      unansweredAlike: 4,
+    });
+    // (the head's second answer otherwise: a difference in each row, at that part, never an unanswered run)
+    const other = outOf(prefixes, built("other", true, "other"), "other");
+    assert.equal(other.status, 1, other.stderr);
+    for (const source of rows) {
+      const counts = other.work.find((line) => line.source === source).counts;
+      assert.deepEqual(counts, { runs: 4, differences: 4 }, source);
+    }
+    const differs = other.out.filter((line) => line.source === "one-unanswered");
+    assert.deepEqual(
+      differs.map(({ part, unanswered }) => [part, unanswered]),
+      Array.from({ length: 4 }, () => [3, { base: 0, head: 2 }]),
+    );
+    // (a head crash where the base ran: the run it cut named, counted for the head alone, exit 3 ahead of 1)
+    const crash = outOf(
+      area("crashes", ["head-crash", "both-answered"]),
+      built("crash", true, "same"),
+      "crash",
+    );
+    assert.equal(crash.status, 3, crash.stderr);
+    const cut = crash.work.find((line) => line.source === "head-crash");
+    assert.deepEqual(
+      [cut.at, cut.crashed],
+      [
+        { tree: "head", mode: "src-on", check: "publication" },
+        { base: false, head: true },
+      ],
+    );
+    assert.deepEqual(crash.work.at(-1).total.crashed, { base: 0, head: 1 });
+    // (the stall index reads the named tree: the head's alone, a candidate)
+    const judged = spawnSync(process.execPath, [stalls, join(directory, "crash.work.jsonl")], {
+      encoding: "utf8",
+    });
+    const stalled = judged.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .find((line) => line.source === "head-crash");
+    assert.match(stalled.stalled.head, /FATAL ERROR: Reached heap limit/);
+    assert.deepEqual(
+      [stalled.at, stalled.verdict],
+      [{ tree: "head", mode: "src-on", check: "publication" }, "candidate"],
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A built tree's library whose publication of `<shape> <size>` charges its ledger 100 units a size on the base; on the
+ * head, `rises` 100 a size at 4 and 110 at 8 and 16, `flat` 100, and `stops` 100 but leaving a node unanswered at 8.
+ */
+const growthLibrary = (
+  head: boolean,
+): string => `import { WorkLedger } from "../../src/type-inference/core/budget.js";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+export function publicationHashes(files) {
+  const [shape, size] = files[0].source.split(" ");
+  const n = Number(size);
+  const each = ${head} && shape === "rises" && n > 4 ? 110 : 100;
+  new WorkLedger(1000).charge("frames", each * n);
+  return ${head} && shape === "stops" && n === 8
+    ? { parts: ["a"], unanswered: 1, unansweredBy: { reason: "memory", node: 3 } }
+    : { parts: ["a"], unanswered: 0 };
+}
+`;
+
+test("the stall index prints a growth line per area: a series whose head-over-base units rise 1 % or more a doubling flagged, a series with a stopped run left out as the residual; and a NODE_OPTIONS heap other than --memory is said on stderr, the total naming memory (#1837's F22, #1956)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const built = (name: string, head: boolean) => {
+      const tree = join(directory, name);
+      mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
+      mkdirSync(join(tree, "dist", "src", "type-inference", "core"), { recursive: true });
+      writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(join(tree, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
+      writeFileSync(
+        join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
+        growthLibrary(head),
+      );
+      return tree;
+    };
+    const folder = join(directory, "sized");
+    mkdirSync(folder);
+    writeFileSync(
+      join(folder, "g.mjs"),
+      'export const sizes = [4, 8, 16];\nexport const shapes = Object.fromEntries(["rises", "flat", "stops"].map((shape) => [shape, (n) => `${shape} ${n}`]));\n',
+    );
+    const work = join(directory, "sized.work.jsonl");
+    const ran = spawnSync(
+      process.execPath,
+      [runner, folder, built("base", false), built("head", true), "--work", work],
+      { encoding: "utf8", env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=3000" } },
+    );
+    assert.equal(ran.status, 1, ran.stderr);
+    assert.match(
+      ran.stderr,
+      /runs with --memory 2048 MB of heap; NODE_OPTIONS's 3000 MB applies to this process only/,
+    );
+    assert.equal(JSON.parse(ran.stdout.trim().split("\n").at(-1)!).memory, 2048);
+    const judged = spawnSync(process.execPath, [stalls, work], { encoding: "utf8" });
+    const growth = judged.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .find((line) => line.growth !== undefined);
+    // (four modes: `rises` and `flat` measured in each, `rises` flagged at its 10 % step; `stops` the residual)
+    assert.deepEqual([growth.measured, growth.flagged], [8, 4]);
+    assert.deepEqual(
+      growth.worst[0].ratios.map((ratio: number) => Math.round(ratio * 100) / 100),
+      [1, 1.1, 1.1],
+    );
+    assert.match(growth.worst[0].series, /^g\.mjs rises /);
+    assert.deepEqual(growth.residual, {
+      series: 4,
+      named: ["rev-off", "rev-on", "src-off", "src-on"].map(
+        (mode) => `g.mjs stops ${mode} publication`,
+      ),
+    });
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

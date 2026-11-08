@@ -191,27 +191,58 @@ function firstPart(was, is) {
 }
 
 /**
+ * Whether two publications agree on what both answered, where either left nodes unanswered (#1837): the answers and the
+ * record (unless either's answers stopped at a binding, where both are its stop's), each occurrence both answered, and
+ * the route, by their hashes. `equal`; `{ differs }`, the first part that differs (its index, or `route`); or
+ * `uncomparable` where either holds no parts (no base, or a stored base before #1503).
+ */
+function answeredPrefix(was, is) {
+  const [base, head] = [was?.value?.parts, is.value.parts];
+  if (!Array.isArray(base) || !Array.isArray(head)) return "uncomparable";
+  const atBinding = [was.value, is.value].some(
+    (value) => value.unansweredBy?.binding !== undefined,
+  );
+  const occurrences = Math.max(0, Math.min(base.length, head.length) - 3);
+  const compared = [
+    ...(atBinding ? [] : [0, 1]),
+    ...Array.from({ length: occurrences }, (_, index) => 2 + index),
+  ];
+  const differs = compared.find((part) => base[part] !== head[part]);
+  if (differs !== undefined) return { differs };
+  return base.at(-1) === head.at(-1) ? "equal" : { differs: "route" };
+}
+
+/**
  * A run's outcome from the base's result (`was`, run or stored; none where the baseline has none) and the head's
  * (`is`): an exception on either, never compared (#1439); nodes left unanswered on either, agreement apart
  * (`unansweredAlike`, #1592) only where the base's result holds its parts and both trees left the same count
- * unanswered and published the same answered part (the parts up to the stop, by their hash), else `unanswered`; with no
- * base, `uncompared`, never agreement; else a difference, or nothing where they agree.
+ * unanswered and published the same answered part (the parts up to the stop, by their hash), else `unanswered`, each
+ * with whether what both answered agrees (`prefix`, `answeredPrefix`), a difference where it does not; with no base,
+ * `uncompared`, never agreement; else a difference, or nothing where they agree.
  */
 function judged(was, is) {
   if (was?.thrown !== undefined || is.thrown !== undefined)
     return { thrown: { base: was?.thrown, head: is.thrown } };
-  if (was?.value.unanswered > 0 || is.value.unanswered > 0)
+  if (was?.value.unanswered > 0 || is.value.unanswered > 0) {
+    const by = { base: reasonOf(was?.value), head: reasonOf(is.value) };
+    const prefix = answeredPrefix(was, is);
+    if (prefix.differs !== undefined)
+      return {
+        difference: {
+          base: was.value.hash.slice(0, 16),
+          head: is.value.hash.slice(0, 16),
+          part: prefix.differs,
+          parts: [was.value.parts.length, is.value.parts.length],
+          unanswered: { base: was.value.unanswered, head: is.value.unanswered },
+          by,
+        },
+      };
     return Array.isArray(was?.value.parts) &&
       was.value.unanswered === is.value.unanswered &&
       was.value.hash === is.value.hash
-      ? {
-          unansweredAlike: is.value.unanswered,
-          by: { base: reasonOf(was?.value), head: reasonOf(is.value) },
-        }
-      : {
-          unanswered: { base: was?.value.unanswered, head: is.value.unanswered },
-          by: { base: reasonOf(was?.value), head: reasonOf(is.value) },
-        };
+      ? { unansweredAlike: is.value.unanswered, by, prefix }
+      : { unanswered: { base: was?.value.unanswered, head: is.value.unanswered }, by, prefix };
+  }
   if (was === undefined) return { uncompared: true };
   if (was.value.hash === is.value.hash) return {};
   return {
@@ -462,6 +493,15 @@ if (process.argv[2] === "--child") {
   const seconds = Number(option("timeout") ?? DEFAULTS.timeout);
   const timeout = seconds * 1000;
   const memory = Number(option("memory") ?? DEFAULTS.memory);
+  // (each source's process gets `--memory` as its heap, whatever heap `NODE_OPTIONS` sets, as the central queue sets
+  // one on every job: said once here, and the total names `memory`, so the override is never silent, #1956)
+  const asked = /(?:^|\s)--max[-_]old[-_]space[-_]size=(\d+)(?:\s|$)/.exec(
+    process.env.NODE_OPTIONS ?? "",
+  )?.[1];
+  if (asked !== undefined && Number(asked) !== memory)
+    console.error(
+      `families-runner: each source's process runs with --memory ${memory} MB of heap; NODE_OPTIONS's ${asked} MB applies to this process only`,
+    );
   if (store !== undefined && options.has("only"))
     refused("--store stores whole shards: drop --only");
   const itemized = options.has("items") || options.has("items-from-env");
@@ -844,6 +884,11 @@ if (process.argv[2] === "--child") {
   /** What the stored tree and the head did (a stall's, an exception's or an uncharged run's text), where either did. */
   const either = (base, head) =>
     base === undefined && head === undefined ? undefined : { base, head };
+  /** Each tree this runner runs, by its part: the base and the head, the head against a stored base, a tree stored. */
+  const treeNames =
+    baseline !== undefined ? ["head"] : roots.length === 2 ? ["base", "head"] : ["base"];
+  /** Whether a stall's reason (its text) is a crash: the process ended (a fatal V8 error, a signal), not the unit limit. */
+  const crashed = (stall) => typeof stall === "string" && stall !== "units";
   /**
    * A head's run of a `--work` record (one tree's units, allowance and milliseconds) with the stored base's first: its
    * units and allowance on that run where the stored line (`kept`) holds them (a plan 2 area's ended run, or the run
@@ -877,7 +922,9 @@ if (process.argv[2] === "--child") {
     "differences",
   ];
   const zeros = () => Object.fromEntries(counts.map((key) => [key, 0]));
-  const total = { area, generators: 0, ...zeros(), modes: 4 };
+  const total = { area, generators: 0, ...zeros(), crashed: { base: 0, head: 0 }, modes: 4 };
+  // (sources where the head crashed and the base did not: exit 3, #1837's F24)
+  let headOnly = 0;
   // `--work`: what ran, then one line per source, then the total
   worked({
     work: {
@@ -919,7 +966,7 @@ if (process.argv[2] === "--child") {
   });
   let sequence = 0;
   for (const { name, checks, sources } of generators) {
-    const row = { generator: name, ...zeros() };
+    const row = { generator: name, ...zeros(), crashed: { base: 0, head: 0 } };
     for (const source of sources) {
       const before = { ...row };
       row.sources += 1;
@@ -998,6 +1045,29 @@ if (process.argv[2] === "--child") {
       }
       // with a baseline, a source stalls or throws outside its runs where either tree did, as with both trees run
       const stalled = baseline === undefined ? reply.stalled : either(kept?.stalled, reply.stalled);
+      // (the run this runner's stall cut: its tree, mode and check, #1965; none named where it came between runs)
+      const at =
+        reply.stalled === undefined
+          ? undefined
+          : reply.cutAt === undefined
+            ? null
+            : {
+                tree: treeNames[reply.cutAt.tree],
+                mode: reply.cutAt.mode,
+                check: reply.cutAt.check,
+              };
+      // (a crash on each tree: this runner's, the head's alone after the base's, a stored base's, #1837's F24)
+      const crashes = {
+        base:
+          (crashed(reply.stalled) && at?.tree === "base") ||
+          (baseline !== undefined && crashed(kept?.stalled)),
+        head:
+          (crashed(reply.stalled) && at?.tree === "head") ||
+          (afterBase ?? []).some((ran) => crashed(ran.head.stalled)),
+      };
+      if (crashes.base) row.crashed.base += 1;
+      if (crashes.head) row.crashed.head += 1;
+      if (crashes.head && !crashes.base) headOnly += 1;
       const failed =
         baseline === undefined ? reply.thrown : either(kept?.thrown?.runner, reply.thrown?.runner);
       // a run that reached the safety net does work no ledger charges (#1647, #1424): named by its run (and tree), a
@@ -1045,6 +1115,7 @@ if (process.argv[2] === "--child") {
           generator: name,
           source: source.name,
           stalled,
+          ...(at === undefined ? {} : { at }),
           ...(afterBase === undefined ? {} : { afterBase }),
           ...inputs,
         });
@@ -1076,6 +1147,8 @@ if (process.argv[2] === "--child") {
               .map((key) => [key, row[key] - before[key]]),
           ),
           ...(stalled === undefined ? {} : { stalled }),
+          ...(at === undefined ? {} : { at }),
+          ...(crashes.base || crashes.head ? { crashed: crashes } : {}),
           ...(afterBase === undefined ? {} : { afterBase }),
           ...(uncharged === undefined ? {} : { uncharged }),
           ...(left.length === 0 ? {} : { unanswered: left }),
@@ -1084,10 +1157,11 @@ if (process.argv[2] === "--child") {
     console.log(JSON.stringify(row));
     total.generators += 1;
     for (const key of counts) total[key] += row[key];
+    for (const tree of ["base", "head"]) total.crashed[tree] += row.crashed[tree];
   }
   for (const { child } of Object.values(slots)) child?.kill();
   if (progress !== undefined) rmSync(pathOf(progress, "outside"), { force: true });
-  const ended = { ...total, units, timeout: seconds, node: process.version };
+  const ended = { ...total, units, timeout: seconds, memory, node: process.version };
   if (storing !== undefined) {
     // the shard whole, its total last, with what made it
     const runner = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url)));
@@ -1099,14 +1173,17 @@ if (process.argv[2] === "--child") {
   }
   worked({ total: ended });
   console.log(JSON.stringify(ended));
+  // (3: the head crashed where the base did not, ahead of 1: anything else to read; 2 is a refused usage)
   process.exitCode =
-    total.differences +
-      total.stalled +
-      total.exceptions +
-      total.unanswered +
-      total.uncompared +
-      total.uncharged ===
-    0
-      ? 0
-      : 1;
+    headOnly > 0
+      ? 3
+      : total.differences +
+            total.stalled +
+            total.exceptions +
+            total.unanswered +
+            total.uncompared +
+            total.uncharged ===
+          0
+        ? 0
+        : 1;
 }

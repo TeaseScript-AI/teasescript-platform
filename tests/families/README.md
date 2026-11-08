@@ -5,6 +5,49 @@ are not in CI: before a type-core review round, the builder runs the affected ar
 and reports the counts (`docs/TESTING.md`, test admission). Each module under `tests/families/<area>/` reproduces the
 sources of one recorded evidence run (#1446), and `check.mjs` (in CI) checks that it does.
 
+## The runner's contract
+
+What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise; the sections below explain them.
+
+- **Defaults** (`DEFAULTS`, `baselines.mjs`):
+  - `--units 4` (`FAMILIES_UNITS`): a run stalls past 4 times its program's allowance, a publication run's question
+    grant added (below);
+  - `--timeout 1800` seconds a run (`FAMILIES_TIMEOUT`; 60 in CI), the safety net;
+  - `--memory 2048` MB of heap for each source's process. It is the process's own `--max-old-space-size`, so it holds
+    whatever heap `NODE_OPTIONS` sets: the central queue sets one on every job, and the runner says so on stderr where
+    it differs (#1956);
+  - `--allowances natural,16,256` for the stop runs.
+
+  A stored baseline is made at these defaults: its PLAN records them, and `--store` refuses others.
+
+- **A run's record** (`run-contract.mjs`, one module for the runner, the stall index and the store):
+  - why its oracle left questions unanswered: `questions`, `memory`, `read-depth`, `stopped`, or `unknown` from a library
+    that names none, each with the first node left or the binding where the answers' own questions stopped;
+  - its limit (`limitOf`): `units` × its allowance, plus, for a publication run, its oracle's 64 units for each cell its
+    questions returned, kept with the run as `questions`. A store writes and reads every run by the same limit.
+- **The total line** (stdout's last; `--work`'s last): sources, unparsed, stalled, exceptions, unanswered,
+  unansweredAlike, uncompared, uncharged, runs, differences, `crashed: {base, head}` (stalls that ended the process, not
+  the unit limit), the unit multiple, the safety net in seconds, `memory` and the Node version.
+- **A stall's record** (`--out`, and the source's `--work` line): its reason (`units`, or how the process ended), the
+  run it cut as `at: {tree, mode, check}` (`null` between runs, #1965), with `--store` the cut run's certificate, and,
+  where the base's process ended, the head's own outcome on each later run (`afterBase`).
+- **Exit codes:**
+  - 0: nothing differs, throws, stalls, is left unanswered, uncompared or uncharged;
+  - 1: something to read: a difference, an exception, a stall (a crash of the base among them), or a run left
+    unanswered, uncompared or uncharged;
+  - 3: the head crashed where the base did not, ahead of 1 (#1837's F24);
+  - 2: a refused usage or record.
+
+  `sx-job status` shows each but 0 as "failed".
+
+- **The evidence total** of a replay is `stalls.mjs`'s total over the shards' `--work` records. It names each area
+  complete only with its shards `0/N` to `N-1/N` of one plan, counts a repeated place once and refuses a shard given
+  twice; a sum of the shards' own totals counts each repeat. Its growth lines are advisory.
+- **A stored baseline's identity:** its MANIFEST (the `src/` tree, the oracle library, the lockfile, Node) and each
+  area's PLAN (the limits above, the allowances, each generator's checks, each shard's places). The runner's own source,
+  `--work` records and `--out` files are no part of it. `baselines.mjs state` reports, for each stored area, its runs
+  left unanswered by reason and those within a question grant.
+
 ## Running an area
 
 Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/type-core-oracles.js`), then:
@@ -59,7 +102,9 @@ admitted types stopped. A publication run's unit limit grants the same 64 per ce
 run's `questions`), so the oracle's stop comes first wherever a question reports its cells before the runner's limit; one
 question's own cost is the runner's to bound. A run with any on either tree agrees only where both trees left
 the same count unanswered and published the same parts up to them (#1592): the bound is the same on both trees, so
-what it leaves unanswered is too. Such a run is counted apart (`unansweredAlike`); any other is neither agreement nor an
+what it leaves unanswered is too. What both answered is compared too (`prefix`: the answers and the record, unless
+either's answers stopped at a binding, each occurrence both answered, and the route): where it differs, the run is a
+difference. Such a run is counted apart (`unansweredAlike`); any other is neither agreement nor an
 exception: the runner writes it to `--out` and counts it apart (`unanswered`). Each such run records why on each tree
 (`by`, on `--out` and the source's `--work` line, and on a stored run), with the first node or the binding left:
 `questions` (the analysis finished and the oracle's questions passed their bound; their per-cell cost rises by a log
@@ -67,10 +112,7 @@ factor, #1941), `memory` (their room in the heap passed: the core keeps its answ
 oracle ends before V8 runs out of heap), `read-depth` (the analysis finished and a question passed the read-depth limit), `stopped` (the
 analysis's own budget stopped it), or `unknown` where the tree's oracle or a run stored before this names none. `stalls.mjs` counts them as runner artefacts, one group a reason and `unansweredAlike`,
 each with its runs, sources and first witness, on a line of its own where any group has runs and always in `--index`.
-It prints one JSON line per generator and
-a total (sources, unparsed, stalled, exceptions, unanswered, unansweredAlike, uncompared, uncharged, modes, runs,
-differences, the unit limit's multiple and the safety net in seconds), and exits 1 when any run differs, throws, leaves
-nodes unanswered other than alike, is uncompared or reaches the safety net, or any source stalls. Run large sizes as one
+It prints one JSON line per generator and the total line, and exits as the contract above says. Run large sizes as one
 capped job per area or shard on a worker. Report stalls, uncharged runs and publication exceptions separately; none
 establishes agreement.
 

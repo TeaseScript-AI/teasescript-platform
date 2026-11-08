@@ -221,8 +221,11 @@ function entryOf(line, area, trees, ran) {
   const runs = line.runs?.map(runOf);
   let { stalled } = line;
   if (typeof stalled === "string") {
+    // (the tree its record names, #1965; else the tree a progress record had running)
     const running = line.runs?.at(-1)?.running;
-    const tree = trees === 2 && running !== undefined ? ["base", "head"][running] : undefined;
+    const tree =
+      line.at?.tree ??
+      (trees === 2 && running !== undefined ? ["base", "head"][running] : undefined);
     stalled = { [tree ?? (trees === 1 ? "head" : "source")]: stalled };
   } else if (stalled !== undefined)
     stalled = Object.fromEntries(Object.entries(stalled).filter(([, why]) => why !== undefined));
@@ -623,7 +626,10 @@ for (const [place, was] of replay) {
   if (was.stalled !== undefined) {
     const line = { area: nameOf(was.area), generator: was.generator, source: was.source };
     const rerunOf = is === was ? {} : { rerun: { outcome: outcomeOf(is), ...verdict } };
-    console.log(JSON.stringify({ ...line, stalled: was.stalled, ...verdictOf(was), ...rerunOf }));
+    const at = was.at === undefined ? {} : { at: was.at };
+    console.log(
+      JSON.stringify({ ...line, stalled: was.stalled, ...at, ...verdictOf(was), ...rerunOf }),
+    );
   }
   if (is !== was) row.rerun += 1;
   // (a source an `--out` file lists is a stall of a shard whose other sources are not listed)
@@ -741,6 +747,67 @@ const artefactRows = GROUPS.map((group) => {
 });
 if (artefactRows.some((row) => row.runs > 0))
   console.log(JSON.stringify({ artefacts: artefactRows }));
+// the growth bar (#1837's F22), advisory: per area, each series of a shape's sizes in one mode and check, the head's
+// units over the base's at each size, flagged where a doubling of the size raises that ratio by 1 % or more. A run left
+// unanswered, cut by a stall or at the safety net on either tree, or run by the head alone after the base's stall, ends
+// at a stop, not at its program's work: it is left out, and its series is named as the residual.
+const growth = new Map();
+for (const [place, was] of replay) {
+  const is = rerun.get(place) ?? was;
+  const sized = /^(.*)@(\d+)$/.exec(is.source);
+  if (sized === null) continue;
+  const [, shape, size] = sized;
+  const area = nameOf(is.area);
+  if (!growth.has(area)) growth.set(area, { series: new Map(), residual: new Set() });
+  const { series, residual } = growth.get(area);
+  const stopped = new Set([
+    ...(is.unanswered ?? []).map(({ mode, check }) => `${mode} ${check}`),
+    ...(is.afterBase ?? [])
+      .filter(({ mode }) => mode !== undefined)
+      .map(({ mode, check }) => `${mode} ${check}`),
+    ...Object.values(
+      typeof is.uncharged === "object" ? (is.uncharged ?? {}) : { at: is.uncharged },
+    ),
+  ]);
+  for (const run of is.runs ?? []) {
+    const name = `${is.generator} ${shape} ${run.mode} ${run.check}`;
+    const ended = run.base?.done && run.head?.done;
+    if (stopped.has(`${run.mode} ${run.check}`) || !ended) {
+      residual.add(name);
+      continue;
+    }
+    if (!(run.base.work > 0 && run.head.work > 0)) continue;
+    if (!series.has(name)) series.set(name, new Map());
+    series.get(name).set(Number(size), run.head.work / run.base.work);
+  }
+  for (const { mode, check } of is.afterBase ?? [])
+    if (mode !== undefined) residual.add(`${is.generator} ${shape} ${mode} ${check}`);
+}
+for (const [area, { series, residual }] of [...growth].sort(([a], [b]) => a.localeCompare(b))) {
+  const measured = [];
+  for (const [name, ratios] of series) {
+    const sizes = [...ratios.keys()].sort((a, b) => a - b);
+    const steps = sizes
+      .slice(1)
+      .map((size, index) => [sizes[index], size])
+      .filter(([smaller, size]) => size === 2 * smaller)
+      .map(([smaller, size]) => ratios.get(size) / ratios.get(smaller) - 1);
+    if (steps.length > 0)
+      measured.push({ series: name, sizes, ratios: sizes.map((size) => ratios.get(size)), steps });
+  }
+  const flagged = measured
+    .filter(({ steps }) => steps.some((step) => step >= 0.01))
+    .sort((a, b) => Math.max(...b.steps) - Math.max(...a.steps));
+  console.log(
+    JSON.stringify({
+      growth: area,
+      measured: measured.length,
+      flagged: flagged.length,
+      worst: flagged.slice(0, 5),
+      residual: { series: residual.size, named: [...residual].sort() },
+    }),
+  );
+}
 closed &&=
   total.sources > 0 &&
   total.agreed + total.unansweredAlike === total.sources &&
