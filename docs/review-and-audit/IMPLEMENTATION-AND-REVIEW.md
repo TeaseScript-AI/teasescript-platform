@@ -284,6 +284,11 @@ The review comment records the exact head SHA, comparison base, scope, blockers 
 findings, from the second round on whether each earlier finding is closed, checks and outcomes,
 including failures, warnings, skips, unavailable checks, remaining uncertainty, and whether the
 change can land. Landing requires no blocker and sufficient evidence for the complete result.
+Its first line is `Review round <n> (<reviewer>, <head>): <outcome>`, so rounds can be counted per pull request:
+`<n>` counts this pull request's review rounds from 1, scoped and final checks included; `<reviewer>` names the model
+or role, with `final` for a final review (`Sol final`); `<head>` is the short SHA it judged; and `<outcome>` is
+`approve`, `request changes`, `cannot land`, or `closed` for a check bounded to earlier findings that finds them all
+closed. A coordinator's own check and a builder's repair note are not rounds and do not use this line.
 
 ### Convergence
 

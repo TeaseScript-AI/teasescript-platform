@@ -1087,15 +1087,6 @@ test("a check that owes the runtime nothing reaches every reader, and a stop aft
   assert.deepEqual(failures, []);
 });
 
-/**
- * A content check over the contents a written type admits (the owner's review F2; ADR 0021 1.8, 1.10): where a value
- * comes from outside the script (host data, a load, a parse) into a written collection type, directly or through a copy,
- * an object holding it, an element of an outer list, a replacement of an empty one, or into a decided one (Sol r2 N3), the elements `join` shows, `sort`
- * orders, `toJson` writes and a choice's list gives are its written element type's: one that does not fit owes the check
- * at the use, a warning (a list may be empty, so never an error), and one that fits is quiet; the incoming check is no
- * substitute. A known empty list is quiet. (A narrowing `is` test's element type narrows an element read, `v[0]`, not
- * the element path these checks read: `narrowing.ts`'s, outside this family.)
- */
 /** A list literal of each written type the content family uses, which decides that type unwritten. */
 const LITERALS: Readonly<Record<string, string>> = {
   "object[]": "[{n: 1}]",
@@ -1106,6 +1097,15 @@ const LITERALS: Readonly<Record<string, string>> = {
   "integer[][]": "[[1]]",
 };
 
+/**
+ * A content check over the contents a written type admits (the owner's review F2; ADR 0021 1.8, 1.10): where a value
+ * comes from outside the script (host data, a load, a parse) into a written collection type, directly or through a copy,
+ * an object holding it, an element of an outer list, a replacement of an empty one, or into a decided one (Sol r2 N3), the elements `join` shows, `sort`
+ * orders, `toJson` writes and a choice's list gives are its written element type's: one that does not fit owes the check
+ * at the use, a warning (a list may be empty, so never an error), and one that fits is quiet; the incoming check is no
+ * substitute. A known empty list is quiet. (A narrowing `is` test's element type narrows an element read, `v[0]`, not
+ * the element path these checks read: `narrowing.ts`'s, outside this family.)
+ */
 test("a content check reads the written element type of a value from outside the script: a misfit owes the use's check", (t) => {
   const consumers: readonly {
     readonly name: string;

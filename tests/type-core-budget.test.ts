@@ -461,8 +461,7 @@ test("the finishing path is bounded after a stop in the setup, in admission's pa
  * (8,022 finishing units for 140 nodes); each path is now a step from its owner's, made into an array only where a copy
  * lands. Linear, not `16 × nodes`: the program's own index, built after a stop at the first unit, costs about 21 units
  * per node of this shape.
- */
-/**
+ *
  * A deeply nested list literal, and a typed parse's or load's nested default read as deep: before admission settled the
  * syntax decides nothing (TABLE r4.135), so no read's key is made for it (Astra r1 B2 on #1165: 2.8 to 3.2 per doubling).
  */

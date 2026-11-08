@@ -47,6 +47,7 @@ export const costlyTestSeconds = {
   "type-core-otherwise.test.js": 8,
   "type-core-contributions.test.js": 8,
   "type-core-discharge.test.js": 8,
+  "type-core-objects.test.js": 8,
   "type-core-narrowing.test.js": 7,
   "type-core-landings.test.js": 6,
   "type-core-inline.test.js": 6,
@@ -71,6 +72,7 @@ export const costlyTestSeconds = {
   "type-core-value-answers.test.js": 1,
   "type-core-records.test.js": 1,
   "type-core-result.test.js": 1,
+  "type-core-charged-iteration.test.js": 1,
   "type-core-method-categories.test.js": 1,
 };
 

@@ -1,8 +1,6 @@
-import { globSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { ts } from "ts-morph";
-
-import { lintFiles } from "./files.mjs";
+import { checkedFiles, fileComments } from "./comments.mjs";
 
 // A comment says what the code does now and never forecasts later work (IMPLEMENTATION-AND-REVIEW.md "Code that does
 // not mislead", #1977). This check reads comments only, never strings or code, in the linted files and in `.vue`
@@ -31,40 +29,6 @@ export const FORECASTS = [
 /** The citations whose count per file may only shrink. */
 const COUNTED_CITATIONS = ["TABLE r4", "TABLE §"];
 
-/** Each comment of a JavaScript or TypeScript text: its text and 1-based line. */
-function comments(fileName, text) {
-  const kind = ts.getScriptKindFromFileName(fileName) || ts.ScriptKind.TS;
-  const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, kind);
-  const ranges = new Map();
-  for (const nodes = [source]; nodes.length > 0;) {
-    const node = nodes.pop();
-    for (const range of [
-      ...(ts.getLeadingCommentRanges(text, node.pos) ?? []),
-      ...(ts.getTrailingCommentRanges(text, node.end) ?? []),
-    ])
-      ranges.set(range.pos, range);
-    nodes.push(...node.getChildren(source));
-  }
-  return [...ranges.values()]
-    .sort((a, b) => a.pos - b.pos)
-    .map((range) => ({
-      text: text.slice(range.pos, range.end),
-      line: source.getLineAndCharacterOfPosition(range.pos).line + 1,
-    }));
-}
-
-/** The comments of a file: a `.vue` file's `<script>` blocks, each at its line; any other file whole. */
-function fileComments(fileName, text) {
-  if (!fileName.endsWith(".vue")) return comments(fileName, text);
-  const found = [];
-  for (const match of text.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gu)) {
-    const offset = text.slice(0, match.index + match[0].indexOf(match[1])).split("\n").length - 1;
-    for (const comment of comments(`${fileName}.ts`, match[1]))
-      found.push({ text: comment.text, line: comment.line + offset });
-  }
-  return found;
-}
-
 /** The forecasts in `text`'s comments: each comment line's form and text. */
 export function forecastsIn(fileName, text) {
   const found = [];
@@ -92,11 +56,7 @@ export function citationCounts(fileName, text) {
   return counts;
 }
 
-/** The files this check reads: the linted files and the `.vue` files. */
-function checkedFiles(root) {
-  return [
-    ...lintFiles(),
-    ...globSync("**/*.vue", { cwd: root, exclude: ["node_modules/**", "dist/**"] }),
+/**", "dist/**"] }),
   ].sort();
 }
 

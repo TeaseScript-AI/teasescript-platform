@@ -399,7 +399,6 @@ test("a click that arrives after the timeout does not revive the button", () => 
   assert.deepEqual(late.snapshot, timedOut);
 });
 
-/** A malformed snapshot fails validation and cannot be restored from a checkpoint. */
 /** The snapshot with its handed-off button result replaced in every copy. */
 function withResult(snapshot: RuntimeSnapshot, result: unknown) {
   const handoff = snapshot.interactionResultHandoff!;
@@ -419,6 +418,7 @@ function rejects(plan: InstructionPlan, snapshot: unknown): boolean {
   return !validateRuntimeSnapshot(snapshot, plan).valid;
 }
 
+/** A malformed snapshot fails validation and cannot be restored from a checkpoint. */
 test("plan and snapshot validation reject malformed button results and timing", () => {
   const plan = compileValidPlan('let elapsed = showButton "Go", timeout: 5 s\nexit');
   const shown = createImmediatePacingRuntimeSnapshot(plan);

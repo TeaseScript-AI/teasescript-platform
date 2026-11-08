@@ -12,13 +12,13 @@ const byCost = (a, b) => seconds(b) - seconds(a) || (a < b ? -1 : a > b ? 1 : 0)
 
 /**
  * The seconds shard `index` of `count` spends before its tests: CI's last test job runs the pre-test checks first
- * (`check-2`'s `check:pretest`). With one shard, as `npm test` runs locally, none.
+ * (`check-3`'s `check:pretest`). With one shard, as `npm test` runs locally, none.
  */
 const startSeconds = (index, count) => (count > 1 && index === count ? pretestSeconds : 0);
 
 /**
  * The seconds shard `index` of `count` spends after its tests: CI's first test job compares with the runtime oracle
- * (`check-1`'s `oracle:test`). With one shard, none. (`check-2`'s few seconds validating the local-agent tooling are not
+ * (`check-1`'s `oracle:test`). With one shard, none. (`check-3`'s few seconds validating the local-agent tooling are not
  * counted.)
  */
 const endSeconds = (index, count) => (count > 1 && index === 1 ? oracleSeconds : 0);

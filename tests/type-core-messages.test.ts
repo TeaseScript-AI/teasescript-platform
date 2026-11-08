@@ -3457,6 +3457,130 @@ test("a mixed error reads a copy's layer by its type below the copy's own level,
 });
 
 /**
+ * #1825: a mixed error names each set layer of its elements' type as a set, as the current checker's first sentence
+ * does: directly, inside a dict and around one, inside a list, in a join, below a property, a written copy and a
+ * nullable one, and each side by its own values where a set and a list meet (in both orders; the second error there is
+ * #2007's count difference, which this test does not pin). A nested list and a dict of lists stay as they were. In
+ * four modes.
+ */
+test("a mixed element's type names its set layers as sets (#1825)", () => {
+  const ONE = "A list holds one type. Use values of one type in it.";
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    [
+      'let xs=[set[[1]],set[["x"]]]\nexit\n',
+      `This list mixes a set (integer[] set) and a set (string[] set). ${ONE}`,
+    ],
+    [
+      'let xs=[dict {k:set[[1]]},dict {k:set[["x"]]}]\nexit\n',
+      `This list mixes a dict (integer[] set dict) and a dict (string[] set dict). ${ONE}`,
+    ],
+    [
+      'let xs=[set[dict {k:1}],set[dict {k:"x"}]]\nexit\n',
+      `This list mixes a set (integer dict set) and a set (string dict set). ${ONE}`,
+    ],
+    [
+      'let xs=[[set[1]],[set["x"]]]\nexit\n',
+      `This list mixes a list (integer set[]) and a list (string set[]). ${ONE}`,
+    ],
+    [
+      'let xs=[set[[1]]]+[set[["x"]]]\nexit\n',
+      "'+' would mix a set (integer[] set) and a set (string[] set). A list holds one type. Use values of one type in both lists.",
+    ],
+    [
+      'let xs=[set[1]]+[set["x"]]\nexit\n',
+      "'+' would mix a set (integer set) and a set (string set). A list holds one type. Use values of one type in both lists.",
+    ],
+    [
+      'let xs=[{f:set[[1]]},{f:set[["x"]]}]\nexit\n',
+      "This list mixes objects whose property 'f' holds a set (integer[] set) in one and a set (string[] set) in " +
+        "another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      'let a:integer[] set=set[[1]]\nlet b:string[] set=set[["x"]]\nlet xs=[a,b]\nexit\n',
+      `This list mixes a set (integer[] set) and a set (string[] set). ${ONE}`,
+    ],
+    [
+      'let n:integer[]? set=set[[1]]\nlet xs=[n,set[["x"]]]\nexit\n',
+      `This list mixes a set (integer[]? set) and a set (string[] set). ${ONE}`,
+    ],
+    [
+      'let xs=[set[[1]],[["x"]]]\nexit\n',
+      `This list mixes a set (integer[] set) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[[["x"]],set[[1]]]\nexit\n',
+      `This list mixes a list (string[][]) and a set (integer[] set). ${ONE}`,
+    ],
+    // (an `otherwise` names the set its operand gives, its fallback only where the operand may be null)
+    [
+      'let a:integer[][]=[[1]]\nlet xs=[(a otherwise set[[2]]),set[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a set (string[] set). ${ONE}`,
+    ],
+    [
+      'let a:integer[] set=set[[1]]\nlet xs=[(a otherwise [[2]]),[["x"]]]\nexit\n',
+      `This list mixes a set (integer[] set) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let a:integer[] set=set[[1]]\nlet xs=[{p:(a otherwise [[2]])},{p:set[["x"]]}]\nexit\n',
+      "This list mixes objects whose property 'p' holds a set (integer[] set) in one and a set (string[] set) in " +
+        "another. A list holds one type. Give 'p' one type in every element.",
+    ],
+    // (controls: a nested list and a dict of lists)
+    [
+      'let xs=[[[1]],[["x"]]]\nexit\n',
+      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+    ],
+    [
+      'let xs=[dict {k:[1]},dict {k:["x"]}]\nexit\n',
+      `This list mixes a dict (integer[] dict) and a dict (string[] dict). ${ONE}`,
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.code === "TSV044" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+      // (a set's `member` is the sentence's word alone: never a step of the rule's path, which rejects and checks)
+      const request = coreRequest(main(source));
+      assert.ok(request !== null);
+      const paths = inMode(mode, () => analyseCore(request).diagnostics).flatMap((each) =>
+        "rule" in each && each.rule.rule === "mixed" ? [each.rule.path] : [],
+      );
+      assert.ok(
+        paths.length > 0 && paths.every((path) => !path.includes("member")),
+        `${JSON.stringify(mode)} ${source}: ${JSON.stringify(paths)}`,
+      );
+    }
+});
+
+/**
+ * #1825: a growing join's every sentence names its set layers as sets: the set walk's answers are kept apart from the
+ * dict walk's, which a later join over the same operands would otherwise read (Codex r1 on #2017). Every TSV044's
+ * description is checked; their count is not pinned (the checker reports the first join only). In four modes.
+ */
+test("a growing join names its set layers as sets in every sentence (#1825)", () => {
+  for (const [source, sides] of [
+    [
+      'let a=[set[1]]\nlet b=[set["x"]]\nlet xs=a+b+b\nexit\n',
+      "a set (integer set) and a set (string set)",
+    ],
+    [
+      'let a=[set[[1]]]\nlet b=[set[["x"]]]\nlet xs=a+b+b\nexit\n',
+      "a set (integer[] set) and a set (string[] set)",
+    ],
+  ] as const)
+    for (const mode of MODES) {
+      const sentences = inMode(mode, () => reported(main(source)))
+        .filter((each) => each.code === "TSV044")
+        .map((each) => each.message.split(". ")[0]!);
+      assert.ok(sentences.length > 0, `${JSON.stringify(mode)} ${source}`);
+      for (const sentence of sentences)
+        assert.equal(sentence, `'+' would mix ${sides}`, `${JSON.stringify(mode)} ${source}`);
+    }
+});
+
+/**
  * #1762: a mixed error names a dict layer of its elements' type as a dict, as the current checker's first sentence does:
  * a written copy's (one that may be null too), a literal's, below a list, below a property, two deep, and a join's;
  * each side by its own values where a list and a dict meet. In four modes.
@@ -3786,4 +3910,125 @@ test("a store's check tests an argument or an index target by its whole receivin
     "let a:integer?[][]?=[[1]]\nif a == null { exit }\nif hostValue is integer?[][] { a.addAll(hostValue) }\nexit\n",
   ])
     assert.deepEqual(errors(followed), [], followed);
+});
+
+/**
+ * #1828: a mixed join names its leaf with the null this occurrence may hold, by #1765's walk one depth more, as the
+ * current checker's first sentence does: not the null its decided domain allows. In four modes.
+ */
+test("a mixed join names its leaf null as the occurrence holds it (#1828)", () => {
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    // (a narrowed nullable scalar names no null, as the current checker's first sentence: both sides, `+` and `+=`, and at the top)
+    [
+      "let n:integer?=1\nlet xs=[{f:false}]+[{f:n}]\nexit\n",
+      "'+' would mix objects whose property 'f' holds true or false (boolean) in one and a whole number (integer) in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nlet xs=[{f:n}]+[{f:false}]\nexit\n",
+      "'+' would mix objects whose property 'f' holds a whole number (integer) in one and true or false (boolean) in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nlet xs=[{f:false}]\nxs += [{f:n}]\nexit\n",
+      "'+=' would mix objects whose property 'f' holds true or false (boolean) in one and a whole number (integer) in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nlet xs=[{f:n}]\nxs += [{f:false}]\nexit\n",
+      "'+=' would mix objects whose property 'f' holds a whole number (integer) in one and true or false (boolean) in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nlet xs=[false]+[n]\nexit\n",
+      "'+' would mix true or false (boolean) and a whole number (integer). A list holds one type. To allow both, declare the list as 'let xs: (boolean | integer | null)[] =[false]+[n]'.",
+    ],
+    // (one that may be null keeps its `or null`: a host value, a narrowed value invalidated by a store)
+    [
+      "let n:integer?=hostValue\nlet xs=[{f:false}]+[{f:n}]\nexit\n",
+      "'+' would mix objects whose property 'f' holds true or false (boolean) in one and a whole number (integer) or null in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nif hostValue == 1 { n=null }\nlet xs=[{f:n}]+[{f:false}]\nexit\n",
+      "'+' would mix objects whose property 'f' holds a whole number (integer) or null in one and true or false (boolean) in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nif hostValue == 1 { n=null }\nlet xs=[{f:false}]\nxs += [{f:n}]\nexit\n",
+      "'+=' would mix objects whose property 'f' holds true or false (boolean) in one and a whole number (integer) or null in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    // (a copied whole collection keeps its written leaf, a literal's own leaf is narrowed, and a null at an intermediate layer stays there, with a leaf null beside it)
+    [
+      "let n:integer?[]= [1]\nlet xs=[{f:[false]}]+[{f:n}]\nexit\n",
+      "'+' would mix objects whose property 'f' holds a list (boolean[]) in one and a list (integer?[]) in another. A list holds one type. Give 'f' one type in every element.",
+    ],
+    [
+      "let n:integer?=1\nlet xs=[[false]]+[[2,n]]\nexit\n",
+      "'+' would mix a list (boolean[]) and a list (integer[]). A list holds one type. To allow both, declare the list as 'let xs: (boolean | integer)[][] =[[false]]+[[2,n]]'.",
+    ],
+    [
+      'let xs=[[[1],null]]+[[["x"]]]\nexit\n',
+      "'+' would mix a list (integer[]?[]) and a list (string[][]). A list holds one type. To allow both, declare the list as 'let xs: ((integer | string)[]?)[][] =[[[1],null]]+[[[\"x\"]]]'.",
+    ],
+    [
+      'let n:integer?=hostValue\nlet xs=[[[1,n],null]]+[[["x"]]]\nexit\n',
+      "'+' would mix a list (integer?[]?[]) and a list (string[][]). A list holds one type. To allow both, declare the list as 'let xs: ((integer | string | null)[]?)[][] =[[[1,n],null]]+[[[\"x\"]]]'.",
+    ],
+    // (a compound assignment's target read through a property, whose occurrence says nothing at the leaf: its place's
+    // admitted null, a literal's and a written copy's, as the current checker names it; the joins area)
+    [
+      'let box = {first: {items: [1, null]}}\nbox.first.items += ["x"]\nexit\n',
+      "'+=' would mix a whole number (integer) or null and text (string). A list holds one type. To allow both, declare the list with the type '(integer | string | null)[]'.",
+    ],
+    [
+      'let typed: (integer | boolean | null)[] = [1]\nlet box = {first: {items: typed}}\nbox.first.items += ["x"]\nexit\n',
+      "'+=' would mix a whole number (integer), true or false (boolean), or null and text (string). A list holds one type. To allow both, declare the list with the type '(integer | boolean | string | null)[]'.",
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.code === "TSV044" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+});
+
+/**
+ * #1828's known limit: the sentence names the null as admission's occurrence items hold it. Where those items are
+ * `unknown` (#2009: a `+=` target read through a property named like a collection member, `first`, `last`, `random`,
+ * which admission takes as a member read) or keep a null the value cannot hold (#2011: an index into a list of a copied
+ * object), it follows them, as main does, where the current checker names none. Pinned with those reasons, beside a
+ * property of another name, which the occurrence reads right. In four modes.
+ */
+test("a join target whose occurrence items are unknown or keep a stale null names that null (#1828, #2009, #2011)", () => {
+  const DECLARE = "A list holds one type. To allow both, declare the list with the type";
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    // (known wrong, #2009: the checker says `a whole number (integer) and text (string)`)
+    [
+      'let n:integer?=1\nlet box={first:{items:[n]}}\nbox.first.items += ["x"]\nexit\n',
+      `'+=' would mix a whole number (integer) or null and text (string). ${DECLARE} '(integer | string | null)[]'.`,
+    ],
+    [
+      'let n:integer?=hostValue\nif n != null {\nlet box={first:{items:[n]}}\nbox.first.items += ["x"]\n}\nexit\n',
+      `'+=' would mix a whole number (integer) or null and text (string). ${DECLARE} '(integer | string | null)[]'.`,
+    ],
+    // (known wrong, #2009: the checker says `a list (integer[])`)
+    [
+      'let n:integer?=1\nlet box={first:{items:[[n]]}}\nbox.first.items += [["x"]]\nexit\n',
+      `'+=' would mix a list (integer?[]) and a list (string[]). ${DECLARE} '(integer | string | null)[][]'.`,
+    ],
+    // (known wrong, #2011: the items through the index keep `n`'s null; the checker says `a whole number (integer) and text`)
+    [
+      'let n:integer?=1\nlet origin={alpha:{items:[n]}}\nlet box=[origin]\nbox[0].alpha.items += ["x"]\nexit\n',
+      `'+=' would mix a whole number (integer) or null and text (string). ${DECLARE} '(integer | string | null)[]'.`,
+    ],
+    // (the boundary: a property of another name, read right, as the checker)
+    [
+      'let n:integer?=1\nlet box={alpha:{items:[n]}}\nbox.alpha.items += ["x"]\nexit\n',
+      `'+=' would mix a whole number (integer) and text (string). ${DECLARE} '(integer | string | null)[]'.`,
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.code === "TSV044" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
 });

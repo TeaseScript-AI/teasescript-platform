@@ -47,10 +47,14 @@ tests.on("test:complete", (data) => {
 tests.on("test:summary", (summary) => {
   if (!summary.success) process.exitCode = 1;
 });
-// A signal to the whole process group, as from Ctrl+C, also ends the filter that reads stdout, so the cancelled results
-// may find no reader.
+// A signal to the whole process group, as from Ctrl+C, also ends the filter that reads stdout, so the results may find no
+// reader. The same signal ends the files' processes, and this process can report one of them before its own signal
+// listener runs, so a write can fail before the run is cancelled. A reader that has gone stops the run, whichever came
+// first.
 await pipeline(tests, spec(), process.stdout).catch((error) => {
-  if (!controller.signal.aborted || error.code !== "EPIPE") throw error;
+  if (error.code !== "EPIPE") throw error;
+  controller.abort();
+  process.exitCode = 1;
 });
 if (process.env.TEST_FILE_SECONDS)
   writeFileSync(process.env.TEST_FILE_SECONDS, `${JSON.stringify({ filesAtOnce, seconds })}\n`);
