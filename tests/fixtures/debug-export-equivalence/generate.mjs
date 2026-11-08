@@ -49,4 +49,10 @@ for (const scenario of SCENARIOS)
     choices: scenario.choices,
     files: await exportFiles(api, scenario, candidateOf),
   });
-writeFileSync(out, `${JSON.stringify({ base, scenarios }, null, 1)}\n`);
+// Formatted as the repository formats its JSON, by the checkout's own Prettier and configuration.
+const prettier = await import(pathToFileURL(join(root, "node_modules/prettier/index.mjs")).href);
+const options = (await prettier.resolveConfig(join(root, "package.json"))) ?? {};
+writeFileSync(
+  out,
+  await prettier.format(JSON.stringify({ base, scenarios }), { ...options, parser: "json" }),
+);
