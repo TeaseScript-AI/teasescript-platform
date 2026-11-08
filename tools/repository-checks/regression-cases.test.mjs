@@ -231,7 +231,12 @@ function repository(head) {
   mkdirSync(join(root, "tmp"));
   const { NODE_TEST_CONTEXT: _context, ...withoutTestContext } = process.env;
   // started as CI starts it, not as a test: `node:test` refuses a run inside one
-  const env = { ...withoutTestContext, REGRESSION_CASES: "", TMPDIR: join(root, "tmp") };
+  const env = {
+    ...withoutTestContext,
+    REGRESSION_CASES: "",
+    TMPDIR: join(root, "tmp"),
+    RC_FIXTURE_ROOT: root,
+  };
   const run = (...args) =>
     spawnSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8", env });
   return { root, base, env, run };
@@ -312,7 +317,7 @@ regressionCase("x", { pr: 7, atBase: /defect/ }, () => {});
 // each verdict, at the base, by the helper's own record
 const VERDICTS = `import assert from "node:assert/strict";
 import { beforeEach, describe, test } from "node:test";
-import { writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs"; import { join } from "node:path";
 import { Bridge } from "../src/bridge.js";
 ${HELPER}
 const foreign = {};
@@ -335,7 +340,7 @@ test.only("an own op passes", () => {
 });
 // a historical case does not run
 regressionCase("an older fix's case", { pr: 3, atBase: at }, () => {
-  writeFileSync("historical-ran", "");
+  writeFileSync(join(process.env.RC_FIXTURE_ROOT ?? ".", "historical-ran"), "");
 });
 // the first line ends at CR LF, and at a lone CR
 regressionCase("a CR LF message", { pr: 7, atBase: /defect/ }, () => {
