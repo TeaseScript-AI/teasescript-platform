@@ -720,28 +720,38 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       intent,
     });
     resetRequested = false;
+    // A page-wide setting: it lives as long as the Player, whichever activation runs.
     sendRandomRequest(
       host,
       "randomControl",
       { intent: lastRandom },
       ahead === null ? {} : { after: ahead.id },
+      null,
     );
   }
-  /** Sends a random op on the Worker itself; its reply gives the history's revision. */
+  /**
+   * Sends a random op on the Worker itself; its reply gives the history's revision. `origin` is the activation an
+   * adoption acts for: once it retired, its reply writes nothing and its failure stops nothing (`useActivationRun`). A
+   * page-wide setting (`null`, `flushRandom`) lives as long as the Player.
+   */
   function sendRandomRequest(
     host: PlayerBridge,
     op: "randomControl" | "adoptRandom",
     args: Record<string, unknown>,
     options: { readonly after?: string },
+    origin: ActivationRun | null,
   ) {
     host.client.request(op, args, options).then(
       (reply) => {
+        if (disposed || (origin !== null && !activationRun.admits(origin))) return;
         // EVIDENCE: validation: the random ops reply from the same build with the history's revision.
         const { revision } = reply.result as { readonly revision: number };
-        if (!disposed) randomRevision.value = revision;
+        randomRevision.value = revision;
       },
       (error: unknown) => {
-        if (!endsQuietly(error) && !disposed) reportHostError(error);
+        if (endsQuietly(error) || disposed) return;
+        if (origin !== null && !activationRun.admits(origin)) return;
+        reportHostError(error, origin ?? activationRun.current());
       },
     );
   }
@@ -750,13 +760,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * `showSession` without inspection, input adopting an inspected state, Continue after its kept draw went on. A Start's
    * session is already its Player's from the `start` that made it.
    */
-  function adoptRandom(next: PlayerSession) {
+  function adoptRandom(next: PlayerSession, origin = activationRun.current()) {
     if (lastRandom === undefined || disposed) return;
+    // The adoption acts for the activation that shows `next`, and only while that lives.
     sendRandomRequest(
       bridgeOf(next),
       "adoptRandom",
       { session: next.id, intent: lastRandom },
       { after: next.id },
+      origin,
     );
   }
   /** What a Start carries: this Player, whose session it is, and its newest random intent. */
@@ -2634,7 +2646,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /**
    * Resolves the random draw the session is paused at, naturally, with a chosen outcome, or with its site's least-tried
    * one, in the host; with `record`, the outcome goes into the site's history. The session's clock goes on from the
-   * time it paused at. `null` when the session is not paused at that draw or no longer owns the UI.
+   * time it paused at. `null` when the session is not paused at that draw or no longer owns the UI. It acts for the
+   * activation that shows the session: once that retired, its reply writes nothing and its failure stops nothing.
    */
   function resolveRandomDraw(
     drawId: number,
@@ -2644,9 +2657,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (inspecting.value) return Promise.resolve(null);
     // Which reset the record belongs to, as it was asked: one asked for since enters nothing.
     const recorded = record ? { resetAt: lastRandom?.resetAt ?? 0 } : null;
+    const origin = activationRun.current();
     return ownedSection(session.value, "observeInput", async (section, owned, observe) => {
       // Paused at the draw, the session observes no time; a stopped session gives none.
       const current = await observe();
+      if (origin !== null && !activationRun.admits(origin)) return null;
       if (current === null || inspecting.value || current.state.randomDraw?.drawId !== drawId)
         return null;
       const result = await section.send<ResolveDrawResult>("resolveDraw", {
@@ -2654,12 +2669,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         outcome,
         record: recorded,
       });
-      if (!disposed) randomRevision.value = result.revision;
+      if (disposed || (origin !== null && !activationRun.admits(origin))) return null;
+      randomRevision.value = result.revision;
       if (!owned() || publishOwned(section.session) === null) return null;
       clock.rebase();
       return result.outcome;
     }).catch((error: unknown) => {
-      if (!endsQuietly(error) && refusalCode(error) === null && !disposed) reportHostError(error);
+      if (endsQuietly(error) || refusalCode(error) !== null || disposed) return null;
+      if (origin !== null && !activationRun.admits(origin)) return null;
+      reportHostError(error, origin ?? activationRun.current());
       return null;
     });
   }
@@ -3142,7 +3160,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           owned();
           continued = host.latest(continued) ?? continued;
         }
-        adoptRandom(continued);
+        adoptRandom(continued, origin);
         if (!("capture" in taken)) throw taken.error;
         await host.request(continued, "continue", { capture: taken.capture });
         owned();

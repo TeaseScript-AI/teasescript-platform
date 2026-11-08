@@ -65,6 +65,11 @@ interface ImageHost {
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   readonly inputSection: unknown;
+  setRandomControl(control: { readonly sites: readonly [] } | null): void;
+  forgetRandomHistory(): void;
+  readonly randomRevision: Readonly<Ref<number>>;
+  readonly hostError: Readonly<Ref<string | null>>;
+  prepareRestore(given: PlayerRuntimeSession): void;
 }
 let usePlayerSession: (options: {
   resolveAsset?: (path: string) => string | null;
@@ -601,3 +606,101 @@ test("a debug export whose photo read waits while a new Start retires its activa
     { candidate: null, readsAfterRetirement: 0, tickets: [], replacementShown: true },
   );
 });
+
+/*
+ * L5h.3b, the scoped round after the second final review: a random adoption acts for the activation that shows its
+ * session (`adoptRandom`). The real adoption's reply is held at the page's request; a successor activation begins; then
+ * the old reply arrives. A success writes nothing over the successor's history revision; a failure stops nothing of
+ * it, sets no error and captures nothing. Runs and tickets end empty.
+ */
+async function heldAdoption(
+  context: TestContext,
+  before: "start" | "continue",
+  outcome: "success" | "failure",
+) {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() => usePlayerSession({}))!;
+  context.after(() => scope.stop());
+  const bridge = await host.bridge;
+  const facade: Record<string, unknown> = await loadPlayerModule(
+    "player/engine-bridge/in-process.ts",
+  );
+  // EVIDENCE: validation: the bundle's facades, which the assertions below call.
+  const { heldRuns, heldTickets } = facade as {
+    heldRuns: (bridge: PlayerBridge) => number[];
+    heldTickets: (bridge: PlayerBridge) => string[];
+  };
+  host.setRandomControl({ sites: [] });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  if (before === "continue") {
+    host.prepare((options) =>
+      createPlayerRuntimeSession('let restored = askText "Restored"\nexit', options),
+    );
+    await host.activate();
+  }
+  const request = bridge.client.request.bind(bridge.client);
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  const held = { adoption: false };
+  const posted: string[] = [];
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    posted.push(args[0]);
+    const answered = request(...args);
+    if (args[0] !== "adoptRandom" || held.adoption) return answered;
+    held.adoption = true;
+    // The host ran the adoption; its reply reaches the page only once the successor began.
+    return answered.then(async (reply) => {
+      await gate;
+      if (outcome === "failure") throw new TypeError("The adoption failed.");
+      return reply;
+    });
+  });
+  if (before === "continue") host.prepareRestore(host.session.value!);
+  else
+    host.prepare((options) => createPlayerRuntimeSession('let old = askText "Old"\nexit', options));
+  await host.activate();
+  await until(() => held.adoption, "the activation adopts its session");
+  host.prepare((options) =>
+    createPlayerRuntimeSession('let next = askText "Successor"\nexit', options),
+  );
+  await host.activate();
+  host.forgetRandomHistory();
+  const successor = host.session.value;
+  const stateBefore = JSON.stringify(successor?.state);
+  await until(() => posted.includes("randomControl"), "the successor's reset is sent");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const revision = host.randomRevision.value;
+  const from = posted.length;
+  open();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const observed = {
+    revision: host.randomRevision.value,
+    error: host.hostError.value,
+    captures: posted.slice(from).filter((op) => op === "captureRecording").length,
+    shown:
+      host.session.value === successor && JSON.stringify(host.session.value?.state) === stateBefore,
+  };
+  scope.stop();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return { observed, revision, runs: heldRuns(bridge), tickets: heldTickets(bridge) };
+}
+
+for (const [before, outcome] of [
+  ["start", "success"],
+  ["start", "failure"],
+  ["continue", "failure"],
+] as const)
+  test(`a ${before}'s random adoption whose ${outcome} arrives after a successor began acts for nothing of it`, async (context) => {
+    const { observed, revision, runs, tickets } = await heldAdoption(context, before, outcome);
+    // The successor's reset is the history's second revision, after the old adoption's first; it stays.
+    assert.deepEqual(
+      { revision, observed, runs, tickets },
+      {
+        revision: 2,
+        observed: { revision: 2, error: null, captures: 0, shown: true },
+        runs: [],
+        tickets: [],
+      },
+    );
+  });

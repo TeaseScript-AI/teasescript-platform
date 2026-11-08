@@ -234,8 +234,9 @@ test("every publication, stop and binding route of the export observation is cla
 });
 
 /*
- * The second final review's sweep (B2-L-C-D-E): every wait in the page code that acts for an activation, each `await`
- * and each `.then` continuation, either re-admits the activation it began in before its next request or further work,
+ * The second final review's sweep (B2-L-C-D-E), and its scoped round's: every wait in the page code that acts for an
+ * activation, each `await` and each `.then`, `.catch` and `.finally` continuation, in the activation bodies and in every
+ * function of the file they call, transitively, either re-admits the activation it began in before its next request or further work,
  * or is listed with why it needs none. A wait this table does not list fails, and so does a listed re-admission that
  * no longer comes before the next request. Wiring only: that retired work does nothing is the runtime families' claim.
  */
@@ -246,15 +247,24 @@ const ACTIVATION_FILES = [
   "player/vue/src/useDebugExport.ts",
   "player/vue/src/usePlayerSession.ts",
 ] as const;
-/** In `usePlayerSession.ts`, the functions that act for an activation: its begin, its completions and its error stop. */
+/**
+ * In `usePlayerSession.ts`, the functions that act for an activation: its begin, its completions and its error stop,
+ * and every function of the file they call, transitively (`reachable`).
+ */
 const SESSION_ACTIVATION = [
-  "usePlayerSession > activate",
-  "usePlayerSession > startFrom",
-  "usePlayerSession > prepareRestore > begin",
-  "usePlayerSession > reportHostError",
-  "usePlayerSession > stopAt",
+  "activate",
+  "startFrom",
+  "startedSession",
+  "prepareStart",
+  "prepareRestore",
+  "reportHostError",
+  "stopAt",
 ];
 const READMITS = "re-admits before its next request or further work";
+const KEPT_SESSION =
+  "the kept session's persistence, under its own operation ownership (`persistenceOwnership`), which retires on a change of room, store or preparation; it sends no activation's diagnostic work";
+const SAVED_DATA =
+  "reads the page's saved data, before an activation's record begins or for the page; it acts for no activation";
 const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await origin.failure.selection":
     READMITS,
@@ -300,6 +310,46 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "drops a release's refusal; nothing follows",
   "usePlayerSession.ts: usePlayerSession > reportHostError: then starting": READMITS,
   "usePlayerSession.ts: usePlayerSession > stopAt: then acknowledged": READMITS,
+  // Reached from the activation bodies through the functions they call.
+  "usePlayerSession.ts: usePlayerSession > sendRandomRequest: then host.client.request": READMITS,
+  "usePlayerSession.ts: usePlayerSession > resolveRandomDraw > ownedSection:callback: await observe":
+    READMITS,
+  "usePlayerSession.ts: usePlayerSession > resolveRandomDraw > ownedSection:callback: await section.send":
+    READMITS,
+  "usePlayerSession.ts: usePlayerSession > resolveRandomDraw: catch ownedSection": READMITS,
+  "usePlayerSession.ts: usePlayerSession > startFrom: finally settled":
+    "clears the in-flight markers it set, only while they are still its own",
+  "usePlayerSession.ts: usePlayerSession > applyDebugMode: finally bridgeOf.request":
+    "clears the Debug mode asked, only while it is still this request's",
+  "usePlayerSession.ts: usePlayerSession > applyDebugMode: then bridgeOf.request.finally":
+    "the shown session's Debug mode: acts only while that session's lineage still shows, which a successor replaces",
+  "usePlayerSession.ts: usePlayerSession > ownedSection > bridgeOf(current).section:callback > body:callback: await section.send":
+    "the section's observation: its body rechecks `owned` (the session's lineage, the stop and disposal) after it",
+  "usePlayerSession.ts: usePlayerSession > primeAudio: catch element.play":
+    "drops a blocked play; nothing follows",
+  "usePlayerSession.ts: usePlayerSession > settlePlanJson: catch bridge.client.request":
+    "drops the plan JSON's refusal; nothing follows",
+  "usePlayerSession.ts: usePlayerSession > loadScriptStorage: await readScriptStorage": SAVED_DATA,
+  "usePlayerSession.ts: usePlayerSession > readScriptStorage: await values.load": SAVED_DATA,
+  "usePlayerSession.ts: usePlayerSession > readScriptStorage: await capturedMedia.knownReferences.catch":
+    SAVED_DATA,
+  "usePlayerSession.ts: usePlayerSession > readScriptStorage: catch capturedMedia.knownReferences":
+    SAVED_DATA,
+  "usePlayerSession.ts: usePlayerSession > keepSessionLater: await Promise.resolve": KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > keepSessionLater: await keepOnce": KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > keepOnce: await owned": KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > owned: await operation": KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > keepIn: await capturedMedia.promote": KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > keepIn: await ctx.admit": KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > keepIn: await discardKeptSession": KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > keepIn: await forgetKeptSession": KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > keepIn: await insertOrAcceptExisting": KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > keepIn: await storageRoute": KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > keepIn: await store.publish": KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > forgetKeptSession: await discardKeptSession.then":
+    KEPT_SESSION,
+  "usePlayerSession.ts: usePlayerSession > forgetKeptSession: then discardKeptSession":
+    KEPT_SESSION,
 };
 /** Calls that re-admit an activation, and calls that request or act for one. */
 const ADMITS = /^(?:goesOn|lives|owned|activationRun\.admits)$/u;
@@ -342,6 +392,15 @@ function waitsOf(file: string, scope: (path: string) => boolean) {
       declared.set(node.name.getText(source), node.initializer);
     node.forEachChild(collect);
   });
+  /** A call chain's names without its arguments, as `bridgeOf.request.finally`. */
+  const chain = (node: ts.Node): string =>
+    ts.isCallExpression(node)
+      ? chain(node.expression)
+      : ts.isPropertyAccessExpression(node)
+        ? `${chain(node.expression)}.${node.name.text}`
+        : ts.isIdentifier(node) || node.kind === ts.SyntaxKind.ThisKeyword
+          ? node.getText(source)
+          : ts.SyntaxKind[node.kind];
   const visit = (node: ts.Node, path: string[], fn: ts.Node | null): void => {
     const name = named(node);
     const inner = name === null ? path : [...path, name];
@@ -350,24 +409,15 @@ function waitsOf(file: string, scope: (path: string) => boolean) {
     if (scope(where) && owner !== null) {
       const base = `${file.split("/").at(-1)}: ${where}`;
       if (ts.isAwaitExpression(node)) {
-        const awaited = ts.isCallExpression(node.expression)
-          ? node.expression.expression
-          : node.expression;
-        waits.push({
-          key: `${base}: await ${awaited.getText(source)}`,
-          at: node.end,
-          after: owner,
-        });
+        waits.push({ key: `${base}: await ${chain(node.expression)}`, at: node.end, after: owner });
       }
       if (
         ts.isCallExpression(node) &&
         ts.isPropertyAccessExpression(node.expression) &&
-        (node.expression.name.text === "then" || node.expression.name.text === "catch")
+        ["then", "catch", "finally"].includes(node.expression.name.text)
       ) {
-        const receiver = node.expression.expression;
-        const callee = ts.isCallExpression(receiver) ? receiver.expression : receiver;
         waits.push({
-          key: `${base}: ${node.expression.name.text} ${callee.getText(source).replace(/\s+/gu, "")}`,
+          key: `${base}: ${node.expression.name.text} ${chain(node.expression.expression)}`,
           at: node.expression.end,
           // A continuation named by its function is checked in that function's body.
           after: node,
@@ -406,12 +456,55 @@ function waitsOf(file: string, scope: (path: string) => boolean) {
   }));
 }
 
+/** The names of `file`'s functions that `roots` call by name, transitively, the roots included. */
+function reachable(file: string, roots: readonly string[]): ReadonlySet<string> {
+  const source = ts.createSourceFile(
+    file,
+    readFileSync(resolve(process.cwd(), file), "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const functions = new Map<string, ts.Node[]>();
+  source.forEachChild(function collect(node): void {
+    const add = (name: string, body: ts.Node) =>
+      functions.set(name, [...(functions.get(name) ?? []), body]);
+    if (ts.isFunctionDeclaration(node) && node.name !== undefined) add(node.name.text, node);
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.initializer !== undefined &&
+      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+    )
+      add(node.name.getText(source), node.initializer);
+    node.forEachChild(collect);
+  });
+  const seen = new Set(roots);
+  const queue = [...roots];
+  for (let name = queue.shift(); name !== undefined; name = queue.shift())
+    for (const body of functions.get(name) ?? [])
+      body.forEachChild(function walk(node): void {
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+          const callee = node.expression.text;
+          if (functions.has(callee) && !seen.has(callee)) {
+            seen.add(callee);
+            queue.push(callee);
+          }
+        }
+        node.forEachChild(walk);
+      });
+  return seen;
+}
+
 test("every wait of the page's activation work re-admits its activation, or is listed with why it needs none", () => {
+  const session = reachable("player/vue/src/usePlayerSession.ts", SESSION_ACTIVATION);
   const found = ACTIVATION_FILES.flatMap((file) =>
     waitsOf(
       file,
       file.endsWith("usePlayerSession.ts")
-        ? (path) => SESSION_ACTIVATION.some((each) => path === each || path.startsWith(`${each} >`))
+        ? (path) =>
+            path
+              .split(" > ")
+              .slice(1)
+              .some((each) => session.has(each))
         : () => true,
     ),
   );

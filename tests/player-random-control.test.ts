@@ -575,7 +575,7 @@ test("every random-op sender in the composable is classified as adopting or not"
     [
       "if (!paused) adoptRandom(next);",
       "if (session.value !== null) adoptRandom(session.value);",
-      "adoptRandom(continued);",
+      "adoptRandom(continued, origin);",
     ],
   );
 });
