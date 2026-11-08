@@ -674,7 +674,8 @@ least the set share of the photo's measured pixels, else a Muted-family swatch t
 small detail does not colour the Player. A photo without a swatch of that family takes the other family's, the larger
 Vibrant one first. The background,
 message bubbles, composer, buttons, and tools follow the photo together. The background is deepest in colour around
-the photo, or without one around the middle of the Stage; towards its far edges it darkens in dark mode and pales in
+what the Stage shows: the photo, or an image request's preview or the camera view over it, which keep the photo's
+colour; without any, the middle of the Stage. Towards its far edges it darkens in dark mode and pales in
 light mode. With the Photo accent A/B test's A,
 the accent (Send, the preselected ring, and the other accent marks) takes the photo's hue too; B, the default, keeps the
 theme's accent, as does a photo with too little colour. A grey photo makes the Player neutral at the
