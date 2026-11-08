@@ -120,7 +120,7 @@ const player = usePlayerSession(
 
 // `?rewindGate=slow` holds each restart gate of Debug's rewind for 1.5 s, so a switch lasts long enough to show its
 // animation; `?rewindGate=fail` fails the second one, Debug off's reinstatement after a Back, so its retry shows, and
-// holds the third, that retry, likewise (DEBUGGER.md "Rewind"). The Player reads the gate at each call (`rewind.beforeRestart`).
+// holds the third, that retry, for 3 s (DEBUGGER.md "Rewind"). The Player reads the gate at each call (`rewind.beforeRestart`).
 const rewindGate = query.get("rewindGate");
 if (rewindGate === "slow" || rewindGate === "fail") {
   const gate = player.rewind.beforeRestart.bind(player.rewind);
@@ -128,7 +128,8 @@ if (rewindGate === "slow" || rewindGate === "fail") {
   player.rewind.beforeRestart = async () => {
     asked += 1;
     if (rewindGate === "fail" && asked === 2) throw new Error("The restart gate failed (rewindGate=fail).");
-    if (rewindGate === "slow" || asked === 3) await new Promise((resolve) => setTimeout(resolve, 1_500));
+    const hold = rewindGate === "slow" ? 1_500 : asked === 3 ? 3_000 : 0;
+    if (hold > 0) await new Promise((resolve) => setTimeout(resolve, hold));
     return gate();
   };
 }
@@ -278,14 +279,14 @@ else
         <template v-if="buttons.length" #controls>
           <PermanentButtons
             :buttons="buttons"
-            :held="player.rewind.inputHeld.value"
+            :held="player.rewind.inputHeld.value || player.stopped.value"
             @press="press"
           />
         </template>
         <template v-else #controls>
           <BackgroundControlsFixture
             :key="backgroundControlsReset"
-            :held="player.rewind.inputHeld.value"
+            :held="player.rewind.inputHeld.value || player.stopped.value"
           />
         </template>
       </StageRightRail>

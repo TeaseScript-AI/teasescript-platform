@@ -3006,26 +3006,33 @@ async function rewindSwitchScenario(cdp, origin) {
         await physicalClick(cdp, '[data-tools-focus="launcher:Debug"]');
         await waitFor(cdp, `!document.querySelector('[data-tool="Debug"]')`);
       }
-      // The error shows once, in its notice; the transcript it left empty says nothing.
+      // The error shows once, in its notice; the transcript it left empty says nothing; the stopped session's permanent
+      // button is held.
       assertEqual(
         await value(
           cdp,
-          `JSON.stringify(['The Player ran into an error.', 'No messages yet'].map((text) => document.body.innerText.split(text).length - 1))`,
+          `JSON.stringify({
+            texts: ['The Player ran into an error.', 'No messages yet'].map((text) => document.body.innerText.split(text).length - 1),
+            permanent: document.querySelectorAll('[data-permanent-button]').length > 0 && [...document.querySelectorAll('[data-permanent-button]')].every((button) => button.getAttribute('aria-disabled') === 'true'),
+          })`,
         ),
-        "[1,0]",
-        `A failed reinstatement, ${mode} ${device}: its error once, and no empty-transcript text`,
+        JSON.stringify({ texts: [1, 0], permanent: true }),
+        `A failed reinstatement, ${mode} ${device}: its error once, no empty-transcript text, its permanent button held`,
       );
       await save(`retry-${mode}-${device}`);
       // The retry brings the session Back left back, which takes input again, and withdraws the error.
       // The retry, which the failing gate holds, closes its toast; the panel does not offer it again while it runs.
       await physicalClickOn(cdp, retry, "the error notice's Retry return to session");
       await physicalClick(cdp, "[data-notification-bell]");
+      const pendingRetry = `JSON.stringify({ retry: document.querySelector('[data-notice-action="session-error"]')?.disabled ?? 'none', announced: document.querySelector('[data-rewind-announcement]')?.textContent.trim() })`;
       await waitFor(
         cdp,
-        `document.querySelector('[data-notice-action="session-error"]')?.disabled === true`,
-        1_000,
+        `${pendingRetry} === '{"retry":true,"announced":"Returning to session"}'`,
+        2_000,
         `A pending retry, ${mode} ${device}: the panel still offers it`,
-      );
+      ).catch(async (error) => {
+        throw new Error(`${error.message}: ${await value(cdp, pendingRetry)}`);
+      });
       await waitFor(
         cdp,
         `!document.querySelector('[data-player-notice="session-error"]') && !!${choice("Left")} && !${choice("Left")}.disabled`,

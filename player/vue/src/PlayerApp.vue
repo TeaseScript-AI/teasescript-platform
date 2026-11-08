@@ -759,7 +759,7 @@ async function toggleFullscreen() {
               <template v-if="player.permanentButtons.value.length" #controls>
                 <PermanentButtons
                   :buttons="player.permanentButtons.value"
-                  :held="player.rewind.inputHeld.value"
+                  :held="player.rewind.inputHeld.value || player.stopped.value"
                   @press="player.pressPermanentButton"
                 />
               </template>
