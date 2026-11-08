@@ -39,6 +39,19 @@ export async function waitForState(page, predicate, timeoutMs, what) {
   }
 }
 
+const sessions = new WeakMap();
+
+/**
+ * A real tap at (`x`, `y`) through CDP touch input: the phone's own Chrome profile, attached with `noDefaults`, has no
+ * Playwright touch emulation, so `page.touchscreen` refuses there.
+ */
+async function tap(page, x, y) {
+  if (!sessions.has(page)) sessions.set(page, await page.context().newCDPSession(page));
+  const cdp = sessions.get(page);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+}
+
 /**
  * Presses the element at `selector` (its `index`th match) with real input, a tap on the Pixel and a mouse click
  * elsewhere, once it is enabled, scrolled into view, uncovered at its centre, and its box has held still for two
@@ -89,7 +102,7 @@ export async function press(opened, page, selector, index = 0) {
     { selector, index },
   );
   if (box === null) throw new Error(`'${selector}' #${index} is not visible, enabled and still`);
-  if (opened.engine === "pixel") await page.touchscreen.tap(box.x, box.y);
+  if (opened.engine === "pixel") await tap(page, box.x, box.y);
   else await page.mouse.click(box.x, box.y);
 }
 
