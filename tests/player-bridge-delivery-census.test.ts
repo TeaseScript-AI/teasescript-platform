@@ -14,12 +14,14 @@ import { playerOpsContext, type PlayerOpsContext } from "../player/engine-bridge
  * delivery or owner leaves none behind. A delivery is live from just before its op runs until its success reply is
  * posted; after that, what it allocated is the connection's, until it is released or the connection closes.
  *
- * This file: the two construction checks that what a connection retains is held only in owned registries.
+ * This file: two convention checks, by syntax and by declared types, that a connection's registries are owned ones.
+ * They do not decide the invariant: the retention family does (`player-bridge-delivery-retention.test.ts`).
  */
 
 // ---------------------------------------------------------------------------------------------------------------------
-// The census: what a connection retains is held only in owned registries. It covers two places: the ops context, and
-// module-scope state in `player/engine-bridge/`. State held anywhere else is guarded by review and the family's rows.
+// The census, a convention check: the ops context's declared field types and its visible own fields, and the
+// collections created by syntax outside function nodes in the modules of `player/engine-bridge/`. It does not see a
+// class's private instance state, what an immediately invoked function or a computed name creates, or closure state.
 
 /** The context's paths that hold diagnostics or scalar state the connection keeps by design, not registries. */
 const CONNECTION_STATE = new Set([
@@ -33,8 +35,9 @@ const CONNECTION_STATE = new Set([
 ]);
 
 /**
- * What on `holder` (at `path`) is not an owned registry or classified state: a raw collection, an unknown value, or an
- * object with nothing in it. Exemptions are by exact path; functions are behaviour, not state.
+ * What on `holder` (at `path`) is not an owned registry or classified state, among its visible own fields: a raw
+ * collection, an unknown value, or an object with no own fields. Exemptions are by exact path. A function with no own
+ * fields but those `FUNCTION_FIELDS` exempts is skipped; one with more has them checked as any field's.
  */
 function unowned(holder: Readonly<Record<string, unknown>>, path: string): string[] {
   const fields = Object.entries(holder);
@@ -51,7 +54,6 @@ function unowned(holder: Readonly<Record<string, unknown>>, path: string): strin
       Array.isArray(value)
     )
       return [`${at}: a raw collection`];
-    // A function is behaviour only while it carries no state of its own; else its own fields are checked as any are.
     if (typeof value === "function") {
       const own = ownFields(value).filter(([key]) => !FUNCTION_FIELDS.has(key));
       return own.length === 0 ? [] : unowned(Object.fromEntries(own), at);
@@ -62,7 +64,10 @@ function unowned(holder: Readonly<Record<string, unknown>>, path: string): strin
   });
 }
 
-/** The fields every function has of its own, which hold no state of the connection. */
+/**
+ * The own fields this check exempts on a function. An exemption, not a proof: a function's `prototype` is an object
+ * that could hold state, and this check does not look into it.
+ */
 const FUNCTION_FIELDS = new Set(["length", "name", "prototype"]);
 
 /** Every own field of `value`, enumerable or not, a symbol's under its description; an accessor's by its getter. */
@@ -83,9 +88,9 @@ function ownFields<T>(value: T): [string, unknown][] {
 }
 
 /**
- * Whether every field of `T`, recursively, is an owned registry or behaviour: `true`, or the offending field's name. An
- * object with no fields, or an opaque one, is no proof of ownership and fails. A function is behaviour only as a call
- * signature with no properties; one with properties has them checked as any field's.
+ * Whether every declared field of `T`, recursively, is an owned registry or a call signature: `true`, or the offending
+ * field's name. An object type with no keys fails. A function type passes as a call signature with no properties; with
+ * properties, they are checked as any field's. Declared types only: a class's private state behind public methods passes.
  */
 type AllOwned<T> = {
   [Field in keyof T]-?: T[Field] extends (...args: never[]) => infer _Result
@@ -145,9 +150,9 @@ test("every field of a connection's context, recursively, is an owned registry o
 const ENGINE_BRIDGE = resolve(process.cwd(), "player/engine-bridge");
 
 /**
- * Every module-scope binding of `player/engine-bridge/` that can hold state across calls: a `let`, or a collection made
- * outside any function (`new Map`, `Set`, `WeakMap`, `WeakSet`, an array literal), at module scope or as a class field.
- * Each is classified by module and binding; anything else fails.
+ * The module-scope bindings of `player/engine-bridge/` the module check finds: every module-scope `let`, and every
+ * collection created by syntax (`new Map`, `Set`, `WeakMap`, `WeakSet`, an array literal) outside a function node,
+ * named by the declaration it sits in. Each is classified by module and binding; an unclassified or stale one fails.
  */
 const MODULE_STATE: Readonly<Record<string, string>> = {
   "delivery.ts › states": "the owners' own state, weakly keyed by its owner",
@@ -194,9 +199,11 @@ const isCollection = (node: ts.Expression | undefined): boolean => {
   );
 };
 
-/** The module-scope state of `text` (module `module`), by `module › binding`. */
-/** The bodies that run per call, whose collections are no module state: the walk stops at these, and only these. */
-const PER_CALL = new Set([
+/**
+ * The function nodes the module walk does not enter, and only these. What they create is not seen here, also when a
+ * call at module scope keeps it: an immediately invoked function, or a class method's computed name.
+ */
+const FUNCTION_NODES = new Set([
   ts.SyntaxKind.FunctionDeclaration,
   ts.SyntaxKind.FunctionExpression,
   ts.SyntaxKind.ArrowFunction,
@@ -208,7 +215,8 @@ const PER_CALL = new Set([
 
 /**
  * The module-scope state of `text` (module `module`), by `module › binding`: every module-scope `let`, and every
- * collection made anywhere in the module outside a per-call body (`PER_CALL`), named by the declaration it sits in.
+ * collection created by syntax anywhere in the module outside a function node (`FUNCTION_NODES`), named by the
+ * declaration it sits in.
  */
 function moduleState(module: string, text: string): string[] {
   const source = ts.createSourceFile(module, text, ts.ScriptTarget.Latest, true);
@@ -221,7 +229,7 @@ function moduleState(module: string, text: string): string[] {
       for (const declaration of statement.declarationList.declarations)
         found.add(`${module} › ${declaration.name.getText(source)}`);
   const visit = (node: ts.Node, binding: string) => {
-    if (PER_CALL.has(node.kind)) return;
+    if (FUNCTION_NODES.has(node.kind)) return;
     let at = binding;
     if (ts.isVariableDeclaration(node)) at = node.name.getText(source);
     if (ts.isClassLike(node)) at = node.name?.text ?? "(class)";
@@ -262,7 +270,7 @@ test("every module-scope binding of the engine bridge that can hold state across
     "classified, but no such binding",
   );
   // A module-level map, also wrapped in an object or a call, a module-level `let` a registry could be stashed in, and a
-  // class field, also wrapped, are found; a function's own map is not.
+  // class field, also wrapped, are found; a map a function creates is not seen.
   assert.deepEqual(
     moduleState(
       "ops/transfer.ts",
