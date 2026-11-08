@@ -134,9 +134,9 @@ test("a file Git lists three times, while a merge conflicts, is read and counted
 });
 
 test("a run whose links all resolve passes and names how many files it read, past 1 MB of Git's list", () => {
-  // names long enough that Git's NUL-separated list passes 1 MB
+  // names long enough that Git's NUL-separated list passes 1 MB: 4,400 × 249 bytes
   const many = Object.fromEntries(
-    Array.from({ length: 4200 }, (_, index) => [
+    Array.from({ length: 4400 }, (_, index) => [
       `${"n".repeat(240)}${String(index).padStart(5, "0")}.md`,
       "",
     ]),
@@ -151,7 +151,7 @@ test("a run whose links all resolve passes and names how many files it read, pas
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.equal(
       result.stdout,
-      "doc-links: remark reports no unresolved relative link or heading anchor in 4202 Markdown files\n",
+      "doc-links: remark reports no unresolved relative link or heading anchor in 4402 Markdown files\n",
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
