@@ -45,8 +45,13 @@ const reported = (stderr) =>
     .filter((line) => /^\S+\.md$/u.test(line))
     .sort();
 const BROKEN = "[bad](missing.md)\n";
-/** A remark configuration that turns the validator off. */
-const OFF = { plugins: [["remark-validate-links", false]] };
+/**
+ * A remark configuration that would change the run: the validator off, and a plugin that is not installed, which fails
+ * every file it applies to.
+ */
+const CONFIGURED = {
+  plugins: [["remark-validate-links", false], "remark-plugin-that-is-not-installed"],
+};
 
 test("remark reads exactly Git's regular Markdown files, with no configuration or ignore file of its own", () => {
   const { root, git } = checkout({
@@ -54,11 +59,11 @@ test("remark reads exactly Git's regular Markdown files, with no configuration o
     "docs/a.md": "# A\n\n## Part\n\n[back](../README.md#title)\n",
     "gone.md": "# Gone\n",
     ".github/notes.md": "[missing](../docs/a.md#missing)\n",
-    // a root configuration that turns the validator off, nested ones, and an ignore file: none is read
-    "package.json": JSON.stringify({ type: "module", remarkConfig: OFF }),
-    "nested/.remarkrc": JSON.stringify(OFF),
+    // a root configuration that would change the run, nested ones, and an ignore file: none is read
+    "package.json": JSON.stringify({ type: "module", remarkConfig: CONFIGURED }),
+    "nested/.remarkrc": JSON.stringify(CONFIGURED),
     "nested/x.md": BROKEN,
-    "pkg/package.json": JSON.stringify({ remarkConfig: OFF }),
+    "pkg/package.json": JSON.stringify({ remarkConfig: CONFIGURED }),
     "pkg/y.md": BROKEN,
     ".remarkignore": "skipped.md\n",
     "skipped.md": BROKEN,
