@@ -30,7 +30,7 @@ interface RandomControlHost {
   readonly isDisposed: () => boolean;
   readonly activationRun: ReturnType<typeof useActivationRun>;
   readonly reportHostError: (error: unknown, origin?: ActivationRun | null) => void;
-  /** The scene clock, made after this owner. */
+  /** The scene clock, read when used. */
   readonly clock: () => ReturnType<typeof useRuntimeSceneClock>;
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly inspecting: Readonly<Ref<boolean>>;

@@ -57,7 +57,7 @@ interface SavedDataTransferHost {
   readonly endSession: () => void;
   readonly retireRewind: (by: "clear" | "import" | "loss") => void;
   readonly prepareStart: (create: PlayerSessionStart, outdated?: Problem) => void;
-  /** Whether a session runs, waits for Continue, or is starting; made after this owner. */
+  /** Whether a session runs, waits for Continue, or is starting; read when used. */
   readonly sessionInProgress: () => Readonly<Ref<boolean>>;
 }
 

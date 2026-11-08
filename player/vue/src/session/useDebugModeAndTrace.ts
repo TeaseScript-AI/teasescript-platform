@@ -24,15 +24,15 @@ interface DebugModeAndTraceHost {
   readonly publishOwned: (next: PlayerSession) => PlayerSession | null;
   readonly keepSessionLater: () => void;
   readonly copyToDebugRoom: () => Promise<void>;
-  /** The scene clock, made after this owner. */
+  /** The scene clock, read when used. */
   readonly clock: () => ReturnType<typeof useRuntimeSceneClock>;
-  /** The room shown, made after this owner. */
+  /** The room shown, read when used. */
   readonly room: () => Readonly<Ref<"normal" | "debug">>;
-  /** Whether the script has its own saved data, which is made after this owner. */
+  /** Whether the script has its own saved data, read when used. */
   readonly hasNormalStorage: () => boolean;
-  /** Whether a restored state is inspected, made after this owner. */
+  /** Whether a restored state is inspected, read when used. */
   readonly inspecting: () => Readonly<Ref<boolean>>;
-  /** The prepared Start or Continue, made after this owner. */
+  /** The prepared Start or Continue, read when used. */
   readonly activation: () => Readonly<Ref<unknown>>;
 }
 

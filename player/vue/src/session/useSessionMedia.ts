@@ -54,9 +54,9 @@ interface SessionMediaHost {
     ) => Promise<T>,
   ) => Promise<T | null>;
   readonly publishOwned: (next: PlayerSession) => PlayerSession | null;
-  /** The scene clock, made after this owner. */
+  /** The scene clock, read when used. */
   readonly clock: () => ReturnType<typeof useRuntimeSceneClock>;
-  /** The decoder of chosen image files, made after this owner. */
+  /** The decoder of chosen image files, read when used. */
   readonly decodeImage: () => ImageDecoder;
 }
 

@@ -69,11 +69,11 @@ interface KeptSessionHost {
   readonly endSession: () => void;
   readonly prepareStart: (create: PlayerSessionStart, outdated?: Problem) => void;
   readonly prepareRestore: (given: PlayerSession) => void;
-  /** The latest Start, made after this owner. */
+  /** The latest Start, read when used. */
   readonly lastStart: () => Readonly<Ref<PlayerSessionStart | null>>;
   /** Remembers the Start a preparation of the script offers, and the source text of its files. */
   readonly remember: (create: PlayerSessionStart, sources?: ReadonlyMap<string, string>) => void;
-  /** The scene clock, made after this owner. */
+  /** The scene clock, read when used. */
   readonly clock: () => ReturnType<typeof useRuntimeSceneClock>;
   /** A failed store call's fallback, unless the call was refused as stale (`useSavedValues`). */
   readonly rejectedUnlessStale: <T>(fallback: T) => (error: unknown) => T;

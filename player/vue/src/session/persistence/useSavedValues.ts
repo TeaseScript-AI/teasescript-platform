@@ -31,17 +31,17 @@ interface SavedValuesHost {
   readonly generation: Readonly<Ref<number>>;
   readonly stopped: Readonly<Ref<boolean>>;
   readonly isDisposed: () => boolean;
-  /** An input section of the shown session, made after this owner. */
+  /** An input section of the shown session, read when used. */
   readonly inputSection: InputSectionHost;
   /** Ends Debug's rewind history, whose owner is made after this one. */
   readonly retireRewind: (by: "clear" | "import" | "loss") => void;
-  /** The Player's notices, made after this owner. */
+  /** The Player's notices, read when used. */
   readonly notices: () => PlayerNotices;
-  /** Whether a restored state is inspected, made after this owner. */
+  /** Whether a restored state is inspected, read when used. */
   readonly inspecting: () => Readonly<Ref<boolean>>;
-  /** The prepared Start or Continue, made after this owner. */
+  /** The prepared Start or Continue, read when used. */
   readonly activation: () => Readonly<Ref<{ readonly kind: "start" | "continue" } | null>>;
-  /** Whether a Start or Continue is beginning, made after this owner. */
+  /** Whether a Start or Continue is beginning, read when used. */
   readonly beginning: () => Readonly<Ref<boolean>>;
 }
 

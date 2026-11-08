@@ -47,7 +47,7 @@ interface SessionActivationHost {
   readonly captures: { reset(): void };
   readonly device: { reset(): void };
   readonly primeAudio: () => void;
-  /** Whether the script has saved values, which are made after this owner. */
+  /** Whether the script has saved values, read when used. */
   readonly hasScriptStorage: () => boolean;
   readonly loadScriptStorage: () => Promise<void>;
   readonly clearing: () => Readonly<Ref<boolean>>;

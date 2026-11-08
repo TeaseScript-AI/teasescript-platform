@@ -26,25 +26,25 @@ interface SessionRewindHost {
   readonly showSession: (next: PlayerSession, options: { readonly paused: boolean }) => void;
   readonly scriptStorage: ScriptStorageProvider | undefined;
   readonly applyDebugMode: () => void;
-  /** Random control's adoption, made after this owner. */
+  /** Random control's adoption, read when used. */
   readonly adoptRandom: (next: PlayerSession) => void;
-  /** Random control's natural resolution of a draw nobody decides, made after this owner. */
+  /** Random control's natural resolution of a draw nobody decides, read when used. */
   readonly settleUncontrolledDraw: () => void;
-  /** The rewind's surface on the return surface, which a host or a test may change; made after this owner. */
+  /** The rewind's surface on the return surface, which a host or a test may change; read when used. */
   readonly rewindApi: () => { beforeRestart(): void | Promise<void> };
-  /** The scene clock, made after this owner. */
+  /** The scene clock, read when used. */
   readonly clock: () => ReturnType<typeof useRuntimeSceneClock>;
-  /** The Player's notices, made after this owner. */
+  /** The Player's notices, read when used. */
   readonly notices: () => PlayerNotices;
-  /** The prepared Start or Continue, made after this owner. */
+  /** The prepared Start or Continue, read when used. */
   readonly activation: () => Readonly<Ref<unknown>>;
-  /** Whether saved data is being imported, cleared, or a session begins; made after this owner. */
+  /** Whether saved data is being imported, cleared, or a session begins; read when used. */
   readonly importing: () => Readonly<Ref<boolean>>;
   readonly clearing: () => Readonly<Ref<boolean>>;
   readonly beginning: () => Readonly<Ref<boolean>>;
-  /** Debug storage edits under way, made after this owner. */
+  /** Debug storage edits under way, read when used. */
   readonly editsInFlight: () => Readonly<Ref<number>>;
-  /** The count of this Player's changes to the saved values, made after this owner. */
+  /** The count of this Player's changes to the saved values, read when used. */
   readonly savedDataRevision: () => Ref<number>;
 }
 
