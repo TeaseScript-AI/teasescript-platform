@@ -93,7 +93,16 @@ const noFragmentedClasses = {
 // `data-[disabled]:opacity-*` class on a Player control therefore never shows and misleads. `aria-disabled` stays
 // outside this rule: the shared rule does not cover it, and it marks controls that dim while busy yet keep focus
 // (LockDialog, PasswordField).
-const disabledOpacity = /^!?(?:disabled|data-\[disabled\]|data-disabled):!?-?opacity-/;
+// A disabled variant anywhere in the token's variant chain (`dark:disabled:opacity-50`, `disabled:focus:opacity-50`).
+const disabledVariant = /^(?:disabled|data-\[disabled\]|data-disabled)$/;
+function disabledOpacity(token) {
+  const parts = token.replace(/^!/, "").split(":");
+  return (
+    parts.length > 1 &&
+    /^!?-?opacity-/.test(parts.at(-1)) &&
+    parts.slice(0, -1).some((variant) => disabledVariant.test(variant))
+  );
+}
 const noDisabledOpacity = {
   meta: {
     type: "problem",
@@ -105,7 +114,7 @@ const noDisabledOpacity = {
   },
   create(context) {
     function check(node, text) {
-      if (text.split(/\s+/).some((token) => disabledOpacity.test(token)))
+      if (text.split(/\s+/).some((token) => disabledOpacity(token)))
         context.report({ node, messageId: "opacity" });
     }
     const visitors = {

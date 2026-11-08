@@ -123,7 +123,13 @@ test("authored appearance, virtualization and non-class strings are legitimate",
 });
 
 test("an overridden disabled opacity class is refused, in each form", async () => {
-  for (const token of ["disabled:opacity-50", "data-[disabled]:opacity-50"]) {
+  for (const token of [
+    "disabled:opacity-50",
+    "data-[disabled]:opacity-50",
+    "dark:disabled:opacity-50",
+    "hover:data-[disabled]:opacity-50",
+    "disabled:focus:opacity-50",
+  ]) {
     await rejects(vue(`<button class="${token}" />`), "design/no-disabled-opacity");
     await rejects(
       `import { cva } from 'class-variance-authority'; export const variants = cva('${token}');`,
