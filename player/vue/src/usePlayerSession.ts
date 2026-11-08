@@ -3290,7 +3290,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       },
       (error: unknown) => {
         // An obsolete activation's failure stops nothing: the session that replaced it goes on.
-        if (!disposed && token === activationToken) reportHostError(error, origin);
+        if (!disposed && token === activationToken && activationRun.admits(origin))
+          reportHostError(error, origin);
       },
     );
     begunInFlight = settled;

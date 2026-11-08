@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test, { before } from "node:test";
 import { pathToFileURL } from "node:url";
+import ts from "typescript";
 
 /*
  * L5h.3b's static censuses, over the Player's code with the session-work census's reference walk
@@ -230,4 +231,195 @@ test("every publication, stop and binding route of the export observation is cla
     ["ops/session.ts", 1],
     ["ops/history.ts", 1],
   ]);
+});
+
+/*
+ * The second final review's sweep (B2-L-C-D-E): every wait in the page code that acts for an activation, each `await`
+ * and each `.then` continuation, either re-admits the activation it began in before its next request or further work,
+ * or is listed with why it needs none. A wait this table does not list fails, and so does a listed re-admission that
+ * no longer comes before the next request. Wiring only: that retired work does nothing is the runtime families' claim.
+ */
+const ACTIVATION_FILES = [
+  "player/vue/src/session/useExportCandidate.ts",
+  "player/vue/src/session/useFailureRecording.ts",
+  "player/vue/src/session/useActivationRun.ts",
+  "player/vue/src/useDebugExport.ts",
+  "player/vue/src/usePlayerSession.ts",
+] as const;
+/** In `usePlayerSession.ts`, the functions that act for an activation: its begin, its completions and its error stop. */
+const SESSION_ACTIVATION = [
+  "usePlayerSession > activate",
+  "usePlayerSession > startFrom",
+  "usePlayerSession > prepareRestore > begin",
+  "usePlayerSession > reportHostError",
+  "usePlayerSession > stopAt",
+];
+const READMITS = "re-admits before its next request or further work";
+const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
+  "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await origin.failure.selection":
+    READMITS,
+  "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await capture": READMITS,
+  "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await stopShown": READMITS,
+  "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await options.readPhoto":
+    READMITS,
+  "useExportCandidate.ts: useExportCandidate > debugExportCandidate > read: await record.data.arrayBuffer":
+    "a photo's bytes, read by the dialog's candidate once handed over: a handed-over export stays valid",
+  "useFailureRecording.ts: useFailureRecording > stopped: then bridge.read":
+    "the capture's settlement, which releases what lands after retirement (`settle`) and acts for nothing else",
+  "useFailureRecording.ts: useFailureRecording > selection: await state.settled":
+    "reads the settled outcome only; its caller re-admits after it (`debugExportCandidate`)",
+  "useDebugExport.ts: useDebugExport > watch:callback: await player.debugExportCandidate":
+    "the dialog's: what it gets is handed over, or `null`; a later opening releases it",
+  "useDebugExport.ts: useDebugExport > watch:callback: await assembleDebugExport":
+    "assembles a handed-over candidate, which stays valid",
+  "useDebugExport.ts: useDebugExport > watch:callback: await measuredDebugExportFile": "as above",
+  "usePlayerSession.ts: usePlayerSession > activate: await begunInFlight":
+    "before the activation's record begins (`startFrom`); the click's token decides",
+  "usePlayerSession.ts: usePlayerSession > activate: await startFrom": "the activation itself",
+  "usePlayerSession.ts: usePlayerSession > activate: await camera.open":
+    "before the activation's record begins; the click's token decides",
+  "usePlayerSession.ts: usePlayerSession > activate: await loadScriptStorage":
+    "before the activation's record begins; the click's token decides",
+  "usePlayerSession.ts: usePlayerSession > startFrom: then bridgeReady":
+    "before the activation's record begins; the click's token decides",
+  "usePlayerSession.ts: usePlayerSession > startFrom: then begun": READMITS,
+  "usePlayerSession.ts: usePlayerSession > prepareRestore > begin: await host.request": READMITS,
+  "usePlayerSession.ts: usePlayerSession > prepareRestore > begin: catch host.request":
+    "the trace restart's rejection, which reports with the Continue's own activation, admitted there (`reportHostError`)",
+  "usePlayerSession.ts: usePlayerSession > prepareRestore > begin: catch host.client.request":
+    "drops the random release's refusal; nothing follows",
+  "usePlayerSession.ts: usePlayerSession > reportHostError > incident: catch origin.bridge.commitIncident":
+    "drops the incident's refusal; nothing follows",
+  "useActivationRun.ts: useActivationRun > retire: catch ended.bridge.retireRun":
+    "drops the retirement's refusal: the record retired already, and nothing follows",
+  "useExportCandidate.ts: useExportCandidate > deliver > release: catch host.releaseRecording":
+    "drops a release's refusal; nothing follows",
+  "useFailureRecording.ts: useFailureRecording > retire: catch state.bridge.releaseRecording":
+    "drops a release's refusal; nothing follows",
+  "useFailureRecording.ts: useFailureRecording > settle: catch bridge.releaseRecording":
+    "drops a release's refusal; nothing follows",
+  "usePlayerSession.ts: usePlayerSession > reportHostError: then starting": READMITS,
+  "usePlayerSession.ts: usePlayerSession > stopAt: then acknowledged": READMITS,
+};
+/** Calls that re-admit an activation, and calls that request or act for one. */
+const ADMITS = /^(?:goesOn|lives|owned|activationRun\.admits)$/u;
+const ACTS =
+  /^(?:capture|options\.readPhoto|host\.request|host\.halt|stopAt|started|startedSession|reportHostError|origin\.bridge\.commitIncident|origin\.failure\.stopped|host\.captureExport|incident)$/u;
+
+/** Each wait of `file`'s functions within `scope`, with what follows it there. */
+function waitsOf(file: string, scope: (path: string) => boolean) {
+  const source = ts.createSourceFile(
+    file,
+    readFileSync(resolve(process.cwd(), file), "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const named = (node: ts.Node): string | null => {
+    if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node))
+      return node.name?.getText(source) ?? null;
+    if (
+      (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+      (ts.isVariableDeclaration(node.parent) || ts.isPropertyAssignment(node.parent))
+    )
+      return node.parent.name.getText(source);
+    if (
+      (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+      ts.isCallExpression(node.parent)
+    )
+      return `${node.parent.expression.getText(source)}:callback`;
+    return null;
+  };
+  const waits: { key: string; at: number; after: ts.Node; continuations?: readonly ts.Node[] }[] =
+    [];
+  // The file's functions held by a name, as `const commit = () => …`.
+  const declared = new Map<string, ts.Node>();
+  source.forEachChild(function collect(node): void {
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.initializer !== undefined &&
+      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+    )
+      declared.set(node.name.getText(source), node.initializer);
+    node.forEachChild(collect);
+  });
+  const visit = (node: ts.Node, path: string[], fn: ts.Node | null): void => {
+    const name = named(node);
+    const inner = name === null ? path : [...path, name];
+    const owner = name === null ? fn : node;
+    const where = inner.join(" > ");
+    if (scope(where) && owner !== null) {
+      const base = `${file.split("/").at(-1)}: ${where}`;
+      if (ts.isAwaitExpression(node)) {
+        const awaited = ts.isCallExpression(node.expression)
+          ? node.expression.expression
+          : node.expression;
+        waits.push({
+          key: `${base}: await ${awaited.getText(source)}`,
+          at: node.end,
+          after: owner,
+        });
+      }
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        (node.expression.name.text === "then" || node.expression.name.text === "catch")
+      ) {
+        const receiver = node.expression.expression;
+        const callee = ts.isCallExpression(receiver) ? receiver.expression : receiver;
+        waits.push({
+          key: `${base}: ${node.expression.name.text} ${callee.getText(source).replace(/\s+/gu, "")}`,
+          at: node.expression.end,
+          // A continuation named by its function is checked in that function's body.
+          after: node,
+          continuations: node.arguments.map((argument) =>
+            ts.isIdentifier(argument) ? (declared.get(argument.text) ?? argument) : argument,
+          ),
+        });
+      }
+    }
+    node.forEachChild((child) => visit(child, inner, owner));
+  };
+  visit(source, [], null);
+  /** Whether a re-admission follows `at` in `within` before the next request, further work or wait. */
+  const readmits = (at: number, within: ts.Node): boolean => {
+    let admission = Infinity;
+    let next = Infinity;
+    within.forEachChild(function walk(node): void {
+      if (node.pos >= at) {
+        if (ts.isCallExpression(node)) {
+          const callee = node.expression.getText(source);
+          if (ADMITS.test(callee)) admission = Math.min(admission, node.pos);
+          else if (ACTS.test(callee)) next = Math.min(next, node.pos);
+        }
+        if (ts.isAwaitExpression(node)) next = Math.min(next, node.pos);
+      }
+      node.forEachChild(walk);
+    });
+    return admission < next;
+  };
+  return waits.map(({ key, at, after, continuations }) => ({
+    key,
+    readmits:
+      continuations === undefined
+        ? readmits(at, after)
+        : continuations.every((each) => readmits(each.pos, each)),
+  }));
+}
+
+test("every wait of the page's activation work re-admits its activation, or is listed with why it needs none", () => {
+  const found = ACTIVATION_FILES.flatMap((file) =>
+    waitsOf(
+      file,
+      file.endsWith("usePlayerSession.ts")
+        ? (path) => SESSION_ACTIVATION.some((each) => path === each || path.startsWith(`${each} >`))
+        : () => true,
+    ),
+  );
+  assert.deepEqual(
+    [...new Set(found.map((each) => each.key))].sort(),
+    Object.keys(ACTIVATION_WAITS).sort(),
+    "an unlisted or stale wait",
+  );
+  for (const { key, readmits } of found)
+    if (ACTIVATION_WAITS[key] === READMITS) assert.ok(readmits, `${key} re-admits first`);
 });

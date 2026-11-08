@@ -119,8 +119,9 @@ export function useExportCandidate(options: {
    * Captures what a debug export can contain, frozen: in the host, the shown session's state, marks and failure, the
    * run's incident and the recording (the one up to a Player error, else the session's own); here, in the capture's
    * reply, that publication's events and transcript, and what `details` reads of the Player's interface for it. `live`
-   * says whether the dialog still wants the candidate. `null` when the capture is refused or does not match what shows;
-   * nothing then stays held.
+   * says whether the dialog still wants the candidate. `null` when the capture is refused or does not match what shows,
+   * or once the activation it began in retired: after every await it goes on only while that activation lives, and
+   * nothing then stays held. A candidate handed over before the retirement stays the dialog's.
    */
   async function debugExportCandidate(
     details: ExportDetails,
@@ -146,17 +147,26 @@ export function useExportCandidate(options: {
         deliver(host, origin, current, reply, view, details, live),
       );
     let frozen = await capture();
-    // A stop of the run was still committing: once it shows, the capture is tried once more.
-    if (frozen === PENDING_CAPTURE) {
+    // A stop of the run was still committing: once it shows, the capture is tried once more, while its activation lives.
+    if (frozen === PENDING_CAPTURE && lives(origin)) {
       await stopShown();
       frozen = live() && lives(origin) ? await capture() : null;
     }
     if (frozen === PENDING_CAPTURE || frozen === null) return null;
-    // Until the dialog holds the candidate, this owns its ticket: a construction that fails releases it.
+    // Until the dialog holds the candidate, this owns its ticket: a construction that fails, or whose activation
+    // retired, releases it.
+    const owned = frozen;
+    const goesOn = () => {
+      if (lives(origin)) return true;
+      owned.release();
+      return false;
+    };
+    if (!goesOn()) return null;
     const photos: DebugPhotoCandidate[] = [];
     try {
       for (const [reference, usedBy] of debugPhotoUses(frozen)) {
         const record = await options.readPhoto(reference);
+        if (!goesOn()) return null;
         if (record === null || record.kind !== "image") continue;
         photos.push({
           reference,
@@ -176,6 +186,8 @@ export function useExportCandidate(options: {
       frozen.release();
       return null;
     }
+    // Once more at the handoff: the dialog takes only a live activation's candidate.
+    if (!goesOn()) return null;
     return { ...frozen, photos };
   }
 

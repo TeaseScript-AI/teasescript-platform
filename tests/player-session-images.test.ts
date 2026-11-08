@@ -529,3 +529,75 @@ test("a package image the Stage cannot load is reported while the Stage shows it
   await nextTick();
   assert.equal(host.notices.value.length, 0);
 });
+
+// L5h.3b, the second final review's B2-L-C-D-E: a candidate whose photo read still waits when its activation retires
+// is no candidate. Its ticket goes, no read starts after the retirement, and the replacement shows on untouched.
+test("a debug export whose photo read waits while a new Start retires its activation hands nothing over", async (context) => {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() =>
+    usePlayerSession({ decodeImage: async () => ({ width: 1, height: 1 }) }),
+  )!;
+  context.after(() => scope.stop());
+  host.prepare((options) =>
+    createPlayerRuntimeSession(
+      'let image = askImage("Photo")\nlet second = askImage("Second photo")\nlet name = askText "Name"\nexit',
+      options,
+    ),
+  );
+  await host.activate();
+  await answer(host, await chosen(host, "used.png"));
+  await answer(host, await chosen(host, "second.png"));
+  const media: Record<string, unknown> = await loadPlayerModule("player/captured-media.ts");
+  const facade: Record<string, unknown> = await loadPlayerModule(
+    "player/engine-bridge/in-process.ts",
+  );
+  assert.equal(typeof facade.heldTickets, "function");
+  // EVIDENCE: validation: the bundle's tickets facade, checked callable above.
+  const heldTickets = facade.heldTickets as (bridge: PlayerBridge) => string[];
+  // EVIDENCE: validation: the bundle's media store class, whose `read` the candidate's photo reads go through.
+  const store = media.CapturedMediaStore as {
+    prototype: { read(reference: string): Promise<object | null> };
+  };
+  const bridge = await host.bridge;
+  const read = store.prototype.read;
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  const state = { reached: false, retired: false };
+  const reads: boolean[] = [];
+  context.mock.method(store.prototype, "read", async function (this: unknown, reference: string) {
+    reads.push(state.retired);
+    const record = await read.call(this, reference);
+    state.reached = true;
+    await gate;
+    return record;
+  });
+  const pending = host.debugExportCandidate(
+    () => ({
+      player: {},
+      host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
+    }),
+    () => true,
+  );
+  await until(() => state.reached, "the candidate reads its first photo");
+  assert.deepEqual(heldTickets(bridge), ["r1"]);
+  host.prepare((options) =>
+    createPlayerRuntimeSession('let next = askText "Replacement"\nexit', options),
+  );
+  await host.activate();
+  const replacement = host.session.value;
+  state.retired = true;
+  open();
+  // The composable gives `null` for a candidate it does not hand over.
+  const candidate: DebugExportCandidate | null = await pending;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(
+    {
+      candidate,
+      readsAfterRetirement: reads.filter((after) => after).length,
+      tickets: heldTickets(bridge),
+      replacementShown: host.session.value === replacement,
+    },
+    { candidate: null, readsAfterRetirement: 0, tickets: [], replacementShown: true },
+  );
+});
