@@ -2889,16 +2889,21 @@ async function rewindScenario(cdp, origin) {
  * failing restart gate (`?rewindGate`): a pending Return disables what it refuses at once, marks the Player busy and
  * announces itself; Debug off's reinstatement that fails at its gate shows the error once, in its notice, whose Retry
  * return to session brings the session back. In light and dark, on a desktop and a phone; with
- * `PLAYER_SMOKE_SCREENSHOTS` naming a folder, it saves the animation, the retry, and on a desktop the composer live and
- * held there, for the visual check by eye (TESTING.md "Player browser and visual verification"), which also judges the
- * animation's delay and that it moves nothing.
+ * `PLAYER_SMOKE_SCREENSHOTS` naming a folder, it saves the animation, the retry, and on a desktop the screen before
+ * Return with crops of the composer live and held there, each once its transitions have finished, for the visual check
+ * by eye (TESTING.md "Player browser and visual verification"), which also judges the animation's delay and that it
+ * moves nothing.
  */
 async function rewindSwitchScenario(cdp, origin) {
   const folder = process.env.PLAYER_SMOKE_SCREENSHOTS ?? null;
-  // The page, or with `selector` only the element it matches.
+  // The page, or with `selector` only the element it matches, once every running transition has finished.
   const save = async (name, selector = null) => {
     if (folder === null) return;
     await mkdir(folder, { recursive: true });
+    await evaluate(
+      cdp,
+      `return Promise.all(document.getAnimations().filter((animation) => animation instanceof CSSTransition).map((animation) => animation.finished.catch(() => null)))`,
+    );
     const clip =
       selector === null
         ? null
@@ -2942,7 +2947,11 @@ async function rewindSwitchScenario(cdp, origin) {
       await setViewport(cdp, width, height);
       await inspect("slow", mode);
       // Return waits at its slow gate: at once, what it refuses is disabled, and the Player is busy and says so.
-      if (device === "desktop") await save(`composer-live-${mode}`, "[data-composer-shell]");
+      // On a desktop, the composer live and then held, each a crop beside its whole screen.
+      if (device === "desktop") {
+        await save(`live-${mode}-desktop`);
+        await save(`composer-live-${mode}`, "[data-composer-shell]");
+      }
       await physicalClick(cdp, "[data-rewind-return]");
       assertEqual(
         await value(
@@ -2964,11 +2973,11 @@ async function rewindSwitchScenario(cdp, origin) {
         }),
         `A pending Return, ${mode} ${device}: its refused controls disabled, busy, announced`,
       );
-      if (device === "desktop") await save(`composer-held-${mode}`, "[data-composer-shell]");
       if (folder !== null) {
-        // The screenshot waits for the animation, which is not timed here.
+        // The screenshot waits for the animation, which is not timed here; the held composer's crop is beside it.
         await waitFor(cdp, `!!document.querySelector('[data-rewind-switch-indicator]')`);
         await save(`animation-${mode}-${device}`);
+        if (device === "desktop") await save(`composer-held-${mode}`, "[data-composer-shell]");
       }
       await waitFor(
         cdp,
