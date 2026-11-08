@@ -351,9 +351,8 @@ export function createRewindOwner(host: RewindOwnerHost) {
     void Promise.resolve(gated).then(
       () => dispatch({ kind: "gateSettled", gate: which, id, ok: true, mayShow: mayShow() }),
       (error: unknown) => {
-        if (which === "step")
-          problem.value = error instanceof Error ? error.message : String(error);
-        // A Return's or a reinstatement's failure is reported only when the function says it is the current gate's.
+        // A failure is reported only when the function says so (`reportFailure`): a step's as its problem, a Return's
+        // or a reinstatement's as the Player's host failure. An obsolete gate's says nothing.
         const { actions } = dispatch({
           kind: "gateSettled",
           gate: which,
@@ -361,7 +360,10 @@ export function createRewindOwner(host: RewindOwnerHost) {
           ok: false,
           mayShow: mayShow(),
         });
-        if (actions.some((action) => action.kind === "reportFailure")) host.reportHostError(error);
+        if (!actions.some((action) => action.kind === "reportFailure")) return;
+        if (which === "step")
+          problem.value = error instanceof Error ? error.message : String(error);
+        else host.reportHostError(error);
       },
     );
   }

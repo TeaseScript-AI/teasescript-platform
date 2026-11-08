@@ -202,8 +202,8 @@ view, and the number of the session's events that led to it, which rebuild its t
 photos stay in the Player's captured-media store, which keeps every photo it admitted while it is mounted. Each point's
 JSON is written at once to an IndexedDB database of the history's own (`teasescript-debug-history-<UUID>`) and leaves
 memory once written. A point is taken only while the JSON in memory, writes still pending included, stays within
-32 Mi UTF-16 code units (`DEBUG_HISTORY_ADMITTED_SNAPSHOT_CHARS`, provisional); without IndexedDB, or once it fails,
-every point stays in memory. A point that does not fit, or a state too large to save (`TSK004`), ends the collection:
+32 Mi UTF-16 code units (`DEBUG_HISTORY_ADMITTED_SNAPSHOT_CHARS`, provisional); without IndexedDB every point stays in
+memory, and once a write fails only the JSON not yet written stays there, while the snapshots written stay in IndexedDB. A point that does not fit, or a state too large to save (`TSK004`), ends the collection:
 the history keeps the points it has and takes no more. The state the first Back leaves is kept the same way; when it
 does not fit, Back changes nothing. Turning
 either Debug switch off, a new Start or Continue, importing or clearing this script's saved data, and unmounting the

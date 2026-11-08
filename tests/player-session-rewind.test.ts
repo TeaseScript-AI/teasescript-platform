@@ -140,6 +140,8 @@ interface Rewind {
       } | null;
     }>
   >;
+  /** Why the last rewind step changed nothing, or `null`. */
+  readonly problem: Readonly<Ref<string | null>>;
   back(point: number): Promise<boolean>;
   forward(): Promise<boolean>;
   resume(): Promise<boolean>;
@@ -1990,7 +1992,8 @@ async function handoffRow(
 }
 
 /*
- * The caller seam's negative controls (design-r2 §2): each mutant changes the real owner as the composable calls it,
+ * The caller seam's negative controls, for its rule that the page acts only on the owner's decisions
+ * (`rewindOwner.ts`): each mutant changes the real owner as the composable calls it,
  * and the named row must fail.
  */
 const CALLER_MUTANTS: readonly {
@@ -2103,7 +2106,7 @@ test("Debug off waiting on an adoption when the Player unmounts releases everyth
 });
 
 /*
- * Sol code r2's probes (`reviews/l5i6/sol-code-r2.md`), as rows through the real composables and host: each decided by
+ * Handoff cases a review reproduced, as rows through the real composables and host: each decided by
  * the page side's one function (`player/rewind-lifecycle.ts`) and the host's (`advanceHistory`).
  */
 
@@ -2320,3 +2323,39 @@ for (const gateA of ["succeeds", "fails"] as const)
     assert.equal(host.rewind.inspecting.value, false, "reinstated");
     assert.notEqual(shownView(host).lineage, inspected.lineage);
   });
+
+test("an obsolete Back gate's failure leaves no problem on the replacement's history", async (context) => {
+  const made = createHost(context, memoryStorage().provider);
+  const { host } = made;
+  // The Back's restart gate held; every other gate goes through.
+  let reject!: (error: Error) => void;
+  let held = false;
+  const original = host.rewind.beforeRestart.bind(host.rewind);
+  host.rewind.beforeRestart = () => {
+    if (held) return original();
+    held = true;
+    return new Promise<void>((_, fail) => (reject = fail));
+  };
+  await start(context, host);
+  await choose(context, host, "One");
+  const back = backTo(made.rewind, 0);
+  await settle(context);
+  assert.equal(held, true, "the Back waits at its gate");
+  // Debug off abandons it; a replacement session takes the page.
+  made.debug.stop();
+  await host.loadScriptStorage();
+  host.prepare((recording) =>
+    createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
+  );
+  await host.activate();
+  await settle(context);
+  reject(new Error("obsolete Back gate"));
+  assert.equal(await back, false);
+  await settle(context);
+  // Debug on again: the replacement's history shows no problem of the obsolete Back.
+  const again = effectScope();
+  const rewind = again.run(() => useDebugRewind(host))!;
+  context.after(() => again.stop());
+  await settle(context);
+  assert.equal(rewind.problem.value, null);
+});

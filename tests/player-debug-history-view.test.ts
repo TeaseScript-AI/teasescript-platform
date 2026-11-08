@@ -126,7 +126,7 @@ test("the view follows the deltas the history's publications carry, to the timel
   }
   assert.equal(counts.resyncs, 0);
   assert.deepEqual(view.timeline, whole);
-  // Each delta carries its change only: a long session costs no more per step.
+  // Each delta appends at most one new point: a long session costs no more per step.
   for (const publication of publications)
     for (const delta of publication.history) assert.ok(delta.appended.length <= 1);
   assert.equal(whole.points.length, 3);

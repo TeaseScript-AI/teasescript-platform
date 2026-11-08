@@ -1,5 +1,5 @@
 /*
- * The lifecycle grammar of Debug's rewind handoff (L5i.6, design-r1 §2): one operation held at one of its boundaries,
+ * The lifecycle grammar of Debug's rewind handoff (`player/rewind-lifecycle.ts`): one operation held at one of its boundaries,
  * one lifecycle event inserted there, then the operation let go. The declaration generates the schedules; the oracle,
  * derived from docs/DEBUGGER.md "Rewind" and the transfer rules (`rewind-transfer-domain.ts`), says independently of
  * the implementation what the page shows, which sessions the host holds and where the recording begins afterwards.

@@ -15,7 +15,8 @@ import {
  * grammar to a fixed depth. A driver plays the Player and the host: it answers only what was sent, the host's replies
  * in the order the opens were sent, and sends a decided open only as `rewindOwner.ts` does, once every close before it
  * settled. The oracle keeps its own ledgers of histories, tokens, gates and adoptions from the actions alone, and checks
- * the rules of DEBUGGER.md "Rewind" and design-r1 §2 on them, independently of how the function decides:
+ * the rules of DEBUGGER.md "Rewind" and of the page side's handoff (`player/rewind-lifecycle.ts`) on them, independently of
+ * how the function decides:
  *
  * - at most one history is held; an opened history is enrolled or closed at once unless a newer open replaced it in the
  *   host; none is enrolled with Debug off, none closed twice, and none is left held by a new session, a retirement, the
@@ -553,7 +554,18 @@ function advance(
         w.adoption = null;
         break;
       case "reportFailure":
-        if (move !== "openFailed" && !failedCurrent)
+        // A step's failed gate is reported only for the step the page still asks for: Debug runs, and its history
+        // is still open.
+        if (
+          move !== "openFailed" &&
+          !failedCurrent &&
+          !(
+            move === "gateRejected" &&
+            atGate !== null &&
+            w.debug &&
+            !w.closed.has(w.tokens.get(atGate)!.history)
+          )
+        )
           return fail("a failure reported for no failed open or current gate");
         reported = true;
         break;
@@ -947,7 +959,7 @@ test("Sol r2 B2: the Player's disposal during Debug off's gate closes as disposa
 
 test("Sol r2 B3: a step whose gate rejects is dropped, and a later step may go", () => {
   const { batches } = play(OPEN, ["stepAsked", "stepPrepared", "gateRejected", "stepAsked"]);
-  assert.deepEqual(kinds(batches), ["sendStep", "gate", "drop", "sendStep"]);
+  assert.deepEqual(kinds(batches), ["sendStep", "gate", "drop", "reportFailure", "sendStep"]);
 });
 
 test("Sol r2 B5: a clear's close that fails blocks the history it would reopen", () => {

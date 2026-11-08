@@ -18,9 +18,15 @@ import type { DebugHistorySpill } from "./snapshots.js";
  * sessions its lineage keys name, and the deltas a spill failure left for the next publication. The rewind ops and
  * `HeldSession.publish` reach a history only through here.
  *
- * Its histories and their prepared candidates are owned by the deliveries that made them (`delivery.ts`): a history's
- * open whose reply is never posted closes it again, and so does a step's preparation its candidate, by dropping the
- * step with the reservation it made. What a posted delivery made stays until its history closes.
+ * What it keeps is owned by the deliveries that made it (`delivery.ts`):
+ * - a history, from its open's posted reply until it closes (Debug off, a replacement, a retirement, the Player's
+ *   disposal, or the connection's end); one whose open's reply is never posted closes again;
+ * - a prepared candidate, from its preparation's posted reply until its step's commit, which makes it the history's
+ *   shown state, its drop, or its history's close; one whose preparation's reply is never posted is dropped with the
+ *   reservation it made;
+ * - a publication's point and snapshot, until its history closes or an adoption truncates it; one whose publishing
+ *   reply is never posted goes again (`HistoryCore.undoPublication`), and the deltas it would have carried wait for the
+ *   next publication.
  */
 
 /** A held session as the history sees it: its lineage key, and its marks now. */
@@ -161,11 +167,15 @@ export class HistoryRegistry {
     const deltas: HistoryDelta[] = [];
     // The op publishing it, whose delivery owns what the publication changes in each history.
     const delivery = this.#scope();
-    for (const entry of this.entries.values()) {
+    for (const [history, entry] of this.entries) {
       const bound = entry.bound;
       const before = entry.core.publicationRecord();
       if (!this.#binds(entry, held.historyKey)) continue;
-      deltas.push(...entry.pending.splice(0));
+      // The deltas a spill failure left go with this publication; its reply's failure leaves them for the next one.
+      const owed = entry.pending.splice(0);
+      deltas.push(...owed);
+      if (delivery !== null && owed.length > 0)
+        this.#delivery.own(delivery, () => this.returnPending(history, entry, owed));
       const outcome = advanceHistory(entry.core, {
         kind: "publication",
         candidate: {
@@ -179,6 +189,15 @@ export class HistoryRegistry {
       if (delivery !== null) this.#ownPublication(delivery, entry, bound, before);
     }
     return deltas;
+  }
+
+  /**
+   * Puts back, ahead of any queued since, the deltas `owed` a publication of history `history` took and whose reply was
+   * never posted, while `entry` is still that history: the page never received them. A history that closed or was
+   * replaced since takes nothing back.
+   */
+  returnPending(history: number, entry: Entry, owed: readonly HistoryDelta[]): void {
+    if (this.entries.get(history) === entry) entry.pending.unshift(...owed);
   }
 
   /** The innermost open delivery, or `null` for a publication no op makes. */

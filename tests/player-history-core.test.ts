@@ -27,6 +27,7 @@ import {
 import { playerRuntimeForeground } from "../player/runtime-view.js";
 import { deliveryOwner } from "../player/engine-bridge/delivery.js";
 import { HistoryRegistry } from "../player/engine-bridge/history/registry.js";
+import { DebugHistoryView } from "../player/debug-history.js";
 import type { HistoryMarks } from "../player/debug-history-marks.js";
 import { CheckpointError } from "../src/runtime/snapshot/checkpoint-json.js";
 import { obligations, transferCoverage } from "./helpers/rewind-transfer-domain.js";
@@ -783,5 +784,71 @@ test("a publication's undo without its guard overwrites the later change (negati
       assert.throws(() => guardRow(later), assert.AssertionError, later);
   } finally {
     Object.defineProperty(HistoryCore.prototype, "unchangedSince", guard);
+  }
+});
+
+/*
+ * A spill failure's notice and a failed reply (`HistoryRegistry.observePublication`): a publication takes the deltas a
+ * failed spill write left, and when its reply is never posted they go back, so the page still learns that collection
+ * stopped from the next publication.
+ */
+async function owedRow(): Promise<void> {
+  const turn = () => new Promise((resolve) => setImmediate(resolve));
+  const owner = deliveryOwner();
+  let failWrite!: (error: Error) => void;
+  const write = new Promise<void>((_, fail) => (failWrite = fail));
+  const spill = {
+    put: () => write,
+    get: async () => undefined,
+    delete: async () => {},
+    destroy: async () => {},
+  };
+  const registry = new HistoryRegistry(owner, async () => spill);
+  const delivered = <T>(run: () => T): T => {
+    const delivery = owner.begin();
+    const result = run();
+    owner.commit(delivery);
+    return result;
+  };
+  const opened = delivered(() => registry.open(1))!;
+  await turn();
+  const held = { historyKey: "l1", marks: NO_MARKS };
+  let session = createPlayerRuntimeSession(SCRIPT);
+  const view = new DebugHistoryView(
+    opened.timeline,
+    () => session.events,
+    async () => null,
+  );
+  view.applyAll(delivered(() => registry.observePublication(held, session)));
+  assert.equal(view.timeline.complete, true);
+  // The point's spill write fails: collection stops, and the notice waits for the next publication.
+  failWrite(new Error("injected quota"));
+  await turn();
+  await turn();
+  assert.equal(registry.core(1)!.timeline().complete, false);
+  // The next publication's reply is never posted.
+  session = observePlayerRuntimeTime(session, 1).session;
+  const failing = owner.begin();
+  registry.observePublication(held, session);
+  owner.rollback(failing);
+  // The one after it carries the notice, and the page learns that collection stopped.
+  session = observePlayerRuntimeTime(session, 2).session;
+  view.applyAll(delivered(() => registry.observePublication(held, session)));
+  assert.equal(view.timeline.complete, false, "the page learns that collection stopped");
+}
+
+test("a spill failure's notice that a failed reply took goes with the next publication", () =>
+  owedRow());
+
+test("a failed reply that keeps the notice it took loses it (negative control)", async () => {
+  const returned = Object.getOwnPropertyDescriptor(HistoryRegistry.prototype, "returnPending")!;
+  Object.defineProperty(HistoryRegistry.prototype, "returnPending", {
+    ...returned,
+    value: () => {},
+  });
+  try {
+    await assert.rejects(owedRow(), assert.AssertionError);
+  } finally {
+    Object.defineProperty(HistoryRegistry.prototype, "returnPending", returned);
   }
 });

@@ -104,7 +104,7 @@ export type LifecycleEvent =
   | { readonly kind: "retryReinstate" }
   | { readonly kind: "closeSettled"; readonly ok: boolean };
 
-/** What the Player does, in order. A `close` is awaited before the actions after it. */
+/** What the Player does, in order. A later open waits for every preceding close. */
 export type LifecycleAction =
   /** An open, due once every close before it settled: the Player then answers `openDue`. */
   | { readonly kind: "open"; readonly intent: number }
@@ -443,6 +443,9 @@ function gateSettled(
       if (step === null || step.phase !== "gate") return done(settled);
       // Its history closed meanwhile, and the close took its candidate.
       if (step.history !== history) return done({ ...settled, step: null });
+      // A failed gate of the step the page still asks for is its problem to show; an abandoned step's says nothing.
+      if (!event.ok && !step.abandoned && settled.debug)
+        return done({ ...settled, step: null }, ...exitStep(settled), { kind: "reportFailure" });
       if (step.abandoned || !event.ok || !settled.debug || !event.mayShow)
         return done({ ...settled, step: null }, ...exitStep(settled));
       // The final handoff: the commit is sent before the candidate shows, and nothing awaits between them.

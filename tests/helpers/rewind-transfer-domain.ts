@@ -53,7 +53,7 @@ export const RULES: readonly TransferRule[] = [
     variants: [""],
     guards: ["target", "read", "readiness"],
     source:
-      'docs/DEBUGGER.md "Rewind"; player/engine-bridge/ops/history.ts rewindBack; player/vue/src/useDebugRewind.ts step',
+      'docs/DEBUGGER.md "Rewind"; player/engine-bridge/ops/history.ts rewindBack; player/vue/src/rewindOwner.ts back',
     decide: (inspection) =>
       inspection === "not inspecting"
         ? transfer("parks the live lineage", "parked", "target")
@@ -75,7 +75,7 @@ export const RULES: readonly TransferRule[] = [
     transition: "return",
     variants: [""],
     guards: [],
-    source: 'docs/DEBUGGER.md "Rewind"; player/vue/src/useDebugRewind.ts returnToSession',
+    source: 'docs/DEBUGGER.md "Rewind"; player/vue/src/rewindOwner.ts returnToSession',
     decide: (inspection) =>
       inspecting(inspection)
         ? transfer("reinstates the parked lineage", "live", "released")
@@ -111,7 +111,7 @@ export const RULES: readonly TransferRule[] = [
     transition: "close by debugOff",
     variants: [""],
     guards: [],
-    source: 'docs/DEBUGGER.md "Rewind"; player/vue/src/useDebugRewind.ts tryOnScopeDispose',
+    source: 'docs/DEBUGGER.md "Rewind"; player/vue/src/rewindOwner.ts debugOff',
     decide: (inspection) =>
       inspection === "not inspecting"
         ? [

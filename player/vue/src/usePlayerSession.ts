@@ -163,7 +163,7 @@ const MEDIA_SAMPLE_MS = 100;
 
 export interface PlayerSessionOptions {
   /**
-   * The engine's host; the in-process backend by default, until the L5 series activates the Worker. One live Player per
+   * The engine's host; the in-process backend by default. One live Player per
    * bridge, which a later Player may reuse after the previous Player scope is disposed; while another holds it, this
    * Player never becomes ready.
    */
@@ -275,7 +275,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     diagnostics.value = [...diagnostics.value, diagnostic];
   };
   // The engine's host, which owns the plans, the sessions and the recorder of every session's engine calls from Start,
-  // in every build, for a debug export (DEBUGGER.md "Debug export"); in-process until the L5 series activates the Worker.
+  // in every build, for a debug export (DEBUGGER.md "Debug export"); in-process by default.
   // The in-process backend is ready at once, so a Start within the first click needs no wait.
   let bridge: PlayerBridge | null =
     options.bridge === undefined
