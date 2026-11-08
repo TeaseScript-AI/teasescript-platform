@@ -166,7 +166,7 @@ export function checkCommentDeclarations(root) {
   const read = (name) => JSON.parse(readFileSync(new URL(name, import.meta.url), "utf8"));
   const external = new Set(read("./comment-external-names.json").map(({ name }) => name));
   const waiting = read("./comment-declarations-waiting.json");
-  const files = checkedFiles(root).map((file) => {
+  const files = checkedFiles().map((file) => {
     const text = readFileSync(resolve(root, file), "utf8");
     return { file, scripts: scriptsOf(file, text) };
   });
