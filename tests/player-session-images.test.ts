@@ -70,6 +70,8 @@ interface ImageHost {
   readonly randomRevision: Readonly<Ref<number>>;
   readonly hostError: Readonly<Ref<string | null>>;
   prepareRestore(given: PlayerRuntimeSession): void;
+  setDebugMode(on: boolean): void;
+  readonly stopped: Readonly<Ref<boolean>>;
 }
 let usePlayerSession: (options: {
   resolveAsset?: (path: string) => string | null;
@@ -704,3 +706,81 @@ for (const [before, outcome] of [
       },
     );
   });
+
+// L5h.3b, the last scoped round: Debug mode's change acts for the activation that showed its session. A Continue keeps
+// the session's lineage, so a change whose failure arrives after a Continue began must not stop that Continue.
+test("a Debug mode change whose failure arrives after a Continue of the same lineage began stops nothing of it", async (context) => {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() => usePlayerSession({}))!;
+  context.after(() => scope.stop());
+  const bridge = await host.bridge;
+  const facade: Record<string, unknown> = await loadPlayerModule(
+    "player/engine-bridge/in-process.ts",
+  );
+  // EVIDENCE: validation: the bundle's facades, which the assertions below call.
+  const { heldRuns, heldTickets } = facade as {
+    heldRuns: (bridge: PlayerBridge) => number[];
+    heldTickets: (bridge: PlayerBridge) => string[];
+  };
+  host.prepare((options) => createPlayerRuntimeSession('let old = askText "Old"\nexit', options));
+  await host.activate();
+  const request = bridge.client.request.bind(bridge.client);
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  const held = { completed: false };
+  const posted: string[] = [];
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    posted.push(args[0]);
+    const answered = request(...args);
+    if (args[0] !== "setDebugMode" || held.completed) return answered;
+    // The host ran the change; its failure reaches the page only once the Continue began.
+    return answered.then(async () => {
+      held.completed = true;
+      await gate;
+      throw new TypeError("The Debug mode change failed.");
+    });
+  });
+  const identityOf = (session: unknown) => {
+    // EVIDENCE: fixture: a host session's publication carries its diagnostic identity and lineage.
+    return session as {
+      readonly diagnostic: { readonly run: number };
+      readonly lineage: string;
+    } | null;
+  };
+  const predecessor = identityOf(host.session.value);
+  host.setDebugMode(true);
+  await until(() => held.completed, "the host ran the Debug mode change");
+  host.prepareRestore(host.session.value!);
+  await host.activate();
+  const successor = identityOf(host.session.value);
+  const state = JSON.stringify(host.session.value?.state);
+  const from = posted.length;
+  open();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const observed = {
+    runs: [predecessor?.diagnostic.run, successor?.diagnostic.run],
+    sameLineage: predecessor?.lineage === successor?.lineage,
+    error: host.hostError.value,
+    stopped: host.stopped.value,
+    captures: posted.slice(from).filter((op) => op === "captureRecording").length,
+    sameState: JSON.stringify(host.session.value?.state) === state,
+  };
+  scope.stop();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(
+    { observed, runs: heldRuns(bridge), tickets: heldTickets(bridge) },
+    {
+      observed: {
+        runs: [1, 2],
+        sameLineage: true,
+        error: null,
+        stopped: false,
+        captures: 0,
+        sameState: true,
+      },
+      runs: [],
+      tickets: [],
+    },
+  );
+});

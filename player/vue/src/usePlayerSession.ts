@@ -2588,6 +2588,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const on = debugMode;
     const asked = { lineage: current.lineage, on };
     debugModeAsked = asked;
+    // It acts for the activation that shows the session: a Continue keeps the lineage, so the lineage alone does not
+    // say that its activation still lives.
+    const origin = activationRun.current();
     // In the host (`setDebugMode`); the session shows the change while it still owns the UI.
     void bridgeOf(current)
       .request<{ readonly kind: string }>(
@@ -2601,13 +2604,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       })
       .then(
         (outcome) => {
+          if (origin !== null && !activationRun.admits(origin)) return;
           if (outcome.kind === "set" && session.value?.lineage === current.lineage)
             keepSessionLater();
         },
         (error: unknown) => {
           if (endsQuietly(error)) return;
+          if (origin !== null && !activationRun.admits(origin)) return;
           if (!disposed && !stopped.value && session.value?.lineage === current.lineage)
-            reportHostError(error);
+            reportHostError(error, origin ?? activationRun.current());
         },
       );
   }

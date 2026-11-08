@@ -321,10 +321,9 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "clears the in-flight markers it set, only while they are still its own",
   "usePlayerSession.ts: usePlayerSession > applyDebugMode: finally bridgeOf.request":
     "clears the Debug mode asked, only while it is still this request's",
-  "usePlayerSession.ts: usePlayerSession > applyDebugMode: then bridgeOf.request.finally":
-    "the shown session's Debug mode: acts only while that session's lineage still shows, which a successor replaces",
+  "usePlayerSession.ts: usePlayerSession > applyDebugMode: then bridgeOf.request.finally": READMITS,
   "usePlayerSession.ts: usePlayerSession > ownedSection > bridgeOf(current).section:callback > body:callback: await section.send":
-    "the section's observation: its body rechecks `owned` (the session's lineage, the stop and disposal) after it",
+    "the section's observation, which shows only its own session's publication; the body that acts for an activation re-admits first (`resolveRandomDraw`)",
   "usePlayerSession.ts: usePlayerSession > primeAudio: catch element.play":
     "drops a blocked play; nothing follows",
   "usePlayerSession.ts: usePlayerSession > settlePlanJson: catch bridge.client.request":
