@@ -35,12 +35,43 @@ export interface RegressionDeclaration {
 interface Mode {
   readonly mode: "list" | "base";
   readonly records: string;
-  readonly selected?: readonly string[];
+  readonly selected: readonly string[];
 }
-const mode: Mode | null =
-  (process.env.REGRESSION_CASES ?? "") === ""
-    ? null
-    : (JSON.parse(process.env.REGRESSION_CASES ?? "") as Mode);
+
+/** The mode `REGRESSION_CASES` holds: none when it is unset or empty, else its JSON object, checked. */
+function modeOf(text: string): Mode | null {
+  if (text === "") return null;
+  const value: unknown = JSON.parse(text);
+  const refuse = (): never => {
+    throw new Error(
+      `REGRESSION_CASES is not a mode of tools/repository-checks/regression-cases.mjs: ${text}`,
+    );
+  };
+  if (typeof value !== "object" || value === null || !("mode" in value) || !("records" in value))
+    return refuse();
+  const { mode, records } = value;
+  const selected = "selected" in value ? value.selected : [];
+  if (
+    (mode !== "list" && mode !== "base") ||
+    typeof records !== "string" ||
+    !Array.isArray(selected) ||
+    !selected.every((id): id is string => typeof id === "string")
+  )
+    return refuse();
+  return { mode, records, selected };
+}
+const mode = modeOf(process.env.REGRESSION_CASES ?? "");
+
+/** What the helper records about a case: its declaration in list mode; its start and its end in base mode. */
+type Entry =
+  | {
+      readonly name: string;
+      readonly pr: number;
+      readonly atBase: { readonly source: string; readonly flags: string } | null;
+    }
+  | { readonly started: true }
+  | { readonly passed: true }
+  | { readonly failed: string };
 
 const helper = fileURLToPath(import.meta.url);
 const occurrences = new Map<string, number>();
@@ -71,7 +102,7 @@ export function regressionCase(
   const occurrence = (occurrences.get(site) ?? 0) + 1;
   occurrences.set(site, occurrence);
   const id = `${site}#${occurrence}`;
-  const record = (entry: object): void =>
+  const record = (entry: Entry): void =>
     appendFileSync(mode.records, `${JSON.stringify({ id, ...entry })}\n`);
   if (mode.mode === "list") {
     const { atBase } = declared;
@@ -82,7 +113,7 @@ export function regressionCase(
     });
     return;
   }
-  if (!(mode.selected ?? []).includes(id)) return void test(name, fn);
+  if (!mode.selected.includes(id)) return void test(name, fn);
   test(name, { only: true }, async (context) => {
     record({ started: true });
     try {
