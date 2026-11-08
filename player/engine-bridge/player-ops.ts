@@ -18,6 +18,7 @@ import { inputOps } from "./ops/input.js";
 import { mediaOps } from "./ops/media.js";
 import { persistenceOps, type PlanTextSlot } from "./ops/persistence.js";
 import { randomOps } from "./ops/random.js";
+import { recordingOps, type HeldTicket } from "./ops/recording.js";
 import { transferOps, type TransferTicket } from "./ops/transfer.js";
 import { resourceOps } from "./ops/resources.js";
 import { sessionOps } from "./ops/session.js";
@@ -148,6 +149,10 @@ export interface PlayerOpsContext {
   readonly transfers: OwnedMap<string, TransferTicket>;
   /** Counts the tickets this connection gave out. */
   transferCount: number;
+  /** Captured recordings and debug exports, by ticket, until released (`ops/recording.ts`). */
+  readonly recordings: OwnedMap<string, HeldTicket>;
+  /** A new ticket of `recordings`; the connection never gives one out twice. */
+  nextTicket(): string;
   /** Debug's random control on this connection (`alignRandom`); every session its owner holds runs with it. */
   readonly random: RandomState;
   /** Debug's rewind histories on this connection (`ops/history.ts`); `teardown` closes them. */
@@ -168,6 +173,7 @@ export function playerOpsContext(
   const delivery = deliveryOwner();
   const plans = new OwnedMap<string, InstructionPlan>(delivery);
   let nextPlan = 1;
+  let nextTicket = 1;
   return {
     delivery,
     plans,
@@ -188,6 +194,8 @@ export function playerOpsContext(
     }),
     transfers: new OwnedMap(delivery),
     transferCount: 0,
+    recordings: new OwnedMap(delivery),
+    nextTicket: () => `r${nextTicket++}`,
     random: {
       intent: 0,
       owner: 0,
@@ -288,6 +296,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     ...resourceOps(context),
     ...persistenceOps(context),
     ...transferOps(context),
+    ...recordingOps(context),
     ...historyOps(context),
     ...traceOps(context),
     ...randomOps(context),
@@ -296,8 +305,9 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
 
 /**
  * Lets go of the connection's sessions and of everything held for its plans: the plans, their sources and Debug's caches
- * of them, their JSON, and the sessions read for an import. The debug recorder and the value trace stay as they are, the
- * last diagnostics of the connection; this is no reset of the whole context. The `teardown` op runs it on a connection
+ * of them, their JSON, the sessions read for an import, and the recording and export tickets. The debug recorder keeps
+ * its log, the last diagnostics of the connection, but no longer binds to an engine; the value trace stays as it is.
+ * This is no reset of the whole context. The `teardown` op runs it on a connection
  * that stays open; `closeConnection` runs it as the connection ends.
  */
 function releaseConnection(context: PlayerOpsContext, sessions: HostSessions): void {
@@ -306,6 +316,8 @@ function releaseConnection(context: PlayerOpsContext, sessions: HostSessions): v
   context.sourceViews.clear();
   context.planTexts.clear();
   context.transfers.clear();
+  context.recordings.clear();
+  context.recorder.detach();
   // Its histories close as the Player's disposal: their parked sessions and candidates go with the sessions below.
   context.history.closeAll("disposal");
   sessions.clear();

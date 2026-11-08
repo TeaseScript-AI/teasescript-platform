@@ -303,7 +303,13 @@ export function heldPlan(bridge: PlayerBridge, token: string): InstructionPlan {
   return plan;
 }
 
-/** **Facade.** What the connection's recorder holds for a debug export (`DebugRecorder.recording`). */
-export function heldRecording(bridge: PlayerBridge): DebugRecording | null {
-  return backendOf(bridge).context.recorder.recording();
+/**
+ * **Facade.** The recording captured under `ticket` (`captureRecording`), or `null` when no recording is held under it;
+ * without a ticket, what the connection's recorder holds now (`DebugRecorder.recording`).
+ */
+export function heldRecording(bridge: PlayerBridge, ticket?: string): DebugRecording | null {
+  const { context } = backendOf(bridge);
+  if (ticket === undefined) return context.recorder.recording();
+  const held = context.recordings.get(ticket);
+  return held?.kind === "recording" ? held.recording : null;
 }

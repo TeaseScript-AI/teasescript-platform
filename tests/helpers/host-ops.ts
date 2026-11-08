@@ -40,6 +40,11 @@ export const HOST_OPS = {
     read: false,
   },
   releaseTransfer: { planJson: "cleanup of a ticket, which holds no plan JSON", read: false },
+  captureRecording: {
+    planJson: "a held session's recording under a ticket; its plan stays in the host, no plan JSON",
+    read: true,
+  },
+  releaseRecording: { planJson: "cleanup of a ticket, which holds no plan JSON", read: false },
   debugTracing: { planJson: "the connection's value trace", read: false },
   debugView: { planJson: "a held session's trace view", read: true },
   restartTrace: { planJson: "a held session's trace, begun anew", read: false },

@@ -266,6 +266,11 @@ export class PlayerBridge {
     return this.open(reply.session!, reply.view as Introduction);
   }
 
+  /** Lets go of the recording or export held under `ticket` (`releaseRecording`); an unknown one changes nothing. */
+  async releaseRecording(ticket: string): Promise<void> {
+    await this.#client.request("releaseRecording", { ticket });
+  }
+
   /**
    * Opens Debug's rewind history `intent` on this connection (`historyOpen`), unless a newer one is open (`stale`). The
    * sessions an earlier history released with its close are forgotten here.

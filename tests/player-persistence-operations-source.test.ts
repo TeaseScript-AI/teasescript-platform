@@ -238,6 +238,7 @@ const BRIDGE = {
   historyOpen: "host",
   historyTimeline: "host",
   historyStep: "host",
+  releaseRecording: "host",
   request: "host",
   viewCalls: "host",
   section: "host",

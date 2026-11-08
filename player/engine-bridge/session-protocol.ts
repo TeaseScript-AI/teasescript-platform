@@ -8,6 +8,7 @@ import type { RandomTriedView } from "./ops/random.js";
 import type { StorageCapture } from "./ops/history.js";
 import type { HistoryMarks } from "../debug-history-marks.js";
 import type { HistoryDelta } from "./history/core.js";
+import type { DebugRecordingEnd } from "../debug-recorder.js";
 import type { PlayerRuntimeState } from "../runtime-adapter.js";
 
 /*
@@ -71,6 +72,20 @@ export interface Introduction extends Publication {
 }
 
 /**
+ * A capture of a session's recording (`captureRecording`): kept under `ticket` when the recorder records that session,
+ * with how it ends and whether every call is recorded; `stale` when it records another, `none` before any recording.
+ */
+export type RecordingCaptureReply =
+  | {
+      readonly kind: "captured";
+      readonly ticket: string;
+      readonly end: DebugRecordingEnd;
+      readonly complete: boolean;
+    }
+  | { readonly kind: "stale" }
+  | { readonly kind: "none" };
+
+/**
  * The host's session-free reads (`PlayerBridge.read`), each op with its arguments and its result: a read of an op this
  * map lacks, or with other arguments, does not compile. The arguments are checked again by the host at run time; the
  * result is the same build's, so it is not checked when it arrives.
@@ -96,6 +111,10 @@ export interface ReadOps {
     readonly args: Record<string, never>;
     readonly result: StorageCapture;
   };
+  readonly captureRecording: {
+    readonly args: Record<string, never>;
+    readonly result: RecordingCaptureReply;
+  };
 }
 export type ReadOp = keyof ReadOps;
 /** The read ops by name, at run time: exactly the keys of `ReadOps`. */
@@ -105,4 +124,5 @@ export const READ_OPS = {
   captureCheckpoint: true,
   randomTried: true,
   captureStorage: true,
+  captureRecording: true,
 } as const satisfies Record<ReadOp, true>;
