@@ -1,26 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-// The wrapper's own part: Git's file list, remark's configuration and arguments, the exit status and its messages.
-// remark-validate-links' own suite covers how it reads links.
+// The wrapper's own part: Git's file list as the files remark reads, no configuration or ignore file of remark's, the
+// exit status and its messages. remark-validate-links' own suite covers how it reads links.
 
-const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const tool = fileURLToPath(new URL("./doc-links.mjs", import.meta.url));
-const { remarkConfig } = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
 
 /** Writes `files` (path to text) under `root`. */
 function write(root, files) {
@@ -30,190 +19,140 @@ function write(root, files) {
   }
 }
 
-/** A checkout holding `files`, committed, with the repository's `remarkConfig` and `node_modules`; its folder. */
+/** A Git checkout holding `files`, committed; its folder and its `git`. */
 function checkout(files) {
   const root = mkdtempSync(join(tmpdir(), "doc-links-"));
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
   git("init", "-q");
-  write(root, {
-    ".gitignore": "node_modules\nignored/\n",
-    "package.json": JSON.stringify({ type: "module", remarkConfig }),
-    ...files,
-  });
-  symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  write(root, { ".gitignore": "ignored/\nb.md\n", ...files });
   git("add", "-A");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "docs");
-  return root;
+  git("commit", "-q", "--allow-empty", "-m", "docs");
+  return { root, git };
 }
 
 const run = (root) => spawnSync(process.execPath, [tool], { cwd: root, encoding: "utf8" });
+/** The files remark names in its report, each alone on a line. */
+const reported = (stderr) =>
+  stderr
+    .split("\n")
+    .filter((line) => /^\S+\.md$/u.test(line))
+    .sort();
+const BROKEN = "[bad](missing.md)\n";
 
-test("the Markdown Git tracks or does not ignore is checked, with the root configuration only, and a broken link fails the run", () => {
-  const root = checkout({
+test("remark reads exactly Git's regular Markdown files, with no configuration or ignore file of its own", () => {
+  const { root, git } = checkout({
     "README.md": "# Title\n\n[part](docs/a.md#part) and [gone](gone.md)\n",
     "docs/a.md": "# A\n\n## Part\n\n[back](../README.md#title)\n",
     "gone.md": "# Gone\n",
     ".github/notes.md": "[missing](../docs/a.md#missing)\n",
-    // configurations that would drop the validator for their folder, and an ignore file remark would obey
+    // a root configuration that would drop the validator, nested ones, and an ignore file: none is read
+    "package.json": JSON.stringify({ type: "module", remarkConfig: { plugins: [] } }),
     "nested/.remarkrc": '{"plugins":[]}',
-    "nested/x.md": "[bad](missing.md)\n",
+    "nested/x.md": BROKEN,
     "pkg/package.json": '{"remarkConfig":{"plugins":[]}}',
-    "pkg/y.md": "[bad](missing.md)\n",
+    "pkg/y.md": BROKEN,
     ".remarkignore": "skipped.md\n",
-    "skipped.md": "[bad](missing.md)\n",
-    // a name remark-cli would read as an option
-    "--version=.md": "[bad](missing.md)\n",
+    "skipped.md": BROKEN,
+    // names an option parser or a glob would read otherwise: each is one file
+    "--version=.md": BROKEN,
+    "[ab].md": BROKEN,
+    "star*.md": BROKEN,
   });
   try {
-    // a tracked symlink named `*.md` to a folder Git ignores: remark would read the folder's files
-    write(root, { "ignored/inside.md": "[bad](missing.md)\n" });
-    symlinkSync("ignored", join(root, "linked.md"));
-    execFileSync("git", ["add", "linked.md"], { cwd: root });
-    // a tracked file deleted from the working tree, an ignored file and an untracked one
+    // what Git does not list, or lists as no regular file: an ignored `b.md`, which a glob of `[ab].md` would match, a
+    // symlinked folder and a symlinked file, a tracked file deleted from the working tree
+    write(root, { "b.md": BROKEN, "ignored/inside.md": BROKEN, "a.md": "# A\n" });
+    symlinkSync("ignored", join(root, "linked-folder.md"));
+    symlinkSync("ignored/inside.md", join(root, "linked-file.md"));
+    git("add", "a.md", "linked-folder.md", "linked-file.md");
     rmSync(join(root, "gone.md"));
-    write(root, {
-      "ignored/x.md": "[nowhere](nowhere.md)\n",
-      "new.md": "[nope](docs/a.md#nope)\n",
-    });
+    // an untracked file that Git does not ignore
+    write(root, { "new.md": "[nope](docs/a.md#nope)\n" });
     const result = run(root);
     assert.equal(result.status, 1, result.stdout + result.stderr);
-    const lines = result.stderr.split("\n");
-    // remark names each file it reports on, alone on a line: not the ignored ones, the deleted one or the symlink's
-    const reported = lines.filter((line) => /^\S+\.md$/u.test(line)).sort();
     assert.deepEqual(
-      reported,
+      reported(result.stderr),
       [
         "--version=.md",
         ".github/notes.md",
         "README.md",
+        "[ab].md",
         "nested/x.md",
         "new.md",
         "pkg/y.md",
         "skipped.md",
-      ],
+        "star*.md",
+      ].sort(),
       result.stderr,
     );
     assert.match(result.stderr, /Cannot find file `gone\.md`/u);
     assert.equal(
-      lines.findLast((line) => line !== ""),
-      "doc-links: remark reports the problems above (exit 1): fix each link, or the file or heading it names",
+      result.stderr.trim().split("\n").at(-1),
+      "doc-links: remark reports the problems above: fix each link, or the file or heading it names",
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("a run whose links all resolve passes and names how many files it read", () => {
-  const root = checkout({
+test("a file Git lists three times, while a merge conflicts, is read once", () => {
+  const { root, git } = checkout({ "c.md": `${BROKEN}one\n` });
+  try {
+    git("checkout", "-q", "-b", "other");
+    write(root, { "c.md": `${BROKEN}two\n` });
+    git("commit", "-q", "-am", "two");
+    git("checkout", "-q", "-");
+    write(root, { "c.md": `${BROKEN}three\n` });
+    git("commit", "-q", "-am", "three");
+    spawnSync("git", ["merge", "-q", "other"], { cwd: root });
+    const result = run(root);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.deepEqual(reported(result.stderr), ["c.md"], result.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a run whose links all resolve passes and names how many files it read, past 1 MB of Git's list", () => {
+  // names long enough that Git's NUL-separated list passes 1 MB
+  const many = Object.fromEntries(
+    Array.from({ length: 4200 }, (_, index) => [
+      `${"n".repeat(240)}${String(index).padStart(5, "0")}.md`,
+      "",
+    ]),
+  );
+  const { root } = checkout({
     "README.md": "# Title\n\n[part](docs/a.md#part)\n",
     "docs/a.md": "# A\n\n## Part\n\n[back](../README.md#title)\n",
+    ...many,
   });
   try {
     const result = run(root);
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.equal(
       result.stdout,
-      "doc-links: remark reports no unresolved relative link or heading anchor in 2 Markdown files\n",
+      "doc-links: remark reports no unresolved relative link or heading anchor in 4202 Markdown files\n",
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-/** A checkout with a stand-in `remark` that records how it was started and ends as `REMARK_ENDS` says. */
-function launcher(files) {
-  const root = mkdtempSync(join(tmpdir(), "doc-links-launch-"));
-  write(root, {
-    ".gitignore": "node_modules\nstarted.json\n",
-    "node_modules/.bin/remark": `#!/usr/bin/env node
-const { writeFileSync } = require("node:fs");
-writeFileSync("started.json", JSON.stringify({ argv: process.argv.slice(2), node: process.execPath, path: process.env.PATH }));
-const ends = process.env.REMARK_ENDS ?? "0";
-if (ends.startsWith("SIG")) process.kill(process.pid, ends);
-else process.exit(Number(ends));
-`,
-    ...files,
-  });
-  chmodSync(join(root, "node_modules/.bin/remark"), 0o755);
-  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
-  git("init", "-q");
-  git("add", "-A");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "docs");
-  return root;
-}
-
-const gitPath = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
-
-const launch = (root, ends = "0") =>
-  spawnSync(process.execPath, [tool], {
-    cwd: root,
-    encoding: "utf8",
-    // a PATH without this Node's folder: the wrapper puts it there
-    env: {
-      ...process.env,
-      REMARK_ENDS: ends,
-      PATH: [dirname(gitPath), "/usr/bin", "/bin"].join(delimiter),
-    },
-  });
-
-test("remark is started with the pinned options, on this Node, and its end decides the status", () => {
-  const root = launcher({ "a.md": "# A\n", "b/c.md": "# C\n" });
-  try {
-    const passed = launch(root);
-    assert.equal(passed.status, 0, passed.stderr);
-    assert.equal(
-      passed.stdout,
-      "doc-links: remark reports no unresolved relative link or heading anchor in 2 Markdown files\n",
-    );
-    const started = JSON.parse(readFileSync(join(root, "started.json"), "utf8"));
-    assert.deepEqual(started.argv, [
-      "--frail",
-      "--quiet",
-      "--no-stdout",
-      "--no-color",
-      "--rc-path",
-      "package.json",
-      "--no-ignore",
-      "--",
-      "a.md",
-      "b/c.md",
-    ]);
-    assert.equal(started.node, process.execPath);
-    assert.deepEqual(started.path.split(delimiter).slice(0, 2), [
-      join(root, "node_modules/.bin"),
-      dirname(process.execPath),
-    ]);
-
-    const failed = launch(root, "3");
-    assert.equal(failed.status, 1);
-    assert.equal(
-      failed.stderr,
-      "doc-links: remark reports the problems above (exit 3): fix each link, or the file or heading it names\n",
-    );
-    const killed = launch(root, "SIGTERM");
-    assert.equal(killed.status, 2);
-    assert.equal(killed.stderr, "doc-links: remark-cli did not run: SIGTERM\n");
-    rmSync(join(root, "node_modules/.bin/remark"));
-    const missing = spawnSync(process.execPath, [tool], {
-      cwd: root,
-      encoding: "utf8",
-      // this Node and Git, and no other `remark`
-      env: { ...process.env, PATH: [dirname(process.execPath), dirname(gitPath)].join(delimiter) },
-    });
-    assert.equal(missing.status, 2);
-    assert.equal(missing.stderr, "doc-links: remark-cli did not run: spawnSync remark ENOENT\n");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("with no Markdown remark is not started, and outside a Git checkout the run cannot list its files", () => {
-  const root = launcher({});
+test("a name that is not UTF-8, no Markdown at all, and no Git checkout each end the run as the header says", () => {
+  const { root } = checkout({});
   const outside = mkdtempSync(join(tmpdir(), "doc-links-outside-"));
   try {
-    const empty = launch(root);
+    const empty = run(root);
     assert.deepEqual([empty.status, empty.stdout], [0, "doc-links: no Markdown files\n"]);
-    assert.equal(existsSync(join(root, "started.json")), false);
+    writeFileSync(Buffer.from(join(root, "bad\xff.md"), "latin1"), BROKEN);
+    const refused = run(root);
+    assert.equal(refused.status, 2);
+    assert.equal(
+      refused.stderr,
+      "doc-links: Git lists a Markdown file whose name is not UTF-8 (bytes 626164ff2e6d64): rename it\n",
+    );
     const noGit = spawnSync(process.execPath, [tool], {
       cwd: outside,
       encoding: "utf8",

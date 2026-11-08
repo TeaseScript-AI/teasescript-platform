@@ -1,7 +1,13 @@
 #!/usr/bin/env node
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { lstatSync } from "node:fs";
-import { delimiter, dirname, join } from "node:path";
+import { join } from "node:path";
+
+import { remark } from "remark";
+import remarkGfm from "remark-gfm";
+import remarkValidateLinks from "remark-validate-links";
+import { engine } from "unified-engine";
+import { VFile } from "vfile";
 
 // The Markdown links (docs/TESTING.md "Normal and diagnostic verification"): remark-validate-links reports every
 // relative link and heading anchor in the Markdown files that Git tracks or does not ignore that does not resolve.
@@ -10,13 +16,13 @@ import { delimiter, dirname, join } from "node:path";
 //
 // It runs in `check:pretest` and in `tools/check-changed.mjs`, for every change.
 //
-// It runs remark-cli's `remark` (from `node_modules/.bin`, on this Node) with the plugins of package.json's
-// `remarkConfig` and no other configuration (`--rc-path package.json`, so a `.remarkrc` or a nested `package.json`
-// cannot replace it): remark-gfm, and remark-validate-links with `repository: false`, so absolute URLs, this
-// repository's included, are not checked. The files are Git's list (`git ls-files --cached --others
-// --exclude-standard`) of `*.md` entries that are regular files in the working tree, so a deleted file, a symlink and a
-// submodule are not passed; remark reads exactly those (`--no-ignore`, and `--` before the names, so a name such as
-// `--help.md` is a file).
+// It launches nothing: it runs unified-engine in this process, with remark as the processor and remark-gfm and
+// remark-validate-links (`repository: false`, so absolute URLs, this repository's included, are not checked) as its
+// only plugins. No configuration file and no ignore file is searched for (`detectConfig` and `detectIgnore` off), and
+// nothing is written. The files are Git's list (`git ls-files --cached --others --exclude-standard`) of `*.md` entries
+// that are regular files in the working tree, so a deleted file, a symlink and a submodule are not read. Each goes to
+// the engine as a file object, which it takes as that one file, never as a pattern. A name that is not UTF-8 is
+// refused, as it cannot be passed on unchanged.
 //
 // Outside the claim, as remark-validate-links does not read them as GitHub does: raw-HTML links (`<a href>`), and
 // GitHub's view forms: `?plain=1` and `?raw=1`, a folder's README anchors, and a heading GitHub's sanitizer filters a
@@ -28,59 +34,94 @@ import { delimiter, dirname, join } from "node:path";
 // its report), 2 when it cannot run.
 
 const root = process.cwd();
-let files;
-try {
-  files = [
-    ...new Set(
-      execFileSync(
-        "git",
-        ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.md"],
-        { cwd: root, encoding: "utf8", maxBuffer: 1024 * 1024 * 1024 },
-      ).split("\0"),
-    ),
-  ].filter(
-    (file) =>
-      file !== "" && lstatSync(join(root, file), { throwIfNoEntry: false })?.isFile() === true,
+
+/** Why the check cannot run: exit 2. */
+class CannotRun extends Error {}
+
+/** Git's list of the Markdown files that are regular files in the working tree, each name decoded exactly. */
+function markdownFiles() {
+  let listed;
+  try {
+    listed = execFileSync(
+      "git",
+      ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.md"],
+      { cwd: root, maxBuffer: 1024 * 1024 * 1024 },
+    );
+  } catch (error) {
+    throw new CannotRun(`doc-links: cannot list the Markdown files with Git: ${error.message}`);
+  }
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const names = new Set();
+  let start = 0;
+  for (let end = listed.indexOf(0); end !== -1; end = listed.indexOf(0, start)) {
+    const bytes = listed.subarray(start, end);
+    start = end + 1;
+    try {
+      names.add(decoder.decode(bytes));
+    } catch {
+      throw new CannotRun(
+        `doc-links: Git lists a Markdown file whose name is not UTF-8 (bytes ${bytes.toString("hex")}): rename it`,
+      );
+    }
+  }
+  return [...names].filter(
+    (name) => lstatSync(join(root, name), { throwIfNoEntry: false })?.isFile() === true,
   );
-} catch (error) {
-  console.error(`doc-links: cannot list the Markdown files with Git: ${error.message}`);
-  process.exit(2);
-}
-if (files.length === 0) {
-  console.log("doc-links: no Markdown files");
-  process.exit(0);
 }
 
-/** remark's options: the root configuration only, Git's files only, and the names after `--`. */
-const OPTIONS = [
-  "--frail",
-  "--quiet",
-  "--no-stdout",
-  "--no-color",
-  "--rc-path",
-  "package.json",
-  "--no-ignore",
-];
-const result = spawnSync("remark", [...OPTIONS, "--", ...files], {
-  cwd: root,
-  stdio: "inherit",
-  env: {
-    ...process.env,
-    PATH: [join(root, "node_modules/.bin"), dirname(process.execPath), process.env.PATH].join(
-      delimiter,
-    ),
-  },
-});
-if (result.error !== undefined || result.signal !== null) {
-  console.error(`doc-links: remark-cli did not run: ${result.error?.message ?? result.signal}`);
-  process.exit(2);
+/** remark-validate-links over `files` (relative to `root`): the engine's status, 0 when it reports nothing. */
+function validate(files) {
+  return new Promise((resolve, reject) => {
+    engine(
+      {
+        processor: remark,
+        plugins: [remarkGfm, [remarkValidateLinks, { repository: false }]],
+        files: files.map((name) => new VFile({ path: join(root, name) })),
+        cwd: root,
+        detectConfig: false,
+        detectIgnore: false,
+        frail: true,
+        quiet: true,
+        color: false,
+        out: false,
+        output: false,
+        streamError: process.stderr,
+      },
+      (error, status) => (error ? reject(error) : resolve(status ?? 0)),
+    );
+  });
 }
-if (result.status === 0)
-  console.log(
-    `doc-links: remark reports no unresolved relative link or heading anchor in ${files.length} Markdown files`,
-  );
-else
+
+async function main() {
+  const files = markdownFiles();
+  if (files.length === 0) {
+    console.log("doc-links: no Markdown files");
+    return 0;
+  }
+  let status;
+  try {
+    status = await validate(files);
+  } catch (error) {
+    throw new CannotRun(`doc-links: remark did not run: ${error.message}`);
+  }
+  if (status === 0) {
+    console.log(
+      `doc-links: remark reports no unresolved relative link or heading anchor in ${files.length} Markdown files`,
+    );
+    return 0;
+  }
   console.error(
-    `doc-links: remark reports the problems above (exit ${result.status}): fix each link, or the file or heading it names`,
+    "doc-links: remark reports the problems above: fix each link, or the file or heading it names",
   );
-process.exit(result.status === 0 ? 0 : 1);
+  return 1;
+}
+
+main().then(
+  (code) => {
+    process.exitCode = code;
+  },
+  (error) => {
+    console.error(error instanceof CannotRun ? error.message : (error?.stack ?? String(error)));
+    process.exitCode = 2;
+  },
+);

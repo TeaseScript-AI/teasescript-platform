@@ -29,9 +29,9 @@ The repository currently has no browser-automation dependency and no external pr
 with compiled tests, preserving actionable failure information. `npm run format` applies the formatter policy;
 `npm run format:check` verifies it without writing. `npm run lint` applies the [type-evidence policy](LINTING.md);
 `npm run test:lint` type-checks and tests the maintained rule implementation; `npm run knip` checks the selected
-unused-code and dependency categories. `npm run check:doc-links` runs remark-validate-links, with remark-gfm, through
-remark-cli (`package.json`'s `remarkConfig`): it reports every relative link and heading anchor in the Markdown files
-that Git tracks or does not ignore that does not resolve. Absolute URLs, this repository's included, are not checked.
+unused-code and dependency categories. `npm run check:doc-links` runs remark-validate-links, with remark-gfm, in
+unified-engine within its own process, on exactly Git's regular Markdown files: it reports every relative link and
+heading anchor in the Markdown files that Git tracks or does not ignore that does not resolve. Absolute URLs, this repository's included, are not checked.
 Outside that claim, as the plugin does not read them as GitHub does: raw-HTML links, and GitHub's view forms
 (`?plain=1`, `?raw=1`, a folder's README anchors, a heading GitHub's sanitizer filters a tag from); the docs have none
 of them. A reference definition naming a missing file is reported even when no link uses it. A broken link fails
