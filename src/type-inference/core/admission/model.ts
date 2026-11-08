@@ -67,6 +67,19 @@ export interface ListingNode {
 }
 
 /**
+ * #1948: a place's copies at one path, by the next step past it of the longer paths `landed` asks (`nextStepCopies`):
+ * until its scans pay for the index, their count and its size (-1 until made: the copies and their sources' seeds);
+ * then the copies by the steps their sources land past their strips, and those whose sources' landings are not proved
+ * (`sourceSteps`), each list in the copies' order.
+ */
+export interface NextSteps {
+  scans: number;
+  size: number;
+  next: ReadonlyMap<string, readonly number[]> | null;
+  any: readonly number[];
+}
+
+/**
  * A cycle of whole copies, by reference (#1188, Astra's B3): every member lands what the cycle's copies from outside
  * land where they land, the members' written copies (`seeds`, all members') and its root; once per cycle.
  */
