@@ -49,6 +49,8 @@ export default [
       "shadcn/no-restyle": restyle(),
       // Upstream rejects safe helper calls but misses native-element interpolation.
       "design/no-fragmented-classes": "error",
+      // An opacity class on a disabled state is overridden by the theme's disabled treatment, or overrides it.
+      "design/no-disabled-opacity": "error",
       // Authored appearance, virtualization and measured geometry are runtime values.
       "shadcn/no-inline-styles": "off",
     },
