@@ -167,7 +167,8 @@ When something misleads you, or would mislead the next builder:
 The code's architecture is right by construction, not repaired after someone notices. It covers:
 
 - **Ownership:** each piece of state or behavior has one owning module, and a module's folder names its owner.
-- **Direction:** dependencies run one way, without cycles.
+- **Direction:** dependencies run one way, without cycles. `npm run check:imports` checks the declared import
+  boundaries and the cycles in dependency-cruiser's graph; its header defines the scope and the exceptions.
 - **Granularity:** one job per file. A file that gains a second job is split at that seam.
 - **Folders:** grouped by feature or owner, typically 5 to 20 files, never a folder per file. A new file never lands at
   the top level of a component that already has a folder for its concern; creating a missing folder is part of the

@@ -10,11 +10,12 @@ import { dirname, join, resolve } from "node:path";
 //
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else `origin/main`; the
 // changes are those since its merge-base with HEAD, committed or not, untracked files included. Always: `git diff
-// --check`, the format check of the changed files, oxlint, knip and the doc links, each as CI runs it. Then each
-// project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file belongs to the
-// checks that read it, and needs no project when only those that always run do. A changed path no project claims, other
-// than documentation, runs every project's checks. It never builds the TypeScript or runs the compiled test suite,
-// which CI does: a change that shows only there, such as the root tsconfig's emit settings, passes here.
+// --check`, the format check of the changed files, oxlint, knip, the doc links and the imports, each as CI runs it.
+// Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
+// belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
+// project claims, other than documentation, runs every project's checks. It never builds the TypeScript or runs the
+// compiled test suite, which CI does: a change that shows only there, such as the root tsconfig's emit settings, passes
+// here.
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
 // detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
@@ -291,6 +292,7 @@ async function check(cleanups) {
     run("oxlint", process.execPath, ["tools/oxlint/run.mjs"]),
     run("knip", process.execPath, ["node_modules/knip/bin/knip.js"]),
     run("doc links", process.execPath, ["tools/repository-checks/doc-links.mjs"]),
+    run("imports", process.execPath, ["tools/repository-checks/imports.mjs"]),
   ];
   for (const check of checksOf(projects))
     checks.push(
