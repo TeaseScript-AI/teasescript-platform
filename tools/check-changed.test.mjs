@@ -457,11 +457,16 @@ test("main's node_modules come from TEASESCRIPT_MAIN, and unset or empty from th
       [() => writeFileSync(join(root, "node_modules"), ""), false],
     ]) {
       make();
-      assert.equal(staleLink(root), stale);
-      chmodSync(join(root, "denied"), 0o755);
-      rmSync(join(root, "node_modules"), { recursive: true, force: true });
+      try {
+        assert.equal(staleLink(root), stale);
+      } finally {
+        chmodSync(join(root, "denied"), 0o755);
+        rmSync(join(root, "node_modules"), { recursive: true, force: true });
+      }
     }
   } finally {
+    // a failed row may leave `denied` unsearchable: restore it first, so the failure shows and nothing stays behind
+    if (existsSync(join(root, "denied"))) chmodSync(join(root, "denied"), 0o755);
     rmSync(root, { recursive: true, force: true });
   }
 });
