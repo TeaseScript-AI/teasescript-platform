@@ -11,6 +11,7 @@ import {
   VALID_VALUES,
   type ArgumentForm,
 } from "./helpers/argument-forms.js";
+import { coverageGaps, product } from "./helpers/family-coverage.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 
@@ -291,4 +292,71 @@ test("the recording ops' outcomes answer as written, in-process and in a Worker"
     "commitIncident unbegun run": { answer: null },
     "commitIncident retired run": { answer: null },
   });
+});
+
+/*
+ * Recording provenance over the host's begin routes (§21.4 family 2): a Start that records, and the `beginRecording` op
+ * (Continue's) on a session started without the recorder × when the capture comes × the transport. The recorder's end
+ * kinds are its own family (`player-debug-recorder.test.ts`); the routes a test cannot reach through these ops (L5i.6's
+ * history restores, `introduceNow`, raw restores) converge on the same begin, which `player-recording-routes.test.ts`
+ * censuses.
+ */
+const ROUTES = ["start", "beginRecording"] as const;
+const TIMINGS = ["same", "afterAnotherStart", "afterRelease", "noRecorder", "afterStop"] as const;
+
+test("a recording capture answers for the session whose engine began the recording, by route and timing", async () => {
+  const cases = product({ route: [...ROUTES], timing: [...TIMINGS] });
+  const [inProcess, remote] = await onBoth(async (bridge) => {
+    const answers: Record<string, unknown> = {};
+    for (const { route, timing } of cases) {
+      const plan = await preparedPlan(Promise.resolve(bridge), PLAN);
+      // A connection's recorder records one engine at a time; each case begins it anew, or leaves it detached.
+      const begun =
+        timing === "noRecorder"
+          ? null
+          : route === "start"
+            ? await bridge.start(plan, { wallClockMs: 0 }, true)
+            : await bridge.start(plan, { wallClockMs: 0 }, false);
+      if (begun !== null && route === "beginRecording")
+        await bridge.request(begun, "beginRecording", null);
+      const target = begun ?? (await bridge.start(plan, { wallClockMs: 0 }, false));
+      if (timing === "afterAnotherStart") await bridge.start(plan, { wallClockMs: 0 }, true);
+      if (timing === "afterStop")
+        await bridge.client.signal("halt", { error: "TypeError", run: 1, stop: 1 }, target.id);
+      if (timing === "afterRelease")
+        await bridge.client.request("release", null, { session: target.id });
+      answers[`${route} ${timing}`] = await bridge.read(target, "captureRecording").then(
+        (reply) => (reply.kind === "captured" ? `captured ${reply.end}` : reply.kind),
+        (error: unknown) => (error instanceof Error ? error.name : String(error)),
+      );
+      // The teardown between cases detaches the recorder: an unrecorded session's capture is then stale.
+      await bridge.client.request("teardown", null);
+    }
+    return answers;
+  });
+  assert.deepEqual(remote, inProcess);
+  const expected = Object.fromEntries(
+    cases.map(({ route, timing }) => [
+      `${route} ${timing}`,
+      timing === "afterAnotherStart"
+        ? "stale"
+        : timing === "afterRelease"
+          ? "SessionGoneError"
+          : timing === "noRecorder"
+            ? "stale"
+            : "captured live",
+    ]),
+  );
+  assert.deepEqual(inProcess, expected);
+  assert.deepEqual(
+    coverageGaps(
+      cases,
+      Object.keys(inProcess).map((key) => {
+        const [route, timing] = key.split(" ");
+        return { route: route!, timing: timing! };
+      }),
+      { tuples: true },
+    ),
+    [],
+  );
 });
