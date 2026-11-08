@@ -1095,6 +1095,23 @@ function floorControls(): { readonly source: string; readonly horizon: number | 
         ].join("\n") + "\n",
       horizon: null,
     });
+  // (an accepted mark over a host value a floor carries: the mark survives the floor, #2005's F5)
+  for (const p0 of ["{q:hostValue}", "{q:{q:hostValue}}"])
+    out.push({
+      source:
+        [
+          `let p0=${p0}`,
+          "let p1={a:0,b:0}",
+          "let p2={a:0,b:0}",
+          "p2.q=p0",
+          "if p0.q is object { p1=p0 }",
+          "p2=p1",
+          "p2=p2.q",
+          'say "${p2.q.a.z}"',
+          "exit",
+        ].join("\n") + "\n",
+      horizon: null,
+    });
   for (const condition of ["p0.q.b is integer", "p0.q is object"]) {
     const rows = [
       "let p0={a:0}",
