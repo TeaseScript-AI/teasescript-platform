@@ -13,7 +13,9 @@ import { markerOf } from "./retention-child.js";
  * texts, comments and a path). The child's heap snapshot must hold no string that is, or could be, a string with it:
  * one string reader gives every string node its content, whole or, for a slice, "some part of its parent", and a
  * concatenated string is read through its leaves; a node whose content could form the marker counts (it fails
- * closed). The child adds the connection's reach as objects.
+ * closed). The child adds the connection's reach as objects. It runs without V8's background threads
+ * (`--single-threaded`), so what it finds held is not a background compile job's (#1947); a retention check elsewhere
+ * that fails only under load is first compared with background threads off, before any hunt for the holder.
  *
  * Its limits, by design:
  * - a copy of marker-free data (a cloned token array, numbers, spans): copies are not originals, and carry no marker;
