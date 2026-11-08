@@ -6,16 +6,17 @@
 //     [--script NAME] [--route source|plan] [--samples N] [--commit main=SHA] --out FILE
 // A pair's samples run in ABBA order in one browser. On the Pixel (PIXEL_SERIAL set, under the phone lock) each build's
 // host is reached through `adb reverse` at http://localhost:<port>, and each sample records the battery. Exit 0 when
-// every sample is ok, 1 when one is not, 2 when the kit cannot run.
+// every sample is ok, 1 when one is not, 2 when the kit cannot run; every host, reverse and browser it set up is
+// released first, each even when another release fails.
 import { appendFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import { classify } from "./cells.mjs";
-import { adb, cannotRun, openEngine, phoneBattery } from "./lib/engines.mjs";
+import { adb, cannotRun, CannotRun, openEngine, phoneBattery } from "./lib/engines.mjs";
 import { HOST_POLICY, startGateHost } from "./lib/host.mjs";
 import { clearOrigin } from "./lib/cdp.mjs";
 import { cdpSession } from "./lib/engines.mjs";
-import { session } from "./scenarios/session.mjs";
+import { coldBytes, session } from "./scenarios/session.mjs";
 import { calibrate, tapsSample } from "./scenarios/taps.mjs";
 import { bridge, bridgeUrl } from "./scenarios/bridge.mjs";
 import { keep } from "./scenarios/keep.mjs";
@@ -48,10 +49,12 @@ const builds = Object.entries(pairs(values.build)).map(([backend, spec]) => {
   return { backend, tree, playerApp };
 });
 const commits = pairs(values.commit);
-if (!values.engine || !values.scenario || builds.length === 0 || !values.packages || !values.out)
-  cannotRun(
-    "usage: drive.mjs --engine E --scenario S --build NAME=TREE --packages DIR --out FILE (see its header)",
+if (!values.engine || !values.scenario || builds.length === 0 || !values.packages || !values.out) {
+  console.error(
+    "player-gate: cannot run: usage: drive.mjs --engine E --scenario S --build NAME=TREE --packages DIR --out FILE (see its header)",
   );
+  process.exit(2);
+}
 const scenario = values.scenario;
 const script = values.script ?? (scenario === "demo" ? "demo" : "CelebWorship");
 const samples = Number(values.samples);
@@ -67,22 +70,26 @@ const hosts = [];
 const reverses = [];
 let opened = null;
 let failures = 0;
-const cleanup = async () => {
-  await opened?.close().catch(() => {});
-  for (const port of reverses) {
-    try {
-      adb(opened?.serial ?? process.env.PIXEL_SERIAL, "reverse", "--remove", `tcp:${port}`);
-    } catch {
-      // The reverse ends with the adb server anyway.
+let cleaned = null;
+/** Releases the browser, each reverse and each host, once, each even when another fails. */
+const cleanup = () =>
+  (cleaned ??= (async () => {
+    await opened?.close().catch(() => {});
+    for (const port of reverses) {
+      try {
+        adb(opened?.serial ?? process.env.PIXEL_SERIAL, "reverse", "--remove", `tcp:${port}`);
+      } catch {
+        // The reverse ends with the adb server anyway.
+      }
     }
-  }
-  for (const host of hosts) await host.close().catch(() => {});
-};
+    for (const host of hosts) await host.close().catch(() => {});
+  })());
 for (const signal of ["SIGINT", "SIGTERM"])
   process.once(signal, () => {
     void cleanup().finally(() => process.exit(130));
   });
 
+let exitCode = 0;
 try {
   for (const build of builds) {
     const routes = {};
@@ -129,6 +136,7 @@ try {
       try {
         result = await runSample(build, cell, rectangles, reopen, index);
       } catch (error) {
+        if (error instanceof CannotRun) throw error;
         result = { ok: false, error: String(error?.stack ?? error) };
       }
       if (!result.ok) failures += 1;
@@ -149,10 +157,15 @@ try {
       );
     }
   }
+  exitCode = failures === 0 ? 0 : 1;
+} catch (error) {
+  if (!(error instanceof CannotRun)) throw error;
+  console.error(`player-gate: cannot run: ${error.message}`);
+  exitCode = 2;
 } finally {
   await cleanup();
 }
-process.exit(failures === 0 ? 0 : 1);
+process.exit(exitCode);
 
 function gitHead(tree) {
   try {
@@ -168,13 +181,19 @@ function gitHead(tree) {
 async function runSample(build, cell, rectangles, reopen, index) {
   const origin = build.origin;
   switch (scenario) {
-    case "session":
+    case "session": {
+      const result = await session({ opened, origin, script, backend: build.backend });
+      // The served bytes, on their own cold page (the account pauses each Worker at its start).
+      return opened.cdp
+        ? { ...result, bytes: await coldBytes({ opened, origin, script }) }
+        : result;
+    }
     case "sessionInstrumented":
-      return session({ opened, origin, script, instrumented: scenario === "sessionInstrumented" });
+      return session({ opened, origin, script, backend: build.backend, instrumented: true });
     case "aa": {
-      // The A/A run: the full probe and the minimal one on the same build, in ABBA order.
+      // The A/A run: the full probe and the minimal one on the same build, in ABBA order, equal lifetimes.
       const probe = index % 4 === 0 || index % 4 === 3 ? "full" : "minimal";
-      return { arm: probe, ...(await session({ opened, origin, script, probe, turns: 0 })) };
+      return session({ opened, origin, script, backend: build.backend, probe, aa: true });
     }
     case "taps":
     case "bridgeTaps": {
@@ -184,6 +203,7 @@ async function runSample(build, cell, rectangles, reopen, index) {
           : bridgeUrl(origin, cell, true);
       const key = `${build.backend} ${url}`;
       if (!rectangles.has(key)) rectangles.set(key, await calibrated(url));
+      // The window the taps are counted in: the start page's load to Start enabled; `prepare`'s post to its reply.
       const until =
         scenario === "taps"
           ? (page) =>
@@ -195,9 +215,8 @@ async function runSample(build, cell, rectangles, reopen, index) {
                 )
                 .then(() =>
                   page.evaluate(() => ({
-                    startEnabledMs: window.__gate.states.find(
-                      (state) => state.start?.enabled === true,
-                    ).t,
+                    fromMs: 0,
+                    toMs: window.__gate.states.find((state) => state.start?.enabled === true).t,
                   })),
                 )
           : async (page) => {
@@ -205,7 +224,11 @@ async function runSample(build, cell, rectangles, reopen, index) {
               await page.waitForFunction(() => typeof window.__gateRun === "function", undefined, {
                 timeout: 180_000,
               });
-              return page.evaluate(() => window.__gateRun());
+              const result = await page.evaluate(() => window.__gateRun());
+              const prepare = result.requests?.find((request) => request.op === "prepare");
+              if (!result.ok || prepare?.replyAt == null)
+                throw new Error(`the bridge page's prepare did not reply: ${result.error ?? ""}`);
+              return { fromMs: prepare.postAt, toMs: prepare.replyAt };
             };
       return tapsSample({
         opened,

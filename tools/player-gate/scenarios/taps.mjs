@@ -1,10 +1,11 @@
 // Taps answered on the main thread while a script is prepared, the active-input cohort (the L4 gate's specification):
 // CDP `Input.dispatchTouchEvent` start/end pairs every 16 ms, never awaited, onto the probe's tap overlay, from the
 // moment it is in the page until `until` resolves (the start page's Start enabled; on the bridge page, `prepare`'s
-// reply). Tap n is touch point `id` n + 1, which the page reads back as `Touch.identifier` (checked on the Pixel,
+// reply, the page stopping there); the taps sent inside the window are counted. Tap n is touch point `id` n + 1, which the page reads back as `Touch.identifier` (checked on the Pixel,
 // `~/work/evidence/l5-gate/pixel-f12/SUMMARY.md`), on a grid of 2 CSS px inside the overlay. Chromium and the Pixel
 // only: Firefox and WebKit have no CDP input.
-import { gateProbe } from "../lib/probe.mjs";
+import { gateProbe, probeConfig } from "../lib/probe.mjs";
+import { clearOrigin } from "../lib/cdp.mjs";
 import { cdpSession, cannotRun } from "../lib/engines.mjs";
 import { readGate } from "../lib/player.mjs";
 import { summarize } from "../lib/measure.mjs";
@@ -49,15 +50,33 @@ export async function calibrate(page) {
 }
 
 /**
- * One taps sample: opens `url` in a fresh page with the overlay at `rectangle`, sends taps while `until(page)` is
- * pending, and drains the outstanding taps for up to 10 s. `before(page)` runs after the page is open.
+ * The page's clock against this process's: `pageEpoch − nodeEpoch`, from one round trip, with its uncertainty (half
+ * the round trip). The Pixel's clock is not the LXC's, so a send's page time needs it.
+ */
+async function clockOffset(page) {
+  const before = Date.now();
+  const pageEpoch = await page.evaluate(() => performance.timeOrigin + performance.now());
+  const after = Date.now();
+  return { offsetMs: pageEpoch - (before + after) / 2, uncertaintyMs: (after - before) / 2 };
+}
+
+/**
+ * One taps sample: opens `url` in a fresh page with the overlay at `rectangle`, sends taps until `until(page)` resolves
+ * with the window (`fromMs`, `toMs` on the page clock: on the start page from the navigation to Start enabled, on the
+ * bridge page `prepare`'s post to its reply), and drains the outstanding taps for up to 10 s. Counted are the taps sent
+ * inside the window; the row keeps the send ledger, every delivery and every CDP error. `before(page)` runs after the
+ * page is open.
  */
 export async function tapsSample({ opened, url, rectangle, until, before = async () => {} }) {
   if (!opened.cdp) cannotRun(`${opened.engine} has no CDP touch input`);
   const { page, close } = await opened.page({ touch: true });
+  const sends = [];
+  const pending = [];
+  let sending = true;
+  let done = null;
   try {
     const cdp = await cdpSession(opened, page);
-    await page.addInitScript(gateProbe, { taps: rectangle });
+    await page.addInitScript(gateProbe, probeConfig({ taps: rectangle }));
     await before(page, cdp);
     await page.goto(url, { waitUntil: "commit" });
     await page.waitForFunction(
@@ -65,13 +84,16 @@ export async function tapsSample({ opened, url, rectangle, until, before = async
       undefined,
       { polling: 10 },
     );
-    const origin = await page.evaluate(() => performance.timeOrigin);
+    const timeOrigin = await page.evaluate(() => performance.timeOrigin);
+    const clock = await clockOffset(page);
     const capacity = TAP_COLUMNS * TAP_ROWS;
-    const sends = [];
-    const pending = [];
-    let sending = true;
     let overflow = false;
-    const done = until(page).finally(() => (sending = false));
+    // Its rejection is handled from the start: the sender may be sleeping when it settles.
+    done = until(page).then(
+      (window) => ({ window }),
+      (error) => ({ error }),
+    );
+    void done.finally(() => (sending = false));
     while (sending) {
       const n = sends.length;
       if (n >= capacity) {
@@ -80,7 +102,7 @@ export async function tapsSample({ opened, url, rectangle, until, before = async
       }
       const x = rectangle.left + 1 + TAP_SPACING * (n % TAP_COLUMNS);
       const y = rectangle.top + 1 + TAP_SPACING * Math.floor(n / TAP_COLUMNS);
-      sends.push({ id: n + 1, x, y, sentMs: Date.now() - origin });
+      sends.push({ id: n + 1, x, y, sentMs: Date.now() + clock.offsetMs - timeOrigin });
       for (const type of ["touchStart", "touchEnd"])
         pending.push(
           cdp
@@ -95,7 +117,9 @@ export async function tapsSample({ opened, url, rectangle, until, before = async
         );
       await new Promise((resolve) => setTimeout(resolve, CADENCE_MS));
     }
-    const windowResult = await done;
+    const settled = await done;
+    if (settled.error !== undefined) throw settled.error;
+    const { window } = settled;
     const drainBy = Date.now() + DRAIN_MS;
     let gate = await readGate(page);
     while (new Set(gate.taps.map((tap) => tap.id)).size < sends.length && Date.now() < drainBy) {
@@ -115,23 +139,40 @@ export async function tapsSample({ opened, url, rectangle, until, before = async
         outside += 1;
       else if (!answered.has(tap.id)) answered.set(tap.id, tap);
     }
-    const delays = [...answered.values()].map((tap) => tap.t - tap.ts);
+    const inWindow = sends.filter(
+      (send) => send.sentMs >= window.fromMs && send.sentMs <= window.toMs,
+    );
+    const delays = inWindow
+      .map((send) => answered.get(send.id))
+      .filter((tap) => tap !== undefined)
+      .map((tap) => tap.t - tap.ts);
     const gaps = sends.slice(1).map((send, index) => send.sentMs - sends[index].sentMs);
     return {
-      ok: !overflow && outside === 0 && errors.length === 0,
+      ok: !overflow && outside === 0 && errors.length === 0 && inWindow.length > 0,
       rectangle,
-      window: windowResult,
-      sent: sends.length,
-      answered: answered.size,
-      unanswered: sends.length - answered.size,
+      window,
+      clock,
+      sent: inWindow.length,
+      sentInAll: sends.length,
+      answered: delays.length,
+      unanswered: inWindow.length - delays.length,
       outside,
       overflow,
-      cdpErrors: errors.length,
+      cdpErrors: errors,
       delay: summarize(delays),
       within16: delays.filter((delay) => delay <= 16).length,
       cadence: summarize(gaps),
+      ledger: sends,
+      deliveries: gate.taps,
     };
   } finally {
+    sending = false;
+    await done?.catch(() => {});
+    await Promise.all(pending);
+    if (opened.engine === "pixel")
+      await cdpSession(opened, page)
+        .then((cdp) => clearOrigin(cdp, new URL(page.url()).origin))
+        .catch(() => {});
     await close();
   }
 }

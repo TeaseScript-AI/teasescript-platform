@@ -1,4 +1,4 @@
-/* global window, document, performance, requestAnimationFrame, getComputedStyle, PerformanceObserver, IDBDatabase, IDBObjectStore, Document */
+/* global window, document, performance, requestAnimationFrame, getComputedStyle, PerformanceObserver, IDBDatabase, IDBObjectStore, Document, setInterval */
 // The gate's page probe, installed before any page script (`page.addInitScript(gateProbe, config)`). Playwright sends
 // the function's source, so it uses nothing from this module's scope. Everything it records is on the page clock, in
 // `window.__gate`, which the driver reads before the page closes.
@@ -7,10 +7,22 @@
 // `MutationObserver` for the Player's milestones, long tasks where the browser reports them, the engine Worker's
 // construction and `ready` (a `Worker` subclass), and the kept-session store's transactions (wrapped IndexedDB
 // methods). With `config.taps` it also installs the taps cohort's gate: a transparent `touch-action: none` overlay at
-// the tap rectangle, whose events are recorded and kept from every other listener (docs/TESTING.md "The L5
-// activation gate kit").
+// the tap rectangle, whose events are recorded and kept from every other listener; with `config.diagnostic`, the
+// event-loop probe (docs/TESTING.md "The L5 activation gate kit"). A record's `t` is when its callback ran and its
+// `frame` when the next animation frame's callback ran, both `performance.now()`, so `frame >= t`.
+
+/** The one error the gate does not count, as the browser smoke does not: the ResizeObserver loop notice. */
+const IGNORED_ERROR = "ResizeObserver loop";
+
+/** Whether `text` (an error's message) is an error the gate counts. */
+export const countedError = (text) => !String(text).includes(IGNORED_ERROR);
+
+/** The probe's configuration: `extra` with the error rule every caller shares. */
+export const probeConfig = (extra = {}) => ({ ...extra, ignoredError: IGNORED_ERROR });
+
 export function gateProbe(config) {
   const now = () => performance.now();
+  const counted = (text) => !String(text).includes(config.ignoredError);
   const gate = {
     config,
     inputs: [],
@@ -22,25 +34,31 @@ export function gateProbe(config) {
     transactions: [],
     lifecycle: [],
     errors: [],
+    changes: [],
+    rowChanges: [],
+    gaps: [],
+    dropped: 0,
   };
   window.__gate = gate;
-  const frameAfter = (record) => requestAnimationFrame((frame) => (record.frame = frame));
+  // The callback's own time, not the frame's timestamp argument, which can precede the event it follows.
+  const frameAfter = (record) => requestAnimationFrame(() => (record.frame = now()));
+  /** Appends to a growing list, up to a bound; what does not fit is counted. */
+  const LIMIT = 20_000;
+  const keep = (list, record) => (list.length < LIMIT ? list.push(record) : (gate.dropped += 1));
 
   // Errors, as the smoke counts them: console errors, uncaught errors and unhandled rejections.
   const consoleError = window.console.error;
-  // WebKit also logs the ResizeObserver loop notice, which the smoke does not count as an error either.
   window.console.error = (...args) => {
     const text = args.map(String).join(" ");
-    if (!text.startsWith("ResizeObserver loop")) gate.errors.push({ t: now(), text });
+    if (counted(text)) gate.errors.push({ t: now(), text });
     consoleError.apply(window.console, args);
   };
   window.addEventListener("error", (event) => {
-    if (!String(event.message).startsWith("ResizeObserver loop"))
-      gate.errors.push({ t: now(), text: String(event.message) });
+    if (counted(event.message)) gate.errors.push({ t: now(), text: String(event.message) });
   });
-  window.addEventListener("unhandledrejection", (event) =>
-    gate.errors.push({ t: now(), text: String(event.reason) }),
-  );
+  window.addEventListener("unhandledrejection", (event) => {
+    if (counted(event.reason)) gate.errors.push({ t: now(), text: String(event.reason) });
+  });
   for (const type of ["freeze", "resume", "visibilitychange", "pagehide"])
     document.addEventListener(type, () =>
       gate.lifecycle.push({ type, t: now(), visibility: document.visibilityState }),
@@ -112,7 +130,7 @@ export function gateProbe(config) {
       });
   }
 
-  for (const type of ["pointerdown", "pointerup", "click", "keydown"])
+  for (const type of ["pointerdown", "pointerup", "click", "keydown", "touchstart"])
     window.addEventListener(
       type,
       (event) => {
@@ -124,8 +142,17 @@ export function gateProbe(config) {
     );
 
   // The Player's state, read after each batch of DOM changes: the start button, the controls and the transcript rows.
+  // The Player keys its foreground controls by action ID (`RuntimeInteraction.vue`), so each new root element of
+  // `[data-foreground-controls]` is a new action: its serial is the state's `control`.
   let lastState = "";
   const seenRows = new Set();
+  const serials = new WeakMap();
+  let nextSerial = 1;
+  const serialOf = (element) => {
+    if (element === null) return null;
+    if (!serials.has(element)) serials.set(element, nextSerial++);
+    return serials.get(element);
+  };
   const readState = () => {
     const start = document.querySelector("[data-session-start]");
     const buttons = [...document.querySelectorAll("[data-foreground-controls] button")].map(
@@ -148,6 +175,7 @@ export function gateProbe(config) {
           };
     return {
       start: start === null ? null : { label: start.textContent.trim(), enabled: !start.disabled },
+      control: serialOf(document.querySelector("[data-foreground-controls]")),
       buttons,
       composer,
       ended: document.querySelector("[data-session-end]") !== null,
@@ -161,15 +189,32 @@ export function gateProbe(config) {
       t: now(),
     };
     gate.rows.push(record);
+    frameAfter(record);
     // The frame in which the row is first drawn with a positive opacity (H's rule: an entering row is not yet shown).
-    const shown = (frame) => {
+    const shown = () => {
       if (!row.isConnected) return;
-      if (Number(getComputedStyle(row).opacity) > 0) record.shownFrame = frame;
-      else if (frame - record.t < 5000) requestAnimationFrame(shown);
+      const at = now();
+      if (Number(getComputedStyle(row).opacity) > 0) record.shownFrame = at;
+      else if (at - record.t < 5000) requestAnimationFrame(shown);
     };
     requestAnimationFrame(shown);
   };
-  const observe = () => {
+  const observe = (mutations) => {
+    // Every batch of DOM changes, apart from the deduplicated states: a turn's feedback is its first change.
+    const change = { t: now() };
+    keep(gate.changes, change);
+    frameAfter(change);
+    // A change inside a row already seen: its content changed (an update of that message).
+    const changed = new Set();
+    for (const mutation of mutations) {
+      const target =
+        mutation.target.nodeType === 1 ? mutation.target : mutation.target.parentElement;
+      const id = target
+        ?.closest?.(".transcript-entry[data-message-id]")
+        ?.getAttribute("data-message-id");
+      if (id && seenRows.has(id)) changed.add(id);
+    }
+    for (const id of changed) keep(gate.rowChanges, { id, t: change.t });
     for (const row of document.querySelectorAll(".transcript-entry[data-message-id]")) {
       const id = row.getAttribute("data-message-id");
       if (!seenRows.has(id)) {
@@ -192,15 +237,36 @@ export function gateProbe(config) {
     characterData: true,
   });
 
-  // The minimal probe (the A/A run's other arm) records only inputs and states.
+  // The diagnostic cohort's event-loop probe: a 10 ms interval and an animation-frame chain, each gap over 50 ms kept
+  // (scheduling gaps, not proof of one blocking task).
+  if (config.diagnostic) {
+    let tick = now();
+    setInterval(() => {
+      const at = now();
+      if (at - tick > 50) keep(gate.gaps, { kind: "interval", at, gapMs: at - tick });
+      tick = at;
+    }, 10);
+    let frame = now();
+    const chain = () => {
+      const at = now();
+      if (at - frame > 50) keep(gate.gaps, { kind: "frame", at, gapMs: at - frame });
+      frame = at;
+      requestAnimationFrame(chain);
+    };
+    requestAnimationFrame(chain);
+  }
+
+  // The minimal probe (the A/A run's other arm) is the shared observer alone: inputs, states, changes, rows, errors.
   if (config.minimal) return;
-  try {
+  // A browser that does not report long tasks may still accept the observer: unsupported is `null`, never zero.
+  if ((PerformanceObserver.supportedEntryTypes ?? []).includes("longtask"))
     new PerformanceObserver((list) => {
       for (const entry of list.getEntries())
         gate.longTasks.push({ start: entry.startTime, duration: entry.duration });
     }).observe({ type: "longtask", buffered: true });
-  } catch {
+  else {
     gate.longTasks = null;
+    gate.longTasksUnavailable = "this browser does not report the longtask entry type";
   }
 
   // The engine Worker: construction and its `ready`.

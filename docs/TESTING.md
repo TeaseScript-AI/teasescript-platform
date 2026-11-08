@@ -969,14 +969,18 @@ bridge seam on both backends, `delayed` replies at 0, 50 or 250 ms), and the bri
 real engine Worker entry and the in-process backend below the Player. Playwright is loaded from the package.json that
 `PLAYWRIGHT_PACKAGE` names; without it, or without a phone, the kit exits 2.
 
-- `drive.mjs` runs one scenario in one engine for one build or an interleaved pair, one JSON line per sample:
-  `session` (cold open to playable, the first save, turns, bytes served, heap, then reload and Continue),
-  `sessionInstrumented`, `aa` (the probe's own cost), `taps` and `bridgeTaps` (CDP touches every 16 ms while a script is
-  prepared, Chromium and the Pixel), `bridge`, the hidden-page keep (`keepHandler` on the desktop, `keepCompletion` and
-  `keepDurable` on the Pixel) and `demo`.
-- `report.mjs --phase r0|r1` prints the cost report. `cells.mjs` decides every cell: required, or excluded with its
-  reason; a required cell without an ok sample makes the report incomplete (exit 1).
-- `inputs.mjs` writes the bridge page's inputs (a package's project and its plan text) from a built tree.
+- `drive.mjs` runs one scenario in one engine for one build or an interleaved pair, one JSON line per sample with its
+  raw records: `session` (cold open to playable, the first save, cold-load bytes and heap; reload and Continue; turns
+  and final heap; on the CDP engines the bytes from a second cold page), `sessionInstrumented`, `aa` (the full probe's
+  incremental cost beyond the shared observer, over the cold interval), `taps` and `bridgeTaps` (CDP touches every
+  16 ms while the start page loads or a script is prepared, Chromium and the Pixel), `bridge`, the hidden-page keep
+  (`keepHandler` on the desktop, `keepCompletion` and `keepDurable` on the Pixel) and `demo`.
+- `report.mjs --phase r0|r1 --artifacts FILE` prints the cost report. `cells.mjs` decides every cell: required, or
+  excluded with its reason. A sample counts only when every required field that applies to its cell is a number; a
+  required cell without such a sample (for `aa`, in both arms), or no artifact inventory, makes the report incomplete
+  (exit 1).
+- `artifacts.mjs` lists a build's files with raw, gzip and brotli sizes, eager, lazy or Worker; `inputs.mjs` writes the
+  bridge page's inputs (a package's project and its plan text) from a built tree.
 
 Every number names its route (the full Player compiles source; plan text exists only on the bridge page), its backend
 and its cohort: headline numbers come from unmodified builds with the passive probe; the instrumented variant and the

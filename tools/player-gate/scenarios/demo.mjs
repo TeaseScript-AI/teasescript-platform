@@ -4,7 +4,7 @@
 // verification").
 import { clearOrigin } from "../lib/cdp.mjs";
 import { cdpSession } from "../lib/engines.mjs";
-import { gateProbe } from "../lib/probe.mjs";
+import { countedError, gateProbe, probeConfig } from "../lib/probe.mjs";
 import {
   activate,
   answer,
@@ -68,8 +68,11 @@ export async function demo({ opened, origin }) {
   try {
     const cdp = await cdpSession(opened, page);
     if (opened.engine === "pixel") await clearOrigin(cdp, new URL(origin).origin);
-    await page.addInitScript(gateProbe, {});
-    page.on("pageerror", (error) => errors.push(String(error)));
+    await page.addInitScript(gateProbe, probeConfig({}));
+    // The same rule as the probe's collector: the ResizeObserver loop notice is no error.
+    page.on("pageerror", (error) => {
+      if (countedError(error)) errors.push(String(error));
+    });
     await page.goto(`${origin}/player/`, { waitUntil: "commit" });
     await activate(opened, page, "Start", OPEN_MS);
     await waitForState(page, READY, OPEN_MS, "No control after Start");
@@ -106,6 +109,10 @@ export async function demo({ opened, origin }) {
     if (!(error instanceof UnknownControl)) throw error;
     return { ok: false, reason: error.message, errors };
   } finally {
+    if (opened.engine === "pixel")
+      await cdpSession(opened, page)
+        .then((cdp) => clearOrigin(cdp, new URL(origin).origin))
+        .catch(() => {});
     await close();
   }
 }

@@ -54,16 +54,17 @@ async function tap(page, x, y) {
 
 /**
  * Presses the element at `selector` (its `index`th match) with real input, a tap on the Pixel and a mouse click
- * elsewhere, once it is enabled, scrolled into view, uncovered at its centre, and its box has held still for two
- * frames (an entering control moves), as the browser smoke's `pressPoint` waits; fails after 2 s.
+ * elsewhere, once it is enabled, scrolled into view, uncovered at its centre, and its box has held still for `still`
+ * frames (an entering turn control moves, as the browser smoke's `pressPoint` waits; Start and Continue are pressed at
+ * the first frame they are ready, `still` 0); fails after 2 s.
  */
-export async function press(opened, page, selector, index = 0) {
+export async function press(opened, page, selector, index = 0, still = 2) {
   const box = await page.evaluate(
-    ({ selector, index }) =>
+    ({ selector, index, frames }) =>
       new Promise((resolve) => {
         const deadline = performance.now() + 2000;
         let last = null;
-        let still = 0;
+        let held = 0;
         let scrolled = false;
         let centred = false;
         const check = () => {
@@ -90,31 +91,35 @@ export async function press(opened, page, selector, index = 0) {
             rect = null;
           }
           const place = rect && [rect.left, rect.top, rect.width, rect.height].join();
-          still = place && place === last ? still + 1 : 0;
+          held = place && place === last ? held + 1 : 0;
           last = place;
-          if (still >= 2)
+          if (place && held >= frames)
             return resolve({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
           if (performance.now() < deadline) return requestAnimationFrame(check);
           resolve(null);
         };
         requestAnimationFrame(check);
       }),
-    { selector, index },
+    { selector, index, frames: still },
   );
   if (box === null) throw new Error(`'${selector}' #${index} is not visible, enabled and still`);
   if (opened.engine === "pixel") await tap(page, box.x, box.y);
   else await page.mouse.click(box.x, box.y);
 }
 
-/** Starts (or continues) the session the start page offers, `label` being `Start` or `Continue`. Resolves when pressed. */
-export async function activate(opened, page, label, timeoutMs) {
-  await waitForState(
-    page,
-    `(state) => state.start?.enabled === true && state.start.label === ${JSON.stringify(label)}`,
-    timeoutMs,
-    `${label} was not enabled`,
-  );
-  await press(opened, page, "[data-session-start]");
+/** The probe state predicate of the start page's `label` button (`Start` or `Continue`) enabled. */
+export const startEnabled = (label) =>
+  `(state) => state.start?.enabled === true && state.start.label === ${JSON.stringify(label)}`;
+
+/**
+ * Starts (or continues) the session the start page offers, `label` being `Start` or `Continue`, at the first frame its
+ * button is ready, with no stability wait; `whenEnabled` runs once it is enabled, before the press (a heap reading).
+ * Resolves when pressed.
+ */
+export async function activate(opened, page, label, timeoutMs, whenEnabled = async () => {}) {
+  await waitForState(page, startEnabled(label), timeoutMs, `${label} was not enabled`);
+  await whenEnabled();
+  await press(opened, page, "[data-session-start]", 0, 0);
 }
 
 /** The answer the driver types into the composer: its prefill, else a number or a word as its input mode asks. */

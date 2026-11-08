@@ -1,7 +1,6 @@
-// The bridge page (`bridge/page.mjs`), the diagnostic cohort's bridge-level numbers: on either backend and route, the
-// Worker's start, `prepare`'s round trip and the Worker's own handling of it (from the gate Worker entry's log),
-// Start, and Continue (keep capture, restore, continue). On a Worker the page's post of `prepare` and its receipt in
-// the Worker are both on the epoch-based clock, so their difference is the delivery latency, queueing included.
+// The bridge page (`bridge/page.mjs`), the diagnostic cohort's bridge-level numbers: on either backend and route, each
+// request's round trip by ID (`prepare`, `start`, `preparePlanText`, `captureKeep`, the restore's, `continue`), and on a
+// Worker its start and each request's handling and delivery latency in the Worker (the gate Worker entry's log).
 
 const RUN_MS = 180_000;
 
@@ -9,24 +8,28 @@ const RUN_MS = 180_000;
 export const bridgeUrl = (origin, { script, route, backend }, hold = false) =>
   `${origin}/gate-bridge/index.html?script=${encodeURIComponent(script)}&route=${route}&backend=${backend === "main" ? "inprocess" : "worker"}${hold ? "&hold" : ""}`;
 
-/** The Worker side of the case's `prepare`, read from the gate Worker entry's log: receipt → reply, post, delivery. */
+/**
+ * The Worker side of each request, read from the gate Worker entry's log: the Worker's handling (receipt → reply post)
+ * and the delivery latency (receipt − the page's post, on the epoch-based clocks, queueing included).
+ */
 export async function workerSide(page, result) {
   const worker = page.workers().find((candidate) => candidate.url().includes("worker-entry"));
-  if (worker === undefined) return {};
+  if (worker === undefined) return { workerSide: null };
   const [log, origin] = await Promise.all([
     worker.evaluate(() => globalThis.__gateWorker),
     page.evaluate(() => performance.timeOrigin),
   ]);
-  const request = log.find((entry) => entry.dir === "request" && entry.op === "prepare");
-  const reply =
-    request === undefined
-      ? undefined
-      : log.find((entry) => entry.dir === "reply" && entry.id === request.id);
-  const post = (result.posts ?? []).find((entry) => entry.op === "prepare");
   return {
-    prepareInWorkerMs: request && reply ? reply.at - request.at : null,
-    preparePostMs: post?.postMs ?? null,
-    prepareDeliveryMs: request && post ? request.at - (origin + post.at) : null,
+    workerSide: (result.requests ?? []).map((request) => {
+      const receipt = log.find((entry) => entry.dir === "request" && entry.id === request.id);
+      const reply = log.find((entry) => entry.dir === "reply" && entry.id === request.id);
+      return {
+        op: request.op,
+        id: request.id,
+        handlingMs: receipt && reply ? reply.at - receipt.at : null,
+        deliveryMs: receipt ? receipt.at - (origin + request.postAt) : null,
+      };
+    }),
   };
 }
 

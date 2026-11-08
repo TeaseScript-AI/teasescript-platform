@@ -7,10 +7,12 @@ import { createRequire } from "node:module";
 
 export const ENGINES = ["chromium", "firefox", "webkit", "pixel"];
 
-/** Exits 2 with `message`: the kit cannot run here, which is no measurement and no failure of one. */
+/** The kit cannot run here: no measurement and no failure of one. `drive.mjs` releases what it set up, then exits 2. */
+export class CannotRun extends Error {}
+
+/** Throws `CannotRun` with `message`. */
 export function cannotRun(message) {
-  console.error(`player-gate: cannot run: ${message}`);
-  process.exit(2);
+  throw new CannotRun(message);
 }
 
 function playwright() {

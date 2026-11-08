@@ -1,8 +1,11 @@
-// The cost report's one deciding function over its cells (`cells.mjs`) and the report's refusals (`report.mjs`).
+// The cost report's one deciding function over its cells (`cells.mjs`), the report's refusals (`report.mjs`), and the
+// derivations whose boundaries Sol code r1 challenged (`lib/measure.mjs`, `scenarios/keep.mjs`), on synthetic records.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AXES, allCells, cellName, classify } from "./cells.mjs";
 import { buildReport } from "./report.mjs";
+import { playable, turnTimes } from "./lib/measure.mjs";
+import { hiddenCapture } from "./scenarios/keep.mjs";
 
 test("every cell is decided in both phases, and every axis value is required somewhere", () => {
   for (const phase of ["r0", "r1"]) {
@@ -69,18 +72,28 @@ test("a value outside the axes is refused, never skipped", () => {
   );
 });
 
-test("the report fails on a row for an excluded cell and lists required cells without data as incomplete", () => {
-  const row = (cell, ok) => ({
+const row = (cell, ok, result = {}) => ({
+  route: "source",
+  backend: "main",
+  script: "CelebWorship",
+  version: "1",
+  build: "dist/player-app",
+  commit: null,
+  ok,
+  result,
+  ...cell,
+});
+const name = (cell) =>
+  cellName({
+    scenario: "session",
+    script: "CelebWorship",
     route: "source",
     backend: "main",
-    script: "CelebWorship",
-    version: "1",
-    build: "dist/player-app",
-    commit: null,
-    ok,
-    result: {},
+    engine: "chromium",
     ...cell,
   });
+
+test("the report fails on a row for an excluded cell", () => {
   assert.throws(
     () =>
       buildReport(
@@ -89,28 +102,202 @@ test("the report fails on a row for an excluded cell and lists required cells wi
       ),
     /excluded cell/u,
   );
-  const report = buildReport(
+});
+
+/** A complete headline session on `engine` and `backend`, built from the field list's own numbers. */
+function sessionResult({ engine = "chromium", backend = "main" } = {}) {
+  const cdp = engine === "chromium" || engine === "pixel";
+  const worker = backend === "worker";
+  const play = {
+    playableMs: 900,
+    enabledFrameMs: 500,
+    inputToControlMs: 400,
+    enabledToInputMs: 20,
+  };
+  const heap = (at) => ({
+    at,
+    page: { usedBytes: 1 },
+    workers: worker ? [{ url: "engine.worker.js", engine: true, usedBytes: 2 }] : [],
+  });
+  return {
+    cold: play,
+    repeat: play,
+    worker: worker ? { startMs: 50, readyMs: 60 } : null,
+    firstSave: { startToCommitMs: 30, planJsonLength: 10, longTasksMs: cdp ? 0 : null },
+    turns: [{ ok: true, feedbackMs: 5, settledMs: 50 }],
+    ...(cdp
+      ? {
+          memory: ["startEnabled", "playable", "firstSave", "afterTurns", "end"].map(heap),
+          bytes: {
+            requests: [
+              {
+                target: "page",
+                finished: true,
+                failed: null,
+                encodedBytes: 7,
+                beforeStartEnabled: true,
+                beforeFirstSave: true,
+                beforePlayable: true,
+              },
+              ...(worker
+                ? [
+                    {
+                      target: "engine.worker.js",
+                      finished: true,
+                      failed: null,
+                      encodedBytes: 3,
+                      beforeFirstSave: true,
+                    },
+                  ]
+                : []),
+            ],
+          },
+        }
+      : {}),
+  };
+}
+const ARTIFACTS = [{ build: "main", files: [], totals: {} }];
+
+test("a sample counts only with every required field that applies; missing evidence is incomplete", () => {
+  const complete = buildReport(
     [
-      row({ scenario: "session", engine: "chromium" }, true),
-      row({ scenario: "session", engine: "firefox" }, false),
+      row({ scenario: "session", engine: "chromium" }, true, sessionResult()),
+      row({ scenario: "session", engine: "firefox" }, true, sessionResult({ engine: "firefox" })),
     ],
     "r0",
+    ARTIFACTS,
   );
-  assert.equal(report.complete, false);
-  const chromium = cellName({
-    scenario: "session",
-    script: "CelebWorship",
-    route: "source",
-    backend: "main",
-    engine: "chromium",
+  assert.ok(name({}) in complete.summary);
+  // Firefox has no CDP: its bytes, heap and long tasks do not apply and are left out, not printed as a dash.
+  assert.ok(name({ engine: "firefox" }) in complete.summary);
+  assert.ok(
+    !Object.keys(complete.summary[name({ engine: "firefox" })]).some((label) =>
+      label.startsWith("heap"),
+    ),
+  );
+
+  // An ok row with no measurements, the R1-02 probe: incomplete, with what is missing.
+  const empty = buildReport(
+    [row({ scenario: "session", engine: "chromium" }, true)],
+    "r0",
+    ARTIFACTS,
+  );
+  const line = empty.incomplete.find((text) => text.includes(name({})));
+  assert.match(line, /0 complete; missing: cold: playable/u);
+  // A missing heap milestone or an unfinished request is missing evidence too.
+  const noHeap = sessionResult();
+  noHeap.memory = noHeap.memory.filter((reading) => reading.at !== "startEnabled");
+  const unfinished = sessionResult();
+  unfinished.bytes.requests.push({
+    target: "page",
+    finished: false,
+    failed: null,
+    encodedBytes: null,
+    beforeFirstSave: true,
   });
-  const firefox = cellName({
-    scenario: "session",
-    script: "CelebWorship",
-    route: "source",
-    backend: "main",
-    engine: "firefox",
+  for (const result of [noHeap, unfinished])
+    assert.ok(
+      buildReport(
+        [row({ scenario: "session", engine: "chromium" }, true, result)],
+        "r0",
+        ARTIFACTS,
+      ).incomplete.some((text) => text.includes(name({}))),
+    );
+  // No artifact inventory: incomplete.
+  assert.ok(buildReport([], "r0").incomplete.includes("- artifacts: no inventory given"));
+});
+
+test("a worker build needs its engine Worker's start and heap; the A/A run needs both arms", () => {
+  const cell = { scenario: "session", engine: "chromium", backend: "worker" };
+  const withoutWorker = sessionResult({ backend: "worker" });
+  withoutWorker.worker = null;
+  const report = buildReport([row(cell, true, withoutWorker)], "r1", ARTIFACTS);
+  assert.match(
+    report.incomplete.find((text) => text.includes(name({ backend: "worker" }))),
+    /Worker: construction → ready/u,
+  );
+  const aa = (arm) =>
+    row({ scenario: "aa", engine: "chromium" }, true, { arm, cold: sessionResult().cold });
+  const one = buildReport([aa("full"), aa("full")], "r0", ARTIFACTS);
+  assert.ok(one.incomplete.some((text) => text.includes("no complete minimal arm")));
+  const both = buildReport([aa("full"), aa("minimal")], "r0", ARTIFACTS);
+  assert.ok(!both.incomplete.some((text) => text.includes(name({ scenario: "aa" }))));
+});
+
+test("playable is the Player's own two intervals, and a timestamp outside its boundaries is refused", () => {
+  const state = (t, frame, extra) => ({
+    t,
+    frame,
+    start: null,
+    control: null,
+    buttons: [],
+    composer: null,
+    ...extra,
   });
-  assert.ok(chromium in report.summary);
-  assert.ok(report.incomplete.some((line) => line.includes(firefox) && line.includes("0 ok")));
+  const gate = {
+    states: [
+      state(500, 510, { start: { label: "Start", enabled: true } }),
+      state(700, 716, { control: 2, buttons: [{ label: "Go", enabled: true }] }),
+    ],
+    inputs: [{ type: "pointerdown", t: 560, ts: 555, trusted: true }],
+  };
+  assert.deepEqual(playable(gate, "Start"), {
+    ok: true,
+    enabledMs: 500,
+    enabledFrameMs: 510,
+    inputMs: 555,
+    enabledToInputMs: 45,
+    inputToControlMs: 161,
+    playableMs: 671,
+  });
+  // An input stamped before Start was enabled is outside the boundaries.
+  const early = { ...gate, inputs: [{ type: "pointerdown", t: 560, ts: 400, trusted: true }] };
+  assert.equal(playable(early, "Start").ok, false);
+});
+
+test("a turn settles at an enabled control of another action, even with the same label; neither settled nor ended fails", () => {
+  const next = (control, t) => ({
+    t,
+    frame: t + 10,
+    start: null,
+    control,
+    buttons: [{ label: "Next", enabled: true }],
+    composer: null,
+  });
+  const before = next(1, 100);
+  const gate = {
+    states: [before, next(2, 300)],
+    changes: [{ t: 250, frame: 262 }],
+    rows: [],
+    inputs: [{ type: "pointerdown", t: 201, ts: 200, trusted: true }],
+  };
+  assert.deepEqual(turnTimes(gate, 150, before), {
+    ok: true,
+    submissionMs: 200,
+    feedbackMs: 62,
+    firstScriptRowMs: null,
+    settledMs: 110,
+    settledBy: "control",
+  });
+  const unsettled = { ...gate, states: [before] };
+  assert.equal(turnTimes(unsettled, 150, before).ok, false);
+  assert.equal(turnTimes(unsettled, 150, before, "ended").end, "ended");
+});
+
+test("a hidden capture counts only while hidden; one committed after resume is its own outcome", () => {
+  const gate = (end) => ({
+    lifecycle: [{ type: "visibilitychange", t: 30_100, visibility: "visible" }],
+    transactions: [
+      {
+        start: end - 50,
+        end,
+        outcome: "complete",
+        puts: [{ store: "sessions", scope: "s", observedMs: 9 }],
+      },
+    ],
+  });
+  const resumed = hiddenCapture(gate(30_200), 100, "s", 5);
+  assert.equal(resumed.kept, undefined);
+  assert.notEqual(resumed.keptAfterResume, undefined);
+  assert.notEqual(hiddenCapture(gate(20_000), 100, "s", 5).kept, undefined);
 });

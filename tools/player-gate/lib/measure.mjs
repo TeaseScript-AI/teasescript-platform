@@ -16,66 +16,70 @@ export function inputAfter(gate, after, types) {
   );
 }
 
+/** A press of a control: its first trusted pointer, touch or click event. */
+const PRESS = ["pointerdown", "touchstart", "click"];
+
 /**
- * Playable after pressing the start page's button: from the press (the first trusted pointer or click event after
- * `pressedAt`) to the frame after the first enabled control. `from` is the press's own time, or the navigation start.
+ * Playable, the Player's own time (`l5-gate.md` part 4, amended): from the navigation start (the page clock's 0) to
+ * the frame after `label` (`Start` or `Continue`) is enabled, plus from its press's input event to the frame after the
+ * first enabled script control; the enabled → input delay between them is the driver's, reported apart.
  */
-export function playable(gate, pressedAt) {
-  const pressEvent = inputAfter(gate, pressedAt, ["pointerdown", "click"]);
-  const startEnabled = gate.states.find((state) => state.start?.enabled === true);
-  if (pressEvent === null) return { ok: false, reason: "no press recorded" };
-  const control = firstControlAfter(gate, pressEvent.t);
-  if (control === null || control.frame === undefined)
-    return { ok: false, reason: "no enabled control after the press" };
+export function playable(gate, label) {
+  const enabled = gate.states.find(
+    (state) => state.start?.enabled === true && state.start.label === label,
+  );
+  if (enabled?.frame === undefined)
+    return { ok: false, reason: `${label} was never shown enabled` };
+  const press = inputAfter(gate, enabled.t, PRESS);
+  if (press === null) return { ok: false, reason: `no trusted input after ${label} was enabled` };
+  const control = firstControlAfter(gate, press.t);
+  if (control?.frame === undefined)
+    return { ok: false, reason: `no enabled control after ${label}'s input` };
+  const inputToControlMs = control.frame - press.ts;
+  if (!(inputToControlMs >= 0) || !(press.ts >= enabled.t))
+    return { ok: false, reason: "the input's timestamp is outside its boundaries" };
   return {
     ok: true,
-    startEnabledMs: startEnabled?.t ?? null,
-    startEnabledFrameMs: startEnabled?.frame ?? null,
-    pressMs: pressEvent.ts,
-    controlMs: control.t,
-    playableMs: control.frame,
-    pressToPlayableMs: control.frame - pressEvent.ts,
+    enabledMs: enabled.t,
+    enabledFrameMs: enabled.frame,
+    inputMs: press.ts,
+    enabledToInputMs: press.ts - enabled.frame,
+    inputToControlMs,
+    playableMs: enabled.frame + inputToControlMs,
   };
 }
 
-/** The controls a state shows, as one comparable text. */
-const fingerprint = (state) => JSON.stringify([state.buttons, state.composer?.hint ?? null]);
-
 /**
- * One turn from the input event at or after `sentAt`: feedback is the frame after the first DOM change; settlement is
- * the frame after the first enabled control that is new, a script row having appeared since or other controls shown.
+ * One turn from the input event at or after `sentAt`, the state `before` it shown: feedback is the frame after the
+ * first DOM change; settlement is the frame after the first script row or the first state with an enabled control of
+ * another action (its serial). `end` is how the driver saw the turn end when it did not settle: `ended` (the script's
+ * end), `cut` (nothing to answer for 10 s), or `null`; a turn that neither settled nor ended is not ok.
  */
-export function turnTimes(gate, sentAt, before) {
-  const submission = inputAfter(gate, sentAt, ["pointerdown", "keydown"]);
+export function turnTimes(gate, sentAt, before, end = null) {
+  const submission = inputAfter(gate, sentAt, ["pointerdown", "touchstart", "keydown"]);
   if (submission === null) return { ok: false, reason: "no input recorded" };
-  const change = gate.states.find((state) => state.t > submission.t);
-  const settled = gate.states.find(
+  const change = gate.changes.find((record) => record.t > submission.t);
+  const control = gate.states.find(
     (state) =>
-      state.t > submission.t &&
-      hasEnabledControl(state) &&
-      (fingerprint(state) !== fingerprint(before) ||
-        gate.rows.some(
-          (row) => row.speaker !== "user" && row.t > submission.t && row.t <= state.t,
-        )),
+      state.t > submission.t && hasEnabledControl(state) && state.control !== before.control,
   );
-  const scriptRow = gate.rows.find((row) => row.speaker !== "user" && row.t > submission.t);
-  // The driver waited for this turn: without a new control it ended the path (nothing left to answer).
-  if (settled === undefined || settled.frame === undefined)
-    return {
-      ok: true,
-      endedPath: true,
-      submissionMs: submission.ts,
-      feedbackMs: change?.frame === undefined ? null : change.frame - submission.ts,
-      settledMs: null,
-    };
-  return {
-    ok: true,
+  const row = gate.rows.find((record) => record.speaker !== "user" && record.t > submission.t);
+  const settledAt = Math.min(control?.frame ?? Infinity, row?.frame ?? Infinity);
+  const feedbackMs = change?.frame === undefined ? null : change.frame - submission.ts;
+  const times = {
     submissionMs: submission.ts,
-    feedbackMs: change?.frame === undefined ? null : change.frame - submission.ts,
-    firstScriptRowMs:
-      scriptRow?.shownFrame === undefined ? null : scriptRow.shownFrame - submission.ts,
-    settledMs: settled.frame - submission.ts,
-    ended: settled.ended,
+    feedbackMs,
+    firstScriptRowMs: row?.shownFrame === undefined ? null : row.shownFrame - submission.ts,
+  };
+  if (settledAt === Infinity)
+    return end === null
+      ? { ok: false, reason: "neither settled nor ended", ...times }
+      : { ok: true, end, ...times, settledMs: null };
+  return {
+    ok: feedbackMs !== null,
+    ...times,
+    settledMs: settledAt - submission.ts,
+    settledBy: settledAt === row?.frame ? "row" : "control",
   };
 }
 
@@ -91,15 +95,23 @@ export function publishesAfter(gate, after, scope = null) {
   );
 }
 
-/** The first save after the press at `pressMs`: the first committed publish that also writes the plan record. */
-export function firstSave(gate, pressMs, longTasks) {
+/**
+ * The first save after the press at `pressMs`: the first publish transaction that puts this scope's `sessions` record
+ * and its `plans` record, to its `complete`; the plan JSON write is not timed apart (`l5-gate.md` part 4). Long tasks in
+ * that span, or `null` where the browser does not report them.
+ */
+export function firstSave(gate, pressMs) {
   const save = gate.transactions.find(
     (transaction) =>
-      transaction.start > pressMs && transaction.puts.some((put) => put.store === "plans"),
+      transaction.start > pressMs &&
+      transaction.puts.some((put) => put.store === "plans") &&
+      transaction.puts.some((put) => put.store === "sessions"),
   );
-  if (save === undefined) return { ok: false, reason: "no publish with a plan record after Start" };
+  if (save === undefined)
+    return { ok: false, reason: "no publish with a session and a plan record after Start" };
   const plan = save.puts.find((put) => put.store === "plans");
   const session = save.puts.find((put) => put.store === "sessions");
+  const longTasks = gate.longTasks;
   const blocked =
     longTasks === null
       ? null
@@ -109,7 +121,8 @@ export function firstSave(gate, pressMs, longTasks) {
   return {
     ok: save.outcome === "complete",
     outcome: save.outcome,
-    scope: session?.scope ?? null,
+    scope: session.scope,
+    planScope: plan.scope,
     startToCommitMs: save.end === null ? null : save.end - pressMs,
     transactionMs: save.end === null ? null : save.end - save.start,
     planJsonLength: plan.length,
@@ -118,6 +131,7 @@ export function firstSave(gate, pressMs, longTasks) {
       blocked === null || blocked.length === 0
         ? null
         : Math.max(...blocked.map((task) => task.duration)),
+    longTasksUnavailable: gate.longTasksUnavailable ?? null,
   };
 }
 
