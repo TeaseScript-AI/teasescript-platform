@@ -95,10 +95,11 @@ test(
 );
 
 /**
- * A repository with a base branch `main` and a branch `feature` off it, each changing `a.mjs` as `edit` says; `core`
- * also changes a file of the type core on `feature`.
+ * A repository with a base branch `main` and a branch `feature` off it, each changing `a.mjs` as `edit` says. `core`
+ * also changes a file of the type core on `feature` ("added" or "deleted", the file being on `main` for the latter);
+ * `mapper` is the stand-in pin-suite mapper's exit code.
  */
-function repository({ conflict = false, slowOxlint = false, core = false } = {}) {
+function repository({ conflict = false, slowOxlint = false, core = false, mapper = "" } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "check-changed-repo-"));
   const run = (...args) => spawnSync("git", args, { cwd: directory, encoding: "utf8" });
   const write = (path, text) => {
@@ -115,14 +116,17 @@ function repository({ conflict = false, slowOxlint = false, core = false } = {})
   // (a stand-in for the pin-suite mapper that says how it was asked)
   write(
     "tools/repository-checks/pin-suites.mjs",
-    'console.log(`listed for ${process.argv.slice(2).join(" ")}`);\n',
+    `console.log(\`listed for \${process.argv.slice(2).join(" ")}\`);\n${mapper}`,
   );
+  if (core === "deleted")
+    write("src/type-inference/core/answers.ts", "export const answers = 1;\n");
   run("add", ".");
   run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base");
   run("switch", "-q", "-c", "feature");
   write("a.mjs", "export const a = 2;\n");
-  if (core) write("src/type-inference/core/answers.ts", "export const answers = 1;\n");
-  run("add", ".");
+  if (core === "added") write("src/type-inference/core/answers.ts", "export const answers = 1;\n");
+  if (core === "deleted") rmSync(join(directory, "src/type-inference/core/answers.ts"));
+  run("add", "-A");
   run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "feature");
   if (conflict) {
     run("switch", "-q", "main");
@@ -239,31 +243,58 @@ test(
 );
 
 test(
-  "a change to the type core prints the pin-suite mapper's list, and another change does not run it",
-  { timeout: 30_000 },
+  "a change to the type core prints the pin-suite mapper's list, plain and merged, a deletion too, and another change does not run it",
+  { timeout: 60_000 },
   () => {
-    for (const core of [true, false]) {
-      const { directory } = repository({ core });
-      try {
-        const result = spawnSync(process.execPath, [tool, "--base", "main"], {
-          cwd: directory,
-          encoding: "utf8",
-          env: environment,
-        });
-        const base = spawnSync("git", ["merge-base", "HEAD", "main"], {
-          cwd: directory,
-          encoding: "utf8",
-        }).stdout.trim();
-        if (core) {
-          assert.match(result.stdout, /^PASS {2}pin suites +\d+\.\ds$/mu, result.stderr);
-          assert.match(
-            result.stdout,
-            new RegExp(`--- pin suites ---\\nlisted for --base ${base}\\n`, "u"),
+    for (const merged of [false, true])
+      for (const core of ["added", "deleted", false]) {
+        const { directory } = repository({ core });
+        try {
+          const result = spawnSync(
+            process.execPath,
+            [tool, ...(merged ? ["--merged"] : []), "--base", "main"],
+            { cwd: directory, encoding: "utf8", env: environment },
           );
-        } else assert.doesNotMatch(result.stdout, /pin suites/u);
-      } finally {
-        rmSync(directory, { recursive: true, force: true });
+          const base = spawnSync("git", ["merge-base", "HEAD", "main"], {
+            cwd: directory,
+            encoding: "utf8",
+          }).stdout.trim();
+          const at = `${merged ? "merged" : "plain"}, ${core || "no core change"}`;
+          if (core) {
+            assert.match(
+              result.stdout,
+              /^PASS {2}pin suites +\d+\.\ds$/mu,
+              `${at}: ${result.stderr}`,
+            );
+            assert.match(
+              result.stdout,
+              new RegExp(`--- pin suites ---\\nlisted for --base ${base}\\n`, "u"),
+              at,
+            );
+          } else assert.doesNotMatch(result.stdout, /pin suites/u, at);
+        } finally {
+          rmSync(directory, { recursive: true, force: true });
+        }
       }
-    }
   },
 );
+
+test("a pin-suite mapper that fails fails the run, its output printed", { timeout: 30_000 }, () => {
+  const { directory } = repository({
+    core: "added",
+    mapper: 'console.error("no merge-base"); process.exitCode = 2;\n',
+  });
+  try {
+    const result = spawnSync(process.execPath, [tool, "--base", "main"], {
+      cwd: directory,
+      encoding: "utf8",
+      env: environment,
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, /^FAIL {2}pin suites /mu);
+    // (its stdout and stderr arrive in either order)
+    assert.match(result.stdout, /--- pin suites ---\n[^]*no merge-base\n/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

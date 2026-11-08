@@ -288,6 +288,10 @@ async function check(cleanups) {
       `projects: ${[...projects].join(", ") || "none"}\n`,
   );
 
+  // (a deleted core file counts too, which `changed`, holding the files that exist, leaves out)
+  const coreChanged = [...git("diff", "--name-only", mergeBase).split("\n"), ...changed].some(
+    (path) => path.startsWith(CORE),
+  );
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const formatted = changed.filter((path) => FORMATTED.test(path));
   const [formatter, ...formatterArgs] = prettier();
@@ -300,7 +304,7 @@ async function check(cleanups) {
     run("knip", process.execPath, ["node_modules/knip/bin/knip.js"]),
     run("doc links", process.execPath, ["tools/repository-checks/doc-links.mjs"]),
     run("imports", process.execPath, ["tools/repository-checks/imports.mjs"]),
-    ...(changed.some((path) => path.startsWith(CORE))
+    ...(coreChanged
       ? [
           run(
             "pin suites",
