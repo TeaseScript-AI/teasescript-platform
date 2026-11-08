@@ -22,6 +22,7 @@ import { existsSync, readFileSync } from "node:fs";
 // - 14 characters whose first 10 are digits: a queue job id (`sx-job`: the month to the second, then 4 hex), such as
 //   `1107175450d1b5`;
 // - only the letters a-f: a word, such as `defaced`;
+// - right after the word `sha256` (with a space, `:` or `=` between): a file's hash, such as `sha256 4322b2e0e668`;
 // - shorter than 40 and inside a URL or a path, except after `/commit/`, `/commits/`, `/tree/` or `/blob/`: a file's
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
 //
@@ -42,6 +43,8 @@ export function excuse(token, text, index) {
   if (/^\d+$/u.test(token)) return "only digits, an id";
   if (/^\d{10}[0-9a-f]{4}$/u.test(token)) return "a queue job id";
   if (/^[a-f]+$/u.test(token)) return "a word";
+  if (/\bsha256[\s:=]+$/iu.test(text.slice(Math.max(0, index - 16), index)))
+    return "a file's sha256";
   // The run of non-space characters the token is in: a URL or a path, unless it names the commit itself.
   const start = text.slice(0, index).search(/\S*$/u);
   const before = text.slice(start, index);
@@ -228,7 +231,7 @@ function main() {
   const tokens = Object.values(counts).reduce((sum, n) => sum + n, 0);
   process.stdout.write(
     `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.ambiguous} ambiguous, ` +
-      `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths); ` +
+      `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths, sha256s); ` +
       `${placeholders.length} placeholders\n`,
   );
   process.exitCode = failed ? 1 : 0;
