@@ -328,7 +328,7 @@ if (process.argv[2] === "--child") {
   let limit = Infinity;
   let next = Infinity;
   let running = null;
-  // (a run's peak heap: its used heap sampled as it starts, at each `STEP` units charged and as it ends)
+  // (a run's peak heap: its used heap sampled at each `STEP` units charged and as it ends)
   let peak = 0;
   let sampleAt = Infinity;
   const sample = () => {
@@ -400,14 +400,14 @@ if (process.argv[2] === "--child") {
     next = measured && record !== undefined ? STEP : Infinity;
     write({ work: measured ? 0 : null, allowance: null });
     peak = 0;
-    sample();
     sampleAt = STEP;
     const started = performance.now();
     const result = attempt(() => digest(run(trees[tree])));
     const ms = Math.round(performance.now() - started);
     sample();
     sampleAt = Infinity;
-    used.peak.push(Math.round(peak / 2 ** 20));
+    // (in MiB, exact: a binary fraction, never rounded before it is judged near the cap)
+    used.peak.push(peak / 2 ** 20);
     used.work.push(measured ? spent : null);
     used.allowance.push(measured ? allowance : null);
     used.ms.push(ms);
@@ -790,10 +790,12 @@ if (process.argv[2] === "--child") {
       start?.mode === undefined ? {} : { mode: start.mode, check: start.check };
     return {
       after: [
-        ...alone.runs.map(({ result, mode, check }) => ({
+        // (each with its peak heap, MiB, where the run ended)
+        ...alone.runs.map(({ result, mode, check }, at) => ({
           mode,
           check,
           head: aloneOutcome(check, result),
+          ...(alone.spent[at]?.peak === undefined ? {} : { peak: alone.spent[at].peak[0] }),
         })),
         ...(alone.uncharged === undefined
           ? []
@@ -805,8 +807,6 @@ if (process.argv[2] === "--child") {
       thrown: alone.runs
         .filter(({ result }) => result.thrown !== undefined)
         .map(({ result, mode, check }) => ({ mode, check, text: result.thrown })),
-      // (each ended run's units, milliseconds and peak heap, the head's alone)
-      spent: alone.spent,
     };
   };
 
@@ -1180,9 +1180,9 @@ if (process.argv[2] === "--child") {
         ...reply.spent.flatMap(({ mode, check, peak = [] }) =>
           peak.map((mib, at) => ({ mode, check, tree: treeNames[at], peak: mib })),
         ),
-        ...(rerun?.spent ?? []).flatMap(({ mode, check, peak = [] }) =>
-          peak.map((mib) => ({ mode, check, tree: "head", peak: mib })),
-        ),
+        ...(afterBase ?? [])
+          .filter(({ peak }) => peak !== undefined)
+          .map(({ mode, check, peak }) => ({ mode, check, tree: "head", peak })),
       ].filter(({ peak }) => isNearCap(peak, heapLimit));
       for (const tree of ["base", "head"])
         if (near.some((run) => run.tree === tree)) row.nearCap[tree] += 1;

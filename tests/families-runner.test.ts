@@ -694,6 +694,13 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     // it; a writer that ended (another start time) claims it no longer, and its temporary file goes
     assert.equal(into(base, "0/2").status, 1);
     assert.deepEqual(readdirSync(baseline).sort(), ["0of2.runs.jsonl", "PLAN"]);
+    // (a stored shard's total line holds no peak, nor the heap limit or what the runner read of the tree, #2068)
+    const storedTotal = JSON.parse(
+      readFileSync(join(baseline, "0of2.runs.jsonl"), "utf8").trim().split("\n").at(-1)!,
+    ).total;
+    for (const advisory of ["nearCap", "heapLimit", "capabilities"])
+      assert.equal(advisory in storedTotal, false, advisory);
+    assert.deepEqual(storedTotal.crashed, { base: 0, head: 0 });
     const stat = readFileSync("/proc/self/stat", "utf8");
     const started = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
     writeFileSync(join(baseline, ".1of2.claim"), `${process.pid}-${started}\n`);
@@ -4187,29 +4194,50 @@ test("a publication run's unit limit grants its oracle's units per cell its ques
 
 /**
  * A built tree's library whose publication answers every source alike, without the grant's exports where `bare`. Where
- * `heavy`, its publication of `heavy` in the source-order sharing-on mode holds 82 % of its process's heap limit while
- * it charges 70,000 units (past one sampling step), then lets go of it and collects, so its later runs start low.
+ * `heavy`: `heavy` in the source-order sharing-on mode leaves 82 % of its process's heap limit held after it returns,
+ * which the run's end sample alone sees (it charges under one sampling step); `late` in the reversed sharing-on mode
+ * holds as much while it charges 70,000 units (past one step), then lets go. Where `aborting`, `late` in the
+ * source-order sharing-off mode ends the process as V8's heap abort does. Each call first lets go of what an earlier
+ * one held and collects, so a run starts low.
  */
 const peakLibrary = (
   heavy: boolean,
   bare: boolean,
-): string => `import { getHeapStatistics } from "node:v8";
+  aborting: boolean,
+): string => `import { writeSync } from "node:fs";
+import { getHeapStatistics } from "node:v8";
 import { WorkLedger } from "../../src/type-inference/core/budget.js";
 export const MODES = [false, true].flatMap((reversed) =>
   [false, true].map((unshared) => ({ reversed, unshared })),
 );
 ${bare ? "" : "export const QUESTION_UNITS_PER_CELL = 64;\nexport const questionWork = () => ({ units: 0, cells: 0 });"}
+const filled = () => {
+  const held = [];
+  while (getHeapStatistics().used_heap_size < 0.82 * getHeapStatistics().heap_size_limit)
+    held.push(new Array(1 << 14).fill(1.5));
+  return held;
+};
 export function publicationHashes(files, mode) {
+  if (globalThis.heldByPeakLibrary !== undefined) {
+    globalThis.heldByPeakLibrary = undefined;
+    globalThis.gc();
+  }
+  const source = files[0].source;
   const ledger = new WorkLedger(1000000);
-  if (${heavy} && files[0].source === "heavy" && !mode.reversed && !mode.unshared) {
-    const limit = getHeapStatistics().heap_size_limit;
-    let held = [];
-    while (getHeapStatistics().used_heap_size < 0.82 * limit) held.push(new Array(1 << 14).fill(1.5));
+  if (${aborting} && source === "late" && mode.unshared && !mode.reversed) {
+    writeSync(2, "FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory\\n");
+    process.exit(134);
+  }
+  if (${heavy} && source === "heavy" && !mode.reversed && !mode.unshared) {
+    globalThis.heldByPeakLibrary = filled();
+    ledger.charge("frames", 300);
+  } else if (${heavy} && source === "late" && mode.reversed && !mode.unshared) {
+    let held = filled();
     ledger.charge("frames", 70000);
     held = null;
     globalThis.gc();
   } else ledger.charge("frames", 300);
-  return { parts: [files[0].source], unanswered: 0 };
+  return { parts: [source], unanswered: 0 };
 }
 `;
 
@@ -4219,15 +4247,18 @@ test("a run's peak heap is near the cap past 80 % of V8's heap limit, a syntheti
   // (2,144 MiB, the limit V8 gives a 2,048 MB process: 80 % is 1,715.2)
   assert.equal(isNearCap(1715, 2144), false);
   assert.equal(isNearCap(1716, 2144), true);
+  // (a peak is judged as it was sampled, never rounded first: 80.01 % of 448 MiB is 358.4448)
+  assert.equal(isNearCap(358.4, 448), false);
+  assert.equal(isNearCap(0.8001 * 448, 448), true);
   // (never where either is unknown: a failed heap probe, a run with no peak)
   assert.equal(isNearCap(1716, undefined), false);
   assert.equal(isNearCap(null, 2144), false);
 });
 
-test("the runner records each run's peak heap, counts and names a source near the cap on its tree without making it a stall or changing the exit status, and names what each tree's build lacks (the checks proposal's items 25 and 26)", () => {
+test("the runner records each run's peak heap, counts and names a source near the cap on its tree, its end sample's or its step's, the head's alone after a base crash among them, without making it a stall or changing the exit status, and names what each tree's build lacks (the checks proposal's items 25 and 26)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
-    const built = (name: string, heavy: boolean, bare: boolean) => {
+    const built = (name: string, heavy: boolean, bare: boolean, aborting: boolean) => {
       const tree = join(directory, name);
       mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
       mkdirSync(join(tree, "dist", "src", "type-inference", "core"), { recursive: true });
@@ -4235,74 +4266,97 @@ test("the runner records each run's peak heap, counts and names a source near th
       writeFileSync(join(tree, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
       writeFileSync(
         join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
-        peakLibrary(heavy, bare),
+        peakLibrary(heavy, bare, aborting),
       );
       return tree;
     };
-    const base = built("base", false, true);
-    const head = built("head", true, false);
-    const folder = join(directory, "area");
-    mkdirSync(folder);
-    writeFileSync(
-      join(folder, "g.mjs"),
-      'export const cases = [["light", "light"], ["heavy", "heavy"]];\n',
-    );
-    const out = join(directory, "out.jsonl");
-    const work = join(directory, "work.jsonl");
-    const ran = spawnSync(
-      process.execPath,
-      [runner, folder, base, head, "--memory", "512", "--out", out, "--work", work],
-      { encoding: "utf8" },
-    );
-    // (near the cap is advisory: nothing differs, so the exit status is 0)
-    assert.equal(ran.status, 0, ran.stderr);
-    const [row, total] = ran.stdout
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    assert.deepEqual(row.nearCap, { base: 0, head: 1 });
-    assert.deepEqual(total.nearCap, { base: 0, head: 1 });
-    assert.equal(total.stalled, 0);
-    const limit = total.heapLimit;
+    const base = built("base", false, true, true);
+    const head = built("head", true, false, false);
+    const ran = (name: string, cases: string[]) => {
+      const folder = join(directory, name);
+      mkdirSync(folder);
+      writeFileSync(
+        join(folder, "g.mjs"),
+        `export const cases = ${JSON.stringify(cases.map((source) => [source, source]))};\n`,
+      );
+      const out = join(directory, `${name}.out.jsonl`);
+      const work = join(directory, `${name}.work.jsonl`);
+      const result = spawnSync(
+        process.execPath,
+        [runner, folder, base, head, "--memory", "512", "--out", out, "--work", work],
+        { encoding: "utf8" },
+      );
+      const read = (file: string) =>
+        readFileSync(file, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line));
+      const [row, total] = result.stdout
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      return {
+        status: result.status,
+        stderr: result.stderr,
+        row,
+        total,
+        out: read(out),
+        work: read(work),
+      };
+    };
+    const runsOf = (named: { nearCap?: { mode: string; check: string; tree: string }[] }) =>
+      (named.nearCap ?? []).map(({ mode, check, tree }) => [mode, check, tree]);
+
+    // (the end sample's peak: nothing else to read, so near the cap leaves the exit status 0)
+    const first = ran("first", ["light", "heavy"]);
+    assert.equal(first.status, 0, first.stderr);
+    assert.deepEqual(first.row.nearCap, { base: 0, head: 1 });
+    assert.deepEqual(first.total.nearCap, { base: 0, head: 1 });
+    assert.equal(first.total.stalled, 0);
+    const limit = first.total.heapLimit;
     assert.ok(Number.isInteger(limit) && limit > 512, String(limit));
-    assert.deepEqual(total.capabilities, {
+    assert.deepEqual(first.total.capabilities, {
       base: ["QUESTION_UNITS_PER_CELL", "questionWork"],
       head: [],
     });
-    // (`--out` names the heavy source's one run near the cap, the head's, with its peak and the limit)
-    const named = readFileSync(out, "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    assert.equal(named.length, 1);
-    assert.equal(named[0].source, "heavy");
-    assert.equal(named[0].heapLimit, limit);
+    // (`--out` names the one run near the cap, the head's, with its peak and the limit)
     assert.deepEqual(
-      named[0].nearCap.map(
-        ({ mode, check, tree }: { mode: string; check: string; tree: string }) => [
-          mode,
-          check,
-          tree,
-        ],
-      ),
-      [["src-on", "publication", "head"]],
+      first.out.map(({ source }) => source),
+      ["heavy"],
     );
-    assert.ok(named[0].nearCap[0].peak > 0.8 * limit, JSON.stringify(named[0]));
-    // (the work record: the limit and the lacks first; each run's peak on each tree, the light ones far under it)
-    const lines = readFileSync(work, "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    assert.equal(lines[0].work.heapLimit, limit);
-    assert.deepEqual(lines[0].work.capabilities, total.capabilities);
-    const [light, heavy] = lines.slice(1, -1);
+    assert.equal(first.out[0].heapLimit, limit);
+    assert.deepEqual(runsOf(first.out[0]), [["src-on", "publication", "head"]]);
+    assert.ok(first.out[0].nearCap[0].peak > 0.8 * limit, JSON.stringify(first.out[0]));
+    // (the work record: the limit and the lacks first; each run's peak on each tree, the others far under it)
+    assert.equal(first.work[0].work.heapLimit, limit);
+    assert.deepEqual(first.work[0].work.capabilities, first.total.capabilities);
+    const [light, heavy] = first.work.slice(1, -1);
     assert.equal(light.nearCap, undefined);
-    for (const run of light.runs)
+    for (const run of [...light.runs, ...heavy.runs.slice(1)])
       for (const peak of run.peak) assert.ok(peak < 0.8 * limit, String(peak));
-    assert.equal(heavy.runs.length, 4);
     assert.ok(heavy.runs[0].peak[1] > 0.8 * limit && heavy.runs[0].peak[0] < 0.8 * limit);
-    assert.deepEqual(heavy.nearCap.length, 1);
-    assert.deepEqual(lines.at(-1).total, total);
+    assert.deepEqual(runsOf(heavy), [["src-on", "publication", "head"]]);
+    assert.deepEqual(first.work.at(-1).total, first.total);
+
+    // (a step's peak, on the head's run alone after the base's abort: counted as the head's)
+    const second = ran("second", ["late"]);
+    assert.equal(second.status, 1, second.stderr);
+    assert.deepEqual(second.total.crashed, { base: 1, head: 0 });
+    assert.deepEqual(second.total.nearCap, { base: 0, head: 1 });
+    const named = second.out.filter((line) => line.nearCap !== undefined);
+    assert.deepEqual(named.map(runsOf), [[["rev-on", "publication", "head"]]]);
+    const late = second.work[1];
+    assert.deepEqual(
+      late.afterBase.map(({ mode, peak }: { mode: string; peak: number }) => [
+        mode,
+        peak > 0.8 * limit,
+      ]),
+      [
+        ["src-off", false],
+        ["rev-on", true],
+        ["rev-off", false],
+      ],
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -4385,8 +4439,12 @@ test("a base whose run ends its process leaves the head's runs from that one on 
     assert.deepEqual(aborted.crashed, { base: true, head: false });
     // (four base crashes, one of them with the head crashing alone after it: no head-only crash, so exit 1, not 3)
     assert.deepEqual(lines.at(-1).total.crashed, { base: 4, head: 1 });
-    // (the source-order runs both trees ended; from the base's abort on, the head's own outcome per run)
-    assert.deepEqual(aborted.afterBase, [
+    // (the source-order runs both trees ended; from the base's abort on, the head's own outcome per run, each run it
+    // ended with its peak heap, #2068)
+    const withoutPeaks = (after: { peak?: number }[]) => after.map(({ peak, ...run }) => run);
+    for (const run of aborted.afterBase)
+      assert.equal(typeof run.peak, "number", JSON.stringify(run));
+    assert.deepEqual(withoutPeaks(aborted.afterBase), [
       { mode: "src-off", check: "publication", head: { answered: true } },
       {
         mode: "rev-on",
@@ -4401,7 +4459,9 @@ test("a base whose run ends its process leaves the head's runs from that one on 
     ]);
     // (the head's own safety net in its rerun: named by its run, counted and reported as any uncharged run)
     const slow = lines.find((line) => line.source === "head-slow");
-    assert.deepEqual(slow.afterBase, [
+    // (a run at the safety net ended nothing: no peak)
+    assert.equal(slow.afterBase[1].peak, undefined);
+    assert.deepEqual(withoutPeaks(slow.afterBase), [
       { mode: "src-off", check: "publication", head: { answered: true } },
       { mode: "rev-on", check: "publication", head: { uncharged: true } },
     ]);
@@ -4409,7 +4469,7 @@ test("a base whose run ends its process leaves the head's runs from that one on 
     assert.match(ran.stderr, /"source":"head-slow","uncharged":\{"head":"rev-on publication"\}/);
     // (the head's own abort in its rerun: named by its run)
     const dies = lines.find((line) => line.source === "head-dies");
-    assert.deepEqual(dies.afterBase.slice(0, 1), [
+    assert.deepEqual(withoutPeaks(dies.afterBase.slice(0, 1)), [
       { mode: "src-off", check: "publication", head: { answered: true } },
     ]);
     assert.deepEqual([dies.afterBase[1].mode, dies.afterBase[1].check], ["rev-on", "publication"]);
@@ -4418,7 +4478,7 @@ test("a base whose run ends its process leaves the head's runs from that one on 
     // (the head's own exception in its rerun: named by its run there, and reported as any exception: counted, on stderr,
     // in --out with its stack, Codex r4)
     const throws = lines.find((line) => line.source === "head-throws");
-    assert.deepEqual(throws.afterBase[1], {
+    assert.deepEqual(withoutPeaks(throws.afterBase.slice(1, 2))[0], {
       mode: "rev-on",
       check: "publication",
       head: { thrown: "Error: head-throws: the head's own exception" },

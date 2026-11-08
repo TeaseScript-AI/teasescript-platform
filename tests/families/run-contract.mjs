@@ -86,10 +86,11 @@ export function capabilitiesOf({ oracle, ledger }) {
 
 /**
  * The share of a source's process's heap limit (V8's `heap_size_limit`, what its abort is against) above which a run's
- * sampled peak heap is near the cap. The runner counts such runs (`nearCap`) and names them, advisory only: a sampled
- * peak varies with when the collector runs, so it never decides a stall or an exit status. At the default 2,048 MB the
- * highest peak sampled over 36 runs near the cap (W19-sources, W24-varied and W24-alias-group at 256 to 1,024, every
- * mode) was 79 % of the limit, the oracle's `memory` stop holding its questions about 512 MiB under it.
+ * sampled peak heap is near the cap. The runner counts the sources with such a run on each tree (`nearCap`) and names
+ * their runs, advisory only: a sampled peak varies with when the collector runs, so it never decides a stall or an exit
+ * status. At the default 2,048 MB the highest peak sampled over 36 runs near the cap (W19-sources, W24-varied and
+ * W24-alias-group at 256 to 1,024, every mode) was 79 % of the limit, the oracle's `memory` stop holding its questions
+ * about 512 MiB under it.
  */
 export const NEAR_CAP = 0.8;
 
