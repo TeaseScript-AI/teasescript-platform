@@ -24,10 +24,6 @@ function setContrast(event: Event) {
   const contrast = selectValue(event);
   if (contrast === "standard" || contrast === "high") patchIntent({ contrast });
 }
-function setSurfaceMaxChroma(event: Event) {
-  const surfaceMaxChroma = Number(selectValue(event));
-  if (surfaceMaxChroma === 5 || surfaceMaxChroma === 8.5 || surfaceMaxChroma === 12) patchIntent({ surfaceMaxChroma });
-}
 function setMonochrome(event: Event) {
   if (event.target instanceof HTMLInputElement) patchIntent({ monochrome: event.target.checked });
 }
@@ -42,8 +38,8 @@ function pickAccent(event: Event) {
 }
 // Apply one mode's default palette without changing the current mode or contrast.
 function comparePair(pair: "light" | "dark") {
-  const { surfaceHue, surfaceTint, surfaceMaxChroma, monochrome, accentSeed } = defaultPlayerThemeIntents[pair];
-  patchIntent({ surfaceHue, surfaceTint, surfaceMaxChroma, monochrome, accentSeed });
+  const { surfaceHue, surfaceTint, monochrome, accentSeed } = defaultPlayerThemeIntents[pair];
+  patchIntent({ surfaceHue, surfaceTint, monochrome, accentSeed });
 }
 function displayColor(color: OklchColor) {
   return `oklch(${(color.l * 100).toFixed(2)}% ${color.c.toFixed(4)} ${color.h.toFixed(2)})`;
@@ -67,14 +63,11 @@ function displayColor(color: OklchColor) {
     </label>
     <fieldset class="grid gap-2">
       <legend>Surface tint intent</legend>
-      <label class="grid gap-1">Maximum surface chroma
-        <select :value="intent.surfaceMaxChroma" aria-label="Maximum surface chroma" @change="setSurfaceMaxChroma"><option :value="5">5 · quiet</option><option :value="8.5">8.5</option><option :value="12">12 · stronger</option></select>
-      </label>
       <label class="flex items-center gap-2"><input :checked="intent.monochrome" type="checkbox" @change="setMonochrome" /> Monochrome surfaces</label>
       <label class="grid gap-1">Surface hue · {{ intent.surfaceHue }}°
         <input :value="intent.surfaceHue" :disabled="intent.monochrome" aria-label="Surface hue" type="range" min="0" max="360" step="1" @input="setSurfaceHue" />
       </label>
-      <label class="grid gap-1">Tint intensity · {{ Math.round(intent.surfaceTint * 100) }}%
+      <label class="grid gap-1">Tint intensity, share of the mode's chroma cap · {{ Math.round(intent.surfaceTint * 100) }}%
         <input :value="intent.surfaceTint" :disabled="intent.monochrome" aria-label="Tint intensity" type="range" min="0" max="1" step="0.01" @input="setSurfaceTint" />
       </label>
       <p>{{ intent.monochrome || intent.surfaceTint === 0 ? 'Achromatic surfaces. Hue is inactive until tint is added.' : 'Explicit surface tint; independent of accent and light/dark mode.' }}</p>

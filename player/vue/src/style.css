@@ -62,7 +62,6 @@
   --text-muted: oklch(52.649% 0.02679 41.27);
   --package-accent: oklch(59.208% 0.19138 11.08);
   /* Existing demo ambience (#f7cdaf), expressed in OKLCH. */
-  --scene-ambient: oklch(87.69778% 0.062244 57.33796);
   color: var(--foreground);
   background: var(--background);
 }
@@ -138,7 +137,6 @@
   --popover: var(--theme-surface-floating);
   --focus-ring: var(--theme-focus-ring);
   /* UI ambience follows the surface family; exact scene/media color remains content-owned. */
-  --player-ambient: var(--theme-ambient-wash);
   accent-color: var(--theme-accent-solid);
 }
 :root[data-player-theme="light"] { color-scheme: light; }
@@ -214,7 +212,8 @@
   initial-value: black;
 }
 /* One background behind the Stage and the chat, in which both sit (PLAYER-UI.md "Stage and media presentation"): one
-   field colour, and effects centred on the photo that fade into it, so no edge marks where the Stage ends. */
+   field colour, and a vignette centred on the photo, or on the Stage without one, that fades into it, so no edge marks
+   where the Stage ends. */
 .player-viewport-canvas {
   position: fixed;
   left: var(--viewport-left);
@@ -223,19 +222,15 @@
   height: var(--usable-height);
   --player-field: var(--background);
   /* One continuous canvas includes the cutout clearance above Player content. */
-  background:
-    radial-gradient(ellipse 90% 55% at 68% 0%,
-      color-mix(in srgb, var(--player-ambient, var(--scene-ambient)) 34%, transparent), transparent 72%),
-    var(--player-field);
+  background: var(--player-field);
 }
-/* A Stage photo's colour (`usePhotoColour.ts`) replaces the theme's ambience. A vignette centred on the photo
-   (`--photo-cx`/`-cy`/`-w`/`-h`) darkens the far edges in dark mode and pales them in light mode, where darker edges
-   would cost the text on the background its contrast. It is the edge colour through a mask that follows a smoothstep
+/* A vignette centred on the photo, or without one on the Stage (`--vignette-cx`/`-cy`/`-w`/`-h`, `usePhotoColour.ts`),
+   darkens the far edges in dark mode and pales them in light mode, where darker edges would cost the text on the
+   background its contrast. It is the edge colour through a mask that follows a smoothstep
    from 37.5% to 112.5%: the midpoint and the steepest slope of a straight ramp from 50% to 100%, without a ring where
    it starts. Browsers do not dither gradients, so its few colour levels would still show as rings; a faint grain in the
    mask breaks them up. The grain only adds edge colour, so each pixel stays between the background and the edge at the
    vignette's strength, the range `messageContrast.ts` checks text against. */
-:root[data-photo-colour] .player-viewport-canvas { background: var(--player-field); }
 .player-viewport-canvas::before {
   content: "";
   position: absolute;
@@ -244,13 +239,13 @@
   mask-image:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128'%3E%3Cfilter id='grain' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0 0 0 -0.21'/%3E%3C/filter%3E%3Crect width='128' height='128' filter='url(%23grain)'/%3E%3C/svg%3E"),
     radial-gradient(
-      calc(var(--photo-w, 480px) * 0.5 + var(--usable-width) * 0.4)
-        calc(var(--photo-h, 320px) * 0.5 + var(--usable-height) * 0.75)
-        at var(--photo-cx, 50%) var(--photo-cy, 30%),
+      calc(var(--vignette-w, 480px) * 0.5 + var(--usable-width) * 0.4)
+        calc(var(--vignette-h, 320px) * 0.5 + var(--usable-height) * 0.75)
+        at var(--vignette-cx, 50%) var(--vignette-cy, 30%),
       transparent 37.5%, rgb(0 0 0 / 2.8%) 45%, rgb(0 0 0 / 10.4%) 52.5%, rgb(0 0 0 / 21.6%) 60%,
       rgb(0 0 0 / 35.2%) 67.5%, rgb(0 0 0 / 50%) 75%, rgb(0 0 0 / 64.8%) 82.5%, rgb(0 0 0 / 78.4%) 90%,
       rgb(0 0 0 / 89.6%) 97.5%, rgb(0 0 0 / 97.2%) 105%, black 112.5%);
-  opacity: var(--photo-vignette, 0);
+  opacity: var(--player-vignette, 0);
   pointer-events: none;
 }
 :root[data-player-theme="light"] .player-viewport-canvas { --photo-edge: white; }

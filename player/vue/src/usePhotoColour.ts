@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch, watchEffect, type Ref } from "vue";
 import { useResizeObserver } from "@vueuse/core";
 import type { PhotoSwatches } from "../../theme/node-vibrant/swatches.js";
+import { MODE_SURFACES } from "../../theme/palette.js";
 import { photoColours, type PhotoColourChoice } from "../../theme/photo-theme.js";
 
 // Photo colours (PLAYER-UI.md "Stage and media presentation"): the Stage photo colours the Player.
@@ -21,12 +22,13 @@ function stageImage(stage: HTMLElement | undefined) {
 }
 
 /**
- * Where the photo is drawn on the Player's background (`--photo-cx`, `--photo-cy`, `--photo-w`, `--photo-h` on the
- * document root), so the background centres its effects on it. The Stage image keeps its aspect inside its box
- * (`object-fit: contain`). Its box can change while the canvas and the Stage keep their size, as when a preview or the
- * camera view over it goes, so the image is observed too.
+ * Where the background's vignette is centred and how large its centre is (`--vignette-cx`, `--vignette-cy`,
+ * `--vignette-w`, `--vignette-h` on the document root): the photo as it is drawn, or without a photo the Stage's box, so
+ * no earlier photo's place stays. The Stage image keeps its aspect inside its box (`object-fit: contain`). Its box can
+ * change while the canvas and the Stage keep their size, as when a preview or the camera view over it goes, so the
+ * image is observed too.
  */
-function usePhotoGeometry(
+function useVignetteGeometry(
   canvas: Readonly<Ref<HTMLElement | undefined>>,
   stage: Readonly<Ref<HTMLElement | undefined>>,
   photo: readonly Readonly<Ref<unknown>>[],
@@ -34,20 +36,38 @@ function usePhotoGeometry(
   const root = document.documentElement;
   const image = shallowRef<HTMLImageElement>();
   let frame = 0;
+  function set(box: { left: number; top: number; width: number; height: number }, origin: DOMRect) {
+    root.style.setProperty("--vignette-cx", `${box.left - origin.left + box.width / 2}px`);
+    root.style.setProperty("--vignette-cy", `${box.top - origin.top + box.height / 2}px`);
+    root.style.setProperty("--vignette-w", `${box.width}px`);
+    root.style.setProperty("--vignette-h", `${box.height}px`);
+  }
   function place() {
     frame = 0;
     image.value = stageImage(stage.value);
-    if (!canvas.value || !image.value || image.value.naturalWidth === 0) return;
+    if (!canvas.value) return;
+    const origin = canvas.value.getBoundingClientRect();
+    if (!image.value) {
+      // No photo: the middle of the Stage.
+      if (stage.value) set(stage.value.getBoundingClientRect(), origin);
+      return;
+    }
     const { naturalWidth, naturalHeight } = image.value;
     const box = image.value.getBoundingClientRect();
-    // An image request's preview hides the photo: its effects keep their place.
-    if (box.width === 0 || box.height === 0) return;
-    const origin = canvas.value.getBoundingClientRect();
+    // A photo still loading, or hidden by an image request's preview: the effects keep their place.
+    if (naturalWidth === 0 || box.width === 0 || box.height === 0) return;
     const scale = Math.min(box.width / naturalWidth, box.height / naturalHeight);
-    root.style.setProperty("--photo-cx", `${box.left - origin.left + box.width / 2}px`);
-    root.style.setProperty("--photo-cy", `${box.top - origin.top + box.height / 2}px`);
-    root.style.setProperty("--photo-w", `${naturalWidth * scale}px`);
-    root.style.setProperty("--photo-h", `${naturalHeight * scale}px`);
+    const width = naturalWidth * scale;
+    const height = naturalHeight * scale;
+    set(
+      {
+        left: box.left + (box.width - width) / 2,
+        top: box.top + (box.height - height) / 2,
+        width,
+        height,
+      },
+      origin,
+    );
   }
   const schedule = () => {
     if (!frame) frame = requestAnimationFrame(place);
@@ -56,16 +76,16 @@ function usePhotoGeometry(
   watch(photo, schedule, { flush: "post" });
   onBeforeUnmount(() => {
     cancelAnimationFrame(frame);
-    for (const name of ["--photo-cx", "--photo-cy", "--photo-w", "--photo-h"])
+    for (const name of ["--vignette-cx", "--vignette-cy", "--vignette-w", "--vignette-h"])
       root.style.removeProperty(name);
   });
 }
 
 /**
  * The Player's photo colours from the swatches of the photo the Stage shows (`photo`; `null` swatches keep the theme's
- * own colours). While they apply, the document root has `data-photo-colour` and the vignette strength
- * `--photo-vignette`; for a moment after they change it has `data-photo-fade`, during which `style.css` fades the
- * background and the message bubbles.
+ * own colours). While they apply, the document root has `data-photo-colour`. The vignette's strength
+ * (`--player-vignette`) is the mode's, with or without a photo; for a moment after the colours change the root has
+ * `data-photo-fade`, during which `style.css` fades the background and the message bubbles.
  */
 export function usePhotoColour(
   photo: Readonly<Ref<unknown>>,
@@ -82,7 +102,7 @@ export function usePhotoColour(
   const colours = computed(() =>
     swatches.value ? photoColours(swatches.value, mode.value, choice.value) : null,
   );
-  usePhotoGeometry(elements.canvas, elements.stage, [photo, swatches]);
+  useVignetteGeometry(elements.canvas, elements.stage, [photo, swatches]);
   const root = document.documentElement;
   const fading = ref(false);
   let fadeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -94,10 +114,8 @@ export function usePhotoColour(
     fadeTimer = setTimeout(() => (fading.value = false), PHOTO_FADE_TIMES[fadeTime.value] + 100);
   });
   watchEffect(() => {
-    const vignette = colours.value?.vignette;
-    root.toggleAttribute("data-photo-colour", vignette !== undefined);
-    if (vignette === undefined) root.style.removeProperty("--photo-vignette");
-    else root.style.setProperty("--photo-vignette", String(vignette));
+    root.toggleAttribute("data-photo-colour", colours.value !== null);
+    root.style.setProperty("--player-vignette", String(MODE_SURFACES[mode.value].vignette));
     root.style.setProperty("--photo-fade-duration", `${PHOTO_FADE_TIMES[fadeTime.value]}ms`);
     root.toggleAttribute("data-photo-fade", fading.value);
   });
@@ -105,7 +123,7 @@ export function usePhotoColour(
     clearTimeout(fadeTimer);
     root.removeAttribute("data-photo-colour");
     root.removeAttribute("data-photo-fade");
-    root.style.removeProperty("--photo-vignette");
+    root.style.removeProperty("--player-vignette");
     root.style.removeProperty("--photo-fade-duration");
   });
   return colours;
