@@ -7,6 +7,7 @@ import {
   readlinkSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,8 +42,9 @@ import { costlyTestSeconds } from "./costly-test-files.mjs";
 // a leftover it may not remove, or no `node_modules`, which it never installs: it names the fix). The fix it names is
 // a command that links main's `node_modules` in the checkout `TEASESCRIPT_MAIN` names (by default
 // `/opt/teasescript-agents/teasescript-main/current`) when that folder has one, by the absolute path the system opens
-// for it (`mainLinkCommand`): run as printed, it links that very folder. Over a stale link (`staleLink`) it says so and
-// names the command that replaces only that link. Else it names the merge-base's tree from `sx-tree`, or `npm ci`.
+// for it (`mainLinkCommand`): run as printed, it links that very folder. Over a stale link (`staleLink`: one whose
+// target is confirmed gone, not one it may not read) it says so and names the command that replaces only that link.
+// Else it names the merge-base's tree from `sx-tree`, or `npm ci`.
 
 /** The projects a changed path can belong to, each with the npm scripts or commands that check it. */
 export const PROJECTS = {
@@ -169,12 +171,22 @@ const TEMPORARY_PREFIX = join(tmpdir(), "check-changed-merged-");
 /** The LXC's own checkout of main, which an unset or empty `TEASESCRIPT_MAIN` means. */
 export const MAIN_CHECKOUT = "/opt/teasescript-agents/teasescript-main/current";
 
-/** Whether `cwd`'s `node_modules` is a link whose target is gone (`lstat` finds a link, the system opens nothing). */
+/**
+ * Whether `cwd`'s `node_modules` is a link whose target is confirmed gone: `lstat` finds a link, and opening it fails
+ * because a part of its target does not exist (`ENOENT`, `ENOTDIR`). A target it may not read (`EACCES`), a loop, or
+ * any other failure is not confirmed, so the link is not stale.
+ */
 export function staleLink(cwd) {
   try {
-    return lstatSync(`${cwd}/node_modules`).isSymbolicLink() && !existsSync(`${cwd}/node_modules`);
+    if (!lstatSync(`${cwd}/node_modules`).isSymbolicLink()) return false;
   } catch {
     return false;
+  }
+  try {
+    statSync(`${cwd}/node_modules`);
+    return false;
+  } catch (error) {
+    return error.code === "ENOENT" || error.code === "ENOTDIR";
   }
 }
 

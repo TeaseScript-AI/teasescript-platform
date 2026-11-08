@@ -437,16 +437,28 @@ test("main's node_modules come from TEASESCRIPT_MAIN, and unset or empty from th
     assert.equal(mainLinkCommand({ TEASESCRIPT_MAIN: "" }, root, join(root, "lxc")), linked);
     assert.equal(mainLinkCommand({}, root, join(root, "absent")), null);
     assert.equal(mainLinkCommand({ TEASESCRIPT_MAIN: "absent" }, root, join(root, "lxc")), null);
-    // only a link whose target is gone is stale: not a folder, a file, a live link or nothing
+    // only a link whose target is confirmed gone is stale: not a folder, a file, a live link, nothing, or a link whose
+    // target it may not read (for a root user, who may read it, that link is live)
     assert.equal(staleLink(root), false);
+    writeFileSync(join(root, "file"), "");
+    mkdirSync(join(root, "denied", "node_modules"), { recursive: true });
     for (const [make, stale] of [
       [() => symlinkSync(join(root, "gone"), join(root, "node_modules")), true],
+      [() => symlinkSync(join(root, "file", "below"), join(root, "node_modules")), true],
+      [
+        () => {
+          symlinkSync(join(root, "denied", "node_modules"), join(root, "node_modules"));
+          chmodSync(join(root, "denied"), 0);
+        },
+        false,
+      ],
       [() => symlinkSync(join(root, "lxc", "node_modules"), join(root, "node_modules")), false],
       [() => mkdirSync(join(root, "node_modules")), false],
       [() => writeFileSync(join(root, "node_modules"), ""), false],
     ]) {
       make();
       assert.equal(staleLink(root), stale);
+      chmodSync(join(root, "denied"), 0o755);
       rmSync(join(root, "node_modules"), { recursive: true, force: true });
     }
   } finally {
@@ -499,6 +511,8 @@ test(
       ),
       ...Object.keys(PATH_FORMS).map((form) => ({ form, name: "it's -stale", stale: true })),
     ];
+    assert.equal(new Set(cases.map((each) => JSON.stringify(each))).size, 55);
+    const visited = [];
     for (const { form, name, stale } of cases) {
       const root = realpathSync(mkdtempSync(join(tmpdir(), "check-changed-domain-")));
       try {
@@ -524,9 +538,12 @@ test(
           `${form} ${JSON.stringify(name)}`,
           label,
         );
+        visited.push({ form, name, stale });
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
     }
+    // every case of the domain ran to its end: a skipped one fails here
+    assert.deepEqual(visited, cases);
   },
 );
