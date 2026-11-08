@@ -657,8 +657,8 @@ if (process.argv[2] === "--child") {
           ...(expired === undefined ? result : { uncharged: expired }),
           runs,
           spent,
-          // (the tree whose run the stall cut, from its start message)
-          ...(cut && going !== null ? { cutTree: going.tree } : {}),
+          // (the run the stall cut, from its start message: its tree, mode and check)
+          ...(cut && going !== null ? { cutAt: going } : {}),
         });
       };
       arm();
@@ -681,18 +681,28 @@ if (process.argv[2] === "--child") {
             ? { unanswered: result.value.unanswered, by: result.value.unansweredBy }
             : { answered: true };
   /**
-   * The head's runs of `message` from run `from` on, alone in a fresh child (#1837): each run's mode, check and
-   * outcome (`aloneOutcome`), and the head's own stall where its child ended too.
+   * The head's runs of `message` from run `from` on, alone in a fresh child, ended after them (#1837): each run's mode,
+   * check and outcome (`aloneOutcome`), then the run where the head's own child ended, if it did, with its stall or
+   * its safety net (`uncharged`, counted as any uncharged run).
    */
   const aloneAfter = async (message, from) => {
     const alone = await analysed({ ...message, from }, slots.head);
+    slots.head.child?.kill();
+    slots.head.child = null;
+    const where = (start) =>
+      start?.mode === undefined ? {} : { mode: start.mode, check: start.check };
     return [
       ...alone.runs.map(({ result, mode, check }) => ({
         mode,
         check,
         head: aloneOutcome(check, result),
       })),
-      ...(alone.stalled === undefined ? [] : [{ head: { stalled: alone.stalled } }]),
+      ...(alone.uncharged === undefined
+        ? []
+        : [{ ...where(alone.uncharged), head: { uncharged: true } }]),
+      ...(alone.stalled === undefined
+        ? []
+        : [{ ...where(alone.cutAt), head: { stalled: alone.stalled } }]),
     ];
   };
 
@@ -917,7 +927,7 @@ if (process.argv[2] === "--child") {
       // head's own outcome beside the base's stall, never lost with it (#1837)
       const afterBase =
         roots.length === 2 &&
-        reply.cutTree === 0 &&
+        reply.cutAt?.tree === 0 &&
         reply.stalled !== undefined &&
         reply.stalled !== "units"
           ? await aloneAfter(message, reply.runs.length)
@@ -978,12 +988,16 @@ if (process.argv[2] === "--child") {
           : reply.uncharged.mode === undefined
             ? OUTSIDE_RUNS
             : `${reply.uncharged.mode} ${reply.uncharged.check}`;
+      // (or the head's run alone after the base's abort, #1837)
+      const alone = afterBase?.find((ran) => ran.head.uncharged === true);
       const uncharged =
         baseline !== undefined
           ? either(kept?.uncharged, reached)
-          : reached === undefined || roots.length === 1
-            ? reached
-            : { [["base", "head"][reply.uncharged.tree] ?? "source"]: reached };
+          : reached === undefined && alone !== undefined
+            ? { head: alone.mode === undefined ? OUTSIDE_RUNS : `${alone.mode} ${alone.check}` }
+            : reached === undefined || roots.length === 1
+              ? reached
+              : { [["base", "head"][reply.uncharged.tree] ?? "source"]: reached };
       if (storing !== undefined) {
         const key = sourceKey(source);
         // (a stall over the unit limit with the run it cut: its certificate, the same on every machine)

@@ -337,12 +337,12 @@ const QUESTION_HEAP_RESERVE = 1_536 * 2 ** 20;
 const QUESTION_HEAP_HEADROOM = 512 * 2 ** 20;
 
 /**
- * The questions' room in the heap, taken as they start: this process's V8 heap limit (fixed by its
- * `--max-old-space-size`, as the families runner sets it) less the reserve, so that a stop lands at the same cell on
- * every run. Only where the heap in use passes the reserve and the process can collect (`--expose-gc`, as the runner's
- * child has it) is the live heap after a collection taken: where that too passes the reserve, something before the run
- * still holds its heap, and the room is what is left beside it, less the headroom, so that the run ends as `memory`
- * instead of in V8's abort. Or a test's (`withQuestionMemory`).
+ * The questions' room in the heap, taken when a publication's meter is made, before its analysis (`Questions`): this
+ * process's V8 heap limit (fixed by its `--max-old-space-size`, as the families runner sets it) less the reserve, so
+ * that a stop lands at the same cell on every run. Only where the heap in use then passes the reserve and the process
+ * can collect (`--expose-gc`, as the runner's child has it) is the live heap after a collection taken: where that too
+ * passes the reserve, what ran before the publication still holds it, and the room is what is left beside it, less the
+ * headroom, so that the run ends as `memory` instead of in V8's abort. Or a test's (`withQuestionMemory`).
  */
 let questionRoom: number | null = null;
 function heapRoom(): number {
@@ -433,8 +433,8 @@ class QuestionsStopped extends Error {
 class Questions {
   #units = 0;
   #cells = 0;
-  /** The questions' room in the heap, taken at the first question (`heapRoom`). */
-  #room: number | null = null;
+  /** The questions' room in the heap, taken before the analysis (`heapRoom`). */
+  readonly #room = heapRoom();
 
   public constructor() {
     questionsSoFar = { units: 0, cells: 0 };
@@ -458,7 +458,6 @@ class Questions {
     const allowance = questionBound.allowance ?? answers.budget.allowance;
     if (this.#units > allowance + questionBound.perCell * this.#cells)
       throw new QuestionsStopped("questions");
-    this.#room ??= heapRoom();
     if (QUESTION_BYTES_PER_CELL * this.#cells > this.#room) throw new QuestionsStopped("memory");
     return answer;
   }

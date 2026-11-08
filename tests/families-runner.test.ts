@@ -4180,8 +4180,9 @@ test("a publication run's unit limit grants its oracle's units per cell its ques
 });
 
 /**
- * A built tree's library whose publication of `aborts` ends the process as V8's heap abort does, in the sharing-off
- * source-order mode, where `aborting`; else answers it, leaving 2 nodes unanswered (`memory`) in the reversed modes.
+ * A built tree's library whose publication of `aborts`, `head-slow` and `head-dies` ends the process as V8's heap abort
+ * does, in the sharing-off source-order mode, where `aborting`; else answers them, `aborts` leaving 2 nodes unanswered
+ * (`memory`) in the reversed modes, `head-slow` waiting 6 s and `head-dies` aborting in the sharing-on reversed mode.
  */
 const abortingLibrary = (aborting: boolean): string => `import { createHash } from "node:crypto";
 import { writeSync } from "node:fs";
@@ -4190,9 +4191,14 @@ export const MODES = [false, true].flatMap((reversed) =>
 );
 export function publicationHashes(files, mode) {
   const source = files[0].source;
-  if (${aborting} && source === "aborts" && mode.unshared && !mode.reversed) {
+  const fatal = () => {
     writeSync(2, "FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory\\n");
     process.exit(134);
+  };
+  if (${aborting} && source !== "fine" && mode.unshared && !mode.reversed) fatal();
+  if (!${aborting} && mode.reversed && !mode.unshared) {
+    if (source === "head-slow") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 6000);
+    if (source === "head-dies") fatal();
   }
   const parts = [createHash("sha256").update(source).digest("hex")];
   return !${aborting} && source === "aborts" && mode.reversed
@@ -4201,7 +4207,7 @@ export function publicationHashes(files, mode) {
 }
 `;
 
-test("a base whose run ends its process leaves the head's runs from that one on to a fresh child of the head alone, each recorded as the head's own outcome beside the base's stall (#1837)", () => {
+test("a base whose run ends its process leaves the head's runs from that one on to a fresh child of the head alone, each recorded as the head's own outcome beside the base's stall, its own safety net or abort named by its run (#1837, Codex r2)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
     const built = (name: string, aborting: boolean) => {
@@ -4219,12 +4225,16 @@ test("a base whose run ends its process leaves the head's runs from that one on 
     mkdirSync(folder);
     writeFileSync(
       join(folder, "g.mjs"),
-      `export const cases = ${JSON.stringify(["aborts", "fine"].map((name) => [name, name]))};\n`,
+      `export const cases = ${JSON.stringify(
+        ["aborts", "head-slow", "head-dies", "fine"].map((name) => [name, name]),
+      )};\n`,
     );
     const work = join(directory, "aborts.work.jsonl");
-    const ran = spawnSync(process.execPath, [runner, folder, base, head, "--work", work], {
-      encoding: "utf8",
-    });
+    const ran = spawnSync(
+      process.execPath,
+      [runner, folder, base, head, "--work", work, "--timeout", "3"],
+      { encoding: "utf8" },
+    );
     assert.equal(ran.status, 1, ran.stderr);
     const lines = readFileSync(work, "utf8")
       .trim()
@@ -4246,6 +4256,22 @@ test("a base whose run ends its process leaves the head's runs from that one on 
         head: { unanswered: 2, by: { reason: "memory", node: 7 } },
       },
     ]);
+    // (the head's own safety net in its rerun: named by its run, counted and reported as any uncharged run)
+    const slow = lines.find((line) => line.source === "head-slow");
+    assert.deepEqual(slow.afterBase, [
+      { mode: "src-off", check: "publication", head: { answered: true } },
+      { mode: "rev-on", check: "publication", head: { uncharged: true } },
+    ]);
+    assert.deepEqual(slow.uncharged, { head: "rev-on publication" });
+    assert.match(ran.stderr, /"source":"head-slow","uncharged":\{"head":"rev-on publication"\}/);
+    // (the head's own abort in its rerun: named by its run)
+    const dies = lines.find((line) => line.source === "head-dies");
+    assert.deepEqual(dies.afterBase.slice(0, 1), [
+      { mode: "src-off", check: "publication", head: { answered: true } },
+    ]);
+    assert.deepEqual([dies.afterBase[1].mode, dies.afterBase[1].check], ["rev-on", "publication"]);
+    assert.match(dies.afterBase[1].head.stalled, /FATAL ERROR: .*heap out of memory/);
+    assert.equal(dies.afterBase.length, 2);
     // (the other source runs on, both trees, in a child of both)
     const fine = lines.find((line) => line.source === "fine");
     assert.equal(fine.stalled, undefined);
@@ -4256,10 +4282,14 @@ test("a base whose run ends its process leaves the head's runs from that one on 
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line))
-      .filter((line) => line.source === "aborts");
+      .filter((line) => line.verdict !== undefined && line.source !== undefined);
     assert.deepEqual(
-      verdicts.map(({ verdict }) => verdict),
-      ["inherited"],
+      verdicts.map(({ source, verdict }) => [source, verdict]),
+      [
+        ["aborts", "inherited"],
+        ["head-slow", "inherited"],
+        ["head-dies", "inherited"],
+      ],
       judged.stdout,
     );
   } finally {

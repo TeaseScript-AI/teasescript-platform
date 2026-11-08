@@ -33,7 +33,7 @@ an outcome, not a stall. A source that takes more than `--memory` MB of heap, or
 fatal V8 error), stalls as well. A stall is counted with its reason (`units`, or how the process ended; `--out`), and
 the runner goes on with the next source. Where the base's run ended the process, the head's runs from that one on run
 alone in a fresh child, each recorded beside the stall as the head's own outcome (`afterBase` on the source's `--work`
-line and in `--out`: answered, unanswered and why, unparsed, an exception, or its own stall), so that the head's result
+line and in `--out`: answered, unanswered and why, unparsed, an exception, its own stall, or its safety net, counted as an uncharged run), so that the head's result
 is never lost with the base's process (#1837). The wall clock is only a safety net, `--timeout` seconds a run (60 in CI,
 which sets `CI=true` and runs only the runner's own tests): a run that reaches it does work no ledger charges (#1424's
 class), and is reported as a defect with its source and run (`uncharged`, on stderr and in `--out`), counted apart,
