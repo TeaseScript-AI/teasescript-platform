@@ -5,34 +5,35 @@ import { runRetentionChild } from "./helpers/retention-witness.js";
 
 /*
  * The delivery invariant, decided by the runtime's own heap (#2006; `retention-witness.ts`): after a delivery aborts,
- * or its connection ends, the heap holds no marked payload of its allocations. Each allocation class `own` registers
- * runs its real op in one child (`delivery-retention-child.ts`), committed (the control the witness must find), aborted
- * on the same open connection, and closed.
+ * or its connection ends, the heap holds no marked payload of its allocations, within the residual named below. Each
+ * allocation class `own` registers runs its real op in one child (`delivery-retention-child.ts`), committed (the control
+ * the witness must find), aborted on the same open connection, and closed.
  *
- * Each class is decided by a marker of its own, which the marker scan sees through private fields, closures and
- * promises: a plan and compiled sources (`prepare`) and a transfer ticket (`readTransfer`) carry it in their input, and
- * a host session (`start`) in its saved data, which its state and publication hold.
+ * A class is decided by a marker of its own, which the marker scan sees through private fields, closures and promises,
+ * wherever the class keeps its payload:
+ * - a plan and compiled sources (`prepare`), and a transfer ticket (`readTransfer`): in their input;
+ * - a host session (`start`): in the saved value its script loads and says, so in its engine state, its publication's
+ *   view and transcript, and its events; a second net, weak references to every object of its publication's public
+ *   graph the op added, sees a branch the marker might miss;
+ * - the source-view caches (`drawCode`: the sidecar text, the sidecar, the latest file): in their plan's comments,
+ *   which the plan does not keep; the plan's sources, their only other holder, are let go of once the caches were made.
  *
- * The residual, where no input can carry a marker of its own: a plan-text slot (`preparePlanText`) and the source-view
- * caches (`drawCode`: the sidecar text, the sidecar, the latest file) are made from their plan, so their only marker is
- * the plan's, which the committed plan holds too. They are decided by weak references to the objects the op added (a
- * slot and its waiting task; a cache's promise, sidecar and file code, with what they reach through visible fields),
- * and their plan's marker decides them at `closed`. What those objects keep only behind a private field, a closure or a
- * promise's result is not observed for them.
- *
- * Also the witness's own limits (`retention-witness.ts`: a marker-free copy is not an original), and the diagnostic
- * state the connection keeps by design (the recorder, the value trace, the random control), which these cases record
- * none of.
+ * The residual: a plan-text slot (`preparePlanText`) shares its payload with its prerequisite plan (its JSON is the
+ * plan's, written in a later task), so it is decided by weak references to the slot and its waiting task, and its plan's
+ * marker decides it at `closed`; what it would keep only behind a private field, a closure or a promise's result is not
+ * observed. Also the witness's own limits (`retention-witness.ts`: a marker-free copy is not an original), and the
+ * diagnostic state the connection keeps by design (the recorder, the value trace, the random control), which these
+ * cases record none of.
  */
 
 const CLASSES = ["plan", "sources", "session", "transfer", "slot", "cache"] as const;
-/** The classes whose own input carries their case's marker. */
-const MARKED = new Set(["plan", "sources", "session", "transfer"]);
+/** The classes decided by a marker of their own. */
+const MARKED = new Set(["plan", "sources", "session", "transfer", "cache"]);
 /** The classes whose op runs on a plan a case committed first, with a marker of its own (`…/plan`). */
 const ON_A_PLAN = new Set(["session", "slot", "cache"]);
 const MOMENTS = ["committed", "aborted", "closed"] as const;
 
-test("after a delivery aborts, or its connection ends, the heap holds nothing of its allocations; a committed one is found", () => {
+test("after a delivery aborts, or its connection ends, the heap holds no marked payload of its allocations, within the named residual; a committed one is found", () => {
   const cases = MOMENTS.flatMap((moment) => CLASSES.map((allocation) => `${moment}/${allocation}`));
   const plans = cases
     .filter((name) => ON_A_PLAN.has(name.split("/")[1]!))

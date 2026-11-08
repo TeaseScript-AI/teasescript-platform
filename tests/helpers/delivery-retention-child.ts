@@ -63,6 +63,8 @@ interface Connection {
   /** Weak references to what the next run of `op` adds, once it ran. */
   watch(op: string): Promise<readonly WeakRef<WeakKey>[]>;
   terminate(): void;
+  /** Lets go of plan `token`'s compiled sources, as a release does, keeping the plan. */
+  retireSources(token: string): void;
 }
 
 function connection(): Connection {
@@ -115,15 +117,18 @@ function connection(): Connection {
           const before = reach(context);
           const outcome = await op.run(...args);
           const added = [...reach(context)].filter((value) => !before.has(value));
-          // A new session's whole payload: the held session, and the publication behind its private fields.
+          // A new session's whole payload: the held session,
           const created =
             outcome.session === undefined ? undefined : sessions!.get(outcome.session);
+          // and every object of its publication's public graph the op added (a second net beside the session's marker).
           const publication =
             created !== undefined &&
             "publication" in created &&
             typeof created.publication === "object" &&
             created.publication !== null
-              ? [created.publication]
+              ? [...reach(created.publication)].filter(
+                  (value) => !before.has(value) && !shared.has(value),
+                )
               : [];
           const payload = created === undefined ? [] : [created, ...publication];
           // A new slot's waiting task is its payload too.
@@ -148,6 +153,48 @@ function connection(): Connection {
     failPost: (op) => void (failing = op),
     watch: (op) => new Promise((done) => (watching = { op, done })),
     terminate: () => client.terminate(),
+    retireSources: (token) => void context.sources.delete(token),
+  };
+}
+
+/**
+ * A session's plan, marked with `planMarker`, that loads its saved value and says it, so the session's own marker (the
+ * saved value's) sits in its engine state, its publication's view and transcript, and its events.
+ */
+function sessionProject(planMarker: string) {
+  return {
+    files: [
+      {
+        path: "main.tease",
+        source: [
+          `// ${planMarker}`,
+          `let plan_${planMarker} = 1`,
+          'let probe = load "probe", default: ""',
+          'say "${probe}", instant',
+          `showButton "Done ${planMarker}"`,
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  };
+}
+
+/**
+ * A plan for the source-view caches: its path and texts carry `planMarker`, and only its comments carry `marker`, which
+ * the plan does not keep, but its sources and the caches made from them do.
+ */
+function cacheProject(planMarker: string, marker: string) {
+  return {
+    files: [
+      {
+        path: "main.tease",
+        source: [
+          `let hit_${planMarker} = chance(50) // ${marker}`,
+          `showButton "Done ${planMarker}" // ${marker}`,
+          `exit // ${marker}`,
+        ].join("\n"),
+      },
+    ],
   };
 }
 
@@ -190,12 +237,9 @@ async function allocate(
         return { source: { kind: "source", script: markedProject(marker) } };
       case "session":
         return {
-          plan: await prepared({ kind: "plan", text: planText(markedProject(planMarker)) }),
-          // The session's own marker, in its saved data, which its state and publication hold.
-          options: {
-            ...START,
-            scriptStorage: [{ key: `key_${marker}`, value: `value ${marker}` }],
-          },
+          plan: await prepared({ kind: "source", script: sessionProject(planMarker) }),
+          // The session's own marker, in the saved value its script loads and says.
+          options: { ...START, scriptStorage: [{ key: "probe", value: `value ${marker}` }] },
           recording: false,
         };
       case "transfer":
@@ -205,7 +249,8 @@ async function allocate(
           plan: await prepared({ kind: "plan", text: planText(markedProject(planMarker)) }),
         };
       case "cache": {
-        const plan = await prepared({ kind: "source", script: markedProject(planMarker) });
+        const plan = await prepared({ kind: "source", script: cacheProject(planMarker, marker) });
+        cachePlan = plan;
         const metadata = await link.request("planMetadata", { plan });
         // EVIDENCE: fixture: `planMetadata` of a held plan gives its random sites, and the project has two.
         const site = (metadata.result as { randomSites: readonly { path: string }[] })
@@ -214,16 +259,42 @@ async function allocate(
       }
     }
   };
+  let cachePlan: string | null = null;
   const args = await argsOf();
   const op = OPS[allocation];
   const watched = link.watch(op);
   if (fail) link.failPost(op);
   await link.request(op, args).catch(() => {});
+  // The caches' only other holder of their marker, the plan's sources, goes once they were made; the plan stays.
+  if (cachePlan !== null) link.retireSources(cachePlan);
   return watched;
 }
 
 /** Every case of the child, grouped by class; returns, per case, how many of its weak references still hold. */
+/**
+ * What every session's publication reaches whatever it ran (the engine's module constants, such as its default
+ * speakers): found from a publication of an unmarked session, so the publication net counts only what a case's own
+ * session added.
+ */
+const shared = new Set<WeakKey>();
+
+async function sharedReach(): Promise<void> {
+  const link = connection();
+  connections.push(link);
+  const watched = link.watch("start");
+  // EVIDENCE: fixture: `prepare` of this project prepares.
+  const prepared = (
+    await link.request("prepare", { source: { kind: "source", script: sessionProject("shared") } })
+  ).result as { plan: string };
+  await link.request("start", { plan: prepared.plan, options: START, recording: false });
+  for (const ref of await watched) {
+    const value = ref.deref();
+    if (value !== undefined) shared.add(value);
+  }
+}
+
 async function runCases() {
+  await sharedReach();
   const cases = childCases();
   const seedOf = (name: string) => cases.find((each) => each.name === name)?.seed;
   const results: { name: string; refs: readonly WeakRef<WeakKey>[] }[] = [];
