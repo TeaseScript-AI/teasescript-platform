@@ -86,14 +86,19 @@ function validateAllowedDirective(text) {
  * @returns {{ fileName: string, line: number, column: number, message: string }[]}
  */
 export function checkEvidenceComments(fileName, sourceText) {
-  if (!fileName.endsWith(".vue")) return checkScript(fileName, sourceText, 0);
-  return scriptsOf(fileName, sourceText).flatMap(({ text, lineOffset }) =>
-    checkScript(fileName, text, lineOffset),
+  if (!fileName.endsWith(".vue")) return checkScript(fileName, sourceText);
+  return scriptsOf(fileName, sourceText).flatMap(({ text, lineOffset, columnOffset }) =>
+    checkScript(fileName, text).map((diagnostic) => ({
+      ...diagnostic,
+      line: diagnostic.line + lineOffset,
+      // a script's first line starts after its tag
+      column: diagnostic.line === 1 ? diagnostic.column + columnOffset : diagnostic.column,
+    })),
   );
 }
 
-/** The exceptions of one script, `lineOffset` the lines of its file before it. */
-function checkScript(fileName, sourceText, lineOffset) {
+/** The exceptions of one script, at its own lines and columns. */
+function checkScript(fileName, sourceText) {
   const scriptKind = ts.getScriptKindFromFileName(fileName) || ts.ScriptKind.TS;
   const sourceFile = ts.createSourceFile(
     fileName,
@@ -125,7 +130,7 @@ function checkScript(fileName, sourceText, lineOffset) {
         const location = sourceFile.getLineAndCharacterOfPosition(range.pos);
         diagnostics.push({
           fileName,
-          line: location.line + 1 + lineOffset,
+          line: location.line + 1,
           column: location.character + 1,
           message,
         });

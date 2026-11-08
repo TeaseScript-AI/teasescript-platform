@@ -151,3 +151,30 @@ const first = value;
     ],
   );
 });
+
+test("finds a .vue file's script blocks as Vue does, and reports at the file's line and column", () => {
+  const at = (sourceText) =>
+    checkEvidenceComments("Fixture.vue", sourceText).map(({ line, column }) => ({ line, column }));
+  // a `>` inside a quoted attribute ends no tag
+  assert.deepEqual(
+    at(
+      '<script setup lang="ts" generic="T extends Array<string>">// oxlint-disable-next-line no-debugger\ndebugger;\n</script>',
+    ),
+    [{ line: 1, column: 59 }],
+  );
+  // a `<script>` inside a template comment is no block
+  assert.deepEqual(
+    at(
+      '<template>\n<!-- <script>\n/* eslint-disable */\n</script> -->\n<p>ok</p>\n</template>\n<script setup lang="ts">const a = 1;</script>',
+    ),
+    [],
+  );
+  // a comment on the tag's own line, and an attribute that holds the block's own text
+  assert.deepEqual(at('<script lang="ts">/* eslint-disable */\nexport default {};\n</script>'), [
+    { line: 1, column: 19 },
+  ]);
+  assert.deepEqual(
+    at('<script\n data-note="/* eslint-disable */"\n lang="ts">/* eslint-disable */</script>'),
+    [{ line: 3, column: 12 }],
+  );
+});
