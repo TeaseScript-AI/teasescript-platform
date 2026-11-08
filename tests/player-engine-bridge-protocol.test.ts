@@ -16,6 +16,7 @@ import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import { BRIDGE_VERSION, type BuildIdentity } from "../player/engine-bridge/protocol.js";
 import { compilePlayerProject } from "../player/compile-project.js";
 import { listRandomSites, validateInstructionPlan } from "../src/index.js";
+import { clockTicket } from "./helpers/clock-ticket.js";
 
 /*
  * The engine bridge over a real worker thread (a separate realm; messages are structured clones): the Worker's
@@ -221,7 +222,7 @@ test("requests for one session go one at a time, and a section holds its session
 
     const session = (await client.request("start", null)).session!;
     const seen: unknown[] = [];
-    const section = client.section(session, async (send) => {
+    const section = client.section(session, clockTicket(), async (send) => {
       seen.push((await send("add", { by: 1 }, 0)).result);
       await new Promise((resolve) => setTimeout(resolve, 20));
       seen.push((await send("add", { by: 1 }, 1)).result);

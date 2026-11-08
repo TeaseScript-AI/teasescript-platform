@@ -60,11 +60,11 @@ interface RoomHost {
       | { readonly plan: string; readonly options: () => PlayerRuntimeSessionOptions },
   ): Promise<void>;
   inputSection<T>(
-    body: (section: {
-      observe(): Promise<PlayerRuntimeSession | null>;
-      send<R>(op: string, args: unknown): Promise<R | symbol>;
-      readonly session: PlayerRuntimeSession;
-    }) => Promise<T>,
+    work: "inputAnswer",
+    body: (
+      section: { send<R>(op: string, args: unknown): Promise<R | symbol> },
+      observed: PlayerRuntimeSession | null,
+    ) => Promise<T>,
   ): Promise<T | null>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
@@ -624,9 +624,8 @@ test("Debug turned on while an ended normal session is being kept keeps it in th
     if (args[0] === "captureKeep") captured();
     return sent;
   });
-  await normal.host.inputSection(async (input) => {
-    await input.observe();
-    const shown = input.session.state.foregroundAction;
+  await normal.host.inputSection("inputAnswer", async (input, observed) => {
+    const shown = observed?.state.foregroundAction ?? null;
     assert.ok(shown !== null && "actionId" in shown);
     await input.send("activateButton", { actionId: shown.actionId, input: null });
   });

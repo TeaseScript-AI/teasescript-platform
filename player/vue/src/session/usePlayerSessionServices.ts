@@ -24,7 +24,9 @@ interface SessionServicesHost {
   readonly reportDiagnostic: (diagnostic: PlayerDiagnostic) => void;
   readonly servicedSession: Readonly<Ref<PlayerSession | null>>;
   readonly generation: Readonly<Ref<number>>;
-  readonly serviceSection: <T>(body: (section: ServiceSection) => Promise<T>) => Promise<T | null>;
+  readonly serviceSection: <T>(
+    body: (section: ServiceSection, observed: PlayerSession | null) => Promise<T>,
+  ) => Promise<T | null>;
   readonly options: PlayerSessionOptions;
 }
 

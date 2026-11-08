@@ -246,7 +246,11 @@ const ACTIVATION_FILES = [
   "player/vue/src/session/useActivationRun.ts",
   "player/vue/src/useDebugExport.ts",
   "player/vue/src/usePlayerSession.ts",
+  // `ownedSection`'s member call `clock.section`, followed into the clock's section and its observation (#1983).
+  "player/vue/src/useRuntimeSceneClock.ts",
 ] as const;
+/** In the clock, the section that `ownedSection` opens and its observation; the clock's own scheduling acts for none. */
+const CLOCK_SECTION = ["useRuntimeSceneClock > section", "useRuntimeSceneClock > observeIn"];
 /**
  * In `usePlayerSession.ts`, the functions that act for an activation: its begin, its completions and its error stop,
  * and every function of the file they call, transitively (`reachable`).
@@ -312,8 +316,11 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "usePlayerSession.ts: usePlayerSession > stopAt: then acknowledged": READMITS,
   // Reached from the activation bodies through the functions they call.
   "usePlayerSession.ts: usePlayerSession > sendRandomRequest: then host.client.request": READMITS,
-  "usePlayerSession.ts: usePlayerSession > resolveRandomDraw > ownedSection:callback: await observe":
-    READMITS,
+  // The clock's section (#1983): its observation, then the caller's body, which re-admits first (checked below).
+  "useRuntimeSceneClock.ts: useRuntimeSceneClock > section > bridgeOf(current).section:callback: await observeIn":
+    "the section's observation, before the caller's body: the activation work's body re-admits as it begins (`resolveRandomDraw`, checked below)",
+  "useRuntimeSceneClock.ts: useRuntimeSceneClock > observeIn: await opened.send":
+    "the section's observation, which shows only its own session's publication (`owned`); the body that acts for an activation re-admits first (`resolveRandomDraw`)",
   "usePlayerSession.ts: usePlayerSession > resolveRandomDraw > ownedSection:callback: await section.send":
     READMITS,
   "usePlayerSession.ts: usePlayerSession > resolveRandomDraw: catch ownedSection": READMITS,
@@ -322,8 +329,6 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "usePlayerSession.ts: usePlayerSession > applyDebugMode: finally bridgeOf.request":
     "clears the Debug mode asked, only while it is still this request's",
   "usePlayerSession.ts: usePlayerSession > applyDebugMode: then bridgeOf.request.finally": READMITS,
-  "usePlayerSession.ts: usePlayerSession > ownedSection > bridgeOf(current).section:callback > body:callback: await section.send":
-    "the section's observation, which shows only its own session's publication; the body that acts for an activation re-admits first (`resolveRandomDraw`)",
   "usePlayerSession.ts: usePlayerSession > primeAudio: catch element.play":
     "drops a blocked play; nothing follows",
   "usePlayerSession.ts: usePlayerSession > settlePlanJson: catch bridge.client.request":
@@ -504,7 +509,9 @@ test("every wait of the page's activation work re-admits its activation, or is l
               .split(" > ")
               .slice(1)
               .some((each) => session.has(each))
-        : () => true,
+        : file.endsWith("useRuntimeSceneClock.ts")
+          ? (path) => CLOCK_SECTION.some((each) => path === each || path.startsWith(`${each} >`))
+          : () => true,
     ),
   );
   assert.deepEqual(
@@ -514,4 +521,43 @@ test("every wait of the page's activation work re-admits its activation, or is l
   );
   for (const { key, readmits } of found)
     if (ACTIVATION_WAITS[key] === READMITS) assert.ok(readmits, `${key} re-admits first`);
+  // The clock runs a section's observation before its body: a body of the activation work re-admits as it begins.
+  const file = "player/vue/src/usePlayerSession.ts";
+  const source = ts.createSourceFile(
+    file,
+    readFileSync(resolve(process.cwd(), file), "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  // Each `ownedSection` call counts under its innermost named function, in the forms `reachable` follows: a
+  // declaration, or an arrow or function expression a variable holds. A body that is not an inline block cannot
+  // re-admit first, so it counts as one that does not.
+  const bodies: string[] = [];
+  source.forEachChild(function visit(node: ts.Node, owner?: string): void {
+    if (ts.isFunctionDeclaration(node) && node.name !== undefined) owner = node.name.text;
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.initializer !== undefined &&
+      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+    )
+      owner = node.name.getText(source);
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.getText(source) === "ownedSection" &&
+      owner !== undefined &&
+      owner !== "ownedSection" &&
+      session.has(owner)
+    ) {
+      const body = node.arguments[2];
+      const first =
+        body !== undefined &&
+        (ts.isArrowFunction(body) || ts.isFunctionExpression(body)) &&
+        ts.isBlock(body.body)
+          ? (body.body.statements[0]?.getText(source) ?? "")
+          : "";
+      bodies.push(`${owner}: ${/activationRun\.admits\(/u.test(first)}`);
+    }
+    node.forEachChild((child) => visit(child, owner));
+  });
+  assert.deepEqual(bodies, ["resolveRandomDraw: true"], "each section body re-admits first");
 });

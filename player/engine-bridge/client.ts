@@ -6,6 +6,7 @@ import {
   readWorkerMessage,
   sameBuild,
 } from "./protocol.js";
+import type { ClockTicket } from "../clock-ticket.js";
 import { decodeMessage, encodeMessage } from "./transport.js";
 
 /** How the Player side reaches its engine Worker, whatever runs it: a browser Worker, a Node worker or a test port. */
@@ -86,9 +87,22 @@ export interface BridgeClient {
   ): Promise<BridgeResult>;
   /**
    * Runs `body` as one exclusive section of `session`: other requests for that session wait until it ends, so a
-   * dependent chain (observe, main-side checks and effects, then an op) sees what a synchronous chain would.
+   * dependent chain (observe, main-side checks and effects, then an op) sees what a synchronous chain would. `ticket`
+   * is the scene clock's (`ClockTicket`).
+   *
+   * The type decides one thing: a sender passes a `ClockTicket` to either section API; leaving it out fails
+   * type-checking in `.ts` and in an SFC. It does not decide where the ticket came from. Code outside the clock gets
+   * one in two ways, both deliberately written: by a construct that switches the check off (a cast; `any`, including
+   * `JSON.parse`'s; a non-null assertion; a type guard or assertion function; an overload; an ambient declaration; a
+   * suppression directive), or by keeping the ticket the clock passes to a `BridgeClient` it implements or wraps (Sol
+   * code r1 B1, job 11081923449b44). The ticket guards against a sender that forgets the clock, not against code
+   * written to bypass it.
    */
-  section<T>(session: string, body: (send: SectionSend) => Promise<T>): Promise<T>;
+  section<T>(
+    session: string,
+    ticket: ClockTicket,
+    body: (send: SectionSend) => Promise<T>,
+  ): Promise<T>;
   /**
    * Sends one request at once, ahead of the requests waiting for its session, as `halt` must be: the host handles it on
    * receipt too.
@@ -251,7 +265,7 @@ export function openBridge(
           send(op, args, session, options.basis ?? null, options.onReply),
         );
       },
-      section: (session, body) =>
+      section: (session, _ticket, body) =>
         exclusive(session, () =>
           body((op, args, basis, onReply) => send(op, args, session, basis, onReply)),
         ),

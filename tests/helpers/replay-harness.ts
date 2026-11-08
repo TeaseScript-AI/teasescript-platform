@@ -23,6 +23,7 @@ import {
   type LiveHostOptions,
 } from "./live-host-effects.js";
 import { compareStructures, renderPath } from "./runtime-state-comparison.js";
+import type { ClockTicket } from "../../player/clock-ticket.js";
 
 /*
  * The shared replay harness (#1919; docs/TESTING.md "Replay through the bridge"): a complete, cursor-based trace of the
@@ -211,8 +212,12 @@ export function trackRequests(bridge: Pick<PlayerBridge, "client">): RequestTrac
   client.signal = (op, args, session, onReply) =>
     counted(session, op, args, () => signal.call(client, op, args, session, onReply));
   const sectionOf = section.bind(client);
-  client.section = <T>(id: string, body: (send: SectionSend) => Promise<T>): Promise<T> =>
-    sectionOf<T>(id, (send) =>
+  client.section = <T>(
+    id: string,
+    ticket: ClockTicket,
+    body: (send: SectionSend) => Promise<T>,
+  ): Promise<T> =>
+    sectionOf<T>(id, ticket, (send) =>
       body((op, args, basis, onReply) =>
         counted(id, op, args, () => send(op, args, basis, onReply)),
       ),
