@@ -396,18 +396,6 @@
     "waits": "#1937"
   },
   {
-    "file": "player/engine-bridge/ops/session.ts",
-    "kind": "docblock",
-    "text": "L5b's ops: Start, Continue, time (observe, step, catch-up) and pacing skip, and the recording's start. Each wraps",
-    "waits": "#1999 (lane 3, L5i.6), which changes this file"
-  },
-  {
-    "file": "player/vue/src/usePlayerSession.ts",
-    "kind": "reference",
-    "text": "adoptInspected",
-    "waits": "#1999 (lane 3, L5i.6), which changes this file"
-  },
-  {
     "file": "tools/runtime-oracle/materialize.mjs",
     "kind": "docblock",
     "text": "Acquires and builds `commit` into a new root under `home`; returns its path.",

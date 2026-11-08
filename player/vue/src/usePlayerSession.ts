@@ -1764,7 +1764,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     generation.value++;
     interactionReset.value++;
     jumpedRevision.value = -1;
-    // An inspected state takes Debug's random control only once input adopts it (`adoptInspected` below).
+    // An inspected state takes Debug's random control only once input adopts it (`adoptRewound` below).
     if (!paused) adoptRandom(next);
     session.value = next;
     clock.rebase();
