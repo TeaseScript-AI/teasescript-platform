@@ -44,7 +44,6 @@ import {
   writeSync,
 } from "node:fs";
 import path from "node:path";
-import { getHeapStatistics } from "node:v8";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   beginShard,
@@ -137,15 +136,27 @@ function partHashes(oracle, files, mode, globals) {
 }
 
 /**
- * The heap limit, in MB, V8 gives a Node process started as this one is (its environment, `NODE_OPTIONS` included) with
- * `args`: V8's own figure, read in that process, so that `NODE_OPTIONS` is read by Node itself, never by this runner.
+ * The heap limit, in MB, V8 gives a Node process in this process's environment (`NODE_OPTIONS` included): with
+ * `--max-old-space-size=<memory>` given, as each source's process is, or without (what `NODE_OPTIONS` alone gives). V8's
+ * own figure, read in that process, so that `NODE_OPTIONS` is read by Node itself, never by this runner.
  */
-function heapLimitWith(args) {
-  const said = spawnSync(
-    process.execPath,
-    [...args, "-p", "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)"],
-    { encoding: "utf8" },
-  );
+function heapLimitWith(memory) {
+  const said =
+    memory === undefined
+      ? spawnSync(
+          process.execPath,
+          ["-p", "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)"],
+          { encoding: "utf8" },
+        )
+      : spawnSync(
+          process.execPath,
+          [
+            `--max-old-space-size=${memory}`,
+            "-p",
+            "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)",
+          ],
+          { encoding: "utf8" },
+        );
   return Number(said.stdout.trim());
 }
 
@@ -506,14 +517,13 @@ if (process.argv[2] === "--child") {
   const timeout = seconds * 1000;
   const memory = Number(option("memory") ?? DEFAULTS.memory);
   // (each source's process gets `--memory` as its heap, whatever heap `NODE_OPTIONS` sets, as the central queue sets
-  // one on every job: the total names `memory`, and beside it, where `NODE_OPTIONS` names a heap, the heap limit V8 gives
-  // this runner's own process (`nodeOptions.heapLimit`), wherever it differs from a source's process's, so the override
-  // is never silent; both limits as V8 reads them, #1956)
+  // one on every job: the total names `memory`, and beside it, where `NODE_OPTIONS` names a heap, the heap limit
+  // `NODE_OPTIONS` alone gives a Node process (`nodeOptions.heapLimit`), wherever it differs from a source's process's,
+  // so the override is never silent; both limits as V8 reads them, #1956)
   const nodeOptions = /old[-_]space[-_]size/.test(process.env.NODE_OPTIONS ?? "")
-    ? Math.round(getHeapStatistics().heap_size_limit / 2 ** 20)
+    ? heapLimitWith(undefined)
     : undefined;
-  const differing =
-    nodeOptions !== undefined && nodeOptions !== heapLimitWith([`--max-old-space-size=${memory}`]);
+  const differing = nodeOptions !== undefined && nodeOptions !== heapLimitWith(memory);
   if (store !== undefined && options.has("only"))
     refused("--store stores whole shards: drop --only");
   const itemized = options.has("items") || options.has("items-from-env");

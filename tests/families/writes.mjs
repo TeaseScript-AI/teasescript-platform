@@ -119,6 +119,27 @@ const ALLOWED = {
     cwd: [exactly(0), "reads the working folder"],
   },
   processes: {
+    "the heap probe": [
+      (call, { importedFrom }) => {
+        const [command, args, options] = call.arguments;
+        const elements =
+          args !== undefined && ts.isArrayLiteralExpression(args) ? args.elements : [];
+        const script =
+          "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)";
+        const heap = elements.length === 3 ? [elements[0]] : [];
+        return (
+          importedFrom(call.expression) !== undefined &&
+          command !== undefined &&
+          command.getText() === "process.execPath" &&
+          (elements.length === 2 || elements.length === 3) &&
+          heap.every((element) => /^`--max-old-space-size=\$\{\w+\}`$/.test(element.getText())) &&
+          literal(elements.at(-2)) === "-p" &&
+          literal(elements.at(-1)) === script &&
+          onlyOptions(options, (key) => key === "encoding")
+        );
+      },
+      "a Node process that prints V8's heap limit and ends (the runner's `heapLimitWith`, #1956): it writes nothing",
+    ],
     "the gate's lock holder": [
       (call, { importedFrom }) => {
         const [command, args, options] = call.arguments;
