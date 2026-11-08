@@ -119,33 +119,53 @@ export const ADMITTED_VARIANTS = {
 const DISABLED_VARIANT =
   /^(?:disabled|data-disabled|data-\[disabled(?:[~|^$*]?=[^\]]*)?\])$|^\[.*(?::disabled|\[disabled)/;
 
-/** The variants of a class token and its utility, split at the colons outside brackets and parentheses. */
-function variantChain(token) {
+// The class syntax this rule reads, a closed grammar: `!`? (variant `:`)* utility `!`?, each variant and the utility a
+// name (`hover`, `group-hover/item`, `opacity-50`), a name with a bracketed or parenthesised value (`data-[state=open]`,
+// `opacity-[0.4]`, `opacity-(--dim)`), or a bracketed selector or property (`[&_svg]`, `[opacity:0.5]`). A value holds
+// letters, digits and `_&:.=#%,>+~*|^$@/-`, with balanced brackets and parentheses; quotes, backslashes and anything
+// else are outside it. A class with `opacity` that this grammar does not read is refused, never skipped.
+const CLASS_CHARACTERS = /^[A-Za-z0-9_&:.=#%,>+~*|^$@/()[\]!-]+$/;
+const CLASS_PART =
+  /^(?:\*{1,2}|-?@?[a-z0-9]+(?:[-.][a-z0-9]+)*(?:-(?:\[.+\]|\(.+\)))?(?:\/[a-z0-9-]+)?|\[.+\])$/;
+
+/**
+ * The variants of a class token and its utility, split at the colons outside brackets and parentheses, or `null` when
+ * the token is outside the grammar above.
+ */
+function readClass(token) {
+  const body = token.replace(/^!/, "").replace(/!$/, "");
+  if (!CLASS_CHARACTERS.test(body) || body.includes("!")) return null;
   const parts = [];
-  let depth = 0;
+  const open = [];
   let start = 0;
-  for (let index = 0; index < token.length; index++) {
-    const character = token[index];
-    if (character === "[" || character === "(") depth++;
-    else if ((character === "]" || character === ")") && depth > 0) depth--;
-    else if (character === ":" && depth === 0) {
-      parts.push(token.slice(start, index));
+  for (let index = 0; index < body.length; index++) {
+    const character = body[index];
+    if (character === "[" || character === "(") open.push(character === "[" ? "]" : ")");
+    else if (character === "]" || character === ")") {
+      if (open.pop() !== character) return null;
+    } else if (character === ":" && open.length === 0) {
+      parts.push(body.slice(start, index));
       start = index + 1;
     }
   }
-  return { variants: parts, utility: token.slice(start) };
+  parts.push(body.slice(start));
+  if (open.length > 0 || !parts.every((part) => CLASS_PART.test(part))) return null;
+  return { variants: parts.slice(0, -1), utility: parts.at(-1) };
 }
 
 /**
- * How the rule decides one class token: `null` when it sets no opacity under a variant, else one decision per variant,
- * `{ variant, kind }` with `kind` a form of `ADMITTED_VARIANTS`, `"disabled"` or `"unclassified"`.
+ * How the rule decides one class token: `null` when it sets no opacity under a variant; `[{ variant: token, kind:
+ * "unreadable" }]` when it names opacity outside the grammar; else one decision per variant, `{ variant, kind }` with
+ * `kind` a form of `ADMITTED_VARIANTS`, `"disabled"` or `"unclassified"`.
  */
 export function classifyOpacityToken(token) {
-  const { variants, utility } = variantChain(token.replace(/^!/, ""));
+  if (!/opacity/i.test(token)) return null;
+  const read = readClass(token);
+  if (read === null) return [{ variant: token, kind: "unreadable" }];
   // `opacity-*` in each spelling, and the arbitrary property `[opacity:…]`.
-  if (variants.length === 0 || !/^(?:-?opacity-.+|\[opacity:.+\])$/.test(utility.replace(/!$/, "")))
+  if (read.variants.length === 0 || !/^(?:-?opacity-.+|\[opacity:.+\])$/i.test(read.utility))
     return null;
-  return variants.map((variant) => {
+  return read.variants.map((variant) => {
     if (DISABLED_VARIANT.test(variant)) return { variant, kind: "disabled" };
     const form = Object.keys(ADMITTED_VARIANTS).find((name) =>
       ADMITTED_VARIANTS[name].test(variant),
@@ -163,21 +183,21 @@ const noDisabledOpacity = {
         "Disabled controls take the theme's disabled roles from style.css; an opacity class here is overridden and misleads.",
       unclassified:
         "'{{variant}}' before an opacity class is not a form this rule admits, as nothing shows that it cannot select a disabled control (tools/design-lint/plugin.mjs, ADMITTED_VARIANTS).",
+      unreadable:
+        "'{{variant}}' names opacity in a form this rule cannot read, such as quotes, a backslash or unbalanced brackets; write it in a form the class grammar in tools/design-lint/plugin.mjs reads, or add the form there.",
     },
   },
   create(context) {
     function check(node, text) {
       for (const token of text.split(/\s+/)) {
         const decisions = classifyOpacityToken(token) ?? [];
-        const unclassified = decisions.find(({ kind }) => kind === "unclassified");
+        const named = ["unreadable", "unclassified"]
+          .map((kind) => decisions.find((decision) => decision.kind === kind))
+          .find(Boolean);
         if (decisions.some(({ kind }) => kind === "disabled"))
           context.report({ node, messageId: "opacity" });
-        else if (unclassified)
-          context.report({
-            node,
-            messageId: "unclassified",
-            data: { variant: unclassified.variant },
-          });
+        else if (named)
+          context.report({ node, messageId: named.kind, data: { variant: named.variant } });
       }
     }
     const visitors = {

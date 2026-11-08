@@ -178,14 +178,19 @@ class builders or data flow. Review those paths when changing them.
 
 Disabled controls take the theme's `text-disabled`, `surface-disabled` and `border-disabled` roles from one unlayered
 rule in `player/vue/src/style.css`, which overrides Tailwind's layered utilities, so an opacity class under a disabled
-variant would never show. The local disabled-opacity rule admits the variants before an opacity utility only in a
-closed set of forms that cannot select the control's own disabled state (`ADMITTED_VARIANTS` in
-`tools/design-lint/plugin.mjs`): breakpoints, media and direction, element states and pseudo-elements, `aria-*`, data
-attributes other than `data-disabled`, and `group-*`/`peer-*`, which read another element. It refuses every other
-variant: `disabled`, `data-disabled`, `data-[disabled…]` and arbitrary selectors naming `:disabled` or `[disabled]` as
-overridden, any other form, such as another arbitrary selector or `not-*`, by name until a row admits it.
-`aria-disabled` stays admitted: the shared rule does not cover it, and it marks controls that dim while busy yet keep
-focus.
+variant would never show. The local disabled-opacity rule reads every class that names `opacity` with a closed class
+grammar (`tools/design-lint/plugin.mjs`), and refuses by name one the grammar cannot read, such as quotes, a backslash
+or unbalanced brackets. It admits the variants before an opacity utility only in a closed set of forms that cannot
+select the control's own disabled state (`ADMITTED_VARIANTS`): breakpoints, media and direction, element states and
+pseudo-elements, `aria-*`, data attributes other than `data-disabled`, and `group-*`/`peer-*`, which read another
+element. It refuses every other variant: `disabled`, `data-disabled`, `data-[disabled…]` and arbitrary selectors naming
+`:disabled` or `[disabled]` as overridden, any other form, such as another arbitrary selector or `not-*`, by name until
+a row admits it. `aria-disabled` stays admitted: the shared rule does not cover it, and it marks controls that dim while
+busy yet keep focus. The residual is a class the grammar reads but Tailwind reads differently; none is known.
+Tailwind's own `candidatesToCss` is its check: the rule's tests compile a generated family of lexical forms × variant
+order × utility spellings with it, and every class it compiles to opacity on the element's own `:disabled` or
+`[data-disabled]` must be refused, and every admitted one must compile to neither. A utility that sets opacity without
+naming it is outside the rule.
 
 These checks do not inspect CSS declarations, compute contrast, validate author colors, or prove visual
 consistency. Scoped/global CSS, runtime style objects and externally supplied classes still need review

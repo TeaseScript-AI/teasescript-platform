@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { before, test } from "node:test";
 import { ESLint } from "eslint";
 import { ADMITTED_VARIANTS, classifyOpacityToken } from "./plugin.mjs";
 
@@ -123,97 +125,257 @@ test("authored appearance, virtualization and non-class strings are legitimate",
   );
 });
 
-// The disabled-opacity rule over its two axes: where a class is written, and the form of the variants before an opacity
-// utility. Every form the classifier knows has a row, refused or admitted, and every row runs at every site.
-const classSites = {
-  "a static class": (token) => [vue(`<button class="${token}" />`)],
-  "a bound string": (token) => [vue(`<button :class="'${token}'" />`)],
-  "cn()": (token) => [vue(`<button :class="cn('${token}')" />`)],
-  "an object binding": (token) => [vue(`<button :class="{ '${token}': active }" />`)],
-  "an array binding": (token) => [vue(`<button :class="['mt-4', '${token}']" />`)],
-  "a cva variant": (token) => [
-    `import { cva } from 'class-variance-authority'; export const variants = cva('${token}');`,
-    tsFile,
-  ],
-};
-const opacityForms = [
-  ["disabled:opacity-50", "disabled"],
-  ["disabled:opacity-[0.4]", "disabled"],
-  ["disabled:[opacity:0.5]", "disabled"],
-  ["!disabled:opacity-50", "disabled"],
-  ["data-disabled:opacity-50", "disabled"],
-  ["data-[disabled]:opacity-50", "disabled"],
-  ["data-[disabled=true]:opacity-50", "disabled"],
+// The disabled-opacity rule over its axes: the lexical form of the variants, their order, the opacity utility's
+// spelling and where the class is written. Tailwind's own output is the oracle: a class it compiles to an opacity
+// declaration on a selector naming the element's own `:disabled` or `[data-disabled]` must be refused, and a class the
+// rule admits must compile, to a selector naming neither.
+const disabledSpellings = [
+  "",
+  "disabled",
+  "data-disabled",
+  "data-[disabled]",
+  "data-[disabled=true]",
+  "[&:disabled]",
+  "[&[disabled]]",
+];
+const companionForms = [
+  "",
+  "hover",
+  "dark",
+  "md",
+  "group-hover/item",
+  "peer-disabled",
+  "aria-disabled",
+  "aria-[busy=true]",
+  "data-[state=open]",
+  "data-[label='(']",
+  'data-[label="x"]',
+  "data-[label=a\\:b]",
+  "data-[x",
+  "[&_svg]",
+  "not-enabled",
+];
+const opacityUtilities = ["opacity-50", "opacity-[0.4]", "[opacity:0.5]", "opacity-50!"];
+const family = [];
+for (const disabled of disabledSpellings)
+  for (const companion of companionForms)
+    for (const order of ["disabled first", "companion first"])
+      for (const utility of opacityUtilities) {
+        const variants = order === "disabled first" ? [disabled, companion] : [companion, disabled];
+        family.push({
+          token: [...variants.filter(Boolean), utility].join(":"),
+          axes: [disabled, companion, order, utility],
+        });
+      }
+// Rows named by the reviews, and one per admitted form; `kind` is the decision the rule must take.
+const namedRows = [
+  ["disabled:data-[label='(']:opacity-50", "unreadable"],
+  ["data-[label='(']:disabled:opacity-50", "unreadable"],
   ["[&:disabled]:opacity-50", "disabled"],
-  ["[&[disabled]]:opacity-50", "disabled"],
   ["dark:disabled:opacity-50", "disabled"],
-  ["disabled:focus:opacity-50", "disabled"],
   ["hover:data-[disabled]:opacity-50", "disabled"],
+  ["disabled:focus:opacity-50", "disabled"],
+  ["!disabled:opacity-50", "disabled"],
   ["[&:not(:enabled)]:opacity-50", "unclassified"],
-  ["[&_svg]:opacity-50", "unclassified"],
-  ["not-enabled:opacity-50", "unclassified"],
   ["has-checked:opacity-50", "unclassified"],
-  ["md:hover:opacity-100", "breakpoint"],
   ["max-sm:opacity-70", "breakpoint"],
-  ["dark:opacity-70", "media"],
   ["rtl:opacity-70", "direction"],
-  ["hover:opacity-100", "element state"],
   ["focus-visible:opacity-100", "element state"],
   ["before:opacity-50", "pseudo-element"],
-  ["aria-disabled:opacity-50", "aria"],
-  ["aria-[busy=true]:opacity-50", "aria"],
-  ["data-[state=closed]:opacity-0", "data attribute"],
   ["data-[state=disabled]:opacity-50", "data attribute"],
   ["data-open:opacity-100", "data attribute"],
-  ["peer-disabled:opacity-50", "another element"],
   ["group-disabled:opacity-50", "another element"],
-  ["group-hover/item:opacity-100", "another element"],
+  ["group-[&:disabled]:opacity-50", "another element"],
+  ["group-[:is(&:disabled)]:opacity-50", "another element"],
+  ["group-[&:is(.group),&:disabled]:opacity-50", "another element"],
+  ["peer-[&:disabled]:opacity-50", "another element"],
+  ["data-[disabled~=true]:opacity-50", "disabled"],
+  ["disabled:data-[label=')']:opacity-50", "unreadable"],
+  ["disabled:aria-[label='(']:opacity-50", "unreadable"],
+  ["disabled:data-[label='[']:opacity-50", "unreadable"],
+  ["disabled:!opacity-50", "unreadable"],
+  ["new-state:opacity-50", "unclassified"],
+  ["hover:opacity-(--dim)", "element state"],
   ["disabled:pointer-events-none", "no opacity"],
+  ["hover:transition-opacity", "no opacity"],
   ["opacity-50", "no opacity"],
 ];
-const refusedKinds = { disabled: "opacity", unclassified: "unclassified" };
+const refusals = { disabled: "opacity", unclassified: "unclassified", unreadable: "unreadable" };
+/** The rule's decision for a token: its refusal (`unreadable`, `disabled`, `unclassified`), else its admitted forms. */
+function decision(token) {
+  const decisions = classifyOpacityToken(token);
+  if (decisions === null) return { refusal: null, kinds: ["no opacity"] };
+  const kinds = decisions.map((entry) => entry.kind);
+  return {
+    refusal:
+      ["unreadable", "disabled", "unclassified"].find((kind) => kinds.includes(kind)) ?? null,
+    kinds,
+  };
+}
 
-test("every variant form the disabled-opacity rule knows has a row, at every class site", () => {
-  const kinds = new Set(opacityForms.map(([, kind]) => kind));
-  for (const kind of [
-    ...Object.keys(ADMITTED_VARIANTS),
-    ...Object.keys(refusedKinds),
-    "no opacity",
-  ])
-    assert.ok(kinds.has(kind), `no row for ${kind}`);
-  assert.equal(Object.keys(classSites).length, 6);
+const jsString = (token) => `'${token.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
+const attribute = (value) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+const classSites = {
+  "a static class": (token) => `<button class="${attribute(token)}" />`,
+  "a bound string": (token) => `<button :class="${attribute(jsString(token))}" />`,
+  "cn()": (token) => `<button :class="${attribute(`cn(${jsString(token)})`)}" />`,
+  "an object binding": (token) =>
+    `<button :class="${attribute(`{ ${jsString(token)}: active }`)}" />`,
+  "an array binding": (token) => `<button :class="${attribute(`['mt-4', ${jsString(token)}]`)}" />`,
+  "a cva variant": (token) => `cva(${jsString(token)});`,
+};
+/** The rule's message per token at `site`, linting every token in one file, one token per line. */
+async function siteMessages(site, tokens) {
+  const lines = tokens.map(classSites[site]);
+  const [source, filePath] =
+    site === "a cva variant"
+      ? [`import { cva } from 'class-variance-authority';\n${lines.join("\n")}`, tsFile]
+      : [
+          `<script setup lang="ts">const active = true;</script><template>\n${lines.join("\n")}\n</template>`,
+          vueFile,
+        ];
+  const byLine = new Map();
+  for (const message of await messages(source, filePath))
+    if (message.ruleId === "design/no-disabled-opacity")
+      byLine.set(message.line, message.messageId);
+  return tokens.map((_, index) => byLine.get(index + 2) ?? null);
+}
+
+let oracle;
+before(async () => {
+  const tailwind = await import("tailwindcss");
+  const cssFile = path.resolve("player/vue/src/style.css");
+  const system = await tailwind.__unstable__loadDesignSystem(readFileSync(cssFile, "utf8"), {
+    base: path.dirname(cssFile),
+    async loadStylesheet(id, base) {
+      let file = path.resolve(base, id);
+      if (!id.startsWith(".")) {
+        const directory = path.resolve("node_modules", id);
+        const entry = JSON.parse(readFileSync(path.join(directory, "package.json"), "utf8"));
+        file = path.join(directory, entry.exports?.["."]?.style ?? entry.style);
+      }
+      return { base: path.dirname(file), content: readFileSync(file, "utf8") };
+    },
+  });
+  oracle = (tokens) => system.candidatesToCss(tokens).map(selectsOwnDisabledState);
+});
+/** `selector` without each `:is(…)` that names Tailwind's `.group` or `.peer`: those select another element. */
+function withoutOtherElements(selector) {
+  let own = "";
+  for (let index = 0; index < selector.length; index++) {
+    if (selector.startsWith(":is(", index)) {
+      let depth = 0;
+      let end = index + 3;
+      for (; end < selector.length; end++) {
+        if (selector[end] === "(") depth++;
+        else if (selector[end] === ")" && --depth === 0) break;
+      }
+      const group = selector.slice(index, end + 1);
+      if (/:where\(\.(?:group|peer)\b/.test(group)) {
+        index = end;
+        continue;
+      }
+    }
+    own += selector[index];
+  }
+  return own;
+}
+/**
+ * What Tailwind's CSS for one class does: `null` when it compiles to no opacity declaration, else whether a selector
+ * of one names the element's own `:disabled` or `[data-disabled]`. Escapes belong to the class name, and what names
+ * `.group` or `.peer` selects another element, so both are left out.
+ */
+function selectsOwnDisabledState(css) {
+  if (css === null) return null;
+  let opacity = false;
+  let disabled = false;
+  for (const [, selector, declarations] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!/(?:^|[;\s])opacity\s*:/.test(declarations)) continue;
+    opacity = true;
+    const own = withoutOtherElements(selector.replace(/\\./g, ""));
+    if (/:disabled|\[data-disabled/.test(own)) disabled = true;
+  }
+  return opacity ? disabled : null;
+}
+
+test("the disabled-opacity family covers every combination of its axes, and every decision the rule takes", () => {
+  const sizes = [disabledSpellings, companionForms, ["", ""], opacityUtilities].map(
+    (axis) => axis.length,
+  );
+  assert.equal(
+    family.length,
+    sizes.reduce((product, size) => product * size),
+  );
+  assert.equal(new Set(family.map(({ axes }) => axes.join("\u0000"))).size, family.length);
+  const decided = new Set(
+    [...family.map(({ token }) => token), ...namedRows.map(([token]) => token)].flatMap((token) => {
+      const { refusal, kinds } = decision(token);
+      return refusal ? [refusal] : kinds;
+    }),
+  );
+  for (const kind of [...Object.keys(ADMITTED_VARIANTS), ...Object.keys(refusals), "no opacity"])
+    assert.ok(decided.has(kind), `no row is decided as ${kind}`);
 });
 
-for (const [token, kind] of opacityForms) {
-  test(`${token} is ${kind in refusedKinds ? "refused" : "admitted"} (${kind}) at every class site`, async () => {
-    // A refused token's decision is its disabled variant, else its first unclassified one; an admitted token has the
-    // row's form among its variants and nothing refused.
-    const decisions = classifyOpacityToken(token);
-    const kinds = decisions?.map((decision) => decision.kind) ?? ["no opacity"];
-    const refused = ["disabled", "unclassified"].find((refusal) => kinds.includes(refusal));
-    if (kind in refusedKinds) assert.equal(refused, kind, JSON.stringify(decisions));
-    else assert.ok(refused === undefined && kinds.includes(kind), JSON.stringify(decisions));
-    let sites = 0;
-    for (const [site, source] of Object.entries(classSites)) {
-      const found = (await messages(...source(token))).filter(
-        (message) => message.ruleId === "design/no-disabled-opacity",
+test("the named rows take their decisions", () => {
+  for (const [token, kind] of namedRows) {
+    const { refusal, kinds } = decision(token);
+    if (kind in refusals) assert.equal(refusal, kind, token);
+    else assert.ok(refusal === null && kinds.includes(kind), `${token}: ${JSON.stringify(kinds)}`);
+  }
+});
+
+test("Tailwind's output agrees: what selects a disabled control is refused, and what is admitted selects none", () => {
+  const tokens = [...family.map(({ token }) => token), ...namedRows.map(([token]) => token)];
+  const disabled = oracle(tokens);
+  tokens.forEach((token, index) => {
+    const { refusal, kinds } = decision(token);
+    if (disabled[index] === true)
+      assert.notEqual(refusal, null, `${token} selects a disabled control`);
+    if (refusal === null && !kinds.includes("no opacity"))
+      assert.equal(
+        disabled[index],
+        false,
+        `${token} is admitted but compiles to ${disabled[index]}`,
       );
-      assert.deepEqual(
-        found.map((message) => message.messageId),
-        kind in refusedKinds ? [refusedKinds[kind]] : [],
-        `${site}: ${JSON.stringify(found)}`,
+  });
+  // The reviews' reproductions compile to disabled selectors, so the oracle rows are not vacuous.
+  assert.deepEqual(
+    oracle([
+      "disabled:data-[label='(']:opacity-50",
+      "[&:disabled]:opacity-50",
+      "dark:disabled:opacity-50",
+    ]),
+    [true, true, true],
+  );
+});
+
+for (const site of Object.keys(classSites)) {
+  test(`at ${site}, the rule reports each family token as it decides it`, async () => {
+    const tokens = [...family.map(({ token }) => token), ...namedRows.map(([token]) => token)];
+    const reported = await siteMessages(site, tokens);
+    tokens.forEach((token, index) => {
+      const { refusal } = decision(token);
+      assert.equal(
+        reported[index],
+        refusal === null ? null : refusals[refusal],
+        `${site}: ${token}`,
       );
-      sites++;
-    }
-    assert.equal(sites, Object.keys(classSites).length);
+    });
   });
 }
 
-test("an unclassified variant's message names it", async () => {
-  const [found] = (await messages(vue('<button class="[&_svg]:opacity-50" />'))).filter(
-    (message) => message.ruleId === "design/no-disabled-opacity",
+test("a refused variant's message names it", async () => {
+  const found = (
+    await messages(
+      vue('<button class="[&_svg]:opacity-50" /><button :class="\'data-[x:opacity-50\'" />'),
+    )
+  ).filter((message) => message.ruleId === "design/no-disabled-opacity");
+  assert.match(found[0]?.message ?? "", /'\[&_svg\]' before an opacity class/);
+  assert.match(
+    found[1]?.message ?? "",
+    /'data-\[x:opacity-50' names opacity in a form this rule cannot read/,
   );
-  assert.match(found?.message ?? "", /'\[&_svg\]' before an opacity class/);
 });
 
 test("inline configuration cannot silence errors", async () => {
