@@ -55,7 +55,8 @@ test("the core gives the expected record for every record of the cells it comple
   }
   assert.deepEqual(Object.fromEntries(held), {
     "the adapters' records (S9b)": 3,
-    "the route rule's corridor across locations (#1938)": 19,
+    "the route rule's corridor across locations (#1938)": 18,
+    "a written optional load's definite number error (#1173, listed in #1938)": 1,
     "a static warning of S9b's otherwise (#1737)": 7,
     "U4's consumer remainder (#2025)": 3,
     "a fixture expectation awaiting its ruling (#2025)": 3,
@@ -84,23 +85,74 @@ test("the core gives the expected record for every record of the cells it comple
 });
 
 /**
- * The completeness check of stage 3b's closed hold list (#1073 U6): each held name is a fixture record with an `N` cell
- * whose analysis still differs from its record, so a hold cannot outlive its cause; and every other record with an `N`
- * cell is asserted, by the test above.
+ * The completeness check of stage 3b's closed hold list (#1073 U6): each held name is a fixture record with an `N` cell,
+ * held by its own reason, whose analysis in every mode gives exactly the differences its hold names, and whose
+ * differences have its reason's signature. A hold whose cause is repaired, changed or misnamed fails; every other record
+ * with an `N` cell is asserted, by the test above.
  */
-test("each stage 3b record held by name exists, has an N cell and still differs (#1073 U6)", () => {
+test("each stage 3b record held by name exists, has an N cell, and differs in every mode exactly as its cause does (#1073 U6)", () => {
+  // (a reason's signature: what its cause's differences are, independently of the map that names it)
+  const signatures = new Map<string, (lines: readonly string[]) => boolean>([
+    [
+      "the route rule's corridor across locations (#1938)",
+      (lines) => lines.some((line) => line.startsWith("missing required check ")),
+    ],
+    [
+      "a written optional load's definite number error (#1173, listed in #1938)",
+      (lines) =>
+        lines.some((line) => line.startsWith("missing required check ")) &&
+        lines.some((line) => line.startsWith("missing check integer-check ")),
+    ],
+    [
+      "a static warning of S9b's otherwise (#1737)",
+      (lines) =>
+        lines.every(
+          (line) =>
+            line.startsWith("extra diagnostic static warning ") ||
+            line === "outcome valid, got warning",
+        ),
+    ],
+    [
+      "a context word under an unrelated test (#2024)",
+      (lines) => lines.length > 0 && lines.every((line) => line.startsWith("missing context ")),
+    ],
+    [
+      "a fixture expectation defect (#2025)",
+      (lines) => lines.includes("outcome warning-runtime-check, got valid"),
+    ],
+    // (the owner-ruled holds, U4's, the outliers' and the crossover's, carry no mechanical signature: their pinned
+    // differences are the check)
+    ["U4's consumer remainder (#2025)", () => true],
+    ["a fixture expectation awaiting its ruling (#2025)", () => true],
+    ["the numeric crossover (#1173, #2025)", () => true],
+  ]);
   const byName = new Map(records.map((record) => [record.name, record]));
   const wrong: string[] = [];
-  for (const [name, reason] of HELD_S10_RECORDS) {
+  for (const [name, hold] of HELD_S10_RECORDS) {
     const record = byName.get(name);
     if (record === undefined) {
       wrong.push(`${name}: no such record`);
       continue;
     }
     if (!record.cells.some((cell) => /^N\d/.test(cell))) wrong.push(`${name}: no N cell`);
-    if (heldBack(record) !== reason) wrong.push(`${name}: held by another reason`);
-    if (recordDifferences(record.expected, analysed(record)).length === 0)
-      wrong.push(`${name}: matches its record, so it is no longer held (${reason})`);
+    if (heldBack(record) !== hold.reason) wrong.push(`${name}: held by another reason`);
+    const signature = signatures.get(hold.reason);
+    if (signature === undefined)
+      wrong.push(`${name}: a reason without a signature (${hold.reason})`);
+    else if (!signature(hold.differences))
+      wrong.push(`${name}: its differences are not ${hold.reason}'s`);
+    const request = coreRequest(record.files);
+    assert.ok(request !== null, name);
+    for (const mode of MODES) {
+      const differences = recordDifferences(
+        record.expected,
+        inMode(mode, () => compactAnalysis(request)),
+      );
+      if (JSON.stringify(differences) !== JSON.stringify(hold.differences))
+        wrong.push(
+          `${name} in ${JSON.stringify(mode)}: ${JSON.stringify(differences)}, its hold names ${JSON.stringify(hold.differences)}`,
+        );
+    }
   }
   assert.deepEqual(wrong, []);
   assert.equal(HELD_S10_RECORDS.size, 35);
