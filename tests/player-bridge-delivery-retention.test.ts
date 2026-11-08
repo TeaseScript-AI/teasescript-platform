@@ -12,9 +12,9 @@ import { runRetentionChild } from "./helpers/retention-witness.js";
  * A class is decided by a marker of its own, which the marker scan sees through private fields, closures and promises,
  * wherever the class keeps its payload:
  * - a plan and compiled sources (`prepare`), and a transfer ticket (`readTransfer`): in their input;
- * - a host session (`start`): in the saved value its script loads and says, so in its engine state, its publication's
- *   view and transcript, and its events; a second net, weak references to every object of its publication's public
- *   graph the op added, sees a branch the marker might miss;
+ * - a host session (`start`): in the saved value its script loads and says, so in its engine state, its transcript and
+ *   its events; weak references to every object of its publication's original public graph the op added also cover
+ *   its marker-free state view, and any branch the marker might miss;
  * - the source-view caches (`drawCode`: the sidecar text, the sidecar, the latest file): in their plan's comments,
  *   which the plan does not keep; the plan's sources, their only other holder, are let go of once the caches were made.
  *
