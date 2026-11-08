@@ -30,7 +30,9 @@ with its owner.
 When lines keep returning to one subject, such as a tool, a document or a process, its owner gives it a one-page
 contract if it has none. The contract states what the subject does, its defaults, and what it overrides or refuses.
 
-A filed line becomes an issue with the `friction` label and the first line `Friction class: <class>`. The open backlog
+A filed line becomes an issue with the `friction` label and the first line `Friction class: <class>`, then a line
+`Files: <paths>` naming the files or folders it concerns, so a brief can list the open issues for the files a package
+touches. The open backlog
 per class is the open `friction` issues grouped by that first line. A line fixed in place needs no issue: its report is
 its record.
 
