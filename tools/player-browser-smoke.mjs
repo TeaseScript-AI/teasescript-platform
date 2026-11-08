@@ -122,6 +122,7 @@ async function main() {
         ["debugExport", () => debugExportScenario(cdp, origin, profile)],
         ["debugHistoryStorage", () => debugHistoryStorageScenario(cdp, origin)],
         ["rewind", () => rewindScenario(cdp, origin)],
+        ["rewindSwitch", () => rewindSwitchScenario(cdp, origin)],
         ["photoColour", () => photoColourScenario(cdp, origin, profile)],
         ["photoVignette", () => photoVignetteScenario(cdp, origin)],
         ["messageUpdates", () => messageUpdatesScenario(cdp, origin)],
@@ -155,7 +156,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, a session exported and continued in another profile, the debug export after a script error, the rewind history's IndexedDB store, Back and Return in the Player, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, a session exported and continued in another profile, the debug export after a script error, the rewind history's IndexedDB store, Back and Return in the Player, Debug's rewind switches and their retry, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
       );
     } finally {
       cdp.close();
@@ -2880,6 +2881,111 @@ async function rewindScenario(cdp, origin) {
   );
   await waitFor(cdp, `!!${choice("Left")}`, 8_000, "Return did not show the session it left");
   assertEqual(await value(cdp, said), left, "Return shows the transcript the session had");
+}
+
+/**
+ * Debug's rewind switches as the Player shows them (DEBUGGER.md "Rewind"), through the development preview's slow and
+ * failing restart gate (`?rewindGate`): a pending Return disables what it refuses at once, marks the Player busy and
+ * announces itself, and its animation shows only after the delay; Debug off's reinstatement that fails at its gate
+ * offers Retry return to session, also with Debug off, which brings the session back. In light and dark, on a desktop
+ * and a phone; with `PLAYER_SMOKE_SCREENSHOTS` naming a folder, it saves the animation and the retry there.
+ */
+async function rewindSwitchScenario(cdp, origin) {
+  const folder = process.env.PLAYER_SMOKE_SCREENSHOTS ?? null;
+  const save = async (name) => {
+    if (folder === null) return;
+    await mkdir(folder, { recursive: true });
+    const shot = await cdp.call("Page.captureScreenshot", { format: "png" });
+    await writeFile(join(folder, `${name}.png`), Buffer.from(shot.result.data, "base64"));
+  };
+  const choice = (label) =>
+    `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === '${label}')`;
+  const theme = `document.documentElement.dataset.playerTheme`;
+  // Back to the first answer through the given gate, the state shown for inspection.
+  const inspect = async (gate) => {
+    await navigate(cdp, `${origin}/player/?package=rewind&dev&rewindGate=${gate}`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+    await waitFor(cdp, `!!${choice("Red")}`, 8_000, "The first choice did not show");
+    await physicalClickOn(cdp, choice("Red"), "the Red choice");
+    await waitFor(cdp, `!!${choice("Left")}`, 8_000, "The second choice did not show");
+    await waitFor(cdp, `!!document.querySelector('[data-back-to-here]')`, 8_000, "No Back to here");
+    await physicalClick(cdp, "[data-back-to-here]");
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-rewind-inspection]')`,
+      8_000,
+      "Back showed no inspection",
+    );
+  };
+  for (const mode of ["light", "dark"])
+    for (const [device, width, height] of [
+      ["desktop", 1440, 900],
+      ["phone", 390, 844],
+    ]) {
+      await setViewport(cdp, width, height);
+      await inspect("slow");
+      // The theme is the Player's preference, which a reload keeps.
+      if ((await value(cdp, theme)) !== mode) {
+        await physicalClick(cdp, "[data-theme-mode-control]");
+        await waitFor(cdp, `${theme} === '${mode}'`);
+      }
+      // Return waits at its slow gate: at once, what it refuses is disabled, the Player is busy and says so, and no
+      // animation shows yet.
+      await physicalClick(cdp, "[data-rewind-return]");
+      assertEqual(
+        await value(
+          cdp,
+          `JSON.stringify({
+            controls: [...document.querySelectorAll('[data-foreground-controls] button, [data-rewind-inspection] button')].every((button) => button.disabled),
+            busy: document.querySelector('[data-rewind-status]')?.getAttribute('aria-busy'),
+            announced: document.querySelector('[data-rewind-announcement]')?.textContent.trim(),
+            animation: !!document.querySelector('[data-rewind-switch-indicator]'),
+          })`,
+        ),
+        JSON.stringify({
+          controls: true,
+          busy: "true",
+          announced: "Returning to session",
+          animation: false,
+        }),
+        `A pending Return, ${mode} ${device}: its refused controls disabled, busy, announced, no animation yet`,
+      );
+      await waitFor(
+        cdp,
+        `!!document.querySelector('[data-rewind-switch-indicator]')`,
+        1_400,
+        `A pending Return, ${mode} ${device}: no animation once it lasted`,
+      );
+      await save(`animation-${mode}-${device}`);
+      await waitFor(
+        cdp,
+        `!document.querySelector('[data-rewind-inspection]') && !!${choice("Left")}`,
+      );
+      // Debug off's reinstatement fails at its gate: the failure stops the Player, and Retry return to session shows,
+      // with Debug off.
+      await inspect("fail");
+      await physicalClick(cdp, '[data-tools-focus="launcher:Debug"]');
+      await waitFor(cdp, visible("[data-debug-active]"), 8_000, "The Debug panel did not open");
+      await physicalClick(cdp, "[data-debug-active]");
+      await waitFor(
+        cdp,
+        `!!document.querySelector('[data-rewind-retry]')`,
+        8_000,
+        `A failed reinstatement, ${mode} ${device}: no retry`,
+      );
+      await physicalClick(cdp, '[data-tools-focus="launcher:Debug"]');
+      await waitFor(cdp, `!document.querySelector('[data-tool="Debug"]')`);
+      await save(`retry-${mode}-${device}`);
+      // The retry brings the session Back left back, which takes input again.
+      await physicalClick(cdp, "[data-rewind-retry]");
+      await waitFor(
+        cdp,
+        `!document.querySelector('[data-rewind-retry]') && !!${choice("Left")} && !${choice("Left")}.disabled`,
+        8_000,
+        `The retry, ${mode} ${device}: the session did not come back`,
+      );
+    }
 }
 
 /**
