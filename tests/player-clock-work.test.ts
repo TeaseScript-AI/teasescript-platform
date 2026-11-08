@@ -667,18 +667,6 @@ function declaredSectionWork(): string[] {
   return keys;
 }
 
-test("the section-work family covers every row in each state its turn can have", () => {
-  assert.deepEqual([...SECTION_ROWS].sort(), declaredSectionWork().sort());
-  const feasible = [
-    ...product({ row: [...SECTION_ROWS], state: ["owned", "held", "retired"] }),
-    ...product({ row: ["mediaLoadObserved", "mediaLoad"], state: ["basis refused"] }),
-  ];
-  const observed = SECTION_CASES.map(({ row, state }) => ({ row, state }));
-  assert.deepEqual(coverageGaps(feasible, observed, { tuples: true }), []);
-  const lacking = observed.filter((each) => !(each.row === "service" && each.state === "held"));
-  assert.ok(coverageGaps(feasible, lacking, { tuples: true }).length > 0);
-});
-
 interface SectionClock {
   section<T>(
     work: string,
@@ -719,7 +707,10 @@ async function sectionClock(context: TestContext, shown: PlayerRuntimeSession) {
   return { clock, paused, sampled };
 }
 
-for (const { row, state, name } of SECTION_CASES)
+/** The `(row, state)` coordinates registered as section cases below. */
+const registeredSections: { row: string; state: string }[] = [];
+for (const { row, state, name } of SECTION_CASES) {
+  registeredSections.push({ row, state });
   test(`the clock opens a section under its row, observing at its turn: ${name}`, async (context) => {
     const player = await mount(context, false);
     const bridge = await player.host.bridge;
@@ -787,6 +778,20 @@ for (const { row, state, name } of SECTION_CASES)
       `${name}: the observation`,
     );
   });
+}
+
+test("the section-work family covers every row in each state its turn can have", () => {
+  // The coordinates the loop above registered as cases, not the list it reads.
+  assert.deepEqual([...SECTION_ROWS].sort(), declaredSectionWork().sort());
+  const feasible = [
+    ...product({ row: [...SECTION_ROWS], state: ["owned", "held", "retired"] }),
+    ...product({ row: ["mediaLoadObserved", "mediaLoad"], state: ["basis refused"] }),
+  ];
+  const observed = registeredSections;
+  assert.deepEqual(coverageGaps(feasible, observed, { tuples: true }), []);
+  const lacking = observed.filter((each) => !(each.row === "service" && each.state === "held"));
+  assert.ok(coverageGaps(feasible, lacking, { tuples: true }).length > 0);
+});
 
 test("a kind of section work the clock's table does not hold throws, and opens nothing", async (context) => {
   const player = await mount(context, false);

@@ -529,28 +529,35 @@ test("every wait of the page's activation work re-admits its activation, or is l
     ts.ScriptTarget.Latest,
     true,
   );
+  // Each `ownedSection` call counts under its innermost named function, in the forms `reachable` follows: a
+  // declaration, or an arrow or function expression a variable holds. A body that is not an inline block cannot
+  // re-admit first, so it counts as one that does not.
   const bodies: string[] = [];
-  source.forEachChild(function visit(node): void {
+  source.forEachChild(function visit(node: ts.Node, owner?: string): void {
+    if (ts.isFunctionDeclaration(node) && node.name !== undefined) owner = node.name.text;
     if (
-      ts.isFunctionDeclaration(node) &&
-      node.name !== undefined &&
-      session.has(node.name.text) &&
-      node.name.text !== "ownedSection"
+      ts.isVariableDeclaration(node) &&
+      node.initializer !== undefined &&
+      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
     )
-      node.forEachChild(function find(inner): void {
-        if (
-          ts.isCallExpression(inner) &&
-          inner.expression.getText(source) === "ownedSection" &&
-          inner.arguments[2] !== undefined &&
-          (ts.isArrowFunction(inner.arguments[2]) || ts.isFunctionExpression(inner.arguments[2])) &&
-          ts.isBlock(inner.arguments[2].body)
-        ) {
-          const first = inner.arguments[2].body.statements[0]?.getText(source) ?? "";
-          bodies.push(`${node.name!.text}: ${/activationRun\.admits\(/u.test(first)}`);
-        }
-        inner.forEachChild(find);
-      });
-    node.forEachChild(visit);
+      owner = node.name.getText(source);
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.getText(source) === "ownedSection" &&
+      owner !== undefined &&
+      owner !== "ownedSection" &&
+      session.has(owner)
+    ) {
+      const body = node.arguments[2];
+      const first =
+        body !== undefined &&
+        (ts.isArrowFunction(body) || ts.isFunctionExpression(body)) &&
+        ts.isBlock(body.body)
+          ? (body.body.statements[0]?.getText(source) ?? "")
+          : "";
+      bodies.push(`${owner}: ${/activationRun\.admits\(/u.test(first)}`);
+    }
+    node.forEachChild((child) => visit(child, owner));
   });
   assert.deepEqual(bodies, ["resolveRandomDraw: true"], "each section body re-admits first");
 });
