@@ -1,8 +1,9 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GROUNDS, refusalsOf } from "./pin-grounds.mjs";
+import { GROUNDS, readingOf, refusalsOf } from "./pin-grounds.mjs";
 
 // The suites that pin the type core's exact work, the focused list a change needs, and the ground a re-pin needs:
 //
@@ -11,16 +12,17 @@ import { GROUNDS, refusalsOf } from "./pin-grounds.mjs";
 // `PIN_SUITES` declares the suites: each one pins a whole-analysis count (a work total, a table of totals or of `main`'s
 // recorded work as bounds, a count of listed copy or construction sites), so any change under `src/type-inference/core/`
 // can move it, and the suite itself is listed when it or the file holding its pins changes. The changes are those since
-// the merge-base of HEAD and `--base` (default `origin/main`), committed or not, untracked files included, as
-// `check-changed.mjs` reads them. A change to a test helper lists only the suites whose pins it holds (`in`), not every
+// the merge-base of HEAD and `--base` (default `origin/main`), committed or not, untracked files included, a moved file
+// by both its paths. A change to a test helper lists only the suites whose pins it holds (`in`), not every
 // suite that imports it.
 //
 // Without options it prints the pinning suites the changes reach, one `dist/tests/…` line each, or `none`; exit 0.
 // `--run` runs them through `tools/test-output-filter.mjs` (built tests are needed: `npm run build:typescript`); exit 1
 // when one fails. `--check-grounds` reads each changed file holding a suite's pins, at the merge-base and at the head,
 // by `pin-grounds.mjs`, whose header says what it refuses; exit 1 naming each refusal, with the time the reading took.
-// A file new since the merge-base has no base and is not read. Exit 2 on another option, or when the changes cannot be
-// read (no merge-base, a base file Git cannot show).
+// A file new since the merge-base is not read, unless a file deleted since then held its owners: a moved pin file is
+// compared with what it was. Exit 2 on another option, or when the changes cannot be read (no merge-base, a base file
+// in the tree that Git cannot show).
 //
 // The list is the authority. Its test (`pin-suites.test.mjs`) requires each suite's `pin` to find a line in the file
 // holding its pins, and finds three pin forms by their text (`PIN_FORMS`): an `assert.equal` of `.total` to a literal of
@@ -133,6 +135,22 @@ export function addedLines(diff) {
   return added;
 }
 
+/** The `git diff -U0` of two texts. */
+function textDiff(before, after) {
+  const directory = mkdtempSync(join(tmpdir(), "pin-suites-"));
+  try {
+    writeFileSync(join(directory, "before"), before);
+    writeFileSync(join(directory, "after"), after);
+    return spawnSync("git", ["diff", "--no-index", "-U0", "before", "after"], {
+      cwd: directory,
+      encoding: "utf8",
+      maxBuffer: 1 << 28,
+    }).stdout;
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 function git(root, ...args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 1 << 28 });
 }
@@ -194,9 +212,44 @@ function main(argv) {
     const start = performance.now();
     const refusals = [];
     let read = 0;
+    /** A path's text at the merge-base: `undefined` when its tree lacks it, `null` when Git cannot read it. */
+    const atBase = (path) => {
+      const listed = spawnSync("git", ["ls-tree", "--name-only", mergeBase, "--", path], {
+        cwd: root,
+        encoding: "utf8",
+      });
+      if (listed.status === 0 && listed.stdout.trim() === "") return undefined;
+      const shown = spawnSync("git", ["show", `${mergeBase}:${path}`], {
+        cwd: root,
+        encoding: "utf8",
+        maxBuffer: 1 << 28,
+      });
+      return listed.status === 0 && shown.status === 0 ? shown.stdout : null;
+    };
+    // (a path deleted since the merge-base whose base text holds a pin file's owners is that file's base: a moved pin
+    // file is compared with what it was, not read as new)
+    const deleted = paths.filter((path) => !existsSync(join(root, path)) && path.endsWith(".ts"));
     for (const file of files) {
-      const shown = spawnSync("git", ["cat-file", "-e", `${mergeBase}:${file}`], { cwd: root });
-      if (shown.status !== 0) continue;
+      // (absent from the base's tree: a new file, not read; listed there but unreadable: the comparison cannot run)
+      let base = atBase(file);
+      let movedFrom;
+      if (base === undefined && existsSync(join(root, file)))
+        for (const path of deleted) {
+          const text = atBase(path);
+          if (typeof text !== "string") continue;
+          const reading = readingOf(file, text);
+          if (reading.records.length > 0 && reading.refusals.length === 0) {
+            [base, movedFrom] = [text, path];
+            break;
+          }
+        }
+      if (base === undefined) continue;
+      if (base === null) {
+        console.error(
+          `pin-suites: Git cannot read ${file} at ${short}: fetch it, or name another --base`,
+        );
+        return 2;
+      }
       if (!existsSync(join(root, file))) {
         refusals.push(
           `${file}: deleted, with its pins.\n  Restore it, or update its declaration in tools/repository-checks/pin-grounds.mjs.`,
@@ -207,9 +260,13 @@ function main(argv) {
       refusals.push(
         ...refusalsOf(
           file,
-          git(root, "show", `${mergeBase}:${file}`),
+          base,
           readFileSync(join(root, file), "utf8"),
-          addedLines(git(root, "diff", "-U0", mergeBase, "--", file)),
+          addedLines(
+            movedFrom === undefined
+              ? git(root, "diff", "-U0", mergeBase, "--", file)
+              : textDiff(base, readFileSync(join(root, file), "utf8")),
+          ),
         ),
       );
     }
