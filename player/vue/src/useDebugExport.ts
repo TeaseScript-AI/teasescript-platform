@@ -17,6 +17,7 @@ import {
   type DebugExport,
 } from "../../debug-export.js";
 import { gzipSupported } from "../../transfer-encoding.js";
+import type { PlayerSession } from "../../runtime-view.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 /** The largest file the Player offers, safely under GitHub's 25 MB attachment limit. */
@@ -43,7 +44,8 @@ export interface PreparedDebugExport {
 export function useDebugExport(
   player: PlayerSessionHost,
   name: () => string,
-  details: () => Pick<DebugExportCandidate, "player" | "host">,
+  /** What only the Player's interface knows for the shown session `shown`, read as the export's capture is delivered. */
+  details: (shown: PlayerSession | null) => Pick<DebugExportCandidate, "player" | "host">,
 ) {
   const open = ref(false);
   const candidate = shallowRef<DebugExportCandidate | null>(null);
@@ -52,6 +54,13 @@ export function useDebugExport(
   const gzip = gzipSupported();
   // Each opening and each preparation has its own number; a later one discards the results of earlier ones.
   let generation = 0;
+  // Each opening's own number: a candidate is wanted only by the opening that asked for it.
+  let opening = 0;
+  /** Lets go of the candidate, and of what the host holds for it. */
+  function retire() {
+    candidate.value?.release();
+    candidate.value = null;
+  }
 
   function release() {
     if (typeof prepared.value === "object") URL.revokeObjectURL(prepared.value.url);
@@ -59,16 +68,19 @@ export function useDebugExport(
   }
 
   watch(open, async (isOpen) => {
-    const current = ++generation;
+    ++generation;
+    const opened = ++opening;
     release();
-    candidate.value = null;
+    retire();
     choices.value = NO_PERSONAL_CONTENT;
     if (!isOpen) return;
     try {
-      const frozen = await player.debugExportCandidate(details());
-      if (current === generation) candidate.value = frozen;
+      const frozen = await player.debugExportCandidate(details, () => opened === opening);
+      if (opened !== opening) frozen?.release();
+      else if (frozen === null) prepared.value = "failed";
+      else candidate.value = frozen;
     } catch {
-      if (current === generation) prepared.value = "failed";
+      if (opened === opening) prepared.value = "failed";
     }
   });
   watch([candidate, choices], async ([frozen, chosen]) => {
@@ -98,7 +110,9 @@ export function useDebugExport(
   });
   onScopeDispose(() => {
     generation++;
+    opening++;
     release();
+    retire();
   });
 
   const fileName = computed(() =>

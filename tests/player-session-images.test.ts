@@ -59,7 +59,8 @@ interface ImageHost {
   ): Promise<void>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   debugExportCandidate(
-    shown: Pick<DebugExportCandidate, "player" | "host">,
+    details: () => Pick<DebugExportCandidate, "player" | "host">,
+    live: () => boolean,
   ): Promise<DebugExportCandidate>;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
@@ -218,11 +219,15 @@ test("a debug export candidate is the state when it was asked for, while play co
   const transcriptEntries = [...asked.transcriptEntries];
   // So is its state, which play changes in place.
   const askedSnapshot = playerRuntimeSnapshot(asked);
-  const pending = host.debugExportCandidate({
-    player: {},
-    host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
-  });
-  // The player answers before the candidate has read the photo the session used.
+  const pending = host.debugExportCandidate(
+    () => ({
+      player: {},
+      host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
+    }),
+    () => true,
+  );
+  // The capture is delivered; the player answers while the candidate reads the photo the session used.
+  await new Promise((resolve) => setTimeout(resolve, 0));
   host.update(submitPlayerRuntimeComposer(asked, "later answer")!.session);
   assert.equal(host.session.value?.state.status, "halted");
   const candidate = await pending;
@@ -291,10 +296,13 @@ test("after a reload, Continue's debug export offers the photo its state holds, 
   const after = await page();
   assert.equal(after.host.activation.value, "continue");
   await after.host.activate();
-  const candidate = await after.host.debugExportCandidate({
-    player: {},
-    host: { stage: { status: "loaded", path: null }, media: [], notices: [], debugLog: null },
-  });
+  const candidate = await after.host.debugExportCandidate(
+    () => ({
+      player: {},
+      host: { stage: { status: "loaded", path: null }, media: [], notices: [], debugLog: null },
+    }),
+    () => true,
+  );
   assert.deepEqual(
     candidate.photos.map((each) => [each.reference, each.usedBy, each.byteLength]),
     [[photo, [], PNG.length]],

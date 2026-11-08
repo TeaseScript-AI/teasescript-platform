@@ -282,13 +282,15 @@ export class HeldSession implements HostSession, ObservedSession {
     return isStopArguments(args);
   }
 
-  /** A Player error stop of this session arrived: the run's capture waits for its commit. */
+  /**
+   * A Player error stop of this session arrived: the run's capture waits for its commit. The stopped session is the
+   * stop's run's, also a Continue's restored session the error stopped before Continue handed it over (`bindRun`).
+   */
   stopRequested(args: unknown): void {
     if (!isStopArguments(args)) return;
-    advanceExportObservation(this.#connection.exportObservation, {
-      kind: "stopRequested",
-      stop: args,
-    });
+    const owner = this.#connection.exportObservation;
+    advanceExportObservation(owner, { kind: "bindSession", session: this, run: args.run });
+    advanceExportObservation(owner, { kind: "stopRequested", stop: args });
   }
 
   /**

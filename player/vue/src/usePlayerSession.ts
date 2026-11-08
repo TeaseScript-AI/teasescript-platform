@@ -29,11 +29,10 @@ import {
 import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../media-device.js";
 import { type LockDialogInput } from "../../lock-service.js";
 import type { LockServices } from "../../encryption/lock.js";
-import {
-  playerRuntimeSnapshotOrNull,
-  type PlayerRuntimeRestorePoint,
-  type PlayerRuntimeSession,
-  type PlayerRuntimeSessionOptions,
+import type {
+  PlayerRuntimeRestorePoint,
+  PlayerRuntimeSession,
+  PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
 import {
   activePlayerRuntimeInteraction,
@@ -46,7 +45,6 @@ import {
 } from "../../runtime-view.js";
 import {
   createInProcessBackend,
-  hatch,
   heldPlan,
   heldRecording,
   introduceNow,
@@ -155,12 +153,15 @@ import { useCallView } from "./session/useCallView.js";
 import { usePlayerCameraLifecycle, useSessionCamera } from "./session/usePlayerCameras.js";
 import { usePlayerSessionServices } from "./session/usePlayerSessionServices.js";
 import { useFailureRecording } from "./session/useFailureRecording.js";
+import type { ExportCaptureReply } from "../../engine-bridge/session-protocol.js";
 
 const PRIMED_AUDIO_ELEMENTS = 2;
 const SILENCE = silence(50);
 
 // Media progress is sampled this often while media loads or plays; cues fire at this resolution.
 const MEDIA_SAMPLE_MS = 100;
+/** A debug export's capture that met a stop of its run still committing (`captureExport`'s `pending`). */
+const PENDING_CAPTURE = Symbol("pending capture");
 
 export interface PlayerSessionOptions {
   /**
@@ -2830,6 +2831,69 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Readies the page for a rewind step's commit or a reinstatement, which begins the host's recording anew: after a
    * Player error, the recording up to the error is kept for the debug export first. Its callers await what it returns.
    */
+  /**
+   * Decides a debug export's capture in its reply's hook (`captureExport`): it is the candidate only while the dialog
+   * wants it, no stop is under way here, and it matches what shows. For a session: the shown lineage, and the store
+   * view's revision, event boundary and diagnostic identity; for none: the same run, and still no session. Events and
+   * transcript come from that store view, marks and incident only from the capture. Otherwise its ticket is released.
+   */
+  function deliverExport(
+    host: PlayerBridge,
+    current: PlayerSession | null,
+    reply: ExportCaptureReply,
+    view: PlayerSession | null,
+    details: (shown: PlayerSession | null) => Pick<DebugExportCandidate, "player" | "host">,
+    live: () => boolean,
+  ): Omit<DebugExportCandidate, "photos"> | typeof PENDING_CAPTURE | null {
+    if (reply.kind === "pending") return PENDING_CAPTURE;
+    if (reply.kind !== "captured") return null;
+    const release = () => void host.releaseRecording(reply.ticket).catch(() => {});
+    const { identity } = reply;
+    const matches =
+      current === null
+        ? session.value === null && identity.run === run
+        : view !== null &&
+          session.value?.lineage === current.lineage &&
+          view.revision === identity.revision &&
+          view.events.length === identity.eventsThrough &&
+          view.diagnostic.run === identity.run &&
+          view.diagnostic.stop === identity.stop;
+    if (!live() || halting.value || !matches) {
+      release();
+      return null;
+    }
+    return {
+      build: playerBuildIdentity,
+      package: options.debugPackage ?? { id: null, version: null },
+      session:
+        view === null
+          ? null
+          : {
+              snapshot: reply.snapshot,
+              failure: reply.failure,
+              events: [...view.events],
+              transcriptEntries: [...view.transcriptEntries],
+            },
+      recording: reply.recording,
+      prepare: (replay) => host.exportPrepare(reply.ticket, replay),
+      release,
+      hostError: reply.incident?.errorName ?? null,
+      editedWhileDebugging: reply.marks?.editedWhileDebugging ?? null,
+      rewoundWhileDebugging: reply.marks?.rewoundWhileDebugging ?? null,
+      ...details(view),
+    };
+  }
+  /** Resolves once no Player error stop is under way here (`halting`). */
+  function stopShown(): Promise<void> {
+    if (!halting.value) return Promise.resolve();
+    return new Promise((resolve) => {
+      const stop = watch(halting, (now) => {
+        if (now) return;
+        stop();
+        resolve();
+      });
+    });
+  }
   function beforeRewindRestart(): void | Promise<void> {
     // The recording up to a Player error is captured before the host begins the recorder anew.
     return failureRecording.beforeRestart();
@@ -3451,38 +3515,32 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     stopped,
     reportHostError,
     /**
-     * What a debug export can contain now, frozen: the session, its recording, and the photos it used. `shown` adds
-     * what only the Player's interface knows: its presentation details and what it observed of the Stage and media.
+     * Captures what a debug export can contain, frozen: in the host, the shown session's state, marks and failure, the
+     * run's incident and the recording (`captureExport`); here, in the capture's reply, that publication's events and
+     * transcript, and what `details` reads of the Player's interface for it. `live` says whether the dialog still wants
+     * the candidate. `null` when the capture is refused or does not match what shows; nothing then stays held.
      */
     async debugExportCandidate(
-      shown: Pick<DebugExportCandidate, "player" | "host">,
-    ): Promise<DebugExportCandidate> {
-      // Everything is taken before the first photo is read, so play continuing meanwhile cannot mix in later state.
+      details: (shown: PlayerSession | null) => Pick<DebugExportCandidate, "player" | "host">,
+      live: () => boolean,
+    ): Promise<DebugExportCandidate | null> {
       const current = session.value;
-      // The shown state, after a call that threw rebuilt from the recorded calls, or `null` when it cannot be exported, so
-      // that the export never presents an earlier state as the one shown; how the session failed is known either way.
-      const snapshot =
-        current === null ? null : hatch(current, (current) => playerRuntimeSnapshotOrNull(current));
-      const recording = exportedRecording();
-      const frozen = {
-        build: playerBuildIdentity,
-        package: options.debugPackage ?? { id: null, version: null },
-        session:
-          current === null
-            ? null
-            : {
-                plan: heldPlan(current.connection, current.planToken),
-                snapshot,
-                failure: current.state.failure,
-                events: [...current.events],
-                transcriptEntries: [...current.transcriptEntries],
-              },
-        recording,
-        hostError: hostError.value,
-        editedWhileDebugging: debugEdits.value,
-        rewoundWhileDebugging: rewound.value,
-        ...shown,
-      };
+      const host = current?.connection ?? bridge;
+      if (host === null) return null;
+      const failed = failureRecording.ticket();
+      const recording =
+        failed !== null && failed.bridge === host ? { ticket: failed.ticket } : "current";
+      const capture = () =>
+        host.captureExport(current, recording, (reply, view) =>
+          deliverExport(host, current, reply, view, details, live),
+        );
+      let frozen = await capture();
+      // A stop of the run was still committing: once it shows, the capture is tried once more.
+      if (frozen === PENDING_CAPTURE) {
+        await stopShown();
+        frozen = live() ? await capture() : null;
+      }
+      if (frozen === PENDING_CAPTURE || frozen === null) return null;
       const photos: DebugPhotoCandidate[] = [];
       for (const [reference, usedBy] of debugPhotoUses(frozen)) {
         const record = await capturedMedia.read(reference);
@@ -3496,6 +3554,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           usedBy,
           read: async () => new Uint8Array(await record.data.arrayBuffer()),
         });
+      }
+      if (!live()) {
+        frozen.release();
+        return null;
       }
       return { ...frozen, photos };
     },

@@ -634,6 +634,7 @@ const FOREIGN_CALLS: Record<string, (a: PlayerBridge, foreign: PlayerSession) =>
   viewCalls: async (a, foreign) => void (await a.viewCalls(foreign, true)),
   section: async (a, foreign) => void (await a.section(foreign, async () => {})),
   halt: async (a, foreign) => void (await a.halt(foreign)),
+  captureExport: async (a, foreign) => void (await a.captureExport(foreign, "current", () => null)),
   frozen: async (a, foreign) => void a.frozen(foreign),
   release: async (a, foreign) => void a.release(foreign),
 };

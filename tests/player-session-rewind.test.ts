@@ -116,7 +116,8 @@ interface RewindHost {
     readonly complete: boolean;
   } | null;
   debugExportCandidate(
-    player: Record<string, never>,
+    details: () => Record<string, never>,
+    live: () => boolean,
   ): Promise<{
     readonly session: { readonly snapshot: RuntimeSnapshot } | null;
     readonly recording: {
@@ -456,10 +457,15 @@ test("Back shows an earlier state paused, and Forward and Return restore the sta
   assert.equal(await host.observe(), inspected);
   assert.deepEqual(storage.saved(), { k: 1, pick: "One" });
   // The restored state is a diagnostic fork, and its recording begins at it.
-  assert.deepEqual((await host.debugExportCandidate({})).rewoundWhileDebugging, {
-    restoredSceneTimeMs: inspected!.state.observedSessionTimeMs,
-    rewindCount: 1,
-  });
+  assert.deepEqual(
+    (
+      await host.debugExportCandidate(
+        () => ({}),
+        () => true,
+      )
+    ).rewoundWhileDebugging,
+    { restoredSceneTimeMs: inspected!.state.observedSessionTimeMs, rewindCount: 1 },
+  );
   assert.deepEqual(host.debugRecording()?.anchorSnapshot, playerRuntimeSnapshot(inspected!));
 
   assert.equal(await rewind.forward(), true);
@@ -471,7 +477,15 @@ test("Back shows an earlier state paused, and Forward and Return restore the sta
   assert.equal(await rewind.returnToSession(), true);
   assert.equal(host.session.value, tip);
   assert.equal(host.rewind.inspecting.value, false);
-  assert.equal((await host.debugExportCandidate({})).rewoundWhileDebugging, null);
+  assert.equal(
+    (
+      await host.debugExportCandidate(
+        () => ({}),
+        () => true,
+      )
+    ).rewoundWhileDebugging,
+    null,
+  );
   assert.deepEqual(storage.calls, ["write k", "write pick"]);
 });
 
@@ -506,7 +520,10 @@ test("after an engine call throws, the export, Back, Forward, and Return work fr
   await assert.rejects(choose(context, host, "Long"), SCOPES_USED_UP);
   assert.equal(host.session.value, tip);
 
-  const candidate = await host.debugExportCandidate({});
+  const candidate = await host.debugExportCandidate(
+    () => ({}),
+    () => true,
+  );
   assert.deepEqual(candidate.session?.snapshot, shown);
   assert.deepEqual(
     candidate.recording?.operations.map((operation) => [operation.kind, operation.thrown]),
@@ -553,7 +570,15 @@ test("a different choice adopts the restored state: its saved data, then the new
   );
   assert.equal(await rewind.returnToSession(), false);
   assert.equal(rewind.state.value.inspection, null);
-  assert.deepEqual((await host.debugExportCandidate({})).rewoundWhileDebugging?.rewindCount, 1);
+  assert.deepEqual(
+    (
+      await host.debugExportCandidate(
+        () => ({}),
+        () => true,
+      )
+    ).rewoundWhileDebugging?.rewindCount,
+    1,
+  );
 
   // Turning Debug off keeps the branch: it is the session now.
   const branch = host.session.value;

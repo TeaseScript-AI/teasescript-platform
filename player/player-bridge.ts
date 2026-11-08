@@ -305,6 +305,7 @@ export class PlayerBridge {
     recording: "current" | { readonly ticket: string },
     deliver: (reply: ExportCaptureReply, shown: PlayerSession | null) => T,
   ): Promise<T> {
+    if (session !== null) this.#own(session);
     let delivered: { readonly value: T } | null = null;
     await this.#client.request(
       "captureExport",

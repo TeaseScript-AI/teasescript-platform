@@ -85,6 +85,7 @@ function candidate(
   const frozen: Omit<DebugExportCandidate, "photos"> = {
     build: { commit: "abc", dirty: false, mode: "production", appVersion: "0.0.0" },
     package: { id: "development-package:test", version: null },
+    release: () => {},
     // What the host prepares from the export's ticket (`exportPrepare`).
     prepare: (replay) =>
       prepareExport(
@@ -443,10 +444,14 @@ test("a state that cannot be checkpointed is exported as the last good state, wh
   const recorder = new DebugRecorder();
   const session = createPlayerRuntimeSession('let name = askText "Name"\nexit', { recorder });
   const recording = recorder.recording()!;
+  // A Player defect left a state the engine's validation refuses.
+  const broken = { ...recording, endSnapshot: { ...recording.endSnapshot!, nextInstruction: -1 } };
+  const base = candidate(session, recorder);
   const frozen: DebugExportCandidate = {
-    ...candidate(session, recorder),
-    // A Player defect left a state the engine's validation refuses.
-    recording: { ...recording, endSnapshot: { ...recording.endSnapshot!, nextInstruction: -1 } },
+    ...base,
+    recording: broken,
+    prepare: (replay) =>
+      prepareExport({ plan: broken.plan, session: base.session, recording: broken }, replay),
     hostError: "TypeError",
   };
   const { exported } = await assembleDebugExport(frozen, all(frozen));

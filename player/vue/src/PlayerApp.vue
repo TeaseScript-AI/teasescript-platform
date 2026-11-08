@@ -193,7 +193,8 @@ useRandomDrawGuard(() => randomPicker.value !== null);
 const debugExport = useDebugExport(
   props.player,
   () => props.title,
-  () => ({
+  // Read as the export's capture is delivered: what derives from a session reads `shown`, the store's matching view.
+  (shown) => ({
     player: {
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
@@ -212,13 +213,14 @@ const debugExport = useDebugExport(
         debugStageImage(props.player, {
           covered: stageCamera.value !== null,
           overridden: props.media !== undefined,
+          session: shown,
         }),
       ),
       // The active media, as Debug's Now view lists them, from the critical view.
-      media: (session.value === null ||
-      (session.value.state.status !== "running" && session.value.state.status !== "waiting")
+      media: (shown === null ||
+      (shown.state.status !== "running" && shown.state.status !== "waiting")
         ? []
-        : session.value.state.media
+        : shown.state.media
       ).map(({ mediaId, media, loaded, state, source }) => ({
         mediaId,
         media,

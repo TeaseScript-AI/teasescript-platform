@@ -108,6 +108,10 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     startedSession: SESSION,
     reportHostError: SESSION,
     incident: SESSION,
+    release: READ,
+    deliverExport: READ,
+    capture: READ,
+    "deliverExport.prepare": READ,
     stopAt: SESSION,
     beginRun: SESSION,
     supersede: SESSION,
@@ -143,6 +147,11 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
       "compares a held photo's bytes with an imported one's, by position: it reaches no store",
   },
   "session/useCallView.ts": { viewCalls: SESSION },
+  "session/useFailureRecording.ts": {
+    settle: READ,
+    "useFailureRecording.stopped": READ,
+    "useFailureRecording.retire": READ,
+  },
   "session/usePlayerCameras.ts": { useSessionCamera: CAMERA, usePlayerCameraLifecycle: CAMERA },
   "session/usePlayerSessionServices.ts": {
     usePlayerSessionServices: SERVICES,

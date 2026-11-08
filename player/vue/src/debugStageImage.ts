@@ -1,6 +1,6 @@
 import { isCapturedMediaReference } from "../../captured-media.js";
 import { debugStageImageStatus, type DebugStageImageStatus } from "../../presentation.js";
-import { playerRuntimeMedia } from "../../runtime-view.js";
+import { playerRuntimeMedia, type PlayerSession } from "../../runtime-view.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 /**
@@ -14,6 +14,8 @@ export function debugStageImage(
     readonly covered: boolean;
     /** Whether the development preview shows a Stage media fixture instead of the session's image. */
     readonly overridden: boolean;
+    /** The session whose Stage this describes; the Player's shown session by default. */
+    readonly session?: PlayerSession | null;
   },
 ): {
   readonly status: DebugStageImageStatus;
@@ -22,7 +24,7 @@ export function debugStageImage(
 } {
   const image = player.stageImage.value;
   const observed = player.stageImageObservation.value;
-  const session = player.session.value;
+  const session = shown.session === undefined ? player.session.value : shown.session;
   const video = session === null ? null : playerRuntimeMedia(session.state).stage.videoMediaId;
   const captured = image !== null && isCapturedMediaReference(image);
   return {

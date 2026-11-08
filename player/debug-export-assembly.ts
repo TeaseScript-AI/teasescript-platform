@@ -41,6 +41,8 @@ export interface DebugExportCandidate {
    * replay data, of the recording's plan before the shown one.
    */
   readonly prepare: (replay: boolean) => Promise<PreparedExport>;
+  /** Lets go of what the host holds for this candidate (its export ticket); the dialog calls it as it retires it. */
+  readonly release: () => void;
   /** The error name of an exception of the Player itself that stopped the session. */
   readonly hostError: string | null;
   /** The session's "Edited while debugging" mark from Debug's storage editor; `null` when it was not edited. */
