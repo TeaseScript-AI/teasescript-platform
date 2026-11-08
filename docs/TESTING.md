@@ -196,8 +196,10 @@ the tracker issue; it is not a per-pull-request level.
 before it asks for review and before READY: `node tools/repository-checks/pin-suites.mjs --run`. A pin that moves is
 re-pinned only with its ground: the comment above it says how many units more or fewer and which change made them, and
 the reviewer checks that no part of the change is a repeated question, work the core already did once, done again.
-`--check-grounds` refuses a re-pin whose comment did not change. It reads a re-pin as a line of a declared pin that
-changed only in its numbers; a pin whose words or layout changed too is the reviewer's to check.
+`--check-grounds` refuses a re-pin whose comment did not change. It reads a re-pin as a line of a declared work pin
+whose expected numbers alone changed; the reviewer checks the rest: a pin whose words or layout changed too, a listed
+site's count (its reason names the site), and a new suite. A change to a test helper lists only a suite whose pins it
+holds, not every suite that imports it.
 
 ## Test admission and consolidation
 

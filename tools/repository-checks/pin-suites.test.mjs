@@ -188,3 +188,33 @@ test("a pin's ground may be its test's header or its start; a counter snapshot i
     "@@ -1 +1 @@\n-  /** main's work, measured on old */\n+  /** main's work, measured on abc */";
   assert.deepEqual(refusalsOf("f.ts", families, `${row}\n${ground}`, suite("work-b")), []);
 });
+
+test("a call's argument in a pin is an input, and an unrelated top-level block's comment is no pin's header", () => {
+  const table = [
+    "/** a fixture count */", // 1
+    "const COUNT = 1;", // 2
+    "", // 3
+    "/** every unit as on `main` at `abc` */", // 4
+    "const frozen = 1;", // 5
+    "const OUTSIDE = [", // 6
+    '  ["the chain", chain(16), [11837, 12196, 11837, 12196]],', // 7
+    "];", // 8
+  ].join("\n");
+  const at = (base, head) => `@@ -7 +7 @@\n-  ["the chain", ${base}],\n+  ["the chain", ${head}],`;
+  const input = at(
+    "chain(32), [11837, 12196, 11837, 12196]",
+    "chain(16), [11837, 12196, 11837, 12196]",
+  );
+  assert.deepEqual(refusalsOf("t.test.ts", table, input, suite("closure")), []);
+  const row = at(
+    "chain(16), [11836, 12196, 11837, 12196]",
+    "chain(16), [11837, 12196, 11837, 12196]",
+  );
+  const [refusal, ...more] = refusalsOf("t.test.ts", table, row, suite("closure"));
+  assert.deepEqual(more, []);
+  assert.match(refusal, /:7: re-pinned \(11837\).*in its header \(line 4\)/su);
+  const unrelated = `${row}\n@@ -1 +1 @@\n-/** a count */\n+/** a fixture count */`;
+  assert.equal(refusalsOf("t.test.ts", table, unrelated, suite("closure")).length, 1);
+  const ground = `${row}\n@@ -4 +4 @@\n-/** every unit as on \`main\` at \`old\` */\n+/** every unit as on \`main\` at \`abc\` */`;
+  assert.deepEqual(refusalsOf("t.test.ts", table, ground, suite("closure")), []);
+});
