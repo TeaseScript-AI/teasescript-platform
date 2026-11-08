@@ -42,6 +42,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { comparedOf } from "./baselines.mjs";
+import { groupOf, REASON_GROUPS, UNKNOWN_REASON } from "./run-contract.mjs";
 import { sourceKey } from "./sources.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -685,15 +686,10 @@ for (const [area, row] of rows) {
   for (const key of Object.keys(total)) total[key] += row[key];
 }
 // the runner artefacts (#1837): each run a tree's oracle left unanswered, by why (`run.mjs`'s `unansweredBy`:
-// `questions`, `stopped`, else `unknown`) or left alike, with its runs, sources and first witness; they stay apart from
+// `questions`, `memory`, `read-depth`, `stopped`, else `unknown`; its witness the node, or the binding, left) or left alike, with its runs, sources and first witness; they stay apart from
 // agreement as before, so that no round classifies them again
-const GROUPS = [
-  "unanswered: questions",
-  "unanswered: stopped",
-  "unanswered: unknown",
-  "unansweredAlike",
-];
-const ISSUES = { "unanswered: questions": "#1837" };
+const GROUPS = [...REASON_GROUPS, "unansweredAlike"];
+const ISSUES = { "unanswered: questions": "#1941" };
 const artefacts = new Map(
   GROUPS.map((group) => [group, { runs: 0, sources: new Set(), witness: null }]),
 );
@@ -705,9 +701,8 @@ for (const [place, was] of replay) {
       .map((by) => by.reason);
     const groups = left.alike
       ? ["unansweredAlike"]
-      : [...new Set(reasons.length === 0 ? ["unknown"] : reasons)].map(
-          (reason) =>
-            `unanswered: ${GROUPS.includes(`unanswered: ${reason}`) ? reason : "unknown"}`,
+      : [...new Set(reasons.length === 0 ? [UNKNOWN_REASON] : reasons)].map((reason) =>
+          groupOf(GROUPS.includes(groupOf(reason)) ? reason : UNKNOWN_REASON),
         );
     for (const group of groups) {
       const row = artefacts.get(group);
@@ -718,8 +713,7 @@ for (const [place, was] of replay) {
         (by) =>
           by != null &&
           (group === "unansweredAlike" ||
-            group ===
-              `unanswered: ${GROUPS.includes(`unanswered: ${by.reason}`) ? by.reason : "unknown"}`),
+            group === groupOf(GROUPS.includes(groupOf(by.reason)) ? by.reason : UNKNOWN_REASON)),
       );
       const witness = {
         area: nameOf(is.area),
@@ -728,6 +722,7 @@ for (const [place, was] of replay) {
         mode: left.mode,
         check: left.check,
         node: tree?.node ?? null,
+        ...(tree?.binding === undefined ? {} : { binding: tree.binding }),
       };
       const text = (w) => `${w.area} ${w.generator}/${w.source} ${w.mode} ${w.check}`;
       if (row.witness === null || text(witness) < text(row.witness)) row.witness = witness;
