@@ -106,6 +106,48 @@ test("each stage 3b record held by name exists, has an N cell and still differs 
   assert.equal(HELD_S10_RECORDS.size, 35);
 });
 
+test("the record comparison the asserted records rest on reports each part: outcome, sites, context and N10's payload (#1073 U6)", () => {
+  // (a record with a required-check payload and an asserted context, its own analysis compared with its record changed
+  // in one part at a time: a release by the comparison is only as complete as these parts)
+  const record = records.find((entry) => entry.name === "cp9-cells/F15/unknown-member");
+  assert.ok(record !== undefined && heldBack(record) === null);
+  const actual = analysed(record);
+  assert.deepEqual(recordDifferences(record.expected, actual), []);
+  const first = record.expected.diagnostics.find(
+    (d) => d.requiredCheck !== undefined && d.requiredCheck !== null,
+  );
+  const contexted = record.expected.diagnostics.find((d) => d.context !== null);
+  const payload = first?.requiredCheck;
+  assert.ok(payload && contexted);
+  const changed = (diagnostics: typeof record.expected.diagnostics) => ({
+    ...record.expected,
+    diagnostics,
+  });
+  const parts: Readonly<Record<string, CompactRecord>> = {
+    outcome: {
+      ...record.expected,
+      outcome: record.expected.outcome === "valid" ? "warning" : "valid",
+    },
+    site: changed(
+      record.expected.diagnostics.map((d) =>
+        d === first ? { ...d, site: { ...d.site, offset: d.site.offset + 1 } } : d,
+      ),
+    ),
+    context: changed(
+      record.expected.diagnostics.map((d) =>
+        d === contexted ? { ...d, context: d.context === "branch" ? "loop" : "branch" } : d,
+      ),
+    ),
+    payload: changed(
+      record.expected.diagnostics.map((d) =>
+        d === first ? { ...d, requiredCheck: { ...payload, missingTests: ["otherwise"] } } : d,
+      ),
+    ),
+  };
+  for (const [part, expected] of Object.entries(parts))
+    assert.notDeepEqual(recordDifferences(expected, actual), [], part);
+});
+
 /**
  * TABLE r4.63–r4.66's rule function as the set pins it (`cp9-cells/s6/rule-function/…`): its ten records, each compared
  * whole in both orders, but those `heldBack` names.
