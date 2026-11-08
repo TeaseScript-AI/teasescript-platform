@@ -422,7 +422,7 @@ test("an option without its value, or given twice, stops the report with the usa
   }
 });
 
-test("in a repository, a refused command line reads and writes nothing, its other options and roots included", () => {
+test("in a repository, a refused command line stops with the usage and writes nothing", () => {
   const { root, git, base } = history(
     { "src/sample.ts": "export const x = 1;\n" },
     { "src/sample.ts": "export const x = 2;\n" },
