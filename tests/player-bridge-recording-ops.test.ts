@@ -1,0 +1,294 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { compilePlayerProject } from "../player/compile-project.js";
+import { connectBridge } from "../player/engine-bridge/client.js";
+import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
+import { PlayerBridge } from "../player/player-bridge.js";
+import {
+  formObligations,
+  malformedArguments,
+  VALID_VALUES,
+  type ArgumentForm,
+} from "./helpers/argument-forms.js";
+import { inProcessBridge } from "./helpers/in-process-bridge.js";
+import { preparedPlan } from "./helpers/prepared-plan.js";
+
+/*
+ * The recording and debug-export ops' surfaces (L5h.3b, `ops/recording.ts`): each op's argument forms, refused when
+ * malformed and admitted with every valid value of each class; the halt's stop arguments likewise; and each op's
+ * outcomes, the same in-process and over a Worker.
+ */
+
+const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
+const PLAYER_WORKER = new URL("../player/engine-bridge/node-worker.js", import.meta.url);
+const PLAN = compilePlayerProject('say "Hello", instant\nlet name = askText "Name?"\nexit').plan!;
+
+const worker = async () =>
+  new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
+
+/** Runs `body` on the in-process backend and on a Node Worker; terminates the Worker after. */
+async function onBoth<T>(body: (bridge: PlayerBridge) => Promise<T>): Promise<[T, T]> {
+  const inProcess = await body(await inProcessBridge());
+  const remote = await worker();
+  try {
+    return [inProcess, await body(remote)];
+  } finally {
+    remote.client.terminate();
+  }
+}
+
+type Answer = { readonly answer: unknown } | { readonly name: string; readonly message: string };
+
+/** The answer of `request`, its result projected by `project`, or its refusal. */
+async function answerOf(
+  request: Promise<{ readonly result: unknown }>,
+  project: (result: unknown) => unknown = (result) => result,
+): Promise<Answer> {
+  try {
+    return { answer: project((await request).result) };
+  } catch (error) {
+    assert.ok(error instanceof Error);
+    return { name: error.name, message: error.message };
+  }
+}
+
+const MALFORMED = (op: string): Answer => ({
+  name: "BridgeRefusal",
+  message: `Malformed arguments for '${op}'.`,
+});
+
+/** Each op's argument forms. */
+const ARGUMENTS = {
+  beginRun: [{ required: { run: "integer", retires: "nullableInteger" } }],
+  retireRun: [{ required: { run: "integer" } }],
+  commitIncident: [{ required: { error: "string", run: "integer", stop: "integer" } }],
+  captureRecording: [{ required: { session: "string" } }],
+  captureExport: [{ required: { session: "nullableString", recording: "selector" } }],
+  exportPrepare: [{ required: { ticket: "string", replay: "boolean" } }],
+  releaseRecording: [{ required: { ticket: "string" } }],
+} as const satisfies Record<string, readonly ArgumentForm[]>;
+type RecordingOp = keyof typeof ARGUMENTS;
+// EVIDENCE: invariant: the keys of `ARGUMENTS`, declared literally above.
+const OPS = Object.keys(ARGUMENTS) as RecordingOp[];
+
+/** A Player error stop's halt arguments. */
+const HALT: readonly ArgumentForm[] = [
+  { required: { error: "string", run: "integer", stop: "integer" } },
+];
+
+test("every recording op refuses each malformed argument its forms oblige, and admits every valid value", async () => {
+  const [inProcess, remote] = await onBoth(async (bridge) => {
+    const answers: Record<string, Answer> = {};
+    for (const op of OPS) {
+      for (const { id, args } of malformedArguments(ARGUMENTS[op]))
+        answers[`${op} ${id}`] = await answerOf(bridge.client.request(op, args));
+      // Each valid value of each field, the other fields at their first: never refused as malformed.
+      const [form] = ARGUMENTS[op];
+      for (const [field, kind] of Object.entries(form.required))
+        for (const [index, value] of VALID_VALUES[kind].entries()) {
+          const args = Object.fromEntries(
+            Object.entries(form.required).map(([name, of]) => [
+              name,
+              name === field ? value : VALID_VALUES[of][0],
+            ]),
+          );
+          const answer = await answerOf(bridge.client.request(op, args));
+          answers[`${op} ${field} valid ${index + 1}`] = {
+            answer:
+              JSON.stringify(answer) === JSON.stringify(MALFORMED(op)) ? "malformed" : "admitted",
+          };
+        }
+    }
+    return answers;
+  });
+  assert.deepEqual(remote, inProcess);
+  for (const op of OPS) {
+    const malformed = Object.keys(inProcess)
+      .filter((key) => key.startsWith(`${op} `) && !key.includes(" valid "))
+      .map((key) => key.slice(op.length + 1));
+    assert.deepEqual(malformed, formObligations(ARGUMENTS[op]), `${op}'s malformed forms`);
+    for (const id of malformed)
+      assert.deepEqual(inProcess[`${op} ${id}`], MALFORMED(op), `${op} ${id}`);
+    for (const [key, answer] of Object.entries(inProcess))
+      if (key.startsWith(`${op} `) && key.includes(" valid "))
+        assert.deepEqual(answer, { answer: "admitted" }, key);
+  }
+});
+
+test("a halt refuses malformed stop arguments, and a valid stop or none halts", async () => {
+  const [inProcess, remote] = await onBoth(async (bridge) => {
+    const plan = await preparedPlan(Promise.resolve(bridge), PLAN);
+    const answers: Record<string, Answer> = {};
+    for (const { id, args } of malformedArguments(HALT).filter(({ id }) => id !== "null")) {
+      const session = await bridge.start(plan, { wallClockMs: 0 }, false);
+      answers[id] = await answerOf(bridge.client.signal("halt", args, session.id));
+    }
+    const stopped = await bridge.start(plan, { wallClockMs: 0 }, false);
+    answers["valid"] = await answerOf(
+      bridge.client.signal("halt", { error: "TypeError", run: 1, stop: 1 }, stopped.id),
+      (result) =>
+        typeof result === "object" && result !== null ? Object.keys(result).sort() : result,
+    );
+    const plain = await bridge.start(plan, { wallClockMs: 0 }, false);
+    answers["none"] = await answerOf(bridge.client.signal("halt", null, plain.id), (result) =>
+      typeof result === "object" && result !== null ? Object.keys(result).sort() : result,
+    );
+    return answers;
+  });
+  assert.deepEqual(remote, inProcess);
+  // A halt without arguments is a plain stop (`none` below), so `null` is no malformed form of the halt.
+  const malformed = Object.keys(inProcess).filter((key) => key !== "valid" && key !== "none");
+  assert.deepEqual(
+    malformed,
+    formObligations(HALT).filter((id) => id !== "null"),
+  );
+  for (const id of malformed) assert.deepEqual(inProcess[id], MALFORMED("halt"), id);
+  // A Player error stop's acknowledgement carries its diagnostic identity and incident; a plain one only the call view.
+  assert.deepEqual(inProcess["valid"], {
+    answer: ["callView", "diagnostic", "incident", "instructions", "revision"],
+  });
+  assert.deepEqual(inProcess["none"], { answer: ["callView", "instructions", "revision"] });
+});
+
+test("the recording ops' outcomes answer as written, in-process and in a Worker", async () => {
+  const [inProcess, remote] = await onBoth(async (bridge) => {
+    const plan = await preparedPlan(Promise.resolve(bridge), PLAN);
+    const outcomes: Record<string, unknown> = {};
+    const kind = (result: unknown) =>
+      typeof result === "object" && result !== null && "kind" in result ? result.kind : result;
+    await bridge.beginRun(1, null);
+    const recorded = await bridge.start(plan, { wallClockMs: 0 }, true);
+    // A second session, started without the recorder, whose engine the recorder does not record.
+    const unrecorded = await bridge.start(plan, { wallClockMs: 0 }, false);
+    const captured = await bridge.read(recorded, "captureRecording");
+    outcomes["captureRecording recorded"] = {
+      ...captured,
+      ticket: typeof (captured as { ticket?: unknown }).ticket,
+    };
+    outcomes["captureRecording unrecorded"] = await bridge.read(unrecorded, "captureRecording");
+    const ticket = captured.kind === "captured" ? captured.ticket : "";
+    const exported = (session: string | null, recording: unknown) =>
+      answerOf(bridge.client.request("captureExport", { session, recording }), (result) => {
+        const reply = result as {
+          kind: string;
+          ticket?: string;
+          recording?: unknown;
+          identity?: unknown;
+        };
+        return {
+          kind: reply.kind,
+          recording:
+            reply.recording === undefined ? "absent" : reply.recording === null ? "none" : "held",
+          identity: reply.identity ?? null,
+        };
+      });
+    outcomes["captureExport current"] = await exported(recorded.id, "current");
+    outcomes["captureExport ticket"] = await exported(recorded.id, { ticket });
+    outcomes["captureExport another session's recording"] = await exported(unrecorded.id, {
+      ticket,
+    });
+    outcomes["captureExport stale current"] = await exported(unrecorded.id, "current");
+    outcomes["captureExport no session"] = await exported(null, "current");
+    outcomes["captureExport unknown ticket"] = await exported(recorded.id, { ticket: "r0" });
+    const exportTicket = await bridge.client.request("captureExport", {
+      session: recorded.id,
+      recording: "current",
+    });
+    const held = (exportTicket.result as { ticket: string }).ticket;
+    outcomes["captureExport an export ticket as recording"] = await exported(recorded.id, {
+      ticket: held,
+    });
+    const prepared = (replay: boolean, of: string) =>
+      answerOf(bridge.client.request("exportPrepare", { ticket: of, replay }), (result) => {
+        const parts = result as {
+          contentHash: unknown;
+          checkpointRole: unknown;
+          omissions: unknown;
+        };
+        return {
+          hashed: typeof parts.contentHash === "string",
+          role: parts.checkpointRole,
+          omissions: parts.omissions,
+        };
+      });
+    outcomes["exportPrepare replay"] = await prepared(true, held);
+    outcomes["exportPrepare no replay"] = await prepared(false, held);
+    outcomes["exportPrepare a recording ticket"] = await prepared(true, ticket);
+    outcomes["releaseRecording held"] = await answerOf(
+      bridge.client.request("releaseRecording", { ticket: held }),
+    );
+    outcomes["exportPrepare released"] = await prepared(true, held);
+    outcomes["releaseRecording unknown"] = await answerOf(
+      bridge.client.request("releaseRecording", { ticket: "r0" }),
+    );
+    outcomes["commitIncident"] = await answerOf(
+      bridge.client.request("commitIncident", { error: "TypeError", run: 1, stop: 7 }),
+    );
+    outcomes["commitIncident again"] = await answerOf(
+      bridge.client.request("commitIncident", { error: "RangeError", run: 1, stop: 8 }),
+      kind,
+    );
+    outcomes["commitIncident unbegun run"] = await answerOf(
+      bridge.client.request("commitIncident", { error: "TypeError", run: 9, stop: 1 }),
+    );
+    await bridge.retireRun(1);
+    outcomes["commitIncident retired run"] = await answerOf(
+      bridge.client.request("commitIncident", { error: "TypeError", run: 1, stop: 9 }),
+    );
+    return outcomes;
+  });
+  assert.deepEqual(remote, inProcess);
+  const identity = (session: string) => ({
+    run: 1,
+    session,
+    revision: 1,
+    eventsThrough: 3,
+    stop: null,
+  });
+  const NO_RECORDING = { name: "Error", message: "No recording is held under this ticket." };
+  const NO_EXPORT = { name: "Error", message: "No export is held under this ticket." };
+  const incident = { errorName: "TypeError", run: 1, stop: 7, revision: null, eventsThrough: null };
+  assert.deepEqual(inProcess, {
+    "captureRecording recorded": {
+      kind: "captured",
+      ticket: "string",
+      end: "live",
+      complete: true,
+    },
+    "captureRecording unrecorded": { kind: "stale" },
+    "captureExport current": {
+      answer: { kind: "captured", recording: "held", identity: identity("s1") },
+    },
+    "captureExport ticket": {
+      answer: { kind: "captured", recording: "held", identity: identity("s1") },
+    },
+    // An explicit ticket may name another lineage's recording.
+    "captureExport another session's recording": {
+      answer: { kind: "captured", recording: "held", identity: identity("s2") },
+    },
+    "captureExport stale current": {
+      answer: { kind: "refused", recording: "absent", identity: null },
+    },
+    "captureExport no session": {
+      answer: {
+        kind: "captured",
+        recording: "none",
+        identity: { run: 1, session: null, revision: null, eventsThrough: null, stop: null },
+      },
+    },
+    "captureExport unknown ticket": NO_RECORDING,
+    "captureExport an export ticket as recording": NO_RECORDING,
+    "exportPrepare replay": { answer: { hashed: true, role: "current", omissions: [] } },
+    "exportPrepare no replay": { answer: { hashed: true, role: null, omissions: [] } },
+    "exportPrepare a recording ticket": NO_EXPORT,
+    "releaseRecording held": { answer: null },
+    "exportPrepare released": NO_EXPORT,
+    "releaseRecording unknown": { answer: null },
+    commitIncident: { answer: incident },
+    // The first committed incident stays the run's.
+    "commitIncident again": { answer: incident },
+    "commitIncident unbegun run": { answer: null },
+    "commitIncident retired run": { answer: null },
+  });
+});

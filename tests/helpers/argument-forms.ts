@@ -10,12 +10,23 @@ import { product } from "./family-coverage.js";
 const WRONG_VALUES = {
   string: [1, null, true, {}, [], new Uint8Array([1])],
   bytes: ["text", null, 1, [1, 2], {}],
+  nullableString: [1, true, {}, [], new Uint8Array([1])],
+  integer: ["1", null, true, 1.5, {}, []],
+  nullableInteger: ["1", true, 1.5, {}, []],
+  boolean: ["true", null, 1, {}, []],
+  // A recording selector: `current`, or a ticket.
+  selector: ["other", null, 1, {}, { ticket: 1 }, { ticket: "r1", kind: "recording" }],
 } as const satisfies Record<string, readonly unknown[]>;
 export type ValueClass = keyof typeof WRONG_VALUES;
-/** A value of each class, as a valid argument holds it. */
-const VALID_VALUES: Readonly<Record<ValueClass, unknown>> = {
-  string: "t1",
-  bytes: new Uint8Array([1]),
+/** The values of each class a valid argument may hold; the first is the one a generated argument holds. */
+export const VALID_VALUES: Readonly<Record<ValueClass, readonly [unknown, ...unknown[]]>> = {
+  string: ["t1"],
+  bytes: [new Uint8Array([1])],
+  nullableString: ["t1", null],
+  integer: [1],
+  nullableInteger: [1, null],
+  boolean: [true, false],
+  selector: ["current", { ticket: "r1" }],
 };
 
 /** One form of an op's arguments: its required fields, and any optional ones, with their value classes. */
@@ -36,7 +47,9 @@ export interface MalformedArgument {
  */
 export function malformedArguments(forms: readonly ArgumentForm[]): MalformedArgument[] {
   const valid = (fields: Readonly<Record<string, ValueClass>>) =>
-    Object.fromEntries(Object.entries(fields).map(([field, kind]) => [field, VALID_VALUES[kind]]));
+    Object.fromEntries(
+      Object.entries(fields).map(([field, kind]) => [field, VALID_VALUES[kind][0]]),
+    );
   const found: MalformedArgument[] = [
     { id: "null", args: null },
     { id: "a string", args: "t1" },
