@@ -68,7 +68,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isRecordedQuestions, isRecordedReason, limitOf } from "./run-contract.mjs";
+import { isRecordedQuestions, isRecordedReason, limitOf, UNKNOWN_REASON } from "./run-contract.mjs";
 import { generatorFolders, generatorsOf, holdsGenerators, placeOf } from "./sources.mjs";
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
@@ -911,6 +911,35 @@ export function storedRuns(folder) {
   return incomplete === undefined ? { lines, identity, units } : { status: 1, refused: incomplete };
 }
 
+/**
+ * What the verified shards' `sources` store (#1837): their runs, those left unanswered by each reason (a binding's form
+ * apart, `run-contract.mjs`), and, under plan 2 (`units`), the runs that ended above `units` times their allowance within
+ * their question grant (`granted`), and the stalls over the unit limit.
+ */
+function storedOf(sources, units) {
+  const runs = sources.flatMap((source) => Object.values(source.runs));
+  const reasons = {};
+  for (const { value } of runs) {
+    if (!(value?.unanswered > 0)) continue;
+    // (a run stored before #1837 named no reason: `unknown`, as the runner reads it)
+    const by = value.unansweredBy ?? { reason: UNKNOWN_REASON };
+    const reason = by.binding === undefined ? by.reason : `${by.reason} (binding)`;
+    reasons[reason] = (reasons[reason] ?? 0) + 1;
+  }
+  return {
+    count: runs.length,
+    reasons,
+    ...(units === null
+      ? {}
+      : {
+          granted: runs.filter(
+            ({ work, allowance }) => allowance !== null && work > units * allowance,
+          ).length,
+          overLimit: sources.filter((source) => source.stalled === "units").length,
+        }),
+  };
+}
+
 /** A built tree's areas: the folders of tests/families/ with generators, and tools/corpus/fixture/. */
 function areasOf(tree) {
   // (the families' areas as the check finds them, then the corpus fixture, an area outside `tests/families`)
@@ -998,6 +1027,14 @@ async function stateOf(tree, root, readOnly) {
           shards,
           ...(damaged > 0 ? { damaged } : {}),
           store,
+          ...(count > 0
+            ? {
+                runs: storedOf(
+                  read.flatMap((shard) => shard.sources ?? []),
+                  made.area.units,
+                ),
+              }
+            : {}),
         };
       }
     }
