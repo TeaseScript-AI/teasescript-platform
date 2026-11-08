@@ -32,13 +32,13 @@ import { decodeMessage } from "./transport.js";
 import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host.js";
 
 /*
- * The production backend until the L5 series activates the Worker: the same host and ops, in the page's realm, over a
- * port pair that passes every message through `structuredClone`. A request a session op handles runs when it is posted;
- * replies arrive later, on a microtask or after `delayMs`, so the UI meets replies that come later, as from a Worker.
+ * The Player's production backend: the same host and ops as a Worker's, in the page's realm, over a port pair that
+ * passes every message through `structuredClone`. A request a session op handles runs when it is posted; replies arrive
+ * later, on a microtask or after `delayMs`, as from a Worker.
  *
- * Until each family converts its UI, the **transition facade** below lets that family's code reach the host's session
- * synchronously, as before. Every main-realm import of one of its names is a RATCHET entry (`inventory.ts`), and the L5
- * gate requires this module gone, not only RATCHET empty.
+ * The **transition facade** below lets code that has not moved to the bridge reach the host's session synchronously.
+ * Every main-realm import of one of its names is a RATCHET entry (`inventory.ts`); the L5 gate requires this module
+ * gone, not only RATCHET empty.
  */
 
 interface Backend {

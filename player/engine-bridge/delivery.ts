@@ -7,10 +7,12 @@
  * reply. Closing the connection (`close`) is permanent: it aborts every open delivery, and from then on the owner admits
  * no delivery and no allocation, so late work cannot refill what the connection's cleanup cleared.
  *
- * Deliveries nest only synchronously: the host runs one op at a time, and a facade call's delivery opens and ends inside
- * one synchronous call, so the innermost open delivery is the scope an allocation registers with (`scope`). Work that
- * runs later for an owner already established (a plan-text timer, a source-view continuation of a committed cache)
- * writes to that owner's resource, checked by identity; it does not register with whatever delivery is open then.
+ * Two deliveries can be open at once, in either order. A facade call can run while an op's delivery is open, awaiting;
+ * and a facade's factory can begin a request whose op opens its delivery inside the facade's, and that delivery can
+ * outlive the facade's. So an allocation registers with the innermost open delivery (`scope`) only where it runs inside
+ * its own op; the facade names its own delivery for every allocation it makes (`in-process.ts`). Work that runs later for
+ * an owner already established (a plan-text timer, a source-view continuation of a committed cache) writes to that
+ * owner's resource, checked by identity; it does not register with whatever delivery is open then.
  */
 
 /** A delivery's identity: only the owner that began it knows it. */
@@ -65,16 +67,20 @@ const states = new WeakMap<DeliveryOwner, OwnerState>();
  * stop the undos, the release or the client's settlement.
  */
 function undoAll(undos: readonly (() => void)[], report: (error: unknown) => void): void {
-  for (const undo of [...undos].reverse())
+  for (const undo of [...undos].reverse()) attempt(undo, report);
+}
+
+/** Runs `step`; a failure goes to `report`, and a report that fails is dropped: the caller always goes on. */
+function attempt(step: () => void, report: (error: unknown) => void): void {
+  try {
+    step();
+  } catch (error) {
     try {
-      undo();
-    } catch (error) {
-      try {
-        report(error);
-      } catch {
-        // The diagnostic failed; the cleanup goes on.
-      }
+      report(error);
+    } catch {
+      // The diagnostic failed; the cleanup goes on.
     }
+  }
 }
 
 /** Where an undo's failure goes by default: the host's console, as a host error (there is no client to tell). */
@@ -164,10 +170,15 @@ export function deliveryOwner(report: (error: unknown) => void = reportUndoFailu
  */
 export class OwnedMap<K, V> {
   readonly #entries = new Map<K, V>();
+  /** Each entry's insertion, which its undo names: a key released and set again is another insertion. */
+  readonly #insertions = new Map<K, object>();
   readonly #owner: DeliveryOwner;
   readonly #retire: ((value: V, key: K) => void) | undefined;
 
-  /** `retire`, if given, runs once for every entry that leaves: undone, deleted or cleared. */
+  /**
+   * `retire`, if given, runs once for every entry that leaves: undone, deleted or cleared. One that throws is reported
+   * by the owner (`delivery.ts`), and the others still run.
+   */
   constructor(owner: DeliveryOwner, retire?: (value: V, key: K) => void) {
     this.#owner = owner;
     this.#retire = retire;
@@ -202,10 +213,12 @@ export class OwnedMap<K, V> {
   set(key: K, value: V, delivery: Delivery = this.#owner.scope()): void {
     if (this.#entries.has(key))
       throw new DeliveryRefusedError("This registry holds that key already.");
+    const insertion = {};
     this.#owner.own(delivery, () => {
-      if (this.#entries.get(key) === value) this.delete(key);
+      if (this.#insertions.get(key) === insertion) this.delete(key);
     });
     this.#entries.set(key, value);
+    this.#insertions.set(key, insertion);
   }
 
   /** Releases the entry under `key`. */
@@ -213,7 +226,8 @@ export class OwnedMap<K, V> {
     if (!this.#entries.has(key)) return false;
     const value = this.#entries.get(key)!;
     this.#entries.delete(key);
-    this.#retire?.(value, key);
+    this.#insertions.delete(key);
+    this.#retired(value, key);
     return true;
   }
 
@@ -221,7 +235,14 @@ export class OwnedMap<K, V> {
   clear(): void {
     const entries = [...this.#entries];
     this.#entries.clear();
-    for (const [key, value] of entries) this.#retire?.(value, key);
+    this.#insertions.clear();
+    for (const [key, value] of entries) this.#retired(value, key);
+  }
+
+  /** Runs `retire` for an entry that left, under the owner's reporting. */
+  #retired(value: V, key: K): void {
+    const retire = this.#retire;
+    if (retire !== undefined) attempt(() => retire(value, key), states.get(this.#owner)!.report);
   }
 }
 
