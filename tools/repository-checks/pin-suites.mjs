@@ -16,14 +16,16 @@ import { fileURLToPath } from "node:url";
 // Without options it prints the pinning suites the changes reach, one `dist/tests/…` line each, or `none`; exit 0.
 // `--run` runs them through `tools/test-output-filter.mjs` (built tests are needed: `npm run build:typescript`); exit 1
 // when one fails. `--check-grounds` finds each re-pin in a changed suite: a line inside one of its declared pins (from a
-// line its `pin` finds to where that line's brackets close) that differs from its base line only in numbers outside its
-// strings (a `"checks 142 …"` counter snapshot counts as numbers). It requires a changed comment line in the block above
-// the re-pin (up to a blank line, a closing line or the test's start) or in its header comment (above its test and at
-// its start; outside a test, the comment opening its top-level block, or the comment above the line its `ground` finds),
-// where the "N units more or fewer since #…" ground is written; exit 1 naming each re-pin without one. It judges that the ground was touched,
-// not whether it is true: the reviewer does. A pin whose words or layout changed with its numbers is no re-pin here.
-// A listed-site count (`[count, "reason"]`) names its site by its reason, which the kept and key-ids tests require, and
-// is not checked here.
+// line its `pin` finds to where that line's brackets close) that differs from its base line only in its expected
+// values: numbers outside its strings and its calls' arguments, where a `"checks 142 …"` counter snapshot counts as
+// numbers. It requires a changed comment line in the block above the re-pin (up to a blank line, a closing line or the
+// test's start) or in its header comment: above its test and at its start; outside a test, directly above the top-level
+// declarations that run into the pin, or above the line its `ground` finds. That is where the "N units more or fewer
+// since #…" ground is written; exit 1 naming each re-pin without one. It judges that the ground was touched, not
+// whether it is true: the reviewer does. Not read, so the reviewer's to check: a pin whose words or layout changed with
+// its numbers; a number in a call's argument split across lines; a listed-site count (`[count, "reason"]`, `listed`),
+// whose reason names its site, as the kept and key-ids tests require; a suite not yet committed, which has no base.
+// A change to a test helper lists only the suites whose pins it holds (`in`), not every suite that imports it.
 //
 // The list is the authority. Its test (`pin-suites.test.mjs`) requires each `pin` to find a line, and finds three pin
 // forms by their text: an `assert.equal` of `.total` to a literal of four or more digits, a table of four or more such
@@ -70,7 +72,7 @@ export const PIN_SUITES = [
   {
     file: "tests/type-core-kept.test.ts",
     pins: "listed construction sites",
-    pin: /^const LISTED\b/u,
+    pin: /^const (?:LISTED|STORED)\b/u,
     listed: true,
   },
   {
@@ -133,18 +135,28 @@ const COMMENT = /^\s*(?:\/\/|\/\*|\*)/u;
 const CLOSING = /^\s*[\]})]+[,;)]*\s*$/u;
 const TEST_START = /^\s*test\(/u;
 const TOP_CLOSING = /^[\]})]/u;
+const TOP_COMMENT = /^(?:\/\/|\/\*| \*)/u;
+const CALL = /(?<![\w$.])(?!assert\.)([\w$][\w$.]*)\([^()]*\)/gu;
 const STRING = /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\\n]|\\.)*`/gu;
 const COUNTERS = /^"[A-Za-z]+ \d+(?: [A-Za-z]+ \d+)*"$/u;
 
 /** A line with its numbers replaced, so two lines that differ only in their numbers read alike. */
 const shapeOf = (line) => line.replace(NUMBER, "#");
 
-/** A line's code: each string emptied, but a counter snapshot, whose numbers are work. */
-const codeOf = (line) => line.replace(STRING, (text) => (COUNTERS.test(text) ? text : '""'));
+/**
+ * A line's expected values: each string emptied, but a counter snapshot, whose numbers are work, and each call's
+ * arguments but an assertion's emptied, since they are inputs (`chain(16)`).
+ */
+const codeOf = (line) => {
+  let code = line.replace(STRING, (text) => (COUNTERS.test(text) ? text : '""'));
+  for (let last = ""; last !== code;) [last, code] = [code, code.replace(CALL, "$1()")];
+  return code;
+};
 
 /**
  * The re-pin candidates in one file's change: from `git diff -U0` text, each added line whose base line in the same hunk
- * differs from it only in numbers outside its strings, and is no comment; with the head lines the hunks added.
+ * differs from it only in numbers outside its strings and its calls' arguments, and is no comment; with the head lines
+ * the hunks added.
  */
 export function rePinsOf(diff) {
   const rePins = [];
@@ -199,7 +211,8 @@ const commentAbove = (lines, at) => {
 /**
  * Where a re-pin's ground is written in the head text, each as a range of 1-based lines: the block above its line (up to
  * a blank line, a closing line or the test's start), and its header: the comment above the line `ground` finds, else
- * the comment above its test and at its start, else (outside a test) the comment opening its top-level block.
+ * the comment above its test and at its start, else (outside a test) the comment directly above the top-level
+ * declarations that run without a blank line into the pin.
  */
 export function groundsOf(lines, at, ground) {
   let top = at;
@@ -216,14 +229,21 @@ export function groundsOf(lines, at, ground) {
     let start = at;
     while (start >= 1 && !TEST_START.test(lines[start - 1]) && !TOP_CLOSING.test(lines[start - 1]))
       start -= 1;
-    const inTest = start >= 1 && TEST_START.test(lines[start - 1]);
-    if (inTest) header.push(commentAbove(lines, start));
-    // (in a test, the comment at its start; outside one, the comment that opens the top-level block holding the pin)
-    let from = start + 1;
-    while (!inTest && from < at && lines[from - 1].trim() === "") from += 1;
-    let to = from - 1;
-    while (to < at - 1 && COMMENT.test(lines[to])) to += 1;
-    header.push({ from, to });
+    if (start >= 1 && TEST_START.test(lines[start - 1])) {
+      header.push(commentAbove(lines, start));
+      let to = start;
+      while (to < at - 1 && COMMENT.test(lines[to])) to += 1;
+      header.push({ from: start + 1, to });
+    } else {
+      let first = at;
+      while (first > 1 && lines[first - 2].trim() !== "" && !TOP_CLOSING.test(lines[first - 2]))
+        if (TOP_COMMENT.test(lines[first - 2])) {
+          let from = first - 1;
+          while (from > 1 && TOP_COMMENT.test(lines[from - 2])) from -= 1;
+          header.push({ from, to: first - 1 });
+          break;
+        } else first -= 1;
+    }
   }
   return {
     above: { from: top, to: at - 1 },
