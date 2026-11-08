@@ -6,6 +6,8 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { addedLinesOfPatch } from "./structure-report.mjs";
+
 const tool = fileURLToPath(new URL("./structure-report.mjs", import.meta.url));
 
 /** `count` lines of code. */
@@ -208,3 +210,138 @@ test(
     }
   },
 );
+
+test("a hunk's added lines are its `+` lines, read inside the header's counts", () => {
+  // two changed lines with two unchanged ones between them, as `diff.interHunkContext` makes one hunk of them
+  assert.deepEqual(
+    addedLinesOfPatch(
+      "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -501,4 +501,4 @@\n-a\n+A\n b\n c\n-d\n+D\n@@ -900,0 +901,2 @@\n+e\n+f\n\\ No newline at end of file\n",
+    ),
+    [501, 504, 901, 902],
+  );
+  // a deletion adds nothing, and a payload line shaped as a header is payload
+  assert.deepEqual(
+    addedLinesOfPatch("@@ -3,2 +2,0 @@\n-x\n-y\n@@ -9 +8 @@\n-z\n++++ b/fake\n"),
+    [8],
+  );
+  assert.throws(() => addedLinesOfPatch("@@ -1,0 +1,2 @@\n+a"), /a hunk ends before its counts/u);
+});
+
+/** A repository with `base` committed, then `change` committed over it; its folder, `git` and the base commit. */
+function history(base, change, setUp = () => {}) {
+  const root = mkdtempSync(join(tmpdir(), "structure-report-git-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  setUp(root, git);
+  write(root, base);
+  git("add", "-A");
+  git("commit", "-q", "-m", "base");
+  const baseCommit = git("rev-parse", "HEAD");
+  write(root, change);
+  git("add", "-A");
+  git("commit", "-q", "-m", "change");
+  return { root, git, base: baseCommit };
+}
+
+const changeOf = (root, base, env = process.env) => {
+  const result = spawnSync(
+    process.execPath,
+    [tool, "--diff", base, "--json", join(root, "change.json")],
+    { cwd: root, encoding: "utf8", env },
+  );
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  return JSON.parse(readFileSync(join(root, "change.json"), "utf8")).change.map(({ line }) => line);
+};
+
+test("--diff measures Git's committed regular files: a function's last line, merged hunks, a clean filter, no links", () => {
+  const filtered = `${"//filtered\n".repeat(200)}${longFunction("kept", 160)}\n`;
+  const { root, git, base } = history(
+    {
+      "src/edge.ts": `${longFunction("edge", 160)}\n`,
+      "src/hunks.ts": `${lines(1001)}\n`,
+      "src/clean.ts": filtered,
+      "src/link.ts": "export const link = 1;\n",
+      "outside/target.ts": `${lines(1100)}\n`,
+      ".gitattributes": "src/clean.ts filter=strip\n",
+    },
+    {
+      // the closing line of a 160-line function
+      "src/edge.ts": `${longFunction("edge", 160).replace(/\}$/u, "};")}\n`,
+      // two lines changed with two unchanged ones between them
+      "src/hunks.ts": `${lines(1001).replace("x500 = 500", "x500 = 5000").replace("x503 = 503", "x503 = 5030")}\n`,
+      // a body line of a function the clean filter moves to line 1 of the blob
+      "src/clean.ts": filtered.replace("const v5 = 5;", "const v5 = 55;"),
+    },
+    (root, git) => git("config", "filter.strip.clean", "sed '/filtered/d'"),
+  );
+  try {
+    // a symlink in place of a regular file, and a gitlink: neither is measured
+    rmSync(join(root, "src/link.ts"));
+    execFileSync("ln", ["-s", "../outside/target.ts", join(root, "src/link.ts")]);
+    git("add", "-A");
+    git("update-index", "--add", "--cacheinfo", `160000,${base},src/module.ts`);
+    git("commit", "-q", "-m", "links");
+    // uncommitted work is not measured: an unstaged deletion and an unstaged addition
+    rmSync(join(root, "src/hunks.ts"));
+    write(root, { "src/fresh.ts": lines(400) });
+    git("config", "diff.interHunkContext", "10");
+    const found = changeOf(root, base, { ...process.env, GIT_DIFF_OPTS: "--unified=3" });
+    assert.deepEqual(found, [
+      "function over 150 lines that the change writes into: src/clean.ts:1 kept (160 lines)",
+      "function over 150 lines that the change writes into: src/edge.ts:1 edge (160 lines)",
+      "file over 1000 lines that the change adds to: src/hunks.ts (1001, was 1001)",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a name that is not UTF-8, and hunks that --numstat does not count, stop the report", () => {
+  const named = history(
+    { "src/x.ts": "export const x = 1;\n" },
+    { "src/x.ts": "export const x = 2;\n" },
+  );
+  const counted = history(
+    { "src/x.ts": "export const x = 1;\n" },
+    { "src/x.ts": "export const x = 2;\n" },
+  );
+  try {
+    writeFileSync(
+      Buffer.from(join(named.root, "src/bad\xff.ts"), "latin1"),
+      "export const b = 1;\n",
+    );
+    named.git("add", "-A");
+    named.git("commit", "-q", "-m", "bad");
+    const refused = spawnSync(process.execPath, [tool, "--diff", named.base], {
+      cwd: named.root,
+      encoding: "utf8",
+    });
+    assert.equal(refused.status, 2);
+    assert.equal(
+      refused.stderr,
+      "structure-report: Git names a file that is not UTF-8 (bytes 7372632f626164ff2e7473): the report reads UTF-8 names only\n",
+    );
+    // a stand-in Git whose --numstat counts 99 lines: the hunks add one, so the report stops
+    const bin = join(counted.root, "bin");
+    const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+    write(counted.root, {
+      "bin/git": `#!/bin/sh\ncase " $* " in *" --numstat "*) printf '99\\t0\\tsrc/x.ts\\0'; exit 0;; esac\nexec ${realGit} "$@"\n`,
+    });
+    execFileSync("chmod", ["+x", join(bin, "git")]);
+    const mismatch = spawnSync(process.execPath, [tool, "--diff", counted.base], {
+      cwd: counted.root,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    });
+    assert.equal(mismatch.status, 2, mismatch.stdout + mismatch.stderr);
+    assert.equal(
+      mismatch.stderr,
+      "structure-report: the hunks of src/x.ts add 1 lines, but git diff --numstat counts 99: the patch was not read as Git wrote it\n",
+    );
+  } finally {
+    rmSync(named.root, { recursive: true, force: true });
+    rmSync(counted.root, { recursive: true, force: true });
+  }
+});

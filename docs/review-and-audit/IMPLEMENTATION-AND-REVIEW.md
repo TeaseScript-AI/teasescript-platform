@@ -186,8 +186,8 @@ These signals each ask, in the plan or the review, for the seam or for the reaso
 - a folder over 20 files, or a component's top level over 12 (the components are `src/`, `player/`, `tests/`, `tools/`
   and `playground/`, and no other folder counts as a top level).
 
-`node tools/structure-report.mjs` lists them, with `--diff <base>` for the signals a change adds to, crossing a line or
-adding to one already over; CI prints that list on every pull request (`docs/TESTING.md`).
+`node tools/structure-report.mjs` lists them, with `--diff <base>` for the signals a committed change adds to, crossing a
+line or adding to one already over; CI prints that list on every pull request (`docs/TESTING.md`).
 
 Moving or splitting files is its own pull request on the light route. It changes no behavior, and its build output
 is byte-identical where the build allows it. The coordinator schedules it between packages, so that no open pull

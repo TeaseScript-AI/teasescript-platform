@@ -14,25 +14,31 @@
 // over 12, functions over 150 lines, names a letter apart). --json writes them all; --compare counts each against an
 // earlier --json.
 //
-// With --diff BASE: only the signals the change since the merge base (`git merge-base BASE HEAD`) adds to, each against
-// the merge base's tree: a file over 1000 lines that it adds lines to, a function over 150 lines whose lines include
-// one it adds, a folder over 20 files or a top level over 12 that it adds a file to, a pair of names a letter apart
-// that the merge base did not have, and a file gaining over 300 lines. A change adds to a signal whether it crosses the
-// line or the base was already over it. Only the changed files are parsed. --json writes those lines too, for a READY
-// to quote.
+// With --diff BASE: only the signals the change from the merge base (`git merge-base BASE HEAD`) to `HEAD` adds to,
+// each against the merge base's tree: a file over 1000 lines that it adds lines to, a function over 150 lines whose
+// lines include one it adds, a folder over 20 files or a top level over 12 that it adds a file to, a pair of names a
+// letter apart that the merge base did not have, and a file gaining over 300 lines. A change adds to a signal whether
+// it crosses the line or the base was already over it. Both sides are Git's committed trees, never the working tree:
+// commit first. Only the changed files are parsed. --json writes those lines too, for a READY to quote.
 //
-// What the change is, is Git's: its files, their status and their names at the merge base come from `git diff -z -M
-// --name-status` over the whole tree, so a file moved in from outside the roots is a move; the lines it adds, by file
-// and position, are those the hunk headers of each file's own `git diff -M -U0` report, and their count per file is
-// `git diff --numstat`'s, which the tool checks (exit 2 when they differ). Every `git diff` runs with --no-ext-diff,
-// --no-textconv, --no-color, --no-relative and the standard a/ and b/ prefixes, whatever the user's Git configuration
-// says. Git's rename detection decides what a move is: a file it only moves adds no lines and no file, and an edited
-// move below its similarity threshold (50% by default) counts as a deletion and an addition.
+// What the change is, is Git's. Its files, their modes and status, and their names at the merge base come from `git
+// diff -z -M --raw` over the whole tree, so a file moved in from outside the roots is a move; only regular files (modes
+// 100644 and 100755) are measured, so a symlink and a submodule are not; a name that is not UTF-8 stops the report
+// (exit 2). The lines it adds, by file and position, are the `+` lines of each file's own `git diff -M -U0
+// --inter-hunk-context=0`, each hunk's body read inside its header's counts, with `GIT_DIFF_OPTS` removed from Git's
+// environment; their count per file is `git diff --numstat`'s, which the tool checks (exit 2 when they differ). A
+// file's text is its blob (`git cat-file blob`). Every `git diff` runs with --no-ext-diff, --no-textconv, --no-color
+// and --no-relative, whatever the user's configuration says.
 //
-// Exit status: 0 when the report is printed, 2 when --diff's hunks and --numstat disagree.
+// The residual, Git's own choices: its diff algorithm and indent heuristic place the added lines, and can change their
+// count; rename detection's similarity threshold (50% by default) and its limit decide what a move is, so an edited
+// move below them counts as a deletion and an addition; and attributes can make a file binary, which adds no lines.
+//
+// Exit status: 0 when the report is printed, 2 when --diff cannot read the change as Git wrote it.
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
 
 const SIGNALS = {
@@ -65,6 +71,8 @@ const roots =
 
 const git = (...gitArgs) =>
   execFileSync("git", gitArgs, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+/** Git's output as raw bytes, for NUL-separated names. */
+const gitBytes = (...gitArgs) => execFileSync("git", gitArgs, { maxBuffer: 256 * 1024 * 1024 });
 const lineCount = (text) =>
   (text.match(/\n/gu)?.length ?? 0) + (text === "" || text.endsWith("\n") ? 0 : 1);
 
@@ -142,24 +150,51 @@ const listedAt = (ref) =>
     .split("\0")
     .filter((f) => f && CODE.test(f));
 
-/** `git diff` with its output pinned against the user's configuration: no external diff or textconv driver, no colour,
- * the standard prefixes, paths from the top folder. */
+/** Git's environment for the diffs: without `GIT_DIFF_OPTS`, which would change their context. */
+const { GIT_DIFF_OPTS: _diffOptions, ...diffEnvironment } = process.env;
+
+/** `git diff` between two commits, with its output pinned against the user's configuration, as raw bytes. */
 const gitDiff = (...diffArgs) =>
-  git(
-    "-c",
-    "diff.noprefix=false",
-    "-c",
-    "diff.mnemonicPrefix=false",
-    "diff",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--no-color",
-    "--no-relative",
-    ...diffArgs,
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "diff.noprefix=false",
+      "-c",
+      "diff.mnemonicPrefix=false",
+      "-c",
+      "diff.suppressBlankEmpty=false",
+      "diff",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--no-color",
+      "--no-relative",
+      ...diffArgs,
+    ],
+    { maxBuffer: 256 * 1024 * 1024, env: diffEnvironment },
   );
 
 /** Why the report cannot be trusted: exit 2. */
 class CannotRun extends Error {}
+
+const utf8 = new TextDecoder("utf-8", { fatal: true });
+/** Git's NUL-separated `bytes` as names, each decoded exactly, or refused: the report reads UTF-8 names only. */
+function namesOf(bytes) {
+  const names = [];
+  let start = 0;
+  for (let end = bytes.indexOf(0); end !== -1; end = bytes.indexOf(0, start)) {
+    const name = bytes.subarray(start, end);
+    start = end + 1;
+    try {
+      names.push(utf8.decode(name));
+    } catch {
+      throw new CannotRun(
+        `structure-report: Git names a file that is not UTF-8 (bytes ${name.toString("hex")}): the report reads UTF-8 names only`,
+      );
+    }
+  }
+  return names;
+}
 
 /** A name as the report prints it: as is, or quoted when it holds a control character such as a newline or tab. */
 const shown = (file) =>
@@ -178,33 +213,89 @@ function holdsLineIn(lines, from, to) {
   return low < lines.length && lines[low] <= to;
 }
 
-/** The signals the change since `base` adds to, each `{ signal, line }` with the line the report prints. */
+/** The modes of a regular file's blob; a symlink (120000) and a gitlink (160000) are not measured. */
+const REGULAR = new Set(["100644", "100755"]);
+
+/**
+ * The line numbers a patch's hunks add, in order: each hunk's body read inside its header's counts, its `+` lines the
+ * added ones. `patch` is one file's `git diff` text.
+ */
+export function addedLinesOfPatch(patch) {
+  const added = [];
+  const lines = patch.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const hunk = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/u.exec(lines[index]);
+    if (hunk === null) continue;
+    let [old, next, fresh] = [Number(hunk[1] ?? 1), Number(hunk[2]), Number(hunk[3] ?? 1)];
+    while (old > 0 || fresh > 0) {
+      index += 1;
+      const line = lines[index];
+      if (line === undefined)
+        throw new CannotRun("structure-report: a hunk ends before its counts");
+      if (line.startsWith("\\")) continue;
+      if (line.startsWith("+")) {
+        added.push(next);
+        next += 1;
+        fresh -= 1;
+      } else if (line.startsWith("-")) old -= 1;
+      else {
+        next += 1;
+        fresh -= 1;
+        old -= 1;
+      }
+    }
+  }
+  return added;
+}
+
+/**
+ * The regular code files of commit `ref` under the roots: a map from each name to its blob's mode. Names come from
+ * Git's NUL-separated list.
+ */
+function regularFilesAt(ref) {
+  const files = new Map();
+  for (const entry of namesOf(gitBytes("ls-tree", "-r", "-z", ref, "--", ...roots))) {
+    const [meta, name] = [
+      entry.slice(0, entry.indexOf("\t")),
+      entry.slice(entry.indexOf("\t") + 1),
+    ];
+    const [mode] = meta.split(" ");
+    if (REGULAR.has(mode) && CODE.test(name)) files.set(name, mode);
+  }
+  return files;
+}
+
+/** The signals the change from the merge base to `HEAD` adds to, each `{ signal, line }` with the line it prints. */
 function changeSignals(base) {
   const mergeBase = git("merge-base", base, "HEAD").trim();
-  const headFiles = listedAt();
-  const baseFiles = listedAt(mergeBase);
-  const headSet = new Set(headFiles);
+  const [headFiles, baseFiles] = [regularFilesAt("HEAD"), regularFilesAt(mergeBase)];
   const selected = (file) =>
     roots.some((root) => root === "." || file === root || file.startsWith(`${root}/`));
 
-  // Names and status come only from Git's NUL-separated list, over the whole tree, so that a file moved in from outside
-  // the roots is a move: each changed file's status and its name at the merge base.
-  const status = gitDiff("-M", "--name-status", "-z", mergeBase).split("\0");
+  // Names, modes and status come only from Git's NUL-separated raw list, over the whole tree, so that a file moved in
+  // from outside the roots is a move: `:<old mode> <new mode> <old blob> <new blob> <status>`, then one or two names.
+  const raw = namesOf(gitDiff("-M", "--raw", "-z", mergeBase, "HEAD"));
   const changes = [];
-  for (let i = 0; i < status.length - 1;) {
-    const code = status[i];
+  for (let i = 0; i < raw.length;) {
+    const [oldMode, newMode, , , code] = raw[i].slice(1).split(" ");
     if (code.startsWith("R")) {
-      changes.push({ code: "R", file: status[i + 2], old: status[i + 1] });
+      changes.push({ code: "R", oldMode, newMode, old: raw[i + 1], file: raw[i + 2] });
       i += 3;
     } else {
-      changes.push({ code, file: status[i + 1], old: code === "A" ? null : status[i + 1] });
+      changes.push({
+        code,
+        oldMode,
+        newMode,
+        old: code === "A" ? null : raw[i + 1],
+        file: raw[i + 1],
+      });
       i += 2;
     }
   }
   // Git's own count of each file's added lines (`-` for a binary file), the check on the hunks read below.
-  const numstat = gitDiff("-M", "--numstat", "-z", mergeBase).split("\0");
+  const numstat = namesOf(gitDiff("-M", "--numstat", "-z", mergeBase, "HEAD"));
   const gitAdded = new Map();
-  for (let i = 0; i < numstat.length - 1;) {
+  for (let i = 0; i < numstat.length;) {
     const [added, , ...name] = numstat[i].split("\t");
     const file = name.join("\t");
     if (file === "") {
@@ -215,24 +306,19 @@ function changeSignals(base) {
       i += 1;
     }
   }
-  /** The line numbers `change` adds to its file, from the hunk headers of the file's own patch, in order. */
+  /** The line numbers `change` adds to its file, from its own patch, checked against `--numstat`. */
   const addedLinesOf = (change) => {
     const paths = change.code === "R" ? [change.old, change.file] : [change.file];
     const patch = gitDiff(
       "-M",
       "-U0",
+      "--inter-hunk-context=0",
       mergeBase,
+      "HEAD",
       "--",
       ...paths.map((file) => `:(literal)${file}`),
-    );
-    const lines = [];
-    // a payload line starts with `+`, `-`, ` ` or `\`, so a line starting `@@ ` is a hunk header
-    for (const line of patch.split("\n")) {
-      const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/u.exec(line);
-      if (hunk === null) continue;
-      const [start, count] = [Number(hunk[1]), Number(hunk[2] ?? 1)];
-      for (let n = start; n < start + count; n++) lines.push(n);
-    }
+    ).toString("utf8");
+    const lines = addedLinesOfPatch(patch);
     const counted = gitAdded.get(change.file);
     if (String(lines.length) !== (counted === "-" ? "0" : counted))
       throw new CannotRun(
@@ -240,22 +326,26 @@ function changeSignals(base) {
       );
     return lines;
   };
+  const blob = (ref, file) => git("cat-file", "blob", `${ref}:${file}`);
 
   const found = [];
   const relevant = changes
     .filter(
-      ({ code, file }) => code !== "D" && selected(file) && CODE.test(file) && headSet.has(file),
+      ({ code, file, newMode }) =>
+        code !== "D" && REGULAR.has(newMode) && selected(file) && headFiles.has(file),
     )
     .sort((one, other) => (one.file < other.file ? -1 : one.file > other.file ? 1 : 0));
   for (const change of relevant) {
     const { file } = change;
     const added = addedLinesOf(change);
     if (added.length === 0) continue;
-    const text = readFileSync(file, "utf8");
+    const text = blob("HEAD", file);
     const lines = lineCount(text);
     if (lines > SIGNALS.fileLines) {
       const was =
-        change.old === null ? 0 : lineCount(git("cat-file", "blob", `${mergeBase}:${change.old}`));
+        change.old === null || !REGULAR.has(change.oldMode)
+          ? 0
+          : lineCount(blob(mergeBase, change.old));
       found.push({
         signal: "file",
         line: `file over ${SIGNALS.fileLines} lines that the change adds to: ${shown(file)} (${lines}, was ${was})`,
@@ -274,11 +364,14 @@ function changeSignals(base) {
         line: `file gaining over ${SIGNALS.addedLines} lines: +${added.length} ${shown(file)}`,
       });
   }
-  // a new file adds to its folder; a moved one does not
-  const [headFolders, baseFolders] = [folderCounts(headFiles), folderCounts(baseFiles)];
+  // a new regular file adds to its folder; a moved one does not
+  const [headFolders, baseFolders] = [
+    folderCounts([...headFiles.keys()]),
+    folderCounts([...baseFiles.keys()]),
+  ];
   const grownFolders = new Set(
     changes
-      .filter(({ code, file }) => code === "A" && selected(file) && CODE.test(file))
+      .filter(({ code, file }) => code === "A" && selected(file) && headFiles.has(file))
       .map(({ file }) => path.dirname(file)),
   );
   for (const dir of [...grownFolders].sort()) {
@@ -297,8 +390,8 @@ function changeSignals(base) {
       });
   }
   const key = ({ dir, names }) => JSON.stringify([dir, ...names]);
-  const basePairs = new Set(nearNamesOf(baseFiles).map(key));
-  for (const pair of nearNamesOf(headFiles))
+  const basePairs = new Set(nearNamesOf([...baseFiles.keys()]).map(key));
+  for (const pair of nearNamesOf([...headFiles.keys()]))
     if (!basePairs.has(key(pair)))
       found.push({
         signal: "names",
@@ -307,82 +400,97 @@ function changeSignals(base) {
   return found;
 }
 
-if (diffBase) {
-  let found;
-  try {
-    found = changeSignals(diffBase);
-  } catch (error) {
-    if (!(error instanceof CannotRun)) throw error;
-    console.error(error.message);
-    process.exit(2);
-  }
-  const header = `structure signals this change adds to against ${diffBase}`;
-  if (found.length === 0) console.log(`${header}: none`);
-  else {
-    console.log(`${header} (advisory; each asks for the seam or the reason there is none):`);
-    for (const { line } of found) console.log(`  ${line}`);
-  }
-  if (jsonOut)
-    writeFileSync(
-      jsonOut,
-      `${JSON.stringify({ signals: SIGNALS, base: diffBase, change: found }, null, 2)}\n`,
+/** The report the command line asks for. */
+function main() {
+  if (diffBase) {
+    let found;
+    try {
+      found = changeSignals(diffBase);
+    } catch (error) {
+      if (!(error instanceof CannotRun)) throw error;
+      console.error(error.message);
+      process.exit(2);
+    }
+    const header = `structure signals this change adds to against ${diffBase}`;
+    if (found.length === 0) console.log(`${header}: none`);
+    else {
+      console.log(`${header} (advisory; each asks for the seam or the reason there is none):`);
+      for (const { line } of found) console.log(`  ${line}`);
+    }
+    if (jsonOut)
+      writeFileSync(
+        jsonOut,
+        `${JSON.stringify({ signals: SIGNALS, base: diffBase, change: found }, null, 2)}\n`,
+      );
+  } else {
+    const files = listedAt();
+    const fileLines = [];
+    const longFunctions = [];
+    for (const file of files) {
+      const text = readFileSync(file, "utf8");
+      fileLines.push({ file, lines: lineCount(text) });
+      if (PARSED.test(file)) longFunctions.push(...longFunctionsOf(file, text));
+    }
+    const folders = folderCounts(files);
+    const report = {
+      signals: SIGNALS,
+      files: files.length,
+      largeFiles: fileLines
+        .filter((f) => f.lines > SIGNALS.fileLines)
+        .sort((a, b) => b.lines - a.lines),
+      broadFolders: [...folders]
+        .filter(([dir]) => !COMPONENTS.includes(dir))
+        .map(([dir, count]) => ({ dir, files: count }))
+        .filter((f) => f.files > SIGNALS.folderFiles)
+        .sort((a, b) => b.files - a.files),
+      broadTopLevels: COMPONENTS.map((dir) => ({ dir, files: folders.get(dir) ?? 0 }))
+        .filter((f) => f.files > SIGNALS.topLevelFiles)
+        .sort((a, b) => b.files - a.files),
+      longFunctions: longFunctions.sort((a, b) => b.lines - a.lines),
+      nearNames: nearNamesOf(files),
+    };
+
+    const show = (title, rows, line) => {
+      console.log(`${title}: ${rows.length}`);
+      for (const row of rows.slice(0, top)) console.log(`  ${line(row)}`);
+    };
+    console.log(`${report.files} code files under ${roots.join(", ")}`);
+    show(
+      `Files over ${SIGNALS.fileLines} lines`,
+      report.largeFiles,
+      (r) => `${r.lines}  ${r.file}`,
     );
-} else {
-  const files = listedAt();
-  const fileLines = [];
-  const longFunctions = [];
-  for (const file of files) {
-    const text = readFileSync(file, "utf8");
-    fileLines.push({ file, lines: lineCount(text) });
-    if (PARSED.test(file)) longFunctions.push(...longFunctionsOf(file, text));
-  }
-  const folders = folderCounts(files);
-  const report = {
-    signals: SIGNALS,
-    files: files.length,
-    largeFiles: fileLines
-      .filter((f) => f.lines > SIGNALS.fileLines)
-      .sort((a, b) => b.lines - a.lines),
-    broadFolders: [...folders]
-      .filter(([dir]) => !COMPONENTS.includes(dir))
-      .map(([dir, count]) => ({ dir, files: count }))
-      .filter((f) => f.files > SIGNALS.folderFiles)
-      .sort((a, b) => b.files - a.files),
-    broadTopLevels: COMPONENTS.map((dir) => ({ dir, files: folders.get(dir) ?? 0 }))
-      .filter((f) => f.files > SIGNALS.topLevelFiles)
-      .sort((a, b) => b.files - a.files),
-    longFunctions: longFunctions.sort((a, b) => b.lines - a.lines),
-    nearNames: nearNamesOf(files),
-  };
+    show(
+      `Folders over ${SIGNALS.folderFiles} files`,
+      report.broadFolders,
+      (r) => `${r.files}  ${r.dir}/`,
+    );
+    show(
+      `Top levels over ${SIGNALS.topLevelFiles} files`,
+      report.broadTopLevels,
+      (r) => `${r.files}  ${r.dir}/`,
+    );
+    show(
+      `Functions over ${SIGNALS.functionLines} lines`,
+      report.longFunctions,
+      (r) => `${r.lines}  ${r.file}:${r.line} ${r.name}`,
+    );
+    show("Names a letter apart", report.nearNames, (r) => `${r.dir}/: ${r.names.join("  ")}`);
 
-  const show = (title, rows, line) => {
-    console.log(`${title}: ${rows.length}`);
-    for (const row of rows.slice(0, top)) console.log(`  ${line(row)}`);
-  };
-  console.log(`${report.files} code files under ${roots.join(", ")}`);
-  show(`Files over ${SIGNALS.fileLines} lines`, report.largeFiles, (r) => `${r.lines}  ${r.file}`);
-  show(
-    `Folders over ${SIGNALS.folderFiles} files`,
-    report.broadFolders,
-    (r) => `${r.files}  ${r.dir}/`,
-  );
-  show(
-    `Top levels over ${SIGNALS.topLevelFiles} files`,
-    report.broadTopLevels,
-    (r) => `${r.files}  ${r.dir}/`,
-  );
-  show(
-    `Functions over ${SIGNALS.functionLines} lines`,
-    report.longFunctions,
-    (r) => `${r.lines}  ${r.file}:${r.line} ${r.name}`,
-  );
-  show("Names a letter apart", report.nearNames, (r) => `${r.dir}/: ${r.names.join("  ")}`);
-
-  if (compareWith) {
-    const earlier = JSON.parse(readFileSync(compareWith, "utf8"));
-    const keys = ["largeFiles", "broadFolders", "broadTopLevels", "longFunctions", "nearNames"];
-    const delta = (key) => `${key} ${earlier[key]?.length ?? "(absent)"} -> ${report[key].length}`;
-    console.log(`Against ${compareWith}: ${keys.map(delta).join("; ")}`);
+    if (compareWith) {
+      const earlier = JSON.parse(readFileSync(compareWith, "utf8"));
+      const keys = ["largeFiles", "broadFolders", "broadTopLevels", "longFunctions", "nearNames"];
+      const delta = (key) =>
+        `${key} ${earlier[key]?.length ?? "(absent)"} -> ${report[key].length}`;
+      console.log(`Against ${compareWith}: ${keys.map(delta).join("; ")}`);
+    }
+    if (jsonOut) writeFileSync(jsonOut, `${JSON.stringify(report, null, 2)}\n`);
   }
-  if (jsonOut) writeFileSync(jsonOut, `${JSON.stringify(report, null, 2)}\n`);
 }
+
+// run as a command, not when a test imports `addedLinesOfPatch`
+if (
+  process.argv[1] !== undefined &&
+  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
+)
+  main();
