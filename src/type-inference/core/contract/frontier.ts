@@ -1785,8 +1785,10 @@ function floorBelow(
   step(frontier);
   if (at.kind === "key") {
     const path = keptSteps(frontier.contract.work, at.path, [s]);
+    // (through the build's tasks, as a goal passes its nodes: a run of floors holds no native frame per step)
     for (const member of at.members)
-      if (holds(frontier.contract, member, path)) then(keyNode(frontier, member, path));
+      if (holds(frontier.contract, member, path))
+        frontier.tasks.push([then, keyNode(frontier, member, path)]);
   }
   termsAt(frontier, node, (term) => {
     const leaf = frontier.nodes[term]!;
@@ -1925,7 +1927,8 @@ function fastBelow(
 
 /**
  * One step below a marked or held node's inner node: its goal's; #2005, scoped, a pure one's step read directly, as
- * its goal's rules would (a literal's child and F11's `missing`, an unknown leaf itself).
+ * its goal's rules would (a literal's child and F11's `missing`, an unknown leaf itself), each node passed through the
+ * build's tasks, so a path of any length below pure nodes holds no native frame per step.
  */
 function innerBelow(
   frontier: Frontier,
@@ -1938,7 +1941,8 @@ function innerBelow(
     step(frontier);
     if (at.kind === "leaf") {
       if (s === "element" && frontier.hosts.has(node)) throw new Decline("host element");
-      return then(node);
+      frontier.tasks.push([then, node]);
+      return;
     }
     if (at.kind === "mark")
       return innerBelow(frontier, at.inner, s, (found) => then(markNode(frontier, found)));
@@ -1949,14 +1953,16 @@ function innerBelow(
       if (s === "element" && (at.at.children.has(s) || at.at.empty))
         throw new Decline("collection");
       const child = at.at.children.get(s);
-      if (child !== undefined) then(litNode(frontier, literal, pathAt(contract, id, s), child));
+      if (child !== undefined)
+        frontier.tasks.push([then, litNode(frontier, literal, pathAt(contract, id, s), child)]);
       const lacking = lackingAt(contract, index, id, s);
       if (lacking !== null)
-        then(
+        frontier.tasks.push([
+          then,
           leafNode(frontier, joinParts("m", literal, id, s), () =>
             unknownItem(REASON.missing, lacking),
           ),
-        );
+        ]);
       return;
     }
   }
