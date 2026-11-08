@@ -11,57 +11,90 @@ import { fileURLToPath } from "node:url";
 // recorded work as bounds, a count of listed copy or construction sites), so any change under `src/type-inference/core/`
 // can move it, and the suite itself is listed when it or the file holding its pins changes. The changes are those since
 // the merge-base of HEAD and `--base` (default `origin/main`), committed or not, untracked files included, as
-// `check-changed.mjs` reads them.
+// `check-changed.mjs` reads them. A change to a test helper lists only the suites whose pins it holds (`in`), not every
+// suite that imports it.
 //
 // Without options it prints the pinning suites the changes reach, one `dist/tests/…` line each, or `none`; exit 0.
 // `--run` runs them through `tools/test-output-filter.mjs` (built tests are needed: `npm run build:typescript`); exit 1
-// when one fails. `--check-grounds` finds each re-pin in a changed suite: a line inside one of its declared pins (from a
-// line its `pin` finds to where that line's brackets close) that differs from its base line only in its expected
-// values: numbers outside its strings and its calls' arguments, where a `"checks 142 …"` counter snapshot counts as
-// numbers. It requires a changed comment line in the block above the re-pin (up to a blank line, a closing line or the
-// test's start) or in its header comment: above its test and at its start; outside a test, directly above the top-level
-// declarations that run into the pin, or above the line its `ground` finds. That is where the "N units more or fewer
-// since #…" ground is written; exit 1 naming each re-pin without one. It judges that the ground was touched, not
-// whether it is true: the reviewer does. Not read, so the reviewer's to check: a pin whose words or layout changed with
-// its numbers; a number in a call's argument split across lines; a listed-site count (`[count, "reason"]`, `listed`),
-// whose reason names its site, as the kept and key-ids tests require; a suite not yet committed, which has no base.
-// A change to a test helper lists only the suites whose pins it holds (`in`), not every suite that imports it.
+// when one fails.
 //
-// The list is the authority. Its test (`pin-suites.test.mjs`) requires each `pin` to find a line, and finds three pin
-// forms by their text: an `assert.equal` of `.total` to a literal of four or more digits, a table of four or more such
-// literals, and a `[count, "reason"]` record. A pin written another way (`strictEqual`, `deepEqual` of a short tuple or
-// an object, a total under four digits, a helper's table, a nested table such as work-a's) is not found; the test is a
-// net for a forgotten suite, and `NOT_PINS` declares the files it finds that pin no work. Exit 2 when the checks cannot
-// run (no merge-base).
+// `--check-grounds` reads each changed line inside a suite's pins (from a line its `pin` finds to where that line's
+// brackets close, or in a hunk that removed such a line), its strings, templates and comments set apart by one scan of
+// the file (`scanOf`). A line holding no
+// number outside them is no pin. Any other must take one of the suite's declared `forms` (`ADMITTED`), whose numbers
+// outside an `input` part are its expected values; a line in no declared form is refused, fail-closed, naming the fix:
+// write the values as literals in a declared form, or declare the form here. An expected value inside a call
+// (`Number(684)`) and a list or a call's argument split across lines are such refusals. A line whose expected values
+// a removed line of the suite's base pins held is unchanged (an input, a word or the layout changed); any other is a
+// new or re-pinned value and needs a changed comment line, where the "N units more or fewer since #…" ground is
+// written: in the block above it (up to a blank line, a closing line or the test's start), or in its header, the
+// comment above its test and at its start, or, for a pin outside a test, the comment above the line its declared
+// `ground` finds. Exit 1 naming each refusal. It judges that the ground was touched, not whether it is true: the
+// reviewer does. A listed-site count (`listed`) names its site by its reason, which the kept and key-ids tests require,
+// and is not read; nor is a suite not yet committed, which has no base.
+//
+// The list is the authority. Its test (`pin-suites.test.mjs`) requires each `pin` and `ground` to find a line, each
+// line of today's pins to take a declared form, and each pin to have a header (outside a test, at its `ground`); it
+// moves each expected value and requires its refusal. It also finds three pin forms by their text (`PIN_FORMS`): an `assert.equal`
+// of `.total` to a literal of four or more digits, a table of four or more such literals, and a `[count, "reason"]`
+// record. A pin written another way (`strictEqual`, `deepEqual` of a short tuple or an object, a total under four
+// digits, a helper's table, a nested table such as work-a's) is not found; that test is a net for a forgotten suite,
+// and `NOT_PINS` declares the files it finds that pin no work. Exit 2 when the checks cannot run (no merge-base).
 
 /** The core, whose every file can move a pin. */
 const CORE = "src/type-inference/core/";
 
+const N = String.raw`\d[\d_]*`;
+const LIST = String.raw`\[${N}(?:, ${N})*\]`;
+const form = (source) => new RegExp(`^${source}$`, "du");
+
 /**
- * Each suite that pins the core's exact work: its file, what it pins, the lines that open its pins (`pin`), and, when
- * its pins are elsewhere, the file holding them (`in`) and the line whose comment above is their ground (`ground`).
- * `listed` marks a count of listed sites, whose ground is its reason.
+ * The forms a changed pin line may take, read on its code (each string `""` but a counter snapshot, each template `""`,
+ * comments dropped): its numbers are expected values, but those in its `input` group.
+ */
+export const ADMITTED = {
+  asserted: form(
+    String.raw`assert\.(?:equal|deepEqual)\([\w$.]+, (?:${N}|${LIST})(?:, [\w$.]+(?:\([\w$.]*\))?)?\);`,
+  ),
+  tuple: form(String.raw`\["", (?<input>""|[\w$]+\(${N}\)), ${LIST}\],?`),
+  row: form(`${LIST},?`),
+  totals: form(String.raw`\{ total: ${N}, decisions: ${LIST}, default: ${LIST} \},?`),
+  sizeKey: form(String.raw`(?<input>${N}): \[`),
+  keyed: form(String.raw`[\w$]+: ${LIST},?`),
+  counters: form(String.raw`"[A-Za-z]+ \d+(?: [A-Za-z]+ \d+)*",?`),
+};
+
+/**
+ * Each suite that pins the core's exact work: its file, what it pins, the lines that open its pins (`pin`), the forms
+ * its pin lines take (`forms`, of `ADMITTED`), and, when its pins are elsewhere, the file holding them (`in`); for a pin
+ * outside a test, the line whose comment above is its ground (`ground`). `listed` marks a count of listed sites, whose
+ * ground is its reason.
  */
 export const PIN_SUITES = [
   {
     file: "tests/type-core-candidate.test.ts",
     pins: "an integer rule's total and checks",
     pin: /^\s*assert\.deepEqual\(units, \[/u,
+    forms: ["asserted"],
   },
   {
     file: "tests/type-core-closure.test.ts",
     pins: "work totals at two demands, four modes",
     pin: /^const OUTSIDE\b/u,
+    forms: ["tuple", "row"],
+    ground: /^const frozen\b/u,
   },
   {
     file: "tests/type-core-contract-capture.test.ts",
     pins: "one capture total",
     pin: /^\s*assert\.equal\(budget\.total,/u,
+    forms: ["asserted"],
   },
   {
     file: "tests/type-core-f18.test.ts",
     pins: "a literal default's total, decision and default work",
     pin: /^\s*\{ total: \d/u,
+    forms: ["totals"],
   },
   {
     file: "tests/type-core-key-ids.test.ts",
@@ -79,11 +112,13 @@ export const PIN_SUITES = [
     file: "tests/type-core-work-a.test.ts",
     pins: "a store check's work per mode",
     pin: /^\s*assert\.deepEqual\(measured, \[/u,
+    forms: ["row"],
   },
   {
     file: "tests/type-core-work-b.test.ts",
     pins: "main's work per family, as bounds",
     pin: /^\s*main: \{\s*$/u,
+    forms: ["row", "sizeKey"],
     in: "tests/helpers/type-core-families.ts",
     ground: /^\s*readonly main: /u,
   },
@@ -91,6 +126,7 @@ export const PIN_SUITES = [
     file: "tests/type-core-work-c.test.ts",
     pins: "main's work per shape, as bounds",
     pin: /^\s*(?:(?:shared|unshared): \{|setup: \[|"checks \d|\[\d{4,}(?:, \d{4,}){3}\])/u,
+    forms: ["keyed", "counters", "row"],
   },
 ];
 
@@ -131,119 +167,230 @@ export function builtOf(file) {
 }
 
 const NUMBER = /\d[\d_]*/gu;
-const COMMENT = /^\s*(?:\/\/|\/\*|\*)/u;
+const COUNTERS = /^"[A-Za-z]+ \d+(?: [A-Za-z]+ \d+)*"$/u;
 const CLOSING = /^\s*[\]})]+[,;)]*\s*$/u;
 const TEST_START = /^\s*test\(/u;
 const TOP_CLOSING = /^[\]})]/u;
-const TOP_COMMENT = /^(?:\/\/|\/\*| \*)/u;
-const CALL = /(?<![\w$.])(?!assert\.)([\w$][\w$.]*)\([^()]*\)/gu;
-const STRING = /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\\n]|\\.)*`/gu;
-const COUNTERS = /^"[A-Za-z]+ \d+(?: [A-Za-z]+ \d+)*"$/u;
-
-/** A line with its numbers replaced, so two lines that differ only in their numbers read alike. */
-const shapeOf = (line) => line.replace(NUMBER, "#");
+/** The characters after which a `/` opens a regular expression; a `!` after a value is TypeScript's, read as a value. */
+const REGEX_AFTER = "(,=:[!&|?{};+-*%<>~^";
 
 /**
- * A line's expected values: each string emptied, but a counter snapshot, whose numbers are work, and each call's
- * arguments but an assertion's emptied, since they are inputs (`chain(16)`).
+ * Each line of `text` by one scan of its strings, templates, comments and regular expressions: its `code` (each string
+ * `""` but a counter snapshot, each template `""` with its interpolations, each regular expression `/r/`, comments
+ * dropped), the column each code character came from (`at`), whether its first token is a comment (`comment`), and
+ * whether it starts outside every string, template and comment (`top`).
  */
-const codeOf = (line) => {
-  let code = line.replace(STRING, (text) => (COUNTERS.test(text) ? text : '""'));
-  for (let last = ""; last !== code;) [last, code] = [code, code.replace(CALL, "$1()")];
-  return code;
-};
-
-/**
- * The re-pin candidates in one file's change: from `git diff -U0` text, each added line whose base line in the same hunk
- * differs from it only in numbers outside its strings and its calls' arguments, and is no comment; with the head lines
- * the hunks added.
- */
-export function rePinsOf(diff) {
-  const rePins = [];
-  const added = new Set();
-  let removed = [];
-  let line = 0;
-  for (const text of diff.split("\n")) {
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/u.exec(text);
-    if (hunk !== null) {
-      line = Number(hunk[1]);
-      removed = [];
-      continue;
-    }
-    if (text.startsWith("---") || text.startsWith("+++")) continue;
-    if (text.startsWith("-")) removed.push(text.slice(1));
-    else if (text.startsWith("+")) {
-      const head = text.slice(1);
-      added.add(line);
-      const base = removed.find(
-        (old) => codeOf(old) !== codeOf(head) && shapeOf(old) === shapeOf(head),
-      );
-      if (base !== undefined && !COMMENT.test(head)) rePins.push({ line, base, head });
-      line += 1;
-    }
-  }
-  return { rePins, added };
+export function scanOf(text) {
+  const kept = scans.get(text);
+  if (kept !== undefined) return kept;
+  const lines = scanned(text);
+  scans.set(text, lines);
+  if (scans.size > 4) scans.delete(scans.keys().next().value);
+  return lines;
 }
 
-/** The 1-based lines inside a pin: from each line `pin` finds to where that line's brackets close, strings aside. */
-export function pinLinesOf(lines, pin) {
-  const inside = new Set();
-  for (let at = 0; at < lines.length; at += 1) {
-    if (!pin.test(lines[at])) continue;
+/** The last few scans, since a check reads each base text once per suite and its test reads one base many times. */
+const scans = new Map();
+
+function scanned(text) {
+  const lines = [];
+  const interpolations = [];
+  let state = "code";
+  let depth = 0;
+  let literal = "";
+  let literalAt = 0;
+  let previous = "";
+  let line = { code: "", at: [], comment: null, top: true };
+  let column = 0;
+  // (a counter snapshot keeps each character's column; a placeholder takes its literal's)
+  const emit = (code, at, spread = false) => {
+    if (interpolations.length > 0) return;
+    for (let offset = 0; offset < code.length; offset += 1) {
+      line.code += code[offset];
+      line.at.push(spread ? at + offset : at);
+    }
+  };
+  for (let index = 0; index < text.length; index += 1, column += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === "\n") {
+      if (state === "line") state = "code";
+      lines.push({ ...line, comment: line.comment === true });
+      const top = state === "code" && interpolations.length === 0;
+      line = { code: "", at: [], comment: state === "block" ? true : top ? null : false, top };
+      column = -1;
+      continue;
+    }
+    if (state === "code") {
+      if (char === "/" && (next === "/" || next === "*")) {
+        if (line.comment === null) line.comment = true;
+        state = next === "/" ? "line" : "block";
+        index += 1;
+        column += 1;
+        continue;
+      }
+      if (line.comment === null && char.trim() !== "") line.comment = false;
+      if (char === '"' || char === "'") {
+        state = char;
+        literal = char;
+        literalAt = column;
+      } else if (char === "`") {
+        state = "template";
+        emit('""', column);
+      } else if (char === "/" && (previous === "" || REGEX_AFTER.includes(previous))) {
+        state = "regex";
+        emit("/r/", column);
+      } else if (char === "}" && interpolations.length > 0 && depth - 1 === interpolations.at(-1)) {
+        depth = interpolations.pop();
+        state = "template";
+      } else {
+        if (char === "{") depth += 1;
+        if (char === "}") depth -= 1;
+        emit(char, column);
+        if (char === "!" && /[\w$)\]]/u.test(previous)) previous = ")";
+        else if (char.trim() !== "") previous = char;
+      }
+    } else if (state === '"' || state === "'") {
+      if (char === "\\") {
+        literal += char + next;
+        index += 1;
+        column += 1;
+      } else {
+        literal += char;
+        if (char === state) {
+          state = "code";
+          if (COUNTERS.test(literal)) emit(literal, literalAt, true);
+          else emit('""', literalAt);
+          previous = '"';
+        }
+      }
+    } else if (state === "template") {
+      if (char === "\\") {
+        index += 1;
+        column += 1;
+      } else if (char === "`") {
+        state = "code";
+        previous = "`";
+      } else if (char === "$" && next === "{") {
+        interpolations.push(depth);
+        depth += 1;
+        state = "code";
+        index += 1;
+        column += 1;
+      }
+    } else if (state === "regex" || state === "class") {
+      if (char === "\\") {
+        index += 1;
+        column += 1;
+      } else if (state === "regex" && char === "[") state = "class";
+      else if (state === "class" && char === "]") state = "regex";
+      else if (state === "regex" && char === "/") {
+        state = "code";
+        previous = "/";
+      }
+    } else if (state === "block" && char === "*" && next === "/") {
+      state = "code";
+      index += 1;
+      column += 1;
+    }
+  }
+  lines.push({ ...line, comment: line.comment === true });
+  return lines;
+}
+
+/** The 1-based lines of each pin `pin` opens in a scan: from its line to where that line's brackets close. */
+export function pinsOf(scan, raw, pin) {
+  const pins = [];
+  for (let at = 0; at < scan.length; at += 1) {
+    if (!scan[at].top || !pin.test(raw[at])) continue;
     let depth = 0;
-    for (let line = at; line < lines.length; line += 1) {
-      inside.add(line + 1);
-      for (const char of codeOf(lines[line]))
+    let line = at;
+    for (; line < scan.length; line += 1) {
+      for (const char of scan[line].code)
         depth += "[{(".includes(char) ? 1 : "]})".includes(char) ? -1 : 0;
       if (depth <= 0) break;
     }
+    pins.push({ from: at + 1, to: Math.min(line, scan.length - 1) + 1 });
   }
-  return inside;
+  return pins;
 }
 
-/** The comment lines directly above line `at` (1-based), as a range. */
-const commentAbove = (lines, at) => {
+/**
+ * A pin line's reading by the suite's forms: `null` when it holds no number outside its strings and comments, `{ form:
+ * undefined }` when it takes no declared form, else its form and its expected values with their columns.
+ */
+export function readingOf(scanned, forms) {
+  const code = scanned.code.trim();
+  if (!/\d/u.test(code)) return null;
+  const lead = scanned.code.length - scanned.code.trimStart().length;
+  for (const name of forms) {
+    const match = ADMITTED[name].exec(code);
+    if (match === null) continue;
+    const input = match.indices.groups?.input;
+    const values = [];
+    for (const number of code.matchAll(NUMBER)) {
+      if (input !== undefined && number.index >= input[0] && number.index < input[1]) continue;
+      const from = scanned.at[lead + number.index];
+      values.push({ text: number[0], from, to: from + number[0].length });
+    }
+    return { form: name, values };
+  }
+  return { form: undefined, values: [] };
+}
+
+/** The hunks of a `git diff -U0`, each with the base lines it removed and the head lines it added. */
+export function hunksOf(diff) {
+  const hunks = [];
+  let base = 0;
+  let head = 0;
+  for (const text of diff.split("\n")) {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/u.exec(text);
+    if (hunk !== null) {
+      [base, head] = [Number(hunk[1]), Number(hunk[2])];
+      hunks.push({ removed: [], added: [] });
+    } else if (text.startsWith("---") || text.startsWith("+++") || hunks.length === 0) continue;
+    else if (text.startsWith("-")) hunks.at(-1).removed.push(base++);
+    else if (text.startsWith("+")) hunks.at(-1).added.push(head++);
+  }
+  return hunks;
+}
+
+/** The comment lines directly above line `at` (1-based) in a scan, as a range. */
+const commentAbove = (scan, at) => {
   let from = at;
-  while (from > 1 && COMMENT.test(lines[from - 2])) from -= 1;
+  while (from > 1 && scan[from - 2].comment) from -= 1;
   return { from, to: at - 1 };
 };
 
 /**
- * Where a re-pin's ground is written in the head text, each as a range of 1-based lines: the block above its line (up to
- * a blank line, a closing line or the test's start), and its header: the comment above the line `ground` finds, else
- * the comment above its test and at its start, else (outside a test) the comment directly above the top-level
- * declarations that run without a blank line into the pin.
+ * Where a pin line's ground is written, each as a range of 1-based lines: the block above it (up to a blank line, a
+ * closing line or the test's start), and its header: the comment above its test and at its start, or, outside a test,
+ * the comment above the line `ground` finds.
  */
-export function groundsOf(lines, at, ground) {
+export function groundsOf(scan, raw, at, ground) {
   let top = at;
   while (top > 1) {
-    const above = lines[top - 2];
-    if (above.trim() === "" || CLOSING.test(above) || TEST_START.test(above)) break;
+    const above = scan[top - 2];
+    if (raw[top - 2].trim() === "" || CLOSING.test(above.code) || TEST_START.test(above.code))
+      break;
     top -= 1;
   }
   const header = [];
-  if (ground !== undefined) {
-    const anchor = lines.findIndex((text) => ground.test(text)) + 1;
-    if (anchor > 0) header.push(commentAbove(lines, anchor));
-  } else {
-    let start = at;
-    while (start >= 1 && !TEST_START.test(lines[start - 1]) && !TOP_CLOSING.test(lines[start - 1]))
-      start -= 1;
-    if (start >= 1 && TEST_START.test(lines[start - 1])) {
-      header.push(commentAbove(lines, start));
-      let to = start;
-      while (to < at - 1 && COMMENT.test(lines[to])) to += 1;
-      header.push({ from: start + 1, to });
-    } else {
-      let first = at;
-      while (first > 1 && lines[first - 2].trim() !== "" && !TOP_CLOSING.test(lines[first - 2]))
-        if (TOP_COMMENT.test(lines[first - 2])) {
-          let from = first - 1;
-          while (from > 1 && TOP_COMMENT.test(lines[from - 2])) from -= 1;
-          header.push({ from, to: first - 1 });
-          break;
-        } else first -= 1;
-    }
+  let start = at;
+  while (
+    start >= 1 &&
+    !TEST_START.test(scan[start - 1].code) &&
+    !(scan[start - 1].top && TOP_CLOSING.test(scan[start - 1].code))
+  )
+    start -= 1;
+  if (start >= 1 && TEST_START.test(scan[start - 1].code)) {
+    header.push(commentAbove(scan, start));
+    let to = start;
+    while (to < at - 1 && scan[to].comment) to += 1;
+    header.push({ from: start + 1, to });
+  } else if (ground !== undefined) {
+    const anchor = raw.findIndex((text, index) => scan[index].top && ground.test(text)) + 1;
+    if (anchor > 0) header.push(commentAbove(scan, anchor));
   }
   return {
     above: { from: top, to: at - 1 },
@@ -251,46 +398,94 @@ export function groundsOf(lines, at, ground) {
   };
 }
 
-/** Whether a range holds a comment line the change added. */
-const touched = (lines, range, added) => {
-  for (let line = range.from; line <= range.to; line += 1)
-    if (added.has(line) && COMMENT.test(lines[line - 1])) return true;
-  return false;
-};
-
 const linesText = ({ from, to }) => (from === to ? `line ${from}` : `lines ${from}–${to}`);
 
-/** The re-pins inside one file's pins whose ground no comment line the change added is in, each as one refusal. */
-export function refusalsOf(file, headText, diff, { pin, ground }) {
-  const lines = headText.split("\n");
-  const inside = pinLinesOf(lines, pin);
-  const { rePins, added } = rePinsOf(diff);
-  const out = [];
-  for (const { line, base, head } of rePins) {
+/**
+ * The base side of a change: the base lines inside its pins (`inside`), and the expected values each removed one held,
+ * as a multiset of their texts (`held`).
+ */
+function baseOf(baseText, hunks, suite) {
+  const raw = baseText.split("\n");
+  const scan = scanOf(baseText);
+  const inside = new Set(pinsOf(scan, raw, suite.pin).flatMap(({ from, to }) => range(from, to)));
+  const held = new Map();
+  for (const line of hunks.flatMap((hunk) => hunk.removed)) {
     if (!inside.has(line)) continue;
-    const { above, header } = groundsOf(lines, line, ground);
-    if ([above, ...header].some((range) => touched(lines, range, added))) continue;
-    const was = base.match(NUMBER) ?? [];
-    const moved = (head.match(NUMBER) ?? []).filter((number, index) => number !== was[index]);
+    const reading = readingOf(scan[line - 1], suite.forms);
+    if (reading?.form === undefined) continue;
+    const key = reading.values.map((value) => value.text).join(",");
+    held.set(key, (held.get(key) ?? 0) + 1);
+  }
+  return { inside, held };
+}
+
+const range = (from, to) => Array.from({ length: to - from + 1 }, (_, index) => from + index);
+
+/**
+ * The refusals of one file holding a suite's pins, from its base and head texts and their `git diff -U0`: each changed
+ * pin line in no declared form, and each new or re-pinned value whose ground no comment line the change added is in.
+ */
+export function refusalsOf(file, baseText, headText, diff, suite) {
+  const raw = headText.split("\n");
+  const scan = scanOf(headText);
+  const hunks = hunksOf(diff);
+  const base = baseOf(baseText, hunks, suite);
+  const held = base.held;
+  const added = hunks.flatMap((hunk) => hunk.added);
+  const changed = new Set(added);
+  // (a line is read as a pin's when it is inside one at the head, or its hunk removed a line of one at the base: an
+  // edit that leaves no line its `pin` finds is still read)
+  const inside = new Set(pinsOf(scan, raw, suite.pin).flatMap(({ from, to }) => range(from, to)));
+  for (const hunk of hunks)
+    if (hunk.removed.some((line) => base.inside.has(line)))
+      for (const line of hunk.added) inside.add(line);
+  const touched = (range) => {
+    for (let line = range.from; line <= range.to; line += 1)
+      if (changed.has(line) && scan[line - 1].comment) return true;
+    return false;
+  };
+  const out = [];
+  const of = file === suite.file ? "" : ` (${suite.file})`;
+  for (const line of added) {
+    if (!inside.has(line)) continue;
+    const reading = readingOf(scan[line - 1], suite.forms);
+    if (reading === null) continue;
+    if (reading.form === undefined) {
+      out.push(
+        `${file}:${line}: a changed pin line in none of its declared forms (${suite.forms.join(", ")})${of}.\n` +
+          `  Write its expected values as literals in one of them, or declare its form in tools/repository-checks/pin-suites.mjs.`,
+      );
+      continue;
+    }
+    const key = reading.values.map((value) => value.text).join(",");
+    if ((held.get(key) ?? 0) > 0) {
+      held.set(key, held.get(key) - 1);
+      continue;
+    }
+    const { above, header } = groundsOf(scan, raw, line, suite.ground);
+    if ([above, ...header].some(touched)) continue;
     const where = [
       `directly above it${above.to >= above.from ? ` (${linesText(above)})` : ""}`,
       ...(header.length > 0 ? [`in its header (${header.map(linesText).join(", ")})`] : []),
     ].join(", or ");
     out.push(
-      `${file}:${line}: re-pinned (${moved.join(", ")}) with no change to its ground.\n` +
+      `${file}:${line}: re-pinned (${key.replaceAll(",", ", ")}) with no change to its ground${of}.\n` +
         `  Write ${where} how many units more or fewer, and since which change ("N units more since #…").`,
     );
   }
   return out;
 }
 
-/** The refusals of every changed file holding a suite's work pins, given its head text (`read`) and `git diff -U0`. */
-export function groundRefusals(paths, read, diffOf) {
+/**
+ * The refusals of every changed file holding a suite's work pins, given its head text (`read`), its base text
+ * (`readBase`, empty for a new file) and its `git diff -U0` (`diffOf`).
+ */
+export function groundRefusals(paths, read, readBase, diffOf) {
   return PIN_SUITES.flatMap((suite) => {
     const file = suite.in ?? suite.file;
     return suite.listed || !paths.includes(file)
       ? []
-      : refusalsOf(file, read(file), diffOf(file), suite);
+      : refusalsOf(file, readBase(file), read(file), diffOf(file), suite);
   });
 }
 
@@ -337,6 +532,14 @@ function main(argv) {
     const refusals = groundRefusals(
       paths.filter((path) => existsSync(join(root, path))),
       (file) => readFileSync(join(root, file), "utf8"),
+      (file) => {
+        const shown = spawnSync("git", ["show", `${mergeBase}:${file}`], {
+          cwd: root,
+          encoding: "utf8",
+          maxBuffer: 1 << 28,
+        });
+        return shown.status === 0 ? shown.stdout : "";
+      },
       (file) => git(root, "diff", "-U0", mergeBase, "--", file),
     );
     for (const refusal of refusals) console.log(`pin-suites: ${refusal}`);
