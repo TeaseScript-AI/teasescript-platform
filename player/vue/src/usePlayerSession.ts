@@ -80,11 +80,6 @@ import {
 } from "../../player-bridge.js";
 import { BridgeRequestError } from "../../engine-bridge/client.js";
 import { RETIRED, type InputSectionHost } from "./runtime-input";
-import {
-  debugPhotoUses,
-  type DebugExportCandidate,
-  type DebugPhotoCandidate,
-} from "../../debug-export-assembly.js";
 import type { DebugRewoundWhileDebugging } from "../../debug-export.js";
 import { sweepDebugHistories } from "../../debug-history-indexeddb.js";
 import { createRewindOwner } from "./rewindOwner";
@@ -153,7 +148,7 @@ import { useCallView } from "./session/useCallView.js";
 import { usePlayerCameraLifecycle, useSessionCamera } from "./session/usePlayerCameras.js";
 import { usePlayerSessionServices } from "./session/usePlayerSessionServices.js";
 import { useFailureRecording } from "./session/useFailureRecording.js";
-import type { ExportCaptureReply } from "../../engine-bridge/session-protocol.js";
+import { useExportCandidate } from "./session/useExportCandidate.js";
 import type { RunBegin } from "../../engine-bridge/recording/export-observation.js";
 
 const PRIMED_AUDIO_ELEMENTS = 2;
@@ -161,8 +156,6 @@ const SILENCE = silence(50);
 
 // Media progress is sampled this often while media loads or plays; cues fire at this resolution.
 const MEDIA_SAMPLE_MS = 100;
-/** A debug export's capture that met a stop of its run still committing (`captureExport`'s `pending`). */
-const PENDING_CAPTURE = Symbol("pending capture");
 
 export interface PlayerSessionOptions {
   /**
@@ -2828,64 +2821,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     return inspecting.value ? adoptRewound() : true;
   }
 
-  /**
-   * Decides a debug export's capture in its reply's hook (`captureExport`, which matched a session's capture against the
-   * store's view): it is the candidate only while the dialog wants it, no stop is under way here, and it is of what
-   * shows: the shown lineage, or for no session, the same run and still no session. Events and transcript come from the
-   * store's view, marks and incident only from the capture. Otherwise its ticket is released.
-   */
-  function deliverExport(
-    host: PlayerBridge,
-    current: PlayerSession | null,
-    reply: ExportCaptureReply,
-    view: PlayerSession | null,
-    details: (shown: PlayerSession | null) => Pick<DebugExportCandidate, "player" | "host">,
-    live: () => boolean,
-  ): Omit<DebugExportCandidate, "photos"> | typeof PENDING_CAPTURE | null {
-    if (reply.kind === "pending") return PENDING_CAPTURE;
-    if (reply.kind !== "captured") return null;
-    const release = () => void host.releaseRecording(reply.ticket).catch(() => {});
-    const { identity } = reply;
-    const matches =
-      current === null
-        ? session.value === null && identity.run === run
-        : view !== null && session.value?.lineage === current.lineage;
-    if (!live() || halting.value || !matches) {
-      release();
-      return null;
-    }
-    return {
-      build: playerBuildIdentity,
-      package: options.debugPackage ?? { id: null, version: null },
-      session:
-        view === null
-          ? null
-          : {
-              snapshot: reply.snapshot,
-              failure: reply.failure,
-              events: [...view.events],
-              transcriptEntries: [...view.transcriptEntries],
-            },
-      recording: reply.recording,
-      prepare: (replay) => host.exportPrepare(reply.ticket, replay),
-      release,
-      hostError: reply.incident?.errorName ?? null,
-      editedWhileDebugging: reply.marks?.editedWhileDebugging ?? null,
-      rewoundWhileDebugging: reply.marks?.rewoundWhileDebugging ?? null,
-      ...details(view),
-    };
-  }
-  /** Resolves once no Player error stop is under way here (`halting`). */
-  function stopShown(): Promise<void> {
-    if (!halting.value) return Promise.resolve();
-    return new Promise((resolve) => {
-      const stop = watch(halting, (now) => {
-        if (now) return;
-        stop();
-        resolve();
-      });
-    });
-  }
+  const exportCandidate = useExportCandidate({
+    session,
+    bridge: () => bridge,
+    failureTicket: () => failureRecording.ticket(),
+    run: () => run,
+    halting,
+    build: playerBuildIdentity,
+    package: options.debugPackage ?? { id: null, version: null },
+    readPhoto: (reference) => capturedMedia.read(reference),
+  });
   /**
    * Readies the page for a rewind step's commit or a reinstatement, which begins the host's recording anew: after a
    * Player error, the recording up to the error is kept for the debug export first. Its callers await what it returns.
@@ -3510,53 +3455,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** Whether an exception of the Player itself stopped the session where it stands; until the next Start. */
     stopped,
     reportHostError,
-    /**
-     * Captures what a debug export can contain, frozen: in the host, the shown session's state, marks and failure, the
-     * run's incident and the recording (`captureExport`); here, in the capture's reply, that publication's events and
-     * transcript, and what `details` reads of the Player's interface for it. `live` says whether the dialog still wants
-     * the candidate. `null` when the capture is refused or does not match what shows; nothing then stays held.
-     */
-    async debugExportCandidate(
-      details: (shown: PlayerSession | null) => Pick<DebugExportCandidate, "player" | "host">,
-      live: () => boolean,
-    ): Promise<DebugExportCandidate | null> {
-      const current = session.value;
-      const host = current?.connection ?? bridge;
-      if (host === null) return null;
-      const failed = failureRecording.ticket();
-      const recording =
-        failed !== null && failed.bridge === host ? { ticket: failed.ticket } : "current";
-      const capture = () =>
-        host.captureExport(current, recording, (reply, view) =>
-          deliverExport(host, current, reply, view, details, live),
-        );
-      let frozen = await capture();
-      // A stop of the run was still committing: once it shows, the capture is tried once more.
-      if (frozen === PENDING_CAPTURE) {
-        await stopShown();
-        frozen = live() ? await capture() : null;
-      }
-      if (frozen === PENDING_CAPTURE || frozen === null) return null;
-      const photos: DebugPhotoCandidate[] = [];
-      for (const [reference, usedBy] of debugPhotoUses(frozen)) {
-        const record = await capturedMedia.read(reference);
-        if (record === null || record.kind !== "image") continue;
-        photos.push({
-          reference,
-          mimeType: record.mimeType,
-          byteLength: record.size,
-          width: record.width ?? null,
-          height: record.height ?? null,
-          usedBy,
-          read: async () => new Uint8Array(await record.data.arrayBuffer()),
-        });
-      }
-      if (!live()) {
-        frozen.release();
-        return null;
-      }
-      return { ...frozen, photos };
-    },
+    /** What a debug export can contain, frozen (`useExportCandidate`). */
+    debugExportCandidate: exportCandidate.debugExportCandidate,
     /** Whether Debug's value trace runs: the host keeps it, and every session operation there records into it. */
     debugTracing: computed(() => debugTracing.value),
     /** Which of the host's traces runs, once the host answered `setDebugTracing`; `null` without one. */

@@ -542,7 +542,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "read",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > debugExportCandidate > capture > captureExport:callback":
+  "player/vue/src/session/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture > captureExport:callback":
     ["lifecycle", ["BridgeClient.request"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > reportHostError > then:callback.2": [
     "lifecycle",
@@ -587,7 +587,9 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerDebug.ts usePlayerDebug > explain {explain}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > activate {activate}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > debugView {debugView}",
-  "player/vue/src/usePlayerSession.ts usePlayerSession > deliverExport > release {release}",
+  "player/vue/src/session/useExportCandidate.ts useExportCandidate > debugExportCandidate {debugExportCandidate}",
+  "player/vue/src/session/useExportCandidate.ts useExportCandidate > deliver > release {release}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > debugExportCandidate {debugExportCandidate}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > demandCallView {demandCallView}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > editSavedData {editSavedData}",
   "player/vue/src/usePlayerSession.ts usePlayerSession > exportSession {exportSession}",

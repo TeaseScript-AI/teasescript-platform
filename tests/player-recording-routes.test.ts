@@ -115,13 +115,16 @@ test("the failure capture's and the export capture's replies each reach one sett
         path: "useFailureRecording > settle",
       },
       { file: "player/player-bridge.ts", path: "PlayerBridge > captureExport" },
-      { file: "player/vue/src/usePlayerSession.ts", path: "usePlayerSession > deliverExport" },
+      {
+        file: "player/vue/src/session/useExportCandidate.ts",
+        path: "useExportCandidate > deliver",
+      },
     ]),
     [
-      "player/player-bridge.ts PlayerBridge > captureExport <- player/vue/src/usePlayerSession.ts usePlayerSession > debugExportCandidate > capture",
+      "player/player-bridge.ts PlayerBridge > captureExport <- player/vue/src/session/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture",
+      "player/vue/src/session/useExportCandidate.ts useExportCandidate > deliver <- player/vue/src/session/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture > captureExport:callback",
       "player/vue/src/session/useFailureRecording.ts useFailureRecording > settle <- player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped > then:callback.1",
       "player/vue/src/session/useFailureRecording.ts useFailureRecording > settle <- player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped > then:callback.2",
-      "player/vue/src/usePlayerSession.ts usePlayerSession > deliverExport <- player/vue/src/usePlayerSession.ts usePlayerSession > debugExportCandidate > capture > captureExport:callback",
     ],
   );
   // Nothing is chained after the capture's settlement: its handlers only settle.

@@ -108,10 +108,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     startedSession: SESSION,
     reportHostError: SESSION,
     incident: SESSION,
-    release: READ,
-    deliverExport: READ,
-    capture: READ,
-    "deliverExport.prepare": READ,
+    "usePlayerSession.readPhoto": READ,
     stopAt: SESSION,
     supersede: SESSION,
     issueTracing: SESSION,
@@ -130,7 +127,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     storedPhotos: READ,
     "usePlayerSession.savedPhoto": READ,
     resolveAsset: READ,
-    "usePlayerSession.debugExportCandidate": READ,
     scriptStorageOptions: READ,
     ownStoredMedia: READ,
     readTransfer: TRANSFER,
@@ -146,6 +142,14 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
       "compares a held photo's bytes with an imported one's, by position: it reaches no store",
   },
   "session/useCallView.ts": { viewCalls: SESSION },
+  "session/useExportCandidate.ts": {
+    useExportCandidate: READ,
+    release: READ,
+    deliver: READ,
+    "deliver.prepare": READ,
+    debugExportCandidate: READ,
+    capture: READ,
+  },
   "session/useFailureRecording.ts": {
     settle: READ,
     "useFailureRecording.stopped": READ,
@@ -185,6 +189,8 @@ const DERIVED: Readonly<Record<string, string>> = {
   resolveTemporalContext: "the host's time zone source, from the options: no store",
   decodeImage: "the host's image decoder, from the options: no store",
   keptScope: "the saved values' scope, a name: no store",
+  exportCandidate:
+    "a debug export's candidate, reading the media store's photos through `readPhoto`: it writes no store",
 };
 
 /** The handles an ownership binds a raw resource with. */
