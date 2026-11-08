@@ -262,6 +262,21 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     console.warn(`[player] ${diagnostic.code}: ${diagnostic.message}`);
     diagnostics.value = [...diagnostics.value, diagnostic];
   };
+  // The session composable's shared state, which its owners read: the shown session, and what holds or stops it.
+  const session = shallowRef<PlayerSession | null>(null);
+  // While the session is paused at a random draw (DEBUGGER.md "Random draws"), it holds like an inspected state until
+  // the draw is resolved.
+  const drawPending = computed(() => session.value?.state.randomDraw != null);
+  // An exception of the Player itself stops the session where it stands (PLAYER-UI "Session end and failure"): nothing
+  // of it runs, observes time, or takes input any more, and late answers, reports, and writes are dropped. Its
+  // transcript, Stage, and recording stay for the error dialog and a debug export, until the next Start.
+  const stopped = computed(() => hostError.value !== null || halting.value);
+  const held = computed(() => inspecting.value || drawPending.value || stopped.value);
+  // The session as other parts of the Player service it: none while a restored state is inspected or a draw is paused.
+  const servicedSession = computed(() => (held.value ? null : session.value));
+  // A new session remounts the transcript and resets interaction-local state.
+  const generation = ref(0);
+  const interactionReset = ref(0);
   // The engine's host, which owns the plans, the sessions and the recorder of every session's engine calls from Start,
   // in every build, for a debug export (DEBUGGER.md "Debug export"); in-process by default.
   // The in-process backend is ready at once, so a Start within the first click needs no wait.
@@ -639,7 +654,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     return resolved.state === "ready" ? resolved.url : null;
   };
   const resolveTemporalContext = options.temporalContext ?? (() => playerTemporalContext());
-  const session = shallowRef<PlayerSession | null>(null);
   /**
    * The rewind retirement stamp (`rewindRetirements`, below) the owner's reply guards read; declared first, as the owner
    * is made before everything that reads it.
@@ -678,14 +692,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const rewound = computed<DebugRewoundWhileDebugging | null>(
     () => session.value?.marks.rewoundWhileDebugging ?? null,
   );
-  // While the session is paused at a random draw (DEBUGGER.md "Random draws"), it holds like an inspected state until
-  // the draw is resolved.
-  const drawPending = computed(() => session.value?.state.randomDraw != null);
-  // An exception of the Player itself stops the session where it stands (PLAYER-UI "Session end and failure"): nothing
-  // of it runs, observes time, or takes input any more, and late answers, reports, and writes are dropped. Its
-  // transcript, Stage, and recording stay for the error dialog and a debug export, until the next Start.
-  const stopped = computed(() => hostError.value !== null || halting.value);
-  const held = computed(() => inspecting.value || drawPending.value || stopped.value);
   // Debug's random control (`session/useRandomControl.ts`).
   const random = useRandomControl({
     bridgeNow: () => bridge,
@@ -710,11 +716,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     randomTried,
     randomRevision,
   } = random;
-  // The session as other parts of the Player service it: none while a restored state is inspected or a draw is paused.
-  const servicedSession = computed(() => (held.value ? null : session.value));
-  // A new session remounts the transcript and resets interaction-local state.
-  const generation = ref(0);
-  const interactionReset = ref(0);
   // The transcript revision through which the session's transcript shows directly, as history: what development time
   // jumps published. -1 for none in this generation.
   const jumpedRevision = ref(-1);
