@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -119,6 +119,87 @@ test(
       const selected = report("src/wide");
       assert.match(selected, /^Folders over 20 files: 1\n {2}22 {2}src\/wide\/$/mu);
       assert.match(selected, /^Top levels over 12 files: 0$/mu);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "--diff reads the change as Git reports it, whatever the files are named and however the user's Git is configured",
+  { timeout: 60_000 },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "structure-report-names-"));
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    try {
+      git("init", "-q");
+      git("config", "user.email", "t@t");
+      git("config", "user.name", "t");
+      // a configuration that changes what `git diff` prints: an external diff that prints nothing, a textconv driver
+      // that doubles every line, no or other prefixes, relative paths and colour
+      for (const [key, value] of [
+        ["diff.external", "true"],
+        ["diff.dup.textconv", "sed p"],
+        ["diff.noprefix", "true"],
+        ["diff.mnemonicPrefix", "true"],
+        ["diff.relative", "true"],
+        ["color.ui", "always"],
+      ])
+        git("config", key, value);
+      const NAMES = [
+        "src/space name.ts",
+        "src/tab\tname.ts",
+        'src/quote"name.ts',
+        "src/new\nline.ts",
+        "src/café.ts",
+        "src/-dash.ts",
+        "src/[bracket].ts",
+      ];
+      write(root, {
+        ".gitattributes": "*.ts diff=dup\n",
+        ...Object.fromEntries(NAMES.map((name) => [name, lines(1001)])),
+        "src/shrink.ts": lines(1003),
+        "src/header.ts": `export const t = \`\nfirst\n\`;\n${longFunction("written", 160)}\n`,
+        "outside/moving.ts": lines(400),
+      });
+      git("add", "-A");
+      git("commit", "-q", "-m", "base");
+      const base = git("rev-parse", "HEAD");
+      write(root, {
+        // one line more in each named file
+        ...Object.fromEntries(
+          NAMES.map((name) => [name, `${lines(1001)}\nexport const added = 1;`]),
+        ),
+        // one line fewer: a deletion-only hunk adds nothing
+        "src/shrink.ts": lines(1003).replace("export const x500 = 500;\n", ""),
+        // an added line that the patch shows as `+++ b/denominator.ts;`, and a line written in the function below it
+        "src/header.ts": readFileSync(join(root, "src/header.ts"), "utf8")
+          .replace("first", "++ b/denominator.ts;")
+          .replace("const v5 = 5;", "const v5 = 55;"),
+      });
+      // a move from outside the roots into src/: no lines added
+      renameSync(join(root, "outside/moving.ts"), join(root, "src/arrived.ts"));
+      git("add", "-A");
+      git("commit", "-q", "-m", "change");
+
+      const result = spawnSync(
+        process.execPath,
+        [tool, "--diff", base, "--json", join(root, "change.json")],
+        { cwd: root, encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      const json = JSON.parse(readFileSync(join(root, "change.json"), "utf8"));
+      const shown = (name) => (/[\t\n]/u.test(name) ? JSON.stringify(name) : name);
+      assert.deepEqual(
+        json.change.map(({ line }) => line).sort(),
+        [
+          "function over 150 lines that the change writes into: src/header.ts:4 written (160 lines)",
+          ...NAMES.map(
+            (name) =>
+              `file over 1000 lines that the change adds to: ${shown(name)} (1002, was 1001)`,
+          ),
+        ].sort(),
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

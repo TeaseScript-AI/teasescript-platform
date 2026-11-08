@@ -286,7 +286,7 @@ test("the lists count their entries, the structure signals come from structure-r
     [3, 2, 1, 0, 7],
   );
   assert.deepEqual([c.largeFiles, c.broadFolders, c.longFunctions], [1, 1, 1]);
-  assert.deepEqual(c.largestFile, { file: "src/big.ts", lines: 1103 });
+  assert.deepEqual(c.largestFile, { file: "src/big.ts", lines: 1102 });
   assert.deepEqual(c.longestFunction, { file: "src/big.ts", name: "big", lines: 1102 });
   assert.equal(result.commit, git(fixture.root, "rev-parse", "HEAD"));
   const text = run(fixture.root);

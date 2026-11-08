@@ -5,21 +5,31 @@
 //   node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]
 //   node tools/structure-report.mjs [ROOT…] --diff BASE [--json FILE]
 //
-// ROOT selects what is read, by default the five components: src, player, tests, tools and playground. A component's top
-// level is the code files directly in it; no other folder counts as a top level, whichever ROOT selects it. Only files
-// Git tracks are read. A file's lines are counted as an editor shows them: a final newline ends the last line. Functions are measured in
-// TypeScript and JavaScript files; the script blocks of .vue files are not parsed.
+// ROOT selects what is read, by default the five components: src, player, tests, tools and playground. A component's
+// top level is the code files directly in it; no other folder counts as a top level, whichever ROOT selects it. Only
+// files Git tracks are read. A file's lines are counted as an editor shows them: a final newline ends the last line.
+// Functions are measured in TypeScript and JavaScript files; the script blocks of .vue files are not parsed.
 //
 // Without --diff: the whole tree's signals, the top N of each (files over 1000 lines, folders over 20 files, top levels
 // over 12, functions over 150 lines, names a letter apart). --json writes them all; --compare counts each against an
 // earlier --json.
 //
-// With --diff BASE: only the signals the change since the merge base (`git merge-base BASE HEAD`) adds to, each
-// against the merge base's tree: a file over 1000 lines that it adds lines to, a function over 150 lines whose lines
-// include one it adds, a folder over 20 files or a top level over 12 that it adds a file to, a pair of names a letter
-// apart that the merge base did not have, and a file gaining over 300 lines. A change adds to a signal whether it crosses the line or the base
-// was already over it. A file it only moves (Git's rename detection) adds no lines and no file. Only the changed files
-// are parsed. --json writes those lines too, for a READY to quote.
+// With --diff BASE: only the signals the change since the merge base (`git merge-base BASE HEAD`) adds to, each against
+// the merge base's tree: a file over 1000 lines that it adds lines to, a function over 150 lines whose lines include
+// one it adds, a folder over 20 files or a top level over 12 that it adds a file to, a pair of names a letter apart
+// that the merge base did not have, and a file gaining over 300 lines. A change adds to a signal whether it crosses the
+// line or the base was already over it. Only the changed files are parsed. --json writes those lines too, for a READY
+// to quote.
+//
+// What the change is, is Git's: its files, their status and their names at the merge base come from `git diff -z -M
+// --name-status` over the whole tree, so a file moved in from outside the roots is a move; the lines it adds, by file
+// and position, are those the hunk headers of each file's own `git diff -M -U0` report, and their count per file is
+// `git diff --numstat`'s, which the tool checks (exit 2 when they differ). Every `git diff` runs with --no-ext-diff,
+// --no-textconv, --no-color, --no-relative and the standard a/ and b/ prefixes, whatever the user's Git configuration
+// says. Git's rename detection decides what a move is: a file it only moves adds no lines and no file, and an edited
+// move below its similarity threshold (50% by default) counts as a deletion and an addition.
+//
+// Exit status: 0 when the report is printed, 2 when --diff's hunks and --numstat disagree.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -132,77 +142,144 @@ const listedAt = (ref) =>
     .split("\0")
     .filter((f) => f && CODE.test(f));
 
+/** `git diff` with its output pinned against the user's configuration: no external diff or textconv driver, no colour,
+ * the standard prefixes, paths from the top folder. */
+const gitDiff = (...diffArgs) =>
+  git(
+    "-c",
+    "diff.noprefix=false",
+    "-c",
+    "diff.mnemonicPrefix=false",
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-color",
+    "--no-relative",
+    ...diffArgs,
+  );
+
+/** Why the report cannot be trusted: exit 2. */
+class CannotRun extends Error {}
+
+/** A name as the report prints it: as is, or quoted when it holds a control character such as a newline or tab. */
+const shown = (file) =>
+  [...file].some((character) => character < " " || character === "\u007f")
+    ? JSON.stringify(file)
+    : file;
+
+/** Whether the sorted line numbers `lines` hold one from `from` to `to`, both included. */
+function holdsLineIn(lines, from, to) {
+  let [low, high] = [0, lines.length];
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (lines[middle] < from) low = middle + 1;
+    else high = middle;
+  }
+  return low < lines.length && lines[low] <= to;
+}
+
 /** The signals the change since `base` adds to, each `{ signal, line }` with the line the report prints. */
 function changeSignals(base) {
   const mergeBase = git("merge-base", base, "HEAD").trim();
   const headFiles = listedAt();
   const baseFiles = listedAt(mergeBase);
-  const status = git("diff", "-M", "--name-status", "-z", mergeBase, "--", ...roots).split("\0");
-  // the files the change adds (not those it only renames), and each changed file's name at the base
-  const addedFiles = [];
-  const before = new Map();
+  const headSet = new Set(headFiles);
+  const selected = (file) =>
+    roots.some((root) => root === "." || file === root || file.startsWith(`${root}/`));
+
+  // Names and status come only from Git's NUL-separated list, over the whole tree, so that a file moved in from outside
+  // the roots is a move: each changed file's status and its name at the merge base.
+  const status = gitDiff("-M", "--name-status", "-z", mergeBase).split("\0");
+  const changes = [];
   for (let i = 0; i < status.length - 1;) {
     const code = status[i];
-    if (code.startsWith("R") || code.startsWith("C")) {
-      before.set(status[i + 2], status[i + 1]);
-      if (code.startsWith("C")) addedFiles.push(status[i + 2]);
+    if (code.startsWith("R")) {
+      changes.push({ code: "R", file: status[i + 2], old: status[i + 1] });
       i += 3;
     } else {
-      if (code === "A") addedFiles.push(status[i + 1]);
-      if (code === "M") before.set(status[i + 1], status[i + 1]);
+      changes.push({ code, file: status[i + 1], old: code === "A" ? null : status[i + 1] });
       i += 2;
     }
   }
-  // each file's added line numbers, on its side in HEAD
-  const addedLines = new Map();
-  let current = null;
-  for (const line of git("diff", "-M", "-U0", "--no-color", mergeBase, "--", ...roots).split(
-    "\n",
-  )) {
-    if (line.startsWith("+++ ")) current = line === "+++ /dev/null" ? null : line.slice(6);
-    const hunk = /^@@ -\S+ \+(\d+)(?:,(\d+))? @@/.exec(line);
-    if (hunk && current !== null) {
-      const [start, count] = [Number(hunk[1]), Number(hunk[2] ?? 1)];
-      if (!addedLines.has(current)) addedLines.set(current, []);
-      for (let n = start; n < start + count; n++) addedLines.get(current).push(n);
+  // Git's own count of each file's added lines (`-` for a binary file), the check on the hunks read below.
+  const numstat = gitDiff("-M", "--numstat", "-z", mergeBase).split("\0");
+  const gitAdded = new Map();
+  for (let i = 0; i < numstat.length - 1;) {
+    const [added, , ...name] = numstat[i].split("\t");
+    const file = name.join("\t");
+    if (file === "") {
+      gitAdded.set(numstat[i + 2], added);
+      i += 3;
+    } else {
+      gitAdded.set(file, added);
+      i += 1;
     }
   }
-  const changed = [...addedLines.keys()].filter(
-    (file) => CODE.test(file) && headFiles.includes(file),
-  );
-  const baseLines = (file) => {
-    const old = before.get(file);
-    return old === undefined ? 0 : lineCount(git("show", `${mergeBase}:${old}`));
+  /** The line numbers `change` adds to its file, from the hunk headers of the file's own patch, in order. */
+  const addedLinesOf = (change) => {
+    const paths = change.code === "R" ? [change.old, change.file] : [change.file];
+    const patch = gitDiff(
+      "-M",
+      "-U0",
+      mergeBase,
+      "--",
+      ...paths.map((file) => `:(literal)${file}`),
+    );
+    const lines = [];
+    // a payload line starts with `+`, `-`, ` ` or `\`, so a line starting `@@ ` is a hunk header
+    for (const line of patch.split("\n")) {
+      const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/u.exec(line);
+      if (hunk === null) continue;
+      const [start, count] = [Number(hunk[1]), Number(hunk[2] ?? 1)];
+      for (let n = start; n < start + count; n++) lines.push(n);
+    }
+    const counted = gitAdded.get(change.file);
+    if (String(lines.length) !== (counted === "-" ? "0" : counted))
+      throw new CannotRun(
+        `structure-report: the hunks of ${shown(change.file)} add ${lines.length} lines, but git diff --numstat counts ${counted}: the patch was not read as Git wrote it`,
+      );
+    return lines;
   };
 
   const found = [];
-  for (const file of changed.sort()) {
+  const relevant = changes
+    .filter(
+      ({ code, file }) => code !== "D" && selected(file) && CODE.test(file) && headSet.has(file),
+    )
+    .sort((one, other) => (one.file < other.file ? -1 : one.file > other.file ? 1 : 0));
+  for (const change of relevant) {
+    const { file } = change;
+    const added = addedLinesOf(change);
+    if (added.length === 0) continue;
     const text = readFileSync(file, "utf8");
     const lines = lineCount(text);
-    const added = addedLines.get(file).length;
-    if (lines > SIGNALS.fileLines)
+    if (lines > SIGNALS.fileLines) {
+      const was =
+        change.old === null ? 0 : lineCount(git("cat-file", "blob", `${mergeBase}:${change.old}`));
       found.push({
         signal: "file",
-        line: `file over ${SIGNALS.fileLines} lines that the change adds to: ${file} (${lines}, was ${baseLines(file)})`,
+        line: `file over ${SIGNALS.fileLines} lines that the change adds to: ${shown(file)} (${lines}, was ${was})`,
       });
-    if (PARSED.test(file)) {
-      const written = new Set(addedLines.get(file));
+    }
+    if (PARSED.test(file))
       for (const fn of longFunctionsOf(file, text))
-        if ([...written].some((n) => n >= fn.line && n < fn.line + fn.lines))
+        if (holdsLineIn(added, fn.line, fn.line + fn.lines - 1))
           found.push({
             signal: "function",
-            line: `function over ${SIGNALS.functionLines} lines that the change writes into: ${file}:${fn.line} ${fn.name} (${fn.lines} lines)`,
+            line: `function over ${SIGNALS.functionLines} lines that the change writes into: ${shown(file)}:${fn.line} ${fn.name} (${fn.lines} lines)`,
           });
-    }
-    if (added > SIGNALS.addedLines)
+    if (added.length > SIGNALS.addedLines)
       found.push({
         signal: "added",
-        line: `file gaining over ${SIGNALS.addedLines} lines: +${added} ${file}`,
+        line: `file gaining over ${SIGNALS.addedLines} lines: +${added.length} ${shown(file)}`,
       });
   }
+  // a new file adds to its folder; a moved one does not
   const [headFolders, baseFolders] = [folderCounts(headFiles), folderCounts(baseFiles)];
   const grownFolders = new Set(
-    addedFiles.filter((file) => CODE.test(file)).map((file) => path.dirname(file)),
+    changes
+      .filter(({ code, file }) => code === "A" && selected(file) && CODE.test(file))
+      .map(({ file }) => path.dirname(file)),
   );
   for (const dir of [...grownFolders].sort()) {
     const count = headFolders.get(dir) ?? 0;
@@ -211,27 +288,34 @@ function changeSignals(base) {
       if (count > SIGNALS.topLevelFiles)
         found.push({
           signal: "top level",
-          line: `top level over ${SIGNALS.topLevelFiles} files that the change adds to: ${dir}/ (${count}, was ${was})`,
+          line: `top level over ${SIGNALS.topLevelFiles} files that the change adds to: ${shown(dir)}/ (${count}, was ${was})`,
         });
     } else if (count > SIGNALS.folderFiles)
       found.push({
         signal: "folder",
-        line: `folder over ${SIGNALS.folderFiles} files that the change adds to: ${dir}/ (${count}, was ${was})`,
+        line: `folder over ${SIGNALS.folderFiles} files that the change adds to: ${shown(dir)}/ (${count}, was ${was})`,
       });
   }
-  const key = ({ dir, names }) => `${dir}\n${names.join("\n")}`;
+  const key = ({ dir, names }) => JSON.stringify([dir, ...names]);
   const basePairs = new Set(nearNamesOf(baseFiles).map(key));
   for (const pair of nearNamesOf(headFiles))
     if (!basePairs.has(key(pair)))
       found.push({
         signal: "names",
-        line: `names a letter apart: ${pair.dir}/: ${pair.names.join("  ")}`,
+        line: `names a letter apart: ${shown(pair.dir)}/: ${pair.names.map(shown).join("  ")}`,
       });
   return found;
 }
 
 if (diffBase) {
-  const found = changeSignals(diffBase);
+  let found;
+  try {
+    found = changeSignals(diffBase);
+  } catch (error) {
+    if (!(error instanceof CannotRun)) throw error;
+    console.error(error.message);
+    process.exit(2);
+  }
   const header = `structure signals this change adds to against ${diffBase}`;
   if (found.length === 0) console.log(`${header}: none`);
   else {
