@@ -35,7 +35,8 @@
 // count; rename detection's similarity threshold (50% by default) and its limit decide what a move is, so an edited
 // move below them counts as a deletion and an addition; and attributes can make a file binary, which adds no lines.
 //
-// Exit status: 0 when the report is printed, 2 when --diff cannot read the change as Git wrote it.
+// Exit status: 0 when the report is printed; 2, with the usage, when --top, --json, --compare or --diff has no value
+// (it is the last argument, or the next one starts with `--`); 2 when --diff cannot read the change as Git wrote it.
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -53,11 +54,18 @@ const COMPONENTS = ["src", "player", "tests", "tools", "playground"];
 const CODE = /\.(ts|tsx|mts|cts|js|mjs|cjs|vue)$/;
 const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/;
 
+const USAGE = `usage: node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]
+       node tools/structure-report.mjs [ROOT…] --diff BASE [--json FILE]`;
 const args = process.argv.slice(2);
+/** The value after `name`, removed from `args` with it; a missing value ends the run (exit 2), so nothing is skipped. */
 const option = (name) => {
   const i = args.indexOf(name);
   if (i < 0) return undefined;
   const value = args[i + 1];
+  if (value === undefined || value.startsWith("--")) {
+    console.error(`structure-report: ${name} takes a value\n${USAGE}`);
+    process.exit(2);
+  }
   args.splice(i, 2);
   return value;
 };

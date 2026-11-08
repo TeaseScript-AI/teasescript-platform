@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -372,5 +380,35 @@ test("a name that is not UTF-8, and hunks that --numstat does not count, stop th
   } finally {
     rmSync(named.root, { recursive: true, force: true });
     rmSync(counted.root, { recursive: true, force: true });
+  }
+});
+
+test("an option without its value stops the report with the usage, and writes nothing", () => {
+  const root = mkdtempSync(join(tmpdir(), "structure-report-"));
+  const usage =
+    "usage: node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]\n" +
+    "       node tools/structure-report.mjs [ROOT…] --diff BASE [--json FILE]\n";
+  try {
+    for (const [args, missing] of [
+      [["--top"], "--top"],
+      [["--json"], "--json"],
+      [["--compare"], "--compare"],
+      [["--diff"], "--diff"],
+      [["src", "--json"], "--json"],
+      [["--json", "--top", "3"], "--json"],
+      [["--diff", "--json", "out.json"], "--diff"],
+    ]) {
+      const result = spawnSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+      assert.equal(result.status, 2, args.join(" "));
+      assert.equal(result.stdout, "", args.join(" "));
+      assert.equal(
+        result.stderr,
+        `structure-report: ${missing} takes a value\n${usage}`,
+        args.join(" "),
+      );
+      assert.deepEqual(readdirSync(root), [], `${args.join(" ")}: nothing is written`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
