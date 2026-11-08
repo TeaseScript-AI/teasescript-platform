@@ -4195,14 +4195,16 @@ test("a publication run's unit limit grants its oracle's units per cell its ques
  * A built tree's library whose publication answers every source alike, without the grant's exports where `bare`. Where
  * `heavy`: `heavy` in the source-order sharing-on mode leaves 82 % of its process's heap limit held after it returns,
  * which the run's end sample alone sees (it charges under one sampling step); `late` in the reversed sharing-on mode
- * holds as much while it charges 70,000 units (past one step), then lets go. Where `aborting`, `late` in the
- * source-order sharing-off mode ends the process as V8's heap abort does. Each call first lets go of what an earlier
- * one held and collects, so a run starts low.
+ * holds as much while it charges 70,000 units (past one step), then lets go, as `both` does in the source-order
+ * sharing-on mode. Where `aborting`, `late` in the source-order sharing-off mode ends the process as V8's heap abort
+ * does; where `dying`, `both` in the source-order sharing-on mode does. Each call first lets go of what an earlier one
+ * held and collects, so a run starts low.
  */
 const peakLibrary = (
   heavy: boolean,
   bare: boolean,
   aborting: boolean,
+  dying = false,
 ): string => `import { writeSync } from "node:fs";
 import { getHeapStatistics } from "node:v8";
 import { WorkLedger } from "../../src/type-inference/core/budget.js";
@@ -4223,14 +4225,21 @@ export function publicationHashes(files, mode) {
   }
   const source = files[0].source;
   const ledger = new WorkLedger(1000000);
-  if (${aborting} && source === "late" && mode.unshared && !mode.reversed) {
+  if (
+    (${aborting} && source === "late" && mode.unshared && !mode.reversed) ||
+    (${dying} && source === "both" && !mode.unshared && !mode.reversed)
+  ) {
     writeSync(2, "FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory\\n");
     process.exit(134);
   }
   if (${heavy} && source === "heavy" && !mode.reversed && !mode.unshared) {
     globalThis.heldByPeakLibrary = filled();
     ledger.charge("frames", 300);
-  } else if (${heavy} && source === "late" && mode.reversed && !mode.unshared) {
+  } else if (
+    ${heavy} &&
+    ((source === "late" && mode.reversed && !mode.unshared) ||
+      (source === "both" && !mode.reversed && !mode.unshared))
+  ) {
     let held = filled();
     ledger.charge("frames", 70000);
     held = null;
@@ -4254,10 +4263,16 @@ test("a run's peak heap is near the cap past 80 % of V8's heap limit, a syntheti
   assert.equal(isNearCap(null, 2144), false);
 });
 
-test("the runner records each run's peak heap, counts and names a source near the cap on its tree, its end sample's or its step's, the head's alone after a base crash among them, without making it a stall or changing the exit status, and names what each tree's build lacks (the checks proposal's items 25 and 26)", () => {
+test("the runner records each run's peak heap, counts and names a source near the cap on its tree, its end sample's or its step's, the head's alone after a base crash and a base's before a head crash among them, without making it a stall or changing the exit status, and names what each tree's build lacks (the checks proposal's items 25 and 26)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
-    const built = (name: string, heavy: boolean, bare: boolean, aborting: boolean) => {
+    const built = (
+      name: string,
+      heavy: boolean,
+      bare: boolean,
+      aborting: boolean,
+      dying = false,
+    ) => {
       const tree = join(directory, name);
       mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
       mkdirSync(join(tree, "dist", "src", "type-inference", "core"), { recursive: true });
@@ -4265,13 +4280,13 @@ test("the runner records each run's peak heap, counts and names a source near th
       writeFileSync(join(tree, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
       writeFileSync(
         join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
-        peakLibrary(heavy, bare, aborting),
+        peakLibrary(heavy, bare, aborting, dying),
       );
       return tree;
     };
     const base = built("base", false, true, true);
     const head = built("head", true, false, false);
-    const ran = (name: string, cases: string[]) => {
+    const ran = (name: string, cases: string[], trees = [base, head]) => {
       const folder = join(directory, name);
       mkdirSync(folder);
       writeFileSync(
@@ -4282,7 +4297,7 @@ test("the runner records each run's peak heap, counts and names a source near th
       const work = join(directory, `${name}.work.jsonl`);
       const result = spawnSync(
         process.execPath,
-        [runner, folder, base, head, "--memory", "512", "--out", out, "--work", work],
+        [runner, folder, ...trees, "--memory", "512", "--out", out, "--work", work],
         { encoding: "utf8" },
       );
       const read = (file: string) =>
@@ -4356,6 +4371,20 @@ test("the runner records each run's peak heap, counts and names a source near th
         ["rev-off", false],
       ],
     );
+
+    // (a base's peak on a run whose head then aborted: kept from the head's start, counted as the base's; the head's
+    // crash alone, so exit 3)
+    const third = ran(
+      "third",
+      ["both"],
+      [built("heavy-base", true, true, false), built("dying-head", false, false, false, true)],
+    );
+    assert.equal(third.status, 3, third.stderr);
+    assert.deepEqual(third.total.crashed, { base: 0, head: 1 });
+    assert.deepEqual(third.total.nearCap, { base: 1, head: 0 });
+    assert.deepEqual(third.out.filter((line) => line.nearCap !== undefined).map(runsOf), [
+      [["src-on", "publication", "base"]],
+    ]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

@@ -453,7 +453,9 @@ if (process.argv[2] === "--child") {
         const used = { work: [], allowance: [], ms: [], questions: [], peak: [] };
         const results = [];
         for (const tree of trees.keys()) {
-          await sent({ start: { run: index, tree, mode: label, check } });
+          // (with the peaks of the trees that ended this run, so that a stall on a later tree keeps them)
+          const peaks = used.peak.length === 0 ? {} : { peaks: [...used.peak] };
+          await sent({ start: { run: index, tree, mode: label, check, ...peaks } });
           results.push(counted(seq, index, tree, label, check, run, used));
         }
         index += 1;
@@ -1174,12 +1176,20 @@ if (process.argv[2] === "--child") {
       if (crashes.base) row.crashed.base += 1;
       if (crashes.head) row.crashed.head += 1;
       if (crashes.head && !crashes.base) headOnly += 1;
-      // (each ended run whose peak heap on a tree is near its process's cap, the head's runs alone after the base's
-      // crash among them: advisory, counted a source a tree and named in `--out`, never a stall or an exit status)
+      // (each ended run whose peak heap on a tree is near its process's cap, a tree's that ended a run a stall then cut
+      // on a later tree and the head's runs alone after the base's crash among them: advisory, counted a source a tree
+      // and named in `--out`, never a stall or an exit status)
       const near = [
         ...reply.spent.flatMap(({ mode, check, peak = [] }) =>
           peak.map((mib, at) => ({ mode, check, tree: treeNames[at], peak: mib })),
         ),
+        // (the trees that ended the run a stall cut, before the tree it was on)
+        ...(reply.cutAt?.peaks ?? []).map((mib, at) => ({
+          mode: reply.cutAt.mode,
+          check: reply.cutAt.check,
+          tree: treeNames[at],
+          peak: mib,
+        })),
         ...(afterBase ?? [])
           .filter(({ peak }) => peak !== undefined)
           .map(({ mode, check, peak }) => ({ mode, check, tree: "head", peak })),
