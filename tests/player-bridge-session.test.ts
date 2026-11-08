@@ -299,7 +299,7 @@ test("a deadline observation that loses to an op has no effect: state, events, d
 /** Another module's key named as the ticket's is: a value keyed by it is no ticket. */
 const foreignTicketKey: unique symbol = Symbol("ClockTicket");
 
-test("only the scene clock's ticket opens a section, at the bridge and at its client (#1983)", () => {
+test("a section without a clock ticket fails type-checking at both levels; a check-disabling construct or a ticket a client wrapper kept is not decided (#1983)", () => {
   // Typed, never called: what the type check decides. Where a ticket came from it does not decide (`ClockTicket`).
   const typed = (
     bridge: PlayerBridge,

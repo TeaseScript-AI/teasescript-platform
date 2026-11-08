@@ -12,12 +12,14 @@ import { isDeepStrictEqual } from "node:util";
  * boundary member the tables do not hold fails, and so does a row nothing matches.
  *
  * What it claims: the entry points the clock's literal oracle drives (`player-clock-work.test.ts`, the five `ClockWork`
- * rows' entry points and development time's skip and auto-skip) are found and classified. Sections are not walked. A
- * sender that omits the scene clock fails type-checking, from `.ts` and from `.vue` (`vue-tsc`): `PlayerBridge.section`
- * and `BridgeClient.section` take a `ClockTicket`, which only the clock's unexported mint makes, under a `SectionWork`
- * row (#1983). Making a ticket outside the clock takes a construct that switches the check off: a cast, `any` (implicit
- * too, as `JSON.parse`'s), a non-null assertion, a type guard or assertion function, an overload, an ambient
- * declaration, or a suppression directive. The type-assertion `EVIDENCE:` rule sees only `as` and `<T>` casts.
+ * rows' entry points and development time's skip and auto-skip) are found and classified. Sections are not walked
+ * (#1983). The type decides one thing: a sender passes a `ClockTicket` to either section API; leaving it out fails
+ * type-checking in `.ts` and in an SFC. It does not decide where the ticket came from. Code outside the clock gets one
+ * in two ways, both deliberately written: by a construct that switches the check off (a cast; `any`, including
+ * `JSON.parse`'s; a non-null assertion; a type guard or assertion function; an overload; an ambient declaration; a
+ * suppression directive), or by keeping the ticket the clock passes to a `BridgeClient` it implements or wraps (Sol
+ * code r1 B1, job 11081923449b44). The ticket guards against a sender that forgets the clock, not against code written
+ * to bypass it. The type-assertion `EVIDENCE:` rule sees only `as` and `<T>` casts (#2042).
  * Requests, signals and facade sends are walked in the `.ts` files under `player/`; a `.vue` caller through a
  * session's `connection` is outside the walk (#2041).
  */
@@ -72,7 +74,8 @@ const CLOCK = "player/vue/src/useRuntimeSceneClock.ts";
 /** Every public member of `BridgeClient`: what sends to the host unguarded, what takes the clock's ticket, and what does not send. */
 const CLIENT_MEMBERS = {
   sending: ["request", "signal"],
-  // A section takes a `ClockTicket`, so the type decides that the clock opens it (#1983); the walk does not follow it.
+  // A section takes a `ClockTicket`: leaving it out fails type-checking, so the walk does not follow it (#1983).
+  // Where a ticket came from it does not decide: a check-disabling construct, or one a `BridgeClient` wrapper kept.
   ticketed: ["section"],
   // The Worker's end and its loss listener send no session work.
   nonSending: ["terminate", "onLoss"],
