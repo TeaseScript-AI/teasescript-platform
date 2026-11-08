@@ -27,7 +27,7 @@ import {
   ownReadItem,
   wholeBelow,
 } from "./admission/ingress.js";
-import { copyGraph } from "./inherited/inherited.js";
+import { copyGraph, inheritedProofOf } from "./inherited/inherited.js";
 import { typedByDefault } from "./admission/landing-index.js";
 import {
   joinElements,
@@ -164,6 +164,14 @@ function packetPath(packet: KeyPacketMaking, index: number): readonly string[] {
   return steps.reverse();
 }
 
+/** The runs `Admission.run` refused inside a solver run (#1072 A2): none over the corpora. */
+let runsInsideSolverRuns = 0;
+
+/** `runsInsideSolverRuns`, for the tests that count them over a corpus. */
+export function admissionRunsInsideSolverRuns(): number {
+  return runsInsideSolverRuns;
+}
+
 /**
  * A public method whose body lives in `admission/` delegates to the function of its name there; the members those
  * functions read are public for them, and internal to admission.
@@ -221,9 +229,6 @@ export class Admission {
   get inheriting(): ReceivingDomain["inheriting"] {
     return this.pass.receivingDomain.inheriting;
   }
-  get inherited(): ReceivingDomain["inherited"] {
-    return this.pass.receivingDomain.inherited;
-  }
   get inheritedOwn(): ReceivingDomain["inheritedOwn"] {
     return this.pass.receivingDomain.inheritedOwn;
   }
@@ -241,12 +246,6 @@ export class Admission {
   }
   get termLevels(): ReceivingDomain["termLevels"] {
     return this.pass.receivingDomain.termLevels;
-  }
-  get resolving(): boolean {
-    return this.pass.receivingDomain.resolving;
-  }
-  set resolving(value: boolean) {
-    this.pass.receivingDomain.resolving = value;
   }
   readonly whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
@@ -464,6 +463,7 @@ export class Admission {
   ) {
     // (A4's state is the pass's, made afresh for this admission: TABLE r4.375)
     pass.receivingDomain.reset();
+    pass.receivingDomain.replayProof = (key) => inheritedProofOf(this, key);
     const { definitions, program } = pass;
     this.deciderCaches = {
       deciders: this.deciders,
@@ -562,6 +562,14 @@ export class Admission {
   }
 
   public run<T>(work: Work<T>): T {
+    // (a run inside a solver run is a read an inherited proof's run did not yield: refused, and counted for the tests'
+    // corpora, #1072 A2)
+    if (this.pass.solver.running) {
+      runsInsideSolverRuns += 1;
+      throw new Error(
+        "Admission ran a computation inside a solver run (#1072 A2): yield it as a read.",
+      );
+    }
     return this.host.run(work);
   }
 

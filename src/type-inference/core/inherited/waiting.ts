@@ -14,7 +14,7 @@ import { permittedAt } from "../admission/permitted.js";
 // The decisions that wait on each other through copies (a union-find by key), and what a scan reads of an inherited type.
 
 /**
- * What `from` inherits at `path` (`inheritedAt`) as a scan asks it: known, or the key it waits on yielded, past the
+ * What `from` inherits at `path` (`inheritedAt`) as a scan asks it: the key it waits on yielded, past the
  * deepest path a written type reaches its path's prefix there.
  */
 function* inheritedSteps(
@@ -32,9 +32,8 @@ function* inheritedSteps(
     return above === null ? null : permittedAt(above, path.from(admission.reach));
   }
   const key = keyAtRef(contract, from, path);
-  const known = admission.inherited.get(key);
   // EVIDENCE: invariant: a key yielded is resumed with its inherited type.
-  const term = known !== undefined ? known : ((yield key) as TypeTerm | null);
+  const term = (yield key) as TypeTerm | null;
   // (#1901: whether its copy reads its written type at its own root, `Admission.inheritedOwn`, read at the key made
   // for the term, once it is resolved)
   if (own !== undefined) own.value = term !== null && admission.inheritedOwn.get(key) === true;
@@ -81,14 +80,6 @@ function cut(admission: Admission, a: CanonicalKey, b: CanonicalKey): boolean {
     admission.cycles.has(b) &&
     rootOf(admission, a) === rootOf(admission, b)
   );
-}
-
-/** A decision's cycle as it stands (`cycles`): its root and size, empty outside every cycle. */
-export function cycleOf(admission: Admission, asked: Key): string {
-  const key = canonicalKey(admission.pass.contract, asked);
-  if (!admission.cycles.has(key)) return "";
-  const root = rootOf(admission, key);
-  return `${admission.cycleSizes.get(root)!}:${root}`;
 }
 
 function rootOf(admission: Admission, key: CanonicalKey): CanonicalKey {
