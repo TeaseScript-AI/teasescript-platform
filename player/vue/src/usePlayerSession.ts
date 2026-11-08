@@ -907,10 +907,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     return stopped.value ? null : current;
   };
   /**
-   * A section of `current` that the clock opens for `work` (`clock.section`), with the clock's observation for that row:
-   * `null` once `current` no longer owns the UI, before or after it. The body receives liveness checks (`owned`); it
-   * rechecks them after each await, as what it sends is applied to the session's store and shown only while `current`
-   * owns the UI (`publishOwned`). `null` without `current`, or once a Player error stopped it.
+   * A section of `current` that the clock opens for `work` (`clock.section`), with that row's observation. Observing
+   * rows give `null` once `current` no longer owns the UI, before or after the observation; rows that observe nothing
+   * give the section's session. The body receives liveness checks (`owned`); it rechecks them after each await, as what
+   * it sends is applied to the session's store and shown only while `current` owns the UI (`publishOwned`). `null`
+   * without `current`, or once a Player error stopped it.
    */
   function ownedSection<T>(
     current: PlayerSession | null,
