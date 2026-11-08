@@ -25,6 +25,8 @@ import { OWNERSHIP_MODES, type Operated, type Ownership } from "./helpers/plan-j
 /** The host's modules, under this folder: the composable and every module of its `session/` folder. */
 const HOST_ROOT = "player/vue/src";
 const MAIN = "usePlayerSession.ts";
+/** The rewind's owner, whose adoption replaces the saved values. */
+const REWIND = "session/useSessionRewind.ts";
 const HOST_MODULES = () => [
   MAIN,
   ...readdirSync(resolve(process.cwd(), HOST_ROOT, "session"))
@@ -126,8 +128,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     ownStoredMedia: READ,
     readTransfer: TRANSFER,
     discardSessionReview: TRANSFER,
-    adoptShown: EDIT,
-    settleAdoption: EDIT,
     applySavedDataEdit: EDIT,
     clearScriptStorage: EDIT,
     "usePlayerSession.rememberScriptName": EDIT,
@@ -142,6 +142,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     applyDebugMode: SESSION,
     debugView: SESSION,
   },
+  "session/useSessionRewind.ts": { adoptShown: EDIT, settleAdoption: EDIT },
   "session/useSessionMedia.ts": { storeImageFile: EDIT, "useSessionMedia.watchMedia": SETUP },
   "session/useRandomControl.ts": {
     useRandomControl: SETUP,
@@ -199,6 +200,8 @@ const DERIVED: Readonly<Record<string, string>> = {
   keptScope: "the saved values' scope, a name: no store",
   exportCandidate:
     "a debug export's candidate, reading the media store's photos through `readPhoto`: it writes no store",
+  rewind:
+    "the rewind's owner, given the saved values: its adoption writes them, classified there (`settleAdoption`)",
 };
 
 /** The handles an ownership binds a raw resource with. */
@@ -937,8 +940,8 @@ function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: 
 test("an adoption's read reaches settleAdoption only from its two callbacks, with nothing chained after it, and settleAdoption begins with its ownership check", () => {
   const { reads, problems } = adoptionSettlements(
     ts.createSourceFile(
-      MAIN,
-      readFileSync(resolve(process.cwd(), HOST_ROOT, MAIN), "utf8"),
+      REWIND,
+      readFileSync(resolve(process.cwd(), HOST_ROOT, REWIND), "utf8"),
       ts.ScriptTarget.Latest,
       true,
     ),

@@ -186,14 +186,10 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "resume",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#7": [
-    "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
-  ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > tryOnScopeDispose:callback#3": [
-    "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
-  ],
+  "player/vue/src/session/useSessionRewind.ts useSessionRewind > followSessions > watch:callback#1":
+    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
+  "player/vue/src/session/useSessionRewind.ts useSessionRewind > followSessions > tryOnScopeDispose:callback":
+    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > importSavedData > owned:callback > commit:callback#2":
     ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback > replaceSession > admit:callback#1":
@@ -664,6 +660,21 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerSession.ts usePlayerSession {setDebugTracing}",
   "player/vue/src/session/useSessionMedia.ts useSessionMedia {ownedSection}",
   "player/vue/src/session/useSessionMedia.ts useSessionMedia {reportHostError}",
+  "player/vue/src/session/useSessionRewind.ts useSessionRewind > adoptRewound {adoptRewound}",
+  "player/vue/src/session/useSessionRewind.ts useSessionRewind > prepareInput {prepareInput}",
+  "player/vue/src/session/useSessionRewind.ts useSessionRewind > retireRewind {retireRewind}",
+  "player/vue/src/session/useSessionRewind.ts useSessionRewind {adoptRandom}",
+  "player/vue/src/session/useSessionRewind.ts useSessionRewind {applyDebugMode}",
+  "player/vue/src/session/useSessionRewind.ts useSessionRewind {reportHostError}",
+  "player/vue/src/session/useSessionRewind.ts useSessionRewind {settleUncontrolledDraw}",
+  "player/vue/src/session/useSessionRewind.ts useSessionRewind {showSession}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > adoptRandom {adoptRandom}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > applyDebugMode {applyDebugMode}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > settleUncontrolledDraw {settleUncontrolledDraw}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > showSession {showSession}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {adoptRewound}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {prepareInput}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {retireRewind}",
 ];
 
 /**

@@ -246,6 +246,7 @@ const SESSION_FILES: readonly string[] = [
   "player/vue/src/session/useRandomControl.ts",
   "player/vue/src/session/useDebugModeAndTrace.ts",
   "player/vue/src/session/useSessionMedia.ts",
+  "player/vue/src/session/useSessionRewind.ts",
 ];
 const ACTIVATION_FILES = [
   ...SESSION_FILES,

@@ -530,6 +530,8 @@ const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string,
       "return host.start(create.plan, startOptions, true, random, origin.begin)",
       "by kind: `startedSession`'s held plan",
     ],
+  ],
+  "player/vue/src/session/useSessionRewind.ts": [
     ["show: (next, paused) => showRewound(next, { paused })", "restore: the rewind owner's show"],
   ],
   "player/vue/src/useDebugRewind.ts": [],
@@ -547,6 +549,7 @@ const COMPOSABLE_FILES = [
   "player/vue/src/session/useRandomControl.ts",
   "player/vue/src/session/useDebugModeAndTrace.ts",
   "player/vue/src/session/useSessionMedia.ts",
+  "player/vue/src/session/useSessionRewind.ts",
 ] as const;
 /** The text of the session composable's files, one after another. */
 function composableText(): string {
@@ -589,9 +592,11 @@ test("every random-op sender in the composable is classified as adopting or not"
   assert.deepEqual(
     calls.map((line) => line.trim()),
     [
+      // The rewind owner's dependency, which forwards its adoption to the random control's.
+      "adoptRandom: (next) => adoptRandom(next),",
       "if (!paused) adoptRandom(next);",
-      "if (session.value !== null) adoptRandom(session.value);",
       "adoptRandom(continued, origin);",
+      "if (session.value !== null) adoptRandom(session.value);",
     ],
   );
 });
