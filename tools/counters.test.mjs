@@ -223,6 +223,7 @@ before(() => {
     "tools/oxlint/comment-forecasts-allowed.json": JSON.stringify([{}, {}]),
     "tools/oxlint/comment-declarations-waiting.json": JSON.stringify([{}]),
     "tools/oxlint/comment-external-names.json": JSON.stringify([]),
+    "tools/repository-checks/imports-waiting.json": JSON.stringify([{}, {}, {}, {}]),
     "tools/oxlint/comment-citations.json": JSON.stringify({
       "src/a.ts": { "#1": 2, "#2": 1 },
       "src/b.ts": { "#1": 4 },
@@ -288,12 +289,13 @@ test("the lists count their entries, the structure signals come from structure-r
       c.forecastsAllowed,
       c.declarationsWaiting,
       c.externalNames,
+      c.importsWaiting,
       c.citations,
     ],
-    [3, 2, 1, 0, 7],
+    [3, 2, 1, 0, 4, 7],
   );
   assert.deepEqual([c.largeFiles, c.broadFolders, c.longFunctions], [1, 1, 1]);
-  assert.deepEqual(c.largestFile, { file: "src/big.ts", lines: 1103 });
+  assert.deepEqual(c.largestFile, { file: "src/big.ts", lines: 1102 });
   assert.deepEqual(c.longestFunction, { file: "src/big.ts", name: "big", lines: 1102 });
   assert.equal(result.commit, git(fixture.root, "rev-parse", "HEAD"));
   const text = run(fixture.root);
@@ -311,6 +313,7 @@ test("a missing list is absent, and a list of another shape or a ROOT that is no
     "forecastsAllowed",
     "declarationsWaiting",
     "externalNames",
+    "importsWaiting",
     "citations",
   ])
     assert.equal(c[key], null, key);

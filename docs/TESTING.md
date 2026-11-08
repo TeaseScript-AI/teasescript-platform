@@ -36,11 +36,20 @@ not checked. Outside that claim, as the plugin does not read them as GitHub does
 forms (`?plain=1`, `?raw=1`, a folder's README anchors, a heading GitHub's sanitizer filters a tag from); the docs have
 none of them. A reference definition naming a missing file is reported even when no link uses it. A broken link fails
 `check:pretest` wherever it sits, so its fix belongs to whoever moved the file or renamed the heading, also in a file
-they did not touch. `npm run lint:design` and `npm run test:lint:design` check the [Player design
+they did not touch. `npm run check:imports` runs dependency-cruiser: cruising each tsconfig with the compiler's import
+elision, it reports no edge a rule forbids, and its graph has no value cycle outside the waiting list. The rules are the
+boundaries the architecture documents declare (`src/` imports no `player/`, `playground/` or package it is not admitted;
+the framework-independent `player/` no `player/vue/`); cycles through imports the compiler erases are counted, not
+refused. Not seen: a `<script src>` block, a `.js` file beside a same-name `.ts` (read as the `.js`), and a `.vue` file
+Vue's parser refuses (vue-tsc refuses it in CI). `tools/repository-checks/imports.mjs` lists the boundaries with their
+sources, the packages each area may import with their reasons, the generated-component exception, and what no document
+declares. `npm run lint:design` and `npm run test:lint:design` check the [Player design
 contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
-TypeScript compilation precedes UI work; compiled tests run only after all builds pass. Each command's output is
-printed together, including warnings. A failure stops the group and subsequent stages; SIGINT/SIGTERM also terminate
+TypeScript compilation precedes UI work; compiled tests run only after all builds pass, as many files at once as
+`node --test` runs, fewer under a cgroup memory limit: as many as fit at 3 GiB plus 640 MiB a file
+(`tools/test-files-at-once.mjs`). Each command's output is printed together, including warnings. A failure stops the
+group and subsequent stages; SIGINT/SIGTERM also terminate
 child process groups, escalating after a grace period. A command stopped this way is labelled `ABORTED`, not `FAIL`,
 and prints after the failed one. `npm run test:verification` checks scheduling, diagnostics and
 process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`).
@@ -68,8 +77,11 @@ Its `playerProfile` has person fields, which `playerProfile.petNames` reads and 
 copies, only when `--player-profile profile.json` gives a JSON object of them, such as
 `{"firstName": "Alex", "petNames": ["puppy"]}`. The probe is a developer aid, not a test.
 `npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
-`node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, format, oxlint, knip, the doc links, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash.
+`node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, format, oxlint, knip, the doc links, the imports, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash.
 `node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a tree hash only exists), and finds its unfilled placeholders (its header lists the rules); it never fetches.
+CI's "Structure signals (advisory)" step, after `check:pretest` in the job that runs it, prints
+`node tools/structure-report.mjs --diff HEAD^1`: the structure signals the change adds to, against the merge's first
+parent. It never fails; the plan or the review answers each signal.
 `node tools/ci-test-counts.mjs <run id>` prints a GitHub Actions run's node:test totals (tests, pass, fail, skipped) per job and step, read from `gh run view <run id> --log`, and their sum; `--log <file>` reads a saved log.
 `node tools/counters.mjs [ROOT] [--json]` counts a checkout's lint disables, `@ts-expect-error` and `@ts-ignore` directives, skipped and todo tests, shrink-only list entries and structure signals (its header defines each), for comparing them over time.
 
@@ -180,6 +192,13 @@ before it. An empty cell has no corpus yet.
 
 The compiler's shadow gate (`tests/families/shadow.mjs`) is a campaign run from the tree after merges and reported on
 the tracker issue; it is not a per-pull-request level.
+
+**Pinned work.** Some suites pin the core's exact work: totals, listed copy and construction sites, and work tables
+(`tools/repository-checks/pin-suites.mjs` lists them). A change under `src/type-inference/core/` runs all of them before
+it asks for review and before READY: `node tools/repository-checks/pin-suites.mjs --run`. A pin that moves is re-pinned
+only with its ground: the comment above it says how many units more or fewer and which change made them, and the
+reviewer checks that no part of the change is a repeated question, work the core already did once, done again. A change
+to a test helper lists only a suite whose pins it holds, not every suite that imports it.
 
 ## Test admission and consolidation
 

@@ -12,7 +12,7 @@ import { HandlerIndex } from "../../src/type-inference/core/handlers.js";
 import type { ContextWord, ItemTag } from "../../src/type-inference/core/items.js";
 import { pathKey, stablePath, type Narrowing } from "../../src/type-inference/core/narrowing.js";
 import { CoreProgram, type CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
-import { ReceivingDomain } from "../../src/type-inference/core/receiving-domain.js";
+import { ReceivingDomain } from "../../src/type-inference/core/inherited/receiving-domain.js";
 import { Solver, withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { Values } from "../../src/type-inference/core/values.js";
 

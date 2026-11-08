@@ -167,7 +167,8 @@ When something misleads you, or would mislead the next builder:
 The code's architecture is right by construction, not repaired after someone notices. It covers:
 
 - **Ownership:** each piece of state or behavior has one owning module, and a module's folder names its owner.
-- **Direction:** dependencies run one way, without cycles.
+- **Direction:** dependencies run one way, without cycles. `npm run check:imports` checks the declared import
+  boundaries and the cycles in dependency-cruiser's graph; its header defines the scope and the exceptions.
 - **Granularity:** one job per file. A file that gains a second job is split at that seam.
 - **Folders:** grouped by feature or owner, typically 5 to 20 files, never a folder per file. A new file never lands at
   the top level of a component that already has a folder for its concern; creating a missing folder is part of the
@@ -183,9 +184,11 @@ These signals each ask, in the plan or the review, for the seam or for the reaso
 - a file over 1,000 lines;
 - a pull request adding over 300 lines to one file;
 - a function over 150 lines;
-- a folder over 20 files, or a component's top level over 12.
+- a folder over 20 files, or a component's top level over 12 (the components are `src/`, `player/`, `tests/`, `tools/`
+  and `playground/`, and no other folder counts as a top level).
 
-`node tools/structure-report.mjs` lists them, with `--diff <base>` for what a change adds.
+`node tools/structure-report.mjs` lists them, with `--diff <base>` for the signals a committed change adds to, crossing a
+line or adding to one already over; CI prints that list on every pull request (`docs/TESTING.md`).
 
 Moving or splitting files is its own pull request on the light route. It changes no behavior, and its build output
 is byte-identical where the build allows it. The coordinator schedules it between packages, so that no open pull

@@ -248,7 +248,7 @@ test("the full suite's runner refuses a test runner option given to its Node ins
           assert.equal(refused.status, 1, `${label}: ${refused.stderr}`);
           assert.match(
             refused.stderr,
-            /runs \d+ files at once, as `node --test` does by default, and takes no test runner option/,
+            /runs \d+ files at once, as `node --test` does by default or fewer under a memory limit, and takes no test runner option/,
             label,
           );
           assert.doesNotMatch(refused.stdout, /ℹ tests/, label);

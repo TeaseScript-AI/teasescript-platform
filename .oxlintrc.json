@@ -91,6 +91,30 @@
     },
     {
       "files": [
+        "player/vue/src/AbTestsPanel.vue",
+        "player/vue/src/CodeBlock.vue",
+        "player/vue/src/ExportTextDialog.vue",
+        "player/vue/src/FloatingViewfinder.vue",
+        "player/vue/src/LayoutDebug.vue",
+        "player/vue/src/LockDialog.vue",
+        "player/vue/src/PasswordField.vue",
+        "player/vue/src/PathBreadcrumb.vue",
+        "player/vue/src/PlayerApp.vue",
+        "player/vue/src/PlayerToolsShell.vue",
+        "player/vue/src/PopupDialog.vue",
+        "player/vue/src/RandomDrawPicker.vue",
+        "player/vue/src/SessionEndDialog.vue",
+        "player/vue/src/StageRightRail.vue",
+        "player/vue/src/StorageEditDialog.vue",
+        "player/vue/src/ToolPanelHeader.vue",
+        "player/vue/src/components/ui/sidebar/SidebarProvider.vue"
+      ],
+      "rules": {
+        "anti-slop/require-safety-comment-for-type-assertion": "off"
+      }
+    },
+    {
+      "files": [
         "src/**/*.{ts,tsx,mts,cts}",
         "player/**/*.{ts,tsx,mts,cts}",
         "tests/helpers/**/*.{ts,tsx,mts,cts}"

@@ -5,6 +5,56 @@ are not in CI: before a type-core review round, the builder runs the affected ar
 and reports the counts (`docs/TESTING.md`, test admission). Each module under `tests/families/<area>/` reproduces the
 sources of one recorded evidence run (#1446), and `check.mjs` (in CI) checks that it does.
 
+## The runner's contract
+
+What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise; the sections below explain them.
+
+- **Defaults** (`DEFAULTS`, `baselines.mjs`):
+  - `--units 4` (`FAMILIES_UNITS`): a run stalls past 4 times its program's allowance, a publication run's question
+    grant added (below);
+  - `--timeout 1800` seconds a run (`FAMILIES_TIMEOUT`; 60 in CI), the safety net;
+  - `--memory 2048` MB of heap for each source's process. It is the process's own `--max-old-space-size`, so it holds
+    whatever heap `NODE_OPTIONS` sets, which holds for the runner's own process only. The usual source of a difference
+    is the central queue, which sets `--max-old-space-size` in `NODE_OPTIONS` on every job: the total line (on stdout,
+    and the work record's last line) carries `memory`, and beside it `nodeOptions.heapLimit`, the heap limit
+    `NODE_OPTIONS` alone gives a Node process, where `NODE_OPTIONS` changes the heap at all and that limit differs from a
+    source's process's. Each limit is V8's own, read by a probe process, so the runner reads no form of `NODE_OPTIONS`
+    itself; a failed probe is said so (`nodeOptions.probe`, #1956);
+  - `--allowances natural,16,256` for the stop runs.
+
+  A stored baseline is made at these defaults: its PLAN records them, and `--store` refuses others.
+
+- **A run's record** (`run-contract.mjs`, one module for the runner, the stall index and the store):
+  - why its oracle left questions unanswered: `questions`, `memory`, `read-depth`, `stopped`, or `unknown` from a library
+    that names none, each with the first node left or the binding where the answers' own questions stopped;
+  - its limit (`limitOf`): `units` × its allowance, plus, for a publication run, its oracle's 64 units for each cell its
+    questions returned, kept with the run as `questions`. A store writes and reads every run by the same limit.
+- **The total line** (stdout's last; `--work`'s last): the area, generators, sources, unparsed, stalled, exceptions,
+  unanswered, unansweredAlike, uncompared, uncharged, runs, differences, `crashed: {base, head}` (stalls that ended the
+  process, not the unit limit), modes, the unit multiple, the safety net in seconds, `memory` (with `nodeOptions` where
+  `NODE_OPTIONS` asked another heap) and the Node version.
+- **A stall's record** (`--out`, and the source's `--work` line): its reason (`units`, or how the process ended),
+  `at: {tree, mode, check}` (#1965): the tree it was on and the run it cut, each `null` where unknown (a stall between
+  runs, a stored base's crash), and, where the base's process ended, the head's own outcome on each later run
+  (`afterBase`). A stored shard's line keeps a stall over the unit limit's cut run as its certificate (`cut`).
+- **Exit codes:**
+  - 0: nothing differs, throws, stalls, is uncompared or uncharged, and every run left unanswered is left alike on both
+    trees (`unansweredAlike`);
+  - 1: something to read: a difference, an exception, a stall (a crash of the base among them), or a run left
+    unanswered, uncompared or uncharged;
+  - 3: the head crashed where the base did not, ahead of 1 (#1837's F24);
+  - 2: a refused usage or record.
+
+  `sx-job status` shows each but 0 as "failed".
+
+- **The evidence total** of a replay is `stalls.mjs`'s total over the shards' `--work` records. It names each area
+  complete only with its shards `0/N` to `N-1/N` of one plan, counts a repeated place once and refuses a shard given
+  twice; a sum of the shards' own totals counts each repeat. Its growth lines are advisory.
+- **A stored baseline's identity:** its MANIFEST (the `src/` tree, the oracle library, the lockfile, Node) and each
+  area's PLAN (the limits above, the allowances, each generator's checks, each shard's places). The runner's own source,
+  `--work` records and `--out` files are no part of it. `baselines.mjs state` reports, for each stored area, its runs
+  left unanswered by reason and those within a question grant.
+
 ## Running an area
 
 Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/type-core-oracles.js`), then:
@@ -31,7 +81,10 @@ store checks) against the largest `allowance` of a ledger it charged, max(30 M, 
 on every machine, so a stall is too. A run that ends past its allowance but within the limit (a budget stop, TSV076) is
 an outcome, not a stall. A source that takes more than `--memory` MB of heap, or that ends its analysing process (a
 fatal V8 error), stalls as well. A stall is counted with its reason (`units`, or how the process ended; `--out`), and
-the runner goes on with the next source. The wall clock is only a safety net, `--timeout` seconds a run (60 in CI,
+the runner goes on with the next source. Where the base's run ended the process, the head's runs from that one on run
+alone in a fresh child, each recorded beside the stall as the head's own outcome (`afterBase` on the source's `--work`
+line and in `--out`: answered, unanswered and why, unparsed, an exception, its own stall, or its safety net, counted as an uncharged run), so that the head's result
+is never lost with the base's process (#1837). The wall clock is only a safety net, `--timeout` seconds a run (60 in CI,
 which sets `CI=true` and runs only the runner's own tests): a run that reaches it does work no ledger charges (#1424's
 class), and is reported as a defect with its source and run (`uncharged`, on stderr and in `--out`), counted apart,
 never as a stall. The limit and the safety net were derived from a measured corpus ("The unit limit and the safety
@@ -42,20 +95,31 @@ descendant holding its stderr delays the next source (no compiler or oracle code
 either tree is an exception, never compared, because identical exceptions on both trees are not agreement (#1439): the
 runner prints it on stderr with its source, mode and check, writes it with each stack to `--out` and counts it apart
 from stalls, in a source that stalls later too (`tests/families-runner.test.ts`, in CI). A publication is had only up to
-the oracle's own stop: where its questions after a finished analysis pass the allowance, the nodes from that one on stay
-unanswered (`publicationHashes`'s `unanswered`, #1499). A run with any on either tree agrees only where both trees left
-the same count unanswered and published the same parts up to them (#1592): the allowance is the same on both trees, so
-what it leaves unanswered is too. Such a run is counted apart (`unansweredAlike`); any other is neither agreement nor an
-exception: the runner writes it to `--out` and counts it apart (`unanswered`). Each such run records why on each tree
-(`by`, on `--out` and the source's `--work` line, and on a stored run): `questions` (the analysis finished and the
-oracle's later questions passed the allowance; their cost is #1837's), `stopped` (the analysis's own budget stopped it;
-today's oracle answers a stopped analysis whole, so this does not occur), or `unknown` where the tree's oracle or a run
-stored before this names none. `stalls.mjs` counts them as runner artefacts, one group a reason and `unansweredAlike`,
+the oracle's own stop. Its own questions (each binding's admitted types, then the occurrences) run apart from the
+analysis's allowance and stop after the one whose units pass the program's allowance plus 64 per cell returned (an
+occurrence's answer, its element's and each property's; two a binding), where 640 bytes per cell returned pass
+their room in the heap, or past the read-depth limit (#1837). The room is taken before the publication's analysis:
+the process's V8 heap limit less 1.5 GiB, which the analysis's own heap with sharing off needs (#1603: at the default
+heap, `W19-sources`, `W24-alias-group`, `W24-exit` and `W24-varied` at k = 1,024 end as `memory` in all four modes,
+#1945). Only where what ran before still holds more than 1.5 GiB after a collection (`--expose-gc`, as the runner's
+child has it) is it the heap limit less that live heap less 512 MiB, so the run stops as `memory`, not in V8's abort. The
+nodes from there on stay unanswered (`publicationHashes`'s `unanswered`, #1499), after the bindings left where the
+admitted types stopped. A publication run's unit limit grants the same 64 per cell its tree's oracle reports so far
+(`questionWork`; `limitOf` in `run-contract.mjs`, by which a store writes and reads the run too, its report kept as the
+run's `questions`), so the oracle's stop comes first wherever a question reports its cells before the runner's limit; one
+question's own cost is the runner's to bound. A run with any on either tree is first compared on what both
+trees answered (`prefix`: the answers and the record, unless either's answers stopped at a binding, each occurrence both
+answered, and the route): where that differs, the run is a difference, counted and recorded as one. Otherwise it agrees
+only where both trees left the same count unanswered and published the same parts up to them (#1592): the bound is the
+same on both trees, so what it leaves unanswered is too. That run is counted apart (`unansweredAlike`); any other is
+neither agreement nor an exception: the runner writes it to `--out` and counts it apart (`unanswered`). Each such run records why on each tree
+(`by`, on `--out` and the source's `--work` line, and on a stored run), with the first node or the binding left:
+`questions` (the analysis finished and the oracle's questions passed their bound; their per-cell cost rises by a log
+factor, #1941), `memory` (their room in the heap passed: the core keeps its answers, about 450 bytes a cell, so the
+oracle ends before V8 runs out of heap), `read-depth` (the analysis finished and a question passed the read-depth limit), `stopped` (the
+analysis's own budget stopped it), or `unknown` where the tree's oracle or a run stored before this names none. `stalls.mjs` counts them as runner artefacts, one group a reason and `unansweredAlike`,
 each with its runs, sources and first witness, on a line of its own where any group has runs and always in `--index`.
-It prints one JSON line per generator and
-a total (sources, unparsed, stalled, exceptions, unanswered, unansweredAlike, uncompared, uncharged, modes, runs,
-differences, the unit limit's multiple and the safety net in seconds), and exits 1 when any run differs, throws, leaves
-nodes unanswered other than alike, is uncompared or reaches the safety net, or any source stalls. Run large sizes as one
+It prints one JSON line per generator and the total line, and exits as the contract above says. Run large sizes as one
 capped job per area or shard on a worker. Report stalls, uncharged runs and publication exceptions separately; none
 establishes agreement.
 
