@@ -20,10 +20,18 @@ import {
 } from "../contract/key-ids.js";
 import { keyLane } from "../contract/lanes.js";
 import { landed, landedKey, passThrough, passThroughKey } from "../admission/landings.js";
-import type { Frontier, Inheriting, Stop, Stops, Waiting } from "../admission/model.js";
+import type {
+  Frontier,
+  Inheriting,
+  Stop,
+  Stops,
+  Waiting,
+  WaitingAnswer,
+} from "../admission/model.js";
 import { permittedAt, unrestricted } from "../admission/permitted.js";
 import { inputsAt, inputsOf, scanAt } from "../admission/scan.js";
 import { cycleOf, inheritedInto, join } from "./waiting.js";
+import { isRead, read, type Read, type ReadAnswer } from "./reads.js";
 import { copySources, stopsOf } from "../admission/walk.js";
 import { wholeOf } from "../admission/eligibility.js";
 import { positions } from "../positions.js";
@@ -201,7 +209,7 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
     const waiting = new Map<CanonicalKey, number>([[key, 0]]);
     let closed = "";
     // (the type the top scan waited on, given to it as it goes on)
-    let given: TypeTerm | null = null;
+    let given: ReadAnswer = null;
     // (#1931: the finished scans of a cycle still waiting below them, in the order they finished, kept only once the
     // cycle closes: a scan that reads one waits on the cycle, as on a waiting scan, whichever key was asked first)
     const deferred: { readonly key: CanonicalKey; readonly term: TypeTerm | null }[] = [];
@@ -250,7 +258,7 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
     while (pending.length > 0) {
       const top = pending.at(-1)!;
       // (a key no store reaches finds nothing)
-      const step =
+      const step: IteratorResult<CanonicalKey | Read, WaitingAnswer> =
         top.steps === null ? { done: true as const, value: null } : top.steps.next(given);
       given = null;
       if (step.done === true) {
@@ -258,6 +266,11 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
           step.value === null ? null : optionalOf(step.value.copied, step.value.nullable),
           step.value?.own === true,
         );
+        continue;
+      }
+      // (a read answered by its synchronous run, the scan going on: #1072 A2)
+      if (isRead(step.value)) {
+        given = step.value.now();
         continue;
       }
       const needed = step.value;
@@ -432,11 +445,11 @@ function* wrapped(
   const { program, values, contract } = admission.pass;
   const decl = scanHop(admission, place, first)!.decl;
   // (a cursor's path read by its id: G3 stage 1)
-  const value = admission.run(
+  const position = () =>
     typeof path === "number"
       ? values.valuePositionAt(decl.value!, decl.node, path)
-      : values.valuePosition(decl.value!, decl.node, path),
-  );
+      : values.valuePosition(decl.value!, decl.node, path);
+  const value = yield* read(() => admission.run(position()), position);
   const at = value.proof;
   if (
     at === null ||
@@ -467,12 +480,13 @@ function* wrapped(
 
 /** A computation run outside a resolution: each inherited type it waits on resolved by `inheritedAt` first. */
 export function drive<T>(admission: Admission, steps: Inheriting<T>): T {
-  let given: TypeTerm | null = null;
-  for (;;) {
-    const step = steps.next(given);
-    if (step.done === true) return step.value;
-    given = inheritedAtKey(admission, step.value);
-  }
+  let step: IteratorResult<CanonicalKey | Read, T> = steps.next();
+  // (a read answered by its synchronous run: #1072 A2)
+  while (step.done !== true)
+    step = steps.next(
+      isRead(step.value) ? step.value.now() : inheritedAtKey(admission, step.value),
+    );
+  return step.value;
 }
 
 /** Another key's inherited type as a scan's answer (`inheritedAt`'s `passThrough`): known, or waited on. */
@@ -485,7 +499,8 @@ function* answerOf(
   readonly own?: boolean;
 } | null> {
   const known = admission.inherited.get(key);
-  const term = known !== undefined ? known : yield key;
+  // EVIDENCE: invariant: a key yielded is resumed with its inherited type.
+  const term = known !== undefined ? known : ((yield key) as TypeTerm | null);
   return term === null
     ? null
     : { copied: term, nullable: false, own: admission.inheritedOwn.get(key) === true };

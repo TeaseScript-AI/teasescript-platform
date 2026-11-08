@@ -70,11 +70,13 @@ import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
 import { joinSteps, keptSteps, type WorkLedger } from "./budget.js";
 import type { ReceivingDomain } from "./inherited/receiving-domain.js";
+import { read, readNow, type Reads } from "./inherited/reads.js";
 import {
   arrayStrip,
   carried,
   carriedBy,
   keepsOwn,
+  keepsOwnRead,
   type CarrierRole,
   type Dispatch,
   type StepsStrip,
@@ -563,6 +565,11 @@ export class Admission {
     return this.host.run(work);
   }
 
+  /** `run` as a read (`Read`): run now outside a solver run, yielded inside an inherited proof (#1072 A2). */
+  public *runRead<T>(work: () => Work<T>): Reads<T> {
+    return yield* read(() => this.run(work()), work);
+  }
+
   /**
    * A6: a definite contribution that does not fit at a place's path is rejected, a return against its own result's
    * decision too (F23), so it leaves the result's contract (an argument stays: the parameter is its callee's); in the
@@ -625,10 +632,26 @@ export class Admission {
 
   /** A store's value at the path below its destination, by §3 at its node. */
   public valueAt(d: Definition, at: Rest): Item[] {
+    return readNow(this.valueAtRead(d, at));
+  }
+
+  /** `valueAt` as a read (`Read`): run now outside a solver run, yielded inside an inherited proof (#1072 A2). */
+  public *valueAtRead(d: Definition, at: Rest): Reads<Item[]> {
     this.pass.program.work.charge("checks");
     if (d.kind === "const")
       return restRef(this.pass.contract, at).length === 0 ? [...(d.items ?? [])] : [];
-    return this.items(d.value!, d.node, at);
+    return yield* this.itemsRead(d.value!, d.node, at);
+  }
+
+  /** `items` as a read: inside an inherited proof the solver's, the finishing read being after a stop only. */
+  public *itemsRead(value: PlaceId, node: FlowNode, at: Rest): Reads<Item[]> {
+    const values = this.pass.values;
+    return yield* read(
+      () => this.items(value, node, at),
+      function* () {
+        return withoutEmpty(yield* values.valueItems(value, node, at));
+      },
+    );
   }
 
   /** A value's items at a node and a path: the finishing read's after a stop (`AdmissionHost.read`), else the solver's. */
@@ -853,6 +876,15 @@ export class Admission {
   /** Whether the receiver's or the key's decision leaves a value's operation its own value (F19a, F19: `keepsOwn`). */
   public keepsOwn(value: PlaceId): boolean {
     return keepsOwn(this.pass.program, value, this.#dispatch);
+  }
+
+  /** `keepsOwn` with the receiver's decision a read (`Read`, #1072 A2). */
+  public keepsOwnRead(value: PlaceId): Reads<boolean> {
+    const { contract } = this.pass;
+    const runRead = <T>(work: () => Work<T>): Reads<T> => this.runRead(work);
+    return keepsOwnRead(this.pass.program, value, function* (receiver) {
+      return heldReference(yield* runRead(() => contract.valueReceiver(receiver)));
+    });
   }
 
   /** A literal's term at one step: an object's property by its step, a collection's element; built once per literal. */
