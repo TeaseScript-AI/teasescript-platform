@@ -8,13 +8,15 @@
 // - `delayed`: `usePlayerSession.ts` gets `delayed-in-process.mjs`, whose `createInProcessBackend` delivers replies
 //   after GATE_DELAY_MS (the in-process backend's own `delayMs`); every other importer of `client.js` gets
 //   `delayed-client.mjs`, which delivers what a Worker port receives after the same delay, in order. The in-process
-//   backend's own `openBridge` call is left alone, so no reply is delayed twice.
+//   backend's own `openBridge` call is left alone, so no reply is delayed twice; with GATE_LOG=1 it gets
+//   `instrumented-client.mjs` instead, which logs each reply as it arrives after the delay (a diagnostic build).
 import { fileURLToPath } from "node:url";
 import productionConfig from "../../../player/vue/vite.config.ts";
 
 const variant = process.env.GATE_VARIANT;
 const out = process.env.OUT;
 const delayMs = Number(process.env.GATE_DELAY_MS ?? "0");
+const log = process.env.GATE_LOG === "1";
 if (variant !== "instrumented" && variant !== "delayed")
   throw new Error("GATE_VARIANT is neither instrumented nor delayed");
 if (!out) throw new Error("OUT names no output folder for the variant");
@@ -48,7 +50,9 @@ function gateSwap() {
         (source === "./client.js" && importer.includes("/player/engine-bridge/"));
       if (!client) return null;
       if (variant === "instrumented") return here("instrumented-client.mjs");
-      return importer === IN_PROCESS ? null : here("delayed-client.mjs");
+      // With GATE_LOG, the in-process backend's own port is logged too, after its delay: when each reply arrives.
+      if (importer === IN_PROCESS) return log ? here("instrumented-client.mjs") : null;
+      return here("delayed-client.mjs");
     },
   };
 }
