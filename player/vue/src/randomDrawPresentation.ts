@@ -1,8 +1,17 @@
-import type { LanguageTokenClass, RandomDrawView, RandomOutcome } from "../../../src/index.js";
+import type { RandomDrawView, RandomOutcome } from "../../../src/index.js";
 import { checkedOutcome } from "../../../src/runtime/random/random-kinds.js";
 import { randomDrawAlternatives } from "../../../src/runtime/random/random-alternatives.js";
 import { runtimeDebugPreview } from "../../../src/runtime/debug/debug-preview.js";
 import { numberText as text, randomOutcomeLabel } from "../../random-outcomes.js";
+
+// The code a draw shows is framework-independent (`player/draw-code.ts`): the engine host makes it, this page shows it.
+export {
+  CONTEXT_ROWS,
+  type CodeLine,
+  type CodeSegment,
+  type CodeTokenClass,
+  type DrawCode,
+} from "../../draw-code.js";
 
 /**
  * How the random draw picker (DEBUGGER.md "Random draws") offers a draw's outcomes: a button for each when the draw has
@@ -85,33 +94,4 @@ function rank(outcome: RandomOutcome): number {
     case "order":
       return 0;
   }
-}
-
-/** What a stretch of code is, for its colour: the compiler's class of its token or comment (`classifyTokens`). */
-export type CodeTokenClass = LanguageTokenClass;
-
-export interface CodeSegment {
-  readonly text: string;
-  readonly kind: CodeTokenClass | null;
-  /** Whether the segment is marked, as the draw is. */
-  readonly mark: boolean;
-}
-
-export interface CodeLine {
-  /** One-based. */
-  readonly number: number;
-  readonly segments: readonly CodeSegment[];
-}
-
-/** How many lines the code around a draw shows by default: the draw's line in the middle. */
-export const CONTEXT_ROWS = 7;
-
-/** What the picker shows of the draw's file: every line with the draw marked, and the range "Show whole" fits. */
-export interface DrawCode {
-  readonly lines: readonly CodeLine[];
-  readonly enclosing: {
-    readonly kind: "function" | "block" | "file";
-    readonly from: number;
-    readonly to: number;
-  } | null;
 }
