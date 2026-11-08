@@ -9,6 +9,7 @@ import {
   PIN_SUITES,
   builtOf,
   groundRefusals,
+  corroborated,
   groundsOf,
   pinFormsOf,
   pinsOf,
@@ -80,7 +81,7 @@ const PLANNED = [
 
 /** The refusals the check gives for a line it cannot read: no declared form, or a lost opening line. */
 const UNREADABLE =
-  /in none of its declared forms|an opening line changed|though alone it reads as code/u;
+  /in none of its declared forms|an opening line changed|alone it is more than a comment/u;
 
 const refusals = (entry, { head, diff }) =>
   refusalsOf(entry.file, entry.text, head, diff, entry.suite);
@@ -127,6 +128,10 @@ test("the list is kept true: each file a pin form finds is declared; each pin, g
         assert.ok(
           reading === null || reading.form !== undefined,
           `${file}:${line} takes none of ${suite.file}'s forms: declare it`,
+        );
+        assert.ok(
+          corroborated(scan[line - 1], raw[line - 1]),
+          `${file}:${line}: the scan alone disagrees`,
         );
       }
       assert.ok(
@@ -436,14 +441,22 @@ test("an edit that breaks an opener, or a construct the scan could misread, cann
     capture.raw.findLastIndex((text, index) => index < total && text.includes("const source =")) +
     1;
   const end = capture.raw.findIndex((text, index) => index >= total && text === "});") + 1;
-  for (const misread of [
+  const indent = capture.raw[total - 1].slice(0, capture.raw[total - 1].indexOf("assert"));
+  const expected = [
+    [moved],
+    [`${indent}assert.equal(budget.total, Number("22962574"));`],
+    [`${indent}assert.equal(budget.total, reviewExpected);`],
+    [`${indent}assert.equal(budget.total, 2 * 11_481_287);`],
+    [`${indent}assert.equal(budget.total, reviewFactor`, `${indent}  * 22_962_574);`],
+  ];
+  for (const [misread, changed] of [
     "  function reviewPattern() { return /* a note */ /[/*]/; }",
-    "  if (true) /[/*]/;",
-  ]) {
+    '  if (true) /[/*]/.test("x");',
+  ].flatMap((misread) => expected.map((lines) => [misread, lines]))) {
     const recovered = edited(
       capture.text,
       [source, 0, misread],
-      [total, 1, moved],
+      [total, 1, ...changed],
       [
         end + 1,
         0,
@@ -454,8 +467,46 @@ test("an edit that breaks an opener, or a construct the scan could misread, cann
         "",
       ],
     );
-    assert.ok(refusals(capture, recovered).length > 0, misread);
+    assert.ok(refusals(capture, recovered).length > 0, `${misread} ${changed.join(" / ")}`);
   }
+  // (a continuation alone changed under a misread: a leading `*` is no proof of a comment)
+  const continued = {
+    ...capture,
+    text: edited(capture.text, [
+      total,
+      1,
+      `${indent}assert.equal(budget.total, reviewFactor`,
+      `${indent}  * 22_962_573);`,
+    ]).head,
+  };
+  const drifted = edited(
+    continued.text,
+    [source, 0, '  if (true) /[/*]/.test("x");'],
+    [total + 1, 1, `${indent}  * 22_962_574);`],
+  );
+  assert.match(refusals(continued, drifted).join("\n"), /alone it is more than a comment/u);
   const open = edited(capture.text, [1, 0, "const unclosed = `"], [total, 1, moved]);
   assert.match(refusals(capture, open).join("\n"), /its scan ends inside/u);
+});
+
+test("a declared opening line cannot hold an expected value", () => {
+  let openers = 0;
+  for (const entry of read().filter((each) => each.suite.opener !== undefined))
+    for (const { from } of entry.pins) {
+      openers += 1;
+      const value = pinLines().find(
+        (line) => line.file === entry.file && line.line > from && line.reading.values.length > 0,
+      );
+      const { text, from: at, to } = value.reading.values[0];
+      const row = entry.raw[value.line - 1];
+      const moved =
+        `${row.slice(0, at)}${Number(text.replaceAll("_", "")) + 1}${row.slice(to)}`.trim();
+      const joined = `${entry.raw[from - 1]}${"[".repeat(value.line - from - 1)}${moved}`;
+      const found = refusals(entry, edited(entry.text, [from, value.line - from + 1, joined]));
+      assert.ok(
+        found.some((refusal) => /in none of its declared forms/u.test(refusal)),
+        `${entry.file}:${from}: ${joined}`,
+      );
+    }
+  assert.equal(openers, 2);
 });
