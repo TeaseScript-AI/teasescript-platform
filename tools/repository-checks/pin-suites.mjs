@@ -21,18 +21,19 @@ import { fileURLToPath } from "node:url";
 // `--check-grounds` reads each changed line inside a suite's pins: from a line its `pin` finds to where that line's
 // brackets close, or in a hunk that removed a pin line or was inserted between two. One scan of the file (`scanOf`)
 // sets its strings, templates, comments and regular expressions apart. Fail-closed, every such line but a blank or
-// comment line must take one of the suite's declared `forms` (`ADMITTED`), a bracket-only line, or the opening line
-// itself; any other line, one whose values sit in a string or a call (`Number(684)`, `Number("684")`) or are split
+// comment line must take one of the suite's declared `forms` (`ADMITTED`), a bracket-only line, or the suite's declared
+// `opener`; any other line, one whose values sit in a string or a call (`Number(684)`, `Number("684")`) or are split
 // across lines included, is refused naming the fix: write the values as literals in a declared form, or declare the
-// form here. So is an edit after which `pin` finds fewer pins, and a file whose scan ends inside a string, template,
-// comment or regular expression. A form's numbers outside its `input` part are its expected values. A line whose
-// expected values a removed line of the suite's base pins held is unchanged (an input, a word or the layout changed);
-// any other is a new or re-pinned value and needs a changed comment line, where the "N units more or fewer since #…"
-// ground is written: in the block above it (up to a blank line, a closing line or the test's start), or in its header,
-// the comment above its test and at its start, or, for a pin outside a test, the comment above the line its declared
-// `ground` finds. Exit 1 naming each refusal. It judges that the ground was touched, not whether it is true: the
-// reviewer does. A listed-site count (`listed`) names its site by its reason, which the kept and key-ids tests require,
-// and is not read; nor is a suite not yet committed, which has no base.
+// form here. So is an edit after which `pin` finds fewer pins, a file whose scan ends inside a string, template,
+// comment or regular expression, and a changed pin line the scan places in one though alone it reads as code. A form's
+// numbers outside its `input` part are its expected values. A line whose expected values a removed line of the suite's
+// base pins held is unchanged (an input, a word or the layout changed); any other is a new or re-pinned value and needs
+// a changed comment line, where the "N units more or fewer since #…" ground is written: in the block above it (up to a
+// blank line, a closing line or the test's start), or in its header, the comment above its test and at its start, or,
+// for a pin outside a test, the comment above the line its declared `ground` finds. Exit 1 naming each refusal. It
+// judges that the ground was touched, not whether it is true: the reviewer does. A listed-site count (`listed`) names
+// its site by its reason, which the kept and key-ids tests require, and is not read; nor is a suite not yet committed,
+// which has no base.
 //
 // The list is the authority. Its test (`pin-suites.test.mjs`) requires each `pin` and `ground` to find a line, each
 // line of today's pins to take a declared form, and each pin to have a header (outside a test, at its `ground`); it
@@ -74,9 +75,9 @@ const STRUCTURE = ["open", "close"];
 
 /**
  * Each suite that pins the core's exact work: its file, what it pins, the lines that open its pins (`pin`), the forms
- * its pin lines take (`forms`, of `ADMITTED`), and, when its pins are elsewhere, the file holding them (`in`); for a pin
- * outside a test, the line whose comment above is its ground (`ground`). `listed` marks a count of listed sites, whose
- * ground is its reason.
+ * its pin lines take (`forms`, of `ADMITTED`), the whole code of a pin's opening line when it holds no value
+ * (`opener`), and, when its pins are elsewhere, the file holding them (`in`); for a pin outside a test, the line whose
+ * comment above is its ground (`ground`). `listed` marks a count of listed sites, whose ground is its reason.
  */
 export const PIN_SUITES = [
   {
@@ -89,6 +90,8 @@ export const PIN_SUITES = [
     file: "tests/type-core-closure.test.ts",
     pins: "work totals at two demands, four modes",
     pin: /^const OUTSIDE\b/u,
+    opener:
+      /^const OUTSIDE: readonly \(readonly \[string, string, readonly number\[\]\]\)\[\] = \[$/u,
     forms: ["tuple", "row", "string"],
     ground: /^const frozen\b/u,
   },
@@ -120,6 +123,7 @@ export const PIN_SUITES = [
     file: "tests/type-core-work-a.test.ts",
     pins: "a store check's work per mode",
     pin: /^\s*assert\.deepEqual\(measured, \[/u,
+    opener: /^assert\.deepEqual\(measured, \[$/u,
     forms: ["row"],
   },
   {
@@ -181,6 +185,13 @@ const TEST_START = /^\s*test\(/u;
 const TOP_CLOSING = /^[\]})]/u;
 /** The characters after which a `/` opens a regular expression; a `!` after a value is TypeScript's, read as a value. */
 const REGEX_AFTER = "(,=:[!&|?{};+-*%<>~^";
+/** Whether a character continues a word. */
+const isWord = (char) =>
+  (char >= "a" && char <= "z") ||
+  (char >= "A" && char <= "Z") ||
+  (char >= "0" && char <= "9") ||
+  char === "_" ||
+  char === "$";
 /** The words after which a `/` opens a regular expression. */
 const REGEX_WORDS = new Set([
   "return",
@@ -198,9 +209,6 @@ const REGEX_WORDS = new Set([
   "yield",
   "await",
 ]);
-/** The word that ends just before `index` in `text`, past any spaces. */
-const wordBefore = (text, index) =>
-  /[\w$]*$/u.exec(text.slice(Math.max(0, index - 40), index).trimEnd())[0];
 
 /**
  * Each line of `text` by one scan of its strings, templates, comments and regular expressions: its `code` (each string
@@ -228,6 +236,9 @@ function scanned(text) {
   let literal = "";
   let literalAt = 0;
   let previous = "";
+  // (the last word of code, comments aside, and whether the last code character continues it)
+  let word = "";
+  let inWord = false;
   let line = { code: "", at: [], comment: null, top: true };
   let column = 0;
   // (a counter snapshot keeps each character's column; a placeholder takes its literal's)
@@ -243,6 +254,7 @@ function scanned(text) {
     const next = text[index + 1];
     if (char === "\n") {
       if (state === "line") state = "code";
+      inWord = false;
       lines.push({ ...line, comment: line.comment === true });
       const top = state === "code" && interpolations.length === 0;
       line = { code: "", at: [], comment: state === "block" ? true : top ? null : false, top };
@@ -252,16 +264,18 @@ function scanned(text) {
     if (state === "code") {
       if (char === "/" && (next === "/" || next === "*")) {
         if (line.comment === null) line.comment = true;
+        inWord = false;
         state = next === "/" ? "line" : "block";
         index += 1;
         column += 1;
         continue;
       }
-      if (line.comment === null && char.trim() !== "") line.comment = false;
+      if (line.comment === null && char > " ") line.comment = false;
       if (char === '"' || char === "'") {
         state = char;
         literal = char;
         literalAt = column;
+        [word, inWord] = ["", false];
       } else if (char === "`") {
         state = "template";
         emit('""', column);
@@ -269,10 +283,11 @@ function scanned(text) {
         char === "/" &&
         (previous === "" ||
           REGEX_AFTER.includes(previous) ||
-          REGEX_WORDS.has(wordBefore(text, index)))
+          (isWord(previous) && REGEX_WORDS.has(word)))
       ) {
         state = "regex";
         emit("/r/", column);
+        [word, inWord] = ["", false];
       } else if (char === "}" && interpolations.length > 0 && depth - 1 === interpolations.at(-1)) {
         depth = interpolations.pop();
         state = "template";
@@ -280,8 +295,15 @@ function scanned(text) {
         if (char === "{") depth += 1;
         if (char === "}") depth -= 1;
         emit(char, column);
+        if (isWord(char)) {
+          word = inWord ? word + char : char;
+          inWord = true;
+        } else {
+          inWord = false;
+          if (char > " ") word = "";
+        }
         if (char === "!" && /[\w$)\]]/u.test(previous)) previous = ")";
-        else if (char.trim() !== "") previous = char;
+        else if (char > " ") previous = char;
       }
     } else if (state === '"' || state === "'") {
       if (char === "\\") {
@@ -351,9 +373,8 @@ export function pinsOf(scan, raw, pin) {
 
 /**
  * A pin line's reading by its suite's forms: `null` for a blank or comment line, `{ form: undefined }` for a line in no
- * declared form, else its form and its expected values with their columns. A line `pin` finds that opens brackets it
- * does not close and holds no number or string opens a pin (`opener`); any other line, an emptied string or template
- * included, must take a form.
+ * declared form, else its form and its expected values with their columns. The suite's declared `opener` line, which
+ * holds no value, is one; any other line, an emptied string or template included, must take a form.
  */
 export function readingOf(scanned, raw, suite) {
   const code = scanned.code.trim();
@@ -371,12 +392,7 @@ export function readingOf(scanned, raw, suite) {
     }
     return { form: name, values };
   }
-  const opens = [...code].reduce(
-    (depth, char) => depth + ("[{(".includes(char) ? 1 : "]})".includes(char) ? -1 : 0),
-    0,
-  );
-  if (scanned.top && opens > 0 && !/\d|""/u.test(code) && suite.pin.test(raw))
-    return { form: "opener", values: [] };
+  if (suite.opener?.test(code)) return { form: "opener", values: [] };
   return { form: undefined, values: [] };
 }
 
@@ -508,6 +524,21 @@ export function refusalsOf(file, baseText, headText, diff, suite) {
   };
   for (const line of added) {
     if (!inside.has(line)) continue;
+    // (a line the scan places in a comment, string or template, but which alone reads as code with a number: the scan
+    // may have misread something above it, so the line is refused rather than skipped)
+    const alone = scanned(raw[line - 1])[0];
+    if (
+      (!scan[line - 1].top || scan[line - 1].comment) &&
+      !/^\s*(?:\*|\/\/|\/\*)/u.test(raw[line - 1]) &&
+      /\d/u.test(alone.code) &&
+      !/\d/u.test(scan[line - 1].code)
+    ) {
+      out.push(
+        `${file}:${line}: the scan reads this changed pin line as in a comment, string or template, though alone it reads as code${of}.\n` +
+          `  Rewrite what the scan misreads above it, or teach it to \`scanOf\` in tools/repository-checks/pin-suites.mjs.`,
+      );
+      continue;
+    }
     const reading = readingOf(scan[line - 1], raw[line - 1], suite);
     if (reading === null || (reading.form !== undefined && reading.values.length === 0)) continue;
     if (reading.form === undefined) {

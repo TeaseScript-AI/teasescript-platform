@@ -79,7 +79,8 @@ const PLANNED = [
 ];
 
 /** The refusals the check gives for a line it cannot read: no declared form, or a lost opening line. */
-const UNREADABLE = /in none of its declared forms|an opening line changed/u;
+const UNREADABLE =
+  /in none of its declared forms|an opening line changed|though alone it reads as code/u;
 
 const refusals = (entry, { head, diff }) =>
   refusalsOf(entry.file, entry.text, head, diff, entry.suite);
@@ -205,6 +206,17 @@ test("a changed pin line in no declared form is refused with the fix, in every p
             swapped("Math.PI"),
             ...(split > 0 ? [[text.slice(0, split + 1), `  ${text.slice(split + 2)}`]] : []),
           ];
+    // (the line split before its closing brackets, its value as is and as a name)
+    const closers = /[\])}]+[,;)]*$/u.exec(text.trimEnd());
+    if (closers !== null && closers.index > from) {
+      const indent = text.slice(0, text.length - text.trimStart().length);
+      const head = text.slice(0, closers.index);
+      variants.push([head, `${indent}${closers[0]}`]);
+      variants.push([
+        `${text.slice(0, from)}reviewExpected${head.slice(to)}`,
+        `${indent}${closers[0]}`,
+      ]);
+    }
     // (a line's values written as one string, where the suite's strings are no input: closure's names and sources are,
     // and a string where its type holds numbers fails the type check)
     if (!entry.suite.forms.includes("string"))
@@ -226,7 +238,7 @@ test("a changed pin line in no declared form is refused with the fix, in every p
 });
 
 test("each form reads its expected values and only those", () => {
-  const suite = { forms: Object.keys(ADMITTED), pin: /^const PIN\b/u };
+  const suite = { forms: Object.keys(ADMITTED), pin: /^const PIN\b/u, opener: /^const PIN = \[$/u };
   for (const [line, form, values] of [
     ["  assert.equal(budget.total, 22_962_573);", "asserted", ["22_962_573"]],
     ["  assert.deepEqual(units, [194, 17], JSON.stringify(mode));", "asserted", ["194", "17"]],
@@ -262,6 +274,7 @@ test("the scan sets strings, templates, comments and regular expressions apart",
     'const a = "x // y"; // a note',
     "const t = `a ${f(`b ${1}`)} // c`;",
     "function r() { return /`/; }",
+    "function p() { return /* a note */ /[/*]/; }",
     "const q = x! / 2;",
     "const n = !/'/.test(s);",
     "/* a block",
@@ -278,6 +291,7 @@ test("the scan sets strings, templates, comments and regular expressions apart",
       ['const a = "";', false, true],
       ['const t = "";', false, true],
       ["function r() { return /r/; }", false, true],
+      ["function p() { return  /r/; }", false, true],
       ["const q = x! / 2;", false, true],
       ["const n = !/r/.test(s);", false, true],
       ["", true, true],
@@ -417,6 +431,31 @@ test("an edit that breaks an opener, or a construct the scan could misread, cann
     [total, 1, moved],
   );
   assert.equal(refusals(capture, regex).length, 1);
+  // (a misread above the pin, its scan recovered below and its pin count kept by a pin added there)
+  const source =
+    capture.raw.findLastIndex((text, index) => index < total && text.includes("const source =")) +
+    1;
+  const end = capture.raw.findIndex((text, index) => index >= total && text === "});") + 1;
+  for (const misread of [
+    "  function reviewPattern() { return /* a note */ /[/*]/; }",
+    "  if (true) /[/*]/;",
+  ]) {
+    const recovered = edited(
+      capture.text,
+      [source, 0, misread],
+      [total, 1, moved],
+      [
+        end + 1,
+        0,
+        "/* scanner recovery */",
+        "export function reviewReference(budget: { total: number }) {",
+        "  assert.equal(budget.total, 22_962_573);",
+        "}",
+        "",
+      ],
+    );
+    assert.ok(refusals(capture, recovered).length > 0, misread);
+  }
   const open = edited(capture.text, [1, 0, "const unclosed = `"], [total, 1, moved]);
   assert.match(refusals(capture, open).join("\n"), /its scan ends inside/u);
 });
