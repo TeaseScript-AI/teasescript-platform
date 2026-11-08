@@ -29,6 +29,9 @@ jobs:
         with:
           persist-credentials: false
           show-progress: false
+          # the history without file contents, for the regression cases' base (below)
+          fetch-depth: 0
+          filter: blob:none
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
@@ -42,6 +45,14 @@ jobs:
           BUILD_SOURCEMAPS: "0"
           TEST_FILE_SECONDS: ${{ runner.temp }}/test-file-seconds.json
         run: npm test -- --shard=1/3
+      # Each regression case the pull request declares (`tests/helpers/regression-case.ts`) must fail at its base as it
+      # declares (`tools/repository-checks/regression-cases.mjs`, docs/TESTING.md "Regression-test rule"). It reuses the
+      # build above, and ends at once when no changed test file declares a case. The base is the merge's first parent.
+      - name: Regression cases fail at the base
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: node tools/repository-checks/regression-cases.mjs --base "$(git rev-parse HEAD^1)" --pr "$PR"
       # each test file's seconds, which `tools/measure-test-files.mjs --from-ci` makes the shards' weights from
       - name: Keep each test file's seconds
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
