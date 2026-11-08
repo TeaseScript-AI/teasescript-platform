@@ -500,9 +500,10 @@ function effectiveSaySkippable(
 }
 
 /**
- * The markup of each say's most recent text, keyed by its plan instruction: a say that shows the same text again, as
- * in a loop or another session of the plan, parses it once. Each say keeps one entry, replaced when its text changes;
- * the markup is deeply frozen and holds nothing of a session.
+ * The markup of each literal say's text, keyed by its plan instruction: a say that shows the same text again, as in a
+ * loop or another session of the plan, parses it once. Only a say whose text is a literal of the plan is kept, so an
+ * entry holds the plan's text and its deeply frozen markup, never a text a session computed; a say with any other text
+ * parses it each time.
  */
 const lastSayMarkup = new WeakMap<
   object,
@@ -513,6 +514,8 @@ function sayMarkup(
   instruction: Extract<Instruction, { kind: "say" }>,
   text: string,
 ): MessageMarkup {
+  if (instruction.textTemporary !== undefined || instruction.value.kind !== "literal")
+    return parseMessageMarkup(text);
   const last = lastSayMarkup.get(instruction);
   if (last !== undefined && last.text === text) return last.markup;
   const markup = parseMessageMarkup(text);
