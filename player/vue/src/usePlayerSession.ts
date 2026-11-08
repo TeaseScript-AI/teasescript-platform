@@ -154,6 +154,7 @@ import { useScreenWakeLock } from "./useScreenWakeLock";
 import { useCallView } from "./session/useCallView.js";
 import { usePlayerCameraLifecycle, useSessionCamera } from "./session/usePlayerCameras.js";
 import { usePlayerSessionServices } from "./session/usePlayerSessionServices.js";
+import { useFailureRecording } from "./session/useFailureRecording.js";
 
 const PRIMED_AUDIO_ELEMENTS = 2;
 const SILENCE = silence(50);
@@ -307,12 +308,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     pendingTracing = false;
     pendingRandom = false;
   });
-  // The recording up to a Player error, kept for a debug export until the next Start, when Debug's rewind begins the
-  // recorder anew at a restored state.
-  let failureRecording: DebugRecording | null = null;
+  // The recording up to a Player error, captured in the host as the stop is sent and kept until the next Start, while
+  // Debug's rewind may begin the recorder anew at a restored state.
+  const failureRecording = useFailureRecording();
   /** The recording a debug export shows: the one up to a Player error, else the host's recorder's. */
-  const exportedRecording = () =>
-    failureRecording ?? (bridge === null ? null : heldRecording(bridge));
+  const exportedRecording = (): DebugRecording | null => {
+    const failed = failureRecording.ticket();
+    if (failed !== null) return heldRecording(failed.bridge, failed.ticket);
+    return bridge === null ? null : heldRecording(bridge);
+  };
   // Rewind histories that pages which ended without deleting theirs left behind go now.
   if (options.debugHistorySpill === undefined) void sweepDebugHistories();
   // The error name of an exception of the Player itself, such as one at Start; it stays until the next Start. Such an
@@ -388,6 +392,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function stopAt(target: PlayerSession, name: string, stop: number) {
     const host = bridgeOf(target);
     const acknowledged = host.halt(target, stopOf(name, stop));
+    failureRecording.stopped(target);
     const commit = () => {
       if (disposed || stop !== activationToken) return endHalting(stop);
       // The final publication shows, then the stop; the halt holds the session stopped until then, so nothing reacting
@@ -1199,6 +1204,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     lastRandom = undefined;
     bridge?.unclaim(claim);
     if (bridge !== null && run !== null) void bridge.retireRun(run).catch(() => {});
+    failureRecording.retire();
     disposed = true;
     supersede();
     // The host's JSON of the plans this page prepared, written or waiting for its task, is not needed any more.
@@ -2825,8 +2831,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Player error, the recording up to the error is kept for the debug export first. Its callers await what it returns.
    */
   function beforeRewindRestart(): void | Promise<void> {
-    // Nothing runs after a Player error, so the recording is still the one up to the error until it begins anew.
-    if (stopped.value && failureRecording === null) failureRecording = exportedRecording();
+    // The recording up to a Player error is captured before the host begins the recorder anew.
+    return failureRecording.beforeRestart();
   }
   /**
    * Shows a session Debug's rewind restored or reinstated in the host (DEBUGGER.md "Rewind"), with its marks, as a new
@@ -3249,7 +3255,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (!disposed && token === activationToken) return startFrom(pending, sample);
       });
     hostError.value = null;
-    failureRecording = null;
+    failureRecording.retire();
     beginRun(bridge);
     let begun: PlayerSession | Promise<PlayerSession>;
     // `begin` records the click's capture: it reads it before its first await, a Start in its factory or options.
