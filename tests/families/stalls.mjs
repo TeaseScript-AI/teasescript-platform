@@ -42,7 +42,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { comparedOf } from "./baselines.mjs";
-import { groupOf, REASON_GROUPS, UNKNOWN_REASON } from "./reasons.mjs";
+import { groupOf, REASON_GROUPS, UNKNOWN_REASON } from "./run-contract.mjs";
 import { sourceKey } from "./sources.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));

@@ -24,7 +24,7 @@ import { coreRequest } from "./helpers/type-core-analysis.js";
 const runner = resolve(process.cwd(), "tests/families/run.mjs");
 const baselines = resolve(process.cwd(), "tests/families/baselines.mjs");
 const stalls = resolve(process.cwd(), "tests/families/stalls.mjs");
-const reasons = resolve(process.cwd(), "tests/families/reasons.mjs");
+const contract = resolve(process.cwd(), "tests/families/run-contract.mjs");
 
 /**
  * A built tree's work ledger, which every unit of its analyses' work passes (the runner counts its charges and limits
@@ -346,8 +346,8 @@ test("the corpus runner records why an oracle left a run unanswered, and the sta
     };
     // (the oracle's own question budget on both trees, at two counts: four runs of one source, its reason and node)
     const q = groups(questions2, questions3, "questions");
-    // (every group of the one reason list, `reasons.mjs`, and the alike group, each with its runs and sources)
-    const reasonGroups: string[] = (await import(pathToFileURL(reasons).href)).REASON_GROUPS;
+    // (every group of the one reason list, `run-contract.mjs`, and the alike group, each with its runs and sources)
+    const reasonGroups: string[] = (await import(pathToFileURL(contract).href)).REASON_GROUPS;
     const rowsWith = (counted: Record<string, number[]>): Record<string, number[]> =>
       Object.fromEntries(
         [...reasonGroups, "unansweredAlike"].map((group) => [group, counted[group] ?? [0, 0]]),
@@ -1023,7 +1023,7 @@ test("the stored baselines' tools show no plain write outside the gate in their 
   const { modules, sites, escapes, processes, loads } = await inventoryOf(process.cwd());
   assert.deepEqual(modules, [
     "tests/families/baselines.mjs",
-    "tests/families/reasons.mjs",
+    "tests/families/run-contract.mjs",
     "tests/families/run.mjs",
     "tests/families/sources.mjs",
   ]);
@@ -1087,7 +1087,7 @@ test("the stored baselines' tools show no plain write outside the gate in their 
     for (const file of [
       "tools/corpus/baseline.sh",
       "tests/families/baselines.mjs",
-      "tests/families/reasons.mjs",
+      "tests/families/run-contract.mjs",
       "tests/families/run.mjs",
       "tests/families/sources.mjs",
     ]) {
@@ -1582,7 +1582,7 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
       writeFileSync(join(folder, "package-lock.json"), "{}\n");
       writeFileSync(join(folder, ".sha"), `${sha.repeat(40)}\n`);
-      for (const tool of ["baselines.mjs", "reasons.mjs", "run.mjs", "sources.mjs"])
+      for (const tool of ["baselines.mjs", "run-contract.mjs", "run.mjs", "sources.mjs"])
         cpSync(join("tests", "families", tool), join(folder, "tests", "families", tool));
       writeFileSync(
         join(folder, "tests", "families", "area", "stored.mjs"),
@@ -3929,7 +3929,7 @@ test("a baseline plans copies in 64 shards where it first plans it, keeps a coun
     writeFileSync(join(built, "package.json"), '{ "type": "module" }\n');
     writeFileSync(join(built, "package-lock.json"), "{}\n");
     writeFileSync(join(built, ".sha"), `${"1".repeat(40)}\n`);
-    for (const tool of ["baselines.mjs", "reasons.mjs", "run.mjs", "sources.mjs"])
+    for (const tool of ["baselines.mjs", "run-contract.mjs", "run.mjs", "sources.mjs"])
       cpSync(join("tests", "families", tool), join(built, "tests", "families", tool));
     const cases = (names: string[]) =>
       `export const cases = ${JSON.stringify(names.map((name) => [name, name]))};\n`;
@@ -4189,6 +4189,7 @@ export function publicationHashes(files, mode) {
   if (!${aborting} && mode.reversed && !mode.unshared) {
     if (source === "head-slow") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 6000);
     if (source === "head-dies") fatal();
+    if (source === "head-throws") throw new Error("head-throws: the head's own exception");
   }
   const parts = [createHash("sha256").update(source).digest("hex")];
   return !${aborting} && source === "aborts" && mode.reversed
@@ -4216,13 +4217,14 @@ test("a base whose run ends its process leaves the head's runs from that one on 
     writeFileSync(
       join(folder, "g.mjs"),
       `export const cases = ${JSON.stringify(
-        ["aborts", "head-slow", "head-dies", "fine"].map((name) => [name, name]),
+        ["aborts", "head-slow", "head-dies", "head-throws", "fine"].map((name) => [name, name]),
       )};\n`,
     );
     const work = join(directory, "aborts.work.jsonl");
+    const out = join(directory, "aborts.jsonl");
     const ran = spawnSync(
       process.execPath,
-      [runner, folder, base, head, "--work", work, "--timeout", "3"],
+      [runner, folder, base, head, "--work", work, "--out", out, "--timeout", "3"],
       { encoding: "utf8" },
     );
     assert.equal(ran.status, 1, ran.stderr);
@@ -4262,6 +4264,22 @@ test("a base whose run ends its process leaves the head's runs from that one on 
     assert.deepEqual([dies.afterBase[1].mode, dies.afterBase[1].check], ["rev-on", "publication"]);
     assert.match(dies.afterBase[1].head.stalled, /FATAL ERROR: .*heap out of memory/);
     assert.equal(dies.afterBase.length, 2);
+    // (the head's own exception in its rerun: named by its run there, and reported as any exception: counted, on stderr,
+    // in --out with its stack, Codex r4)
+    const throws = lines.find((line) => line.source === "head-throws");
+    assert.deepEqual(throws.afterBase[1], {
+      mode: "rev-on",
+      check: "publication",
+      head: { thrown: "Error: head-throws: the head's own exception" },
+    });
+    assert.equal(throws.counts.exceptions, 1);
+    assert.match(ran.stderr, /"source":"head-throws","mode":"rev-on","check":"publication"/);
+    const reported = readFileSync(out, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .find((line) => line.source === "head-throws" && line.thrown !== undefined);
+    assert.match(reported.thrown.head, /^Error: head-throws: the head's own exception\n\s+at /);
     // (the other source runs on, both trees, in a child of both)
     const fine = lines.find((line) => line.source === "fine");
     assert.equal(fine.stalled, undefined);
@@ -4279,6 +4297,7 @@ test("a base whose run ends its process leaves the head's runs from that one on 
         ["aborts", "inherited"],
         ["head-slow", "inherited"],
         ["head-dies", "inherited"],
+        ["head-throws", "inherited"],
       ],
       judged.stdout,
     );
@@ -4289,7 +4308,7 @@ test("a base whose run ends its process leaves the head's runs from that one on 
 
 test("one list of stop reasons: every reason has its stall group, and a stored line holds every reason in every recorded form (#1837, the families' fourth hand-kept copy)", async () => {
   const { STOP_REASONS, UNKNOWN_REASON, REASON_GROUPS, groupOf } = await import(
-    pathToFileURL(reasons).href
+    pathToFileURL(contract).href
   );
   const { sourceFault, DEFAULTS } = await import(pathToFileURL(baselines).href);
   assert.deepEqual(REASON_GROUPS, [...STOP_REASONS, UNKNOWN_REASON].map(groupOf));
@@ -4345,4 +4364,126 @@ test("one list of stop reasons: every reason has its stall group, and a stored l
   ];
   for (const by of refused)
     assert.notEqual(sourceFault(stored(by), DEFAULTS.units), undefined, JSON.stringify(by));
+});
+
+/**
+ * A built tree's library whose publication charges its ledger (allowance 1,000) 300 units, its oracle then reporting 10
+ * cells at 64 units each (a grant of 640 beyond 4 × 1,000), and then: `admitted` 4,339 more (4,639, one under the limit
+ * with the grant), `over` 4,341 (one over it), `ungranted` 3,701 with no cells reported (one over the plain limit).
+ */
+const storedGrantLibrary = `import { WorkLedger } from "../../src/type-inference/core/budget.js";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+export const QUESTION_UNITS_PER_CELL = 64;
+let cells = 0;
+export const questionWork = () => ({ units: 0, cells });
+export function publicationHashes(files) {
+  const source = files[0].source;
+  cells = 0;
+  const ledger = new WorkLedger(1000);
+  ledger.charge("frames", 300);
+  cells = source === "ungranted" ? 0 : 10;
+  ledger.charge("frames", { admitted: 4339, over: 4341, ungranted: 3701 }[source] ?? 0);
+  return { parts: ["a", "b"], unanswered: 0 };
+}
+`;
+
+test("a store writes and reads a publication run by the runner's own limit, its grant from the cells its oracle reported included, and still refuses a run over it (#1837, the final review's R1)", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const tree = join(directory, "tree");
+    mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
+    mkdirSync(join(tree, "dist", "src", "type-inference", "core"), { recursive: true });
+    mkdirSync(join(tree, "src"));
+    writeFileSync(join(tree, "src", "a.ts"), "tree\n");
+    writeFileSync(join(tree, ".sha"), `${"1".repeat(40)}\n`);
+    writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
+    writeFileSync(join(tree, "dist", "src", "type-inference", "core", "budget.js"), LEDGER);
+    writeFileSync(
+      join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
+      storedGrantLibrary,
+    );
+    const folder = join(directory, "grants");
+    mkdirSync(folder);
+    writeFileSync(
+      join(folder, "g.mjs"),
+      `export const cases = ${JSON.stringify(["admitted", "over", "ungranted"].map((name) => [name, name]))};\n`,
+    );
+    const run = (...args: string[]) =>
+      spawnSync(process.execPath, [runner, folder, ...args], {
+        encoding: "utf8",
+        env: { ...process.env, FAMILIES_UNITS: "4" },
+      });
+    // (the runner admits `admitted` and stalls the other two; the store writes all three, its lines checked as written)
+    const store = join(directory, "store");
+    mkdirSync(store);
+    const stored = run(tree, "--store", store);
+    assert.equal(stored.status, 1, stored.stderr);
+    assert.doesNotMatch(stored.stderr, /would be stored as/);
+    const [src] = readdirSync(store);
+    const area = join(store, src!, "grants");
+    const shard = readFileSync(join(area, "0of1.runs.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const line = (source: string) => shard.find((entry) => entry.source === source);
+    const questions = { perCell: 64, cells: 10 };
+    /** A stored run, as far as its limit reads it. */
+    type StoredRun = {
+      readonly value?: unknown;
+      readonly work: number;
+      readonly allowance: number;
+      readonly questions?: { readonly perCell: number; readonly cells: number };
+    };
+    const runsOf = (source: string): StoredRun[] => Object.values(line(source).runs);
+    assert.deepEqual(
+      runsOf("admitted").map(({ work, allowance, questions: reported }) => [
+        work,
+        allowance,
+        reported,
+      ]),
+      Array.from({ length: 4 }, () => [4639, 1000, questions]),
+    );
+    assert.deepEqual(
+      [line("over").stalled, line("over").cut],
+      ["units", { run: "src-on publication", work: 4641, allowance: 1000, questions }],
+    );
+    assert.deepEqual(
+      [line("ungranted").stalled, line("ungranted").cut],
+      ["units", { run: "src-on publication", work: 4001, allowance: 1000 }],
+    );
+    // (read back: the comparison against the stored shard reads every line through the same check, refusing none)
+    const against = run(tree, "--baseline", area);
+    assert.equal(against.status, 1, against.stderr);
+    assert.doesNotMatch(against.stderr, /refused|is not one a store writes/);
+    // (the same check, row by row: one unit over the limit with its grant, a run with no cells reported over the plain
+    // limit, a grant on a run that is no publication, and a cut within its limit are all refused)
+    const { sourceFault } = await import(pathToFileURL(baselines).href);
+    const admitted = line("admitted");
+    const withRun = (run: StoredRun) => ({ ...admitted, runs: { "src-on publication": run } });
+    const value = admitted.runs["src-on publication"].value;
+    assert.equal(sourceFault(admitted, 4), undefined);
+    assert.equal(sourceFault(line("over"), 4), undefined);
+    assert.equal(sourceFault(line("ungranted"), 4), undefined);
+    for (const [refused, why] of [
+      [withRun({ value, work: 4641, allowance: 1000, questions }), "one unit over the limit"],
+      [withRun({ value, work: 4001, allowance: 1000 }), "no cells reported, over the plain limit"],
+      [
+        {
+          ...admitted,
+          runs: { "src-on stops 16": { value, work: 300, allowance: 1000, questions } },
+        },
+        "a grant on a stop run",
+      ],
+      [
+        withRun({ value, work: 4639, allowance: 1000, questions: { perCell: 0, cells: 10 } }),
+        "no units per cell",
+      ],
+      [{ ...line("over"), cut: { ...line("over").cut, work: 4640 } }, "a cut within its limit"],
+    ] as const)
+      assert.notEqual(sourceFault(refused, 4), undefined, why);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
