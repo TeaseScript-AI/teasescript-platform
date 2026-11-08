@@ -5,8 +5,8 @@ import { relative, resolve } from "node:path";
 // begins) and `test:complete` (it ends), each file's innermost running test is known, and when a test last began or
 // ended there. Once a file has gone `AFTER_MS` without either, a line on standard error names its innermost test with
 // its parents, and again each `AFTER_MS` while it stays so; files are looked at once a minute. The longest test of the
-// suite took 99 s at 15 files at once on desktop (2026-11-08), so a passing run prints nothing. The timer does not keep
-// a run alive.
+// suite took 99 s at 15 files at once on desktop (2026-11-08), so a passing run of today's suite prints nothing; a
+// single test over 5 minutes would print its line and still pass. The timer does not keep a run alive.
 export const AFTER_MS = 5 * 60_000;
 const LOOK_MS = 60_000;
 
