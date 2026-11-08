@@ -84,6 +84,7 @@ interface RewindHost {
       | { readonly plan: string; readonly options: () => PlayerRuntimeSessionOptions },
   ): void;
   activate(): void;
+  prepareRestore(given: PlayerRuntimeSession): void;
   reportHostError(error: unknown): void;
   readonly hostError: Readonly<Ref<string | null>>;
   toStartPage(): Promise<void>;
@@ -2666,4 +2667,122 @@ test("the host holds only the latest activation's run, whether activations succe
   await settle(context);
   held.push(heldRuns(bridge));
   assert.deepEqual(held, [[1], [2], [3], [4], [5], []]);
+});
+
+/*
+ * L5h.3b, B2-L-C (orchestrator 2's invariant): every host message that names an activation's run carries its begin, and
+ * the host begins the run the first time it sees it, whatever the message: a Start's or an introduction's, Continue's
+ * handoff, a halt's or an incident's stop arguments. Generated over the activation × where it fails × how its Player
+ * error reaches the host; each case then Starts anew and disposes of the Player. The host holds the latest activation's
+ * run only, and none after the disposal.
+ */
+const RUN_AXES = {
+  activation: ["heldStart", "factoryStart", "continue"],
+  failure: ["none", "beforeHost", "afterHost"],
+  path: ["none", "commitIncident", "halt"],
+} as const;
+type RunCase = { readonly [A in keyof typeof RUN_AXES]: (typeof RUN_AXES)[A][number] };
+
+/** A case's coordinates as the case they name. */
+function asRunCase(coordinates: Coordinates): RunCase {
+  // EVIDENCE: invariant: `product` gives the declared axes' values.
+  return coordinates as RunCase;
+}
+
+/** Why a combination is no case, or `null` for a feasible one. */
+function runInfeasible({ activation, failure, path }: RunCase): string | null {
+  if ((failure === "none") !== (path === "none"))
+    return "an error reaches the host exactly when one happens";
+  if (activation === "continue" && path === "commitIncident")
+    return "a Continue has its restored session, which its error stops";
+  if (activation !== "continue" && failure === "beforeHost" && path === "halt")
+    return "a Start that failed before the host has no session to halt";
+  if (activation === "factoryStart" && failure === "beforeHost")
+    return "a factory Start's first host step is its introduction; nothing fallible precedes it";
+  return null;
+}
+
+test("each activation's run reaches the host once, however the activation ends, and ends the run before it", async (context) => {
+  const cases = product({ ...RUN_AXES }).filter(
+    (coordinates) => runInfeasible(asRunCase(coordinates)) === null,
+  );
+  const observed: Coordinates[] = [];
+  for (const coordinates of cases) {
+    const c = asRunCase(coordinates);
+    await context.test(`${c.activation} ${c.failure} ${c.path}`, async (subtest) => {
+      const made = createHost(subtest, memoryStorage().provider, { lossy: true });
+      const { host } = made;
+      const bridge = await host.bridge;
+      await start(subtest, host);
+      const held = [heldRuns(bridge)];
+      const failed = new TypeError("The activation failed.");
+      if (c.activation === "continue") {
+        const first = host.session.value!;
+        host.prepareRestore(
+          restorePlayerRuntimeSessionAt(
+            onHost((session: PlayerRuntimeSession) => session.plan)(first),
+            JSON.stringify(playerRuntimeSnapshot(first)),
+            first.events,
+          ),
+        );
+        if (c.failure === "beforeHost") {
+          // Its handoff fails before it is posted: the host never sees the run but through the halt.
+          const request = bridge.client.request.bind(bridge.client);
+          let pending = true;
+          subtest.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+            if (args[0] !== "beginRecording" || !pending) return request(...args);
+            pending = false;
+            return Promise.reject(failed);
+          });
+        }
+        host.activate();
+      } else if (c.activation === "factoryStart")
+        host.prepare(() => {
+          if (c.failure === "afterHost" && c.path === "commitIncident") throw failed;
+          return createPlayerRuntimeSession(script, host.scriptStorageOptions());
+        });
+      else {
+        const prepared = await bridge.client.request("prepare", {
+          source: { kind: "source", script },
+        });
+        // EVIDENCE: fixture: `prepare` of a source replies with its held plan's token.
+        const plan = (prepared.result as { readonly plan: string }).plan;
+        host.prepare({
+          // A plan the host does not hold fails the Start in the host, after its run began there.
+          plan: c.failure === "afterHost" && c.path === "commitIncident" ? "p0" : plan,
+          options: () => {
+            if (c.failure === "beforeHost") throw failed;
+            return host.scriptStorageOptions();
+          },
+        });
+      }
+      if (c.activation !== "continue") host.activate();
+      await settle(subtest);
+      // A Player error after the activation reached the host and made its session.
+      if (c.failure === "afterHost" && c.path === "halt") {
+        host.reportHostError(failed);
+        await settle(subtest);
+      }
+      if (c.failure !== "none")
+        assert.notEqual(host.hostError.value, null, "the activation failed");
+      held.push(heldRuns(bridge));
+      await start(subtest, host);
+      held.push(heldRuns(bridge));
+      made.scope.stop();
+      await settle(subtest);
+      held.push(heldRuns(bridge));
+      assert.deepEqual(held, [[1], [2], [3], []]);
+    });
+    observed.push(coordinates);
+  }
+  assert.deepEqual(
+    coverageGaps(
+      product({ ...RUN_AXES }).filter(
+        (coordinates) => runInfeasible(asRunCase(coordinates)) === null,
+      ),
+      observed,
+      { tuples: true },
+    ),
+    [],
+  );
 });

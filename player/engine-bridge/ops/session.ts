@@ -44,6 +44,7 @@ import { NO_MARKS, marksAfterEdit, type HistoryMarks } from "../../debug-history
 import type { CallViewReply, Introduction, Publication, StopReply } from "../session-protocol.js";
 import {
   advanceExportObservation,
+  ensureRun,
   isRunBegin,
   isStopArguments,
   runIncident,
@@ -293,6 +294,8 @@ export class HeldSession implements HostSession, ObservedSession {
   stopRequested(args: unknown): void {
     if (!isStopArguments(args)) return;
     const owner = this.#connection.exportObservation;
+    // The stop's run begins here when the host has not seen it, as when its Continue failed before its handoff.
+    ensureRun(owner, args);
     advanceExportObservation(owner, { kind: "bindSession", session: this, run: args.run });
     advanceExportObservation(owner, { kind: "stopRequested", stop: args });
   }

@@ -90,7 +90,11 @@ async function runCase(c: { readonly [A in Axis]: Value<A> }): Promise<Observed>
     const stops = c.stop === "none" ? [] : c.stop === "once" ? [1] : [1, 2];
     const stop = async () => {
       for (const at of stops)
-        await bridge.client.signal("halt", { error: "TypeError", run: 1, stop: at }, session.id);
+        await bridge.client.signal(
+          "halt",
+          { error: "TypeError", run: 1, stop: at, retires: null },
+          session.id,
+        );
     };
     const capture = async () => {
       const reply = await bridge.client.request("captureExport", {
@@ -188,7 +192,7 @@ test("a debug export's capture observes the identity, marks, incident and record
 test("the observation's deciding function holds a stop pending until its commit, keeps the first incident, and forgets a retired run", () => {
   const owner = new ExportObservation();
   const session: { run: number | null; observation: unknown } = { run: null, observation: null };
-  const stop = (at: number, error = "TypeError") => ({ error, run: 1, stop: at });
+  const stop = (at: number, error = "TypeError") => ({ error, run: 1, stop: at, retires: null });
   // EVIDENCE: fixture: an observed session is its run and latest observation, which this literal has.
   const observed = session as ObservedSession;
   const steps: [string, unknown][] = [];

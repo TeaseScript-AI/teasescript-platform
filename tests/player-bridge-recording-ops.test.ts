@@ -98,7 +98,7 @@ const OPS = Object.keys(ARGUMENTS) as RecordingOp[];
 
 /** A Player error stop's halt arguments. */
 const HALT: readonly ArgumentForm[] = [
-  { required: { error: "string", run: "integer", stop: "integer" } },
+  { required: { error: "string", run: "integer", stop: "integer", retires: "nullableInteger" } },
 ];
 
 test("every recording op refuses each malformed argument its forms oblige, and admits every valid value", async () => {
@@ -150,7 +150,11 @@ test("a halt refuses malformed stop arguments, and a valid stop or none halts", 
     }
     const stopped = await bridge.start(plan, { wallClockMs: 0 }, false);
     answers["valid"] = await answerOf(
-      bridge.client.signal("halt", { error: "TypeError", run: 1, stop: 1 }, stopped.id),
+      bridge.client.signal(
+        "halt",
+        { error: "TypeError", run: 1, stop: 1, retires: null },
+        stopped.id,
+      ),
       (result) =>
         typeof result === "object" && result !== null
           ? Object.keys(result).sort()
@@ -380,7 +384,11 @@ test("a recording capture answers for the session whose engine began the recordi
       const target = begun ?? (await bridge.start(plan, { wallClockMs: 0 }, false));
       if (timing === "afterAnotherStart") await bridge.start(plan, { wallClockMs: 0 }, true);
       if (timing === "afterStop")
-        await bridge.client.signal("halt", { error: "TypeError", run: 1, stop: 1 }, target.id);
+        await bridge.client.signal(
+          "halt",
+          { error: "TypeError", run: 1, stop: 1, retires: null },
+          target.id,
+        );
       if (timing === "afterRelease")
         await bridge.client.request("release", null, { session: target.id });
       answers[`${route} ${timing}`] = await bridge.read(target, "captureRecording").then(

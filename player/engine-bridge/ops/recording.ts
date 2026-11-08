@@ -8,6 +8,7 @@ import type { BridgeOps } from "../worker-host.js";
 import { heldSession } from "./persistence.js";
 import {
   advanceExportObservation,
+  ensureRun,
   isStopArguments,
   type StopArguments,
 } from "../recording/export-observation.js";
@@ -70,20 +71,15 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
       },
     },
     // A Player error before its run had a session: the run's incident, with no session to stop.
-    // An activation that failed before its first host request begins its run here, ending the run before it: each
-    // activation's run reaches the host once, on that request or on this one.
+    // A Player error with no session to stop: its run begins here when the host has not seen it, as when its
+    // activation failed before its first host request, ending the run before it.
     commitIncident: {
       session: "none",
-      checkArguments: (args) =>
-        isRecord(args) &&
-        exactly(args, ["error", "run", "stop", "retires"]) &&
-        isStopArguments({ error: args.error, run: args.run, stop: args.stop }) &&
-        (args.retires === null || Number.isSafeInteger(args.retires)),
+      checkArguments: isStopArguments,
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted stop arguments with the run's `retires` before run.
-        const { retires, ...stop } = args as StopArguments & { readonly retires: number | null };
-        if (!owner.runs.has(stop.run))
-          advanceExportObservation(owner, { kind: "beginRun", run: stop.run, retires });
+        // EVIDENCE: validation: checkArguments accepted stop arguments before run.
+        const stop = args as StopArguments;
+        ensureRun(owner, stop);
         advanceExportObservation(owner, { kind: "stopRequested", stop });
         const committed = advanceExportObservation(owner, {
           kind: "stopCommitted",

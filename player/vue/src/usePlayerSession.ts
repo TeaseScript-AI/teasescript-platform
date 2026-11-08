@@ -334,8 +334,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function runOf(): RunBegin | undefined {
     return activationRun ?? undefined;
   }
-  /** The stop arguments of a Player error `name` at stop `stop`, in the current run; `null` outside any run. */
-  const stopOf = (name: string, stop: number) => (run === null ? null : { error: name, run, stop });
+  /**
+   * The stop arguments of a Player error `name` at stop `stop`, in the current run with the run its activation ends,
+   * so a host that has not seen the run begins it; `null` outside any run.
+   */
+  const stopOf = (name: string, stop: number) =>
+    run === null ? null : { error: name, run, stop, retires: activationRun?.retires ?? null };
   // From a Player error stop until the host acknowledged it (a round trip with a Worker): input stops, nothing renders.
   // It belongs to the stop `haltingStop` names: only that stop ends it, and a later activation retires it.
   const halting = ref(false);
@@ -370,8 +374,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Without a session to stop, the run's incident is committed by itself.
     const incident = () => {
       const args = stopOf(name, stop);
-      if (args !== null)
-        void bridge?.commitIncident(args, activationRun?.retires ?? null).catch(() => {});
+      if (args !== null) void bridge?.commitIncident(args).catch(() => {});
     };
     if (starting === null) {
       hostError.value = name;

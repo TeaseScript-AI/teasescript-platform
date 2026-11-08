@@ -296,12 +296,9 @@ export class PlayerBridge {
     await this.#client.request("retireRun", { run });
   }
 
-  /**
-   * Commits a Player error of a run that has no session to stop (`commitIncident`); `retires` is the run the
-   * activation ends, which begins here when the activation failed before its first host request.
-   */
-  async commitIncident(stop: StopArguments, retires: number | null): Promise<void> {
-    await this.#client.request("commitIncident", { ...stop, retires });
+  /** Commits a Player error of a run that has no session to stop (`commitIncident`). */
+  async commitIncident(stop: StopArguments): Promise<void> {
+    await this.#client.request("commitIncident", stop);
   }
 
   /**

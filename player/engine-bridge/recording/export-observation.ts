@@ -31,15 +31,26 @@ export function runIncident(owner: ExportObservation, run: number | null): Expor
   return run === null ? null : (owner.runs.get(run)?.incident ?? null);
 }
 
-/** Whether `value` is a halt's stop arguments: an error name, and whole run and stop numbers. */
+/** Whether `value` is a Player error stop's arguments: an error name, and whole run, stop and `retires` numbers. */
 export function isStopArguments(value: unknown): value is StopArguments {
   return (
     isRecord(value) &&
-    exactly(value, ["error", "run", "stop"]) &&
+    exactly(value, ["error", "run", "stop", "retires"]) &&
     typeof value.error === "string" &&
     Number.isSafeInteger(value.run) &&
-    Number.isSafeInteger(value.stop)
+    Number.isSafeInteger(value.stop) &&
+    (value.retires === null || Number.isSafeInteger(value.retires))
   );
+}
+
+/**
+ * Begins run `begin.run`, ending `begin.retires`, unless the owner saw it already. Every host message that names an
+ * activation's run carries its begin (a Start's, an introduction's and Continue's handoff, a halt's and an incident's
+ * stop arguments), and goes through here or `beginRun` first: whichever reaches the host first begins the run.
+ */
+export function ensureRun(owner: ExportObservation, begin: RunBegin): void {
+  if (owner.runs.has(begin.run)) return;
+  advanceExportObservation(owner, { kind: "beginRun", run: begin.run, retires: begin.retires });
 }
 
 /** An activation's run, which a Start, Continue's handoff or an introduction carries: its number, and the run it ends. */
@@ -58,10 +69,12 @@ export function isRunBegin(value: unknown): value is RunBegin {
   );
 }
 
-/** The arguments of a Player error stop's halt: the validated error name, with its run and stop identity. */
-export interface StopArguments {
+/**
+ * The arguments of a Player error stop (a halt, or `commitIncident` without a session): the validated error name, with
+ * its run and stop identity, and the run its activation ends (`RunBegin`).
+ */
+export interface StopArguments extends RunBegin {
   readonly error: string;
-  readonly run: number;
   readonly stop: number;
 }
 

@@ -308,7 +308,7 @@ export function heldPlan(bridge: PlayerBridge, token: string): InstructionPlan {
   return plan;
 }
 
-/** **Facade.** The diagnostic runs the connection holds for its debug exports (`ExportObservation`), in order. */
+/** **Facade, for tests.** The diagnostic runs the connection holds for its debug exports (`ExportObservation`), in order. */
 export function heldRuns(bridge: PlayerBridge): number[] {
   return [...backendOf(bridge).context.exportObservation.runs.keys()].sort((a, b) => a - b);
 }
