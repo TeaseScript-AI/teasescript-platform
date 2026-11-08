@@ -24,7 +24,7 @@ const modelValue = useVModel(props, "modelValue", emits, {
     v-model="modelValue"
     :class="
       cn(
-        'flex w-full bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50',
+        'flex w-full bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed',
         props.variant === 'embedded'
           ? 'min-h-0 rounded-none border-0 shadow-none focus-visible:ring-0'
           : 'min-h-[60px] rounded-md border border-input shadow-sm focus-visible:ring-1 focus-visible:ring-ring',

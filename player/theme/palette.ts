@@ -5,8 +5,8 @@ import { accentTone, tonalColor } from "./material.js";
 export interface PlayerThemeIntent {
   readonly mode: "light" | "dark";
   readonly surfaceHue: number;
+  /** The surfaces' share of the mode's chroma cap (`MODE_SURFACES`), 0..1, without a Stage photo. */
   readonly surfaceTint: number;
-  readonly surfaceMaxChroma: 5 | 8.5 | 12;
   readonly monochrome: boolean;
   readonly accentSeed: OklchColor;
   readonly contrast: "standard" | "high";
@@ -21,12 +21,36 @@ export interface SurfaceTones {
   readonly control: number;
 }
 
-/** Surfaces in a Stage photo's colour, in place of the intent's surface hue, tint and tones. */
+/**
+ * Each mode's surfaces, for both colour sources, the theme's colour and a Stage photo's (owner, 2026-11-08): their tones,
+ * the most chroma they take, so a vivid photo still gives a calm Player, and how strongly the background's far edges
+ * darken (dark mode) or pale (light mode), 0..1. Dark: a coloured canvas with darker message bubbles on it. Light: a
+ * light canvas with lighter bubbles and paler edges, so the centre reads deeper than the edges ("subtle", owner,
+ * 2026-10-13); the canvas tone stays where secondary text on it keeps its contrast.
+ */
+export const MODE_SURFACES: Readonly<
+  Record<
+    "light" | "dark",
+    { readonly tones: SurfaceTones; readonly chroma: number; readonly vignette: number }
+  >
+> = {
+  dark: {
+    tones: { canvas: 18, chrome: 13, raised: 11, floating: 26, control: 22 },
+    chroma: 28,
+    vignette: 0.6,
+  },
+  light: {
+    tones: { canvas: 89, chrome: 94, raised: 98, floating: 99, control: 97 },
+    chroma: 22,
+    vignette: 0.7,
+  },
+};
+
+/** Surfaces in a Stage photo's colour, in place of the intent's surface hue and tint. */
 export interface PhotoSurfaces {
   readonly hue: number;
-  /** Surface chroma before each role's tint factor. */
+  /** Surface chroma before each role's tint factor, at most the mode's cap. */
   readonly chroma: number;
-  readonly tones: SurfaceTones;
 }
 
 export interface ContrastDiagnostic {
@@ -42,7 +66,6 @@ export function generatePlayerTheme(intent: PlayerThemeIntent, photo?: PhotoSurf
     !intent ||
     !["light", "dark"].includes(intent.mode) ||
     !["standard", "high"].includes(intent.contrast) ||
-    ![5, 8.5, 12].includes(intent.surfaceMaxChroma) ||
     typeof intent.monochrome !== "boolean" ||
     !Number.isFinite(intent.surfaceHue) ||
     !Number.isFinite(intent.surfaceTint) ||
@@ -54,26 +77,14 @@ export function generatePlayerTheme(intent: PlayerThemeIntent, photo?: PhotoSurf
   const dark = intent.mode === "dark";
   const high = intent.contrast === "high";
   const textTarget = high ? 7 : 4.5;
-  // Material-oriented surface hierarchy; tuning remains provisional.
-  const tones: SurfaceTones =
-    photo?.tones ??
-    {
-      light: { canvas: 98, chrome: 95, raised: 92, floating: 99, control: 96 },
-      dark: { canvas: 8, chrome: 12, raised: 18, floating: 26, control: 22 },
-    }[intent.mode];
+  // One route for both colour sources: the mode's tones, and the photo's colour or the theme's.
+  const { tones, chroma: chromaCap } = MODE_SURFACES[intent.mode];
   const hue = (((photo?.hue ?? intent.surfaceHue) % 360) + 360) % 360;
-  const chroma = photo
-    ? photo.chroma
-    : intent.monochrome
-      ? 0
-      : intent.surfaceTint * intent.surfaceMaxChroma;
+  const chroma = photo ? photo.chroma : intent.monochrome ? 0 : intent.surfaceTint * chromaCap;
   // Tint lives principally in the canvas. Less chroma in nested surfaces keeps the
   // high end of light tint usable without turning every layer into the same wash.
   const surface = (tone: number, tint = 1) =>
     tonalColor(chroma === 0 ? 0 : hue, chroma * tint, tone);
-  // Keep the established translucent wash strength as the canvas tone changes.
-  const ambientChroma = Math.min(24, chroma * 4);
-  const ambientTone = dark ? tones.canvas + 11 : tones.canvas - 9;
   const neutral = (tone: number) => tonalColor(0, 0, tone);
   const black = neutral(0);
   const white = neutral(100);
@@ -117,7 +128,6 @@ export function generatePlayerTheme(intent: PlayerThemeIntent, photo?: PhotoSurf
     "surface-floating": surface(tones.floating, dark ? 0.6 : 0.2),
     "surface-control": surface(tones.control, dark ? 0.7 : 0.6),
     "surface-selected": stateTone(panelTone, 11, 12),
-    "ambient-wash": tonalColor(ambientChroma === 0 ? 0 : hue, ambientChroma, ambientTone),
     "border-subtle": neutral(dark ? (high ? 60 : 38) : high ? 50 : 80),
     "border-floating": neutral(dark ? (high ? 72 : 48) : high ? 45 : 72),
     "border-default": neutral(dark ? (high ? 75 : 52) : high ? 35 : 65),

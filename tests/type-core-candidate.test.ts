@@ -35,7 +35,7 @@ import type { TypeAnalysisRequest, TypeCheckResult } from "../src/type-inference
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { CARRIER_KINDS, type CarrierKind } from "../src/type-inference/core/carriers.js";
-import { withTestAllowance } from "../src/type-inference/core/budget.js";
+import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import {
   checkedResult,
   coreCheckResult,
@@ -1664,14 +1664,17 @@ test("an integer-only use of a written number place is the current checker's err
       );
     }
   // (a receiver that may be null: the current checker reports the receiver's null where the core reports the use, both
-  // an error at that site, the null contributing nothing to the removed value)
+  // an error at that site, the null contributing nothing to the removed value; since AD-1 the core also reports the
+  // receiver's null there, the route rule's error, so the sites are compared once each)
   for (const use of uses)
     for (const program of [
       `let ps: (number dict)?[] = [dict{a: 1}]\n${use('ps[0].remove("a")')}`,
       `function f: (number dict)? {\n  return dict{a: 1}\n}\n${use('f().remove("a")')}`,
     ]) {
       const source = `${program}\nexit\n`;
-      const sites = (found: readonly string[]) => found.map((error) => error.split("@")[1]);
+      const sites = (found: readonly string[]) => [
+        ...new Set(found.map((error) => error.split("@")[1])),
+      ];
       const current = sites(errors(compileSource(source, OPTIONS)));
       assert.ok(current.length > 0, source);
       assert.deepEqual(
@@ -3024,8 +3027,6 @@ test("a program outside the slice throws at its first construct outside it", () 
     ["let total = 0\nwhile false {\n  total = 1\n}\nexit\n", 14],
     // another consumer: a condition that is no boolean (C3)
     ['if 1 {\n  say "never"\n}\nexit\n', 3],
-    // a possible null, whose required check comes with narrowing (S10)
-    ["let flag = true\nlet n: integer? = null\nif flag {\n  n = 2\n}\nrepeat n {}\nexit\n", 66],
     // lists nested as deep as the facts' walk (256 levels), inferred or written
     [
       `let a = ${"[".repeat(256)}1${"]".repeat(256)}\na = ${"[".repeat(256)}"bad"${"]".repeat(256)}\nexit\n`,
@@ -3591,6 +3592,470 @@ test("the route ends at the refusal its capture establishes, at the store whose 
   const deep = `if hostValue is integer {}\nlet typed:integer${"[]".repeat(128)}=hostValue\nlet out=typed\n${"out=typed\n".repeat(8)}out=hostValue\nexit\n`;
   for (const mode of MODES)
     assert.notEqual(inMode(mode, () => candidate(deep)).plan, null, JSON.stringify(mode));
+});
+
+test("the route rule's error stands where a run can bring the null unchecked, and a check the compiler cannot keep warns (AD-1, #1073 PR 4)", () => {
+  // (functions are outside the candidate's slice: the core's analysis answers)
+  const errs = (source: string): boolean => {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    return analyseCore(request).diagnostics.some((d) => d.class === "compile-error");
+  };
+  for (const [source, error] of [
+    // (a loop's exit tests out the null: a check the compiler cannot keep, the warning; the other polarity is the error,
+    // the fixture's `forms/while-false-exit`; Codex r1 F1 on #1937)
+    [
+      'let n = 1\nif askBoolean "Clear?" { n = null }\nwhile n == null { n = 1 }\nrepeat n {}\nexit\n',
+      false,
+    ],
+    // (a test of the producer in the use's own condition before it, of the needed form; another comparison checks
+    // nothing: Codex r1 F2, F5)
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null and f() > 0 { say "yes" }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != 2 { repeat f() {} }\nexit\n',
+      true,
+    ],
+    // (Codex r2 on #1937: a `not`, a later test of the same call, an `or`'s guard, a leaving guard, an optional type test
+    // of a union, and an `else` arm of a non-null test)
+    [
+      'let n = 1\nif askBoolean "Clear?" { n = null }\nwhile not (n != null) { n = 1 }\nrepeat n {}\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null and f() > 0 and f() != null { say "y" }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null or f() > 0 { say "y" }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null { exit }\nrepeat f() {}\nexit\n',
+      false,
+    ],
+    [
+      'function f: integer | string { return "s" }\nif f() is integer? { repeat f() {} }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null { say "y" } else { repeat f() {} }\nexit\n',
+      true,
+    ],
+    // (Codex r3 on #1937: a guard that leaves through its `else` arm or its `then` arm beside an `else`, or with
+    // `continue` in a loop, is a check on every route past it; one of the wrong form, one in a sibling block, or a
+    // `while` a `break` leaves is not)
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null { say "y" } else { exit }\nrepeat f() {}\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null { exit } else { say "y" }\nrepeat f() {}\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nrepeat 2 { if f() == null { continue }\nrepeat f() {} }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null { say "y" } else { exit }\nrepeat f() {}\nexit\n',
+      true,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif askBoolean("b") { if f() == null { exit } }\nrepeat f() {}\nexit\n',
+      true,
+    ],
+    [
+      'let n = 1\nif askBoolean "Clear?" { n = null }\nwhile n == null { if askBoolean "b" { break }\nn = 1 }\nrepeat n {}\nexit\n',
+      true,
+    ],
+    // (a called function's written union proves itself: Codex r1 F4)
+    ['function f: integer | string { return "s" }\nrepeat f() {}\nexit\n', true],
+    // (a parameter's default is selected only where some call omits the argument)
+    ["function use(n = null) { repeat n {} }\nuse(2)\nexit\n", false],
+    ["function use(n = null) { repeat n {} }\nuse()\nuse(2)\nexit\n", true],
+    // (a call's result is its own producer; a test of the same call around it is a check the compiler cannot keep)
+    [
+      'function read { if askBoolean("v") { return null }\n return 2 }\nrepeat read() {}\nexit\n',
+      true,
+    ],
+    [
+      'function read { if askBoolean("v") { return null }\n return 2 }\nif read() != null { repeat read() {} }\nexit\n',
+      false,
+    ],
+  ] as const)
+    assert.equal(
+      inBothOrders(() => errs(source)),
+      error,
+      source,
+    );
+  // (a written union's other kind the use does not take, made by a non-literal producer, certifies the union's route as
+  // the member's does, #1073)
+  const union =
+    'let flagHost = askBoolean "f"\nlet d = dict{a: 1}\nlet value: boolean | string | null = d.get("x", default: null)\n' +
+    'if flagHost { value = "w" }\nsay d.get(value, default: 0)\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source: union }], ["hostValue"]);
+  assert.ok(request !== null);
+  assert.ok(
+    inBothOrders(() =>
+      analyseCore(request).diagnostics.some(
+        (d) =>
+          d.class === "compile-error" &&
+          d.kind !== "written-type" &&
+          d.requiredCheck?.missingTests[0] === "if value is string",
+      ),
+    ),
+  );
+  // (S7: a method call's receiver that may be null is the runtime's check at the call, where a run fails: Codex r3 F6)
+  for (const source of [
+    "let xs = [null, [1]]\nxs[0].sort()\nexit\n",
+    "let xs = [null, [1]]\n(xs[0]).sort()\nexit\n",
+    'let xs = [null, ["a"]]\nsay xs[0].join(",")\nexit\n',
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const syntax = syntaxOf(source);
+    const derived = derive(syntax, compactAnalysis(request));
+    const failure = evaluate(syntax, derived.stores, {}, false, derived.content).run.failure;
+    assert.ok(
+      derived.discharges.some(
+        (d) => d.by === "native" && d.what === "member" && `TSR016@${d.site}` === failure,
+      ),
+      `${source}: ${failure} ${JSON.stringify(derived.discharges)}`,
+    );
+  }
+  // (S7: C1's check of a copied integer that may be null is its store's, and the predicted run fails where the plan's
+  // does: Sol's classification F1 on #1937)
+  const copied =
+    "let t:integer=7\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:null,nest:{n:null,keep:1},spare:1}\n" +
+    "let a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n";
+  const copiedRequest = coreRequest([{ path: "main.tease", source: copied }]);
+  assert.ok(copiedRequest !== null);
+  const syntax = syntaxOf(copied);
+  const derived = derive(syntax, compactAnalysis(copiedRequest));
+  assert.ok(
+    derived.discharges.some((d) => d.by === "store"),
+    JSON.stringify(derived.discharges),
+  );
+  const compiled = candidate(copied);
+  assert.ok(compiled.plan !== null);
+  assert.deepEqual(
+    runGlobals(compiled.plan, {}),
+    evaluate(syntax, derived.stores, {}, false, derived.content).run,
+  );
+});
+
+test("the tested-producer rule admits its closed set of forms over every axis, and anything else is the route rule's error (AD-1, #1073 PR 4)", () => {
+  // (the open-set rule: the expected outcome comes from the rule's own table, never from the engine. A test removes the
+  // offending kind where it holds (H) or where it fails (F); `not` swaps the two; a position takes H, F or neither; an
+  // exit kind leaves for good. A use with a check on every route warns; any other is the error)
+  const KINDS = {
+    null: {
+      declare: 'function f { if askBoolean("f") { return null }\n return 1 }\n',
+      forms: [
+        ["f() != null", true, false],
+        ["f() == null", false, true],
+        ["f() is integer", true, false],
+        ["f() is integer?", false, true],
+        ["f() != 2", false, false],
+      ],
+    },
+    string: {
+      declare: 'function f: integer | string { if askBoolean("f") { return "s" }\n return 1 }\n',
+      forms: [
+        ["f() is integer", true, false],
+        ["f() is string", false, true],
+        ["f() is not string", true, false],
+        // (where `f() != null` fails, the value tested is null: not a string)
+        ["f() != null", false, true],
+        ["f() != 2", false, false],
+      ],
+    },
+  } as const;
+  type Proof = (holds: boolean, fails: boolean) => boolean;
+  const USE = "repeat f() {}";
+  const COMPARE = "f() > 0";
+  const H: Proof = (holds) => holds;
+  const F: Proof = (_, fails) => fails;
+  const NEVER: Proof = () => false;
+  // (each position: its source around a condition `C` and an exit `E`, what proves it, and the exit kinds it takes)
+  const ANY = ["exit", "end", "return", "goto", "continue", "break"] as const;
+  const TOP = ["exit", "end", "goto"] as const;
+  const POSITIONS: readonly (readonly [
+    string,
+    (c: string, e: string) => string,
+    Proof,
+    readonly string[],
+  ])[] = [
+    ["then arm", (c) => `if ${c} { ${USE} }`, H, ["none"]],
+    ["else arm", (c) => `if ${c} { say "n" } else { ${USE} }`, F, ["none"]],
+    ["else-if arm", (c) => `if ${c} { say "n" } else if askBoolean("e") { ${USE} }`, F, ["none"]],
+    ["nested in then arm", (c) => `if ${c} { if askBoolean("e") { ${USE} } }`, H, ["none"]],
+    ["loop body", (c) => `while ${c} { ${USE}\nbreak }`, H, ["none"]],
+    ["after an and", (c) => `if ${c} and ${COMPARE} { say "y" }`, H, ["none"]],
+    ["after an or", (c) => `if ${c} or ${COMPARE} { say "y" }`, F, ["none"]],
+    ["before an and", (c) => `if ${COMPARE} and ${c} { say "y" }`, NEVER, ["none"]],
+    ["past a while", (c) => `while ${c} { say "w" }\n${USE}`, F, ["none"]],
+    [
+      "past a while a break leaves",
+      (c) => `while ${c} { if askBoolean("b") { break } }\n${USE}`,
+      NEVER,
+      ["none"],
+    ],
+    ["past a leaving then arm", (c, e) => `if ${c} { ${e} }\n${USE}`, F, ANY],
+    [
+      "past a leaving then arm with an else",
+      (c, e) => `if ${c} { ${e} } else { say "y" }\n${USE}`,
+      F,
+      ANY,
+    ],
+    ["past a leaving else arm", (c, e) => `if ${c} { say "y" } else { ${e} }\n${USE}`, H, ANY],
+    [
+      "past a guard in both arms",
+      (c, e) => `if askBoolean("s") { if ${c} { ${e} } } else { if ${c} { ${e} } }\n${USE}`,
+      F,
+      ANY,
+    ],
+    [
+      "past a guard in one arm",
+      (c, e) => `if askBoolean("s") { if ${c} { ${e} } }\n${USE}`,
+      NEVER,
+      ANY,
+    ],
+    [
+      "past a guard a label follows",
+      (c, e) => `if askBoolean("g") { goto back }\nif ${c} { ${e} }\nlabel back\n${USE}`,
+      NEVER,
+      TOP,
+    ],
+    ["past a loop holding a guard", (c, e) => `repeat 2 { if ${c} { ${e} } }\n${USE}`, NEVER, ANY],
+  ];
+  // (an exit kind's frame: `return` in a function, `continue` and `break` in a loop, `goto` to a label after the use)
+  const framed = (exit: string, body: string): string =>
+    exit === "return"
+      ? `function h {\n${body}\n}\nh()\n`
+      : exit === "continue" || exit === "break"
+        ? `repeat 2 {\n${body}\n}\n`
+        : exit === "goto"
+          ? `${body}\nlabel done\n`
+          : `${body}\n`;
+  const statement = (exit: string): string => (exit === "goto" ? "goto done" : exit);
+  const covered = new Set<string>();
+  const wrong: string[] = [];
+  for (const [kind, { declare, forms }] of Object.entries(KINDS))
+    for (const [test, holds, fails] of forms)
+      for (const negated of [false, true])
+        for (const [position, make, proof, exits] of POSITIONS)
+          for (const exit of exits) {
+            const condition = negated ? `not (${test})` : test;
+            const source = declare + framed(exit, make(condition, statement(exit))) + "exit\n";
+            const checked = negated ? proof(fails, holds) : proof(holds, fails);
+            const request = coreRequest([{ path: "main.tease", source }]);
+            assert.ok(request !== null, source);
+            const error = inBothOrders(() =>
+              analyseCore(request).diagnostics.some((d) => d.class === "compile-error"),
+            );
+            if (error === checked)
+              wrong.push(`${checked ? "warning" : "error"} expected: ${source}`);
+            covered.add([kind, test, negated, position, exit].join(" | "));
+          }
+  assert.deepEqual(wrong, []);
+  // (the coverage check: every kind, form, polarity, position and exit kind it takes, each once)
+  const expected = Object.values(KINDS).reduce(
+    (sum, { forms }) =>
+      sum + forms.length * 2 * POSITIONS.reduce((count, [, , , exits]) => count + exits.length, 0),
+    0,
+  );
+  assert.equal(covered.size, expected);
+});
+
+test("in a program holding an arm its entry narrowing leaves no kind no route promotes, and the use keeps the warning (AD-1, #1938)", () => {
+  // (Sol's F2 on #1937 and the lead's default (Codex r6, r7): the expected outcome from the rule's own table, never the
+  // engine's. A writer of a possible null; an `if` whose one arm overwrites the key; its test of `other` gives an arm no
+  // run enters where `other` holds no kind that arm's entry narrowing keeps, and then the program keeps the warning,
+  // whichever arm the route takes. Unknown forms count as runs)
+  const FEASIBILITY = {
+    // (`other` may be an object, null or text: every arm of every form is entered on some run)
+    feasible:
+      'let other = {k: 1}\nif askBoolean("o") { other = null }\nif askBoolean("p") { other = "s" }\n',
+    // (`other` is an object on every run)
+    "infeasible by entry narrowing": "let other = {k: 1}\n",
+    // (a comparison, not N1's form: the guard proves nothing, and the arm counts as a run, #1938's residual)
+    unknown: "let other = {k: 1}\n",
+  } as const;
+  // (each form: whether its truth, and its falsity, leaves an object no kind)
+  const FORMS: readonly (readonly [string, boolean, boolean])[] = [
+    ["other != null", false, true],
+    ["other == null", true, false],
+    ["other is string", true, false],
+  ];
+  const covered = new Set<string>();
+  const wrong: string[] = [];
+  for (const [feasibility, declare] of Object.entries(FEASIBILITY))
+    for (const [test, holds, fails] of FORMS)
+      for (const negated of [false, true])
+        for (const killIn of ["then", "else"] as const) {
+          const plain = feasibility === "unknown" ? "other.k == 1" : test;
+          const condition = negated ? `not (${plain})` : plain;
+          const kill = "n = 1";
+          const statement =
+            killIn === "then"
+              ? `if ${condition} { ${kill} }`
+              : `if ${condition} { say "y" } else { ${kill} }`;
+          const source =
+            'let c = askBoolean "c"\nlet n = 1\nif c { n = null }\n' +
+            declare +
+            statement +
+            "\nrepeat n {}\nexit\n";
+          // (an object leaves one of the arms no kind where either side of the form removes it: `not` swaps the sides)
+          const routeArmDead = feasibility === "infeasible by entry narrowing" && (holds || fails);
+          const request = coreRequest([{ path: "main.tease", source }]);
+          assert.ok(request !== null, source);
+          const [error, warning] = inBothOrders(() => {
+            const diagnostics = analyseCore(request).diagnostics;
+            return [
+              diagnostics.some((d) => d.class === "compile-error"),
+              diagnostics.some((d) => d.class === "warning-runtime-check"),
+            ] as const;
+          });
+          if (error === routeArmDead || (routeArmDead && !warning))
+            wrong.push(`${routeArmDead ? "warning" : "error"} expected: ${source}`);
+          covered.add([feasibility, test, negated, killIn].join(" | "));
+        }
+  // (the default's siblings, each the warning: a whole copy, nesting, `else if`, a loop's body, a second callable, a
+  // callable reached through another; and a program whose arms are all entered keeps the error)
+  const writer = 'let c = askBoolean "c"\nlet n = 1\nif c { n = null }\nlet other = {k: 1}\n';
+  const SIBLINGS: readonly (readonly [string, string, boolean])[] = [
+    [
+      "a whole copy",
+      "let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:8,nest:{n:8,keep:1},spare:1}\n" +
+        "let a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n",
+      false,
+    ],
+    [
+      "a nested if",
+      `${writer}if other != null { if other != null { n = 1 } }\nrepeat n {}\nexit\n`,
+      false,
+    ],
+    [
+      "an else if",
+      `${writer}if askBoolean("e") { n = 1 } else if other != null { n = 1 }\nrepeat n {}\nexit\n`,
+      false,
+    ],
+    [
+      "a loop's body",
+      `${writer}repeat 2 { if other != null { n = 1 } }\nrepeat n {}\nexit\n`,
+      false,
+    ],
+    [
+      "a second callable",
+      "function g {\n  let o = {k: 1}\n  let r = null\n  if o != null { r = 1 }\n  return r\n}\nlet n = g()\nrepeat n {}\nexit\n",
+      false,
+    ],
+    // (Codex r7: a callable whose result or default reaches the use through another callable)
+    [
+      "two callees",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nrepeat h() {}\nexit\n",
+      false,
+    ],
+    [
+      "two callees through a store",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nlet n=h()\nrepeat n {}\nexit\n",
+      false,
+    ],
+    [
+      "two callees through a fallback",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return null otherwise g() }\nrepeat h() {}\nexit\n",
+      false,
+    ],
+    [
+      "a field copied from a callee",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nlet a={n:g()}\nlet b=a\nrepeat b.n {}\nexit\n",
+      false,
+    ],
+    [
+      "a default through two callees",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nfunction f(n=h()) { repeat n {} }\nf()\nf(1)\nexit\n",
+      false,
+    ],
+    [
+      "a second callable whose arms are entered",
+      'function g {\n  if askBoolean("g") { return null }\n  return 1\n}\nlet n = g()\nrepeat n {}\nexit\n',
+      true,
+    ],
+  ];
+  for (const [name, source, expected] of SIBLINGS) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const [error, warning] = inBothOrders(() => {
+      const diagnostics = analyseCore(request).diagnostics;
+      return [
+        diagnostics.some((d) => d.class === "compile-error"),
+        diagnostics.some((d) => d.class === "warning-runtime-check"),
+      ] as const;
+    });
+    if (error !== expected || (!expected && !warning))
+      wrong.push(`${expected ? "error" : "warning"} expected (${name}): ${source}`);
+    covered.add(`sibling | ${name}`);
+  }
+  // (the unavailable axis, Sol's final F1 on #1937 and the lead's ruling: a tested read whose answer is missing blocks
+  // promotion, at a demand allowance that stops its decision and at the natural one; external data's answer does not)
+  const realRoute = "let n = 1\nif hostValue is boolean { n = null }\n";
+  const UNAVAILABLE: readonly (readonly [string, string, number | null, boolean])[] = [
+    [
+      "a stopped tested read",
+      "function g { let o = {k: 1}\nlet r = null\nif o != null { r = 1 }\nreturn r }\nfunction h { return g() }\nrepeat h() {}\nexit\n",
+      64,
+      false,
+    ],
+    [
+      "a stopped tested read, natural allowance",
+      "function g { let o = {k: 1}\nlet r = null\nif o != null { r = 1 }\nreturn r }\nfunction h { return g() }\nrepeat h() {}\nexit\n",
+      null,
+      false,
+    ],
+    [
+      "a tested read admission has no items for (#2009)",
+      `${realRoute}let box = {first: {k: 1}}\nif box.first != null { say "y" }\nrepeat n {}\nexit\n`,
+      null,
+      false,
+    ],
+    [
+      "a tested read with an empty answer (Codex r9)",
+      `${realRoute}let xs = []\nlet q = xs[0].k\nif q != null { say "y" }\nrepeat n {}\nexit\n`,
+      null,
+      false,
+    ],
+    [
+      "a tested read of external data, the control",
+      `${realRoute}if hostValue != null { say "y" }\nrepeat n {}\nexit\n`,
+      null,
+      true,
+    ],
+  ];
+  for (const [name, source, allowance, expected] of UNAVAILABLE) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const [error, warning] = inBothOrders(() => {
+      const run = () => analyseCore(request).diagnostics;
+      const diagnostics = allowance === null ? run() : withTestDemandAllowance(allowance, run);
+      return [
+        diagnostics.some((d) => d.class === "compile-error"),
+        diagnostics.some((d) => d.class === "warning-runtime-check"),
+      ] as const;
+    });
+    if (error !== expected || (!expected && !warning))
+      wrong.push(`${expected ? "error" : "warning"} expected (${name}): ${source}`);
+    covered.add(`unavailable | ${name}`);
+  }
+  assert.deepEqual(wrong, []);
+  // (the coverage check: every feasibility, form, polarity and position, every sibling and every unavailable cell)
+  assert.equal(
+    covered.size,
+    Object.keys(FEASIBILITY).length * FORMS.length * 2 * 2 + SIBLINGS.length + UNAVAILABLE.length,
+  );
 });
 
 test("no production code selects the core: only tests reach the candidate entry", () => {

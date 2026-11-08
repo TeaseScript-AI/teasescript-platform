@@ -359,19 +359,6 @@ function heapRoom(): number {
     : limit - live - QUESTION_HEAP_HEADROOM;
 }
 
-/**
- * Releases what V8 keeps of the last exception thrown: until its stack is formatted, an error holds its frames and their
- * receivers, so one thrown and caught inside an analysis keeps the whole analysis reachable after it returns (1.1 GB
- * at `W19-sources` k = 1,024 with sharing off), until another exception replaces it (#1837).
- */
-function releaseLastException(): void {
-  try {
-    throw new Error("released");
-  } catch {
-    // (only the throw matters: it replaces V8's record of the last exception)
-  }
-}
-
 /** Test-only: `run` with the oracle's questions given `room` bytes of heap. */
 export function withQuestionMemory<T>(room: number, run: () => T): T {
   const outer = questionRoom;
@@ -837,13 +824,10 @@ function publishedElements<Occurrence>(
     .filter(({ kind }) => kind.kind === "binding")
     .map((place) => place.id);
   return inMode(mode, () => {
-    // (the analysis's parts first, its answers dropped when they end; then the route's compile, so that the two
-    // analyses' heaps are never held at once: with sharing off each can take a gigabyte, #1603)
+    // (the analysis's parts first, its answers dropped when they end; then the route's compile, so that the oracle never
+    // holds both analyses' answers: with sharing off each can take a gigabyte, #1603)
     const analysed = analysedElements(request, bindings, each);
-    releaseLastException();
     const route = JSON.stringify(publishedRoute(files, globals).text);
-    // (and the route's own analysis, held the same way after its compile returns)
-    releaseLastException();
     return { ...analysed, route };
   });
 }

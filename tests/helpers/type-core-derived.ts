@@ -1810,7 +1810,22 @@ export function derive(
           content.fallbacks.push({ owner: site(fallback), site: at, type });
       }
       native("fallback", at);
-    } else if (check.kind === "copy-type" && !check.against.includes("unknown")) {
+    } else if (
+      (check.kind === "copy-type" ||
+        // (C1's check of a copied integer that may be null, at its store's value: the store's own, as a copy type's)
+        (check.kind === "null-check" &&
+          check.against.length > 0 &&
+          check.against.every((kind) => kind === "integer") &&
+          statements.some((candidate) => {
+            const store = storeOf(candidate);
+            return (
+              store !== null &&
+              site(unwrap(store.value)) === at &&
+              (check.target === store.name || check.target.startsWith(`${store.name}.`))
+            );
+          }))) &&
+      !check.against.includes("unknown")
+    ) {
       const statement = statements
         .filter(
           (candidate) =>
@@ -1856,7 +1871,14 @@ export function derive(
       const path = check.target === store.name ? [] : check.target.slice(prefix.length).split(".");
       owed.set(statement, [...(owed.get(statement) ?? []), { path, against: check.against }]);
       discharges.push({ statement });
-    } else if (check.kind === "integer-check") {
+    } else if (
+      check.kind === "integer-check" ||
+      // (a count's or an index's possible null that a check on every route the compiler cannot keep leaves to the run,
+      // V30 §13, #1073 PR 4: the runtime's own check of the count or the index takes it at the use, as an integer's)
+      (check.kind === "null-check" &&
+        check.against.length > 0 &&
+        check.against.every((kind) => kind === "integer"))
+    ) {
       const get = all.find(
         (expression) =>
           expression.kind === "callExpression" &&
@@ -1913,9 +1935,20 @@ export function derive(
         native("member", site(store.target));
       } else {
         const read = readAt(check);
-        if (read === undefined)
+        // (a method's receiver that may be null, `xs[0].sort()`: the runtime's own check of the call's receiver, at the call)
+        const method =
+          read === undefined
+            ? all.find(
+                (expression) =>
+                  expression.kind === "callExpression" &&
+                  expression.callee.kind === "propertyAccessExpression" &&
+                  (site(unwrap(expression.callee.object)) === at || site(expression) === at),
+              )
+            : undefined;
+        if (read === undefined && method?.kind === "callExpression") native("member", site(method));
+        else if (read === undefined)
           throw new Underivable(`a member obligation at ${at} without a member`);
-        native("member", site(read));
+        else native("member", site(read));
       }
     } else
       throw new Underivable(`${check.kind} ${check.target}: an obligation no discharge rule maps`);

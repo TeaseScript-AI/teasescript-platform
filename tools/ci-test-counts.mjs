@@ -8,20 +8,33 @@ import { existsSync, readFileSync } from "node:fs";
 //
 // A log line is `<job>\t<step>\t<timestamp> <text>`. Each node:test summary is the run of `ℹ <name> <number>` lines
 // that `ℹ tests` begins. A step's summaries are added up, and the count of summaries is named when there are
-// several. The last line adds up every step. A run in progress has no logs yet.
+// several. The last line adds up every step. A run in progress has no logs yet. GitHub keeps a run's per-step logs only
+// for about an hour after it ends (on 2026-11-08, runs that had ended 47 minutes earlier still had them, and those
+// ended 62 minutes earlier no longer did); after that `gh run view --log` names every line's step "UNKNOWN STEP". Each
+// step's output still begins with `##[group]Run <command>`, so such a step is named by the command it ran, and a line
+// says why.
 //
 // Exit status: 0 when the logs hold a summary and none counts a failure, 1 otherwise, 2 when it cannot run (bad
 // arguments, an unreadable file, or `gh` failing).
 
 const COUNTED = ["tests", "pass", "fail", "skipped"];
+const UNKNOWN = "UNKNOWN STEP";
 
 /** Each step's summed `COUNTED` totals and number of summaries, in log order, from the text of a run's log. */
 export function countsOf(log) {
   const steps = new Map();
   let current = null;
+  // Per job, the command of the step its unnamed lines now come from.
+  const commands = new Map();
   for (const line of log.split(/\r?\n/u)) {
-    const [job, step, rest] = line.split("\t", 3);
+    const [job, logged, rest] = line.split("\t", 3);
     if (rest === undefined) continue;
+    let step = logged;
+    if (logged === UNKNOWN) {
+      const run = /^\S+Z ##\[group\]Run (.+)$/u.exec(rest);
+      if (run !== null) commands.set(job, run[1]);
+      if (commands.has(job)) step = `run: ${commands.get(job)}`;
+    }
     const match = /^\S+Z ℹ (\w+) (\d+(?:\.\d+)?)$/u.exec(rest);
     if (match === null) continue;
     const [, name, value] = match;
@@ -31,6 +44,7 @@ export function countsOf(log) {
         steps.set(key, {
           job,
           step,
+          byCommand: logged === UNKNOWN,
           summaries: 0,
           ...Object.fromEntries(COUNTED.map((n) => [n, 0])),
         });
@@ -56,6 +70,12 @@ function linesOf(steps, source) {
   const summaries = steps.reduce((total, step) => total + step.summaries, 0);
   const jobs = new Set(steps.map(({ job }) => job)).size;
   return [
+    ...(steps.some((step) => step.byCommand)
+      ? [
+          "ci-test-counts: GitHub no longer has this run's per-step logs (it keeps them for about an hour after a run" +
+            " ends), so steps are named by the command they ran.",
+        ]
+      : []),
     ...steps.map(
       (step) =>
         `${step.job.padEnd(jobWidth)}  ${label(step.step, step.summaries).padEnd(stepWidth)}  ${totals(step)}`,
