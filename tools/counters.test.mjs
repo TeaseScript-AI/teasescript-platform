@@ -211,7 +211,14 @@ before(() => {
     "tests/sites.test.ts": `${SITES.map(([, line]) => line).join("\n")}\n`,
     "tests/scopes.test.ts": `const stub = { skip() {}, todo() {} };\n${SCOPES.map((c) => c.text).join("\n")}\n`,
     ".oxlintrc.json": JSON.stringify({
-      overrides: [{ files: ["a", "b"] }, { files: ["c"] }, { rules: {} }],
+      overrides: [
+        { files: ["a", "b"], rules: { "no-debugger": "off" } },
+        { files: ["c"], rules: { eqeqeq: ["allow", {}], "no-debugger": 0 } },
+        // a scope entry, which turns a rule on, and entries without rules: not waiting lists
+        { files: ["d"], rules: { "no-debugger": "off", eqeqeq: "error" } },
+        { files: ["e"] },
+        { rules: {} },
+      ],
     }),
     "tools/oxlint/comment-forecasts-allowed.json": JSON.stringify([{}, {}]),
     "tools/oxlint/comment-declarations-waiting.json": JSON.stringify([{}]),

@@ -22,7 +22,8 @@
 //   context: the first parameter of a function passed to such a call as its last argument. So a closer binding of the
 //   same name hides the context, as it does when the code runs, and a name with no declaration is no context. Todo is
 //   the same with `todo`. Not counted: an aliased import of `test`, and a context's subtests.
-// - The lists count their entries: the `files` of every `.oxlintrc.json` override, the items of
+// - The lists count their entries: the `files` of each `.oxlintrc.json` override that is a waiting list (docs/LINTING.md
+//   "Waiting lists", by tools/oxlint/check-waiting-overrides.mjs's `isWaitingEntry`), the items of
 //   tools/oxlint/comment-forecasts-allowed.json, comment-declarations-waiting.json and comment-external-names.json
 //   (a list that may grow), and the sum of the counts in comment-citations.json. A list whose file does not exist is
 //   null, printed "absent"; an `overrides` or `files` field left out counts 0, and one of another type is malformed.
@@ -42,6 +43,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
 import { parse as parseVue } from "vue/compiler-sfc";
+
+import { isWaitingEntry } from "./oxlint/check-waiting-overrides.mjs";
 
 const CODE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|vue)$/u;
 const LINT_DISABLE = /^(?:\/\/|\/\*)\s*(?:oxlint|eslint)-disable(?:-next-line|-line)?(?![\w-])/u;
@@ -250,7 +253,7 @@ function lists(root) {
     for (const override of overrides) {
       const files = !isObject(override) ? null : override.files === undefined ? [] : override.files;
       shape(".oxlintrc.json", Array.isArray(files), "overrides with `files` arrays");
-      counts.oxlintOverrideFiles += files.length;
+      if (isWaitingEntry(override)) counts.oxlintOverrideFiles += files.length;
     }
   }
   for (const [key, file] of Object.entries(LISTS)) {
@@ -357,7 +360,7 @@ async function main(argv) {
   console.log(`@ts-expect-error and @ts-ignore: ${c.tsDirectives}`);
   console.log(`Skipped tests: ${c.skippedTests}`);
   console.log(`Todo tests: ${c.todoTests}`);
-  console.log(`.oxlintrc.json override files: ${value(c.oxlintOverrideFiles)}`);
+  console.log(`.oxlintrc.json waiting-list files: ${value(c.oxlintOverrideFiles)}`);
   console.log(`Comment forecasts allowed: ${value(c.forecastsAllowed)}`);
   console.log(`Comment citations: ${value(c.citations)}`);
   console.log(`Comment declarations waiting: ${value(c.declarationsWaiting)}`);
