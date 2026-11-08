@@ -26,19 +26,18 @@ The repository currently has no browser-automation dependency and no external pr
 ## Normal and diagnostic verification
 
 `npm run check` runs formatting verification, lint, lint-rule/exception fixtures, Knip, the doc links, and the build
-with compiled tests, preserving actionable failure information. `npm run format` applies the formatter policy;
-`npm run format:check` verifies it without writing. `npm run lint` applies the [type-evidence policy](LINTING.md);
-`npm run test:lint` type-checks and tests the maintained rule implementation; `npm run knip` checks the selected
-unused-code and dependency categories. `npm run check:doc-links` runs remark-validate-links, with remark-gfm, in
-unified-engine within its own process, on exactly Git's regular Markdown files: it reports every relative link and
-heading anchor in the Markdown files that Git tracks or does not ignore that does not resolve. Absolute URLs, this repository's included, are not checked.
-Outside that claim, as the plugin does not read them as GitHub does: raw-HTML links, and GitHub's view forms
-(`?plain=1`, `?raw=1`, a folder's README anchors, a heading GitHub's sanitizer filters a tag from); the docs have none
-of them. A reference definition naming a missing file is reported even when no link uses it. A broken link fails
+with compiled tests, preserving actionable failure information. `npm run format` applies the formatter policy; `npm run
+format:check` verifies it without writing. `npm run lint` applies the [type-evidence policy](LINTING.md); `npm run
+test:lint` type-checks and tests the maintained rule implementation; `npm run knip` checks the selected unused-code and
+dependency categories. `npm run check:doc-links` runs remark-validate-links, with remark-gfm, in unified-engine within
+its own process, on exactly Git's regular Markdown files: it reports every relative link and heading anchor in the
+Markdown files that Git tracks or does not ignore that does not resolve. Absolute URLs, this repository's included, are
+not checked. Outside that claim, as the plugin does not read them as GitHub does: raw-HTML links, and GitHub's view
+forms (`?plain=1`, `?raw=1`, a folder's README anchors, a heading GitHub's sanitizer filters a tag from); the docs have
+none of them. A reference definition naming a missing file is reported even when no link uses it. A broken link fails
 `check:pretest` wherever it sits, so its fix belongs to whoever moved the file or renamed the heading, also in a file
-they did not touch. `npm run lint:design` and `npm run test:lint:design` check the
-[Player design contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in
-`npm run check`.
+they did not touch. `npm run lint:design` and `npm run test:lint:design` check the [Player design
+contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
 TypeScript compilation precedes UI work; compiled tests run only after all builds pass. Each command's output is
 printed together, including warnings. A failure stops the group and subsequent stages; SIGINT/SIGTERM also terminate
