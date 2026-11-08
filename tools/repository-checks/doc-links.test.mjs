@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 // The wrapper's own part: Git's file list as the files remark reads, no configuration or ignore file of remark's, the
 // exit status and its messages. remark-validate-links' own suite covers how it reads links.
 
+const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const tool = fileURLToPath(new URL("./doc-links.mjs", import.meta.url));
 
 /** Writes `files` (path to text) under `root`. */
@@ -19,14 +20,18 @@ function write(root, files) {
   }
 }
 
-/** A Git checkout holding `files`, committed; its folder and its `git`. */
+/**
+ * A Git checkout holding `files`, committed, with the repository's `node_modules`, so that a remark configuration in it
+ * would resolve the same plugins the wrapper uses; its folder and its `git`.
+ */
 function checkout(files) {
   const root = mkdtempSync(join(tmpdir(), "doc-links-"));
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
   git("init", "-q");
   git("config", "user.email", "t@t");
   git("config", "user.name", "t");
-  write(root, { ".gitignore": "ignored/\nb.md\n", ...files });
+  write(root, { ".gitignore": "node_modules\nignored/\nb.md\n", ...files });
+  symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
   git("add", "-A");
   git("commit", "-q", "--allow-empty", "-m", "docs");
   return { root, git };
