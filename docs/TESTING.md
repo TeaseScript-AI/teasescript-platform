@@ -175,12 +175,13 @@ before it. An empty cell has no corpus yet.
 The compiler's shadow gate (`tests/families/shadow.mjs`) is a campaign run from the tree after merges and reported on
 the tracker issue; it is not a per-pull-request level.
 
-**Pinned work.** Some suites pin the core's exact work: totals, listed copy and construction sites, and per-shape tables
+**Pinned work.** Some suites pin the core's exact work: totals, listed copy and construction sites, and work tables
 (`tools/repository-checks/pin-suites.mjs` lists them). A change under `src/type-inference/core/` runs all of them
 before it asks for review and before READY: `node tools/repository-checks/pin-suites.mjs --run`. A pin that moves is
 re-pinned only with its ground: the comment above it says how many units more or fewer and which change made them, and
 the reviewer checks that no part of the change is a repeated question, work the core already did once, done again.
-`--check-grounds` refuses a re-pin whose comment did not change.
+`--check-grounds` refuses a re-pin whose comment did not change. It reads a re-pin as a line of a declared pin that
+changed only in its numbers; a pin whose words or layout changed too is the reviewer's to check.
 
 ## Test admission and consolidation
 
