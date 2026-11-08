@@ -58,7 +58,8 @@ import extractTSConfig from "dependency-cruiser/config-utl/extract-ts-config";
 // privileged adapter layers, which have no modules yet.
 //
 // Exit status: 0 when nothing is refused, 1 when a boundary is crossed, an unlisted cycle exists or a listed entry is
-// gone, 2 when it cannot run. On SIGINT, SIGTERM or SIGHUP it ends its two cruises, awaits them and ends by the signal.
+// gone, 2 when it cannot run. It installs no signal handler: interrupted, it stops by the signal, and a cruise left
+// running only reads files and ends by itself.
 
 const CODE = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|vue)$/u;
 
@@ -190,50 +191,31 @@ async function cruiseProject(name) {
   process.stdout.write(result.output);
 }
 
-/** The two cruises, each in its own process at once; their JSON results, by project. Ended with them on a signal. */
+/** The two cruises, each in its own process at once; their JSON results, by project. */
 async function cruiseBoth() {
-  const children = [];
-  let stopping = false;
-  const signals = ["SIGINT", "SIGTERM", "SIGHUP"].map((signal) => {
-    // once: the signal raised again below takes its default action, ending this process by it
-    const onSignal = async () => {
-      stopping = true;
-      for (const child of children) child.process.kill(signal);
-      await Promise.allSettled(children.map((child) => child.done));
-      process.kill(process.pid, signal);
-    };
-    process.once(signal, onSignal);
-    return [signal, onSignal];
+  const children = Object.keys(PROJECTS).map((name) => {
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "--cruise", name], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const chunks = [];
+    let stderr = "";
+    child.stdout.on("data", (chunk) => chunks.push(chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    const done = new Promise((resolve) =>
+      child.on("close", (status, signal) => resolve({ status, signal })),
+    );
+    return { name, done, chunks, stderr: () => stderr };
   });
-  try {
-    for (const name of Object.keys(PROJECTS)) {
-      const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "--cruise", name], {
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      const chunks = [];
-      let stderr = "";
-      child.stdout.on("data", (chunk) => chunks.push(chunk));
-      child.stderr.on("data", (chunk) => (stderr += chunk));
-      const done = new Promise((resolve) =>
-        child.on("close", (status, signal) => resolve({ status, signal })),
+  const results = {};
+  for (const { name, done, chunks, stderr } of children) {
+    const { status, signal } = await done;
+    if (status !== 0)
+      throw new CannotRun(
+        `check:imports: the ${name} project's cruise failed (${signal ?? `exit ${status}`}):\n${stderr()}`,
       );
-      children.push({ name, process: child, done, chunks, stderr: () => stderr });
-    }
-    const results = {};
-    for (const { name, done, chunks, stderr } of children) {
-      const { status, signal } = await done;
-      // a signal ends the run: the handler above ends it by that signal once both cruises have ended
-      if (stopping) await new Promise(() => {});
-      if (status !== 0)
-        throw new CannotRun(
-          `check:imports: the ${name} project's cruise failed (${signal ?? `exit ${status}`}):\n${stderr()}`,
-        );
-      results[name] = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    }
-    return results;
-  } finally {
-    for (const [signal, onSignal] of signals) process.off(signal, onSignal);
+    results[name] = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   }
+  return results;
 }
 
 /** The strongly connected groups of more than one file in `edges` (a map from a file to the files it imports). */
