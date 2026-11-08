@@ -6,6 +6,7 @@ import {
   type SectionSend,
 } from "./engine-bridge/client.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
+import type { ClockTicket } from "./clock-ticket.js";
 import type { HistoryTimeline } from "./engine-bridge/history/core.js";
 import type { HistoryOpened, HistoryOpResult } from "./engine-bridge/ops/history.js";
 import type { KeptRestore } from "./engine-bridge/ops/persistence.js";
@@ -69,12 +70,10 @@ export class ForeignSessionError extends Error {
 }
 
 /**
- * What a service's chain gets in its section of the published session (`section` of the service hosts): an
- * observation inside the section, as `observeForInput` makes one, and the section's requests.
+ * What a service's chain gets in its section of the published session (`section` of the service hosts): the section's
+ * requests. The clock observes before the chain runs (its `service` row), and the chain receives that observation.
  */
 export interface ServiceSection {
-  /** The clock's now and media samples, observed (`observeTime`), with the stop checked before and after. */
-  observe(): Promise<PlayerSession | null>;
   /**
    * One op of the section's session from `basis`; resolves with its result once its publication is applied to the
    * session's store. It shows only while this session owns the UI (`publishOwned`), so recheck that after the await.
@@ -456,10 +455,14 @@ export class PlayerBridge {
     return merged;
   }
 
-  /** Runs `body` as one exclusive section of `session`; see `SessionSection`. */
-  section<T>(session: PlayerSession, body: (section: SessionSection) => Promise<T>): Promise<T> {
+  /** Runs `body` as one exclusive section of `session`, which the scene clock opens (`ticket`); see `SessionSection`. */
+  section<T>(
+    session: PlayerSession,
+    ticket: ClockTicket,
+    body: (section: SessionSection) => Promise<T>,
+  ): Promise<T> {
     this.#own(session);
-    return this.#client.section(session.id, (send: SectionSend) => {
+    return this.#client.section(session.id, ticket, (send: SectionSend) => {
       const shown = () => this.latest(session) ?? session;
       return body({
         send: (op, args, options = {}) =>

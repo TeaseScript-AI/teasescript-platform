@@ -30,6 +30,7 @@ import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoin
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 import { NO_MARKS } from "../player/debug-history-marks.js";
+import { clockTicket } from "./helpers/clock-ticket.js";
 
 /*
  * L5i.4: Debug's random control as the engine host's connection state. Its owner's sessions decide their draws from the
@@ -114,7 +115,11 @@ const said = (session: { readonly transcriptEntries: readonly { readonly text: s
 /** Holds `session`'s turn until the returned function releases it. */
 function holdTurn(bridge: PlayerBridge, session: PlayerSession) {
   let release = () => {};
-  const held = bridge.section(session, () => new Promise<void>((done) => (release = done)));
+  const held = bridge.section(
+    session,
+    clockTicket(),
+    () => new Promise<void>((done) => (release = done)),
+  );
   return async () => {
     release();
     await held;

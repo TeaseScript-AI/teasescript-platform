@@ -1,13 +1,14 @@
 import type { PlayerBridge, ServiceSection } from "../../player/player-bridge.js";
 import type { PlayerSession } from "../../player/runtime-view.js";
+import { clockTicket } from "./clock-ticket.js";
 
 /**
  * A service host's `section`, as `usePlayerSession` gives it, over `bridge`: an exclusive section of the session
- * `current()` gives, whose observation observes that session at its own scene time (no clock moves in these tests),
- * and whose sends show their publications through `show`, as `publishOwned` does; none once the session's store froze
- * at a stop. `onSend` sees each request right
- * before it is posted, the observation's included, so a test can act at that moment. `advance` gives how far an
- * observation moves the session's scene time, as the Player's clock does when time passed; none by default.
+ * `current()` gives, which observes that session at its own scene time (no clock moves in these tests) before the body,
+ * as the clock's `service` row does, and whose sends show their publications through `show`, as `publishOwned` does;
+ * none once the session's store froze at a stop. `onSend` sees each request right before it is posted, the
+ * observation's included, so a test can act at that moment. `advance` gives how far an observation moves the session's
+ * scene time, as the Player's clock does when time passed; none by default.
  */
 export function serviceSection(
   bridge: PlayerBridge,
@@ -15,26 +16,28 @@ export function serviceSection(
   show: (next: PlayerSession) => void,
   onSend: (op: string, args: unknown) => void = () => {},
   advance: (session: PlayerSession) => number = () => 0,
-): <T>(body: (section: ServiceSection) => Promise<T>) => Promise<T | null> {
+): <T>(
+  body: (section: ServiceSection, observed: PlayerSession | null) => Promise<T>,
+) => Promise<T | null> {
   return (body) => {
     const session = current();
     // As once a Player error stopped the session.
     if (session === null || bridge.frozen(session)) return Promise.resolve(null);
-    return bridge.section(session, (section) =>
-      body({
-        observe: async () => {
-          const at = section.session.state.observedSessionTimeMs;
-          const args = { atMs: at + advance(section.session), media: [] };
-          onSend("observeTime", args);
-          await section.send("observeTime", args);
-          show(section.session);
-          return section.session;
+    return bridge.section(session, clockTicket(), async (section) => {
+      const at = section.session.state.observedSessionTimeMs;
+      const args = { atMs: at + advance(section.session), media: [] };
+      onSend("observeTime", args);
+      await section.send("observeTime", args);
+      show(section.session);
+      return body(
+        {
+          send: (op, args, basis) => {
+            onSend(op, args);
+            return section.send(op, args, { basis, publish: show });
+          },
         },
-        send: (op, args, basis) => {
-          onSend(op, args);
-          return section.send(op, args, { basis, publish: show });
-        },
-      }),
-    );
+        section.session,
+      );
+    });
   };
 }

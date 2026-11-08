@@ -4,7 +4,11 @@ import test from "node:test";
 import ts from "typescript";
 
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
-import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
+import {
+  BridgeRequestError,
+  connectBridge,
+  type BridgeClient,
+} from "../player/engine-bridge/client.js";
 import { beginRecordingNow, heldPlan, heldRecording } from "../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
@@ -26,6 +30,8 @@ import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { viewCalls, viewed, withoutViews } from "./helpers/debug-readers.js";
 import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
 import { NO_MARKS } from "../player/debug-history-marks.js";
+import { clockTicket } from "./helpers/clock-ticket.js";
+import type * as Clock from "../player/vue/src/useRuntimeSceneClock.js";
 
 /*
  * L5b's bridge: the session ops (Start, Continue, time, catch-up, pacing), the reply contract (each publication's
@@ -273,7 +279,7 @@ test("a deadline observation that loses to an op has no effect: state, events, d
     const plan = await prepared(bridge, SCRIPT);
     const session = await bridge.start(plan, { wallClockMs: 0, temporalContext: TEMPORAL }, false);
     // The op's section holds the session; a deadline observation made from the same revision waits behind it.
-    const section = bridge.section(session, (send) =>
+    const section = bridge.section(session, clockTicket(), (send) =>
       send.send("observeTime", { atMs: 1_000, media: [] }),
     );
     const late = withLateObservation
@@ -288,6 +294,34 @@ test("a deadline observation that loses to an op has no effect: state, events, d
     return { shown: shown(latest), snapshot: hatch(latest, playerRuntimeSnapshot) };
   };
   assert.deepEqual(await play(true), await play(false));
+});
+
+/** Another module's key named as the ticket's is: a value keyed by it is no ticket. */
+const foreignTicketKey: unique symbol = Symbol("ClockTicket");
+
+test("only the scene clock's ticket opens a section, at the bridge and at its client (#1983)", () => {
+  // Typed, never called: what the type check decides. Where a ticket came from it does not decide (`ClockTicket`).
+  const typed = (
+    bridge: PlayerBridge,
+    client: BridgeClient,
+    session: PlayerSession,
+    clock: typeof Clock,
+  ) => {
+    const body = async () => {};
+    // @ts-expect-error -- no ticket.
+    void bridge.section(session, body);
+    // @ts-expect-error -- no ticket.
+    void client.section(session.id, body);
+    // @ts-expect-error -- an empty object is no ticket.
+    void bridge.section(session, {}, body);
+    // @ts-expect-error -- a value keyed by another symbol is no ticket.
+    void bridge.section(session, { [foreignTicketKey]: true }, body);
+    // @ts-expect-error -- as above, at the client.
+    void client.section(session.id, { [foreignTicketKey]: true }, body);
+    // @ts-expect-error -- the clock exports no mint, so no module forwards one.
+    void clock.mintClockTicket;
+  };
+  assert.equal(typeof typed, "function");
 });
 
 test("each transitional factory gets a new session, its plan's token, its history and the host's recorder", async () => {
@@ -632,7 +666,7 @@ const FOREIGN_CALLS: Record<string, (a: PlayerBridge, foreign: PlayerSession) =>
   request: async (a, foreign) =>
     void (await a.request(foreign, "observeTime", { atMs: 0, media: [] })),
   viewCalls: async (a, foreign) => void (await a.viewCalls(foreign, true)),
-  section: async (a, foreign) => void (await a.section(foreign, async () => {})),
+  section: async (a, foreign) => void (await a.section(foreign, clockTicket(), async () => {})),
   halt: async (a, foreign) => void (await a.halt(foreign)),
   captureExport: async (a, foreign) => void (await a.captureExport(foreign, "current", () => null)),
   frozen: async (a, foreign) => void a.frozen(foreign),

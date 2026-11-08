@@ -1,11 +1,12 @@
 import type { DebugAnswerInput } from "../../debug-export.js";
 import type { PlayerRuntimeControlResult } from "../../runtime-adapter.js";
 import type { PlayerSession } from "../../runtime-view.js";
+import type { SectionWork } from "./useRuntimeSceneClock.js";
 
 /*
  * The player's input over the engine's bridge (the L5 series, L5c): the chain `RuntimeInteraction` runs for an answer,
- * and the op each control answers with. The chain is one section of the shown session: it observes the session at the
- * clock's now, checks that the session still owns the UI and that the action the player acted on is still presented,
+ * and the op each control answers with. The chain is one section of the shown session: the clock observes the session at
+ * its now (the `inputAnswer` row), then the chain checks that the session still owns the UI and that the action the player acted on is still presented,
  * runs the main side's own effect (a URL's tab), and posts the op. Each step runs only while the session owns the UI, so a
  * replaced, stopped or unmounted session never opens its tab or receives its answer.
  */
@@ -18,8 +19,6 @@ export const RETIRED: unique symbol = Symbol("retired");
 
 /** A section of the shown session, for input (`usePlayerSession`'s `inputSection`). */
 export interface InputSection {
-  /** The session at the clock's now, observed; `null` once it no longer owns the UI (replaced, stopped, unmounted). */
-  observe(): Promise<PlayerSession | null>;
   /** Whether the section's session still owns the UI. */
   owned(): boolean;
   /** Posts one op of the session while it owns the UI; its publication shows as the Player's publications do. */
@@ -28,9 +27,20 @@ export interface InputSection {
   readonly session: PlayerSession;
 }
 
-/** Runs `body` in an input section of the shown session; `null` without one, or once a Player error stopped it. */
+/** The clock's section rows (`SectionWork`) that input sections run under. */
+export type InputWork = Extract<
+  SectionWork,
+  "inputAnswer" | "inputDraft" | "storageEdit" | "storageWriteDone"
+>;
+
+/**
+ * Runs `body` in an input section of the shown session that the clock opens for `work`, with the clock's observation
+ * for that row: the session at its now, `null` once it no longer owns the UI (replaced, stopped, unmounted), or the
+ * section's session for a row that observes nothing. `null` without a session, or once a Player error stopped it.
+ */
 export type InputSectionHost = <T>(
-  body: (section: InputSection) => Promise<T>,
+  work: InputWork,
+  body: (section: InputSection, observed: PlayerSession | null) => Promise<T>,
 ) => Promise<T | null>;
 
 /** What a control answers on the observed session: its op and arguments, or `null` when it answers nothing there. */
@@ -102,7 +112,7 @@ export async function draftInput(
   target: { readonly actionId: number; readonly fieldId: string },
   text: string,
 ): Promise<PlayerSession | null> {
-  const drafted = await section(async (input) => {
+  const drafted = await section("inputDraft", async (input) => {
     if (!input.owned()) return null;
     const outcome = await input.send<InputOutcome | null>("draftForm", { ...target, text });
     return outcome !== RETIRED && outcome?.kind === "updated" && input.owned()
@@ -122,8 +132,7 @@ export async function runInput(
   target: (session: PlayerSession) => number | undefined,
   intent: InputIntent,
 ): Promise<InputResult> {
-  const result = await section(async (input) => {
-    const observed = await input.observe();
+  const result = await section("inputAnswer", async (input, observed) => {
     if (observed === null || !input.owned()) return { kind: "retired" } as const;
     if (target(observed) !== presented) return { kind: "unavailable" } as const;
     const chosen = presented === undefined ? null : intent(observed);

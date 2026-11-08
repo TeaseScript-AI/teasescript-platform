@@ -84,10 +84,13 @@ export interface FileStoreServiceHost {
   /** Identifies the published session; it changes when another session starts. */
   generation(): number;
   /**
-   * Runs `body` as one exclusive section of the published session, with an observation inside it; `null` without a
-   * session, or once a Player error stopped it.
+   * Runs `body` as one exclusive section of the published session, after the clock's observation inside it, which
+   * `observed` gives (`null` once the session no longer owns the UI); `null` without a session, or once a Player error
+   * stopped it.
    */
-  section<T>(body: (section: ServiceSection) => Promise<T>): Promise<T | null>;
+  section<T>(
+    body: (section: ServiceSection, observed: PlayerSession | null) => Promise<T>,
+  ): Promise<T | null>;
   readonly media: FileStoreMedia;
   diagnostic(diagnostic: PlayerDiagnostic): void;
   /** Runs `task` later, after the engine had a chance to run. */
@@ -148,8 +151,8 @@ export class FileStoreService {
       const record = this.#answer!;
       const answer = await record.promise;
       if (!this.#current(record)) return;
-      await this.#host.section((section) =>
-        this.#deliver(section, record, action.actionId, answer),
+      await this.#host.section((section, observed) =>
+        this.#deliver(section, observed, record, action.actionId, answer),
       );
     } catch (error) {
       // A refusal changed nothing: a basis another op replaced keeps this answer for the next service, a released
@@ -170,11 +173,11 @@ export class FileStoreService {
    */
   async #deliver(
     section: ServiceSection,
+    observed: PlayerSession | null,
     record: AnswerRecord<PlayerFileStoreAnswer>,
     actionId: number,
     answer: PlayerFileStoreAnswer,
   ): Promise<void> {
-    const observed = await section.observe();
     if (!this.#current(record)) return;
     if (!observed || activePlayerRuntimeFileStore(observed.state)?.actionId !== actionId)
       return this.#settled(record.key);

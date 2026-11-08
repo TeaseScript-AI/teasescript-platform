@@ -6,6 +6,7 @@ import {
   readWorkerMessage,
   sameBuild,
 } from "./protocol.js";
+import type { ClockTicket } from "../clock-ticket.js";
 import { decodeMessage, encodeMessage } from "./transport.js";
 
 /** How the Player side reaches its engine Worker, whatever runs it: a browser Worker, a Node worker or a test port. */
@@ -86,9 +87,14 @@ export interface BridgeClient {
   ): Promise<BridgeResult>;
   /**
    * Runs `body` as one exclusive section of `session`: other requests for that session wait until it ends, so a
-   * dependent chain (observe, main-side checks and effects, then an op) sees what a synchronous chain would.
+   * dependent chain (observe, main-side checks and effects, then an op) sees what a synchronous chain would. `ticket`
+   * is the scene clock's (`ClockTicket`): only the clock opens a section.
    */
-  section<T>(session: string, body: (send: SectionSend) => Promise<T>): Promise<T>;
+  section<T>(
+    session: string,
+    ticket: ClockTicket,
+    body: (send: SectionSend) => Promise<T>,
+  ): Promise<T>;
   /**
    * Sends one request at once, ahead of the requests waiting for its session, as `halt` must be: the host handles it on
    * receipt too.
@@ -251,7 +257,7 @@ export function openBridge(
           send(op, args, session, options.basis ?? null, options.onReply),
         );
       },
-      section: (session, body) =>
+      section: (session, _ticket, body) =>
         exclusive(session, () =>
           body((op, args, basis, onReply) => send(op, args, session, basis, onReply)),
         ),

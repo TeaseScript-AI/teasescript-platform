@@ -1,7 +1,8 @@
 // The census of session work in `player/` (L5i.5, R3): which entry points reach the engine bridge's sending surfaces,
 // derived with the TypeScript language service, not listed by hand. The boundary is read from the code: every member
-// of the `BridgeClient` interface and every function the in-process facade exports. Discovery walks references
-// backwards from each sending surface (`findReferences`): a function that calls a surface directly is a forwarder, and
+// of the `BridgeClient` interface and every function the in-process facade exports. The test walks the sending ones but
+// `section`, which takes the scene clock's ticket, so the type decides that the clock opens it (#1983). Discovery walks
+// references backwards from each sending surface (`findReferences`): a function that calls a surface directly is a forwarder, and
 // its callers are walked in turn. Where the walk ends is an entry point: a named function nothing in `player/` calls,
 // an anonymous function passed as a value (a callback), or a reference that is not a direct call (an escape: a value
 // passed, bound or stored). An object literal's property that holds a forwarder is followed through its property's

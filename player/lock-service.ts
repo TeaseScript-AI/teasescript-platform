@@ -79,10 +79,13 @@ export interface LockServiceHost {
   /** Identifies the published session; it changes when another session starts. */
   generation(): number;
   /**
-   * Runs `body` as one exclusive section of the published session, with an observation inside it; `null` without a
-   * session, or once a Player error stopped it.
+   * Runs `body` as one exclusive section of the published session, after the clock's observation inside it, which
+   * `observed` gives (`null` once the session no longer owns the UI); `null` without a session, or once a Player error
+   * stopped it.
    */
-  section<T>(body: (section: ServiceSection) => Promise<T>): Promise<T | null>;
+  section<T>(
+    body: (section: ServiceSection, observed: PlayerSession | null) => Promise<T>,
+  ): Promise<T | null>;
   readonly media: FileStoreMedia;
   diagnostic(diagnostic: PlayerDiagnostic): void;
   /** Shows a lock dialog, or none; `busy` while the Player locks or opens with what the player gave in it. */
@@ -245,7 +248,9 @@ export class LockService {
       const record = this.#answer!;
       const answer = await record.promise;
       if (!this.#current(record)) return;
-      await this.#host.section((section) => this.#deliver(section, record, action, answer));
+      await this.#host.section((section, observed) =>
+        this.#deliver(section, observed, record, action, answer),
+      );
     } catch (error) {
       // A refusal changed nothing: a basis another op replaced keeps this answer for the next service, a released
       // session needs none, and a Player error stop, or the Worker's loss, already dropped it.
@@ -265,12 +270,12 @@ export class LockService {
    */
   async #deliver(
     section: ServiceSection,
+    observed: PlayerSession | null,
     record: AnswerRecord<PlayerLockAnswer>,
     action: RuntimeLockActionSnapshot,
     answer: PlayerLockAnswer,
   ): Promise<void> {
     const { key } = record;
-    const observed = await section.observe();
     if (!this.#current(record)) return;
     if (!observed || activePlayerRuntimeLock(observed.state)?.actionId !== action.actionId)
       return this.#settled(key);

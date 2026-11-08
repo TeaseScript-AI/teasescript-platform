@@ -28,6 +28,9 @@ import {
   type RuntimeInput,
 } from "./helpers/player-input.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+import type { ClockTicket } from "../player/clock-ticket.js";
+import { clockTicket } from "./helpers/clock-ticket.js";
+import type { InputSectionHost } from "../player/vue/src/runtime-input.js";
 
 /*
  * The Player's input over the engine's bridge (L5c), through the production intents, the input chain
@@ -175,8 +178,8 @@ function track(context: TestContext, bridge: PlayerBridge) {
   context.mock.method(
     bridge.client,
     "section",
-    (session: string, body: Parameters<typeof section>[1]) =>
-      section(session, (send) =>
+    (session: string, ticket: ClockTicket, body: Parameters<typeof section>[2]) =>
+      section(session, ticket, (send) =>
         body((op, args, basis, onReply) => {
           // EVIDENCE: fixture: the ops of this file's tests post record arguments.
           const record = args as Record<string, unknown>;
@@ -474,7 +477,7 @@ for (const target of ["an answer", "the pacing skip"] as const)
     // the input's own has not run yet, and that one, at its turn, retires it.
     let open!: () => void;
     const opened = new Promise<void>((resolve) => (open = resolve));
-    const holding = bridge.section(shown, () => opened);
+    const holding = bridge.section(shown, clockTicket(), () => opened);
     const answering =
       target === "an answer"
         ? answer(host, input.intents.choice(options(shown)[1]!.id, "button"))
@@ -809,6 +812,18 @@ test("a permanent button is pressed at the observed time, and a replaced session
 // The composer's text and repeat have one owner, `useComposerFields`: the component that renders the composer reads
 // them with `text` and writes them only with `writeField`, which ends a composition under way first. Only the composer
 // takes the writable model (`useComposerModel`); a component cannot inject what it provides itself.
+test("an input section names the clock's row it runs under (#1983)", () => {
+  // Typed, never called: the type check decides that a sender names a row, and which rows input may name.
+  const typed = (section: InputSectionHost) => {
+    // @ts-expect-error -- no row.
+    void section(async () => null);
+    // @ts-expect-error -- a service's row is no input work.
+    void section("service", async () => null);
+    void section("inputDraft", async () => null);
+  };
+  assert.equal(typeof typed, "function");
+});
+
 test("only the composer takes the composer's writable model", () => {
   const sources = fileURLToPath(new URL("../../player/vue/src/", import.meta.url));
   const files = readdirSync(sources, { recursive: true, encoding: "utf8" }).filter((file) =>

@@ -23,6 +23,7 @@ import type { ScriptStorageProvider } from "../player/script-storage.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { serviceSection } from "./helpers/service-section.js";
+import { clockTicket } from "./helpers/clock-ticket.js";
 
 /*
  * When the engine's Worker is lost, every request still waiting for its reply ends its caller quietly: the loss is the
@@ -122,21 +123,22 @@ function serviceHost(bridge: PlayerBridge, session: PlayerSession, lossAt: strin
     sent: [],
     diagnostics: 0,
   };
-  const section: <T>(body: (section: ServiceSection) => Promise<T>) => Promise<T | null> =
-    serviceSection(
-      bridge,
-      () => state.session,
-      (next) => (state.session = next),
-      (op) => {
-        state.sent.push(op);
-        if (op !== lossAt) return;
-        queueMicrotask(() => {
-          lose();
-          // The Player withholds a stopped session from its services.
-          state.session = null;
-        });
-      },
-    );
+  const section: <T>(
+    body: (section: ServiceSection, observed: PlayerSession | null) => Promise<T>,
+  ) => Promise<T | null> = serviceSection(
+    bridge,
+    () => state.session,
+    (next) => (state.session = next),
+    (op) => {
+      state.sent.push(op);
+      if (op !== lossAt) return;
+      queueMicrotask(() => {
+        lose();
+        // The Player withholds a stopped session from its services.
+        state.session = null;
+      });
+    },
+  );
   return {
     state,
     host: {
@@ -266,10 +268,11 @@ interface LossHost {
   activate(): Promise<void>;
   demandCallView(): { release(): void };
   inputSection<T>(
-    body: (section: {
-      observe(): Promise<PlayerSession | null>;
-      send<R>(op: string, args: unknown): Promise<R | symbol>;
-    }) => Promise<T>,
+    work: "inputAnswer" | "inputDraft",
+    body: (
+      section: { send<R>(op: string, args: unknown): Promise<R | symbol> },
+      observed: PlayerSession | null,
+    ) => Promise<T>,
   ): Promise<T | null>;
 }
 let usePlayerSession: (options: {
@@ -386,11 +389,17 @@ async function mount(context: TestContext, delayMs: number) {
 }
 
 for (const [consumer, run] of [
-  ["an input section's observation", (player: LossHost) => player.inputSection((s) => s.observe())],
+  [
+    "an input section's observation",
+    (player: LossHost) => player.inputSection("inputAnswer", async (_s, observed) => observed),
+  ],
   [
     "an input section's op",
     (player: LossHost) =>
-      player.inputSection((s) => s.send<PlayerSession>("observeInput", { atMs: 0, media: [] })),
+      // A row that observes nothing, so the op is the section's first post.
+      player.inputSection("inputDraft", (s) =>
+        s.send<PlayerSession>("observeInput", { atMs: 0, media: [] }),
+      ),
   ],
 ] as const)
   test(`${consumer} in flight when the Worker is lost ends quietly, and the loss is the error stop once`, async (context) => {
@@ -419,12 +428,12 @@ for (const [consumer, run] of [
 for (const [consumer, run] of [
   [
     "an observation still queued in the client",
-    (player: LossHost) => player.inputSection((s) => s.observe()),
+    (player: LossHost) => player.inputSection("inputAnswer", async (_s, observed) => observed),
   ],
   [
     "an op still queued in the client",
     (player: LossHost) =>
-      player.inputSection((s) => s.send("observeInput", { atMs: 0, media: [] })),
+      player.inputSection("inputDraft", (s) => s.send("observeInput", { atMs: 0, media: [] })),
   ],
 ] as const)
   test(`control: ${consumer} at the loss never posts, as the stop ends it first`, async (context) => {
@@ -434,6 +443,7 @@ for (const [consumer, run] of [
     let release = () => {};
     void bridge.section(
       player.session.value!,
+      clockTicket(),
       () => new Promise<void>((resolve) => (release = resolve)),
     );
     const unhandled = await unhandledDuring(async () => {

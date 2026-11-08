@@ -1,7 +1,8 @@
 import { computed, ref, shallowReactive, watch, type Ref, type ShallowRef } from "vue";
 import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
 import type { MediaProgressReport, TimeObservationOutcome } from "../../../src/index.js";
-import { bridgeOf, endsQuietly, refusalCode } from "../../player-bridge.js";
+import type { ClockTicket } from "../../clock-ticket.js";
+import { bridgeOf, endsQuietly, refusalCode, type SessionSection } from "../../player-bridge.js";
 import {
   nextPlayerRuntimeCatchUpStepMs,
   pendingPlayerRuntimeStorageWrite,
@@ -34,6 +35,30 @@ const CLOCK_WORK: Readonly<Record<ClockWork, "settle" | "observe" | "none">> = O
   // Media cues follow what was actually played.
   audioEnded: "observe",
 });
+
+/**
+ * A kind of section work (`section`), and what the session observes at the section's turn, before the work's body:
+ * `observeInput` or `observeTime` with the clock's now and media samples, or `none`.
+ */
+const SECTION_WORK = Object.freeze({
+  // `runInput`, `pressPermanentButton`, `resolveRandomDraw`.
+  inputAnswer: "observeInput",
+  // `draftInput`: a draft has no observation.
+  inputDraft: "none",
+  storageEdit: "none",
+  storageWriteDone: "none",
+  // The lock, stored-files and camera deliveries.
+  service: "observeTime",
+  mediaLoadObserved: "observeTime",
+  mediaLoad: "none",
+} as const);
+export type SectionWork = keyof typeof SECTION_WORK;
+
+/** The clock's ticket for a section it opens; the clock is the one maker, and passes each straight to its section. */
+function mintClockTicket(): ClockTicket {
+  // EVIDENCE: fixture: the scene clock is the one maker of tickets, which are checked by type only.
+  return {} as ClockTicket;
+}
 
 /**
  * Maps monotonic browser time onto the session's persisted scene time. The engine reads no clock: this Player
@@ -168,7 +193,7 @@ export function useRuntimeSceneClock(
     // With `recover`, nothing below rejects: every failure, the media samples' too, is decided here.
     try {
       const args = { atMs: sceneTimeMs(shown), media: mediaReports() };
-      outcome = await bridgeOf(shown).section(shown, async (section) => {
+      outcome = await bridgeOf(shown).section(shown, mintClockTicket(), async (section) => {
         if (disposed || paused.value || owned(shown) === null) return "skipped";
         try {
           return await section.send<TimeObservationOutcome>("observeTime", args);
@@ -198,6 +223,54 @@ export function useRuntimeSceneClock(
     if (outcome === null) return null;
     if (outcome === "skipped" || outcome.kind !== "observed") return owned(shown);
     return whileLive(observation, () => publishLater(shown), owned(shown));
+  }
+
+  /**
+   * Runs `body` in a section of `current` that the clock opens for `work`: at the section's turn it observes what the
+   * work needs (`SECTION_WORK`), then runs `body` with that observation. An observation drops a catch-up under way,
+   * sends the clock's now and media samples, and shows its publication (`publishLater`); it is `null` once `owned`
+   * fails, before or after it, or the session was refused as stopped or lost. While the clock is paused (an inspected
+   * state, a waiting draw), nothing is observed and the section's session is the observation, as for a `none` row. The
+   * body runs whatever the observation, so it decides what a `null` one means. Throws for a kind the table does not hold.
+   */
+  function section<T>(
+    work: SectionWork,
+    current: PlayerSession,
+    owned: () => boolean,
+    body: (section: SessionSection, observed: PlayerSession | null) => Promise<T>,
+  ): Promise<T> {
+    if (!Object.hasOwn(SECTION_WORK, work))
+      throw new Error(`No section work is named ${String(work)}.`);
+    const needs = SECTION_WORK[work];
+    return bridgeOf(current).section(current, mintClockTicket(), async (opened) =>
+      body(opened, needs === "none" ? opened.session : await observeIn(opened, needs, owned)),
+    );
+  }
+
+  /** `section`'s observation, `op`, in `opened` at its turn. */
+  async function observeIn(
+    opened: SessionSection,
+    op: "observeTime" | "observeInput",
+    owned: () => boolean,
+  ): Promise<PlayerSession | null> {
+    if (!owned()) return null;
+    if (paused.value) return opened.session;
+    cancel();
+    const shown = opened.session;
+    let outcome: TimeObservationOutcome;
+    try {
+      outcome = await opened.send<TimeObservationOutcome>(op, {
+        atMs: sceneTimeMs(shown),
+        media: mediaReports(),
+      });
+    } catch (error) {
+      // Refused as stopped, or lost with the Worker: the session no longer owns the UI.
+      if (endsQuietly(error)) return null;
+      throw error;
+    }
+    if (!owned()) return null;
+    if (outcome.kind === "observed" && publishLater(opened.session) === null) return null;
+    return opened.session;
   }
 
   /**
@@ -364,6 +437,7 @@ export function useRuntimeSceneClock(
     observe,
     requestObservation,
     before,
+    section,
     catchUp,
     rebase,
     /** Where scene time stands for `current` now: what an observation of it reports. */

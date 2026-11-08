@@ -137,12 +137,11 @@ import type {
   RuntimeScriptStorageEntrySnapshot,
   SerializableRuntimeValue,
   TemporalContext,
-  TimeObservationOutcome,
 } from "../../../src/index.js";
 
 import { serializableEquals } from "../../../src/runtime/values/serializable-values.js";
 import { silence } from "./generatedAudio";
-import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
+import { useRuntimeSceneClock, type SectionWork } from "./useRuntimeSceneClock";
 import { useScreenWakeLock } from "./useScreenWakeLock";
 import { useCallView } from "./session/useCallView.js";
 import { usePlayerCameraLifecycle, useSessionCamera } from "./session/usePlayerCameras.js";
@@ -831,8 +830,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       // Without a session, nothing takes them.
       if (current === null) return reports.forEach(([mediaId]) => acknowledge(mediaId));
       try {
-        await ownedSection(current, "observeTime", async (section, owned, observed) => {
-          if (observe && (await observed()) === null) return;
+        const work = observe ? "mediaLoadObserved" : "mediaLoad";
+        await ownedSection(current, work, async (section, owned, observed) => {
+          if (observed === null) return;
           for (const [mediaId, report] of reports) {
             if (held.value || !owned()) return;
             const outcome = await section.send<MediaReportOutcome>("reportMediaLoad", {
@@ -907,80 +907,65 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     return stopped.value ? null : current;
   };
   /**
-   * A section of `current`, with an observation inside it as `observeForInput` makes one: the clock's now and media
-   * samples, observed over the bridge with `observeOp`, and `null` once `current` no longer owns the UI, before and
-   * after. While the clock is paused (an inspected state, a waiting draw) nothing is observed, as `clock.observe()`
-   * observes nothing then. The body receives liveness checks (`owned`); it rechecks them after each await, as what it
-   * sends is applied to the session's store and shown only while `current` owns the UI (`publishOwned`). `null`
-   * without `current`, or once a Player error stopped it.
+   * A section of `current` that the clock opens for `work` (`clock.section`), with the clock's observation for that row:
+   * `null` once `current` no longer owns the UI, before or after it. The body receives liveness checks (`owned`); it
+   * rechecks them after each await, as what it sends is applied to the session's store and shown only while `current`
+   * owns the UI (`publishOwned`). `null` without `current`, or once a Player error stopped it.
    */
   function ownedSection<T>(
     current: PlayerSession | null,
-    observeOp: "observeTime" | "observeInput",
+    work: SectionWork,
     body: (
       section: SessionSection,
       owned: () => boolean,
-      observe: () => Promise<PlayerSession | null>,
+      observed: PlayerSession | null,
     ) => Promise<T>,
   ): Promise<T | null> {
     if (current === null || stopped.value) return Promise.resolve(null);
     const owned = () => !disposed && !stopped.value && session.value?.lineage === current.lineage;
-    return bridgeOf(current).section(current, (section) =>
-      body(section, owned, async () => {
-        if (!owned()) return null;
-        if (held.value) return section.session;
-        clock.cancel();
-        const shown = section.session;
-        let outcome: TimeObservationOutcome;
-        try {
-          outcome = await section.send<TimeObservationOutcome>(observeOp, {
-            atMs: clock.sceneTimeMs(shown),
-            media: device.sample(),
-          });
-        } catch (error) {
-          // Refused as stopped, or lost with the Worker: the session no longer owns the UI.
-          if (endsQuietly(error)) return null;
-          throw error;
-        }
-        if (!owned()) return null;
-        if (outcome.kind === "observed" && publishOwned(section.session) === null) return null;
-        return section.session;
-      }),
+    return clock.section(work, current, owned, (section, observed) =>
+      body(section, owned, observed),
     );
   }
   /** A service's section of the serviced session (`ownedSection`); `null` without one, or once stopped. */
-  function serviceSection<T>(body: (section: ServiceSection) => Promise<T>): Promise<T | null> {
-    return ownedSection(servicedSession.value, "observeTime", (section, _owned, observe) =>
-      body({
-        observe,
-        // What the services send shows as any work completing after a reply does.
-        send: (op, args, basis) =>
-          section.send(op, args, { basis, publish: (next) => void publishOwned(next) }),
-      }),
+  function serviceSection<T>(
+    body: (section: ServiceSection, observed: PlayerSession | null) => Promise<T>,
+  ): Promise<T | null> {
+    return ownedSection(servicedSession.value, "service", (section, _owned, observed) =>
+      body(
+        {
+          // What the services send shows as any work completing after a reply does.
+          send: (op, args, basis) =>
+            section.send(op, args, { basis, publish: (next) => void publishOwned(next) }),
+        },
+        observed,
+      ),
     );
   }
   /**
    * An input section of the shown session (`ownedSection`): its observation and ops read no basis, and an op is posted
    * only while the session owns the UI. A refusal of the stopped session (`halted`) changed nothing, as one never posted.
    */
-  const inputSection: InputSectionHost = (body) =>
-    ownedSection(session.value, "observeInput", (section, owned, observe) =>
-      body({
-        observe,
-        owned,
-        send: async (op, args) => {
-          if (!owned()) return RETIRED;
-          try {
-            return await section.send(op, args, { publish: (next) => void publishOwned(next) });
-          } catch (error) {
-            if (endsQuietly(error)) return RETIRED;
-            throw error;
-          }
+  const inputSection: InputSectionHost = (work, body) =>
+    ownedSection(session.value, work, (section, owned, observed) =>
+      body(
+        {
+          owned,
+          send: async (op, args) => {
+            if (!owned()) return RETIRED;
+            try {
+              return await section.send(op, args, { publish: (next) => void publishOwned(next) });
+            } catch (error) {
+              if (endsQuietly(error)) return RETIRED;
+              throw error;
+            }
+          },
+          get session() {
+            return section.session;
+          },
         },
-        get session() {
-          return section.session;
-        },
-      }),
+        observed,
+      ),
     );
 
   const { demandCallView } = useCallView({
@@ -1352,7 +1337,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           for (const stored of scriptWritesStored) stored.set(write!.key, write!.value);
         }
         // The provider's write is made; the acknowledgement goes only to the session that still owns the UI, once.
-        await inputSection(async (section) => {
+        await inputSection("storageWriteDone", async (section) => {
           if (!section.owned() || generation.value !== sessionGeneration) return;
           await section.send("completeStorageWrite", { actionId: write!.actionId, stored });
         });
@@ -1490,7 +1475,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (retired() || stopped.value) return { kind: "saved", live: false };
         if (stored.has(key)) return { kind: "overtaken" };
         if (!liveSession()) return { kind: "saved", live: false };
-        const decided = await inputSection(async (section) => {
+        const decided = await inputSection("storageEdit", async (section) => {
           // Rechecked at the section's turn: input before it may have published meanwhile.
           if (!section.owned() || retired()) return { kind: "saved", live: false } as const;
           if (stored.has(key)) return { kind: "overtaken" } as const;
@@ -2663,9 +2648,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Which reset the record belongs to, as it was asked: one asked for since enters nothing.
     const recorded = record ? { resetAt: lastRandom?.resetAt ?? 0 } : null;
     const origin = activationRun.current();
-    return ownedSection(session.value, "observeInput", async (section, owned, observe) => {
+    return ownedSection(session.value, "inputAnswer", async (section, owned, current) => {
       // Paused at the draw, the session observes no time; a stopped session gives none.
-      const current = await observe();
       if (origin !== null && !activationRun.admits(origin)) return null;
       if (current === null || inspecting.value || current.state.randomDraw?.drawId !== drawId)
         return null;
@@ -3019,8 +3003,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /** Clicks a permanent button at the observed time, like other input; a click it does not accept changes nothing. */
   async function pressPermanentButton(buttonId: number) {
     if (!(await prepareInput())) return;
-    await inputSection(async (section) => {
-      if ((await section.observe()) === null) return;
+    await inputSection("inputAnswer", async (section, observed) => {
+      if (observed === null) return;
       // Its publication shows as the op's reply applies (`publishOwned`), whatever the press's outcome.
       await section.send("pressPermanentButton", { buttonId });
     });

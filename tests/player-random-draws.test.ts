@@ -35,6 +35,7 @@ import { loadSourceDebugSidecar } from "../src/runtime/debug/source-sidecar.js";
 import { createSourceDebugSidecar } from "../src/index.js";
 import { NO_MARKS } from "../player/debug-history-marks.js";
 import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
+import { clockTicket } from "./helpers/clock-ticket.js";
 
 // The button press on a session the composable's host holds (`OnHost`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
@@ -604,7 +605,11 @@ test("a replacement session's draw with the same ID resolves while the previous 
   await settle(context);
   // The first session's turn is held, so its resolution waits.
   let release = () => {};
-  const holding = bridge.section(first, () => new Promise<void>((done) => (release = done)));
+  const holding = bridge.section(
+    first,
+    clockTicket(),
+    () => new Promise<void>((done) => (release = done)),
+  );
   const earlier = random.resolve("natural");
   host.showSession(second);
   await settle(context);
