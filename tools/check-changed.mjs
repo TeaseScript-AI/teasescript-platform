@@ -2,6 +2,7 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { costlyTestSeconds } from "./costly-test-files.mjs";
 
 // Runs, before a push, the checks CI fails on for what changed since a base, in parallel, and prints one line per check
 // with its verdict and seconds, and the full output of a check that failed:
@@ -15,9 +16,11 @@ import { dirname, join, resolve } from "node:path";
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
 // project claims, other than documentation, runs every project's checks. It never builds the TypeScript or runs the
 // compiled test suite, which CI does: a change that shows only there, such as the root tsconfig's emit settings, passes
-// here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work, as
-// `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs before review
-// (`docs/TESTING.md`, "Pinned work"), which it does not run itself.
+// here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
+// its published answers, as `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs
+// before review (`docs/TESTING.md`, "Pinned work"), which it does not run itself. When a changed type-core test file has
+// no entry in `tools/costly-test-files.mjs`, it prints one line saying so: the file runs in full, as every file does,
+// and the entry lands from CI at merge.
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
 // detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
@@ -99,6 +102,24 @@ export function checksOf(projects) {
 
 /** The core, a change to which prints the suites that pin its work. */
 const CORE = "src/type-inference/core/";
+
+/** The line a changed type-core test file that `tools/costly-test-files.mjs` does not list prints (#2088). */
+export const UNKNOWN_TO_COSTLY =
+  "unknown to costly-test-files: run in full; the entry lands from CI at merge";
+
+/**
+ * The type-core test files among `paths` that `tools/costly-test-files.mjs` does not list (#2088). The table lists every
+ * type-core test file, so a new one is the unknown kind, and its default is the conservative one: it runs in full, as
+ * every file does (`tools/test-shards.mjs` counts it at `otherTestSeconds`), and the coordinator lands its entry from
+ * the merge's CI runs. Another test file the table lacks is not unknown: the table lists only those of 10 s or more.
+ */
+export function unknownToCostly(paths) {
+  return paths.filter(
+    (path) =>
+      /^tests\/type-core-[^/]+\.test\.ts$/u.test(path) &&
+      costlyTestSeconds[path.slice("tests/".length).replace(/\.ts$/u, ".js")] === undefined,
+  );
+}
 
 /** The extensions `npm run format:check` covers. */
 const FORMATTED = /\.(?:ts|tsx|cts|mts|js|jsx|cjs|mjs)$/u;
@@ -287,6 +308,8 @@ async function check(cleanups) {
     `check-changed: ${changed.length} changed files since ${ref} (${mergeBase.slice(0, 9)}); ` +
       `projects: ${[...projects].join(", ") || "none"}\n`,
   );
+  const unknown = unknownToCostly(changed);
+  if (unknown.length > 0) process.stdout.write(`${unknown.join(", ")}: ${UNKNOWN_TO_COSTLY}\n`);
 
   // (a deleted core file counts too, which `changed`, holding the files that exist, leaves out, and a file moved out of
   // the core, whose old path only `--no-renames` lists)

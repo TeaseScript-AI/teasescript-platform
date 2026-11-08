@@ -13,7 +13,14 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { PROJECTS, checksOf, projectsFor, removeTemporaryWorktree } from "./check-changed.mjs";
+import {
+  PROJECTS,
+  UNKNOWN_TO_COSTLY,
+  checksOf,
+  projectsFor,
+  removeTemporaryWorktree,
+  unknownToCostly,
+} from "./check-changed.mjs";
 
 // A representative changed path for each project, and the projects it alone needs.
 const REPRESENTATIVES = {
@@ -331,6 +338,50 @@ test(
         );
         // (its stdout and stderr arrive in either order)
         if (fails) assert.match(result.stdout, /--- pin suites ---\n[^]*no merge-base\n/u);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  },
+);
+
+test(
+  "a changed type-core test file that costly-test-files does not list prints one line, and fails nothing (#2088)",
+  { timeout: 30_000 },
+  () => {
+    assert.equal(
+      UNKNOWN_TO_COSTLY,
+      "unknown to costly-test-files: run in full; the entry lands from CI at merge",
+    );
+    // (only a type-core test file the table lacks is unknown: the table lists every one, and another file only at 10 s
+    // or more)
+    assert.deepEqual(
+      unknownToCostly([
+        "tests/type-core-unlisted.test.ts",
+        "tests/type-core-cells.test.ts",
+        "tests/unlisted-other.test.ts",
+        "tests/helpers/type-core-unlisted.ts",
+        "src/type-inference/core/type-core-unlisted.test.ts",
+      ]),
+      ["tests/type-core-unlisted.test.ts"],
+    );
+    for (const file of ["tests/type-core-unlisted.test.ts", "tests/type-core-cells.test.ts"]) {
+      const { directory } = repository({ passing: true });
+      try {
+        mkdirSync(join(directory, "tests"), { recursive: true });
+        writeFileSync(join(directory, file), "\n");
+        const result = spawnSync(process.execPath, [tool, "--base", "main"], {
+          cwd: directory,
+          encoding: "utf8",
+          env: environment,
+        });
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        const lines = result.stdout.split("\n").filter((line) => line.includes(UNKNOWN_TO_COSTLY));
+        assert.deepEqual(
+          lines,
+          file.includes("unlisted") ? [`${file}: ${UNKNOWN_TO_COSTLY}`] : [],
+          result.stdout + result.stderr,
+        );
       } finally {
         rmSync(directory, { recursive: true, force: true });
       }

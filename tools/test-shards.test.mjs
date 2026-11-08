@@ -12,6 +12,7 @@ import {
   pretestSeconds,
   testFilesAtOnce,
 } from "./costly-test-files.mjs";
+import { UNKNOWN_TO_COSTLY, unknownToCostly } from "./check-changed.mjs";
 import { shardFiles, shardOption, shardSeconds } from "./test-shards.mjs";
 
 // The suite's files: the costly ones and 298 others.
@@ -31,6 +32,18 @@ test("every test file is in exactly one shard, the costly ones first in each", (
   }
   // (the order the files come in changes nothing)
   assert.deepEqual(shardFiles([...files].reverse(), 2, 3), shardFiles(files, 2, 3));
+});
+
+test("a type-core test file the table does not list runs, in exactly one shard, at the default seconds (#2088)", () => {
+  const unlisted = "type-core-unlisted.test.js";
+  assert.equal(costlyTestSeconds[unlisted], undefined);
+  for (let count = 1; count <= 4; count += 1) {
+    const holding = Array.from({ length: count }, (_, index) =>
+      shardFiles([...files, unlisted], index + 1, count),
+    ).filter((shard) => shard.includes(unlisted));
+    assert.equal(holding.length, 1, `${count} shards`);
+  }
+  assert.equal(shardSeconds([unlisted], 1, 1), otherTestSeconds);
 });
 
 test("the shards' estimated ends, the last after the pre-test checks, differ by no more than the costliest file", () => {
@@ -63,17 +76,16 @@ test("the costliest files fill shard 1's slots, and the next starts in shard 2 a
   assert.deepEqual(shardFiles([costliest[0], ...small], 2, 2), []);
 });
 
-test("every type-core test file has measured seconds, costliest first, and every file with seconds exists", () => {
-  const suite = readdirSync(new URL("../tests/", import.meta.url))
-    .filter((file) => file.endsWith(".test.ts"))
-    .map((file) => file.replace(/\.ts$/, ".js"));
-  const typeCore = suite.filter((file) => file.startsWith("type-core-"));
-  assert.ok(typeCore.length > 0);
-  assert.deepEqual(
-    typeCore.filter((file) => costlyTestSeconds[file] === undefined),
-    [],
-    "regenerate tools/costly-test-files.mjs (its header says how)",
+test("every file with seconds exists, costliest first; a type-core test file without them is named, not refused (#2088)", (t) => {
+  const sources = readdirSync(new URL("../tests/", import.meta.url)).filter((file) =>
+    file.endsWith(".test.ts"),
   );
+  const suite = sources.map((file) => file.replace(/\.ts$/, ".js"));
+  assert.ok(suite.some((file) => file.startsWith("type-core-")));
+  // (a new type-core test file runs in full until the coordinator lands its entry from the merge's CI runs: the line
+  // `check-changed` prints, here on every run until then)
+  const unknown = unknownToCostly(sources.map((file) => `tests/${file}`));
+  if (unknown.length > 0) t.diagnostic(`${unknown.join(", ")}: ${UNKNOWN_TO_COSTLY}`);
   assert.deepEqual(
     costlyTestFiles.filter((file) => !suite.includes(file)),
     [],
