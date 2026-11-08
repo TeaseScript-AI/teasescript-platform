@@ -276,7 +276,11 @@ else
         </template>
         <!-- Likewise the fixture buttons, only while the script shows no permanent button. -->
         <template v-if="buttons.length" #controls>
-          <PermanentButtons :buttons="buttons" @press="press" />
+          <PermanentButtons
+            :buttons="buttons"
+            :held="player.rewind.inputHeld.value"
+            @press="press"
+          />
         </template>
         <template v-else #controls>
           <BackgroundControlsFixture :key="backgroundControlsReset" />

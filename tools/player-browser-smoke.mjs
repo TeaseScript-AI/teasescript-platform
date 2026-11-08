@@ -2937,6 +2937,7 @@ async function rewindSwitchScenario(cdp, origin) {
           cdp,
           `JSON.stringify({
             controls: [...document.querySelectorAll('[data-foreground-controls] button, [data-rewind-inspection] button')].every((button) => button.disabled),
+            permanent: document.querySelectorAll('[data-permanent-button]').length > 0 && [...document.querySelectorAll('[data-permanent-button]')].every((button) => button.getAttribute('aria-disabled') === 'true'),
             busy: document.querySelector('[data-rewind-status]')?.getAttribute('aria-busy'),
             announced: document.querySelector('[data-rewind-announcement]')?.textContent.trim(),
             animation: !!document.querySelector('[data-rewind-switch-indicator]'),
@@ -2944,6 +2945,7 @@ async function rewindSwitchScenario(cdp, origin) {
         ),
         JSON.stringify({
           controls: true,
+          permanent: true,
           busy: "true",
           announced: "Returning to session",
           animation: false,

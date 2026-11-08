@@ -1,6 +1,9 @@
 ---
 title: "Rewind fixture"
 ---
+showPermanentButton "Hint" {
+    say "A hint.", instant
+}
 let first = askChoice "Red", "Blue"
 say "First: ${first}.", instant
 let second = askChoice "Left", "Right"
