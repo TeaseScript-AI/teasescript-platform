@@ -11,7 +11,8 @@ import type { PlayerOpsContext } from "./player-ops.js";
 /*
  * The connection's random and trace state, as the ops read and change it: Debug's random control (`alignRandom`,
  * `ownedRandom`) and its value trace (`alignTrace`), with the intents that set them. A leaf of the engine bridge: the ops
- * and the context's composition (`player-ops.ts`) import it, and it imports none of them.
+ * and the context's composition (`player-ops.ts`) import it, and it imports no value from them, only
+ * `PlayerOpsContext`'s type.
  */
 
 /**
