@@ -10,11 +10,11 @@ import { dirname, join, resolve } from "node:path";
 //
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else `origin/main`; the
 // changes are those since its merge-base with HEAD, committed or not, untracked files included. Always: `git diff
-// --check`, the format check of the changed files, oxlint and knip, each as CI runs it. Then each project a changed
-// path belongs to (`projectsFor`): its type check and tests. A root configuration file belongs to the checks that read
-// it, and needs no project when only those that always run do. A changed path no project claims, other than
-// documentation, runs every project's checks. It never builds the TypeScript or runs the compiled test suite, which
-// CI does: a change that shows only there, such as the root tsconfig's emit settings, passes here.
+// --check`, the format check of the changed files, oxlint, knip and the doc links, each as CI runs it. Then each
+// project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file belongs to the
+// checks that read it, and needs no project when only those that always run do. A changed path no project claims, other
+// than documentation, runs every project's checks. It never builds the TypeScript or runs the compiled test suite,
+// which CI does: a change that shows only there, such as the root tsconfig's emit settings, passes here.
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
 // detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
@@ -71,7 +71,7 @@ export const PROJECTS = {
 /** Root configuration files that only the checks run for every change read: oxlint's. */
 const READ_BY_ALWAYS_RUN_CHECKS = new Set([".oxlintrc.json"]);
 
-/** A path whose change no project's check covers, as CI checks none of it: documentation. */
+/** A documentation path selects no project's checks; its Markdown links are checked on every run (`doc links`). */
 const isDocumentation = (path) => path.endsWith(".md") || path.startsWith("docs/");
 
 /**
@@ -290,6 +290,7 @@ async function check(cleanups) {
       : []),
     run("oxlint", process.execPath, ["tools/oxlint/run.mjs"]),
     run("knip", process.execPath, ["node_modules/knip/bin/knip.js"]),
+    run("doc links", process.execPath, ["tools/repository-checks/doc-links.mjs"]),
   ];
   for (const check of checksOf(projects))
     checks.push(
