@@ -6,7 +6,7 @@ import { run } from "node:test";
 import { shardFiles } from "./test-shards.mjs";
 
 // Measures what `tools/costly-test-files.mjs` records: each compiled test file's seconds, from its process's start to its
-// end, the seconds of the checks CI's `check-2` job runs before its tests (`npm run check:pretest`), and of the runtime
+// end, the seconds of the checks CI's last test job runs before its tests (`npm run check:pretest`), and of the runtime
 // oracle comparison CI's `check-1` job runs after its tests (`npm run oracle:test`). `--write` rewrites
 // `tools/costly-test-files.mjs`; `--raw FILE` keeps the measurement.
 //
@@ -77,14 +77,16 @@ function stepSeconds(runId, jobs, name) {
 }
 
 /**
- * CI's runs: each run's files' seconds (both test jobs' artifacts), its pre-test and oracle steps' seconds and its
+ * CI's runs: each run's files' seconds (every test job's artifact), its pre-test and oracle steps' seconds and its
  * commit.
  */
 function ciRuns(ids) {
   return ids.map((runId) => {
     // (a run's last attempt: re-running a run removes the artifacts of its earlier attempts)
     const where = `repos/{owner}/{repo}/actions/runs/${runId}`;
-    const commit = gh("api", where, "-q", ".head_sha");
+    const { head_sha: commit, conclusion } = JSON.parse(gh("api", where));
+    // (a run that did not pass may lack a test job that never started, whose files the other runs would then cover)
+    if (conclusion !== "success") fail([`run ${runId} did not pass (${conclusion})`]);
     const jobs = JSON.parse(gh("api", `${where}/jobs`, "-q", ".jobs"));
     const pretest = stepSeconds(runId, jobs, "Check source before the tests");
     const oracle = stepSeconds(runId, jobs, "Compare with the runtime oracle");
@@ -93,7 +95,12 @@ function ciRuns(ids) {
     const kept = readdirSync(folder).map((name) =>
       JSON.parse(readFileSync(join(folder, name, "test-file-seconds.json"), "utf8")),
     );
-    if (kept.length !== 2) fail([`run ${runId} kept ${kept.length} test jobs' seconds, not 2`]);
+    // (a test job is one with a step that runs a shard of the tests)
+    const testJobs = jobs.filter((job) =>
+      (job.steps ?? []).some((found) => found.name.startsWith("Build and run tests")),
+    ).length;
+    if (testJobs === 0 || kept.length !== testJobs)
+      fail([`run ${runId} kept ${kept.length} test jobs' seconds, not ${testJobs}`]);
     const atOnce = new Set(kept.map((found) => found.filesAtOnce));
     if (atOnce.size !== 1)
       fail([`run ${runId}'s test jobs ran ${[...atOnce].join(" and ")} files at once`]);

@@ -343,10 +343,6 @@ export function startBridgeHost(
   }
 
   /**
-   * Halts the session on receipt: every request of it the host has not dispatched is refused from now on. The
-   * acknowledgement follows every reply to an op of the session that ran, so it waits for one still awaited.
-   */
-  /**
    * What the stop of session `id` froze, read once its last op ran (the Player's: the stopped publication's call view).
    * A fault reading it still acknowledges the stop, without it.
    */
@@ -358,6 +354,10 @@ export function startBridgeHost(
     }
   }
 
+  /**
+   * Halts the session on receipt: every request of it the host has not dispatched is refused from now on. The
+   * acknowledgement follows every reply to an op of the session that ran, so it waits for one still awaited.
+   */
   function halt(request: BridgeRequest): void {
     const acknowledge = () => {
       const result = stopPayload(request.session!);

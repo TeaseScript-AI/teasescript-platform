@@ -15,11 +15,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # The check runs as two jobs side by side (#1638): each installs and builds, then runs one half of the compiled tests
-  # (`--shard=i/2`, shared out by measured seconds, `tools/test-shards.mjs`); check-2 also runs the checks before the
-  # tests (`check:pretest`), once, and check-1 the runtime oracle comparison after them; the sharing counts both. The
-  # measurement finds those two steps by their names. Together they run what `npm run check` runs; `check`, the required
-  # check, passes only where both passed.
+  # The check runs as three jobs side by side (#1638, #1978): each installs and builds, then runs one third of the
+  # compiled tests (`--shard=i/3`, shared out by measured seconds, `tools/test-shards.mjs`); check-3 also runs the
+  # checks before the tests (`check:pretest`), once, and check-1 the runtime oracle comparison after them; the sharing
+  # counts both. Together they run what `npm run check` runs; `check`, the required check, passes only where all three
+  # passed. `tools/measure-test-files.mjs --from-ci` finds the test jobs by their step named "Build and run tests…" and
+  # the two fixed steps by "Check source before the tests" and "Compare with the runtime oracle": keep those names.
   check-1:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -29,6 +30,9 @@ jobs:
         with:
           persist-credentials: false
           show-progress: false
+          # the history without file contents, for the regression cases' base (below)
+          fetch-depth: 0
+          filter: blob:none
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
@@ -36,12 +40,22 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
-      - name: Build and run tests, shard 1 of 2
+      - name: Build and run tests, shard 1 of 3
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
           BUILD_SOURCEMAPS: "0"
           TEST_FILE_SECONDS: ${{ runner.temp }}/test-file-seconds.json
-        run: npm test -- --shard=1/2
+        run: npm test -- --shard=1/3
+      # How the regression cases the pull request declares (`tests/helpers/regression-case.ts`) end at its base, reported,
+      # not enforced (`tools/repository-checks/regression-cases.mjs`, docs/TESTING.md "Regression-test rule"): the step
+      # never fails the job. It reuses the build above, and ends at once when no changed test file declares a case. The
+      # base is the merge's first parent.
+      - name: Regression cases at the base (reported)
+        if: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: true
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: node tools/repository-checks/regression-cases.mjs --base "$(git rev-parse HEAD^1)" --pr "$PR"
       # The runtime oracle (docs/TESTING.md "Runtime pipeline oracle"): a pinned commit's own install and build, kept
       # between runs by its commit and lockfile, then compared with this build. It is outside the shards, so it runs
       # here alone, always.
@@ -80,6 +94,36 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build and run tests, shard 2 of 3
+        env:
+          NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
+          BUILD_SOURCEMAPS: "0"
+          TEST_FILE_SECONDS: ${{ runner.temp }}/test-file-seconds.json
+        run: npm test -- --shard=2/3
+      # each test file's seconds, which `tools/measure-test-files.mjs --from-ci` makes the shards' weights from
+      - name: Keep each test file's seconds
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: test-file-seconds-${{ github.run_attempt }}-2
+          path: ${{ runner.temp }}/test-file-seconds.json
+          if-no-files-found: error
+          retention-days: 7
+  check-3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          show-progress: false
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
       - name: Validate local-agent tooling
         run: bash tools/local-agent/check-local-agent.sh
       - name: Upload local-agent failure logs
@@ -96,31 +140,31 @@ jobs:
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
         run: npm run check:pretest
-      - name: Build and run tests, shard 2 of 2
+      - name: Build and run tests, shard 3 of 3
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
           BUILD_SOURCEMAPS: "0"
           TEST_FILE_SECONDS: ${{ runner.temp }}/test-file-seconds.json
-        run: npm test -- --shard=2/2
+        run: npm test -- --shard=3/3
       # each test file's seconds, which `tools/measure-test-files.mjs --from-ci` makes the shards' weights from
       - name: Keep each test file's seconds
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: test-file-seconds-${{ github.run_attempt }}-2
+          name: test-file-seconds-${{ github.run_attempt }}-3
           path: ${{ runner.temp }}/test-file-seconds.json
           if-no-files-found: error
           retention-days: 7
   check:
-    needs: [check-1, check-2]
+    needs: [check-1, check-2, check-3]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require both test jobs
+      - name: Require all three test jobs
         env:
-          RESULTS: ${{ needs.check-1.result }} ${{ needs.check-2.result }}
+          RESULTS: ${{ needs.check-1.result }} ${{ needs.check-2.result }} ${{ needs.check-3.result }}
         run: |
-          if [ "$RESULTS" != "success success" ]; then
-            echo "check-1 and check-2: $RESULTS"
+          if [ "$RESULTS" != "success success success" ]; then
+            echo "check-1, check-2 and check-3: $RESULTS"
             exit 1
           fi

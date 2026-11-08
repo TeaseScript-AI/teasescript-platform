@@ -161,30 +161,41 @@ const RESOLVED: ReadonlySet<string> = new Set([
   "otherwise/fallback",
 ]);
 
-/**
- * #1762: a mixed error's path as one side's sentence reads it: each `element` step below a dict its `entry`, where that
- * side's value there is a dict (`dicts`, one walk down the path); admission's own path, which rejects and checks,
- * unchanged.
- */
-function shownSteps(
+/** One side's walk down a mixed error's path for a collection fact (`layersAt`'s), at the asked depths. */
+type CollectionWalk = (
+  fact: "dict" | "set",
   path: readonly string[],
-  dicts: (path: readonly string[], depths: readonly number[]) => boolean[],
-): readonly string[] {
+  depths: readonly number[],
+) => boolean[];
+
+/**
+ * #1762, #1825: a mixed error's path as one side's sentence reads it: each `element` step below a dict its `entry` and
+ * below a set its `member`, where that side's value there is one (`walk`, one walk down the path per collection);
+ * admission's own path, which rejects and checks, unchanged. `member` is a sentence's word alone: no path, check or
+ * key holds it.
+ */
+function shownSteps(path: readonly string[], walk: CollectionWalk): readonly string[] {
   const asked: number[] = [];
   for (let at = 0; at < path.length; at += 1) if (path[at] === "element") asked.push(at);
-  const flags = dicts(path, asked);
+  const dicts = walk("dict", path, asked);
+  const sets = walk("set", path, asked);
   let next = 0;
-  return path.map((step) => (step === "element" && flags[next++] === true ? "entry" : step));
+  return path.map((step) => {
+    if (step !== "element") return step;
+    const at = next++;
+    return dicts[at] === true ? "entry" : sets[at] === true ? "member" : step;
+  });
 }
 
 /**
- * #1762: each side's steps as its sentence writes them (`MixedSteps`), the earliest element's and the other's, each by
- * its own values: a list and a dict may meet at one path (Codex r1 on #1814); none where both are the path.
+ * #1762, #1825: each side's steps as its sentence writes them (`MixedSteps`), the earliest element's and the other's,
+ * each by its own values: a list, a set and a dict may meet at one path (Codex r1 on #1814); none where both are the
+ * path.
  */
 function shownOf(
   path: readonly string[],
-  earliest: (path: readonly string[], depths: readonly number[]) => boolean[],
-  other: (path: readonly string[], depths: readonly number[]) => boolean[],
+  earliest: CollectionWalk,
+  other: CollectionWalk,
 ): { readonly shown?: MixedSteps } {
   const type = shownSteps(path, earliest);
   const kinds = shownSteps(path, other);
@@ -412,6 +423,7 @@ export function literalElements(
         // (#1765: its layers at this path, `layersAt`'s, once asked; #1762: its dict layers too)
         layers?: boolean[];
         dicts?: boolean[];
+        sets?: boolean[];
       }
     >();
     // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
@@ -465,16 +477,16 @@ export function literalElements(
         ...(optional === undefined ? {} : { optional }),
         ...shownOf(
           path,
-          (steps, asked) =>
-            (earliest.dicts ??= layersAt(
+          (fact, steps, asked) =>
+            (earliest[fact === "dict" ? "dicts" : "sets"] ??= layersAt(
               admission,
               earliest.d.value!,
               earliest.d.node,
               steps,
               asked,
-              "dict",
+              fact,
             )),
-          (steps, asked) => layersAt(admission, d.value!, d.node, steps, asked, "dict"),
+          (fact, steps, asked) => layersAt(admission, d.value!, d.node, steps, asked, fact),
         ),
       });
       admission.reject(d, cell, path);
@@ -795,7 +807,6 @@ export function joinElements(
     readonly path: readonly string[];
     first: Decider | null;
     readonly kinds: Set<ItemTag>;
-    nulls: boolean;
   }
   interface Held {
     readonly entries: Map<string, Entry>;
@@ -924,15 +935,15 @@ export function joinElements(
     };
     // what an operand's elements are at a path, by `joinedDomain`: a written copy's type, a read's place's decision,
     // the earliest deciding value's kinds, else its own kinds of one family and no unknown (a type holding only `null`
-    // decides nothing, its `null` `nullAt`'s, never an empty domain no kind fits, but at a strict written destination:
-    // Astra r2's B1b on #1310)
+    // decides nothing, its `null` the sentence's walk's, never an empty domain no kind fits, but at a strict written
+    // destination: Astra r2's B1b on #1310)
     const decidedAt = (
       operand: PlaceId,
       node: FlowNode,
       path: readonly string[],
     ): JoinDecided | "open" | null => {
       const at = joinSteps(["element"], path);
-      const decider = drive(admission, earliestDecider(admission, operand, node, at, null));
+      const decider = joinDecider(admission, operand, node, at);
       if (decider !== null && decider.term !== null) {
         const domain = joinedDomain(typeTags(decider.term));
         if (domain === "open") return "open";
@@ -1034,16 +1045,6 @@ export function joinElements(
       levels.set(at, out);
       return out;
     };
-    // (a place's admitted type holds its null where a read of it, below F11's selection, says nothing)
-    const nullAt = (operand: PlaceId, node: FlowNode, path: readonly string[]): boolean => {
-      const steps = joinSteps(["element"], path);
-      if (admission.items(operand, node, steps).some((item) => item.tag === "null")) return true;
-      const read = placeOf(operand);
-      return (
-        read !== null &&
-        admission.admitted(read.place, joinSteps(read.path, steps)).includes("null")
-      );
-    };
     // (an operand's place in evaluation order: where its source starts, so an earlier tree's composed type keeps its
     // own operands' places inside the operand that reaches it, before every operand after it and after every one before)
     const startOf = (value: PlaceId): number => program.places[value]?.site?.start ?? 0;
@@ -1065,7 +1066,6 @@ export function joinElements(
           path,
           first: ruled === null ? null : { decided: ruled, position },
           kinds: new Set(ruled === null || ruled === "open" ? [] : ruled.own),
-          nulls: nullAt(operand, node, path),
         });
         if (ruled === "open") held.opens.add(at);
         if (path.every((step) => step === "element")) held.levels.add(at);
@@ -1089,25 +1089,24 @@ export function joinElements(
     // (a head's decisions at paths its structure does not give, each asked once)
     const asked = new Map<
       PlaceId,
-      Map<string, { readonly decided: JoinDecided | "open"; readonly nulls: boolean } | null>
+      Map<string, { readonly decided: JoinDecided | "open" } | null>
     >();
     const decisionOf = (
       held: Held,
       path: readonly string[],
       at: string,
-    ): { readonly decided: JoinDecided | "open"; readonly nulls: boolean } | null => {
+    ): { readonly decided: JoinDecided | "open" } | null => {
       // (open at the path or above it: each prefix's text one step longer than the last)
       if (held.opens.size > 0)
         for (let depth = 0, text = ""; depth <= path.length; depth += 1) {
           program.work.charge("checks");
           if (depth > 0) text = depth === 1 ? path[0]! : stepText(text, path[depth - 1]!);
           keepText(admission.work, text.length);
-          if (held.opens.has(text)) return { decided: "open", nulls: false };
+          if (held.opens.has(text)) return { decided: "open" };
         }
       const entry = held.entries.get(at);
       let first = entry?.first ?? null;
       let kinds: ReadonlySet<ItemTag> = entry?.kinds ?? new Set();
-      let nulls = entry?.nulls ?? false;
       const head = held.head;
       if (head !== null && (first === null || head.position < first.position)) {
         let mine = asked.get(head.operand);
@@ -1115,29 +1114,24 @@ export function joinElements(
         let found = mine.get(at);
         if (found === undefined) {
           const ruled = decidedAt(head.operand, head.node, path);
-          found =
-            ruled === null
-              ? null
-              : { decided: ruled, nulls: nullAt(head.operand, head.node, path) };
+          found = ruled === null ? null : { decided: ruled };
           mine.set(at, found);
         }
         if (found !== null) {
           const { decided: ruled } = found;
           first = { decided: ruled, position: head.position };
           if (ruled !== "open") kinds = new Set([...kinds, ...ruled.own]);
-          nulls ||= found.nulls;
         }
       }
       if (first === null) return null;
       const { decided: ruled } = first;
       if (ruled === "open" || ruled.typed || [...kinds].every((kind) => ruled.own.includes(kind)))
-        return { decided: ruled, nulls };
+        return { decided: ruled };
       // (a value's kinds, as `decidedAt` reads them: whole numbers beside numbers are numbers, ADR 0021 1.3; several
       // families each fit as itself)
       const own = kinds.has("number") ? [...new Set([...kinds].map(family))] : [...kinds];
       return {
         decided: { tags: own, written: new Set(own.map(family)).size > 1, typed: false, own },
-        nulls,
       };
     };
     // (a join's paths: the smaller operand's added to the larger one's, the earlier decider at each)
@@ -1156,7 +1150,6 @@ export function joinElements(
         )
           known.first = entry.first;
         for (const kind of entry.kinds) known.kinds.add(kind);
-        known.nulls ||= entry.nulls;
       }
       for (const at of from.opens) into.opens.add(at);
       for (const at of from.levels) into.levels.add(at);
@@ -1169,8 +1162,8 @@ export function joinElements(
     // (its paths are the earlier tree's, which grow with a chain: Codex r7's B3, #1383))
     const reaching = new Set<PlaceId>();
     // (an operand's parts in evaluation order, the earlier part `first`: the earliest deciding at a path decides alone, as
-    // `decidedAt`'s earliest decider does, a later part adding only the numbers that make whole numbers numbers and its
-    // `null`, and deciding where no earlier part does. The larger part's map is the result, by reference, and only the
+    // `decidedAt`'s earliest decider does, a later part adding only the numbers that make whole numbers numbers, and
+    // deciding where no earlier part does. The larger part's map is the result, by reference, and only the
     // smaller part's entries, opens and levels are visited, whichever of the two it is, so a growing earlier join is never
     // walked again whatever position it stands in (Codex r15's and r16's B1 on #1310: the lead's rule))
     const parted = (first: Held, later: Held): Held => {
@@ -1189,10 +1182,8 @@ export function joinElements(
           const known = first.entries.get(at);
           if (known !== undefined && known.first !== null) {
             numbers(known, entry);
-            known.nulls ||= entry.nulls;
             continue;
           }
-          if (known !== undefined) entry.nulls ||= known.nulls;
           first.entries.set(at, entry);
         }
         for (const at of later.levels) first.levels.add(at);
@@ -1204,13 +1195,9 @@ export function joinElements(
         const known = later.entries.get(at);
         if (entry.first === null) {
           if (known === undefined) later.entries.set(at, entry);
-          else known.nulls ||= entry.nulls;
           continue;
         }
-        if (known !== undefined) {
-          numbers(entry, known);
-          entry.nulls ||= known.nulls;
-        }
+        if (known !== undefined) numbers(entry, known);
         later.entries.set(at, entry);
         later.opens.delete(at);
       }
@@ -1291,20 +1278,39 @@ export function joinElements(
           )
             continue;
           // (#1765: the layers between the element and the leaf that may hold null, each side's by its form, as a
-          // literal's elements are: each operand walked down below its elements, Codex r5's B2)
+          // literal's elements are: each operand walked down below its elements, Codex r5's B2; #1790/#1828: and its
+          // leaf by the same walk one depth more, the sentence's null as this occurrence holds it, not as the decided
+          // domain allows it: `n: integer? = 1` joined names no null, a copied `integer?[]` its written leaf)
           const joinNode = program.exprAt(c.site) ?? program.flow.statementAt(c.site) ?? null;
           const below = joinSteps(["element"], path);
-          const depths = intermediateDepths(path).map((depth) => depth + 1);
+          const depths = [...intermediateDepths(path).map((depth) => depth + 1), below.length];
           const layers = (side: PlaceId): boolean[] =>
             joinNode === null
               ? depths.map(() => false)
               : layersAt(admission, side, joinNode, below, depths);
-          const optional = mixedOptional(layers(left), layers(right));
-          // (#1762: each operand's layers are a dict's by the same walk below its elements, its contract's items, Astra
-          // r1 on #1814)
-          const dicts =
-            (side: PlaceId) =>
-            (walked: readonly string[], asked: readonly number[]): boolean[] =>
+          // (an operand whose occurrence says nothing at the leaf, as a compound assignment's target read through a
+          // property, names its place's admitted null there, as the sentence did before: the walk has nothing to read)
+          const leafOf = (side: PlaceId, walked: boolean[]): boolean[] => {
+            if (walked.at(-1)! || joinNode === null) return walked;
+            const read = placeOf(side);
+            if (
+              read === null ||
+              !admission.items(side, joinNode, below).every((item) => item.tag === "unknown") ||
+              !admission.admitted(read.place, joinSteps(read.path, below)).includes("null")
+            )
+              return walked;
+            return [...walked.slice(0, -1), true];
+          };
+          const [leftLayers, rightLayers] = [
+            leafOf(left, layers(left)),
+            leafOf(right, layers(right)),
+          ];
+          const optional = mixedOptional(leftLayers.slice(0, -1), rightLayers.slice(0, -1));
+          // (#1762, #1825: each operand's layers are a dict's or a set's by the same walk below its elements, its
+          // contract's items, Astra r1 on #1814)
+          const collections =
+            (side: PlaceId): CollectionWalk =>
+            (fact, walked, asked) =>
               joinNode === null
                 ? asked.map(() => false)
                 : layersAt(
@@ -1313,18 +1319,15 @@ export function joinElements(
                     joinNode,
                     keptSteps(admission.work, ["element"], walked),
                     asked.map((depth) => depth + 1),
-                    "dict",
+                    fact,
                   );
           const found: Parameters<typeof error>[0] = {
             ...(optional === undefined ? {} : { optional }),
             c,
             path,
-            ...shownOf(path, dicts(left), dicts(right)),
-            earliest:
-              ruled.nulls || ruled.decided.nullable === true
-                ? [...ruled.decided.own, "null"]
-                : ruled.decided.own,
-            kinds: own.nulls || own.decided.nullable === true ? [...kinds, "null"] : kinds,
+            ...shownOf(path, collections(left), collections(right)),
+            earliest: leftLayers.at(-1)! ? [...ruled.decided.own, "null"] : ruled.decided.own,
+            kinds: rightLayers.at(-1)! ? [...kinds, "null"] : kinds,
             value: root.result,
             levels: levelsAt(path),
           };
@@ -1431,6 +1434,46 @@ export interface MixedOptional {
   readonly kinds: readonly boolean[];
 }
 
+/** The written decider's answer for a value at a node and path outside every decision (`earliestDecider`'s). */
+type JoinDecider =
+  ReturnType<typeof earliestDecider> extends Generator<unknown, infer R> ? R : never;
+// (per admission, while no stop forgot an answer: per node, value and path)
+const JOIN_DECIDERS = new WeakMap<
+  Admission,
+  {
+    readonly forgets: number;
+    readonly byNode: Map<FlowNode, Map<PlaceId, Map<string, JoinDecider>>>;
+  }
+>();
+
+/**
+ * #1828: `earliestDecider` of `value` at `node` and `steps` outside every decision, asked once while no stop forgot an
+ * answer. A mixed join's operand is asked it by `decidedAt` and again by its sentence's walk (`mayHoldNull`); the
+ * second ask takes the first's answer (Codex r2 on #1899).
+ */
+function joinDecider(
+  admission: Admission,
+  value: PlaceId,
+  node: FlowNode,
+  steps: readonly string[],
+): JoinDecider {
+  const forgets = admission.pass.solver.forgets;
+  let known = JOIN_DECIDERS.get(admission);
+  if (known === undefined || known.forgets !== forgets)
+    JOIN_DECIDERS.set(admission, (known = { forgets, byNode: new Map() }));
+  let byValue = known.byNode.get(node);
+  if (byValue === undefined) known.byNode.set(node, (byValue = new Map()));
+  let byPath = byValue.get(value);
+  if (byPath === undefined) byValue.set(value, (byPath = new Map()));
+  const at = pathText(steps);
+  if (byPath.has(at)) return byPath.get(at)!;
+  const answer = drive(admission, earliestDecider(admission, value, node, steps, null));
+  // (its key kept, charged as a structure's)
+  keepText(admission.work, at.length);
+  byPath.set(at, answer);
+  return answer;
+}
+
 /**
  * #1765: whether a value may hold null at a layer, by its own form, one case per form, never by what a written copy's
  * items hold (the lead's ruling (A) on #1789, after Codex r1–r11 and Astra r1–r2):
@@ -1464,9 +1507,7 @@ function mayHoldNull(
     return program.opOf.get(at)?.kind === "fallback"
       ? operandNull(admission, at, from)
       : occurrenceNull(admission, at, from);
-  const decided = holdsSource(admission, at)
-    ? drive(admission, earliestDecider(admission, at, from, steps, null))
-    : null;
+  const decided = holdsSource(admission, at) ? joinDecider(admission, at, from, steps) : null;
   // (a copy's term where the deciding copy stands above the layer, which lies below its own level: `b: string?[]` in
   // `[[1],b]`, `d`'s element in `held = d + [2]`; where the layer is the deciding copy's own level, `atom` in
   // `{v:atom}`, as it is read there, narrowed: Codex r1 on #1819, #1901)
@@ -1548,26 +1589,38 @@ function operandNull(admission: Admission, operand: PlaceId, from: FlowNode): bo
 const NARROWED = new WeakMap<object, Map<FlowNode, Map<PlaceId, boolean>>>();
 
 /**
- * #1762: whether a value is a dict there, by its contract's items, which compose its written and carried terms: `a
- * otherwise dict {}`, `a` a written dict holding a host value, is a dict, where its stored values (`valueAt`) lose it
- * (Astra r1 on #1814).
+ * #1762, #1825: whether a value is a dict (or a set) there, by its contract's items, which compose its written and
+ * carried terms: `a otherwise dict {}`, `a` a written dict holding a host value, is a dict, where its stored values
+ * (`valueAt`) lose it (Astra r1 on #1814).
  */
-function dictHeld(admission: Admission, at: PlaceId, steps: readonly string[]): boolean {
+function collectionHeld(
+  admission: Admission,
+  at: PlaceId,
+  steps: readonly string[],
+  tag: "dict" | "set",
+): boolean {
   return withoutEmpty(admission.run(admission.pass.contract.contractOfValueAt(at, steps))).some(
-    (item) => item.tag === "dict",
+    (item) => item.tag === tag,
   );
 }
 
 /**
- * #1762: whether a value is a dict at its own level: an `otherwise` its operand where the operand, narrowed at its node,
- * may hold a value, and its fallback where the operand may be null (a fallback never run names no dict, nor an operand
- * proved null, Codex r5–r6 on #1814); any other value by its items (`dictHeld`) or its own reads (a default). Each
- * node's answer once per pass and node (`DICT_OWN`), a value after the sides it takes, so a chain is walked once.
+ * #1762, #1825: whether a value is a dict (or a set) at its own level: an `otherwise` its operand where the operand,
+ * narrowed at its node, may hold a value, and its fallback where the operand may be null (a fallback never run names no
+ * dict, nor an operand proved null, Codex r5–r6 on #1814); any other value by its items (`collectionHeld`) or its own
+ * reads (a default). Each node's answer once per pass, collection and node (`COLLECTION_OWN`), a value after the sides
+ * it takes, so a chain is walked once.
  */
-function dictOwn(admission: Admission, value: PlaceId, from: FlowNode): boolean {
+function collectionOwn(
+  admission: Admission,
+  value: PlaceId,
+  from: FlowNode,
+  tag: "dict" | "set",
+): boolean {
   const { program } = admission.pass;
-  let byNode = DICT_OWN.get(admission.pass);
-  if (byNode === undefined) DICT_OWN.set(admission.pass, (byNode = new Map()));
+  const memo = COLLECTION_OWN[tag];
+  let byNode = memo.get(admission.pass);
+  if (byNode === undefined) memo.set(admission.pass, (byNode = new Map()));
   let known = byNode.get(from);
   if (known === undefined) byNode.set(from, (known = new Map()));
   const open = [value];
@@ -1589,7 +1642,7 @@ function dictOwn(admission: Admission, value: PlaceId, from: FlowNode): boolean 
               : []),
             ...(operandNull(admission, op.left, from) ? [op.right] : []),
           ]
-        : dictHeld(admission, at, [])
+        : collectionHeld(admission, at, [], tag)
           ? null
           : operandsOf(program, at)
               .filter((operand) => operand.own)
@@ -1612,8 +1665,11 @@ function dictOwn(admission: Admission, value: PlaceId, from: FlowNode): boolean 
   return known.get(value)!;
 }
 
-/** Per pass and node, whether a value is a dict at its own level (`dictOwn`). */
-const DICT_OWN = new WeakMap<object, Map<FlowNode, Map<PlaceId, boolean>>>();
+/** Per collection, pass and node, whether a value is one at its own level (`collectionOwn`). */
+const COLLECTION_OWN = {
+  dict: new WeakMap<object, Map<FlowNode, Map<PlaceId, boolean>>>(),
+  set: new WeakMap<object, Map<FlowNode, Map<PlaceId, boolean>>>(),
+};
 
 /**
  * #1765: the depths of the collection layers strictly between a mixed error's elements (or its path's last property)
@@ -1629,9 +1685,9 @@ function intermediateDepths(path: readonly string[]): number[] {
 /**
  * #1765: whether each of `depths` along `path` holds `fact` for a side, read by one descent down the path (`layersOf`):
  * through a literal's children and through a carried value's parts alike (Astra r2's B1 on #1789: a carrier's literal
- * was descended once per longer prefix). The two facts' own levels and leaves, side by side:
+ * was descended once per longer prefix). The facts' own levels and leaves, side by side:
  * - `null` (#1765): `mayHoldNull`'s rule;
- * - `dict` (#1762): `dictOwn` at a value's own level, its items below it (`dictHeld`).
+ * - `dict` (#1762) and `set` (#1825): `collectionOwn` at a value's own level, its items below it (`collectionHeld`).
  */
 function layersAt(
   admission: Admission,
@@ -1639,7 +1695,7 @@ function layersAt(
   node: FlowNode,
   path: readonly string[],
   depths: readonly number[],
-  fact: "null" | "dict" = "null",
+  fact: "null" | "dict" | "set" = "null",
 ): boolean[] {
   return depths.length === 0 ? [] : layersOf(admission, value, node, path, depths, fact);
 }
@@ -1724,11 +1780,11 @@ function layersOf(
   node: FlowNode,
   path: readonly string[],
   depths: readonly number[],
-  fact: "null" | "dict",
+  fact: "null" | "dict" | "set",
 ): boolean[] {
   const { program } = admission.pass;
-  // (each fact its own answers per pass, #1762)
-  const memos = fact === "null" ? LAYERS : DICT_LAYERS;
+  // (each fact its own answers per pass, #1762, #1825)
+  const memos = fact === "null" ? LAYERS : fact === "dict" ? DICT_LAYERS : SET_LAYERS;
   let memo = memos.get(admission.pass);
   if (memo === undefined)
     memos.set(
@@ -1820,7 +1876,11 @@ function layersOf(
     let { next } = here;
     // (the depth at its own level, if one is)
     if (next < depths.length && depths[next]! + here.shift === 0) {
-      if (fact === "null" ? mayHoldNull(admission, at, from, []) : dictOwn(admission, at, from))
+      if (
+        fact === "null"
+          ? mayHoldNull(admission, at, from, [])
+          : collectionOwn(admission, at, from, fact)
+      )
         holds.add(next);
       next += 1;
     }
@@ -1857,7 +1917,7 @@ function layersOf(
             if (
               fact === "null"
                 ? mayHoldNull(admission, at, from, steps)
-                : dictHeld(admission, at, steps)
+                : collectionHeld(admission, at, steps, fact)
             )
               holds.add(slot);
           }
@@ -1932,8 +1992,22 @@ const LAYERS = new WeakMap<
     readonly count: { value: number };
   }
 >();
-/** Per pass, `layersOf`'s keys and answers for the dict fact (#1762), as `LAYERS` holds the null fact's. */
+/**
+ * Per pass, `layersOf`'s keys and answers for the dict fact (#1762), as `LAYERS` holds the null fact's. Apart from
+ * `SET_LAYERS`: the answers last the pass, so a later sentence over the same values (a growing join's) reads what an
+ * earlier one kept, and a shared memo would give a set ask a dict answer (Codex r1 on #2017).
+ */
 const DICT_LAYERS = new WeakMap<
+  object,
+  {
+    readonly keys: Map<number, Map<string, number>>;
+    readonly answers: Map<PlaceId, Map<number, ReadonlySet<number>>>;
+    readonly seen: Map<PlaceId, Set<number>>;
+    readonly count: { value: number };
+  }
+>();
+/** Per pass, the same for the set fact (#1825), apart from `DICT_LAYERS` for the reason given there. */
+const SET_LAYERS = new WeakMap<
   object,
   {
     readonly keys: Map<number, Map<string, number>>;

@@ -11,7 +11,7 @@ import { RUNTIME_DEBUG_TRACE_LIMITS } from "../src/runtime/debug/debug-trace-lim
 import { instructionSourcePath, type InstructionPlan } from "../src/plan/model.js";
 import { quotedText } from "../src/runtime/values/value-text.js";
 
-/**
+/*
  * Player Debug's Variables view (DEBUGGER.md "Player Debug"): live variables grouped by where they live, and the trace's
  * records as rows of a derivation tree. Everything here is derived on demand from the session and its value trace
  * (`docs/RUNTIME.md#debug-trace`); nothing is stored or recomputed from source.

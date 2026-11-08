@@ -1,0 +1,2 @@
+# `npm run format:check` does not check Vue files, so `prettier --write` leaves them alone too.
+*.vue

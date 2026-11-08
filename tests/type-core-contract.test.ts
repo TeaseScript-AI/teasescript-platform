@@ -51,7 +51,7 @@ import {
   publishedUpToOrder,
 } from "./helpers/type-core-oracles.js";
 
-/**
+/*
  * The contract's identity and mark controls (checkpoint 9, TABLE §8's contract row r4.15–r4.27): every path that
  * enters a source into the contract's indexes obtains its identity from one function, so k contributions of one source
  * are one entry on every path; the marks of §3.2 live in one holder per source and projection whose references

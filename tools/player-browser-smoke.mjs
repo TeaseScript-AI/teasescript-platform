@@ -2887,7 +2887,7 @@ async function debugHistoryStorageScenario(cdp, origin) {
 
 // Each visit starts without the session the Player keeps for a script (PLAYER-UI "Session start and user activation") and
 // without a debug room (DEBUGGER.md "Debug room"), so scenarios stay independent of the order they run in;
-// `keptSessionScenario` and `debugRoomScenario` reload to keep them.
+// `keptSessionScenario` reloads to keep its session.
 async function navigate(cdp, url) {
   for (const databaseName of ["teasescript-kept-sessions", "teasescript-debug-rooms"])
     await cdp.call("IndexedDB.deleteDatabase", {

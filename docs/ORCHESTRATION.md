@@ -11,6 +11,8 @@ Keep a roster in the coordinators' repository: each lane, its current item, what
 [friction](FRICTION.md#known-friction) issues that touch its files or tools, and one line per open pull request
 listing each review round's findings by their nouns. On resume, read the roster and the latest log lines, not the
 transcript, then re-establish each lane's state from GitHub before the next write, as `AGENTS.md` requires.
+When a child's work is done, clean up after it as the agent environment's `/opt/agent-stack/ORCHESTRATION.md`
+"Cleanup after a child" says; that section is the canonical text.
 
 ## Messages
 
@@ -161,6 +163,11 @@ premise, correct it in the open.
 - Appearance and other product choices, and policy, are the owner's ([Roles](DEVELOPMENT-WORKFLOW.md#roles)). A choice
   that keeps today's behavior is the coordinator's; a builder labelling it an owner decision is corrected, not
   forwarded.
+- Development tooling and mechanical checks, and the procedures coordinators run with them (briefs, checklists,
+  triage), are the coordinators' to decide (owner, 2026-11-07; `AGENTS.md`). Before one lands, get feedback from the
+  other coordinator, if there is one, and from the builders who will use it, and weigh it critically. The owner wants
+  them well built, worded so they are not misread, and neither too strict nor too loose, and to be told in plain
+  words what each one changes. A disagreement between coordinators goes to the owner.
 - Show the exact wording of any persistent change.
 - Put questions for the owner on the issue tracker.
 
