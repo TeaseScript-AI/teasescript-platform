@@ -314,9 +314,7 @@ another order), that every way of calling `regressionCase` is found, and that th
 `only` test in the file runs too). A case that loads a module the head adds to the bundles' list
 (`player/vue/vite.test-modules.config.ts`) fails at the base with `Cannot find module`, another reason than its
 `atBase`; and the base is compiled and bundled with the head's `node_modules`. Interrupted, the tool stops by the
-signal; the next run removes what an interrupted run left. Declaring is opt-in; no rule requires it. The step is in
-`check-1`, which had the most room before the slowest job in the first three-job runs (42425098809, 42425942185 and
-42426219880: 98, 16 and 144 s; `check-2` 94, 135 and 0 s; `check-3`, which also runs `check:pretest`, 0, 0 and 122 s).
+signal; the next run removes what an interrupted run left. Declaring is opt-in; no rule requires it.
 
 A focused regression set is sufficient when the defect and its neighboring
 supported behavior are understood. When repeated sibling findings or an
