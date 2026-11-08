@@ -142,18 +142,6 @@ function declaredWork(): string[] {
   });
 }
 
-test("the clock-work family covers every kind of work in every state of the clock", () => {
-  // The axis is the clock's own domain: a kind of work the clock gains needs its row here.
-  assert.deepEqual([...WORK].sort(), declaredWork().sort());
-  const feasible = product({ work: [...WORK], state: [...STATES] });
-  const observed = CASES.map(({ work, state }) => ({ work, state }));
-  assert.deepEqual(coverageGaps(feasible, observed, { tuples: true }), []);
-  const lacking = observed.filter(
-    (each) => !(each.work === "keepCapture" && each.state === "held"),
-  );
-  assert.ok(coverageGaps(feasible, lacking, { tuples: true }).length > 0);
-});
-
 /**
  * Ops whose reply the caller sees only once `release` is called (the host has run them, the session's queue goes
  * on), and section ops refused as their basis would be, without reaching the host.
@@ -417,7 +405,10 @@ function trigger(player: Mounted, work: Work) {
   }
 }
 
-for (const { work, state, name } of CASES)
+/** The `(work, state)` coordinates registered as clock-work cases below. */
+const registeredCases: { work: string; state: string }[] = [];
+for (const { work, state, name } of CASES) {
+  registeredCases.push({ work, state });
   test(`the clock comes before session work: ${name}`, async (context) => {
     const player = await mount(context, state === "held");
     if (state === "held")
@@ -444,6 +435,20 @@ for (const { work, state, name } of CASES)
       assert.ok((post.atMs ?? 0) > (atTrigger ?? 0), `${name}: the work follows the observation`);
     }
   });
+}
+
+test("the clock-work family covers every kind of work in every state of the clock", () => {
+  // The axis is the clock's own domain: a kind of work the clock gains needs its row here.
+  assert.deepEqual([...WORK].sort(), declaredWork().sort());
+  const feasible = product({ work: [...WORK], state: [...STATES] });
+  // The coordinates the loop above registered as cases, not the list it reads.
+  const observed = registeredCases;
+  assert.deepEqual(coverageGaps(feasible, observed, { tuples: true }), []);
+  const lacking = observed.filter(
+    (each) => !(each.work === "keepCapture" && each.state === "held"),
+  );
+  assert.ok(coverageGaps(feasible, lacking, { tuples: true }).length > 0);
+});
 
 // R1: the clock observes inside a section of the shown session, so its basis is read at its own turn.
 function atMsOf(post: { readonly args: unknown }): number {
