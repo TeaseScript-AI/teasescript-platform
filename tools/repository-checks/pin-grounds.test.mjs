@@ -13,40 +13,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { apply, cases, frozen, positions } from "./pin-grounds.fixture.mjs";
 import { GROUNDS, readingOf, refusalsOf } from "./pin-grounds.mjs";
 import { PIN_SUITES, addedLines } from "./pin-suites.mjs";
 
-// The tests of `pin-grounds.mjs`. Their fixture, `pin-grounds.cases.json`, was generated, not written: its `cases` by
-// `build-cases.py` from #2035's review evidence (each Codex round's diffs, and the builder's probe scripts rerun to
-// record their texts), its `positions` from Codex r3's independent inventory; both scripts and their inputs are kept
-// under `~/work/evidence/f17-builder/` on the LXC, and `python3 build-cases.py <checkout> <fixture>` regenerates it. The
-// full 358-position mutation runs apart: `node --test tools/repository-checks/pin-grounds.full.test.mjs`.
-const ROOT = fileURLToPath(new URL("../..", import.meta.url));
-const read = (file) => readFileSync(join(ROOT, file), "utf8");
-const { positions, cases } = JSON.parse(
-  readFileSync(new URL("./pin-grounds.cases.json", import.meta.url), "utf8"),
-);
+// The tests of `pin-grounds.mjs`, on the frozen suite texts of its fixture (`pin-grounds.fixture.mjs`), never on the
+// live suites but where a test says so. The full mutation of every expected value runs apart:
+// `node --test tools/repository-checks/pin-grounds.full.test.mjs`.
 
-/** `text` with a `git diff -U0` applied: each removed line must be the text's. */
-function apply(text, diff) {
-  const lines = text.split("\n");
-  const out = [];
-  let cursor = 0;
-  for (const hunk of diff.split(/^(?=@@ )/mu).filter((part) => part.startsWith("@@"))) {
-    const [header, ...body] = hunk.replace(/\n$/u, "").split("\n");
-    const [, from, count] = /^@@ -(\d+)(?:,(\d+))? /u.exec(header);
-    const start = count === "0" ? Number(from) : Number(from) - 1;
-    out.push(...lines.slice(cursor, start));
-    cursor = start;
-    for (const line of body)
-      if (line.startsWith("-")) {
-        assert.equal(lines[cursor], line.slice(1), `removed line ${cursor + 1}`);
-        cursor += 1;
-      } else if (line.startsWith("+")) out.push(line.slice(1));
-  }
-  out.push(...lines.slice(cursor));
-  return out.join("\n");
-}
+const ROOT = fileURLToPath(new URL("../..", import.meta.url));
+const live = (file) => readFileSync(join(ROOT, file), "utf8");
+const read = frozen;
+const POSITIONS = positions();
 
 /**
  * The suites and places whose values the check must read, written here apart from the readers: each place without the
@@ -61,7 +39,7 @@ const PLANNED = [
   "tests/type-core-f18.test.ts assert.deepEqual({ total, decisions, default })",
   "tests/type-core-work-a.test.ts assert.deepEqual(measured)",
   "tests/type-core-work-c.test.ts the case's counters",
-  "tests/type-core-work-c.test.ts assert.deepEqual(the four modes' totals)",
+  "tests/type-core-work-c.test.ts assert.deepEqual([false, true].flatMap(…))",
   ...["shared", "unshared"].flatMap((side) =>
     ["checks", "invSteps", "literalUnits", "small", "total"].map(
       (name) => `tests/type-core-work-c.test.ts ${side}.${name}`,
@@ -77,14 +55,14 @@ test("each pinning suite has its readers or is listed, and nothing else is read"
   );
 });
 
-test("every current pin is read in its declared place, with no refusal, and matches itself", () => {
+test("every current pin, on the live suites, is read in its declared place, with no refusal, and matches itself", () => {
   const places = new Set();
   for (const [file, { listed }] of Object.entries(GROUNDS)) {
     if (listed) continue;
-    const reading = readingOf(file, read(file));
+    const reading = readingOf(file, live(file));
     assert.deepEqual(reading.refusals, [], file);
     for (const record of reading.records) places.add(`${file} ${roleOf(record.place)}`);
-    assert.deepEqual(refusalsOf(file, read(file), read(file), []), [], file);
+    assert.deepEqual(refusalsOf(file, live(file), live(file), []), [], file);
   }
   assert.deepEqual([...places].sort(), PLANNED);
 });
@@ -96,25 +74,39 @@ const offsetOf = (text, line, column) =>
     .slice(0, line - 1)
     .reduce((sum, each) => sum + each.length + 1, 0) + column;
 
-test("each expected value Codex r3 found is a value of exactly one record, read in memory from one parse a file", () => {
-  for (const [file, line, column, text] of positions) {
-    const at = `${file}:${line}:${column + 1} ${text}`;
-    const offset = offsetOf(read(file), line, column);
-    const holding = readingOf(file, read(file)).records.filter(
-      ({ node }) => node.getStart() <= offset && offset < node.getEnd(),
-    );
-    assert.equal(holding.length, 1, at);
-    const value = text.replaceAll("_", "");
-    assert.ok(
-      holding[0].values.some((each) => each === value || each.endsWith(`=${value}`)),
-      at,
-    );
+test("each record's values are, in order, the expected values Codex r3 found in it, each in one record, from one parse a file", () => {
+  const seen = new Set();
+  for (const file of Object.keys(GROUNDS).filter((each) => !GROUNDS[each].listed)) {
+    const offsets = POSITIONS.filter(([inFile]) => inFile === file).map((position) => [
+      offsetOf(read(file), position[1], position[2]),
+      position,
+    ]);
+    for (const record of readingOf(file, read(file)).records) {
+      const inside = offsets.filter(
+        ([offset]) => record.node.getStart() <= offset && offset < record.node.getEnd(),
+      );
+      for (const [, position] of inside) {
+        const at = position.join(":");
+        assert.ok(!seen.has(at), `${at} in two records`);
+        seen.add(at);
+      }
+      // (a record's numbers, labels aside, in order: a sorted or deduplicated reading differs)
+      const numbers = record.values
+        .map((value) => value.replace(/^[a-z]+=/u, ""))
+        .filter((value) => /^\d/u.test(value));
+      assert.deepEqual(
+        numbers,
+        inside.map(([, [, , , text]]) => text.replaceAll("_", "")),
+        `${file} ${record.place}`,
+      );
+    }
   }
+  assert.equal(seen.size, POSITIONS.length);
 });
 
 test("a value of each place, moved by one, is refused without its ground and passes with one (the full set: pin-grounds.full.test.mjs)", () => {
   const sampled = new Set();
-  for (const [file, line, column, text] of positions) {
+  for (const [file, line, column, text] of POSITIONS) {
     const offset = offsetOf(read(file), line, column);
     const record = readingOf(file, read(file)).records.find(
       ({ node }) => node.getStart() <= offset && offset < node.getEnd(),
@@ -142,11 +134,12 @@ test("the r3–r7 witnesses of the line-level check end as the syntax-tree desig
   const ended = { P: 0, E: 0, G: 0, U: 0 };
   for (const witness of cases) {
     const at = `${witness.instances[0].witness} (${witness.file})`;
-    const main = read(witness.file);
+    // (a listed suite and a new file are not read: their cases need no text)
     const refusals =
       witness.newFile || GROUNDS[witness.file].listed
         ? []
         : (() => {
+            const main = read(witness.file);
             const base = witness.base === null ? main : apply(main, witness.base);
             return refusalsOf(
               witness.file,
@@ -165,7 +158,8 @@ test("the r3–r7 witnesses of the line-level check end as the syntax-tree desig
     ended[witness.class] += witness.instances.length;
   }
   // (the 217 instances, by class, as the design round counted them)
-  assert.deepEqual(ended, { P: 60, E: 3, G: 87, U: 67 });
+  // (design-r6 refuses a second declared-form assertion: control-multiset-duplicate moved from G to U)
+  assert.deepEqual(ended, { P: 60, E: 3, G: 86, U: 68 });
 });
 
 test("a value outside a literal of its declared shape is refused, naming it and the fix", () => {
@@ -233,6 +227,15 @@ test("what a reader cannot prove is refused: a file that does not parse, an owne
     ).join("\n"),
     /holds a PropertyAssignment, not one of total, decisions, default|holds a .*not one of total/u,
   );
+  // (two values swapped within a row: a row's values are read in order)
+  const within = "[1539, 1617, 1539, 1617, 2424, 2149, 2289, 2149]";
+  const swappedWithin = (text) =>
+    text.replace(within, "[1617, 1539, 1539, 1617, 2424, 2149, 2289, 2149]");
+  const withinLine =
+    swappedWithin(read("tests/type-core-closure.test.ts"))
+      .split("\n")
+      .findIndex((text) => text.includes("[1617, 1539, 1539")) + 1;
+  assert.equal(refusals("tests/type-core-closure.test.ts", swappedWithin, [withinLine]).length, 1);
   // (two rows' totals swapped: each row's record is its own, by the row's name)
   const closure = "tests/type-core-closure.test.ts";
   const a = "[1539, 1617, 1539, 1617, 2424, 2149, 2289, 2149]";
@@ -276,18 +279,105 @@ test("Codex r1's ways past a declared position on #2051 are refused", () => {
   ])
     assert.match(
       check(capture, read(capture), read(capture).replace(pin, decoy)),
-      /is not found|declared more than once/u,
+      /is not found|declared more than once|not read as the pin/u,
       decoy,
     );
-  // (1, a loop's shadowing decoy: the live assertion rebound, the old value kept in a loop of its own)
+  // (1, a loop's shadowing decoy as the one declared-form assertion: its `budget` is not the test's)
   const shadowed = read(capture).replace(
     pin,
-    "  for (const once of [0]) { const budget = { total: 22_962_573 + once }; assert.equal(budget.total, 22_962_573); }\n  const actualTotal = budget.total;\n  assert.equal(actualTotal, 22_962_574);",
+    "  for (const once of [0]) { const budget = { total: 22_962_573 + once }; assert.equal(budget.total, 22_962_573); }",
   );
   assert.match(
     check(capture, read(capture), shadowed),
     /budget is declared more than once in the test/u,
   );
+  // (Opus r2: a declared-form assertion the reader does not take as the pin is refused, never dropped)
+  const workCText = read(workCFile);
+  for (const [file, base, head] of [
+    [
+      capture,
+      read(capture),
+      read(capture).replace(
+        pin,
+        `  if (budget.exhausted === null) {\n    assert.equal(budget.total, 22_962_574);\n    return;\n  }\n${pin}`,
+      ),
+    ],
+    [
+      capture,
+      read(capture),
+      read(capture).replace(
+        pin,
+        "  for (const _ of []) assert.equal(budget.total, 22_962_573);\n  if (budget.exhausted === null) assert.equal(budget.total, 22_962_574);",
+      ),
+    ],
+    [
+      workCFile,
+      workCText,
+      workCText
+        .replace(
+          "  assert.deepEqual(\n    [false, true].flatMap(",
+          "  assert.deepEqual([3988, 3988, 4844, 4862], [3988, 3988, 4844, 4862]);\n  if (request !== null) assert.deepEqual(\n    [false, true].flatMap(",
+        )
+        .replace(
+          "    [3988, 3988, 4844, 4862],\n  );\n});",
+          "    [3988, 3988, 4844, 4863],\n  );\n});",
+        ),
+    ],
+    [
+      capture,
+      read(capture),
+      read(capture).replace(
+        'test("the capture ends at the first store whose contract leaves the slice\'s depth", () => {',
+        'test("the capture ends at the first store whose contract leaves the slice\'s depth", { skip: true }, () => {',
+      ),
+    ],
+    [
+      capture,
+      read(capture),
+      read(capture).replace(
+        pin,
+        "  for (const _ of [0]) {\n    enum budget { total = 22_962_573 }\n    assert.equal(budget.total, 22_962_573);\n  }\n  assert.equal((budget.total), 22_962_574);",
+      ),
+    ],
+    [
+      capture,
+      read(capture).replace(pin, `${pin}\n  assert.equal(budget.total, 22_962_573, "again");`),
+      read(capture).replace(
+        pin,
+        `${pin}\n  if (budget.exhausted === null) assert.equal(budget.total, 22_962_574, "again");`,
+      ),
+    ],
+    [
+      capture,
+      read(capture),
+      read(capture).replace(
+        pin,
+        "  for (const _ of []) assert.equal(budget.total, 22_962_573);\n  assert.equal((budget.total), 22_962_574);",
+      ),
+    ],
+  ]) {
+    assert.notEqual(head, base);
+    assert.match(
+      check(file, base, head),
+      /not read as the pin|a second assert|takes options|declared more than once/u,
+      head.slice(0, 0),
+    );
+  }
+  // (each rule alone: a pin after a return, a pin whose `budget` an enum shadows, a pin written another way)
+  for (const head of [
+    read(capture).replace(pin, `  return;\n${pin}`),
+    read(capture).replace(
+      pin,
+      `  for (const _ of [0]) {\n    enum budget { total = 22_962_573 }\n${pin}\n  }`,
+    ),
+    read(capture).replace(pin, "  assert.equal((budget.total), 22_962_573);"),
+  ]) {
+    assert.notEqual(head, read(capture));
+    assert.match(
+      check(capture, read(capture), head),
+      /not read as the pin|declared more than once/u,
+    );
+  }
   // (2: the cases table assigned after an uninitialized declaration, or reassigned after its first table)
   const reassigned = read(workCFile)
     .replace(
@@ -368,7 +458,7 @@ function repository(files) {
       join(directory, "tools/repository-checks", tool),
     );
   mkdirSync(join(directory, "tests/moved"), { recursive: true });
-  for (const file of files) copyFileSync(join(ROOT, file), join(directory, file));
+  for (const file of files) writeFileSync(join(directory, file), frozen(file));
   symlinkSync(join(ROOT, "node_modules"), join(directory, "node_modules"));
   writeFileSync(join(directory, ".gitignore"), "node_modules\n");
   git("init", "-q");
@@ -430,7 +520,7 @@ test(
             "-m",
             "without the candidate suite",
           );
-          copyFileSync(join(ROOT, candidate), join(directory, candidate));
+          writeFileSync(join(directory, candidate), frozen(candidate));
         },
       ],
       // (the file moved, its declarations with it: unchanged it passes, re-pinned it is refused)
@@ -447,6 +537,42 @@ test(
           writeFileSync(join(directory, moved), repinned);
         },
       ],
+      // (design-r6: a move whose owner is renamed is unpaired; an owner renamed in place is named as such)
+      "moved, owner renamed": [
+        1,
+        /new since \w+, its owners whole in no base file, while the change deletes tests\/type-core-contract-capture\.test\.ts: unpaired/u,
+        ({ directory, git }) => {
+          moveTo(directory, git);
+          retitle(directory, moved);
+        },
+      ],
+      "owner renamed in place": [
+        1,
+        /is not found at the base: an owner renamed or new here/u,
+        ({ directory }) => retitle(directory, capture),
+      ],
+      // (a test split out into a file of its own, the old file kept: compared with the file that held it)
+      "split, unchanged": [
+        0,
+        /grounds: 1 changed pin file read in [\d.]+s, 0 refusals/u,
+        ({ directory }) => splitOut(directory, false),
+      ],
+      "split, re-pinned": [
+        1,
+        /type-core-contract-capture-ends\.test\.ts:\d+: .*new or re-pinned \(22962574\)/u,
+        ({ directory }) => splitOut(directory, true),
+      ],
+      // (the old path's blob gone: whether a base file holds its owners cannot be proved)
+      "moved, the old blob unreadable": [
+        2,
+        /Git cannot read tests\/moved\/type-core-contract-capture\.test\.ts's owners at /u,
+        ({ directory, git }) => {
+          moveTo(directory, git);
+          writeFileSync(join(directory, moved), repinned);
+          const blob = git("rev-parse", `HEAD:${capture}`).stdout.trim();
+          rmSync(join(directory, ".git/objects", blob.slice(0, 2), blob.slice(2)));
+        },
+      ],
       // (the file's blob gone from the object store, the file deleted: the tree still lists it, Git cannot show it)
       "unreadable base": [
         2,
@@ -458,6 +584,39 @@ test(
         },
       ],
     };
+    const title = "the capture ends at the first store whose contract leaves the slice's depth";
+    /** The capture test retitled in `file`, with its declaration, and re-pinned. */
+    function retitle(directory, file) {
+      writeFileSync(
+        join(directory, file),
+        repinned.replace(
+          `test("${title}`,
+          `test("a capture ends at the first store whose contract leaves the slice's depth`,
+        ),
+      );
+      const path = join(directory, "tools/repository-checks/pin-grounds.mjs");
+      writeFileSync(
+        path,
+        readFileSync(path, "utf8").replaceAll(
+          title,
+          "a capture ends at the first store whose contract leaves the slice's depth",
+        ),
+      );
+    }
+    /** The capture test moved into a file of its own, the old file keeping the rest, its declaration moved with it. */
+    function splitOut(directory, repin) {
+      const split = "tests/type-core-contract-capture-ends.test.ts";
+      const text = repin ? repinned : read(capture);
+      const start = text.indexOf(`test("${title}`);
+      const end = text.indexOf("\n});\n", start) + 5;
+      const imports = text.slice(0, text.indexOf("\ntest(")) + "\n";
+      writeFileSync(join(directory, split), imports + text.slice(start, end));
+      writeFileSync(join(directory, capture), text.slice(0, start) + text.slice(end));
+      for (const tool of ["pin-suites.mjs", "pin-grounds.mjs"]) {
+        const path = join(directory, "tools/repository-checks", tool);
+        writeFileSync(path, readFileSync(path, "utf8").replaceAll(`"${capture}"`, `"${split}"`));
+      }
+    }
     function moveTo(directory, git) {
       git("mv", capture, moved);
       for (const tool of ["pin-suites.mjs", "pin-grounds.mjs"]) {

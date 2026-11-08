@@ -191,7 +191,15 @@ function main(argv) {
     return 2;
   }
   const short = mergeBase.slice(0, 9);
-  const paths = changedSince(root, mergeBase);
+  let paths;
+  try {
+    paths = changedSince(root, mergeBase);
+  } catch (error) {
+    console.error(
+      `pin-suites: Git cannot read the changes since ${short}: ${String(error.stderr ?? error.message).trim()}`,
+    );
+    return 2;
+  }
   const core = paths.filter((path) => path.startsWith(CORE)).length;
   const suites = suitesFor(paths);
   if (suites.length === 0)
@@ -212,6 +220,12 @@ function main(argv) {
     const start = performance.now();
     const refusals = [];
     let read = 0;
+    const unreadable = (path) => {
+      console.error(
+        `pin-suites: Git cannot read ${path} at ${short}: fetch it, or name another --base`,
+      );
+      return 2;
+    };
     /** A path's text at the merge-base: `undefined` when its tree lacks it, `null` when Git cannot read it. */
     const atBase = (path) => {
       const listed = spawnSync("git", ["ls-tree", "--name-only", mergeBase, "--", path], {
@@ -226,30 +240,55 @@ function main(argv) {
       });
       return listed.status === 0 && shown.status === 0 ? shown.stdout : null;
     };
-    // (a path deleted since the merge-base whose base text holds a pin file's owners is that file's base: a moved pin
-    // file is compared with what it was, not read as new)
-    const deleted = paths.filter((path) => !existsSync(join(root, path)) && path.endsWith(".ts"));
+    /** The base files naming every one of `owners`, by `git grep` of the base tree; `null` when Git cannot read it. */
+    const baseFilesHolding = (owners) => {
+      const found = [];
+      for (const owner of owners) {
+        const grep = spawnSync("git", ["grep", "-l", "-F", "-e", owner, mergeBase, "--", "*.ts"], {
+          cwd: root,
+          encoding: "utf8",
+        });
+        // (Git greps past a blob it cannot read, with exit 1 and an error: no match is then not proved)
+        if ((grep.status !== 0 && grep.status !== 1) || grep.stderr.trim() !== "") return null;
+        found.push(
+          new Set(
+            grep.stdout
+              .split("\n")
+              .filter(Boolean)
+              .map((line) => line.slice(mergeBase.length + 1)),
+          ),
+        );
+      }
+      return [...found[0]].filter((path) => found.every((each) => each.has(path)));
+    };
+    const deleted = paths.filter((path) => !existsSync(join(root, path)));
     for (const file of files) {
-      // (absent from the base's tree: a new file, not read; listed there but unreadable: the comparison cannot run)
+      // (absent from the base's tree: compared with the base file that holds all its owners, a move, a copy or a
+      // split; else new and not read, but refused when the change deletes a file: a move that renamed an owner)
       let base = atBase(file);
-      let movedFrom;
-      if (base === undefined && existsSync(join(root, file)))
-        for (const path of deleted) {
+      let pairedWith;
+      if (base === undefined && existsSync(join(root, file))) {
+        const holding = baseFilesHolding(GROUNDS[file].owners);
+        if (holding === null) return unreadable(`${file}'s owners`);
+        for (const path of holding) {
           const text = atBase(path);
-          if (typeof text !== "string") continue;
+          if (text === null) return unreadable(path);
           const reading = readingOf(file, text);
           if (reading.records.length > 0 && reading.refusals.length === 0) {
-            [base, movedFrom] = [text, path];
+            [base, pairedWith] = [text, path];
             break;
           }
         }
-      if (base === undefined) continue;
-      if (base === null) {
-        console.error(
-          `pin-suites: Git cannot read ${file} at ${short}: fetch it, or name another --base`,
-        );
-        return 2;
+        if (base === undefined && deleted.length > 0) {
+          refusals.push(
+            `${file}: new since ${short}, its owners whole in no base file, while the change deletes ${deleted.join(", ")}: unpaired.\n` +
+              "  Move or split a pin file, and rename its owners, in separate changes, so each is compared with what it was.",
+          );
+          continue;
+        }
       }
+      if (base === undefined) continue;
+      if (base === null) return unreadable(file);
       if (!existsSync(join(root, file))) {
         refusals.push(
           `${file}: deleted, with its pins.\n  Restore it, or update its declaration in tools/repository-checks/pin-grounds.mjs.`,
@@ -257,15 +296,16 @@ function main(argv) {
         continue;
       }
       read += 1;
+      const head = readFileSync(join(root, file), "utf8");
       refusals.push(
         ...refusalsOf(
           file,
           base,
-          readFileSync(join(root, file), "utf8"),
+          head,
           addedLines(
-            movedFrom === undefined
+            pairedWith === undefined
               ? git(root, "diff", "-U0", mergeBase, "--", file)
-              : textDiff(base, readFileSync(join(root, file), "utf8")),
+              : textDiff(base, head),
           ),
         ),
       );
