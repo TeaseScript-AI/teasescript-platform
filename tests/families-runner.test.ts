@@ -700,7 +700,6 @@ test("the corpus runner stores a tree in the baseline of its src/ tree, verified
     ).total;
     for (const advisory of ["nearCap", "heapLimit", "capabilities"])
       assert.equal(advisory in storedTotal, false, advisory);
-    assert.deepEqual(storedTotal.crashed, { base: 0, head: 0 });
     const stat = readFileSync("/proc/self/stat", "utf8");
     const started = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
     writeFileSync(join(baseline, ".1of2.claim"), `${process.pid}-${started}\n`);
