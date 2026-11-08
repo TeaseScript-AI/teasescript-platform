@@ -27,13 +27,10 @@ import type { RandomState } from "./connection-state.js";
 
 // These live in their leaves (`plan-metadata.ts`, `connection-state.ts`); new imports, especially from `ops/`, take
 // them from there, so that no op imports a value from this composition.
-export { planMetadata, type PlanMetadata } from "../plan-metadata.js";
+export type { PlanMetadata } from "../plan-metadata.js";
 export {
   alignRandom,
   alignTrace,
-  isRandomIntent,
-  isTracingIntent,
-  ownedRandom,
   type RandomIntent,
   type RandomState,
   type TracingIntent,
