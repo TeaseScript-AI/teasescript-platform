@@ -76,9 +76,30 @@ const FILES = {
   "player/vue/src/widget.ts": "export const w = 1;\n",
   "player/vue/src/other.ts": "export const o = 1;\n",
   "player/vue/src/uses-adapter.ts": 'import { x } from "../../adapter";\nexport const y = x;\n',
-  // a Node file may import Node's built-ins
+  // a Node file may import Node's built-ins; another file in its folder may not
   "player/engine-bridge/node-host.ts":
     'import { Worker } from "node:worker_threads";\nexport const w = Worker;\n',
+  "player/engine-bridge/other.ts":
+    'import { readFileSync } from "node:fs";\nexport const r = readFileSync;\n',
+  // a package whose name a pattern of `colorjs.io` would match, unescaped: refused
+  "src/lookalike.ts": 'import x from "colorjsXio";\nexport const y = x;\n',
+  "src/node_modules/colorjsXio/package.json": JSON.stringify({
+    name: "colorjsXio",
+    type: "module",
+    exports: "./index.js",
+  }),
+  "src/node_modules/colorjsXio/index.js": "export default 1;\n",
+  // a folder whose name starts with `src` is not `src/`
+  "src-extra/a.ts": 'import { p } from "../player/p.js";\nexport const x = p;\n',
+  // files Git ignores, which a cruise reaches from a tracked file of the other project: refused, both ways
+  ".gitignore": "node_modules\nplayer/hidden.ts\nplayer/vue/src/hidden.ts\n",
+  "player/vue/src/a.ts": 'import { h } from "../../hidden.js";\nexport const a: number = h;\n',
+  "player/hidden.ts": 'import { a } from "./vue/src/a.js";\nexport const h: number = a;\n',
+  "playground/a.ts": 'import { v } from "../player/vue/src/hidden.js";\nexport const a = v;\n',
+  "player/vue/src/hidden.ts":
+    'import { a } from "../../../playground/a.js";\nexport const v = a;\n',
+  // a tracked file deleted from the working tree, without staging (the test deletes it)
+  "src/deleted.ts": "export const d = 1;\n",
   // a crossing the waiting list holds
   "src/listed-cross.ts": 'import { p } from "../player/p.js";\nexport const x = p;\n',
   // a value cycle, a listed one, and a cycle through imports the compiler erases
@@ -88,6 +109,13 @@ const FILES = {
   "src/listed-b.ts": 'import { a } from "./listed-a.js";\nexport const b = () => a;\n',
   "src/type-a.ts": 'import type { B } from "./type-b.js";\nexport interface A { b?: B }\n',
   "src/type-b.ts": 'import type { A } from "./type-a.js";\nexport interface B { a?: A }\n',
+  // erased in the root project, which owns the pair, though the Vue project's cruise, reaching it, keeps the import
+  "src/inline-a.ts":
+    'import { type B } from "./inline-b.js";\nexport const a = 1;\nexport type A = B;\n',
+  "src/inline-b.ts":
+    'import { a } from "./inline-a.js";\nexport const b = a;\nexport type B = number;\n',
+  "player/vue/src/uses-inline.ts":
+    'import { a } from "../../../src/inline-a.js";\nexport const u = a;\n',
   // under the Vue project's verbatimModuleSyntax, `import { type B }` still loads the module: a value cycle
   "player/vue/src/vms-a.ts":
     'import { type B } from "./vms-b";\nexport const a = 1;\nexport type A = B;\n',
@@ -118,10 +146,11 @@ test(
   () => {
     const root = checkout(FILES);
     try {
+      rmSync(join(root, "src/deleted.ts"));
       const result = spawnSync(process.execPath, [tool], { cwd: root, encoding: "utf8" });
       assert.equal(result.status, 1, result.stdout + result.stderr);
       const findings = result.stderr.trim().split("\n");
-      assert.equal(findings.pop(), "check:imports: 10 findings");
+      assert.equal(findings.pop(), "check:imports: 14 findings");
       // each finding once, by what it names: the Vue project's cruise reaching player/adapter.ts adds nothing
       assert.deepEqual(
         findings
@@ -139,9 +168,13 @@ test(
           "player/adapter.ts B3 @/other",
           "player/adapter.ts B3 fs",
           "player/adapter.ts B3 player/vue/src/widget.ts",
+          "player/engine-bridge/other.ts B3 fs",
           "src/crosses.ts B1 player/p.ts",
           "src/crosses.ts B2 fs",
           "src/crosses.ts B2 package vue",
+          "src/lookalike.ts B2 package colorjsXio",
+          "player/hidden.ts: player/vue/src/a.ts imports it, but it is not among Git's files (ignored, or outside the list), so its own project's cruise does not read it: track it, or stop importing it",
+          "player/vue/src/hidden.ts: playground/a.ts imports it, but it is not among Git's files (ignored, or outside the list), so its own project's cruise does not read it: track it, or stop importing it",
           "cycle player/vue/src/components/ui/badge/Badge.vue, player/vue/src/components/ui/badge/index.ts, player/vue/src/components/ui/shared.ts",
           "cycle player/vue/src/vms-a.ts, player/vue/src/vms-b.ts",
           "cycle src/cycle-a.ts, src/cycle-b.ts",
@@ -150,7 +183,7 @@ test(
       );
       assert.equal(
         result.stdout,
-        "check:imports: 1 groups of files form a cycle once imports the compiler erases count (advisory, not refused); the largest, 2 files, holds src/type-a.ts\n",
+        "check:imports: 2 groups of files form a cycle once imports the compiler erases count (advisory, not refused); the largest, 2 files, holds src/inline-a.ts\n",
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -186,9 +219,56 @@ test("the groups are strongly connected components, and the generated-component 
     [`${ui}/button/Button.vue`, `${ui}/button/helpers.ts`],
     [`${ui}/button/Button.vue`, `${ui}/button/index.ts`, `${ui}/shared.ts`],
     [`${ui}/button/a/A.vue`, `${ui}/button/a/index.ts`],
+    [`${ui}/button/Button.vue`, `${ui}/button/Icon.vue`],
     ["player/vue/src/other/X.vue", "player/vue/src/other/index.ts"],
   ])
     assert.equal(isGeneratedComponentGroup(group), false, group.join(" "));
+});
+
+test("a malformed waiting list, an entry of another shape and a cruise result that is not JSON stop the check", () => {
+  const root = checkout({ "src/a.ts": "export const a = 1;\n" });
+  const waiting = join(root, "tools/repository-checks/imports-waiting.json");
+  // a cruise that prints part of a result, then ends as if it succeeded
+  const preload = join(root, "partial.mjs");
+  writeFileSync(
+    preload,
+    'if (process.argv.includes("--cruise")) { process.stdout.write(\'{"modules":\'); process.exit(0); }\n',
+  );
+  const run = (env = process.env) =>
+    spawnSync(process.execPath, [tool], { cwd: root, encoding: "utf8", env });
+  try {
+    mkdirSync(dirname(waiting), { recursive: true });
+    for (const [text, message] of [
+      ["[", /^check:imports: cannot read tools\/repository-checks\/imports-waiting\.json: /u],
+      ["[{}]", /, entry 1, is not a list of cycles/u],
+      [
+        JSON.stringify([
+          { cycle: ["src/a.ts", "src/b.ts"], waits: "x" },
+          { file: "src/a.ts", imports: "x" },
+        ]),
+        /, entry 2, is not a list of cycles/u,
+      ],
+      [
+        JSON.stringify([{ cycle: ["src/a.ts", "src/b.ts"], waits: "x", wait: "y" }]),
+        /, entry 1, /u,
+      ],
+      [JSON.stringify({ cycle: [] }), /imports-waiting\.json is not a list of cycles/u],
+    ]) {
+      writeFileSync(waiting, text);
+      const result = run();
+      assert.equal(result.status, 2, `${text}: ${result.stderr}`);
+      assert.match(result.stderr, message, text);
+    }
+    writeFileSync(waiting, "[]");
+    const result = run({ ...process.env, NODE_OPTIONS: `--import ${preload}` });
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(
+      result.stderr,
+      /^check:imports: the \w+ project's cruise printed no JSON result: /u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 /** The cruise processes running in `root`, by their working folder. */

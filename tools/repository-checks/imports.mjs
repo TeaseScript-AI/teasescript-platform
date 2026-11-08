@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { cruise } from "dependency-cruiser";
@@ -15,11 +15,13 @@ import extractTSConfig from "dependency-cruiser/config-utl/extract-ts-config";
 // forbids, and its graph has no value cycle outside the waiting list.
 //
 // The files are Git's list (tracked, and untracked but not ignored) of `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.mjs`,
-// `.cjs` and `.vue` files, outside `tests/fixtures/`, whose files are deliberate shapes. dependency-cruiser cruises them
-// twice, in two processes at once, because what the compiler erases depends on the project's options: `player/vue/`
-// with `player/vue/tsconfig.json` (`verbatimModuleSyntax`, the `@/` paths), everything else with the root
-// `tsconfig.json`. Each file's imports come from its own project's cruise. `tsPreCompilationDeps: "specify"` marks each
-// import the compiler erases; the others are value imports. It reads `.vue` scripts with `@vue/compiler-sfc`.
+// `.cjs` and `.vue` files that are regular files in the working tree, outside `tests/fixtures/`, whose files are
+// deliberate shapes. dependency-cruiser cruises them twice, in two processes at once, because what the compiler erases
+// depends on the project's options: `player/vue/` with `player/vue/tsconfig.json` (`verbatimModuleSyntax`, the `@/`
+// paths), everything else with the root `tsconfig.json`. Each file's imports come from its own project's cruise, so a
+// code file that such an import reaches and its own project's cruise did not read is refused: it is not among Git's
+// files. `tsPreCompilationDeps: "specify"` marks each import the compiler erases; the others are value imports. It reads
+// `.vue` scripts with `@vue/compiler-sfc`.
 //
 // The declared boundaries count every import, erased ones too, as they couple the folders alike:
 // - B1, `src/` imports nothing under `player/` or `playground/`: `docs/ARCHITECTURE.md` "Implemented deterministic
@@ -45,10 +47,11 @@ import extractTSConfig from "dependency-cruiser/config-utl/extract-ts-config";
 // from `"."`. A group of one `components/ui/<dir>/index.ts` and `.vue` files directly in that `<dir>` is admitted; any
 // other group there is refused.
 //
-// `imports-waiting.json` lists what waits for another pull request: a cycle group, exactly, or one boundary crossing
-// (the importing file and what it imports). A listed entry no longer found fails, so the list only shrinks. Cycles
-// through an erased import set no load order: they are not refused, and the last line counts the groups that form a
-// cycle once erased imports count, advisory.
+// `imports-waiting.json` lists what waits for other work, which each entry's `waits` cites: a cycle group, exactly, or
+// one boundary crossing (the importing file, and the file or package dependency-cruiser resolves its import to:
+// `player/p.ts`, not `../player/p.js`). Keep the list shrink-only: the check fails on an entry it no longer finds, but
+// does not compare an added entry or an enlarged cycle with the base. Cycles through an erased import set no load order:
+// they are not refused, and the last line counts the groups that form a cycle once erased imports count, advisory.
 //
 // Not seen: a `<script src>` block; a `.js` file beside a same-name `.ts`, which resolves to the `.js` (TypeScript picks
 // the `.ts`); a `.vue` file Vue's parser refuses, which yields no imports (vue-tsc refuses it in CI); a computed
@@ -57,8 +60,9 @@ import extractTSConfig from "dependency-cruiser/config-utl/extract-ts-config";
 // `playground/` (`player/vue/src/packageHost.ts` → `playground/package-catalog.ts`); ADR 0017's Standard Library and
 // privileged adapter layers, which have no modules yet.
 //
-// Exit status: 0 when nothing is refused, 1 when a boundary is crossed, an unlisted cycle exists or a listed entry is
-// gone, 2 when it cannot run. It installs no signal handler: interrupted, it stops by the signal, and a cruise left
+// Exit status: 0 when nothing is refused; 1 when a boundary is crossed, an unlisted cycle exists, an imported code file
+// is not among Git's files or a listed entry is gone; 2 when it cannot run, as when the waiting list is malformed or has
+// an entry of another shape, or a cruise's result is not JSON. It installs no signal handler: interrupted, it stops by the signal, and a cruise left
 // running only reads files and ends by itself.
 
 const CODE = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|vue)$/u;
@@ -147,7 +151,9 @@ function codeFiles() {
     { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   )
     .split("\0")
-    .filter((file) => CODE.test(file) && !file.startsWith("tests/fixtures/"));
+    .filter((file) => CODE.test(file) && !file.startsWith("tests/fixtures/"))
+    // a working-tree deletion, a symlink and a submodule are no file to read
+    .filter((file) => lstatSync(file, { throwIfNoEntry: false })?.isFile() === true);
   // dependency-cruiser reads a name with one of these as a glob pattern
   const glob = files.find((file) => /[*?[\]{}()!]/u.test(file));
   if (glob !== undefined)
@@ -213,9 +219,49 @@ async function cruiseBoth() {
       throw new CannotRun(
         `check:imports: the ${name} project's cruise failed (${signal ?? `exit ${status}`}):\n${stderr()}`,
       );
-    results[name] = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    try {
+      results[name] = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch (error) {
+      throw new CannotRun(
+        `check:imports: the ${name} project's cruise printed no JSON result: ${error.message}`,
+        { cause: error },
+      );
+    }
   }
   return results;
+}
+
+const WAITING = "tools/repository-checks/imports-waiting.json";
+
+/** The waiting list: each entry a cycle (`cycle`, `waits`) or a crossing (`file`, `imports`, `waits`), or exit 2. */
+function waitingList() {
+  let entries;
+  try {
+    entries = JSON.parse(readFileSync(WAITING, "utf8"));
+  } catch (error) {
+    throw new CannotRun(`check:imports: cannot read ${WAITING}: ${error.message}`, {
+      cause: error,
+    });
+  }
+  const text = (value) => typeof value === "string" && value !== "";
+  const shapeOf = (entry) =>
+    typeof entry === "object" && entry !== null ? Object.keys(entry).sort().join(", ") : "";
+  const valid = (entry) =>
+    (shapeOf(entry) === "cycle, waits" &&
+      Array.isArray(entry.cycle) &&
+      entry.cycle.length > 1 &&
+      entry.cycle.every(text) &&
+      text(entry.waits)) ||
+    (shapeOf(entry) === "file, imports, waits" &&
+      text(entry.file) &&
+      text(entry.imports) &&
+      text(entry.waits));
+  const invalid = Array.isArray(entries) ? entries.findIndex((entry) => !valid(entry)) : -1;
+  if (!Array.isArray(entries) || invalid !== -1)
+    throw new CannotRun(
+      `check:imports: ${WAITING}${Array.isArray(entries) ? `, entry ${invalid + 1},` : ""} is not a list of cycles ({ "cycle": [files], "waits" }) and crossings ({ "file", "imports", "waits" }), each \`waits\` naming the work it waits for`,
+    );
+  return entries;
 }
 
 /** The strongly connected groups of more than one file in `edges` (a map from a file to the files it imports). */
@@ -276,6 +322,13 @@ export function judge(results, waiting) {
   const valueEdges = new Map();
   const allEdges = new Map();
   const crossings = new Map();
+  const readBy = Object.fromEntries(
+    Object.entries(results).map(([name, result]) => [
+      name,
+      new Set(result.modules.map((module) => module.source)),
+    ]),
+  );
+  const unread = new Map();
   for (const [name, result] of Object.entries(results)) {
     const { owns } = PROJECTS[name];
     for (const module of result.modules) {
@@ -283,6 +336,11 @@ export function judge(results, waiting) {
       const local = module.dependencies.filter(
         (dependency) => !dependency.couldNotResolve && dependency.dependencyTypes.includes("local"),
       );
+      for (const { resolved } of local) {
+        const [owner] = Object.entries(PROJECTS).find(([, project]) => project.owns(resolved));
+        if (CODE.test(resolved) && !readBy[owner].has(resolved) && !unread.has(resolved))
+          unread.set(resolved, module.source);
+      }
       allEdges.set(
         module.source,
         local.map((dependency) => dependency.resolved),
@@ -304,6 +362,11 @@ export function judge(results, waiting) {
       });
     }
   }
+
+  for (const [file, importer] of [...unread].sort())
+    findings.push(
+      `${file}: ${importer} imports it, but it is not among Git's files (ignored, or outside the list), so its own project's cruise does not read it: track it, or stop importing it`,
+    );
 
   const listedCrossings = new Set(
     waiting
@@ -357,9 +420,7 @@ async function main() {
   if (cruiseArgument !== -1) return cruiseProject(process.argv[cruiseArgument + 1]);
   try {
     codeFiles();
-    const waiting = JSON.parse(
-      readFileSync("tools/repository-checks/imports-waiting.json", "utf8"),
-    );
+    const waiting = waitingList();
     const { findings, advisory } = judge(await cruiseBoth(), waiting);
     for (const finding of findings) console.error(finding);
     console.log(advisory);
