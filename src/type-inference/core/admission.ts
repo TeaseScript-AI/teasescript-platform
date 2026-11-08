@@ -234,6 +234,9 @@ export class Admission {
   get inheritedOwn(): ReceivingDomain["inheritedOwn"] {
     return this.pass.receivingDomain.inheritedOwn;
   }
+  get stoppedTerms(): ReceivingDomain["stoppedTerms"] {
+    return this.pass.receivingDomain.stoppedTerms;
+  }
   get cycles(): ReceivingDomain["cycles"] {
     return this.pass.receivingDomain.cycles;
   }

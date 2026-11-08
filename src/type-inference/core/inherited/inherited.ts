@@ -203,12 +203,18 @@ function* waitOn(
   key: CanonicalKey,
 ): Work<TypeTerm | null> {
   const { proof, open } = yield* admission.pass.solver.proven(inheritedProof(admission, key));
-  if (open) {
-    join(admission, reader, key);
-    return null;
-  }
+  if (open) return cutRead(admission, reader, key);
   if (proof !== null) admission.inheritedOwn.set(key, proof.own);
   return proof?.term ?? null;
+}
+
+/**
+ * A4's cycle rule for a read of a key that waits on the reader (an open proof, or a key on the stop path's stack): the
+ * two joined (`join`), the copy between them carrying no written type. One rule for both drivers of a scan's reads.
+ */
+function cutRead(admission: Admission, reader: CanonicalKey, key: CanonicalKey): null {
+  join(admission, reader, key);
+  return null;
 }
 
 /**
@@ -218,9 +224,70 @@ function* waitOn(
 function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
   // (a key in its identity, as the proofs hold it: G3 stage 1)
   const key = canonicalKey(admission.pass.contract, asked);
+  return finishedTerm(admission, key) ?? stoppedTerm(admission, key, []).term;
+}
+
+/** A key's finished proof's term, its own-level bit recorded (#1901); `undefined` where its proof did not finish. */
+function finishedTerm(admission: Admission, key: CanonicalKey): TypeTerm | null | undefined {
   const { proof } = admission.run(admission.pass.solver.proven(inheritedProof(admission, key)));
-  if (proof !== null) admission.inheritedOwn.set(key, proof.own);
-  return proof?.term ?? null;
+  if (proof === null) return undefined;
+  admission.inheritedOwn.set(key, proof.own);
+  return proof.term;
+}
+
+/**
+ * After a stop, a key whose proof did not finish: its own scan driven synchronously, as before #1072 A2, each read
+ * answered by its stopped run (`Read.now`) and each key it waits on by its finished proof, else by this path again; a
+ * key on this path's stack waits on the reader and is cut (`cutRead`), as an open proof is. A key is kept
+ * (`stoppedTerms`) only where its scan and those below it touched no key still on the stack below it; its depth there
+ * and the lowest such depth come back. Checkpoint 3 removes this path when retained proofs answer after a stop
+ * (`retainedAt`, L6), where unavailable stays unavailable.
+ */
+function stoppedTerm(
+  admission: Admission,
+  key: CanonicalKey,
+  stack: CanonicalKey[],
+): { readonly term: TypeTerm | null; readonly low: number } {
+  const kept = admission.stoppedTerms.get(key);
+  if (kept !== undefined) {
+    admission.inheritedOwn.set(key, kept.own);
+    return { term: kept.term, low: Infinity };
+  }
+  const depth = stack.length;
+  stack.push(key);
+  let low = Infinity;
+  const steps = scanOf(admission, key);
+  let answer: WaitingAnswer = null;
+  if (steps !== null) {
+    let step = steps.next();
+    while (step.done !== true) {
+      const yielded = step.value;
+      let given: TypeTerm | null | ReturnType<Read["now"]>;
+      if (isRead(yielded)) given = yielded.now();
+      else {
+        const finished = finishedTerm(admission, yielded);
+        const at = stack.indexOf(yielded);
+        if (finished !== undefined) given = finished;
+        else if (at >= 0) {
+          low = Math.min(low, at);
+          given = cutRead(admission, key, yielded);
+        } else {
+          const below = stoppedTerm(admission, yielded, stack);
+          low = Math.min(low, below.low);
+          given = below.term;
+        }
+      }
+      step = steps.next(given);
+    }
+    answer = step.value;
+  }
+  stack.pop();
+  keepText(admission.work, String(key).length);
+  const term = answer === null ? null : optionalOf(answer.copied, answer.nullable);
+  const own = term !== null && answer?.own === true;
+  admission.inheritedOwn.set(key, own);
+  if (low >= depth) admission.stoppedTerms.set(key, { term, own });
+  return { term, low };
 }
 
 /**

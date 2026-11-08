@@ -69,6 +69,11 @@ export class ReceivingDomain {
    */
   inheritedOwn = new Map<CanonicalKey, boolean>();
   /**
+   * After a stop, the keys whose proofs did not finish, each resolved by its own scan (`stoppedTerm`) and kept where its
+   * scan touched no key still waiting on it: its type and its own-level bit.
+   */
+  stoppedTerms = new Map<CanonicalKey, { readonly term: TypeTerm | null; readonly own: boolean }>();
+  /**
    * The places and paths whose decisions wait on each other through copies, by cycle (`cut`): a union-find, two joined
    * where one's proof reads the other's while their component is solved.
    */

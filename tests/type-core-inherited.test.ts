@@ -8,6 +8,7 @@ import { CoreProgram } from "../src/type-inference/core/program.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
+import { HELD_MODES, heldFamily, heldProblems, heldStops } from "./helpers/type-core-held-host.js";
 import { inMode, MODES, publication } from "./helpers/type-core-oracles.js";
 
 /*
@@ -175,4 +176,18 @@ test("the analysis decides each place as its inherited type says, in the four mo
       ["a decided", "b copied"],
       JSON.stringify(mode),
     );
+});
+
+test("after a stop a key whose proof did not finish is resolved by its own scan: a copy of a written object keeps its boundary check at every settled walk and extraction stop", () => {
+  // (the held family's cases where an unfinished proof read as none lost root's check, #1072 A2's ruling on option 1)
+  for (const name of ["writtenObjectBelow-4-repeat-plain", "writtenObjectBelow-4-written-plain"]) {
+    const c = heldFamily().find((each) => each.name === name)!;
+    const mode = HELD_MODES[0]!;
+    const stops = heldStops(c, mode).filter(
+      (stop) => stop.phase === "walk" || stop.phase === "extraction",
+    );
+    assert.ok(stops.length > 0, name);
+    for (const { allowance, phase } of stops)
+      assert.deepEqual(heldProblems(c, mode, allowance), [], `${name} ${phase} @${allowance}`);
+  }
 });
