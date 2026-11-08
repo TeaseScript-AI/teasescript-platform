@@ -4,7 +4,14 @@
 import { clearOrigin, heapReader } from "../lib/cdp.mjs";
 import { cdpSession } from "../lib/engines.mjs";
 import { gateProbe } from "../lib/probe.mjs";
-import { activate, answer, readGate, UnknownControl, waitForState } from "../lib/player.mjs";
+import {
+  activate,
+  answer,
+  ENABLED_CONTROL,
+  readGate,
+  UnknownControl,
+  waitForState,
+} from "../lib/player.mjs";
 import { firstSave, playable, publishesAfter, turnTimes, workerStart } from "../lib/measure.mjs";
 
 const OPEN_MS = 120_000;
@@ -90,12 +97,7 @@ export async function session({
     await page.goto(url, { waitUntil: "commit" });
     const pressedAt = await page.evaluate(() => performance.now());
     await activate(opened, page, "Start", OPEN_MS);
-    await waitForState(
-      page,
-      `(state) => state.start === null && (state.buttons.some((b) => b.enabled) || state.composer?.enabled === true)`,
-      OPEN_MS,
-      "No control after Start",
-    );
+    await waitForState(page, ENABLED_CONTROL, OPEN_MS, "No control after Start");
     const memory = [];
     if (heap !== null) memory.push({ at: "playable", ...(await heap()) });
 
@@ -119,7 +121,7 @@ export async function session({
       try {
         await waitForState(
           page,
-          `(state) => state.ended || state.failed || (state.start === null && (state.buttons.some((b) => b.enabled) || state.composer?.enabled === true) && (JSON.stringify([state.buttons, state.composer?.hint ?? null]) !== ${JSON.stringify(fingerprint)} || window.__gate.rows.some((row) => row.speaker !== "user" && row.t > ${sentAt})))`,
+          `(state) => state.ended || state.failed || ((${ENABLED_CONTROL})(state) && (JSON.stringify([state.buttons, state.composer?.hint ?? null]) !== ${JSON.stringify(fingerprint)} || window.__gate.rows.some((row) => row.speaker !== "user" && row.t > ${sentAt})))`,
           TURN_MS,
           `Turn ${turn} did not settle`,
         );
@@ -133,7 +135,11 @@ export async function session({
 
     const coldGate = await readGate(page);
     const cold = playable(coldGate, pressedAt);
-    const save = firstSave(coldGate, cold.pressMs ?? pressedAt, coldGate.longTasks);
+    // The minimal probe (the A/A run's other arm) records no transactions, so it has no first save.
+    const save =
+      probe === "minimal"
+        ? null
+        : firstSave(coldGate, cold.pressMs ?? pressedAt, coldGate.longTasks);
     const turnResults = answered.map((entry) =>
       entry.ok === false
         ? entry
@@ -162,12 +168,7 @@ export async function session({
     let repeat;
     try {
       await activate(opened, page, "Continue", OPEN_MS);
-      await waitForState(
-        page,
-        `(state) => state.start === null && (state.buttons.some((b) => b.enabled) || state.composer?.enabled === true)`,
-        OPEN_MS,
-        "No control after Continue",
-      );
+      await waitForState(page, ENABLED_CONTROL, OPEN_MS, "No control after Continue");
       repeat = playable(await readGate(page), reloadedAt);
     } catch (error) {
       repeat = { ok: false, reason: error.message };
@@ -180,7 +181,7 @@ export async function session({
     return {
       ok:
         cold.ok &&
-        save.ok !== false &&
+        (save === null || save.ok !== false) &&
         repeat.ok &&
         turnResults.every((entry) => entry.ok !== false),
       cold,

@@ -5,13 +5,20 @@
 import { clearOrigin } from "../lib/cdp.mjs";
 import { cdpSession } from "../lib/engines.mjs";
 import { gateProbe } from "../lib/probe.mjs";
-import { activate, answer, readGate, UnknownControl, waitForState } from "../lib/player.mjs";
+import {
+  activate,
+  answer,
+  ENABLED_CONTROL,
+  readGate,
+  UnknownControl,
+  waitForState,
+} from "../lib/player.mjs";
 import { publishesAfter } from "../lib/measure.mjs";
 
 const OPEN_MS = 120_000;
 const TURN_MS = 60_000;
 const MAX_TURNS = 80;
-const READY = `(state) => state.ended || state.failed || (state.start === null && (state.buttons.some((b) => b.enabled) || state.composer?.enabled === true))`;
+const READY = `(state) => state.ended || state.failed || (${ENABLED_CONTROL})(state)`;
 
 async function play(opened, page, from, until) {
   let turn = from;

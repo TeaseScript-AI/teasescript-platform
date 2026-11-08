@@ -9,11 +9,18 @@ export function readGate(page) {
   return page.evaluate(() => window.__gate);
 }
 
-/** Whether `state` (a probe state) shows a control the player can use now. */
+/**
+ * Whether `state` (a probe state) shows a control the player can answer now: an enabled button, or the composer when it
+ * is enabled and asks a question (not the composer a pacing gate leaves open for Space).
+ */
+/** The same test as a function source for `waitForState`, which runs in the page. */
+export const ENABLED_CONTROL = `(state) => state.start === null && (state.buttons.some((b) => b.enabled) || (state.composer?.enabled === true && state.composer.asks))`;
+
 export function hasEnabledControl(state) {
   return (
     state.start === null &&
-    (state.buttons.some((button) => button.enabled) || state.composer?.enabled === true)
+    (state.buttons.some((button) => button.enabled) ||
+      (state.composer?.enabled === true && state.composer.asks))
   );
 }
 
@@ -63,7 +70,7 @@ function typedAnswer(composer) {
  * else the enabled button at `turn` modulo their count. Resolves with what it answered.
  */
 export async function answer(opened, page, state, turn) {
-  if (state.composer?.enabled) {
+  if (state.composer?.enabled && state.composer.asks) {
     const input = page.locator("[data-composer-input]");
     if ((await input.inputValue()) === "") await input.fill(typedAnswer(state.composer));
     await input.press("Enter");

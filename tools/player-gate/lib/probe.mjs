@@ -138,6 +138,9 @@ export function gateProbe(config) {
         ? null
         : {
             enabled: !input.disabled && !input.readOnly,
+            // The Player names its composer "Response" when it asks nothing, as during a pacing gate where Space
+            // skips (`RuntimeInteraction.vue`, `:accessible-name`); a question gives its own name.
+            asks: !/^Response(: |$)/u.test(input.getAttribute("aria-label") ?? "Response"),
             hint: input.getAttribute("placeholder") ?? "",
             inputMode: input.getAttribute("inputmode") ?? "",
           };

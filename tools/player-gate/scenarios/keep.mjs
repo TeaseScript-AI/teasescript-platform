@@ -13,7 +13,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { clearOrigin } from "../lib/cdp.mjs";
 import { adb, cdpSession } from "../lib/engines.mjs";
 import { gateProbe } from "../lib/probe.mjs";
-import { activate, readGate, waitForState } from "../lib/player.mjs";
+import { activate, ENABLED_CONTROL, readGate, waitForState } from "../lib/player.mjs";
 import { publishesAfter } from "../lib/measure.mjs";
 
 const OPEN_MS = 120_000;
@@ -55,12 +55,7 @@ async function keptSession(opened, origin, script) {
     waitUntil: "commit",
   });
   await activate(opened, page, "Start", OPEN_MS);
-  await waitForState(
-    page,
-    `(state) => state.start === null && (state.buttons.some((b) => b.enabled) || state.composer?.enabled === true)`,
-    OPEN_MS,
-    "No control after Start",
-  );
+  await waitForState(page, ENABLED_CONTROL, OPEN_MS, "No control after Start");
   const committedBy = Date.now() + 15_000;
   let publish;
   while (

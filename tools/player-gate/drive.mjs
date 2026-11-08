@@ -200,7 +200,13 @@ async function runSample(build, cell, rectangles, reopen, index) {
                     ).t,
                   })),
                 )
-          : (page) => page.evaluate(() => window.__gateRun());
+          : async (page) => {
+              // The bridge page defines `__gateRun` once its module has loaded, which is part of the window.
+              await page.waitForFunction(() => typeof window.__gateRun === "function", undefined, {
+                timeout: 180_000,
+              });
+              return page.evaluate(() => window.__gateRun());
+            };
       return tapsSample({
         opened,
         url,
