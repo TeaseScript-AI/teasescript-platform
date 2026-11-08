@@ -1,16 +1,14 @@
 import { computed, ref, shallowRef, watch } from "vue";
-import { tryOnScopeDispose, useEventListener } from "@vueuse/core";
+import { tryOnScopeDispose } from "@vueuse/core";
 import { browserMediaUrls } from "../../browser-capture.js";
 import { NO_MARKS, type HistoryMarks } from "../../debug-history-marks.js";
 import { planLockNeeds } from "../../plan-metadata.js";
 import {
   CapturedMediaNotStoredError,
   CapturedMediaStore,
-  insertOrAcceptExisting,
   isCapturedMediaReference,
   type CapturedMediaRecord,
   type CapturedMediaRepository,
-  type StoredCapturedMedia,
 } from "../../captured-media.js";
 import {
   browserCapturedMediaLocks,
@@ -22,7 +20,6 @@ import { type LockDialogInput } from "../../lock-service.js";
 import type { LockServices } from "../../encryption/lock.js";
 import type { PlayerRuntimeRestorePoint, PlayerRuntimeSession } from "../../runtime-adapter.js";
 import {
-  activePlayerRuntimeInteraction,
   playerTemporalContext,
   playerRuntimeMedia,
   playerRuntimePermanentButtons,
@@ -35,18 +32,7 @@ import {
   introduceNow,
 } from "../../engine-bridge/in-process.js";
 import type { StartOptions } from "../../engine-bridge/ops/session.js";
-import type { KeepCapture } from "../../engine-bridge/ops/persistence.js";
-import {
-  StaleOperation,
-  persistenceOwnership as ownershipOf,
-  type PersistenceOwnership,
-} from "../../persistence-ownership.js";
-import {
-  EMPTY_PLAN_JSON_LEASE,
-  settle,
-  type PlanJsonEvent,
-  type PlanJsonLease,
-} from "../../plan-json-lease.js";
+import { StaleOperation, type PersistenceOwnership } from "../../persistence-ownership.js";
 import {
   bridgeOf,
   endsQuietly,
@@ -62,18 +48,10 @@ import type { DebugRecorder, DebugRecording } from "../../debug-recorder.js";
 import {
   capturedMediaReferencesIn,
   keptPhotoReferences,
-  keptSession,
-  memoryKeptSessionStore,
   type KeptRoomStore,
   type KeptSessionStore,
 } from "../../kept-sessions.js";
 import type { RuntimeDebugContext } from "../../../src/index.js";
-import {
-  serializeValidatedRuntimeJson,
-  type CheckpointErrorInfo,
-} from "../../../src/runtime/snapshot/checkpoint-json.js";
-import { INSTRUCTION_PLAN_VERSION } from "../../../src/plan/model.js";
-import { RUNTIME_SNAPSHOT_VERSION } from "../../../src/runtime/snapshot/snapshot-format.js";
 import type { Problem } from "./ProblemCard.vue";
 import type { SavedDataHost } from "../../saved-data.js";
 import { playerBuildIdentity } from "../../build-identity.js";
@@ -120,6 +98,7 @@ import { useDebugModeAndTrace } from "./session/useDebugModeAndTrace.js";
 import { useSessionMedia } from "./session/useSessionMedia.js";
 import { useSessionRewind } from "./session/useSessionRewind.js";
 import { useStorageRoute } from "./session/persistence/useStorageRoute.js";
+import { useKeptSession } from "./session/persistence/useKeptSession.js";
 import { storedValueReferences, useSavedValues } from "./session/persistence/useSavedValues.js";
 
 export interface PlayerSessionOptions {
@@ -414,7 +393,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     stopped,
     activationRun,
     publishOwned,
-    keepSessionLater,
+    keepSessionLater: () => keepSessionLater(),
     copyToDebugRoom,
     clock: () => clock,
     room: () => room,
@@ -459,7 +438,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     options,
     capturedMedia,
     capturedMediaPersistence,
-    retireStaleOperations,
+    retireStaleOperations: () => retireStaleOperations(),
   });
   const {
     normalStorage,
@@ -784,23 +763,45 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const decodeImage = options.decodeImage ?? browserImageDecoder;
 
   let activationToken = 0;
-  // The kept-session preparation under way (`prepareScript`, `prepareKept`). A later preparation, and every transition
-  // that replaces what it would show, retires it: Start, Continue, a session's end (`supersede`), an import of the shown
-  // script, a room change, unmount. Only the current one shows its Continue or Start and puts its photos back.
-  let preparation = 0;
-  // The persistence operations under way (`persistenceOwnership`), each revoked for good where it retires.
-  const pendingOwnerships = new Set<PersistenceOwnership>();
-  /** Ends every persistence operation the page's change of room, store, plan tenure, preparation or life retired. */
-  function retireStaleOperations() {
-    for (const ownership of pendingOwnerships) ownership.retireIfStale();
-  }
-  /** A new preparation, which retires the ones before it. */
-  function nextPreparation(): number {
-    preparation += 1;
-    retireStaleOperations();
-    return preparation;
-  }
-  watch(room, retireStaleOperations, { flush: "sync" });
+  // The script's kept session and its persistence operations (`session/persistence/useKeptSession.ts`).
+  const keptOwner = useKeptSession({
+    options,
+    bridgeNow: () => bridge,
+    bridgeReady,
+    isDisposed: () => disposed,
+    session,
+    capturedMedia,
+    notices,
+    route,
+    room,
+    debugRoom,
+    debugEdits,
+    inspecting,
+    rewound,
+    activation,
+    endSession,
+    prepareStart,
+    prepareRestore,
+    lastStart: () => lastStart,
+    remember: (create, sources) => {
+      lastStart.value = create;
+      if (sources !== undefined) scriptSources = sources;
+    },
+    clock: () => clock,
+    rejectedUnlessStale,
+  });
+  const {
+    retireStaleOperations,
+    nextPreparation,
+    persistenceOwnership,
+    owned,
+    settlePlanJson,
+    keepSessionLater,
+    settleKeepAttempt,
+    prepareScript,
+    prepareKept,
+    toStartPage,
+  } = keptOwner;
   // A Continue under way in the host, whose session no other activation may let run on; see `supersede`.
   let continuing: PlayerSession | null = null;
   // The Start or Continue still beginning over the bridge. A later activation begins only once it settled, so the
@@ -967,7 +968,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const failed: string[] = [];
     const importScripts = async (): Promise<void> => {
       // A session being kept is kept before the import discards it.
-      if (ownChosen) while (keeping !== null) await keeping;
+      if (ownChosen) while (keptOwner.keepingNow() !== null) await keptOwner.keepingNow();
       for (const script of review.bundle.scripts) {
         if (!chosen.has(script.scope)) continue;
         try {
@@ -980,7 +981,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
           // The script's next session loads the imported values: its kept session, with its older view, goes first,
           // and a script whose kept session stays keeps its saved data.
-          await ctx.kept(keptSessions).discard(script.scope);
+          await ctx.kept(keptOwner.keptSessionsNow()).discard(script.scope);
           outdated = undefined;
           if (inDebugRoom) await replaceOwnInDebugRoom(ctx, script, review.images);
           else await replaceScript(operationStorage(ctx), capturedMedia, script, review.images);
@@ -1012,7 +1013,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           });
         })
       : ctx.current();
-    pendingOwnerships.delete(ctx);
+    keptOwner.endOwnership(ctx);
     releaseImporting();
     if (unexpected !== null) throw unexpected.error;
     // A stale import says nothing: the page moved on.
@@ -1044,7 +1045,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     script: StorageBundleScript,
     images: readonly CheckedTransferImage[],
   ): Promise<void> {
-    await keptSessions.discard(script.scope);
+    await keptOwner.keptSessionsNow().discard(script.scope);
     const { storage, media } = options.savedData!.persistence(script.scope);
     try {
       await replaceScript(storage, media, script, images);
@@ -1140,423 +1141,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       endings.value++;
   });
 
-  // The script's kept session, which a reload or a later visit continues (PLAYER-UI "Session start and user
-  // activation"); only a script with storage keeps one, under its storage scope. The debug room keeps its own.
-  const keptSessions = options.keptSessions ?? memoryKeptSessionStore();
-  const keptScope = options.scriptStorage?.scope ?? null;
-  const keptStore = (): KeptSessionStore =>
-    room.value === "debug" ? route.debugRoomsNow() : keptSessions;
-  // The host's token of the script's plan, which a kept session runs.
-  let scriptPlan: string | null = null;
-  // What is kept of the shown session, so that keeping it again adds only the events after it: whether the plan is kept,
-  // and how many events, the last of which is `last`. A new session starts with none.
-  let kept: {
-    readonly plan: boolean;
-    readonly count: number;
-    readonly last: InterpreterEvent | null;
-  } = { plan: false, count: 0, last: null };
-  let keeping: Promise<void> | null = null;
-  let keepAgain = false;
-  // How long the host holds the JSON of the script's plan, which a new session's first save stores and a Continue
-  // compares: for the current plan while this page is open; the host writes it in a task of its own before Start
-  // (#1707), and every reader borrows it (`plan-json-lease.ts`). Only `settlePlanJson` changes it.
-  let planJsonLease: PlanJsonLease = EMPTY_PLAN_JSON_LEASE;
-  // Each different plan the page prepares begins a tenure: what an operation of an earlier one finds no longer goes on.
-  let planTenure = 0;
-  /**
-   * One persistence operation's ownership (keep, the kept session's restore, an import): the room, store, plan tenure
-   * and, where it has one, the preparation it began in. `current` is the one rule for every such operation: once the page
-   * closes, switches room or store, prepares another plan, or (with a preparation) a newer preparation begins, the
-   * operation is stale for good. A stale operation issues nothing more: it reaches its stores and the host only through
-   * the ownership's handles, which admit no call once it is stale, and applies every page effect synchronously through
-   * `commit`.
-   */
-  function persistenceOwnership(owner: number | null = null): PersistenceOwnership {
-    const inRoom = room.value;
-    const store = keptStore();
-    const tenure = planTenure;
-    const ownership = ownershipOf(
-      () =>
-        !disposed &&
-        room.value === inRoom &&
-        keptStore() === store &&
-        planTenure === tenure &&
-        (owner === null || owner === preparation),
-    );
-    pendingOwnerships.add(ownership);
-    return ownership;
-  }
-  /**
-   * Runs `operation` of `ownership`, which ends without effect where its ownership went stale; resolves to whether it ran
-   * to its end.
-   */
-  async function owned(
-    ownership: PersistenceOwnership,
-    operation: () => Promise<void>,
-  ): Promise<boolean> {
-    try {
-      await operation();
-      return true;
-    } catch (error) {
-      if (!(error instanceof StaleOperation)) throw error;
-      return false;
-    } finally {
-      pendingOwnerships.delete(ownership);
-    }
-  }
-  /** Settles `event` in the lease and posts the host messages it implies, on the connection the page has. */
-  function settlePlanJson(event: PlanJsonEvent): void {
-    const settled = settle(planJsonLease, event);
-    if (settled.lease.current !== planJsonLease.current) planTenure += 1;
-    planJsonLease = settled.lease;
-    retireStaleOperations();
-    for (const message of settled.messages) {
-      const op = message.kind === "write" ? "preparePlanText" : "releasePlanText";
-      void bridge?.client.request(op, { plan: message.plan }).catch(() => {});
-    }
-  }
-  /**
-   * Keeps the shown session, where a reload continues it, together with the photos only it uses. One write runs at a
-   * time; a request meanwhile keeps the session as it is once that is done. A state Debug's rewind shows for inspection
-   * is never kept: the session it left is.
-   */
-  function keepSessionLater() {
-    if (keeping !== null) {
-      keepAgain = true;
-      return;
-    }
-    keeping = (async () => {
-      // The caller finishes first, such as a Continue that shows the session it keeps.
-      await Promise.resolve();
-      try {
-        do {
-          keepAgain = false;
-          await keepOnce();
-        } while (keepAgain && !disposed);
-      } finally {
-        // In the same step as the last check, so a request after it starts a new write instead of being lost.
-        keeping = null;
-      }
-    })();
-  }
-  async function keepOnce() {
-    const current = session.value;
-    // Only a script a host prepared with `prepareScript` keeps its session.
-    if (keptScope === null || scriptPlan === null || current === null || disposed) return;
-    if (inspecting.value || activation.value !== null) return;
-    // The session is kept in the room and store it plays in now, of the plan tenure now.
-    const ctx = persistenceOwnership();
-    await owned(ctx, () => keepIn(ctx, current, keptScope!));
-  }
-  async function keepIn(ctx: PersistenceOwnership, current: PlayerSession, scope: string) {
-    // The session's events: its store's, which a capture's events end in.
-    const events = current.events;
-    const from =
-      kept.count <= events.length && (kept.count === 0 || events[kept.count - 1] === kept.last)
-        ? kept.count
-        : 0;
-    const withPlan = !(kept.plan && from > 0);
-    const inDebugRoom = room.value === "debug";
-    const store = ctx.kept(keptStore());
-    // The state the host holds now, after the session's earlier requests, and for a first save the plan's JSON, which
-    // the host holds for the page (`plan-json-lease.ts`); later operations change the session.
-    let capture: KeepCapture;
-    try {
-      capture = await ctx.admit(() =>
-        bridgeOf(current).read(current, "captureKeep", {
-          plan: withPlan ? current.planToken : null,
-        }),
-      );
-    } catch (error) {
-      // A request the Worker's loss ended keeps the point kept before.
-      if (endsQuietly(error)) return;
-      ctx.check();
-      await forgetKeptSession(current, ctx);
-      return;
-    }
-    ctx.check();
-    // The host no longer holds the session: the point kept before stays.
-    if (capture.kind === "gone") return;
-    if (capture.kind === "unkeepable") {
-      // A state this browser cannot write, such as one holding a list too long to save, cannot be kept, and the point kept
-      // before must not stand in for it: a reload would go on from an earlier state as if it were this one.
-      await forgetKeptSession(current, ctx);
-      return;
-    }
-    const { snapshotJson, planJson } = capture;
-    const count = capture.eventsThrough;
-    if (count > events.length || (withPlan && planJson === null)) return;
-    const added = events.slice(from, count);
-    const last = events[count - 1] ?? null;
-    const marks = { editedWhileDebugging: debugEdits.value, rewoundWhileDebugging: rewound.value };
-    // Written once, for the photos they show and for the store.
-    const eventsJson = added.map(serializeValidatedRuntimeJson);
-    const references = capturedMediaReferencesIn(snapshotJson, eventsJson);
-    // The room's saved data are in use once storage reached it.
-    await route.storageRouteNow();
-    ctx.check();
-    try {
-      // A new session replaces the one kept before.
-      if (from === 0) {
-        await discardKeptSession(ctx, inDebugRoom);
-        if (inDebugRoom) ctx.commit(() => (debugRoom.value = { session: false }));
-      }
-      ctx.check();
-      // The session is kept only with every photo it uses: one that cannot be stored keeps the session kept before.
-      if (inDebugRoom) {
-        // The debug room stores the session's photos like its saved ones.
-        await capturedMedia.promote(references, ctx);
-        ctx.check();
-      } else {
-        // The photos no save stored go with the session, a photo already kept as it is; a stored one stays stored
-        // while the session uses it (`capturedMediaStorage`).
-        for (const photo of capturedMedia.sessionRecords(references)) {
-          await insertOrAcceptExisting(store.media, photo);
-          ctx.check();
-        }
-      }
-      await store.publish(scope, {
-        planJson: withPlan ? planJson : null,
-        snapshotJson,
-        eventsFrom: from,
-        events: added,
-        eventsJson,
-        marks,
-      });
-    } catch (error) {
-      if (error instanceof StaleOperation) throw error;
-      // The session kept before stays; a reload continues from there.
-      return;
-    }
-    // A publish already under way finishes in its store; a later operation's bookkeeping is its own.
-    ctx.commit(() => {
-      kept = { plan: true, count, last };
-      if (inDebugRoom) debugRoom.value = { session: true };
-      notices.dismiss(playerNoticeKeys.sessionNotKept);
-    });
-  }
-  /**
-   * Discards the session kept for a reload when its state `current` cannot be kept, so the next state that can be is kept
-   * anew; while the session runs or waits, a notice says that a reload would lose it.
-   */
-  async function forgetKeptSession(current: PlayerSession, ctx: PersistenceOwnership) {
-    const inDebugRoom = room.value === "debug";
-    ctx.commit(() => (kept = { plan: false, count: 0, last: null }));
-    const discarded = await discardKeptSession(ctx, inDebugRoom).then(
-      () => true,
-      () => false,
-    );
-    const live = current.state.status === "running" || current.state.status === "waiting";
-    ctx.commit(() => {
-      if (discarded && inDebugRoom) debugRoom.value = { session: false };
-      if (!live) notices.dismiss(playerNoticeKeys.sessionNotKept);
-      else if (!notices.list.some((notice) => notice.key === playerNoticeKeys.sessionNotKept))
-        notices.publish(playerNotices.sessionNotKept());
-    });
-  }
-  /**
-   * Discards the session the room keeps: the normal room's with the photos only it uses, the debug room's alone, since
-   * the room's saved data and photos stay, for the persistence operation `ctx`. The caller shows that the debug room
-   * keeps no session.
-   */
-  function discardKeptSession(ctx: PersistenceOwnership, inDebugRoom: boolean): Promise<void> {
-    return inDebugRoom
-      ? ctx.rooms(route.debugRoomsNow()).discardSession(keptScope!)
-      : ctx.kept(keptSessions).discard(keptScope!);
-  }
-  /**
-   * Asks to keep the shown session as it is now and waits until the keep work under way settles. Keeping is best effort:
-   * it settles also when the session is not kept, as when it cannot be written, the store refuses it, or the page
-   * moved on; nothing here proves that the session was kept.
-   */
-  async function settleKeepAttempt(): Promise<void> {
-    keepSessionLater();
-    while (keeping !== null) await keeping;
-  }
-  // The session is kept at each interaction it newly presents, a lock's dialog or password field too, also when one
-  // asks again after a block, and when it ends, and when the page is hidden.
-  let keptPresentation: string | null = null;
-  watch(session, (current) => {
-    if (current === null || inspecting.value) return;
-    const foreground = current.state.foregroundAction;
-    const presentation =
-      foreground?.kind === "lock" && foreground.phase === "ask"
-        ? `lock ${foreground.actionId} ${foreground.resumes}`
-        : (activePlayerRuntimeInteraction(current.state)?.actionId.toString() ?? null);
-    const ended = current.state.status === "halted" || current.state.status === "failed";
-    if ((presentation === null || presentation === keptPresentation) && !ended) return;
-    keptPresentation = presentation;
-    keepSessionLater();
-  });
-  useEventListener(
-    () => (typeof document === "undefined" ? undefined : document),
-    "visibilitychange",
-    () => {
-      if (document.visibilityState !== "hidden") return;
-      // Time passed while the page was visible is observed before the keep's capture, which follows it in the session's
-      // queue: the session kept is current.
-      clock.before("keepCapture");
-      keepSessionLater();
-    },
-  );
-  /**
-   * Prepares a session of `plan`, which `create` starts: Continue when the script keeps a session that can go on, else
-   * Start. Call it instead of `prepare` once the stored values are loaded.
-   */
-  async function prepareScript(
-    plan: string,
-    create: PlayerSessionStart,
-    sources?: ReadonlyMap<string, string>,
-  ): Promise<void> {
-    // The host holds the plan, under the token `prepare` gave it.
-    // Owned from the call: a later preparation, or a transition that replaces it, while the host gets ready retires it.
-    const owner = nextPreparation();
-    await bridgeReady;
-    if (disposed || owner !== preparation) return;
-    // A plan this one replaces needs no JSON any more; this one's is written now, in a task of its own, for the kept
-    // session's comparison and a first save to read.
-    settlePlanJson({ kind: "replace", plan });
-    if (keptScope !== null) settlePlanJson({ kind: "prepare", plan });
-    scriptPlan = plan;
-    lastStart.value = create;
-    if (sources !== undefined) scriptSources = sources;
-    await prepareKept(owner);
-  }
-  /**
-   * Shows Continue when the script keeps a session that can go on, else Start, with the reason when a Player update
-   * changed the format of the kept session. Only while the preparation `owner` is current: the kept session restored,
-   * its photos, and its plan's JSON are installed together, or not at all. Resolves to whether it did.
-   */
-  async function prepareKept(
-    owner = nextPreparation(),
-    ctx = persistenceOwnership(owner),
-  ): Promise<boolean> {
-    // The preparation `owner`, in the room and plan tenure it began in, installs what it found; a stale one, nothing.
-    return owned(ctx, async () => {
-      ctx.check();
-      const plan = scriptPlan;
-      const found = plan === null ? {} : await restoreKept(plan, ctx);
-      if ("session" in found && !ctx.current()) bridgeOf(found.session).release(found.session);
-      ctx.check();
-      if ("session" in found) {
-        ctx.commit(() => {
-          for (const [reference, stored] of found.media)
-            capturedMedia.restoreSessionMedia(reference, stored);
-          kept = {
-            plan: true,
-            count: found.session.events.length,
-            last: found.session.events.at(-1) ?? null,
-          };
-          prepareRestore(found.session);
-        });
-        return;
-      }
-      ctx.commit(() => {
-        // Unless the session goes on, a new session's first save stores the plan's JSON, which the comparison read.
-        if (plan !== null) settlePlanJson({ kind: "prepare", plan });
-        if (lastStart.value !== null) prepareStart(lastStart.value, found.outdated);
-      });
-    });
-  }
-  /**
-   * The kept session, restored in the host, when it runs the held plan `plan` and has not ended, with the stored records of
-   * the photos only it uses; else, for Start, why the kept session cannot continue when its plan or state is of another
-   * revision than this Player's. Nothing of this Player changes yet (`prepareKept`); a session restored but not continued
-   * is released in the host.
-   */
-  async function restoreKept(
-    plan: string,
-    ctx: PersistenceOwnership,
-  ): Promise<
-    | {
-        readonly session: PlayerSession;
-        readonly media: readonly (readonly [string, StoredCapturedMedia | null])[];
-      }
-    | { readonly outdated?: Problem }
-  > {
-    if (keptScope === null) return {};
-    await route.storageRouteNow();
-    ctx.check();
-    // The normal room's photos come back as session media; the debug room reads its own like its saved ones.
-    const normalRoom = keptStore() === keptSessions;
-    const bound = ctx.kept(keptStore());
-    const stored = await bound.session(keptScope).catch(rejectedUnlessStale(null));
-    ctx.check();
-    const found = stored === null ? null : keptSession(stored);
-    if (found === null) return {};
-    // Not for a session that ended, which only its events can show when its state is of another revision: the engine
-    // ends a session with an `exit` or `runtimeFailure` event.
-    const explain = !found.events.some(
-      (event) => event.kind === "exit" || event.kind === "runtimeFailure",
-    );
-    let restored: PlayerSession | "otherPlan" | "ended";
-    try {
-      const host = await bridgeReady;
-      ctx.check();
-      restored = await ctx.admit(() =>
-        host.restoreKept(plan, found.planJson, found.snapshotJson, found.events, found.marks),
-      );
-    } catch (error) {
-      if (error instanceof StaleOperation) throw error;
-      ctx.check();
-      // The runtime's error says how it refuses a state of another revision.
-      const revisions = explain
-        ? revisionChange(found.snapshotJson, RUNTIME_SNAPSHOT_VERSION)
-        : null;
-      if (
-        revisions === null ||
-        !(error instanceof BridgeRequestError) ||
-        error.name !== "CheckpointError" ||
-        !isCheckpointErrorInfo(error.info)
-      )
-        return {};
-      const { code, path, message } = error.info;
-      return { outdated: { code, path, message: `${message} ${revisions}` } };
-    }
-    if (typeof restored === "object" && !ctx.current()) {
-      // A session a stale preparation restored is released; nothing of it is shown.
-      bridgeOf(restored).release(restored);
-      throw new StaleOperation();
-    }
-    ctx.check();
-    if (restored === "otherPlan") {
-      // After a Player update the same script compiles to a plan of another revision; the plan has no runtime error.
-      const revisions = explain ? revisionChange(found.planJson, INSTRUCTION_PLAN_VERSION) : null;
-      return revisions === null
-        ? {}
-        : { outdated: { message: `Unsupported instruction-plan revision. ${revisions}` } };
-    }
-    if (restored === "ended") return {};
-    // A session a stale preparation restored is released; nothing of it is shown.
-    const session = restored;
-    const owns = () => {
-      if (ctx.current()) return;
-      bridgeOf(session).release(session);
-      throw new StaleOperation();
-    };
-    const media: (readonly [string, StoredCapturedMedia | null])[] = [];
-    if (normalRoom)
-      for (const reference of capturedMediaReferencesIn(found.snapshotJson, found.events)) {
-        media.push([
-          reference,
-          await bound.media.get(keptScope, reference).catch(rejectedUnlessStale(null)),
-        ]);
-        owns();
-      }
-    owns();
-    return { session, media };
-  }
-  /**
-   * Returns to the start page once the session ended by `exit`, which the host does when the player closes the end
-   * dialog; the ended session is kept first, so a reload starts anew.
-   */
-  async function toStartPage(): Promise<void> {
-    if (session.value?.state.status !== "halted") return;
-    await settleKeepAttempt();
-    if (disposed || session.value?.state.status !== "halted") return;
-    endSession();
-    await prepareKept();
-  }
+  keptOwner.startKeeping();
 
   /**
    * The session an export of the session takes (PLAYER-UI "Player Settings"): the shown one while it runs or waits, or the
@@ -1564,7 +1149,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   const exportableSession = computed(
     (): { readonly session: PlayerSession } | { readonly unavailable: string } => {
-      if (keptScope === null || scriptStorage === undefined)
+      if (keptOwner.keptScopeNow() === null || scriptStorage === undefined)
         return { unavailable: "This Player does not keep sessions." };
       if (room.value === "debug") return { unavailable: "A debug session stays in this browser." };
       if (clearing.value || importing.value)
@@ -1617,8 +1202,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
     return {
       transfer: {
-        scope: keptScope!,
-        name: options.savedData?.name(keptScope!) ?? null,
+        scope: keptOwner.keptScopeNow()!,
+        name: options.savedData?.name(keptOwner.keptScopeNow()!) ?? null,
         session: restorePoint,
         entries,
         media,
@@ -1644,7 +1229,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       throw new StorageTransferError(
         "A session cannot be imported into the debug room. Open this script outside the debug room and import it there.",
       );
-    if (keptScope === null || scriptPlan === null || scriptStorage === undefined)
+    if (
+      keptOwner.keptScopeNow() === null ||
+      keptOwner.scriptPlanNow() === null ||
+      scriptStorage === undefined
+    )
       throw new StorageTransferError(
         "This Player does not keep sessions, so it cannot import one.",
       );
@@ -1653,8 +1242,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     await asTransferError(
       host.client.request("reviewTransfer", {
         ticket: transfer.ticket,
-        scope: keptScope,
-        plan: scriptPlan,
+        scope: keptOwner.keptScopeNow(),
+        plan: keptOwner.scriptPlanNow(),
       }),
     );
     const saved = new Set(storedValueReferences(transfer.entries));
@@ -1685,7 +1274,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
     return {
       transfer,
-      name: transfer.name ?? options.savedData?.name(keptScope) ?? null,
+      name: transfer.name ?? options.savedData?.name(keptOwner.keptScopeNow()!) ?? null,
       currentValues: current.length,
     };
   }
@@ -1725,16 +1314,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       importing.value ||
       clearing.value ||
       room.value === "debug" ||
-      keptScope === null ||
-      scriptPlan === null ||
+      keptOwner.keptScopeNow() === null ||
+      keptOwner.scriptPlanNow() === null ||
       scriptStorage === undefined
     )
       throw new StorageTransferError(
         "A session cannot be imported right now. Try again in a moment.",
       );
     const { transfer } = review;
-    const scope = keptScope;
-    const plan = scriptPlan;
+    const scope = keptOwner.keptScopeNow()!;
+    const plan = keptOwner.scriptPlanNow()!;
     const releaseImporting = holdImporting();
     // A session of this script in progress ends first; Debug's rewind could restore this script's earlier saved data
     // over the import, so its history ends.
@@ -1747,7 +1336,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // The saved values in use and the kept sessions, through the import's handles. The values the import stored are
     // shown by its final read, while it owns the page.
     const storage = operationStorage(ctx);
-    const sessions = ctx.kept(keptSessions);
+    const sessions = ctx.kept(keptOwner.keptSessionsNow());
     let failure: string | null = null;
     let ranToEnd = false;
     importedTickets.add(transfer.ticket);
@@ -1755,7 +1344,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       ranToEnd = await owned(ctx, async () => {
         const replaceSession = async (): Promise<void> => {
           // A session being kept is kept before the import replaces it.
-          while (keeping !== null) await keeping;
+          while (keptOwner.keepingNow() !== null) await keptOwner.keepingNow();
           ctx.check();
           // Each photo and file is held under the reference the session and the values hold, as a restored kept
           // session's are; a value's is stored when the values are. One held already is the same (`reviewSessionImport`).
@@ -1780,7 +1369,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           ctx.check();
           let discarded = false;
           try {
-            ctx.commit(() => (kept = { plan: false, count: 0, last: null }));
+            ctx.commit(() => keptOwner.forgetKeptPoint());
             await sessions.discard(scope);
             discarded = true;
             ctx.check();
@@ -1884,14 +1473,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         // The normal room keeps its session as it is now, which a later visit continues; one that ended is kept as it
         // ended, by the keep still under way.
         if (live) await settleKeepAttempt();
-        else while (keeping !== null) await keeping;
+        else while (keptOwner.keepingNow() !== null) await keptOwner.keepingNow();
         const making = live || debugRoom.value === null;
         const replacing = live && debugRoom.value !== null;
         // A Continue or Start still being prepared is the normal room's.
         nextPreparation();
         room.value = "debug";
-        kept = { plan: false, count: 0, last: null };
-        keptPresentation = null;
+        keptOwner.forgetKeptPoint();
+        keptOwner.forgetPresentation();
         await switchStorage(async () => {
           if (replacing)
             await route
@@ -1926,10 +1515,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       const scope = normalStorage.scope;
       const releaseImporting = holdImporting();
       try {
-        while (keeping !== null) await keeping;
+        while (keptOwner.keepingNow() !== null) await keptOwner.keepingNow();
         endSession();
-        kept = { plan: false, count: 0, last: null };
-        keptPresentation = null;
+        keptOwner.forgetKeptPoint();
+        keptOwner.forgetPresentation();
         if (clear === "reset")
           await switchStorage(async () => {
             await route
@@ -2021,8 +1610,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * browser's settings name, which Start and Continue still capture anew, and a Start's plan JSON for its first save.
    */
   function prepareActivation(kind: Activation["kind"]) {
-    if (kind === "start" && keptScope !== null && scriptPlan !== null)
-      settlePlanJson({ kind: "prepare", plan: scriptPlan });
+    if (kind === "start" && keptOwner.keptScopeNow() !== null && keptOwner.scriptPlanNow() !== null)
+      settlePlanJson({ kind: "prepare", plan: keptOwner.scriptPlanNow()! });
     if (options.temporalContext !== undefined) return;
     const token = activationToken;
     setTimeout(() => {
@@ -2297,8 +1886,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     showSession(next);
     // A new session replaces the one kept before.
     if (pending.kind === "start") {
-      kept = { plan: false, count: 0, last: null };
-      keptPresentation = null;
+      keptOwner.forgetKeptPoint();
+      keptOwner.forgetPresentation();
     }
   }
 
@@ -2572,40 +2161,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
 }
 
 export type PlayerSessionHost = ReturnType<typeof usePlayerSession>;
-
-/** Whether `info`, an engine error's details from the host, is a `CheckpointError`'s. */
-function isCheckpointErrorInfo(info: unknown): info is CheckpointErrorInfo {
-  return (
-    typeof info === "object" &&
-    info !== null &&
-    "code" in info &&
-    typeof info.code === "string" &&
-    "path" in info &&
-    typeof info.path === "string" &&
-    "message" in info &&
-    typeof info.message === "string"
-  );
-}
-
-/**
- * The saved and supported revisions, as the start page's Technical details say them, when the JSON of a kept plan or
- * state is of another revision than `supported`, this Player's; else `null`.
- */
-function revisionChange(json: string, supported: number): string | null {
-  let saved: unknown;
-  try {
-    const parsed: unknown = JSON.parse(json);
-    saved =
-      typeof parsed === "object" && parsed !== null && "version" in parsed
-        ? parsed.version
-        : undefined;
-  } catch {
-    return null;
-  }
-  return typeof saved !== "number" || saved === supported
-    ? null
-    : `Saved revision: ${saved}. Supported revision: ${supported}.`;
-}
 
 /**
  * Replaces one script's saved data with its imported values: its own photos are added under new references first. Any

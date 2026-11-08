@@ -249,6 +249,7 @@ const SESSION_FILES: readonly string[] = [
   "player/vue/src/session/useSessionRewind.ts",
   "player/vue/src/session/persistence/useStorageRoute.ts",
   "player/vue/src/session/persistence/useSavedValues.ts",
+  "player/vue/src/session/persistence/useKeptSession.ts",
 ];
 const ACTIVATION_FILES = [
   ...SESSION_FILES,
@@ -342,7 +343,7 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     READMITS,
   "useSessionMedia.ts: useSessionMedia > primeAudio: catch element.play":
     "drops a blocked play; nothing follows",
-  "usePlayerSession.ts: usePlayerSession > settlePlanJson: catch bridge.client.request":
+  "useKeptSession.ts: useKeptSession > settlePlanJson: catch bridgeNow.client.request":
     "drops the plan JSON's refusal; nothing follows",
   "useSavedValues.ts: useSavedValues > loadScriptStorage: await readScriptStorage": SAVED_DATA,
   "useSavedValues.ts: useSavedValues > readScriptStorage: await values.load": SAVED_DATA,
@@ -350,20 +351,20 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     SAVED_DATA,
   "useSavedValues.ts: useSavedValues > readScriptStorage: catch capturedMedia.knownReferences":
     SAVED_DATA,
-  "usePlayerSession.ts: usePlayerSession > keepSessionLater: await Promise.resolve": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepSessionLater: await keepOnce": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepOnce: await owned": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > owned: await operation": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await capturedMedia.promote": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await ctx.admit": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await discardKeptSession": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await forgetKeptSession": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await insertOrAcceptExisting": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await route.storageRouteNow": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await store.publish": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > forgetKeptSession: await discardKeptSession.then":
+  "useKeptSession.ts: useKeptSession > keepSessionLater: await Promise.resolve": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepSessionLater: await keepOnce": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepOnce: await owned": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > owned: await operation": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await capturedMedia.promote": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await ctx.admit": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await discardKeptSession": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await forgetKeptSession": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await insertOrAcceptExisting": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await route.storageRouteNow": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await store.publish": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > forgetKeptSession: await discardKeptSession.then":
     KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > forgetKeptSession: then discardKeptSession":
+  "useKeptSession.ts: useKeptSession > forgetKeptSession: then discardKeptSession":
     KEPT_SESSION,
 };
 /** Calls that re-admit an activation, and calls that request or act for one. */

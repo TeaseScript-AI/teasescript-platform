@@ -94,7 +94,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   [MAIN]: {
     usePlayerSession: SETUP,
     "usePlayerSession.hasNormalStorage": MOVE,
-    keptStore: RESOURCE,
     copyToDebugRoom: MOVE,
     startDebugSessionAnew: MOVE,
     activate: SESSION,
@@ -107,7 +106,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     stopAt: SESSION,
     supersede: SESSION,
     ownedSection: SESSION,
-    settlePlanJson: SESSION,
     "usePlayerSession.readSavedData": READ,
     savedScripts: READ,
     reviewSavedDataImport: READ,
@@ -129,6 +127,12 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     issueTracing: SESSION,
     applyDebugMode: SESSION,
     debugView: SESSION,
+  },
+  "session/persistence/useKeptSession.ts": {
+    keptStore: RESOURCE,
+    settlePlanJson: SESSION,
+    "useKeptSession.keptSessionsNow": RESOURCE,
+    "useKeptSession.startKeeping": SETUP,
   },
   "session/persistence/useSavedValues.ts": {
     useSavedValues: SETUP,
@@ -214,6 +218,8 @@ const DERIVED: Readonly<Record<string, string>> = {
   cameraOffered: "whether a camera is offered here, from the options' capabilities: no store",
   locks:
     "the lock service, given the options' lock code: it asks a service, not the host, and writes no store",
+  keptOwner:
+    "the kept session's owner, made from the options, the route and the media store: its own places are checked in its module",
   savedValues:
     "the saved values in use, made from the route's provider: its own places are checked in its module",
   route:
@@ -711,23 +717,42 @@ function derivedBindings(source: ts.SourceFile): string[] {
       hosts.push(node);
   });
   const found: string[] = [];
-  for (const statement of hosts.flatMap((host) => host.body?.statements ?? [])) {
-    if (!ts.isVariableStatement(statement)) continue;
-    for (const declaration of statement.declarationList.declarations) {
-      const value = declaration.initializer;
-      if (!ts.isIdentifier(declaration.name) || value === undefined) continue;
-      if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) continue;
-      let made = false;
-      const visit = (node: ts.Node) => {
-        if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return;
-        if (ts.isIdentifier(node) && RAW.has(node.text) && !declared(node)) made = true;
-        ts.forEachChild(node, visit);
-      };
-      visit(value);
-      if (made) found.push(declaration.name.text);
+  for (const host of hosts)
+    for (const statement of host.body?.statements ?? []) {
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name)) continue;
+        // A binding an owner makes at its place in the setup is declared without a value, and assigned it once there.
+        const value = declaration.initializer ?? assignedOnce(host, declaration.name.text);
+        if (value === undefined) continue;
+        if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) continue;
+        let made = false;
+        const visit = (node: ts.Node) => {
+          if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return;
+          if (ts.isIdentifier(node) && RAW.has(node.text) && !declared(node)) made = true;
+          ts.forEachChild(node, visit);
+        };
+        visit(value);
+        if (made) found.push(declaration.name.text);
+      }
     }
-  }
   return found;
+}
+
+/** The value `name` is given in `host`'s one assignment of it, as `name = value;`, or `undefined` without exactly one. */
+function assignedOnce(host: ts.FunctionDeclaration, name: string): ts.Expression | undefined {
+  const values: ts.Expression[] = [];
+  host.forEachChild(function visit(node): void {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(node.left) &&
+      node.left.text === name
+    )
+      values.push(node.right);
+    node.forEachChild(visit);
+  });
+  return values.length === 1 ? values[0] : undefined;
 }
 
 /** The function that makes each ownership the host makes, by the operation of the family it belongs to. */

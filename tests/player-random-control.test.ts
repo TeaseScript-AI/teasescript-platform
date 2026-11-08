@@ -519,7 +519,6 @@ test("every session op is classified, and only adoptCatchUp reads a session past
 // is classified. A new module, or an indirection under another name, needs adding here.
 const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string, string])[]>> = {
   "player/vue/src/usePlayerSession.ts": [
-    ["prepareRestore(found.session)", "restore: a kept session"],
     [
       "begin: (origin) => startedSession(create, { debugMode: debugModeOn() }, origin)",
       "start: Start",
@@ -530,6 +529,9 @@ const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string,
       "return host.start(create.plan, startOptions, true, random, origin.begin)",
       "by kind: `startedSession`'s held plan",
     ],
+  ],
+  "player/vue/src/session/persistence/useKeptSession.ts": [
+    ["prepareRestore(found.session)", "restore: a kept session"],
   ],
   "player/vue/src/session/useSessionRewind.ts": [
     ["show: (next, paused) => showRewound(next, { paused })", "restore: the rewind owner's show"],
@@ -552,6 +554,7 @@ const COMPOSABLE_FILES = [
   "player/vue/src/session/useSessionRewind.ts",
   "player/vue/src/session/persistence/useStorageRoute.ts",
   "player/vue/src/session/persistence/useSavedValues.ts",
+  "player/vue/src/session/persistence/useKeptSession.ts",
 ] as const;
 /** The text of the session composable's files, one after another. */
 function composableText(): string {

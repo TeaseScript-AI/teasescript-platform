@@ -403,18 +403,14 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/usePlayerSession.ts usePlayerSession > importSession > owned:callback > replaceSession > commit:callback#4":
     ["creation", ["BridgeClient.request"]],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > keepIn > admit:callback": [
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > keepIn > admit:callback": [
     "none",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > keepOnce > owned:callback": [
-    "none",
-    ["BridgeClient.request"],
-  ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > keepSessionLater > function": [
-    "none",
-    ["BridgeClient.request"],
-  ],
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > keepOnce > owned:callback":
+    ["none", ["BridgeClient.request"]],
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > keepSessionLater > function":
+    ["none", ["BridgeClient.request"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > lock > cancel": [
     "own observation",
     ["BridgeClient.request"],
@@ -427,13 +423,11 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "own observation",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > prepareKept > owned:callback": [
-    "creation",
-    ["BridgeClient.request"],
-  ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > prepareKept > owned:callback > commit:callback#1":
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > prepareKept > owned:callback":
+    ["creation", ["BridgeClient.request"]],
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > prepareKept > owned:callback > commit:callback#1":
     ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > prepareKept > owned:callback > commit:callback#2":
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > prepareKept > owned:callback > commit:callback#2":
     ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > prepareRestore > begin > catch:callback#2":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
@@ -447,10 +441,8 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/useRandomControl.ts useRandomControl > resolveRandomDraw > catch:callback":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > restoreKept > admit:callback": [
-    "creation",
-    ["BridgeClient.request"],
-  ],
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > restoreKept > admit:callback":
+    ["creation", ["BridgeClient.request"]],
   "player/vue/src/usePlayerSession.ts usePlayerSession > rooms > reloadDebug": [
     "creation",
     ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
@@ -489,14 +481,10 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > useEventListener:callback.2": [
-    "clock: keepCapture",
-    ["BridgeClient.request"],
-  ],
-  "player/vue/src/usePlayerSession.ts usePlayerSession > watch:callback#4": [
-    "none",
-    ["BridgeClient.request"],
-  ],
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > startKeeping > useEventListener:callback.2":
+    ["clock: keepCapture", ["BridgeClient.request"]],
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > startKeeping > watch:callback":
+    ["none", ["BridgeClient.request"]],
   "player/vue/src/session/useSessionMedia.ts useSessionMedia > watchMedia > watch:callback#3": [
     "own observation",
     ["BridgeClient.request"],
@@ -681,6 +669,23 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/usePlayerSession.ts usePlayerSession > retireRewind {retireRewind}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {clearScriptStorage}",
   "player/vue/src/usePlayerSession.ts usePlayerSession {editSavedData}",
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > keepSessionLater {keepSessionLater}",
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > prepareKept {prepareKept}",
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > prepareScript {prepareScript}",
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > settleKeepAttempt {settleKeepAttempt}",
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > settlePlanJson {settlePlanJson}",
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > toStartPage {toStartPage}",
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession {endSession}",
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession {prepareRestore}",
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession {prepareStart}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > endSession {endSession}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession > prepareStart {prepareStart}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {keepSessionLater}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {prepareKept}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {prepareScript}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {settleKeepAttempt}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {settlePlanJson}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {toStartPage}",
 ];
 
 /**
@@ -1021,7 +1026,7 @@ const OBSERVATION_USES: readonly string[] = [
   "before <- player/vue/src/session/useSessionMedia.ts useSessionMedia > requestObservation [returned]",
   "before <- player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > setDebugMode [unawaited]",
   "before <- player/vue/src/session/useRandomControl.ts useRandomControl > setRandomControl [unawaited]",
-  "before <- player/vue/src/usePlayerSession.ts usePlayerSession > useEventListener:callback.2 [unawaited]",
+  "before <- player/vue/src/session/persistence/useKeptSession.ts useKeptSession > startKeeping > useEventListener:callback.2 [unawaited]",
   "before <- player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > before [exposed]",
   "before <- player/vue/src/useRuntimeSceneClock.ts useRuntimeSceneClock > useEventListener:callback#2 [returned]",
   "requestObservation (device) <- player/media-device.ts MediaDevice > #create > listen:callback#4 [returned]",
