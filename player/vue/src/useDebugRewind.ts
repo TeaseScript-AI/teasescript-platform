@@ -1,208 +1,68 @@
-import { computed, ref, shallowRef, watch } from "vue";
+import { computed } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
-import {
-  DebugHistory,
-  type DebugHistoryCurrent,
-  type DebugHistoryMarks,
-  type DebugHistoryRestore,
-} from "../../debug-history.js";
-import { restorePlayerRuntimeSessionAt } from "../../runtime-adapter.js";
-import { beginRecordingNow, heldPlan } from "../../engine-bridge/in-process.js";
-import type { PlayerSession } from "../../runtime-view.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 /**
- * Debug's rewind (DEBUGGER.md "Rewind") while the Debug features run: the history of the shown session, and Back,
- * Forward, Resume, and Return. Turning Debug off reinstates the session Back left, if a restored state is still only
- * inspected, and deletes the history; so does a new or replaced session.
+ * Debug's rewind (DEBUGGER.md "Rewind") while the Debug features run: the view of the shown session's history, which
+ * the engine's host keeps (`player/engine-bridge/history/`), and Back, Forward, Resume, and Return. Everything they
+ * decide is the Player's rewind owner's (`rewind.owner`, `rewindOwner.ts`), which outlives this scope: it opens the
+ * history as the scope begins and closes it as the scope ends, as Debug off, or as the Player's disposal when the Player
+ * itself unmounts (`endWithPlayer`).
  */
 export function useDebugRewind(player: PlayerSessionHost) {
   const { rewind } = player;
-  const history = shallowRef<DebugHistory | null>(null);
-  // The history changes in place; this counts its changes for what presents it.
-  const revision = ref(0);
-  const busy = ref(false);
-  const problem = ref<string | null>(null);
-  // Set while this rewind publishes a state, which is no new session.
-  let publishing = false;
-
-  const marks = (): DebugHistoryMarks => ({
-    editedWhileDebugging: player.debugEdits.value,
-    rewoundWhileDebugging: rewind.rewound.value,
-  });
-  function end() {
-    const ended = history.value;
-    history.value = null;
-    revision.value++;
-    void ended?.destroy();
-  }
-  function follow(session: PlayerSession | null) {
-    if (publishing || session === null) return;
-    history.value ??= new DebugHistory(
-      heldPlan(session.connection, session.planToken),
-      rewind.openSpill(),
-      rewind.memoryBudget,
-    );
-    history.value.follow(session, marks());
-    revision.value++;
-  }
-  // Every published session is followed: a point keeps the events of the publication it follows, and the state the host
-  // holds when it is read, which can be a later publication's (#1981).
-  watch(player.generation, () => publishing || end(), { flush: "sync" });
-  watch(rewind.retirements, end, { flush: "sync" });
-  watch(player.session, follow, { flush: "sync" });
-  follow(player.session.value);
-  rewind.onAdopted(() => {
-    history.value?.adopt();
-    revision.value++;
-  });
-
-  function publish(restored: DebugHistoryRestore, plan: DebugHistory["plan"]) {
-    const { position, snapshotJson, marks: restoredMarks } = restored;
-    publishing = true;
-    try {
-      // Restored in the host, with its recorder and its value trace, which begin anew at the state.
-      rewind.publish(
-        ({ recorder, debugTrace }) =>
-          restorePlayerRuntimeSessionAt(
-            plan,
-            snapshotJson,
-            position.events.slice(0, position.eventCount),
-            recorder,
-            debugTrace ?? null,
-          ),
-        { paused: true, marks: restoredMarks },
-      );
-    } finally {
-      publishing = false;
-    }
-    revision.value++;
-  }
-
-  // Runs one rewind step; a failure, such as a state that could not be read back, changes nothing and is reported.
-  async function step(restore: (history: DebugHistory) => Promise<DebugHistoryRestore>) {
-    const current = history.value;
-    if (current === null) return false;
-    // While the step runs, no other step, adoption, or input to an inspected state does.
-    const done = rewind.beginStep();
-    if (done === null) return false;
-    busy.value = true;
-    problem.value = null;
-    try {
-      const restored = await restore(current);
-      if (history.value !== current) return false;
-      publish(restored, current.plan);
-      return true;
-    } catch (error) {
-      if (history.value === current)
-        problem.value = error instanceof Error ? error.message : String(error);
-      return false;
-    } finally {
-      busy.value = false;
-      done();
-    }
-  }
-
-  // Once a step read its state, the session must still be one that may be left, or the step changes nothing.
-  /** Restores the point at `index`; the state left stays for Forward. Resolves to whether it was restored. */
-  const back = (index: number) =>
-    step((current) =>
-      current.back(index, () => {
-        const session = player.session.value;
-        return session === null || !rewind.ready.value ? null : { session, marks: marks() };
-      }),
-    );
-  /** Restores the state the last Back left. */
-  const forward = () => step((current) => current.forward(() => rewind.ready.value));
-
-  /** Reinstates the session the first Back left, as it was then; the restored states go. */
-  function returnToSession() {
-    const current = history.value;
-    if (current?.inspection == null || rewind.working.value) return false;
-    reinstate(current.returnToSession());
-    return true;
-  }
-  function reinstate(parked: DebugHistoryCurrent) {
-    publishing = true;
-    try {
-      // The parked session is the host's still: it shows again, its recording and its trace's epoch begun anew there.
-      rewind.publish(
-        {
-          session: () => {
-            beginRecordingNow(parked.session);
-            return parked.session.connection.latest(parked.session) ?? parked.session;
-          },
-        },
-        { paused: false, marks: parked.marks },
-      );
-    } finally {
-      publishing = false;
-    }
-    revision.value++;
-  }
-
-  // Turning Debug off leaves no restored state inspected: one whose adoption is under way is reinstated only if that
-  // adoption fails while the session is still that generation and its history was not retired meanwhile (a lost
-  // connection retires it: the host no longer holds the parked session). A step under way is abandoned with the history.
+  const { owner } = rewind;
+  let ended = false;
+  // Set when the Player itself unmounts, which ends the history as its disposal, not as Debug off.
+  let withPlayer = false;
+  // The host may become reachable after the scope began, or never; Debug runs once it is, while the scope lives.
+  void player.bridge.then(
+    () => ended || owner.debugOn(),
+    // A host that never became reachable is the bridge promise's failure, which the composable reports itself.
+    () => {},
+  );
   tryOnScopeDispose(() => {
-    const current = history.value;
-    const adoption = rewind.adoption();
-    if (current?.inspection != null) {
-      const parked = current.returnToSession();
-      if (adoption === null) reinstate(parked);
-      else {
-        const generation = player.generation.value;
-        const retirements = rewind.retirements.value;
-        adoption.then(
-          (adopted) => {
-            if (
-              adopted ||
-              !rewind.inspecting.value ||
-              player.generation.value !== generation ||
-              rewind.retirements.value !== retirements
-            )
-              return;
-            try {
-              reinstate(parked);
-            } catch (error) {
-              // On a live connection, a reinstatement that fails is the Player's host failure.
-              player.reportHostError(error);
-            }
-          },
-          () => {
-            // An adoption that rejected is its caller's failure to report; nothing is reinstated for it.
-          },
-        );
-      }
-    }
-    rewind.onAdopted(null);
-    end();
+    ended = true;
+    if (withPlayer) owner.disposal();
+    else owner.debugOff();
   });
 
   return {
     /** The history's state, recomputed whenever it changes. */
     state: computed(() => {
-      void revision.value;
-      const current = history.value;
+      // The view changes in place: its revision says when.
+      void owner.revision.value;
+      const timeline = owner.view.value?.timeline ?? null;
       return {
-        points: current?.points ?? [],
-        inspection: current?.inspection ?? null,
-        shown: current?.shown ?? null,
-        future: current?.future ?? null,
-        complete: current?.complete ?? true,
-        memoryChars: current?.memoryChars ?? 0,
-        spilledCount: current?.spilledCount ?? 0,
+        /** The open history's serial in the host, or `null` while none is open. */
+        history: timeline?.history ?? null,
+        points: timeline?.points ?? [],
+        inspection: timeline?.inspection ?? null,
+        shown: timeline?.inspection?.shown ?? null,
+        future: timeline?.inspection?.future ?? null,
+        complete: timeline?.complete ?? true,
+        memoryChars: timeline?.memoryChars ?? 0,
+        spilledCount: timeline?.spilledCount ?? 0,
       };
     }),
+    /** The grey future: the messages of the state Forward restores that the shown state has not reached, or `null`. */
+    future: owner.future,
     /** Whether a rewind step runs now. */
-    busy: computed(() => busy.value),
+    busy: owner.busy,
     /** Why the last rewind step changed nothing, or `null`. */
-    problem: computed(() => problem.value),
-    back,
-    forward,
+    problem: owner.problem,
+    /** Restores the point `point` (its ID); the state left stays for Forward. Resolves to whether it was restored. */
+    back: (point: number) => owner.back(point),
+    /** Restores the state the last Back left. */
+    forward: () => owner.forward(),
+    /** Marks the coming end of these features as the Player's unmount; `usePlayerDebug` calls it as it unmounts. */
+    endWithPlayer: () => {
+      withPlayer = true;
+    },
     /** Adopts the inspected state without new input, so it runs on; resolves to whether it was adopted. */
     resume: () => rewind.resume(),
-    returnToSession,
+    /** Reinstates the session the first Back left, through the restart gate; resolves to whether it was. */
+    returnToSession: () => owner.returnToSession(),
   };
 }
 

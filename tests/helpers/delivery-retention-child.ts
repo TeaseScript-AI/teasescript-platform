@@ -17,6 +17,10 @@ import {
   startBridgeHost,
 } from "../../player/engine-bridge/worker-host.js";
 import { compilePlayerProject, createPlayerRuntimeSession } from "../../player/compile-project.js";
+import type { HistoryTimeline } from "../../player/engine-bridge/history/core.js";
+import { PlayerBridge } from "../../player/player-bridge.js";
+import { playerRuntimeForeground } from "../../player/runtime-view.js";
+import type { InterpreterEvent } from "../../src/runtime/events.js";
 import { createPlayerRuntimeRestorePoint } from "../../player/runtime-adapter.js";
 import { sessionTransferText } from "../../player/session-transfer.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
@@ -30,6 +34,8 @@ import { markedProject, planText } from "./source-ops-project.js";
  * - `committed`: the op's reply is posted, and the connection stays open: its allocation is the connection's;
  * - `aborted`: on the same connection, the op's success post fails, so its delivery aborts;
  * - `closed`: on a connection of its own, the op commits, then the client ends, which closes the connection.
+ * A rewind history (`historyOpen`) and a step's candidate (`rewindBack`, its prepared Back) are classes too: the
+ * candidate's own marker is in the events its Back gives, which only the candidate keeps.
  * A test-side wrapper of the op takes weak references to what the op added, before its reply goes. The parent scans the
  * snapshot for each case's marker; this reports how many of the weak references still hold.
  */
@@ -45,6 +51,9 @@ const OPS = {
   transfer: "readTransfer",
   slot: "preparePlanText",
   cache: "drawCode",
+  history: "historyOpen",
+  candidate: "rewindBack",
+  point: "submitComposer",
 } as const;
 type AllocationClass = keyof typeof OPS;
 const CLASSES: readonly AllocationClass[] = [
@@ -54,15 +63,23 @@ const CLASSES: readonly AllocationClass[] = [
   "transfer",
   "slot",
   "cache",
+  "history",
+  "candidate",
+  "point",
 ];
 
 interface Connection {
-  request(op: string, args: unknown): Promise<BridgeResult>;
+  /** Sends `op`, on host session `session` when one is given, with no basis. */
+  request(op: string, args: unknown, session?: string): Promise<BridgeResult>;
+  /** The Player's bridge over the same client, for a session's own requests. */
+  readonly bridge: PlayerBridge;
   /** Makes the next success post of `op` fail. */
   failPost(op: string): void;
   /** Weak references to what the next run of `op` adds, once it ran. */
   watch(op: string): Promise<readonly WeakRef<WeakKey>[]>;
   terminate(): void;
+  /** The connection's ops context, for the classes the registry keeps behind its entries. */
+  readonly context: ReturnType<typeof playerOpsContext>;
   /** Lets go of plan `token`'s compiled sources, as a release does, keeping the plan. */
   retireSources(token: string): void;
 }
@@ -115,6 +132,7 @@ function connection(): Connection {
           if (watch === null) return op.run(...args);
           watching = null;
           const before = reach(context);
+          const pointsBefore = new Set(context.history.core(lastIntent)?.timeline().points ?? []);
           const outcome = await op.run(...args);
           const added = [...reach(context)].filter((value) => !before.has(value));
           // A new session's whole payload: the held session,
@@ -131,6 +149,20 @@ function connection(): Connection {
                 )
               : [];
           const payload = created === undefined ? [] : [created, ...publication];
+          // A history's whole payload the op made: its entry and all it reaches, but what every history holds.
+          const entry =
+            name === "historyOpen" ? context.history.entries.get(lastIntent) : undefined;
+          if (entry !== undefined)
+            payload.push(
+              ...[...reach(entry)].filter(
+                (value) => !before.has(value) && !historyShared.has(value),
+              ),
+            );
+          // A publishing op's point, which its history keeps behind its core.
+          if (name === "submitComposer") {
+            const points = context.history.core(lastIntent)?.timeline().points ?? [];
+            payload.push(...points.filter((point) => !pointsBefore.has(point)));
+          }
           // A new slot's waiting task is its payload too.
           const timers = added.flatMap((value) =>
             typeof value === "object" &&
@@ -149,7 +181,10 @@ function connection(): Connection {
   const { client } = openBridge(clientPort, BUILD);
   sessions = startBridgeHost(hostPort, wrapped, BUILD, context.delivery);
   return {
-    request: (op, args) => client.request(op, args),
+    request: (op, args, session) =>
+      client.request(op, args, session === undefined ? {} : { session }),
+    bridge: new PlayerBridge(client),
+    context,
     failPost: (op) => void (failing = op),
     watch: (op) => new Promise((done) => (watching = { op, done })),
     terminate: () => client.terminate(),
@@ -197,6 +232,76 @@ function cacheProject(planMarker: string, marker: string) {
       },
     ],
   };
+}
+
+/** A session whose plan carries `planMarker` and whose first interaction is a choice: answered, it gives a second point. */
+function candidateProject(planMarker: string) {
+  return {
+    files: [
+      {
+        path: "main.tease",
+        source: [
+          `// ${planMarker}`,
+          'say "before", instant',
+          `let pick = askChoice "One ${planMarker}", "Two"`,
+          'say "after ${pick}", instant',
+          `showButton "Done ${planMarker}"`,
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  };
+}
+
+/**
+ * A session that asks a text first, then a choice: answered with a marked text, its next point's state, and so its
+ * snapshot, keeps the marker, which no earlier point has.
+ */
+function pointProject(planMarker: string) {
+  return {
+    files: [
+      {
+        path: "main.tease",
+        source: [
+          `// ${planMarker}`,
+          'let name = askText "Name?"',
+          'say "Hi ${name}", instant',
+          `let pick = askChoice "One ${planMarker}", "Two"`,
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  };
+}
+
+/** The history intents the cases open, increasing on every connection. */
+let lastIntent = 0;
+
+/**
+ * Back's arguments for a candidate of `plan`: a history opened, a session started and answered once, and the events up
+ * to its first point, with `marker` in a say's text, so only the candidate restored from them keeps it.
+ */
+async function backArgs(link: Connection, plan: string, marker: string) {
+  const history = ++lastIntent;
+  await link.request("historyOpen", { intent: history });
+  const session = await link.bridge.start(plan, START, false);
+  const shown = link.bridge.latest(session)!;
+  const foreground = playerRuntimeForeground(shown);
+  if (foreground?.kind !== "choose") throw new Error("The candidate's session asks no choice.");
+  await link.bridge.request(session, "selectChoice", {
+    actionId: shown.state.foregroundAction!.actionId,
+    optionId: foreground.options[0]!.id,
+    input: null,
+  });
+  // EVIDENCE: fixture: `historyTimeline` of an open history gives its timeline.
+  const timeline = (await link.request("historyTimeline", { history })).result as HistoryTimeline;
+  const point = timeline.points[0]!;
+  const events: InterpreterEvent[] = link.bridge
+    .latest(session)!
+    .events.slice(0, point.eventCount)
+    .map((event) => (event.kind === "say" ? { ...event, text: `${event.text} ${marker}` } : event));
+  if (!events.some((event) => event.kind === "say")) throw new Error("No say carries the marker.");
+  return { history, point: point.id, live: session.id, events };
 }
 
 /** A session transfer whose names and saved value carry `marker`. */
@@ -257,14 +362,35 @@ async function allocate(
           .randomSites[0]!;
         return { plan, path: site.path, site };
       }
+      case "history":
+        return { intent: ++lastIntent };
+      case "candidate":
+        return backArgs(
+          link,
+          await prepared({ kind: "source", script: candidateProject(planMarker) }),
+          marker,
+        );
+      case "point": {
+        // A followed session at its text, whose answer carries the marker.
+        const plan = await prepared({ kind: "source", script: pointProject(planMarker) });
+        await link.request("historyOpen", { intent: ++lastIntent });
+        const session = await link.bridge.start(plan, START, false);
+        pointSession = session.id;
+        return {
+          actionId: link.bridge.latest(session)!.state.foregroundAction!.actionId,
+          text: `name ${marker}`,
+          input: null,
+        };
+      }
     }
   };
+  let pointSession: string | undefined;
   let cachePlan: string | null = null;
   const args = await argsOf();
   const op = OPS[allocation];
   const watched = link.watch(op);
   if (fail) link.failPost(op);
-  await link.request(op, args).catch(() => {});
+  await link.request(op, args, allocation === "point" ? pointSession : undefined).catch(() => {});
   // The caches' only other holder of their marker, the plan's sources, goes once they were made; the plan stays.
   if (cachePlan !== null) link.retireSources(cachePlan);
   return watched;
@@ -292,9 +418,47 @@ async function sharedReach(): Promise<void> {
   }
 }
 
+/** What every history holds whatever it ran (its spill factory, its connection's): from an unmarked warm-up history. */
+const historyShared = new Set<WeakKey>();
+
+async function historySharedReach(): Promise<void> {
+  const link = connection();
+  connections.push(link);
+  const intent = ++lastIntent;
+  await link.request("historyOpen", { intent });
+  const entry = link.context.history.entries.get(intent)!;
+  for (const value of reach(entry))
+    if (value !== entry && value !== entry.core) historyShared.add(value);
+}
+
+/** What the control keeps, outside anything the connection owns. */
+const kept: (() => WeakKey)[] = [];
+
+/**
+ * The negative control in #2006's style (`control/history`): a history's open whose reply fails, with its core kept
+ * in a module closure afterwards; its weak references must then be found held.
+ */
+async function historyControl(): Promise<readonly WeakRef<WeakKey>[]> {
+  const link = connection();
+  connections.push(link);
+  const watched = link.watch("historyOpen");
+  const intent = ++lastIntent;
+  link.failPost("historyOpen");
+  await link.request("historyOpen", { intent }).catch(() => {});
+  const refs = await watched;
+  // The open's core, which its delivery undid: kept by a closure the connection does not own.
+  const undone = refs
+    .map((ref) => ref.deref())
+    .find((value) => typeof value === "object" && "pendingStep" in value);
+  if (undone === undefined) throw new Error("The control's core was not among its references.");
+  kept.push(() => undone);
+  return refs;
+}
+
 /** Every case of the child, grouped by class; returns, per case, how many of its weak references still hold. */
 async function runCases() {
   await sharedReach();
+  await historySharedReach();
   const cases = childCases();
   const seedOf = (name: string) => cases.find((each) => each.name === name)?.seed;
   const results: { name: string; refs: readonly WeakRef<WeakKey>[] }[] = [];
@@ -310,7 +474,13 @@ async function runCases() {
     for (const moment of ["committed", "aborted"] as const) {
       const marked = markers(`${moment}/${allocation}`);
       if (marked === null) continue;
-      const refs = await allocate(open, allocation, ...marked, moment === "aborted");
+      // A history's open replaces the connection's earlier history, the committed case's: its abort runs on its own.
+      let link = open;
+      if (moment === "aborted" && ["history", "candidate", "point"].includes(allocation)) {
+        link = connection();
+        connections.push(link);
+      }
+      const refs = await allocate(link, allocation, ...marked, moment === "aborted");
       results.push({ name: `${moment}/${allocation}`, refs });
     }
     const marked = markers(`closed/${allocation}`);
@@ -321,6 +491,8 @@ async function runCases() {
     closing.terminate();
     results.push({ name: `closed/${allocation}`, refs });
   }
+  if (seedOf("control/history") !== undefined)
+    results.push({ name: "control/history", refs: await historyControl() });
   return results;
 }
 

@@ -36,6 +36,8 @@ import { compareStructures, renderPath } from "./runtime-state-comparison.js";
  * The fields a publication may carry, and whether the trace compares each. A publication with another field, or
  * without one of these, fails the trace: a new field (such as L5h.3's `historyPoint`) is declared here, compared or not.
  * `instructions` and `callView` are L5f's, with no source independent of the host; the trace does not compare them.
+ * `marks` are Debug's metadata for a debug export, which no engine call changes; a restore at the cut takes none, and
+ * `history` is Debug's rewind timeline, which follows no history across the cut.
  */
 const PUBLICATION_FIELDS: Readonly<Record<keyof Publication, "compared" | "not compared">> = {
   revision: "compared",
@@ -45,6 +47,8 @@ const PUBLICATION_FIELDS: Readonly<Record<keyof Publication, "compared" | "not c
   events: "compared",
   instructions: "not compared",
   callView: "not compared",
+  marks: "not compared",
+  history: "not compared",
 };
 
 /** One publication after the cut, by value, its revision and cursors relative to the publication before the cut. */

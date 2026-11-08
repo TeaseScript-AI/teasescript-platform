@@ -25,6 +25,7 @@ import type { SerializableRuntimeValue } from "../src/runtime/values/serializabl
 import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { viewCalls, viewed, withoutViews } from "./helpers/debug-readers.js";
 import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
+import { NO_MARKS } from "../player/debug-history-marks.js";
 
 /*
  * L5b's bridge: the session ops (Start, Continue, time, catch-up, pacing), the reply contract (each publication's
@@ -174,9 +175,12 @@ test("a store applies publications by revision and requires their events to cont
     events: [],
     instructions: {},
     callView: null,
+    marks: NO_MARKS,
+    history: [],
     planToken: plan,
     metadata: null,
     liveEventSequence: 0,
+    historyKey: "l0",
   });
   const publication = (revision: number, from: number, eventsThrough: number) => ({
     revision,
@@ -186,6 +190,8 @@ test("a store applies publications by revision and requires their events to cont
     events: [],
     instructions: {},
     callView: null,
+    marks: NO_MARKS,
+    history: [],
   });
   // An eventless publication still applies: its revision is new.
   assert.equal(store.apply(publication(2, 0, 0)), true);
@@ -301,10 +307,14 @@ test("each transitional factory gets a new session, its plan's token, its histor
   assert.equal(restored.liveEventSequence, adapterRestored.liveEventSequence);
   // A factory receives the connection's recorder.
   const { introduceNow } = await import("../player/engine-bridge/in-process.js");
-  introduceNow(bridge, (host) => {
-    recorderSeen = host.recorder;
-    return createPlayerRuntimeSession(SCRIPT, { recorder: host.recorder });
-  });
+  introduceNow(
+    bridge,
+    (host) => {
+      recorderSeen = host.recorder;
+      return createPlayerRuntimeSession(SCRIPT, { recorder: host.recorder });
+    },
+    NO_MARKS,
+  );
   assert.ok(recorderSeen);
   assert.equal(heldRecording(bridge)?.complete, true);
 });

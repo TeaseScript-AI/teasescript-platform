@@ -14,6 +14,7 @@ import {
 } from "../player/runtime-adapter.js";
 import { activePlayerRuntimeInteraction } from "../player/runtime-view.js";
 import { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
+import { NO_MARKS } from "../player/debug-history-marks.js";
 
 /*
  * Clarity audit part 2, item 15: how an op's result session is adopted in the host is decided once
@@ -31,7 +32,7 @@ function held() {
     ),
     100,
   ).session;
-  const session = new HeldSession(raw, "plan", playerOpsContext());
+  const session = new HeldSession(raw, "plan", playerOpsContext(), NO_MARKS);
   session.introduce(null);
   const catchUp = beginPlayerRuntimeCatchUp(raw, 500);
   session.beginCatchUp(catchUp);

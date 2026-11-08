@@ -21,6 +21,7 @@ export class SessionStore {
   readonly #connection: PlayerBridge;
   readonly #planToken: string;
   readonly #liveEventSequence: number;
+  readonly #historyKey: string;
   readonly #events: InterpreterEvent[] = [];
   readonly #entries: PlayerTranscriptEntryPresentation[] = [];
   readonly #rows = new Map<number, number>();
@@ -37,6 +38,7 @@ export class SessionStore {
     this.#connection = connection;
     this.#planToken = introduction.planToken;
     this.#liveEventSequence = introduction.liveEventSequence;
+    this.#historyKey = introduction.historyKey;
     this.#session = this.#append(introduction);
   }
 
@@ -114,6 +116,9 @@ export class SessionStore {
       state: Object.freeze(view.state),
       instructions: view.instructions,
       callView: view.callView,
+      marks: view.marks,
+      history: view.history,
+      historyKey: this.#historyKey,
       liveEventSequence: this.#liveEventSequence,
       events: this.#events,
       transcriptEntries: this.#entries,

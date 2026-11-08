@@ -64,6 +64,7 @@ import type { EffectSample } from "./helpers/live-host-effects.js";
 import { compareStructures, renderPath } from "./helpers/runtime-state-comparison.js";
 import type * as RuntimeAdapter from "../player/runtime-adapter.js";
 import type { RuntimeSnapshot } from "../src/index.js";
+import { NO_MARKS } from "../player/debug-history-marks.js";
 
 /*
  * L5g's B-record evidence: the recording of every engine call, made by the connection's recorder, is the same in-process
@@ -356,8 +357,10 @@ async function aboutToThrow(bridge: PlayerBridge, inProcess: boolean): Promise<P
     nextScopeId: Number.MAX_SAFE_INTEGER - 1,
   });
   if (inProcess)
-    return introduceNow(bridge, (host) =>
-      restorePlayerRuntimeSessionAt(host.plan(token), snapshotJson, []),
+    return introduceNow(
+      bridge,
+      (host) => restorePlayerRuntimeSessionAt(host.plan(token), snapshotJson, []),
+      NO_MARKS,
     );
   const reply = await bridge.client.request("restoreForTest", { plan: token, snapshotJson });
   // EVIDENCE: validation: the test op replies with the new session's introduction.
@@ -611,8 +614,10 @@ async function bridgeRun(inProcess: boolean): Promise<JudgedRun> {
     const token = await prepared(bridge, REPLAYED);
     const snapshotJson = restoredJson();
     let session = inProcess
-      ? introduceNow(bridge, (host) =>
-          restorePlayerRuntimeSessionAt(host.plan(token), snapshotJson, []),
+      ? introduceNow(
+          bridge,
+          (host) => restorePlayerRuntimeSessionAt(host.plan(token), snapshotJson, []),
+          NO_MARKS,
         )
       : await (async () => {
           const reply = await bridge.client.request("restoreForTest", {

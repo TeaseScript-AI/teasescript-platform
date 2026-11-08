@@ -121,6 +121,7 @@ async function main() {
         ["sessionTransfer", () => sessionTransferScenario(debugPort, origin, profile)],
         ["debugExport", () => debugExportScenario(cdp, origin, profile)],
         ["debugHistoryStorage", () => debugHistoryStorageScenario(cdp, origin)],
+        ["rewind", () => rewindScenario(cdp, origin)],
         ["photoColour", () => photoColourScenario(cdp, origin, profile)],
         ["photoVignette", () => photoVignetteScenario(cdp, origin)],
         ["messageUpdates", () => messageUpdatesScenario(cdp, origin)],
@@ -154,7 +155,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, a session exported and continued in another profile, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, a session exported and continued in another profile, the debug export after a script error, the rewind history's IndexedDB store, Back and Return in the Player, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
       );
     } finally {
       cdp.close();
@@ -2813,6 +2814,72 @@ async function setViewport(cdp, width, height) {
     deviceScaleFactor: 1,
     mobile: width < 600,
   });
+}
+
+/**
+ * Debug's rewind in the Player (DEBUGGER.md "Rewind"), whose history the engine's host keeps: each point is written
+ * through to the history's own IndexedDB database; Back to an answer shows the earlier state for inspection, and
+ * Return shows the session it left again.
+ */
+async function rewindScenario(cdp, origin) {
+  const choice = (label) =>
+    `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === '${label}')`;
+  const said = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent.trim()).join(' | ')`;
+  const histories = async () =>
+    evaluate(
+      cdp,
+      `return indexedDB.databases().then((all) => Promise.all(all
+        .map((info) => info.name)
+        .filter((name) => name.startsWith('teasescript-debug-history-'))
+        .map((name) => new Promise((resolve) => {
+          const request = indexedDB.open(name);
+          request.onsuccess = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains('snapshots')) return (db.close(), resolve(0));
+            const count = db.transaction('snapshots').objectStore('snapshots').count();
+            count.onsuccess = () => (db.close(), resolve(count.result));
+            count.onerror = () => (db.close(), resolve(-1));
+          };
+          request.onerror = () => resolve(-1);
+        }))))`,
+    );
+  await navigate(cdp, `${origin}/player/?package=rewind&dev`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, `!!${choice("Red")}`, 8_000, "The first choice did not show");
+  await physicalClickOn(cdp, choice("Red"), "the Red choice");
+  await waitFor(cdp, `!!${choice("Left")}`, 8_000, "The second choice did not show");
+  const left = await value(cdp, said);
+  // Two points, each written through to the history's database.
+  const deadline = Date.now() + 8_000;
+  let rows = await histories();
+  while (!rows.includes(2) && Date.now() < deadline) {
+    await delay(100);
+    rows = await histories();
+  }
+  assertEqual(
+    rows.includes(2),
+    true,
+    `The history's database holds both points (${JSON.stringify(rows)})`,
+  );
+  await waitFor(cdp, `!!document.querySelector('[data-back-to-here]')`, 8_000, "No Back to here");
+  await physicalClick(cdp, "[data-back-to-here]");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-rewind-inspection]')`,
+    8_000,
+    "Back showed no inspection",
+  );
+  await waitFor(cdp, `!!${choice("Red")}`, 8_000, "Back did not show the first choice again");
+  await physicalClick(cdp, "[data-rewind-return]");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-rewind-inspection]')`,
+    8_000,
+    "Return left the inspection",
+  );
+  await waitFor(cdp, `!!${choice("Left")}`, 8_000, "Return did not show the session it left");
+  assertEqual(await value(cdp, said), left, "Return shows the transcript the session had");
 }
 
 /**

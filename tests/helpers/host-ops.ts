@@ -10,6 +10,8 @@ const SESSION_OP =
 const SERVICE_OP = "a held session's answer from a service of the page: no plan";
 const DEBUG_SOURCE_OP = "Debug's source view of a held plan, from its sources, not its JSON";
 const RANDOM_OP = "Debug's random control and history on the connection: draws and sites, no plan";
+const REWIND_OP =
+  "Debug's rewind history on the connection: snapshots of held sessions and their restores, whose plan stays held; no plan JSON";
 
 /** One op's facts. */
 export interface HostOp {
@@ -87,4 +89,14 @@ export const HOST_OPS = {
   planText: { planJson: "producer", read: false },
   captureKeep: { planJson: "producer", read: true },
   reviewTransfer: { planJson: "producer", read: false },
+  historyOpen: { planJson: REWIND_OP, read: false },
+  historyEnroll: { planJson: REWIND_OP, read: false },
+  historyClose: { planJson: REWIND_OP, read: false },
+  historyTimeline: { planJson: REWIND_OP, read: false },
+  rewindBack: { planJson: REWIND_OP, read: false },
+  rewindForward: { planJson: REWIND_OP, read: false },
+  rewindCommit: { planJson: REWIND_OP, read: false },
+  rewindDrop: { planJson: REWIND_OP, read: false },
+  rewindReturn: { planJson: REWIND_OP, read: false },
+  rewindAdopt: { planJson: REWIND_OP, read: false },
 } as const satisfies Record<string, HostOp>;

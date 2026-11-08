@@ -81,8 +81,9 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   Start; one that does not compile shows `ScriptProblems.vue` with its errors instead of Start. `PlayerApp.vue`
   composes the Debug panel: `usePlayerDebug.ts` owns the Debug menu and Debug switches, the countdown line that
   `RuntimeInteraction.vue` shows, and the scopes of `useDebugLog.ts`, of the time controls that
-  `useDevelopmentTime.ts` drives through the session host's `publishJump`, and of `useDebugRewind.ts`, which restores
-  states through the host's `rewind`, and of `useDebugRandom.ts`, which sends Debug's random settings to the engine's
+  `useDevelopmentTime.ts` drives through the session host's `publishJump`, and of `useDebugRewind.ts`, which shows the
+  engine's host's rewind history and asks the host for each step, showing what it restores through the session host's
+  `rewind`, and of `useDebugRandom.ts`, which sends Debug's random settings to the engine's
   host (`setRandomControl`, `forgetRandomHistory`), where `player/random-decisions.ts` decides draws and keeps each
   site's history, and resolves a waiting draw there (`resolveRandomDraw`, `randomTried`); `DebugPanel.vue` and
   `DebugStatus.vue` present them. While a draw waits,

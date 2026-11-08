@@ -6,6 +6,8 @@ import {
   type SectionSend,
 } from "./engine-bridge/client.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
+import type { HistoryTimeline } from "./engine-bridge/history/core.js";
+import type { HistoryOpened, HistoryOpResult } from "./engine-bridge/ops/history.js";
 import type { KeptRestore } from "./engine-bridge/ops/persistence.js";
 import type { StartOptions, StartRandom } from "./engine-bridge/ops/session.js";
 import type {
@@ -16,6 +18,7 @@ import type {
   ReadOps,
 } from "./engine-bridge/session-protocol.js";
 import type { PlayerSession } from "./runtime-view.js";
+import type { HistoryMarks } from "./debug-history-marks.js";
 import { SessionStore } from "./session-store.js";
 
 /** How a request's publication reaches the UI: in place of the store's listener, in the same tick (see `apply`). */
@@ -129,6 +132,12 @@ export class PlayerBridge {
     this.#randomIntents += 1;
     return this.#randomIntents;
   }
+  #historyIntents = 0;
+  /** The next serial of a rewind history on this connection (`historyOpen`), counted as tracing changes are. */
+  nextHistoryIntent(): number {
+    this.#historyIntents += 1;
+    return this.#historyIntents;
+  }
   #player: symbol | null = null;
   #owners = 0;
   #owner = 0;
@@ -240,18 +249,76 @@ export class PlayerBridge {
     planJson: string,
     snapshotJson: string,
     events: readonly InterpreterEvent[],
+    /** The marks the session was kept with; the host validates them, as the rest of the kept state. */
+    marks: HistoryMarks,
   ): Promise<PlayerSession | "otherPlan" | "ended"> {
     const reply = await this.#client.request("restoreKept", {
       plan,
       planJson,
       snapshotJson,
       events,
+      marks,
     });
     // EVIDENCE: validation: `restoreKept` replies from the same build with its outcome and, restored, the new session.
     const outcome = reply.result as KeptRestore;
     if (outcome.kind !== "restored") return outcome.kind;
     // EVIDENCE: validation: a restored session's reply carries its id and introduction.
     return this.open(reply.session!, reply.view as Introduction);
+  }
+
+  /**
+   * Opens Debug's rewind history `intent` on this connection (`historyOpen`), unless a newer one is open (`stale`). The
+   * sessions an earlier history released with its close are forgotten here.
+   */
+  async historyOpen(intent: number): Promise<HistoryOpened> {
+    const reply = await this.#client.request("historyOpen", { intent });
+    // EVIDENCE: validation: `historyOpen` replies from the same build with `HistoryOpened`.
+    const opened = reply.result as HistoryOpened;
+    if (opened.kind === "opened") this.#forget(opened.released);
+    return opened;
+  }
+
+  /** The whole timeline of history `history` (`historyTimeline`), or `null` once it closed. */
+  async historyTimeline(history: number): Promise<HistoryTimeline | null> {
+    const reply = await this.#client.request("historyTimeline", { history });
+    // EVIDENCE: validation: `historyTimeline` replies from the same build with a timeline or `null`.
+    return reply.result as HistoryTimeline | null;
+  }
+
+  /**
+   * Sends the rewind or history op `op` (`ops/history.ts`) of no session: the sessions it released are forgotten here,
+   * and a session it restored is opened, with its introduction.
+   */
+  async historyStep(
+    op:
+      | "historyClose"
+      | "rewindBack"
+      | "rewindForward"
+      | "rewindCommit"
+      | "rewindDrop"
+      | "rewindReturn"
+      | "rewindAdopt",
+    args: unknown,
+  ): Promise<{ readonly result: HistoryOpResult; readonly restored: PlayerSession | null }> {
+    const reply = await this.#client.request(op, args);
+    // EVIDENCE: validation: the history ops reply from the same build with a `HistoryOpResult`.
+    const result = reply.result as HistoryOpResult;
+    if (result.kind === "done") this.#forget(result.released);
+    // A prepared step brings its candidate; nothing is released until the page commits or drops it.
+    const session = result.kind === "done" || result.kind === "prepared" ? reply.session : null;
+    if (session === null) return { result, restored: null };
+    // EVIDENCE: validation: a step that restored a session replies with its introduction.
+    const introduction = reply.view as Introduction;
+    return { result, restored: this.open(session, introduction) };
+  }
+
+  /** Forgets the stores of the sessions `ids`, which the host released itself. */
+  #forget(ids: readonly string[]): void {
+    for (const id of ids) {
+      const store = this.store(id);
+      if (store !== null) this.#collected.unregister(store);
+      this.#stores.delete(id);
+    }
   }
 
   /**
