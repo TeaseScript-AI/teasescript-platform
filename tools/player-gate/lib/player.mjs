@@ -13,9 +13,6 @@ export function readGate(page) {
  * Whether `state` (a probe state) shows a control the player can answer now: an enabled button, or the composer when it
  * is enabled and asks a question (not the composer a pacing gate leaves open for Space).
  */
-/** The same test as a function source for `waitForState`, which runs in the page. */
-export const ENABLED_CONTROL = `(state) => state.start === null && (state.buttons.some((b) => b.enabled) || (state.composer?.enabled === true && state.composer.asks))`;
-
 export function hasEnabledControl(state) {
   return (
     state.start === null &&
@@ -23,6 +20,9 @@ export function hasEnabledControl(state) {
       (state.composer?.enabled === true && state.composer.asks))
   );
 }
+
+/** The same test as `hasEnabledControl`, as a function source for `waitForState`, which runs in the page. */
+export const ENABLED_CONTROL = `(state) => state.start === null && (state.buttons.some((b) => b.enabled) || (state.composer?.enabled === true && state.composer.asks))`;
 
 /** Waits until the probe's latest state satisfies `predicate` (a function source over `state`), or fails after `timeoutMs`. */
 export async function waitForState(page, predicate, timeoutMs, what) {
