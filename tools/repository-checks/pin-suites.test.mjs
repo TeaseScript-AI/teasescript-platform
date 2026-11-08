@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -58,4 +59,13 @@ test("the three pin forms are found by their text, and a pin written another way
   assert.deepEqual(pinFormsOf("  assert.strictEqual(budget.total, 22_962_573);"), []);
   assert.deepEqual(pinFormsOf("  assert.equal(budget.total, 573);"), []);
   assert.deepEqual(pinFormsOf("    [7995, 60],\n    [7081, 60],"), []);
+});
+
+test("an option the tool does not take is refused, not ignored", () => {
+  const tool = join(ROOT, "tools/repository-checks/pin-suites.mjs");
+  for (const args of [["--check-grounds"], ["--base"], ["--run", "extra"]]) {
+    const run = spawnSync(process.execPath, [tool, ...args], { cwd: ROOT, encoding: "utf8" });
+    assert.equal(run.status, 2, `${args.join(" ")}: ${run.stderr}`);
+    assert.match(run.stderr, /use \[--base <ref>\] \[--run\]/u);
+  }
 });
