@@ -61,7 +61,6 @@
   --border-strong: oklch(68.851% 0.04826 51.55);
   --text-muted: oklch(52.649% 0.02679 41.27);
   --package-accent: oklch(59.208% 0.19138 11.08);
-  /* Existing demo ambience (#f7cdaf), expressed in OKLCH. */
   color: var(--foreground);
   background: var(--background);
 }
@@ -136,7 +135,6 @@
   --text-muted: var(--theme-text-secondary);
   --popover: var(--theme-surface-floating);
   --focus-ring: var(--theme-focus-ring);
-  /* UI ambience follows the surface family; exact scene/media color remains content-owned. */
   accent-color: var(--theme-accent-solid);
 }
 :root[data-player-theme="light"] { color-scheme: light; }

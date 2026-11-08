@@ -71,6 +71,7 @@ function displayColor(color: OklchColor) {
         <input :value="intent.surfaceTint" :disabled="intent.monochrome" aria-label="Tint intensity" type="range" min="0" max="1" step="0.01" @input="setSurfaceTint" />
       </label>
       <p>{{ intent.monochrome || intent.surfaceTint === 0 ? 'Achromatic surfaces. Hue is inactive until tint is added.' : 'Explicit surface tint; independent of accent and light/dark mode.' }}</p>
+      <p>Surface hue and tint apply without a Stage photo; a photo supplies its own hue and chroma.</p>
     </fieldset>
     <label class="flex items-center gap-2">Accent color
       <input type="color" aria-label="Accent color" :value="oklchToPickerHex(intent.accentSeed)" @input="pickAccent" />

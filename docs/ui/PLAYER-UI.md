@@ -1333,8 +1333,8 @@ custom surface.
 ## Default themes
 
 The Standard Player generates its semantic colour roles from a theme intent (`player/theme/palette.ts`) and applies
-them before components consume them. The defaults are a warm light theme (surface hue `70°`, `50%` tint, maximum
-surface chroma `8.5`, rose accent `#D63B61`) and a cool dark theme (surface hue `240°`, otherwise the same surface
+them before components consume them. The defaults are a warm light theme (surface hue `70°`, tint `75%` of the
+mode's chroma cap, rose accent `#D63B61`) and a cool dark theme (surface hue `240°`, otherwise the same surface
 intent, blue accent `#2255EE`). Switching light/dark applies that mode's default palette and keeps the contrast
 choice. A Stage photo's colours replace the surface intent while it shows
 ([Stage and media presentation](#stage-and-media-presentation)). Generated values and contrast targets remain
