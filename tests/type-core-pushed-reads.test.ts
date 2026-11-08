@@ -1175,6 +1175,26 @@ test("a receiver with a scalar sibling, a structural sibling, an already marked 
     }
 });
 
+test("a path of 2,048 steps below pure nodes is walked without a native frame per step: the analysis stops where native's does (#2005, Codex r1)", () => {
+  // (the pure path's steps and a floor's children pass through the build's tasks, as a goal's nodes do)
+  const source =
+    [
+      "let p0={a:0}",
+      "let p2={a:0}",
+      `p2.q={a:0}${".x".repeat(2048)}`,
+      "if p0.q.a is integer { p2=p0 }",
+      "p2=p2.q",
+      'say "${p2.a}"',
+      "exit",
+    ].join("\n") + "\n";
+  const files = [{ path: "main.tease", source }];
+  const mode = MODES[0]!;
+  assert.equal(
+    publication(files, mode, GLOBALS),
+    withoutPushedReads(() => publication(files, mode, GLOBALS)),
+  );
+});
+
 /** Astra r2 B3's family: `x` copied `copies` times under a conjunction of `tests` tests of its properties, then marked. */
 function guardedCopies(tests: number, copies: number): string {
   const literal = `{${Array.from({ length: tests }, (_, i) => `a${i}:0`).join(",")}}`;
