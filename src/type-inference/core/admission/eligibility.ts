@@ -25,6 +25,7 @@ import {
 } from "../definitions.js";
 import type { Callable } from "../flow-graph.js";
 import { addRest, aliasKeyAt, covers, grouped, tested } from "./classes.js";
+import { readNow, type Reads } from "../inherited/reads.js";
 
 // §4.3's eligibility: a class's earliest member no test of its read's path holds, and the whole stores A2 reads.
 
@@ -34,6 +35,11 @@ import { addRest, aliasKeyAt, covers, grouped, tested } from "./classes.js";
  * (external data, no kind and no `null`), so the scan passes none.
  */
 export function wholeOf(admission: Admission, key: Key, add: boolean): Definition[] {
+  return readNow(wholeOfRead(admission, key, add));
+}
+
+/** `wholeOf` with its classes' reads (`Read`, #1072 A2). */
+function* wholeOfRead(admission: Admission, key: Key, add: boolean): Reads<Definition[]> {
   const memoKey = joinParts(key, add);
   let list = admission.whole.get(memoKey);
   if (list === undefined) {
@@ -52,7 +58,7 @@ export function wholeOf(admission: Admission, key: Key, add: boolean): Definitio
     );
     program.work.charge("checks", sortCost(list.length));
     list.sort((a, b) => admission.sourceOrder(a) - admission.sourceOrder(b));
-    list = grouped(admission, list);
+    list = yield* grouped(admission, list);
     keepText(admission.work, memoKey.length);
     admission.whole.set(memoKey, list);
   }
@@ -64,13 +70,13 @@ export function wholeOf(admission: Admission, key: Key, add: boolean): Definitio
  * and where a guard of the path holds it, its class's earliest eligible member too, which stands where it is in source
  * order and decides with its own answer (a guard marks a read possible, so it decides nothing).
  */
-export function eligibleOf(
+export function* eligibleOf(
   admission: Admission,
   prefix: Key,
   below: Rest,
   add = false,
-): Definition[] {
-  const list = wholeOf(admission, prefix, add);
+): Reads<Definition[]> {
+  const list = yield* wholeOfRead(admission, prefix, add);
   let out: Definition[] | null = null;
   for (const [index, representative] of list.entries()) {
     const members = admission.members.get(representative);

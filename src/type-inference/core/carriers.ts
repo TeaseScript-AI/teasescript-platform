@@ -10,6 +10,7 @@ import {
   methodCategory,
 } from "./method-categories.js";
 import { stepName, type CoreProgram } from "./program.js";
+import { readNow, type Reads } from "./inherited/reads.js";
 
 /*
  * The carriers (S6): the values that are, or hold, another value, their operand. One table, read by every walk over
@@ -188,17 +189,30 @@ export interface Dispatch {
  * runtime's member, opaque), a `load` of a computed key (external data, whatever its default).
  */
 export function keepsOwn(program: CoreProgram, value: PlaceId, dispatch: Dispatch): boolean {
+  return readNow(
+    keepsOwnRead(program, value, function* (receiver) {
+      return dispatch.reference(receiver);
+    }),
+  );
+}
+
+/** `keepsOwn` of a receiver decision that is a read (`Read`, #1072 A2). */
+export function* keepsOwnRead(
+  program: CoreProgram,
+  value: PlaceId,
+  reference: (receiver: PlaceId) => Reads<boolean>,
+): Reads<boolean> {
   const projection = program.projOf.get(value);
   if (projection !== undefined)
-    return projection.step !== "iteration" && dispatch.reference(projection.owner);
+    return projection.step !== "iteration" && (yield* reference(projection.owner));
   const c = program.opOf.get(value);
-  if (c?.kind === "get") return dispatch.reference(c.receiver);
+  if (c?.kind === "get") return yield* reference(c.receiver);
   if (c?.kind === "load") return c.key === null;
   return (
     c?.kind === "operation" &&
     c.contract.family === "method" &&
     c.receiver !== null &&
-    dispatch.reference(c.receiver)
+    (yield* reference(c.receiver))
   );
 }
 
