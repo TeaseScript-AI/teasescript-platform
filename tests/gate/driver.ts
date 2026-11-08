@@ -46,14 +46,18 @@ const count = (counts: Record<string, number>, key: string) => (counts[key] = (c
 
 /**
  * Records one tape on `bridge`, a fresh host: `source` as `prepare` takes it, then a Start with `options`. Its census
- * counts accepted inputs by op, declines by op and reason, and the rows that proposed accepted inputs. With
- * `candidates`, the driver uses that list maker instead of the table's (the tests' negative probes).
+ * counts accepted inputs by op, declines by op and reason, and the rows that proposed accepted inputs. `candidates` and
+ * `outcomes` replace the table and its readings, for the tests' negative probes and mutants only.
  */
 export async function driveTape(
   bridge: PlayerBridge,
   source: unknown,
   options: StartOptions,
-  { cut = TAPE_CUT, candidates = candidatesFor }: { readonly cut?: number; readonly candidates?: typeof candidatesFor } = {},
+  {
+    cut = TAPE_CUT,
+    candidates = candidatesFor,
+    outcomes = OUTCOMES,
+  }: { readonly cut?: number; readonly candidates?: typeof candidatesFor; readonly outcomes?: typeof OUTCOMES } = {},
 ): Promise<TapeRun> {
   const recorder = recordClient(bridge.client);
   const accepted: Record<string, number> = {};
@@ -101,7 +105,7 @@ export async function driveTape(
           lastDeclined = { candidate: next, reason: error.name };
           continue;
         }
-        const reading = OUTCOMES[next.op](result);
+        const reading = outcomes[next.op](result);
         if (reading.accepted) {
           count(accepted, next.op);
           count(rows, next.row);

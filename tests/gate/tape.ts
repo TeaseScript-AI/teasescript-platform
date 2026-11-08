@@ -103,10 +103,25 @@ export interface ReplayDifference {
 }
 
 /**
+ * `reply` with each `historyKey` renamed by its order of first appearance in the tape (`seen`): a history key is a
+ * counter of its realm (Debug's rewind histories), so two hosts in different realms number the same histories
+ * differently. Every other value is compared as it is.
+ */
+function canonical(reply: TapeReply, seen: Map<string, string>): string {
+  return JSON.stringify(reply, (key, value: unknown) => {
+    if (key !== "historyKey" || typeof value !== "string") return value;
+    if (!seen.has(value)) seen.set(value, `history ${seen.size + 1}`);
+    return seen.get(value);
+  });
+}
+
+/**
  * Sends `entries` through `client` one at a time, in order, with their recorded session, basis and `after`, and compares
- * each reply with the recorded one as JSON. Stops at the first difference.
+ * each reply with the recorded one as JSON, history keys by their order (`canonical`). Stops at the first difference.
  */
 export async function replayTape(client: BridgeClient, entries: readonly TapeEntry[]): Promise<ReplayDifference | null> {
+  const recorded = new Map<string, string>();
+  const replayed = new Map<string, string>();
   for (const [index, entry] of entries.entries()) {
     let actual: TapeReply;
     try {
@@ -120,7 +135,7 @@ export async function replayTape(client: BridgeClient, entries: readonly TapeEnt
     } catch (error) {
       actual = refusalOf(error);
     }
-    if (JSON.stringify(actual) !== JSON.stringify(entry.reply)) return { index, op: entry.op, expected: entry.reply, actual };
+    if (canonical(actual, replayed) !== canonical(entry.reply, recorded)) return { index, op: entry.op, expected: entry.reply, actual };
   }
   return null;
 }

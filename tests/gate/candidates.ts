@@ -26,6 +26,7 @@ export const CANDIDATE_OPS = [
   "submitComposer",
   "selectChoice",
   "activateButton",
+  "stepFormField",
   "submitForm",
   "cancelForm",
   "skipImage",
@@ -80,9 +81,12 @@ interface Shown {
   readonly actionId: number;
 }
 
+/** The ops that record how the player answered (`input`); the form's field steps do not (`ops/input.ts`). */
+const NO_INPUT: ReadonlySet<CandidateOp> = new Set(["stepFormField"]);
+
 const interaction = (op: CandidateOp, shown: Shown, row: string, extra: Record<string, unknown> = {}): Candidate => ({
   op,
-  args: { actionId: shown.actionId, ...extra, input: null },
+  args: { actionId: shown.actionId, ...extra, ...(NO_INPUT.has(op) ? {} : { input: null }) },
   group: "foreground",
   row,
 });
@@ -126,7 +130,12 @@ export const FOREGROUND_ROWS: { readonly [K in ForegroundKind]: (shown: Shown, p
     const form = playerRuntimeForm(shown.session);
     const candidates = [interaction("submitForm", shown, "form:as drafted", { draft: null })];
     const editor = form?.editor ?? null;
-    if (editor !== null && !editor.optional && editor.text === "")
+    // A required value field without a value is opened in the editor first, where its answers are drafted.
+    for (const field of form?.fields ?? [])
+      if (field.kind === "value" && !field.optional && field.state === null && editor?.fieldId !== field.id)
+        candidates.push(interaction("stepFormField", shown, `form:open ${field.id}`, { fieldId: field.id, draft: null }));
+    // Whatever the editor holds: a refused draft stays in it (and is published), and the next answers still follow.
+    if (editor !== null && !editor.optional)
       for (const answer of fieldAnswers(shown.session, editor.fieldId, editor.inputType, editor.inputMode))
         candidates.push(interaction("submitForm", shown, `form:${editor.fieldId}=${answer}`, { draft: answer }));
     if (form?.cancel) candidates.push(interaction("cancelForm", shown, "form:cancel"));

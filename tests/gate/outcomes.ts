@@ -34,6 +34,7 @@ export const OUTCOMES: { readonly [O in CandidateOp]: (result: unknown) => Readi
   submitComposer: formAnswer,
   selectChoice: interactionAnswer,
   activateButton: interactionAnswer,
+  stepFormField: formAnswer,
   submitForm: formAnswer,
   cancelForm: formAnswer,
   skipImage: interactionAnswer,

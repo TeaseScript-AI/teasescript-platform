@@ -11,6 +11,7 @@ import {
   answerPlayerRuntimeFileStore,
   answerPlayerRuntimeLock,
   cancelPlayerRuntimeForm,
+  stepPlayerRuntimeFormField,
   closePlayerRuntimeExport,
   closePlayerRuntimePopup,
   completePlayerRuntimeStorageWrite,
@@ -332,6 +333,10 @@ export const ADAPTER_OPS: Readonly<
   // EVIDENCE: validation: the host accepted `draft` as a string or null (`ops/input.ts`).
   submitForm: presented((session, args) => submitPlayerRuntimeForm(session, (args["draft"] as string | null) ?? undefined)),
   cancelForm: presented((session) => cancelPlayerRuntimeForm(session)),
+  stepFormField: presented((session, args) =>
+    // EVIDENCE: validation: the host accepted `fieldId` as a string and `draft` as a string or null (`ops/input.ts`).
+    stepPlayerRuntimeFormField(session, args["fieldId"] as string, (args["draft"] as string | null) ?? undefined),
+  ),
   skipImage: presented((session) => skipPlayerRuntimeImage(session)),
   openUrl: presented((session) => openPlayerRuntimeUrl(session)),
   closePopup: presented((session) => closePlayerRuntimePopup(session)),
