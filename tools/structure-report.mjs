@@ -178,22 +178,30 @@ const gitDiff = (...diffArgs) =>
 class CannotRun extends Error {}
 
 const utf8 = new TextDecoder("utf-8", { fatal: true });
-/** Git's NUL-separated `bytes` as names, each decoded exactly, or refused: the report reads UTF-8 names only. */
-function namesOf(bytes) {
-  const names = [];
+/**
+ * Git's NUL-separated `bytes` as fields, each name decoded exactly, or refused: the report reads UTF-8 names only. A
+ * field's name follows its first `tabs` tabs (its metadata before them is ASCII); a field with fewer is all name.
+ */
+function namesOf(bytes, tabs = 0) {
+  const fields = [];
   let start = 0;
   for (let end = bytes.indexOf(0); end !== -1; end = bytes.indexOf(0, start)) {
-    const name = bytes.subarray(start, end);
+    const field = bytes.subarray(start, end);
     start = end + 1;
+    let at = 0;
+    for (let tab = 0; tab < tabs && at !== -1; tab += 1) at = field.indexOf(9, at) + 1 || -1;
+    // a field with fewer tabs is a name of its own, as a rename's two names after `--numstat`'s counts
+    const nameStart = at === -1 ? 0 : at;
+    const name = field.subarray(nameStart);
     try {
-      names.push(utf8.decode(name));
+      fields.push(field.subarray(0, nameStart).toString("latin1") + utf8.decode(name));
     } catch {
       throw new CannotRun(
         `structure-report: Git names a file that is not UTF-8 (bytes ${name.toString("hex")}): the report reads UTF-8 names only`,
       );
     }
   }
-  return names;
+  return fields;
 }
 
 /** A name as the report prints it: as is, or quoted when it holds a control character such as a newline or tab. */
@@ -254,7 +262,7 @@ export function addedLinesOfPatch(patch) {
  */
 function regularFilesAt(ref) {
   const files = new Map();
-  for (const entry of namesOf(gitBytes("ls-tree", "-r", "-z", ref, "--", ...roots))) {
+  for (const entry of namesOf(gitBytes("ls-tree", "-r", "-z", ref, "--", ...roots), 1)) {
     const [meta, name] = [
       entry.slice(0, entry.indexOf("\t")),
       entry.slice(entry.indexOf("\t") + 1),
@@ -293,7 +301,7 @@ function changeSignals(base) {
     }
   }
   // Git's own count of each file's added lines (`-` for a binary file), the check on the hunks read below.
-  const numstat = namesOf(gitDiff("-M", "--numstat", "-z", mergeBase, "HEAD"));
+  const numstat = namesOf(gitDiff("-M", "--numstat", "-z", mergeBase, "HEAD"), 2);
   const gitAdded = new Map();
   for (let i = 0; i < numstat.length;) {
     const [added, , ...name] = numstat[i].split("\t");
