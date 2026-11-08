@@ -179,7 +179,8 @@ The code's architecture is right by construction, not repaired after someone not
 The plan names where new code goes: its module and its folder. A change that brings a new responsibility gets its
 own module, or folder, from the start.
 
-These signals each ask, in the plan or the review, for the seam or for the reason there is none. They are not limits:
+These signals each ask, in the plan, for the seam or for the reason there is none; the review checks that the plan
+answered them, for the files the change touches as well as for the code it adds. They are not limits:
 
 - a file over 1,000 lines;
 - a pull request adding over 300 lines to one file;

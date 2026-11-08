@@ -63,6 +63,9 @@ A brief is a file the assignment points to. What it asks for follows the workflo
 - State the environment facts the builder will rely on: where its dependencies come from, which checks run locally and
   which elsewhere, and how to format. Point to the environment's documentation for the details. A builder then never
   works around a tool it only believed missing.
+- Name the files the package will touch, the open `friction` issues in them, and the order against other open pull
+  requests in the same files. The builder judges them at HEAD 0
+  ([Code structure](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-structure)).
 - A final-review brief is also bounded: named cases, campaigns of a stated size, and evidence the reviewer samples
   rather than every run. The final reviewer's only write stays one comment on the pull request.
 - To complete a deliverable an agent left incomplete, continue that same session: it has read the material and knows
@@ -122,7 +125,9 @@ and not an identity rebase. While a pull request waits on a design round, its la
 You own the structure of the whole: each pull request can be reasonable while the whole drifts. After each merged
 package, or at each milestone, run `node tools/structure-report.mjs --json` and compare it with the last report kept
 in the evidence (`--compare`). When a signal shows a clear seam, plan the split or the folder move as its own pull
-request, scheduled between packages.
+request, scheduled between packages. Before a package, the brief names the signals and friction issues in the files
+it will touch, and HEAD 0 decides each ([Briefs](#briefs)); the check after the merge then finds only what the package
+added.
 
 Triage each [friction](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#report-what-cost-a-wrong-turn) line at the end of
 the package it arrived in, or at once when it blocks a lane or keeps wasting compute:
