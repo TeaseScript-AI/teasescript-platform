@@ -4703,10 +4703,19 @@ test("what both trees answered is compared where either left nodes unanswered, a
       ],
     );
     assert.deepEqual(crash.work.at(-1).total.crashed, { base: 0, head: 1 });
-    // (the stall index reads the named tree: the head's alone, a candidate)
-    const judged = spawnSync(process.execPath, [stalls, join(directory, "crash.work.jsonl")], {
-      encoding: "utf8",
-    });
+    // (the stall index reads the named tree: the head's alone, a candidate; its saved index keeps `at`)
+    const index = join(directory, "crash.index.json");
+    const judged = spawnSync(
+      process.execPath,
+      [stalls, join(directory, "crash.work.jsonl"), "--index", index],
+      { encoding: "utf8" },
+    );
+    assert.deepEqual(
+      JSON.parse(readFileSync(index, "utf8")).entries.map(
+        ({ source, at }: { source: string; at: unknown }) => [source, at],
+      ),
+      [["head-crash", { tree: "head", mode: "src-on", check: "publication" }]],
+    );
     const stalled = judged.stdout
       .trim()
       .split("\n")
@@ -4777,12 +4786,12 @@ test("the stall index prints a growth line per area: a series whose head-over-ba
     const ran = spawnSync(
       process.execPath,
       [runner, folder, built("base", false), built("head", true), "--work", work],
-      // (Node takes the last of two heaps)
+      // (Node takes the last of two heaps, its options split as Node splits them, the quotes removed)
       {
         encoding: "utf8",
         env: {
           ...process.env,
-          NODE_OPTIONS: "--max-old-space-size=2048 --max-old-space-size=3000",
+          NODE_OPTIONS: '--max-old-space-size=2048 --max_old_space_size="3000"',
         },
       },
     );

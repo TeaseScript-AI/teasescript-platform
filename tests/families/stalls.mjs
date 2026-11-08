@@ -655,8 +655,18 @@ for (const [place, was] of replay) {
   if (verdict !== undefined) row[verdict.verdict] += 1;
   if (is.stalled !== undefined) {
     row.unavailable += 1;
-    const { area, generator, source, key, stalled, runs } = is;
-    index.push({ area, generator, source, key, stalled, ...verdict, runs });
+    const { area, generator, source, key, stalled, at, runs } = is;
+    // (with the tree and run the stall names, #1965)
+    index.push({
+      area,
+      generator,
+      source,
+      key,
+      stalled,
+      ...(at === undefined ? {} : { at }),
+      ...verdict,
+      runs,
+    });
   }
 }
 const total = zeros();

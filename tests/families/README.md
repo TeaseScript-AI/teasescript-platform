@@ -35,7 +35,8 @@ What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise;
   runs, a stored base's crash), and, where the base's process ended, the head's own outcome on each later run
   (`afterBase`). A stored shard's line keeps a stall over the unit limit's cut run as its certificate (`cut`).
 - **Exit codes:**
-  - 0: nothing differs, throws, stalls, is left unanswered, uncompared or uncharged;
+  - 0: nothing differs, throws, stalls, is uncompared or uncharged, and every run left unanswered is left alike on both
+    trees (`unansweredAlike`);
   - 1: something to read: a difference, an exception, a stall (a crash of the base among them), or a run left
     unanswered, uncompared or uncharged;
   - 3: the head crashed where the base did not, ahead of 1 (#1837's F24);

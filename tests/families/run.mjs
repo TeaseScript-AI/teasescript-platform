@@ -18,10 +18,8 @@
 // (`uncharged`, named by its run, on stderr and in `--out`), never a stall, and the next source runs. A run
 // that throws on either tree is an exception, never compared (#1439): printed to stderr with its source, mode and
 // check, and kept with its stack in `--out`, as is a difference, also where the source stalls later. A publication whose
-// oracle left nodes unanswered at its own budget stop (`publicationHashes`'s `unanswered`) on either tree agrees only
-// where both trees left the same count unanswered and published the same parts up to it (`unansweredAlike`, #1592,
-// counted apart from agreement); any other is neither agreement nor a difference, and is counted apart (`unanswered`)
-// and kept in `--out`. With `--baseline`, the head alone runs, and each run is judged against the stored base result of
+// oracle left nodes unanswered on either tree is judged as the README's contract says (`judged`: a difference where
+// what both answered differs, else `unansweredAlike` or `unanswered`). With `--baseline`, the head alone runs, and each run is judged against the stored base result of
 // the same source, mode and check (a source with each run it does not hold is kept in `--out` as `uncompared`, never
 // agreement); `--store` runs one tree of a commit (sx-tree's, with `src/` and `.sha`) at the runner's defaults and
 // stores one shard of each source's results, one JSON line each, in the baseline of its `src/` tree (`baselines.mjs`),
@@ -135,6 +133,39 @@ function partHashes(oracle, files, mode, globals) {
     parts: [answers, record, ...occurrences, route].map((part) => hash(JSON.stringify(part))),
     unanswered: stopped?.unanswered ?? 0,
   });
+}
+
+/**
+ * The heap `options` (a `NODE_OPTIONS` value) asks, in MB, or none: its options as Node splits them (on spaces, a
+ * double-quoted part one token with its quotes removed and `\` escaping the next character in it), the last
+ * `--max-old-space-size` (or `_` for `-`) winning, its value after `=` or as the next option.
+ */
+function heapOf(options) {
+  const tokens = [];
+  let token = null;
+  let quoted = false;
+  for (let index = 0; index < options.length; index += 1) {
+    const char = options[index];
+    if (quoted && char === "\\") {
+      index += 1;
+      token = (token ?? "") + (options[index] ?? "");
+    } else if (char === '"') {
+      quoted = !quoted;
+      token ??= "";
+    } else if (!quoted && /\s/.test(char)) {
+      if (token !== null) tokens.push(token);
+      token = null;
+    } else token = (token ?? "") + char;
+  }
+  if (token !== null) tokens.push(token);
+  let heap;
+  for (const [index, option] of tokens.entries()) {
+    const named = /^--max[-_]old[-_]space[-_]size(?:=(.*))?$/.exec(option);
+    if (named === null) continue;
+    const value = named[1] ?? tokens[index + 1];
+    if (/^\d+$/.test(value ?? "")) heap = Number(value);
+  }
+  return heap;
 }
 
 /**
@@ -496,14 +527,7 @@ if (process.argv[2] === "--child") {
   // (each source's process gets `--memory` as its heap, whatever heap `NODE_OPTIONS` sets, as the central queue sets
   // one on every job: the total names `memory`, and beside it the heap `NODE_OPTIONS` asked where that differs, so the
   // override is never silent, #1956)
-  // (Node takes the last of several)
-  const asked = Number(
-    [
-      ...(process.env.NODE_OPTIONS ?? "").matchAll(
-        /(?:^|\s)--max[-_]old[-_]space[-_]size=(\d+)(?=\s|$)/g,
-      ),
-    ].at(-1)?.[1] ?? memory,
-  );
+  const asked = heapOf(process.env.NODE_OPTIONS ?? "") ?? memory;
   if (store !== undefined && options.has("only"))
     refused("--store stores whole shards: drop --only");
   const itemized = options.has("items") || options.has("items-from-env");
