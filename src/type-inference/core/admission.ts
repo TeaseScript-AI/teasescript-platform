@@ -27,7 +27,7 @@ import {
   ownReadItem,
   wholeBelow,
 } from "./admission/ingress.js";
-import { copyGraph } from "./admission/inherited.js";
+import { copyGraph } from "./inherited/inherited.js";
 import { typedByDefault } from "./admission/landing-index.js";
 import {
   joinElements,
@@ -69,7 +69,7 @@ import type { DeciderCaches, DeciderGroup, HeldInput } from "./admission/transfe
 import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
 import { joinSteps, keptSteps, type WorkLedger } from "./budget.js";
-import type { ReceivingDomain } from "./receiving-domain.js";
+import type { ReceivingDomain } from "./inherited/receiving-domain.js";
 import {
   arrayStrip,
   carried,

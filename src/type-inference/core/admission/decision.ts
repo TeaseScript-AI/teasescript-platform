@@ -26,7 +26,7 @@ import { marked } from "../guards.js";
 import { ingressLeaves, writerKey, type Item, type ItemTag } from "../items.js";
 import { addRest, aliasKeyAt, covers } from "./classes.js";
 import { hostRead, takeable, wholeOf } from "./eligibility.js";
-import { drive, inheritedAt, openAbove, openAboveKey, optionalOf } from "./inherited.js";
+import { drive, inheritedAt, openAbove, openAboveKey, optionalOf } from "../inherited/inherited.js";
 import {
   admitsNumber,
   concrete,

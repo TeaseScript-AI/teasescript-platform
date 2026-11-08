@@ -6,7 +6,7 @@ import { typeTags } from "../contract.js";
 import { keptKey, keyPlace, sortCost, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import { refText, Touches, type Touch, type TouchRef } from "../touch.js";
-import { inheritedAt } from "./inherited.js";
+import { inheritedAt } from "../inherited/inherited.js";
 import { compatible, concrete } from "./kinds.js";
 import { copiesOf, inheritance, membersOf } from "./landings.js";
 import type { InheritedCopy, LiveGroup, TouchPart, TouchPlace, TouchTask } from "./model.js";
