@@ -58,7 +58,6 @@ const TSV062_REASON = "a static warning of S9b's otherwise (#1737)";
 const U4_REASON = "U4's consumer remainder (#2025)";
 const OUTLIER_REASON = "a fixture expectation awaiting its ruling (#2025)";
 const CROSS_REASON = "the numeric crossover (#1173, #2025)";
-const DEFECT_REASON = "a fixture expectation defect (#2025)";
 const CTX_REASON = "a context word under an unrelated test (#2024)";
 /** A held record: why it is held, and the differences from its record the analysis gives in every mode. */
 export interface S10Hold {
@@ -430,18 +429,6 @@ export const HELD_S10_RECORDS: ReadonlyMap<string, S10Hold> = new Map([
         "extra diagnostic integer-use warning-runtime-check main.tease:197-218 ×1",
         "extra check integer-check archive.element.data.v0 [integer] main.tease:165-186 ×1",
         "extra check integer-check archive.element.data.v1 [integer] main.tease:197-218 ×1",
-      ],
-    },
-  ],
-  [
-    "cp9-cells/3b/loop/break/changed",
-    {
-      reason: DEFECT_REASON,
-      differences: [
-        "outcome warning-runtime-check, got valid",
-        "missing diagnostic integer-use warning-runtime-check main.tease:101-102 ×1",
-        "missing context integer-use warning-runtime-check main.tease:101-102 loop ×1",
-        "missing check null-check n [integer] main.tease:101-102 ×1",
       ],
     },
   ],
