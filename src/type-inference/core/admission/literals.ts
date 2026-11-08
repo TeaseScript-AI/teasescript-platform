@@ -1994,8 +1994,8 @@ const LAYERS = new WeakMap<
 >();
 /**
  * Per pass, `layersOf`'s keys and answers for the dict fact (#1762), as `LAYERS` holds the null fact's. Apart from
- * `SET_LAYERS`: a value's answer is kept from its second ask under a key and a sentence asks dict, then set, once each,
- * so one shared memo would give a third ask the other fact's answer.
+ * `SET_LAYERS`: the answers last the pass, so a later sentence over the same values (a growing join's) reads what an
+ * earlier one kept, and a shared memo would give a set ask a dict answer (Codex r1 on #2017).
  */
 const DICT_LAYERS = new WeakMap<
   object,
