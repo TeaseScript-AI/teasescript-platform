@@ -19,7 +19,8 @@ import { stepName } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { Alias, ChainEnd } from "./model.js";
 import { permittedAt } from "./permitted.js";
-import { writtenSource } from "./walk.js";
+import { writtenSourceRead } from "./walk.js";
+import type { Reads } from "../inherited/reads.js";
 
 // Alias classes (S6-CARRIERS §4.1): the class of a whole store or an add, by its stable source path and chain end.
 
@@ -61,12 +62,12 @@ export function aliasKeyAt(contract: Contract, alias: Alias, asked: Rest): Key |
  * key's own list (`wholeOf`): their earliest as the representative, the later ones its members (`members`); a scan
  * or a check reads the representative, and a member only where it owes something.
  */
-export function grouped(admission: Admission, list: readonly Definition[]): Definition[] {
+export function* grouped(admission: Admission, list: readonly Definition[]): Reads<Definition[]> {
   const out: Definition[] = [];
   const first = new Map<string, Definition>();
   for (const d of list) {
     admission.pass.program.work.charge("indexSteps");
-    const key = aliasKey(admission, d);
+    const key = yield* aliasKey(admission, d);
     const representative = key === null ? undefined : first.get(key);
     if (representative === undefined) {
       if (key !== null) {
@@ -92,7 +93,7 @@ export function grouped(admission: Admission, list: readonly Definition[]): Defi
  * the written type A4 decides the copy by: stores of one class bring equal answers below the path, their own guards
  * apart (a literal's only below its cell, `covers`); `null` for any other store (an own entry).
  */
-function aliasKey(admission: Admission, d: Definition): string | null {
+function* aliasKey(admission: Admission, d: Definition): Reads<string | null> {
   const { program, lists, handlers, contract } = admission.pass;
   if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined || !sharing()) return null;
   program.work.charge("aliasSteps");
@@ -140,7 +141,7 @@ function aliasKey(admission: Admission, d: Definition): string | null {
     handlers.afterSomeCreation(read.read) ? "h" : "",
     // (the member's own copied binding's written type at its read, A4's decider, whatever its chain resolves to:
     // `let b: integer[] = raw` is no `let a = raw`, TABLE r4.72)
-    writtenDomainKey(admission, alias),
+    yield* writtenDomainKey(admission, alias),
     // (what its read's narrowing makes of its answer, S10 part 2b)
     admission.pass.values.narrowingMark(alias.value),
   ].join("|");
@@ -152,8 +153,8 @@ function aliasKey(admission: Admission, d: Definition): string | null {
  * into it (`inheritedAt`), `null` where the copied binding has none; the member's own, never its chain's end's
  * (TABLE r4.72, Astra r5 B1).
  */
-function writtenDomainKey(admission: Admission, alias: Alias): string {
-  const written = writtenSource(admission, alias.value, []);
+function* writtenDomainKey(admission: Admission, alias: Alias): Reads<string> {
+  const written = yield* writtenSourceRead(admission, alias.value, []);
   if (written === null) return "null";
   if (written.from !== null)
     return `inherits ${written.from} ${keptText(admission.work, written.strip)}`;
