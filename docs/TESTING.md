@@ -301,12 +301,14 @@ and `$`:
 
 On a pull request, CI's `check-1` runs the cases it declares against its base after its build
 (`tools/repository-checks/regression-cases.mjs`), and nothing else of the base: not `check:pretest`, other tests, or the
-cost table. Each must fail there with that line, and one that passes, fails for another reason, does not finish, or
-does not run fails the job. A case of another pull request is skipped when that one is merged into the base (a commit
-subject ending `(#N)` in the base's `git log`), and refused otherwise, so a stacked pull request that changes a file
-holding its unmerged parent's cases is refused. Name what the fix adds by string (`{ name: "ForeignSessionError" }`), not by
-import, or the file does not load at the base. The base is compiled with `tsc` alone, so a case in a file that needs the
-Player's test bundles does not run there. Declaring is opt-in; no rule requires it. The step is in `check-1`, which had
+cost table. Each must fail there with that line, and one that passes, fails for another reason, does not finish, or does
+not run fails the job. A case of another pull request is skipped when that one is merged into the base (a commit subject
+ending `(#N)` in the base's `git log`), and refused otherwise, so a stacked pull request that changes a file holding its
+unmerged parent's cases is refused. Name what the fix adds by string (`{ name: "ForeignSessionError" }`), not by import,
+or the file does not load at the base. The base is compiled with `tsc` and its Player test bundles are built, so a case
+may load a Player module (`tests/helpers/player-modules.ts`). Not covered: a case that loads a module the head adds to
+the bundles' list (`player/vue/vite.test-modules.config.ts`) does not run at the base, and the base is compiled and
+bundled with the head's `node_modules`. Declaring is opt-in; no rule requires it. The step is in `check-1`, which had
 the most room before the slowest job in the first three-job runs (42425098809, 42425942185 and 42426219880: 98, 16 and
 144 s; `check-2` 94, 135 and 0 s; `check-3`, which also runs `check:pretest`, 0, 0 and 122 s).
 

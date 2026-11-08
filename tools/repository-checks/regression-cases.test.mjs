@@ -160,6 +160,35 @@ regressionCase("the error is the fix's class", { pr: 7, atBase: /.*/ }, () => {
   assert.throws(() => new Bridge().latest({}), ForeignSessionError);
 });
 `;
+// a Player module the tests load from the bundles (`tests/helpers/player-modules.ts`): the base's must be built
+const CLOCK_BASE =
+  "export const minutes = (seconds: number): number => Math.round(seconds / 60);\n";
+const CLOCK_HEAD =
+  "export const minutes = (seconds: number): number => Math.floor(seconds / 60);\n";
+const BUNDLES_CONFIG = `import { fileURLToPath, URL } from "node:url";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  root: fileURLToPath(new URL("../..", import.meta.url)),
+  logLevel: "warn",
+  publicDir: false,
+  build: {
+    ssr: true,
+    outDir: "dist/player-test-modules",
+    emptyOutDir: true,
+    rolldownOptions: { input: { "player/clock": "player/clock.ts" }, output: { entryFileNames: "[name].js" } },
+  },
+});
+`;
+const PLAYER = `import assert from "node:assert/strict";
+import { loadPlayerModule } from "./helpers/player-modules.js";
+import { regressionCase } from "./helpers/regression-case.js";
+
+regressionCase("a minute and a half shows one minute", { pr: 7, atBase: /#7 minutes of 90 s/ }, async () => {
+  const { minutes } = (await loadPlayerModule("player/clock.ts")) as { minutes: (seconds: number) => number };
+  assert.equal(minutes(90), 1, "#7 minutes of 90 s");
+});
+`;
 
 test(
   "the declared cases of a pull request run against its base, and each must fail there as it declares",
@@ -188,9 +217,13 @@ test(
           include: ["src/**/*.ts", "tests/**/*.ts"],
         }),
         "src/bridge.ts": BRIDGE_BASE,
-        "tests/helpers/regression-case.ts": readFileSync(
-          join(repositoryRoot, "tests/helpers/regression-case.ts"),
-          "utf8",
+        "player/clock.ts": CLOCK_BASE,
+        "player/vue/vite.test-modules.config.ts": BUNDLES_CONFIG,
+        ...Object.fromEntries(
+          ["tests/helpers/regression-case.ts", "tests/helpers/player-modules.ts"].map((path) => [
+            path,
+            readFileSync(join(repositoryRoot, path), "utf8"),
+          ]),
         ),
       });
       symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
@@ -199,8 +232,10 @@ test(
       const base = git("rev-parse", "HEAD");
       write(root, {
         "src/bridge.ts": BRIDGE_HEAD,
+        "player/clock.ts": CLOCK_HEAD,
         "tests/bridge.test.ts": CASES,
         "tests/imports.test.ts": IMPORTS,
+        "tests/player.test.ts": PLAYER,
       });
       git("add", "-A");
       git("commit", "-q", "-m", "Refuse a session of another bridge");
@@ -233,7 +268,7 @@ test(
       assert.match(
         result.stdout,
         new RegExp(
-          `^regression-cases: 1 of 4 cases of #7 fail at ${base.slice(0, 12)} as they declare; historical cases of #3 skipped\\n$`,
+          `^regression-cases: 2 of 5 cases of #7 fail at ${base.slice(0, 12)} as they declare; historical cases of #3 skipped\\n$`,
           "u",
         ),
       );

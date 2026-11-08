@@ -26,18 +26,20 @@ import { fileURLToPath } from "node:url";
 //    `y` flag, and a name its file has once.
 // 3. A case of `--pr` is checked. A case of another pull request is one merged into the base (a commit subject ending
 //    `(#N)` in `git log <base>`) and is skipped; any other number is refused.
-// 4. A detached worktree of the base gets the head's `tests/` in place of its own and the head's `node_modules`, and is
-//    compiled with `tsc` (which emits despite type errors, as a test naming what the fix adds has one at the base). Its
-//    compiled files run with `REGRESSION_CASES=base`, each case alone; `node:test`'s own events give each outcome.
+// 4. A detached worktree of the base gets the head's `tests/` in place of its own and the head's `node_modules`. It is
+//    compiled with `tsc` (which emits despite type errors, as a test naming what the fix adds has one at the base), and
+//    its Player test bundles, which `tests/helpers/player-modules.ts` loads, are built with
+//    `vite build --config player/vue/vite.test-modules.config.ts`. Its compiled files run with `REGRESSION_CASES=base`,
+//    each case alone; `node:test`'s own events give each outcome.
 // 5. `verdict` judges each case: a witness when it failed in its own code with an error whose message's first line
 //    `atBase` matches whole. Anything else is not: it passed, failed for another reason, did not finish (cancelled,
 //    timed out, a hook failed), or did not run (no event, as when its file does not load at the base).
 //
-// Bounded: the base is compiled with `tsc` alone, so a case whose file needs the Player's test bundles
-// (`dist/player-test-modules`) does not run there, and is reported so.
+// Bounded: a case that loads a module the head adds to the bundles' list does not run at the base, as one that imports
+// what the fix adds, and is reported so; and the base is compiled and bundled with the head's `node_modules`.
 //
 // Exit status: 0 when every checked case is a witness, 1 when one is not or a declaration is refused, 2 when it cannot
-// run (a missing option, a base it cannot check out or compile).
+// run (a missing option, a base it cannot check out, compile or bundle).
 
 const root = process.cwd();
 
@@ -84,7 +86,8 @@ export function verdict(cases, outcomes, loadErrors) {
 /** The explanation of each verdict but `witness`, in the line a case that is not one gets. */
 const EXPLAINED = {
   passed: "passed at the base, so it does not witness the defect",
-  "other failure": "failed at the base for another reason than `atBase` names; its error's first line",
+  "other failure":
+    "failed at the base for another reason than `atBase` names; its error's first line",
   "did not finish": "did not finish at the base",
   "did not run": "did not run at the base",
 };
@@ -231,6 +234,20 @@ async function main(argv) {
     if (build.signal !== null || ![0, 1, 2].includes(build.status))
       throw new CannotRun(
         `compiling the base failed (${build.signal ?? `exit ${build.status}`}):\n${build.stderr}`,
+      );
+    const bundles = spawnSync(
+      process.execPath,
+      [
+        join(root, "node_modules/vite/bin/vite.js"),
+        "build",
+        "--config",
+        "player/vue/vite.test-modules.config.ts",
+      ],
+      { cwd: worktree, encoding: "utf8" },
+    );
+    if (bundles.status !== 0)
+      throw new CannotRun(
+        `building the base's Player test bundles failed (${bundles.signal ?? `exit ${bundles.status}`}):\n${bundles.stdout}${bundles.stderr}`,
       );
     process.env.REGRESSION_CASES = "base";
     const files = [...new Set(own.map(({ file }) => file))];
