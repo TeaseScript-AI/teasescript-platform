@@ -16,10 +16,10 @@ import { shardFiles } from "./test-shards.mjs";
 // runners vary. A run counts its last attempt (re-running a run removes its earlier attempts' artifacts).
 //
 // Without it, the build, the full suite in `npm test`'s order and concurrency, and then `check:pretest` (after the
-// suite, with the new seconds written: `test:verification` refuses weights that miss a type-core file) run here, for a
-// local look: in a built checkout, on four CPUs as CI's runners have (`taskset -c 0-3`), on a machine nothing else loads,
-// with a Node compile cache as in CI, a fresh one unless `NODE_COMPILE_CACHE` names one. Such seconds do not predict
-// CI's (#1719). A failed step or test leaves the module as it was.
+// suite, with the new seconds written: `test:verification` checks that every listed file exists, costliest first) run
+// here, for a local look: in a built checkout, on four CPUs as CI's runners have (`taskset -c 0-3`), on a machine
+// nothing else loads, with a Node compile cache as in CI, a fresh one unless `NODE_COMPILE_CACHE` names one. Such
+// seconds do not predict CI's (#1719). A failed step or test leaves the module as it was.
 const usage =
   "Usage: node tools/measure-test-files.mjs [--write] [--raw FILE] [--from-ci RUN ...]\n";
 const argv = process.argv.slice(2);
