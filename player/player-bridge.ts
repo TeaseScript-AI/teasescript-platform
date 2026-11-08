@@ -18,6 +18,7 @@ import type {
   ReadOps,
   StopReply,
   ExportCaptureReply,
+  ExportIdentity,
 } from "./engine-bridge/session-protocol.js";
 import type { PreparedExport } from "./engine-bridge/recording/export-replay.js";
 import type { StopArguments } from "./engine-bridge/recording/export-observation.js";
@@ -102,6 +103,17 @@ export interface SessionSection {
  * them. Every reply's publication goes to its session's store as it arrives (`ReplyHook`), so the store applies
  * publications in the host's order also when a transport delivers some early (the in-process facade's flush).
  */
+/** Whether `view`, the store's view of a session, is the publication `identity` names, with its stop identity. */
+function matches(view: PlayerSession | null, identity: ExportIdentity): boolean {
+  return (
+    view !== null &&
+    view.revision === identity.revision &&
+    view.events.length === identity.eventsThrough &&
+    view.diagnostic.run === identity.run &&
+    view.diagnostic.stop === identity.stop
+  );
+}
+
 export class PlayerBridge {
   readonly #client: BridgeClient;
   /**
@@ -297,8 +309,10 @@ export class PlayerBridge {
 
   /**
    * Captures a debug export of `session`, or of none, with the recording `recording` selects (`captureExport`), after the
-   * session's earlier requests. `deliver` decides the candidate in the reply's hook, with the store's view of the session
-   * then: before the request's promise resolves and before another reply applies.
+   * session's earlier requests. In the reply's hook, before the request's promise resolves and before another reply
+   * applies, a capture of a session is matched against the store's view of it then: its revision, event boundary and
+   * diagnostic identity. One that does not match, as after a publication the page never received, is refused
+   * (`identity`) and released. `deliver` then decides the candidate with that view.
    */
   async captureExport<T>(
     session: PlayerSession | null,
@@ -315,7 +329,11 @@ export class PlayerBridge {
         onReply: (result) => {
           // EVIDENCE: validation: `captureExport` replies from the same build with `ExportCaptureReply`.
           const reply = result.result as ExportCaptureReply;
-          delivered = { value: deliver(reply, session === null ? null : this.latest(session)) };
+          const view = session === null ? null : this.latest(session);
+          if (session !== null && reply.kind === "captured" && !matches(view, reply.identity)) {
+            void this.releaseRecording(reply.ticket).catch(() => {});
+            delivered = { value: deliver({ kind: "refused", reason: "identity" }, view) };
+          } else delivered = { value: deliver(reply, view) };
         },
       },
     );

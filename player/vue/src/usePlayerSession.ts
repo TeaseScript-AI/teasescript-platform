@@ -2832,10 +2832,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Player error, the recording up to the error is kept for the debug export first. Its callers await what it returns.
    */
   /**
-   * Decides a debug export's capture in its reply's hook (`captureExport`): it is the candidate only while the dialog
-   * wants it, no stop is under way here, and it matches what shows. For a session: the shown lineage, and the store
-   * view's revision, event boundary and diagnostic identity; for none: the same run, and still no session. Events and
-   * transcript come from that store view, marks and incident only from the capture. Otherwise its ticket is released.
+   * Decides a debug export's capture in its reply's hook (`captureExport`, which matched a session's capture against the
+   * store's view): it is the candidate only while the dialog wants it, no stop is under way here, and it is of what
+   * shows: the shown lineage, or for no session, the same run and still no session. Events and transcript come from the
+   * store's view, marks and incident only from the capture. Otherwise its ticket is released.
    */
   function deliverExport(
     host: PlayerBridge,
@@ -2852,12 +2852,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const matches =
       current === null
         ? session.value === null && identity.run === run
-        : view !== null &&
-          session.value?.lineage === current.lineage &&
-          view.revision === identity.revision &&
-          view.events.length === identity.eventsThrough &&
-          view.diagnostic.run === identity.run &&
-          view.diagnostic.stop === identity.stop;
+        : view !== null && session.value?.lineage === current.lineage;
     if (!live() || halting.value || !matches) {
       release();
       return null;

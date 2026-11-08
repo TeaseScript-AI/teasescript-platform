@@ -112,8 +112,7 @@ export interface ExportIdentity {
 
 /**
  * A debug export's capture (`captureExport`): frozen under `ticket` with the shown session's state, marks and failure,
- * the run's incident and the selected recording; `pending` while a stop of the run commits (retry); `refused` when the
- * current recording's provenance is not proved.
+ * the run's incident and the selected recording; `pending` while a stop of the run commits (retry); `refused` with why.
  */
 export type ExportCaptureReply =
   | {
@@ -127,7 +126,11 @@ export type ExportCaptureReply =
       readonly recording: DebugRecording | null;
     }
   | { readonly kind: "pending" }
-  | { readonly kind: "refused" };
+  /**
+   * The capture is no candidate: the host could not prove the current recording's provenance, or (on the main side,
+   * `PlayerBridge.captureExport`) the store's view of the session is not the publication the host observed.
+   */
+  | { readonly kind: "refused"; readonly reason: "provenance" | "identity" };
 
 /**
  * The host's session-free reads (`PlayerBridge.read`), each op with its arguments and its result: a read of an op this

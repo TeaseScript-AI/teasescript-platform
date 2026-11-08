@@ -2,9 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compilePlayerProject } from "../player/compile-project.js";
-import { connectBridge } from "../player/engine-bridge/client.js";
+import { connectBridge, openBridge, type ClientPort } from "../player/engine-bridge/client.js";
+import {
+  closeConnection,
+  playerBridgeOps,
+  playerOpsContext,
+} from "../player/engine-bridge/player-ops.js";
+import { decodeMessage } from "../player/engine-bridge/transport.js";
+import {
+  startBridgeHost,
+  type HostPort,
+  type HostSessions,
+} from "../player/engine-bridge/worker-host.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import { PlayerBridge } from "../player/player-bridge.js";
+import { activePlayerRuntimeInteraction } from "../player/runtime-view.js";
 import {
   formObligations,
   malformedArguments,
@@ -359,4 +371,81 @@ test("a recording capture answers for the session whose engine began the recordi
     ),
     [],
   );
+});
+
+/** A connection of production parts whose port fails the next success post of one op, as `player-history-ops`' does. */
+function failingConnection() {
+  const context = playerOpsContext();
+  const opOf = new Map<number, string>();
+  let failing: string | null = null;
+  let toHost: ((data: unknown) => void) | null = null;
+  let toClient: ((data: unknown) => void) | null = null;
+  const hostPort: HostPort = {
+    post: (message) => {
+      const data = decodeMessage(structuredClone(message));
+      // EVIDENCE: fixture: this port carries only the messages the host posts, each with these fields where it has them.
+      const reply = data as { kind?: string; id?: number; ok?: boolean };
+      if (reply.kind === "reply" && reply.ok === true && opOf.get(reply.id!) === failing) {
+        failing = null;
+        throw new Error("injected: the success post fails");
+      }
+      queueMicrotask(() => toClient?.(data));
+    },
+    listen: (listener) => void (toHost = listener),
+  };
+  let sessions: HostSessions | null = null;
+  const clientPort: ClientPort = {
+    post: (message) => {
+      // EVIDENCE: fixture: this port carries only the client's requests, each with its ID and op.
+      const request = decodeMessage(structuredClone(message)) as { id: number; op: string };
+      opOf.set(request.id, request.op);
+      toHost?.(request);
+    },
+    listen: (listener) => void (toClient = listener),
+    onFailure: () => {},
+    terminate: () => closeConnection(context, sessions!),
+  };
+  const { client } = openBridge(clientPort, BUILD);
+  sessions = startBridgeHost(hostPort, playerBridgeOps(context), BUILD, context.delivery);
+  return {
+    bridge: new PlayerBridge(client),
+    context,
+    failPost: (op: string) => void (failing = op),
+  };
+}
+
+test("an answer whose reply failed to post leaves the host ahead: an export of that session is refused by identity, holding nothing", async () => {
+  const link = failingConnection();
+  const { bridge, context } = link;
+  await bridge.beginRun(1, null);
+  const plan = await preparedPlan(
+    Promise.resolve(bridge),
+    compilePlayerProject('let first = askText "First?"\nlet second = askText "Second?"\nexit')
+      .plan!,
+  );
+  const session = await bridge.start(plan, { wallClockMs: 0 }, true);
+  const exportOf = () =>
+    bridge.captureExport(session, "current", (reply, view) => ({
+      kind: reply.kind,
+      reason: reply.kind === "refused" ? reply.reason : null,
+      revision: view?.revision ?? null,
+    }));
+  link.failPost("submitComposer");
+  const answerOf = (text: string) => {
+    const shown = bridge.latest(session)!;
+    const actionId = activePlayerRuntimeInteraction(shown.state)?.actionId;
+    assert.ok(actionId !== undefined, "a question is asked");
+    return bridge.request(session, "submitComposer", { actionId, text, input: null });
+  };
+  await assert.rejects(answerOf("one"), /injected: the success post fails/u);
+  // The engine ran the answer; the page never received its publication.
+  const refused = await exportOf();
+  assert.deepEqual(refused, { kind: "refused", reason: "identity", revision: 1 });
+  // A later request runs after the release the refusal sent.
+  await bridge.client.request("releaseRecording", { ticket: "r0" });
+  assert.equal(context.recordings.size, 0, "the refused capture holds nothing");
+  // The page stays at the question it was shown: its answer to it is stale in the host, which publishes nothing it
+  // could apply, so the export stays refused, never of a state the page did not show.
+  assert.deepEqual(await answerOf("two"), { kind: "staleAction", actionId: 1 });
+  assert.deepEqual(await exportOf(), { kind: "refused", reason: "identity", revision: 1 });
 });

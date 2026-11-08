@@ -158,7 +158,9 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
         else if (held !== null) {
           const capture = context.recorder.capture(held.publication.engine);
           if (capture.kind === "stale")
-            return { result: { kind: "refused" } satisfies ExportCaptureReply };
+            return {
+              result: { kind: "refused", reason: "provenance" } satisfies ExportCaptureReply,
+            };
           if (capture.kind === "captured") recording = capture.recording;
         }
         const current = held?.sessionForOperation() ?? null;
