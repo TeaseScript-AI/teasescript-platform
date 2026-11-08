@@ -12,6 +12,14 @@ export function checkedFiles() {
   return lintFiles();
 }
 
+/** Vue's parse errors in a `.vue` file's `text`, each a message; none for another file. */
+export function sfcErrorsOf(fileName, text) {
+  if (!fileName.endsWith(".vue")) return [];
+  return parseSfc(text, { filename: fileName, sourceMap: false }).errors.map(
+    (error) => error.message,
+  );
+}
+
 /**
  * `text`'s scripts, each parsed, with where its text starts in the file: after `lineOffset` lines, and on that line
  * after `columnOffset` columns (both 0 for a whole file). Vue's parser finds a `.vue` file's blocks, so a `>` in an

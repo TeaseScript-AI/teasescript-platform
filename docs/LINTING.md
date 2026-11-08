@@ -40,7 +40,8 @@ findings of these rules wait for another open pull request or a cleanup are a [w
 - The `correctness` category's other type-aware rules are off: this policy has not chosen them, and `.oxlintrc.json`
   lists them.
 - `.vue` files: these four rules do not reach them, because tsgolint reads only the TypeScript program. oxlint's other
-  rules and the [exception check](#evidence-and-exceptions) read their `<script>` blocks, as Vue's parser finds them.
+  rules read their `<script>` blocks with its own loader. The [exception check](#evidence-and-exceptions) reads them
+  as Vue's parser finds them, and refuses a lint directive in a file that Vue cannot parse.
   Vue handles a promise that a component's template handler, `watch` callback or lifecycle hook returns: a rejection in
   a component inside `PlayerApp.vue` reaches `PlayerApp.vue`'s `onErrorCaptured`, which reports it, and one in
   `PlayerApp.vue`'s own reaches Vue's default handler, as no `app.config.errorHandler` is set. #2023 lists the

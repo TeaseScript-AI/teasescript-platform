@@ -1,6 +1,6 @@
 import { ts } from "ts-morph";
 
-import { scriptsOf } from "./comments.mjs";
+import { scriptsOf, sfcErrorsOf } from "./comments.mjs";
 
 const blanketRuleNames = new Set([
   "all",
@@ -87,6 +87,22 @@ function validateAllowedDirective(text) {
  */
 export function checkEvidenceComments(fileName, sourceText) {
   if (!fileName.endsWith(".vue")) return checkScript(fileName, sourceText);
+  // A block that Vue's parser refuses is not among the scripts below, though oxlint lints it: a file Vue cannot parse
+  // may hold no lint directive.
+  const [error] = sfcErrorsOf(fileName, sourceText);
+  const directive =
+    error === undefined ? null : /(?:oxlint|eslint)-(?:disable|enable)/u.exec(sourceText);
+  if (directive !== null) {
+    const before = sourceText.slice(0, directive.index).split("\n");
+    return [
+      {
+        fileName,
+        line: before.length,
+        column: before.at(-1).length + 1,
+        message: `Vue cannot parse this file (${error}), so its lint directives cannot be checked: fix the file, or remove the directive.`,
+      },
+    ];
+  }
   return scriptsOf(fileName, sourceText).flatMap(({ text, lineOffset, columnOffset }) =>
     checkScript(fileName, text).map((diagnostic) => ({
       ...diagnostic,

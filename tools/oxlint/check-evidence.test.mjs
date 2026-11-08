@@ -178,3 +178,17 @@ test("finds a .vue file's script blocks as Vue does, and reports at the file's l
     [{ line: 3, column: 12 }],
   );
 });
+
+test("refuses a lint directive in a .vue file that Vue cannot parse, whose blocks it cannot all read", () => {
+  const at = (sourceText) =>
+    checkEvidenceComments("Fixture.vue", sourceText).map(({ line, column }) => ({ line, column }));
+  // Vue keeps one `<script>` of two, but oxlint lints both: the second's exception is refused all the same
+  assert.deepEqual(
+    at(
+      "<script>export default {};</script>\n<script>// oxlint-disable-next-line no-debugger -- EVIDENCE: a fixture\ndebugger;</script>",
+    ),
+    [{ line: 2, column: 12 }],
+  );
+  // a file Vue cannot parse that holds no directive, as a deliberately refused fixture
+  assert.deepEqual(at('<script setup src="./setup.ts"></script>\n'), []);
+});
