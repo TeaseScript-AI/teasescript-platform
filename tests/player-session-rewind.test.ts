@@ -82,6 +82,8 @@ interface RewindHost {
     }) => PlayerRuntimeSession,
   ): void;
   activate(): void;
+  reportHostError(error: unknown): void;
+  readonly hostError: Readonly<Ref<string | null>>;
   toStartPage(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   prepareInput(): true | Promise<boolean>;
@@ -126,6 +128,7 @@ interface RewindHost {
     } | null;
     readonly rewoundWhileDebugging: { restoredSceneTimeMs: number; rewindCount: number } | null;
     readonly editedWhileDebugging: { firstEditSceneTimeMs: number; editCount: number } | null;
+    readonly hostError: string | null;
   }>;
 }
 interface Rewind {
@@ -2453,4 +2456,49 @@ test("an export while a rewind gate is pending takes the shown publication's mar
     open();
     await settle(subtest);
   });
+});
+
+/*
+ * L5h.3b's export observation over the Player's activations (§21.4 family 1): a Player error's incident is the run's.
+ * A rewind keeps it, as it keeps the run; the next Start begins a run without one; a retired dialog gets no candidate.
+ */
+test("a debug export's incident is the run's: kept through Back and Return, gone with the next Start", async (context) => {
+  const exported = async (host: RewindHost, live = () => true) => {
+    const candidate = await host.debugExportCandidate(() => ({}), live);
+    // EVIDENCE: fixture: the composable returns `null` for a refused candidate; the local type does not name it.
+    const nullable = candidate as typeof candidate | null;
+    return nullable === null
+      ? null
+      : {
+          hostError: nullable.hostError,
+          rewound: nullable.rewoundWhileDebugging?.rewindCount ?? 0,
+        };
+  };
+  const made = createHost(context, memoryStorage().provider);
+  const { host, rewind } = made;
+  await start(context, host);
+  await choose(context, host, "One");
+  assert.deepEqual(await exported(host), { hostError: null, rewound: 0 });
+  host.reportHostError(new TypeError("A component failed."));
+  await settle(context);
+  assert.equal(host.hostError.value, "TypeError");
+  assert.deepEqual(await exported(host), { hostError: "TypeError", rewound: 0 });
+  assert.equal(await backTo(rewind, 0), true);
+  assert.deepEqual(
+    await exported(host),
+    { hostError: "TypeError", rewound: 1 },
+    "Back keeps the run",
+  );
+  assert.equal(await rewind.returnToSession(), true);
+  await settle(context);
+  assert.deepEqual(await exported(host), { hostError: "TypeError", rewound: 0 }, "Return keeps it");
+  // A dialog that no longer wants the candidate gets none (its ticket's release is the bridge's family's).
+  assert.equal(await exported(host, () => false), null);
+  await start(context, host);
+  assert.equal(host.hostError.value, null);
+  assert.deepEqual(
+    await exported(host),
+    { hostError: null, rewound: 0 },
+    "a new run has no incident",
+  );
 });
