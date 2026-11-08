@@ -719,7 +719,9 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
       "if b != null {\n  c = b\n}\na = c\nb = [1]\nlet value = a[0]\nexit\n",
     {
       record: "87391b2d85943354",
-      upToOrder: "3a0cd1e7a8ab7743",
+      // (#2024: the two reads of `b` under `b != null`, the test and `c = b`, carry the word their read without the
+      // test names, `branch`; the record is unchanged)
+      upToOrder: "34cd1b50ee9af2ed",
       compact: [
         "warning-runtime-check",
         "warning-runtime-check TSV043 12-21",
