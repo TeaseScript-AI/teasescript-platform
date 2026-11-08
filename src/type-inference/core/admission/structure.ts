@@ -22,6 +22,7 @@ import { withoutEmpty } from "../exact-path.js";
 import { dictList } from "../method-categories.js";
 import { propertyStep } from "../program.js";
 import type { Structure } from "./model.js";
+import { readNow, type Reads } from "../inherited/reads.js";
 
 // The own structures of stored values and source keys (F2): their literals' fields and elements, depths, landings.
 
@@ -30,6 +31,11 @@ import type { Structure } from "./model.js";
  * elements (r4.46 (2)); `null` for any other value and for a dict's `keys`, which hold text.
  */
 export function sourceOf(admission: Admission, value: PlaceId): CanonicalKey | null {
+  return readNow(sourceOfRead(admission, value));
+}
+
+/** `sourceOf` with its dict owners' contracts reads (`Read`, #1072 A2). */
+export function* sourceOfRead(admission: Admission, value: PlaceId): Reads<CanonicalKey | null> {
   const { contract, program } = admission.pass;
   const found = contract.copiedKey(value) ?? contract.resultKey(value);
   if (found === null) return null;
@@ -44,7 +50,8 @@ export function sourceOf(admission: Admission, value: PlaceId): CanonicalKey | n
     const list = dictList(step);
     if (list !== undefined) {
       program.work.charge("indexSteps");
-      const owner = withoutEmpty(admission.run(contract.contractOf(walk.prefix(index))));
+      const prefix = walk.prefix(index);
+      const owner = withoutEmpty(yield* admission.runRead(() => contract.contractOf(prefix)));
       if (owner.some((item) => item.tag === "dict")) {
         if (list === "keys") return null;
         continue;
