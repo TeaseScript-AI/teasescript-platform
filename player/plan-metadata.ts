@@ -1,4 +1,5 @@
 import type { InstructionPlan } from "../src/plan/model.js";
+import { listRandomSites, type RandomSite } from "../src/playback.js";
 import { evaluateTagSteps } from "../src/tag-query.js";
 
 // What the Player reads from a plan before it runs, without the compiler: the engine Worker reports it with the plan.
@@ -38,4 +39,25 @@ export function planLockNeeds(plan: InstructionPlan): {
       (instruction.call === "encryptText" || instruction.call === "encryptFile"),
   );
   return { locks, encrypts };
+}
+
+/** What the Player reads from a plan the Worker holds, sent with the plan's token instead of the plan. */
+export interface PlanMetadata {
+  /** The plan's script files, in plan order. */
+  readonly files: readonly string[];
+  readonly stageImages: readonly string[];
+  readonly randomSites: readonly RandomSite[];
+  /** Whether the script locks or opens anything, and whether it encrypts. */
+  readonly locks: boolean;
+  readonly encrypts: boolean;
+}
+
+/** What the Player reads from a plan, sent with its token. */
+export function planMetadata(plan: InstructionPlan): PlanMetadata {
+  return {
+    files: plan.files.map((file) => file.path),
+    stageImages: playerRuntimeStageImages(plan),
+    randomSites: listRandomSites(plan),
+    ...planLockNeeds(plan),
+  };
 }

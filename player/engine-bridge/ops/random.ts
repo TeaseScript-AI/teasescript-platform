@@ -6,13 +6,13 @@ import { checkedOutcome } from "../../../src/runtime/random/random-kinds.js";
 import { resumePlayerRuntimeRandomDraw } from "../../runtime-adapter.js";
 import type { RandomTried } from "../../random-decisions.js";
 import { everyItem, exactly, isRecord } from "../argument-checks.js";
+import { type PlayerOpsContext } from "../player-ops.js";
 import {
   alignRandom,
   isRandomIntent,
   ownedRandom,
-  type PlayerOpsContext,
   type RandomIntent,
-} from "../player-ops.js";
+} from "../connection-state.js";
 import type { BridgeOps } from "../worker-host.js";
 import { heldSession } from "./persistence.js";
 import { HeldSession, publishing, sessionOp } from "./session.js";

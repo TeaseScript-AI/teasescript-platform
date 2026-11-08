@@ -1,12 +1,8 @@
 import { debugViewOf, type DebugTreeState, type DebugViewRequest } from "../../debug-view.js";
 import { setPlayerRuntimeDebugMode } from "../../runtime-adapter.js";
 import { exactly, isRecord } from "../argument-checks.js";
-import {
-  alignTrace,
-  isTracingIntent,
-  type PlayerOpsContext,
-  type TracingIntent,
-} from "../player-ops.js";
+import { type PlayerOpsContext } from "../player-ops.js";
+import { alignTrace, isTracingIntent, type TracingIntent } from "../connection-state.js";
 import type { BridgeOps } from "../worker-host.js";
 import { heldSession } from "./persistence.js";
 import { publishing, sessionOp } from "./session.js";
