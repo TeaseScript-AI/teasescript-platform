@@ -1,0 +1,4100 @@
+{
+ "about": "The F17 test set (o4-lead/reviews/2035/design-r5.md): every r3-r7 witness of #2035's line-level ground check, as a case on main's suite file (base and head as -U0 diffs, the base against main's file, the head against the base; a new file has no base and its head is against main's file), with the class the syntax-tree design gives it (P pass, E exemption, G ground refusal, U unsupported-syntax refusal) and the instances it stands for; and the 358 expected-value positions Codex r3 found apart from any reader of the tool ([file, line, 0-based column, text]).",
+ "positions": [
+  [
+   "tests/type-core-candidate.test.ts",
+   1707,
+   29,
+   "194"
+  ],
+  [
+   "tests/type-core-candidate.test.ts",
+   1707,
+   34,
+   "17"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   246,
+   33,
+   "11837"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   246,
+   40,
+   "12196"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   246,
+   47,
+   "11837"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   246,
+   54,
+   "12196"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   246,
+   61,
+   "17558"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   246,
+   68,
+   "13621"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   246,
+   75,
+   "17579"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   246,
+   82,
+   "13621"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   250,
+   5,
+   "1539"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   250,
+   11,
+   "1617"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   250,
+   17,
+   "1539"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   250,
+   23,
+   "1617"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   250,
+   29,
+   "2424"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   250,
+   35,
+   "2149"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   250,
+   41,
+   "2289"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   250,
+   47,
+   "2149"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   256,
+   5,
+   "4958"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   256,
+   11,
+   "5428"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   256,
+   17,
+   "4958"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   256,
+   23,
+   "5156"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   256,
+   29,
+   "7194"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   256,
+   35,
+   "6187"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   256,
+   41,
+   "7215"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   256,
+   47,
+   "5915"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   262,
+   5,
+   "5090"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   262,
+   11,
+   "5528"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   262,
+   17,
+   "5090"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   262,
+   23,
+   "5255"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   262,
+   29,
+   "6984"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   262,
+   35,
+   "6350"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   262,
+   41,
+   "6875"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   262,
+   47,
+   "6077"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   264,
+   49,
+   "684"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   264,
+   54,
+   "1020"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   264,
+   60,
+   "684"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   264,
+   65,
+   "852"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   264,
+   70,
+   "1071"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   264,
+   76,
+   "1198"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   264,
+   82,
+   "1002"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   264,
+   88,
+   "1121"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   270,
+   5,
+   "20044"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   270,
+   12,
+   "21252"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   270,
+   19,
+   "19818"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   270,
+   26,
+   "21009"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   270,
+   33,
+   "32920"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   270,
+   40,
+   "34389"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   270,
+   47,
+   "32070"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   270,
+   54,
+   "33448"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   275,
+   5,
+   "18994"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   275,
+   12,
+   "19136"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   275,
+   19,
+   "18864"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   275,
+   26,
+   "19006"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   275,
+   33,
+   "20720"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   275,
+   40,
+   "22181"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   275,
+   47,
+   "20460"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   275,
+   54,
+   "21814"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   280,
+   5,
+   "19238"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   280,
+   12,
+   "19354"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   280,
+   19,
+   "19108"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   280,
+   26,
+   "19224"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   280,
+   33,
+   "20963"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   280,
+   40,
+   "22390"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   280,
+   47,
+   "20703"
+  ],
+  [
+   "tests/type-core-closure.test.ts",
+   280,
+   54,
+   "22030"
+  ],
+  [
+   "tests/type-core-contract-capture.test.ts",
+   575,
+   29,
+   "22_962_573"
+  ],
+  [
+   "tests/type-core-f18.test.ts",
+   345,
+   15,
+   "246"
+  ],
+  [
+   "tests/type-core-f18.test.ts",
+   345,
+   32,
+   "15"
+  ],
+  [
+   "tests/type-core-f18.test.ts",
+   345,
+   47,
+   "4"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1559,
+   7,
+   "7995"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1559,
+   13,
+   "60"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1560,
+   7,
+   "7081"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1560,
+   13,
+   "60"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1561,
+   7,
+   "7995"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1561,
+   13,
+   "60"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1562,
+   7,
+   "7081"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1562,
+   13,
+   "60"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1565,
+   7,
+   "8698"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1565,
+   13,
+   "274"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1566,
+   7,
+   "7822"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1566,
+   13,
+   "236"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1567,
+   7,
+   "8698"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1567,
+   13,
+   "274"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1568,
+   7,
+   "7822"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1568,
+   13,
+   "236"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1571,
+   7,
+   "10420"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1571,
+   14,
+   "64"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1572,
+   7,
+   "9327"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1572,
+   13,
+   "64"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1573,
+   7,
+   "10422"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1573,
+   14,
+   "64"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1574,
+   7,
+   "9327"
+  ],
+  [
+   "tests/type-core-work-a.test.ts",
+   1574,
+   13,
+   "64"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6748,
+   9,
+   "51209"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6748,
+   16,
+   "4782"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6748,
+   22,
+   "6799"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6749,
+   9,
+   "45317"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6749,
+   16,
+   "4782"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6749,
+   22,
+   "7113"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6750,
+   9,
+   "51240"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6750,
+   16,
+   "4782"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6750,
+   22,
+   "6815"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6751,
+   9,
+   "45333"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6751,
+   16,
+   "4782"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6751,
+   22,
+   "7129"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6754,
+   9,
+   "121911"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6754,
+   17,
+   "10598"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6754,
+   24,
+   "19143"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6755,
+   9,
+   "103920"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6755,
+   17,
+   "10598"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6755,
+   24,
+   "20281"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6756,
+   9,
+   "121943"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6756,
+   17,
+   "10598"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6756,
+   24,
+   "19175"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6757,
+   9,
+   "103952"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6757,
+   17,
+   "10598"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6757,
+   24,
+   "20313"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6770,
+   9,
+   "51228"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6770,
+   16,
+   "4782"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6770,
+   22,
+   "6796"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6771,
+   9,
+   "45337"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6771,
+   16,
+   "4782"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6771,
+   22,
+   "7110"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6772,
+   9,
+   "51259"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6772,
+   16,
+   "4782"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6772,
+   22,
+   "6812"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6773,
+   9,
+   "45353"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6773,
+   16,
+   "4782"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6773,
+   22,
+   "7126"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6776,
+   9,
+   "121962"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6776,
+   17,
+   "10598"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6776,
+   24,
+   "19140"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6777,
+   9,
+   "103972"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6777,
+   17,
+   "10598"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6777,
+   24,
+   "20278"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6778,
+   9,
+   "121994"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6778,
+   17,
+   "10598"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6778,
+   24,
+   "19172"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6779,
+   9,
+   "104004"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6779,
+   17,
+   "10598"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6779,
+   24,
+   "20310"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6792,
+   9,
+   "61786"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6792,
+   16,
+   "5821"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6792,
+   22,
+   "9406"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6793,
+   9,
+   "55048"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6793,
+   16,
+   "5821"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6793,
+   22,
+   "9776"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6794,
+   9,
+   "61883"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6794,
+   16,
+   "5821"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6794,
+   22,
+   "9486"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6795,
+   9,
+   "55128"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6795,
+   16,
+   "5821"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6795,
+   22,
+   "9856"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6798,
+   9,
+   "145717"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6798,
+   17,
+   "12677"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6798,
+   24,
+   "26926"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6799,
+   9,
+   "126035"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6799,
+   17,
+   "12677"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6799,
+   24,
+   "28176"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6800,
+   9,
+   "145877"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6800,
+   17,
+   "12677"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6800,
+   24,
+   "27086"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6801,
+   9,
+   "126195"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6801,
+   17,
+   "12677"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6801,
+   24,
+   "28336"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6814,
+   9,
+   "43857"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6814,
+   16,
+   "4576"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6814,
+   22,
+   "4148"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6815,
+   9,
+   "40384"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6815,
+   16,
+   "4576"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6815,
+   22,
+   "4238"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6816,
+   9,
+   "43859"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6816,
+   16,
+   "4576"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6816,
+   22,
+   "4150"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6817,
+   9,
+   "40386"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6817,
+   16,
+   "4576"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6817,
+   22,
+   "4240"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6820,
+   9,
+   "88063"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6820,
+   16,
+   "10088"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6820,
+   23,
+   "8164"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6821,
+   9,
+   "81169"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6821,
+   16,
+   "10088"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6821,
+   23,
+   "8342"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6822,
+   9,
+   "88065"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6822,
+   16,
+   "10088"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6822,
+   23,
+   "8166"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6823,
+   9,
+   "81171"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6823,
+   16,
+   "10088"
+  ],
+  [
+   "tests/helpers/type-core-families.ts",
+   6823,
+   23,
+   "8344"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   112,
+   16,
+   "8855"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   112,
+   22,
+   "23083"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   113,
+   19,
+   "2103"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   113,
+   25,
+   "7187"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   114,
+   17,
+   "260"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   114,
+   22,
+   "356"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   115,
+   23,
+   "1974"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   115,
+   29,
+   "6030"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   116,
+   16,
+   "2410"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   116,
+   22,
+   "2712"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   116,
+   28,
+   "3037"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   116,
+   34,
+   "3385"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   116,
+   40,
+   "3758"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   116,
+   46,
+   "4155"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   119,
+   16,
+   "7451"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   119,
+   22,
+   "18875"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   120,
+   19,
+   "2184"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   120,
+   25,
+   "7364"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   121,
+   17,
+   "260"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   121,
+   22,
+   "356"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   122,
+   23,
+   "562"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   122,
+   28,
+   "1782"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   123,
+   16,
+   "2193"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   123,
+   22,
+   "2453"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   123,
+   28,
+   "2727"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   123,
+   34,
+   "3018"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   123,
+   40,
+   "3328"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   123,
+   46,
+   "3656"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   125,
+   14,
+   "6"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   125,
+   17,
+   "9"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   125,
+   20,
+   "1"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   125,
+   23,
+   "0"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   125,
+   26,
+   "0"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   125,
+   29,
+   "0"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   140,
+   16,
+   "10239"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   140,
+   23,
+   "29677"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   141,
+   19,
+   "2427"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   141,
+   25,
+   "8601"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   142,
+   17,
+   "260"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   142,
+   22,
+   "356"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   143,
+   23,
+   "3053"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   143,
+   29,
+   "11245"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   144,
+   16,
+   "2420"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   144,
+   22,
+   "2726"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   144,
+   28,
+   "3061"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   144,
+   34,
+   "3424"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   144,
+   40,
+   "3819"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   144,
+   46,
+   "4263"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   147,
+   16,
+   "8647"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   147,
+   22,
+   "24711"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   148,
+   19,
+   "2508"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   148,
+   25,
+   "8778"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   149,
+   17,
+   "260"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   149,
+   22,
+   "356"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   150,
+   23,
+   "1453"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   150,
+   29,
+   "6239"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   151,
+   16,
+   "2200"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   151,
+   22,
+   "2460"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   151,
+   28,
+   "2739"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   151,
+   34,
+   "3039"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   151,
+   40,
+   "3364"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   151,
+   46,
+   "3729"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   153,
+   14,
+   "6"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   153,
+   17,
+   "10"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   153,
+   21,
+   "2"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   153,
+   24,
+   "0"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   153,
+   27,
+   "0"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   153,
+   30,
+   "0"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   16,
+   "142"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   34,
+   "3"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   44,
+   "4"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   62,
+   "4"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   69,
+   "4"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   80,
+   "42"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   94,
+   "25"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   110,
+   "1"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   124,
+   "1"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   133,
+   "39"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   147,
+   "21"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   161,
+   "21"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   175,
+   "345"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   188,
+   "105"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   205,
+   "504"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   220,
+   "17"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   234,
+   "4"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   253,
+   "2"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   265,
+   "3"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   274,
+   "9"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   288,
+   "15"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   306,
+   "26"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   321,
+   "28"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   535,
+   331,
+   "75"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   16,
+   "142"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   34,
+   "3"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   44,
+   "4"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   62,
+   "4"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   69,
+   "4"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   80,
+   "42"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   94,
+   "25"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   110,
+   "1"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   124,
+   "1"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   133,
+   "39"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   147,
+   "21"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   161,
+   "21"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   175,
+   "345"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   188,
+   "103"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   205,
+   "346"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   220,
+   "17"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   234,
+   "4"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   253,
+   "2"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   265,
+   "3"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   274,
+   "9"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   288,
+   "15"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   306,
+   "12"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   321,
+   "28"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   536,
+   331,
+   "75"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   16,
+   "708"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   34,
+   "32"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   45,
+   "18"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   64,
+   "18"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   72,
+   "18"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   84,
+   "206"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   99,
+   "441"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   116,
+   "226"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   132,
+   "26"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   142,
+   "342"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   157,
+   "107"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   172,
+   "99"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   186,
+   "1744"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   200,
+   "822"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   217,
+   "2533"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   233,
+   "114"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   248,
+   "18"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   268,
+   "16"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   281,
+   "80"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   291,
+   "192"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   307,
+   "134"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   326,
+   "124"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   342,
+   "144"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   543,
+   353,
+   "724"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   16,
+   "708"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   34,
+   "32"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   45,
+   "18"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   64,
+   "18"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   72,
+   "18"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   84,
+   "206"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   99,
+   "441"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   116,
+   "226"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   132,
+   "26"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   142,
+   "342"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   157,
+   "107"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   172,
+   "99"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   186,
+   "1744"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   200,
+   "820"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   217,
+   "1785"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   233,
+   "114"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   248,
+   "18"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   268,
+   "16"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   281,
+   "80"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   291,
+   "192"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   307,
+   "134"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   326,
+   "56"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   341,
+   "144"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   544,
+   352,
+   "724"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   585,
+   5,
+   "3988"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   585,
+   11,
+   "3988"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   585,
+   17,
+   "4844"
+  ],
+  [
+   "tests/type-core-work-c.test.ts",
+   585,
+   23,
+   "4862"
+  ]
+ ],
+ "cases": [
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -246 +246 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-  [\"the C-R1 chain\", chain(16), [11837, 12196, 11837, 12196, 17558, 13621, 17579, 13621]],\n+  [\"the C-R1 chain\", chain(32), [11837, 12196, 11837, 12196, 17558, 13621, 17579, 13621]],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "closure-input-call-only"
+    },
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "closure-source-input"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "closure-source-chain-size-only"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r4-fix/cli-probes.json",
+     "witness": "closure-one-line-input-call-only"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "closure-one-line-input-call-only"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "closure-one-line-input-call-only"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "closure-one-line-input-call-only"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -270 +270 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "closure-direct-work-only"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "closure-numeric-without-ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r4-fix/cli-probes.json",
+     "witness": "closure-real-repin-no-ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "closure-real-repin-no-ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "closure-real-repin-no-ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "closure-real-repin-no-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -241 +241 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n- * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1\u20136 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,\n+ * 1 unit more since #2035; no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1\u20136 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,\n@@ -270 +270 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "closure-direct-work-and-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": "@@ -575 +575 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(22_962_573));\n",
+   "head": "@@ -575 +575 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, Number(22_962_573));\n+  assert.equal(budget.total, Number(22_962_574));\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "contract-work-in-Number-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r4-fix/cli-probes.json",
+     "witness": "contract-work-in-Number-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "contract-work-in-Number-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "contract-work-in-Number-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "contract-work-in-Number-call"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -264 +264 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n+  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [Number(684), 1020, 684, 852, 1071, 1198, 1002, 1121]],\n",
+   "head": "@@ -264 +264 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [Number(684), 1020, 684, 852, 1071, 1198, 1002, 1121]],\n+  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [Number(685), 1020, 684, 852, 1071, 1198, 1002, 1121]],\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "closure-work-in-Number-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r4-fix/cli-probes.json",
+     "witness": "closure-work-in-Number-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "closure-work-in-Number-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "closure-work-in-Number-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "closure-work-in-Number-call"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -244 +244,3 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n-const frozen = `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\\nb.f = hostValue`;\n+const frozen = [\n+  `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\\nb.f = hostValue`,\n+].join(\"\\n\");\n",
+   "head": "@@ -241 +241 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n- * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1\u20136 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,\n+ * 1 unit more since #2035; no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1\u20136 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,\n@@ -272 +272 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "closure-multiline-declaration-real-header"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -244 +244,3 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n-const frozen = `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\\nb.f = hostValue`;\n+const frozen = String(\n+  `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\\nb.f = hostValue`,\n+);\n",
+   "head": "@@ -241 +241 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n- * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1\u20136 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,\n+ * 1 unit more since #2035; no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1\u20136 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,\n@@ -272 +272 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "closure-multiline-call-real-header"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -244 +244,5 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n-const frozen = `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\\nb.f = hostValue`;\n+const frozen = `let a = {f: [[1]]}\n+let b = a\n+// A comment in the generated TeaseScript source.\n+${lines(16, (i) => `b = {f: [[${i}]]}`)}\n+b.f = hostValue`;\n",
+   "head": "@@ -246 +246 @@ let b = a\n-// A comment in the generated TeaseScript source.\n+// A clarified comment in the generated TeaseScript source.\n@@ -274 +274 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "closure-source-string-comment-grounds-pin"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -244 +244,5 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n-const frozen = `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\\nb.f = hostValue`;\n+const frozen = `let a = {f: [[1]]}\n+let b = a\n+// A comment in the generated TeaseScript source.\n+${lines(16, (i) => `b = {f: [[${i}]]}`)}\n+b.f = hostValue`;\n",
+   "head": "@@ -241 +241 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n- * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1\u20136 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,\n+ * 1 unit more since #2035; no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1\u20136 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,\n@@ -274 +274 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "closure-source-string-comment-hides-real-header"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -235,0 +236,3 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n+/** A fixture count for a different top-level block. */\n+const REVIEW_FIXTURE_COUNT = 1;\n+\n",
+   "head": "@@ -236 +236 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n-/** A fixture count for a different top-level block. */\n+/** An unrelated fixture count. */\n@@ -273 +273 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "closure-separated-unrelated-header"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -235,0 +236,3 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n+/** A fixture count for a different top-level block. */\n+const REVIEW_FIXTURE_COUNT = 1;\n+\n",
+   "head": "@@ -244 +244 @@ const REVIEW_FIXTURE_COUNT = 1;\n- * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1\u20136 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,\n+ * 1 unit more since #2035; no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1\u20136 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,\n@@ -273 +273 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "closure-separated-real-header"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "closure-real-top-level-ground-after-helper"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -246 +246,3 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-  [\"the C-R1 chain\", chain(16), [11837, 12196, 11837, 12196, 17558, 13621, 17579, 13621]],\n+  [\"the C-R1 chain\", chain(\n+    16\n+  ), [11837, 12196, 11837, 12196, 17558, 13621, 17579, 13621]],\n",
+   "head": "@@ -247 +247 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    16\n+    32\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "closure-multiline-input-call-only"
+    }
+   ]
+  },
+  {
+   "file": "tests/helpers/type-core-families.ts",
+   "base": null,
+   "head": "@@ -6747 +6747 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [\n-      16: [\n+      64: [\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r3/10d6e26c4e252f7ad8d167c1cca65eb511ff60cb/probes.json",
+     "witness": "work-b-size-key-only"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -575 +575 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "contract-literal-no-ground"
+    },
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-literal-repin"
+    },
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-multiset-other-value"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "capture-numeric-without-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -575 +575 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(22_962_574));\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "contract-number-call"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -575 +575 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(\"22962574\"));\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "contract-number-from-string"
+    },
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "control-no-drift-string-call"
+    },
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-no-declared-form"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "r4 contract-number-from-string"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r4 contract-number-from-string"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r4 contract-number-from-string"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "control-no-drift-string-call"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": "@@ -575 +575 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(\"22962573\"));\n",
+   "head": "@@ -575 +575 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, Number(\"22962573\"));\n+  assert.equal(budget.total, Number(\"22962574\"));\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "contract-renumber-string-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "r4 contract-renumber-string-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r4 contract-renumber-string-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r4 contract-renumber-string-call"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -575 +575 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Math.PI);\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "contract-math-constant"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "r4 contract-math-constant"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r4 contract-math-constant"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r4 contract-math-constant"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -575 +575 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(`22962574`));\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "contract-number-template"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "r4 contract-number-template"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r4 contract-number-template"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r4 contract-number-template"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -264 +264 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n+  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [Number(685), 1020, 684, 852, 1071, 1198, 1002, 1121]],\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "closure-work-number-call"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -255 +255 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    `${chain(4)}\\nfunction take(x: integer[]) { }\\nlet maybe = null\\nif hostValue { maybe = [1] }\\ntake(maybe)`,\n+    `${chain(8)}\\nfunction take(x: integer[]) { }\\nlet maybe = null\\nif hostValue { maybe = [1] }\\ntake(maybe)`,\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "closure-template-input"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "closure-template-source-argument-only"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -264 +264 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n+  [\"an addition\", \"let b = [[1]]\\nb.add(hostValue)\", [685, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "closure-word-and-value"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -240 +240 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n- * completion, and every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221\n+ * completion, and (1 unit more since #1) every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221\n@@ -270 +270 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "closure-grounded"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r4-fix/cli-probes.json",
+     "witness": "closure-real-repin-ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "closure-real-repin-ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "closure-real-repin-ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "closure-real-repin-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -244 +244,3 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n-const frozen = `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\\nb.f = hostValue`;\n+const frozen = `let a = {f: [[1]]}\n+// source comment\n+let b = a`;\n",
+   "head": "@@ -245 +245 @@ const frozen = `let a = {f: [[1]]}\n-// source comment\n+// 1 unit more since #1\n@@ -272 +272 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "closure-template-comment-not-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -244 +244,3 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n-const frozen = `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\\nb.f = hostValue`;\n+const frozen = `let a = {f: [[1]]}\n+// source comment\n+let b = a`;\n",
+   "head": "@@ -240 +240 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n- * completion, and every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221\n+ * completion, and (1 unit more since #1) every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221\n@@ -272 +272 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "closure-template-real-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -244 +244,4 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n-const frozen = `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\\nb.f = hostValue`;\n+const frozen = [\n+  \"let a = {f: [[1]]}\",\n+  \"let b = a\",\n+].join(\"\\n\");\n",
+   "head": "@@ -240 +240 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n- * completion, and every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221\n+ * completion, and (1 unit more since #1) every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221\n@@ -273 +273 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "closure-multiline-declaration-real-ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r4-fix/cli-probes.json",
+     "witness": "closure-multiline-declaration-real-header"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "closure-multiline-declaration-real-header"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "closure-multiline-declaration-real-header"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "closure-multiline-declaration-real-header"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -264,0 +265 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n+  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "closure-duplicate-row"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -245,0 +246 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n+  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n@@ -264 +264,0 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "closure-move-row"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -245,0 +246,2 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n+  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n+  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n@@ -264 +265,0 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "closure-move-and-duplicate-row"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -245 +245,2 @@ const frozen = `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i\n-const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n+const\n+OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n@@ -264,0 +266 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n+  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [685, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "closure-broken-opener-new-row"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+export function reviewPattern() { return /`/; }\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "contract-return-regex-before-pin"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+export const reviewPattern = /`/;\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "contract-regex-after-equals-control"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+assert.equal(({ n: 4 }).n! / 2, 2);\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "contract-postfix-bang-division-control"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+export function reviewNegation(value: boolean) { return !value; }\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "contract-negation-before-pin"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-c.test.ts",
+   "base": null,
+   "head": "@@ -535 +535 @@ test(\"a prefix of closed objects read once has main's counters, in either order,\n-        \"checks 142 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 25 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 345 invSteps 105 literalUnits 504 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 26 syntaxNodes 28 yields 75\",\n+        \"checks \" + \"143 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 25 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 345 invSteps 105 literalUnits 504 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 26 syntaxNodes 28 yields 75\",\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r4/bf8036edb1d7d25b5545b71841aa71daaa318ffa/cli-probes.json",
+     "witness": "work-c-counter-concatenated-string"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "r4 work-c-counter-concatenated-string"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r4 work-c-counter-concatenated-string"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r4 work-c-counter-concatenated-string"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+const reviewExpected = 22_962_574;\n@@ -575 +576,2 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, reviewExpected\n+  );\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "opener-identifier-expected"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r5 opener-identifier-expected"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r5 opener-identifier-expected"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+const reviewExpected = 22_962_574;\n@@ -575 +576,2 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(reviewExpected)\n+  );\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "opener-call-expected"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r5 opener-call-expected"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r5 opener-call-expected"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -575 +575,2 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, budget.total + Math.sign(budget.total)\n+  );\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "opener-expression-expected"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -575 +575,2 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574\n+  );\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "control-opener-literal-expected"
+    },
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "mutant-opener-literal-expected"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r5 opener-literal-split"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r5 opener-literal-split"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+const reviewExpected = 22_962_574;\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(reviewExpected));\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "control-opener-single-line-call"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  function reviewPattern() { return /* a note */ /[/*]/; }\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n@@ -577,0 +579,2 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "control-regex-comment-lost-pin"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  function reviewPattern() { return /* a note */ /[/*]/; }\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n@@ -577,0 +579,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "regex-comment-balanced-pin-count"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  function reviewPattern() { return                                                 /[/*]/; }\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n@@ -577,0 +579,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "regex-long-space-balanced-pin-count"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  function reviewPattern() { return /[/*]/; }\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n@@ -577,0 +579,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "control-regex-no-comment-balanced-pin-count"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  function reviewPattern() { if (true) /[/*]/.test(\"x\"); }\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n@@ -577,0 +579,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "regex-after-if-balanced-pin-count"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  function reviewPattern() { return /* a note */ /[/*]/; }\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "control-regex-comment-ended-guard"
+    }
+   ]
+  },
+  {
+   "file": "tests/helpers/type-core-families.ts",
+   "base": null,
+   "head": "@@ -6746 +6746 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [\n-    main: {\n+    main: { /* layout */\n@@ -6749,0 +6750 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [\n+        [51210, 4782, 6799],\n@@ -6932,0 +6934,5 @@ export const COPY_CHAIN_SOURCES: readonly { readonly name: string; readonly sour\n+\n+export const reviewPinCount = {\n+  main: {\n+  },\n+};\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "control-balanced-opener-interior-insertion"
+    }
+   ]
+  },
+  {
+   "file": "tests/helpers/type-core-families.ts",
+   "base": null,
+   "head": "@@ -6746 +6746 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [\n-    main: {\n+    main: { /* layout */\n@@ -6747,0 +6748 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [\n+        [51210, 4782, 6799],\n@@ -6932,0 +6934,5 @@ export const COPY_CHAIN_SOURCES: readonly { readonly name: string; readonly sour\n+\n+export const reviewPinCount = {\n+  main: {\n+  },\n+};\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "control-balanced-opener-first-array-insertion"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -245,0 +246 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n+  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [685, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "control-closure-first-line-insertion"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -281,0 +282 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n+  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [685, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r5/ee72370272567e5fac7fe4bc098f752e2a2eb6d4/r5-cli-probes.json",
+     "witness": "control-closure-last-line-insertion"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /[/*]/.test(\"x\");\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n@@ -577,0 +579,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "control-block-literal"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "control-block-literal"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+const reviewExpected = 22_962_574;\n@@ -567,0 +569 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /[/*]/.test(\"x\");\n@@ -575 +577 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, reviewExpected);\n@@ -577,0 +580,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "block-identifier"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "block-identifier"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /[/*]/.test(\"x\");\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(\"22962574\"));\n@@ -577,0 +579,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "block-string-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "block-string-call"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /[/*]/.test(\"x\");\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(`22962574`));\n@@ -577,0 +579,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "block-template-call"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "block-template-call"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /[/*]/.test(\"x\");\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, budget.total + Math.sign(budget.total));\n@@ -577,0 +579,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "block-expression"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "block-expression"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /[/*]/.test(\"x\");\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  /* a note */ assert.equal(budget.total, 22_962_574);\n@@ -577,0 +579,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "block-inline-comment"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "block-inline-comment"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+const reviewExpected = 22_962_574;\n@@ -567,0 +569 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /`/.test(\"x\");\n@@ -575 +577 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n@@ -577,0 +580,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+// ` scanner recovery\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "control-template-literal"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "control-template-literal"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+const reviewExpected = 22_962_574;\n@@ -567,0 +569 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /`/.test(\"x\");\n@@ -575 +577 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  /* a note */ assert.equal(budget.total, 22_962_574);\n@@ -577,0 +580,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+// ` scanner recovery\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "template-inline-comment"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "template-inline-comment"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+const reviewExpected = 22_962_574;\n@@ -567,0 +569 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /`/.test(\"x\");\n@@ -575 +577 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, reviewExpected);\n@@ -577,0 +580,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+// ` scanner recovery\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "template-identifier"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "template-identifier"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+const reviewExpected = 22_962_574;\n@@ -567,0 +569 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /`/.test(\"x\");\n@@ -575 +577,3 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  /*\n+   * a note\n+   */ assert.equal(budget.total, 22_962_574);\n@@ -577,0 +582,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+// ` scanner recovery\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "template-comment-block-start"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "template-comment-block-start"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+const reviewFactor = 1;\n@@ -567,0 +569 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /[/*]/.test(\"x\");\n@@ -575 +577,2 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, reviewFactor\n+    * 22_962_574);\n@@ -577,0 +581,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "block-multiply-continuation"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "block-multiply-continuation"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+const reviewFactor = 1;\n@@ -567,0 +569 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /[/*]/.test(\"x\");\n@@ -575 +577,2 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, reviewFactor\n+    + 22_962_574);\n@@ -577,0 +581,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "control-block-add-continuation"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "control-block-add-continuation"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+const reviewExpected = 22_962_574;\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, reviewExpected);\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "control-no-drift-identifier"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "control-no-drift-identifier"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+const reviewFactor = 1;\n@@ -575 +576,2 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, reviewFactor\n+    * 22_962_574);\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "control-no-drift-multiply"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "control-no-drift-multiply"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-a.test.ts",
+   "base": null,
+   "head": "@@ -1557,3 +1557 @@ test(\"a long copied key's store check charges its positions' work, in every mode\n-  assert.deepEqual(measured, [\n-    [\n-      [7995, 60],\n+  assert.deepEqual(measured, [[[7996, 60],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "control-original-declared-opener-literal"
+    },
+    {
+     "evidence": "pin-suites-codex-r6/396d38945d1c4d5399c6f0acedefa18071875fca/r6-cli-probes.json",
+     "witness": "mutant-declared-opener-literal"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "control-original-declared-opener-literal"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/r6-cli-probes.json",
+     "witness": "mutant-declared-opener-literal"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1,2 @@\n+export const reviewContinuation = \"\\\n+\";\n@@ -575 +577 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/position-cli-probes.json",
+     "witness": "position-shift-real-base"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1,2 @@\n+export const reviewContinuation = \"\\\n+\";\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/position-cli-probes.json",
+     "witness": "control-position-shift-unchanged"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1 @@\n+export const reviewContinuation = \"\";\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/position-cli-probes.json",
+     "witness": "control-no-position-shift-repin"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -0,0 +1,3 @@\n+export const reviewContinuation =\n+  \"\\\n+\";\n@@ -575 +578 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/position-cli-probes.json",
+     "witness": "position-shift-formatted"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": "@@ -575 +575,3 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(\"\\\n+22962573\\\n+\"));\n",
+   "head": "@@ -576 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-22962573\\\n+22962574\\\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "escaped-newline-value"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": "@@ -575 +575,3 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(`\n+22962573\n+`));\n",
+   "head": "@@ -576 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-22962573\n+22962574\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-template-newline-value"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": "@@ -575 +575,4 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(\n+    /* expected value */ \"22962573\\\n+\"\n+  ));\n",
+   "head": "@@ -576 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-    /* expected value */ \"22962573\\\n+    /* expected value */ \"22962574\\\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "comment-prefix-open-string"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": "@@ -575 +575,4 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(\n+    \"22962573\\\n+\"\n+  ));\n",
+   "head": "@@ -576 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-    \"22962573\\\n+    \"22962574\\\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-no-comment-open-string"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": "@@ -575 +575,3 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(\n+    /* expected value */ \"22962573\"\n+  ));\n",
+   "head": "@@ -576 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-    /* expected value */ \"22962573\"\n+    /* expected value */ \"22962574\"\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-comment-closed-string"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": "@@ -575 +575,4 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, Number(\n+    /* expected value */ \"22962573\\\n+\"\n+  ));\n",
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /[/*]/.test(\"x\");\n@@ -576 +577 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-    /* expected value */ \"22962573\\\n+    /* expected value */ \"22962574\\\n@@ -580,0 +582,5 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+export function reviewReference(budget: {total: number}) {\n+  // (a fixture only: its unchanged literal, since #1)\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "U",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "drift-comment-prefix-open-string"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -575 +575 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal( budget.total, 22_962_573 );\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-multiset-undeclared-layout",
+     "changed": "yes"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -575 +575 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+    assert.equal(budget.total, 22_962_573);\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-multiset-declared-unchanged"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -575,0 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  assert.equal(budget.total, 22_962_573);\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-multiset-duplicate"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-a.test.ts",
+   "base": null,
+   "head": "@@ -1558,0 +1559 @@ test(\"a long copied key's store check charges its positions' work, in every mode\n+\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-blank-inside-pin"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-a.test.ts",
+   "base": null,
+   "head": "@@ -1558,0 +1559 @@ test(\"a long copied key's store check charges its positions' work, in every mode\n+      // expected values stay as is\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-comment-inside-pin"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": "@@ -0,0 +1,2 @@\n+export const reviewOutside = 1;\n+\n",
+   "head": "@@ -1 +1 @@\n-export const reviewOutside = 1;\n+export const reviewOutside = 2;\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-outside-pin-and-hunk"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /[/*]/.test(\"x\");\n",
+   "head": "@@ -576 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n@@ -578,0 +579,6 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  // (a fixture only: its unchanged literal, since #1)\n+  assert.equal(budget.total, 22_962_573);\n+}\n+\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "control-uncertain-base"
+    },
+    {
+     "evidence": "pin-suites-codex-r7/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-cli-probes.json",
+     "witness": "mutant-uncertain-base"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -265 +265 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-  // (18 units more at demand 64 since #1828: the mixed join's sentence walks each operand to its leaf and reads its\n+  // (19 units more at demand 64 since #1828: the mixed join's sentence walks each operand to its leaf and reads its\n@@ -270 +270 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "closure-numeric-with-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -269 +269 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    `${frozen}\\nlet xs = [1]\\nlet ys = [\"s\"]\\nb.f = [xs + ys]`,\n+    `${frozen}\\nlet xs = [2]\\nlet ys = [\"s\"]\\nb.f = [xs + ys]`,\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "closure-source-only-number"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -241 +241 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n- * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1\u20136 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,\n+ * 1 unit more for the unmarked result since #2035, no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1\u20136 units more on four rows; a regression oracle of this gate only), at demand 16 and 64 in the four modes (each list: demand 16's four modes,\n@@ -250 +250 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [1539, 1617, 1539, 1617, 2424, 2149, 2289, 2149],\n+    [1540, 1617, 1539, 1617, 2424, 2149, 2289, 2149],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "closure-shared-table-header"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -270 +270,4 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [\n+      20044, 21252, 19818, 21009,\n+      32921, 34389, 32070, 33448,\n+    ],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "closure-split-table (named residual)",
+     "changed": "yes"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-kept.test.ts",
+   "base": null,
+   "head": "@@ -58 +58 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {\n-    1,\n+    2,\n",
+   "newFile": false,
+   "class": "E",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "kept-listed-count"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-key-ids.test.ts",
+   "base": null,
+   "head": "@@ -1026 +1026 @@ const COPIES_LISTED: Readonly<Record<string, readonly [number, string]>> = {\n-    310,\n+    311,\n",
+   "newFile": false,
+   "class": "E",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "key-ids-listed-count"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-a.test.ts",
+   "base": null,
+   "head": "@@ -1559 +1559 @@ test(\"a long copied key's store check charges its positions' work, in every mode\n-      [7995, 60],\n+      [7996, 60],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "work-a-numeric-without-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-a.test.ts",
+   "base": null,
+   "head": "@@ -1532 +1532 @@ test(\"a long copied key's store check grows with its copy chain in every mode (#\n- * #1605: what a long copied key's store check charges at k = 16 in each mode (source order shared and not, then\n+ * #1605 (1 unit more since #2035): what a long copied key's store check charges at k = 16 in each mode (source order shared and not, then\n@@ -1559 +1559 @@ test(\"a long copied key's store check charges its positions' work, in every mode\n-      [7995, 60],\n+      [7996, 60],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "work-a-numeric-with-header"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-a.test.ts",
+   "base": null,
+   "head": "@@ -960 +960 @@ test(\"a run of joins read beside a variable of objects grows with the program in\n-      [16, 32],\n+      [16, 64],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "work-a-input-size"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "work-a-all-size-inputs-only"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-c.test.ts",
+   "base": null,
+   "head": "@@ -140 +140 @@ test(\"a deep read asks its one holder's source by reference and walks its path's\n-        total: [10239, 29677],\n+        total: [10240, 29677],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "work-c-numeric-without-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-c.test.ts",
+   "base": null,
+   "head": "@@ -90 +90 @@ test(\"a stack of diamonds of copies and its siblings grow with the program in ei\n- * modes, against `main`'s work there (measured on 7d6c4d3d4: a regression oracle of these shapes): no layer demand; the\n+ * modes, against `main`'s work there (1 unit more since #2035; measured on 7d6c4d3d4: a regression oracle of these shapes): no layer demand; the\n@@ -140 +140 @@ test(\"a deep read asks its one holder's source by reference and walks its path's\n-        total: [10239, 29677],\n+        total: [10240, 29677],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "work-c-numeric-with-header"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-c.test.ts",
+   "base": null,
+   "head": "@@ -110 +110 @@ test(\"a deep read asks its one holder's source by reference and walks its path's\n-      // (`main`'s work at depths 16 and 32, and its totals at 2 to 7, the sharing on and off, equal in either order)\n+      // (1 unit more since #2035; `main`'s work at depths 16 and 32, and its totals at 2 to 7, the sharing on and off, equal in either order)\n@@ -140 +140 @@ test(\"a deep read asks its one holder's source by reference and walks its path's\n-        total: [10239, 29677],\n+        total: [10240, 29677],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "work-c-numeric-other-shape-comment"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-c.test.ts",
+   "base": null,
+   "head": "@@ -535 +535 @@ test(\"a prefix of closed objects read once has main's counters, in either order,\n-        \"checks 142 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 25 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 345 invSteps 105 literalUnits 504 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 26 syntaxNodes 28 yields 75\",\n+        \"checks 142 checksSkipped 3 defScan 4 defSortElements 4 defs 4 domSteps 42 eventSteps 25 exactQueries 1 exactValues 1 frames 39 graphEdges 21 graphNodes 21 indexSteps 345 invSteps 106 literalUnits 504 mergeItems 17 ownerSteps 4 parentStackSteps 2 rdQueries 3 rdWalk 9 regionWalks 15 structureSteps 26 syntaxNodes 28 yields 75\",\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "work-c-counter-snapshot-without-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-c.test.ts",
+   "base": null,
+   "head": "@@ -585 +585 @@ test(\"a prefix the cheap checks refuse walks no holder's marks, main's total und\n-    [3988, 3988, 4844, 4862],\n+    [3989, 3988, 4844, 4862],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "work-c-four-mode-table-without-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-candidate.test.ts",
+   "base": null,
+   "head": "@@ -1707 +1707 @@ test(\"an integer-only use of a written number place is the current checker's err\n-    assert.deepEqual(units, [194, 17], JSON.stringify(mode));\n+    assert.deepEqual(units, [195, 17], JSON.stringify(mode));\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "candidate-without-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-f18.test.ts",
+   "base": null,
+   "head": "@@ -345 +345 @@ test(\"a literal default keeps the contract's own walk: cp9-cells/F18/load-intege\n-      { total: 246, decisions: [15], default: [4] },\n+      { total: 247, decisions: [15], default: [4] },\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "f18-without-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-f18.test.ts",
+   "base": null,
+   "head": "@@ -332 +332 @@ test(\"a literal default keeps the contract's own walk: cp9-cells/F18/load-intege\n-  // it did, its typed default's run 4 units and the decision of `x` 15, the analysis 246)\n+  // it did, its typed default's run 4 units and the decision of `x` 15, the analysis 247, 1 more since #2035)\n@@ -345 +345 @@ test(\"a literal default keeps the contract's own walk: cp9-cells/F18/load-intege\n-      { total: 246, decisions: [15], default: [4] },\n+      { total: 247, decisions: [15], default: [4] },\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "f18-with-start-comment"
+    }
+   ]
+  },
+  {
+   "file": "tests/helpers/type-core-families.ts",
+   "base": null,
+   "head": "@@ -6748 +6748 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [\n-        [51209, 4782, 6799],\n+        [51210, 4782, 6799],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "work-b-table-without-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/helpers/type-core-families.ts",
+   "base": null,
+   "head": "@@ -6731 +6731 @@ export interface OutputBoundFamily {\n-   * reversed), measured on `main` 7d6c4d3d4, the totals less the narrowing index these programs without a test no longer\n+   * reversed), measured on `main` 7d6c4d3d4 (1 unit more since #2035), the totals less the narrowing index these programs without a test no longer\n@@ -6748 +6748 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [\n-        [51209, 4782, 6799],\n+        [51210, 4782, 6799],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r1-fix/probes.json",
+     "witness": "work-b-table-with-ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "work-b-table-with-interface-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -264 +264 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n+  [\"an add\", \"let b = [[2]]\\nb.add(hostValue)\", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "closure-inline-source-number-only"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -113 +113,2 @@ const F = [propertyStep(\"f\")];\n-/** A ring of k copies (#1606's stress family): each listing on it reaches the next, the last the first. */\n+/**\n+ * Unrelated previous test comment edited. A ring of k copies (#1606's stress family): each listing on it reaches the next, the last the first. */\n@@ -270 +271 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "closure-previous-test-header-is-unrelated"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -235,0 +236,3 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n+/** A fixture count for a different top-level block. */\n+const REVIEW_FIXTURE_COUNT = 1;\n+\n",
+   "head": "@@ -236 +236 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n-/** A fixture count for a different top-level block. */\n+/** An unrelated fixture count, with clarified wording. */\n@@ -273 +273 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "closure-unrelated-top-level-comment-grounds-pin"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-c.test.ts",
+   "base": null,
+   "head": "@@ -102 +102 @@ test(\"a deep read asks its one holder's source by reference and walks its path's\n-          \"let a={left:1,q:null}\",\n+          \"let a={left:2,q:null}\",\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "work-c-literal-source-only"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-c.test.ts",
+   "base": null,
+   "head": "@@ -533 +533 @@ test(\"a prefix of closed objects read once has main's counters, in either order,\n-      'let a = {n: 1}\\nlet b = {n: 2, m: \"x\"}\\nlet c = a\\nc = b\\nsay c.n\\nexit',\n+      'let a = {n: 3}\\nlet b = {n: 2, m: \"x\"}\\nlet c = a\\nc = b\\nsay c.n\\nexit',\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "work-c-snapshot-source-only"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-work-c.test.ts",
+   "base": null,
+   "head": "@@ -541 +541 @@ test(\"a prefix of closed objects read once has main's counters, in either order,\n-      wide(8),\n+      wide(9),\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "work-c-template-input-width-only"
+    }
+   ]
+  },
+  {
+   "file": "tests/helpers/type-core-families.ts",
+   "base": null,
+   "head": "@@ -6727 +6727 @@ export interface OutputBoundFamily {\n-  /** Whether the pairs grow with the program's answers (r4.245's exception for its totals), or the family is a control. */\n+  /** Clarified: whether the pairs grow with the program's answers (r4.245's exception for its totals), or the family is a control. */\n@@ -6748 +6748 @@ export const OUTPUT_BOUND_FAMILIES: readonly OutputBoundFamily[] = [\n-        [51209, 4782, 6799],\n+        [51210, 4782, 6799],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "work-b-table-unrelated-interface-comment"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-candidate.test.ts",
+   "base": null,
+   "head": "@@ -1707 +1707 @@ test(\"an integer-only use of a written number place is the current checker's err\n-    assert.deepEqual(units, [194, 17], JSON.stringify(mode));\n+    assert.deepEqual(units, [195, 17], JSON.stringify(mode));\n",
+   "newFile": true,
+   "class": "E",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r2-fix/targeted-probes.json",
+     "witness": "untracked-declared-suite-empty-diff"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -244 +244,3 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n-const frozen = `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\\nb.f = hostValue`;\n+const frozen = `let a = {f: [[1]]}\n+// (the source's own comment)\n+let b = a`;\n",
+   "head": "@@ -245 +245 @@ const frozen = `let a = {f: [[1]]}\n-// (the source's own comment)\n+// (1 unit more since #1)\n@@ -272 +272 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r4-fix/cli-probes.json",
+     "witness": "closure-source-string-comment-grounds-pin"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "closure-source-string-comment-grounds-pin"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "closure-source-string-comment-grounds-pin"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "closure-source-string-comment-grounds-pin"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -244 +244,3 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n-const frozen = `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\\nb.f = hostValue`;\n+const frozen = `let a = {f: [[1]]}\n+// (the source's own comment)\n+let b = a`;\n",
+   "head": "@@ -240 +240 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n- * completion, and every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221\n+ * completion, and (1 unit more since #1) every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221\n@@ -272 +272 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r4-fix/cli-probes.json",
+     "witness": "closure-template-frozen-real-header"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "closure-template-frozen-real-header"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "closure-template-frozen-real-header"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "closure-template-frozen-real-header"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -244 +244,4 @@ test(\"the copied and direct nested stores owe their checks at every mode's stop\"\n-const frozen = `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\\nb.f = hostValue`;\n+const frozen = [\n+  \"let a = {f: [[1]]}\",\n+  \"let b = a\",\n+].join(\"\\n\");\n",
+   "head": "@@ -273 +273 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],\n+    [20044, 21252, 19818, 21009, 32921, 34389, 32070, 33448],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r4-fix/cli-probes.json",
+     "witness": "closure-multiline-declaration-no-ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "closure-multiline-declaration-no-ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "closure-multiline-declaration-no-ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "closure-multiline-declaration-no-ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": "@@ -246 +246,5 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-  [\"the C-R1 chain\", chain(16), [11837, 12196, 11837, 12196, 17558, 13621, 17579, 13621]],\n+  [\n+    \"the C-R1 chain\",\n+    chain(\n+      16\n+    ), [11837, 12196, 11837, 12196, 17558, 13621, 17579, 13621]],\n",
+   "head": "@@ -249 +249 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n-      16\n+      32\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r4-fix/cli-probes.json",
+     "witness": "closure-multiline-input-call-only (refused by design)",
+     "changed": "yes"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "closure-multiline-input-call-only (refused by design)",
+     "changed": "yes"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "closure-multiline-input-call-only (refused by design)",
+     "changed": "yes"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "closure-multiline-input-call-only (refused by design)",
+     "changed": "yes"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-closure.test.ts",
+   "base": null,
+   "head": "@@ -245 +245,2 @@ const frozen = `let a = {f: [[1]]}\\nlet b = a\\n${lines(16, (i) => `b = {f: [[${i\n-const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n+const\n+OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n@@ -263,0 +265 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [\n+  [\"an add\", \"let b = [[1]]\\nb.add(hostValue)\", [685, 1020, 684, 852, 1071, 1198, 1002, 1121]],\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "r4 closure-broken-opener-new-row"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r4 closure-broken-opener-new-row"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r4 closure-broken-opener-new-row"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": "@@ -0,0 +1 @@\n+export function reviewPattern() { return /`/; }\n",
+   "head": "@@ -576 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "r4 contract-return-regex-before-pin"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r4 contract-return-regex-before-pin"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r4 contract-return-regex-before-pin"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": "@@ -0,0 +1 @@\n+export function reviewPattern() { return /`/; }\n",
+   "head": "@@ -568 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  // units, seconds; every mode is #1606's queue evidence)\n+  // (1 unit more since #1) units, seconds; every mode is #1606's queue evidence)\n@@ -576 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n",
+   "newFile": false,
+   "class": "P",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r5-fix/cli-probes.json",
+     "witness": "r4 control: regex after return, re-pin with ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r4 control: regex after return, re-pin with ground"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r4 control: regex after return, re-pin with ground"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  function reviewPattern() { return /* a note */ /[/*]/; }\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n@@ -576,0 +578,4 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r5 regex-comment-balanced-pin-count: function reviewPattern() { return /* a n"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r5 regex-comment-balanced-pin-count: function reviewPattern() { return /* a n"
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  function reviewPattern() { return                                                 /[/*]/; }\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n@@ -576,0 +578,4 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r5 regex-comment-balanced-pin-count: function reviewPattern() { return       "
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r5 regex-comment-balanced-pin-count: function reviewPattern() { return       "
+    }
+   ]
+  },
+  {
+   "file": "tests/type-core-contract-capture.test.ts",
+   "base": null,
+   "head": "@@ -567,0 +568 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+  if (true) /[/*]/;\n@@ -575 +576 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n-  assert.equal(budget.total, 22_962_573);\n+  assert.equal(budget.total, 22_962_574);\n@@ -576,0 +578,4 @@ test(\"the capture ends at the first store whose contract leaves the slice's dept\n+/* scanner recovery */\n+export function reviewReference(budget: {total: number}) {\n+  assert.equal(budget.total, 22_962_573);\n+}\n",
+   "newFile": false,
+   "class": "G",
+   "instances": [
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r6-fix/cli-probes.json",
+     "witness": "r5 regex-comment-balanced-pin-count: if (true) /[/*]/;"
+    },
+    {
+     "evidence": "pin-suites-f17-builder/8dcc678fbe3923742689ee29ecb32b3446a7b4df/r7-fix/cli-probes.json",
+     "witness": "r5 regex-comment-balanced-pin-count: if (true) /[/*]/;"
+    }
+   ]
+  }
+ ]
+}

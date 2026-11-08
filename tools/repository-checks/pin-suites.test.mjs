@@ -63,9 +63,9 @@ test("the three pin forms are found by their text, and a pin written another way
 
 test("an option the tool does not take is refused, not ignored", () => {
   const tool = join(ROOT, "tools/repository-checks/pin-suites.mjs");
-  for (const args of [["--check-grounds"], ["--base"], ["--run", "extra"]]) {
+  for (const args of [["--check"], ["--base"], ["--run", "extra"]]) {
     const run = spawnSync(process.execPath, [tool, ...args], { cwd: ROOT, encoding: "utf8" });
     assert.equal(run.status, 2, `${args.join(" ")}: ${run.stderr}`);
-    assert.match(run.stderr, /use \[--base <ref>\] \[--run\]/u);
+    assert.match(run.stderr, /use \[--base <ref>\] \[--run\] \[--check-grounds\]/u);
   }
 });

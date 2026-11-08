@@ -197,8 +197,11 @@ the tracker issue; it is not a per-pull-request level.
 (`tools/repository-checks/pin-suites.mjs` lists them). A change under `src/type-inference/core/` runs all of them before
 it asks for review and before READY: `node tools/repository-checks/pin-suites.mjs --run`. A pin that moves is re-pinned
 only with its ground: the comment above it says how many units more or fewer and which change made them, and the
-reviewer checks that no part of the change is a repeated question, work the core already did once, done again. A change
-to a test helper lists only a suite whose pins it holds, not every suite that imports it.
+reviewer checks that no part of the change is a repeated question, work the core already did once, done again.
+`--check-grounds` refuses a new or re-pinned value whose comment did not change, reading each value by its place in its
+suite's declared shape (`pin-grounds.mjs`); a pin written outside those shapes (a call, a name, arithmetic, a template)
+is refused, not missed: write the literal, or declare the shape. A change to a test helper lists only a suite whose pins
+it holds, not every suite that imports it.
 
 ## Test admission and consolidation
 
