@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { Admission, admissionRunsInsideSolverRuns } from "../src/type-inference/core/admission.js";
-import { analyseCore } from "../src/type-inference/core/answers.js";
+import { analyseCore, solveDemands } from "../src/type-inference/core/answers.js";
+import { DemandExhausted } from "../src/type-inference/core/budget.js";
 import { inheritedAt } from "../src/type-inference/core/inherited/inherited.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
+import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
@@ -175,4 +177,81 @@ test("the analysis decides each place as its inherited type says, in the four mo
       ["a decided", "b copied"],
       JSON.stringify(mode),
     );
+});
+
+test("a proof cut short at its demand's allowance leaves nothing: the next run reads as a fresh admission", () => {
+  // (Codex r1 on #2098: an unfinished proof's cycle joins kept past the stop read `a` as the number its cycle cuts)
+  const source = `${W}let a = hostValue\nlet b = a\nlet c = b\na = c\nc = w\n${said(["a", "b", "c"])}`;
+  const fresh = settled(source, ["a", "b", "c"]);
+  assert.deepEqual(fresh, { a: "none", b: "none", c: NUMBER });
+  for (const mode of MODES)
+    inMode(mode, () => {
+      let stopped = 0;
+      for (let allowance = 1; ; allowance += 1) {
+        const { request, ids } = prepare(source);
+        const pass = narrowingPass(request);
+        let limit: number | null = allowance;
+        const admission = new Admission(
+          pass,
+          {
+            run: (work) =>
+              limit === null ? pass.solver.run(work) : pass.solver.demand(work, limit),
+          },
+          new Map(),
+          new Set(),
+        );
+        try {
+          inheritedAt(admission, ids.get("a")!, []);
+        } catch (error) {
+          if (!(error instanceof DemandExhausted)) throw error;
+          stopped += 1;
+          limit = null;
+          const got = Object.fromEntries(
+            ["a", "b", "c"].map((place) => {
+              const term = inheritedAt(admission, ids.get(place)!, []);
+              return [place, term === null ? "none" : JSON.stringify(term)];
+            }),
+          );
+          assert.deepEqual(got, fresh, `${JSON.stringify(mode)} at ${allowance}`);
+          continue;
+        }
+        break;
+      }
+      assert.ok(stopped > 0, "some allowance stops the first read");
+    });
+});
+
+test("a wrapper's proof yields its setup's reads: a fresh admission's first read below it answers", () => {
+  // (Codex r1 on #2098: the wrapper's stops were driven synchronously inside the proof's run)
+  const source = `${W}let a = w\nlet d: number dict = dict{}\nlet box = {f: a, g: d.values}\n${said(["box.f"])}`;
+  for (const mode of MODES)
+    inMode(mode, () => {
+      const before = admissionRunsInsideSolverRuns();
+      assert.deepEqual(inheritedIn(source, ["box"], ["f"]), { box: NUMBER }, JSON.stringify(mode));
+      assert.equal(admissionRunsInsideSolverRuns() - before, 0, JSON.stringify(mode));
+    });
+});
+
+test("a pass's inherited proofs replay by their names, cursors among them", () => {
+  // (Codex r1 on #2098: a fresh pass had no admission to make them, and a cursor was read as a number)
+  const source = `${W}let a = hostValue\nlet b = a\nlet c = b\na = c\nc = w\n${said(["a", "b", "c"])}`;
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS)!;
+  const components: { names: readonly string[]; packet: unknown }[] = [];
+  withSolverSeam(
+    {
+      onComponent: (members, replay) =>
+        components.push(
+          replay ?? { names: members.map((member) => member.key), packet: undefined },
+        ),
+    },
+    () => analyseCore(request),
+  );
+  const inherited = components.filter(({ names }) => names.some((name) => name.startsWith("a4|")));
+  assert.ok(inherited.length > 0, "the analysis solves an inherited proof");
+  assert.ok(
+    inherited.some(({ packet }) => packet !== undefined),
+    "an inherited proof's key holds a cursor",
+  );
+  for (const { names, packet } of inherited)
+    assert.equal(solveDemands(request, names, packet).length, names.length, names.join(", "));
 });

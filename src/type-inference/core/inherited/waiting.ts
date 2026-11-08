@@ -75,6 +75,7 @@ export function* inheritedInto(
 
 /** Whether two decisions wait on each other through copies (`cycles`). */
 function cut(admission: Admission, a: CanonicalKey, b: CanonicalKey): boolean {
+  settledCycles(admission);
   return (
     admission.cycles.has(a) &&
     admission.cycles.has(b) &&
@@ -93,10 +94,41 @@ function rootOf(admission: Admission, key: CanonicalKey): CanonicalKey {
   return root;
 }
 
-export function join(admission: Admission, first: Key, second: Key): void {
+/**
+ * Joins two decisions that wait on each other (`cycles`), a read of `reader`'s proof (its demand key) making the join:
+ * it stands while that proof is finished (`joins`, `settleCycles`).
+ */
+export function join(admission: Admission, reader: string, first: Key, second: Key): void {
   // (both decisions in their identity: one member per key)
   const { contract } = admission.pass;
   const [a, b] = [canonicalKey(contract, first), canonicalKey(contract, second)];
+  link(admission, a, b);
+  admission.pass.receivingDomain.joins.push({ reader, a, b });
+}
+
+/**
+ * `cycles` made again from the joins whose proofs are finished (`joins`): after a run that stopped, whose unfinished
+ * proofs the solver forgot, and after the solver forgot finished ones (`Solver.forget`), so a key's cycles are what its
+ * proofs found, whatever was cut short before.
+ */
+export function settleCycles(admission: Admission): void {
+  const { receivingDomain, solver } = admission.pass;
+  receivingDomain.joins = receivingDomain.joins.filter(
+    ({ reader }) => solver.answer(reader) !== undefined,
+  );
+  admission.cycles.clear();
+  admission.cycleSizes.clear();
+  for (const { a, b } of receivingDomain.joins) link(admission, a, b);
+  receivingDomain.joinsSettled = solver.forgets;
+}
+
+/** `settleCycles` where the solver forgot answers since `cycles` was last made, between two runs. */
+export function settledCycles(admission: Admission): void {
+  const { receivingDomain, solver } = admission.pass;
+  if (!solver.running && solver.forgets !== receivingDomain.joinsSettled) settleCycles(admission);
+}
+
+function link(admission: Admission, a: CanonicalKey, b: CanonicalKey): void {
   for (const key of [a, b])
     if (!admission.cycles.has(key)) {
       admission.cycles.set(key, key);

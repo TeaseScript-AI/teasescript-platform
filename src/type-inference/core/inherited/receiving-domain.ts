@@ -17,10 +17,10 @@ import type { Proof, ProofDemand } from "../solver.js";
 /**
  * A4, the written type a copy of a written binding brings into an unwritten place (r4.75 (1), TABLE r4.375): its state, one
  * per pass (`CorePass.receivingDomain`), made with the pass's parts and asking nothing when made. Admission builds it
- * (`copyGraph`) and reads it (`inheritedAt`) as its client; the F18 receiving domain is read from it in a later step
- * (#1072 A2). Each key's inherited type is a proof of the pass's solver (`inheritedProof`); what its runs found, the
- * keys that wait on each other and the own-level bits, is the pass's too. An admission made on the pass starts the rest
- * afresh (`reset`), as each admission's own state was.
+ * (`copyGraph`) and reads it (`inheritedAt`) as its client; F18 does not read it (#1072 A2). Each key's inherited type
+ * is a proof of the pass's solver (`inheritedProof`); what its runs found, the keys that wait on each other and the
+ * own-level bits, is the pass's too. An admission made on the pass starts the rest afresh (`reset`), as each
+ * admission's own state was.
  */
 export class ReceivingDomain {
   /**
@@ -28,8 +28,14 @@ export class ReceivingDomain {
    * made on a pass that held one before starts from none.
    */
   public reset(): void {
-    const { cycles, cycleSizes, inheritedOwn } = this;
-    Object.assign(this, new ReceivingDomain(), { cycles, cycleSizes, inheritedOwn });
+    const { cycles, cycleSizes, inheritedOwn, joins, joinsSettled } = this;
+    Object.assign(this, new ReceivingDomain(), {
+      cycles,
+      cycleSizes,
+      inheritedOwn,
+      joins,
+      joinsSettled,
+    });
   }
 
   /**
@@ -75,6 +81,14 @@ export class ReceivingDomain {
   cycles = new Map<CanonicalKey, CanonicalKey>();
   /** Each cycle's size, by its root (`join`). */
   cycleSizes = new Map<CanonicalKey, number>();
+  /**
+   * Each join of `cycles`, with the demand key of the proof whose read made it: a join stands while that proof is
+   * finished in the solver, and `cycles` is made again from those that stand after a run stops or the solver forgets
+   * (`settleCycles`).
+   */
+  joins: { readonly reader: string; readonly a: CanonicalKey; readonly b: CanonicalKey }[] = [];
+  /** The solver's `forgets` when `cycles` was last made again from `joins`. */
+  joinsSettled = 0;
   /**
    * The deepest path a written type can reach through copies (`inheritedAt`): the written copies' landing paths with
    * their types' element levels, and every copy of an inheriting place's own landing path beside them.

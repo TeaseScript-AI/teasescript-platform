@@ -23,6 +23,7 @@ import {
 } from "./consumers.js";
 import { keyLabel } from "./consumers/names.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
+import { Admission } from "./admission.js";
 import { Closure, type ClosureCounts } from "./admission/closure.js";
 import type { ReceivingObligation, ReceivingResult } from "./admission/receiving.js";
 import { ReceivingDomain } from "./inherited/receiving-domain.js";
@@ -789,6 +790,9 @@ export function solveDemands(
   const pass = createPass(program);
   // (names holding cursors came with their packet, made here and asked in this pass's identity: #1422 B1)
   const keys = packet === undefined ? asked : importNames(pass.contract, asked, packet);
+  // (an inherited proof is made by an admission on the pass, as the replayed pass's was: `replayProof`)
+  if (keys.some((key) => key.startsWith("a4|")))
+    new Admission(pass, { run: (work) => pass.solver.run(work) }, new Map(), new Set());
   return keys.map((key) => {
     pass.solver.run(demandWork(pass, key));
     // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store); a key's
