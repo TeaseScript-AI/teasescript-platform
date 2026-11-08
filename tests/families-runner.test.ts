@@ -1053,7 +1053,8 @@ test("the stored baselines' tools show no plain write outside the gate in their 
   // which are no tool's
   assert.deepEqual(
     processes.map((process) => process.allowed),
-    ["the gate's lock holder", "the runner's own child"],
+    // (the heap probe twice: with a source's heap and without, #1956)
+    ["the gate's lock holder", "the heap probe", "the heap probe", "the runner's own child"],
   );
   assert.deepEqual(
     loads.map((load) => load.function),
