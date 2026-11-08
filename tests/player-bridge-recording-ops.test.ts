@@ -29,8 +29,8 @@ import { preparedPlan } from "./helpers/prepared-plan.js";
 
 /*
  * The recording and debug-export ops' surfaces (L5h.3b, `ops/recording.ts`): each op's argument forms, refused when
- * malformed and admitted with every valid value of each class; the halt's stop arguments likewise; and each op's
- * outcomes, the same in-process and over a Worker.
+ * malformed and admitted with every declared valid witness of each class; the halt's stop arguments likewise; and each
+ * op's outcomes, the same in-process and over a Worker.
  */
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
@@ -101,7 +101,7 @@ const HALT: readonly ArgumentForm[] = [
   { required: { error: "string", run: "integer", stop: "integer", retires: "nullableInteger" } },
 ];
 
-test("every recording op refuses each malformed argument its forms oblige, and admits every valid value", async () => {
+test("every recording op refuses each malformed argument its forms oblige, and admits every declared valid witness", async () => {
   const [inProcess, remote] = await onBoth(async (bridge) => {
     const answers: Record<string, Answer> = {};
     for (const op of OPS) {

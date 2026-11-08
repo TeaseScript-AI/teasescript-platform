@@ -29,8 +29,9 @@ export interface RecordingTicket {
 }
 
 /**
- * A debug export's capture, frozen: the shown session's state and failure (none without a session), its marks, the
- * run's incident, the selected recording, and the plan the export identifies (the recording's before the shown one's).
+ * A debug export's capture, held for its preparation (`exportPrepare`): what `ExportFrozen` keeps, the plan the export
+ * identifies (the recording's before the shown one's), the shown session's snapshot and the selected recording. The
+ * shown failure, marks and incident are delivered in the capture's reply (`ExportCaptureReply`), not held here.
  */
 export interface ExportTicket extends ExportFrozen {
   readonly kind: "export";
@@ -116,7 +117,7 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
       },
     },
     // A debug export's capture of the named session, or of none, with the recording `current` (the session's own, by its
-    // engine), `none` (proved absent, as a Player error's capture that settled unavailable), or one held under a
+    // engine), `none` (no recording: what a Player error's capture that settled unavailable selects), or one held under a
     // recording ticket. Refused when a stop of the run is still committing (retry) or the current recording's provenance
     // is not proved; never with another recording or state in its place.
     captureExport: {

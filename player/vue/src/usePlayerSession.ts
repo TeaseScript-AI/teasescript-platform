@@ -306,8 +306,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The recording up to a Player error, captured in the host as the stop is sent and kept until the next Start, while
   // Debug's rewind may begin the recorder anew at a restored state.
   const failureRecording = useFailureRecording();
-  /** The recording a debug export shows: the one up to a Player error, else the host's recorder's. */
-  const exportedRecording = (): DebugRecording | null => {
+  /**
+   * The recording the host holds for diagnostics and tests: a Player error's, while its captured ticket is held, else
+   * the recorder's current one. Not a debug export's selection (`failureRecording.selection()`), which waits for a
+   * pending capture and selects none where it settled unavailable.
+   */
+  const heldDebugRecording = (): DebugRecording | null => {
     const failed = failureRecording.ticket();
     if (failed !== null) return heldRecording(failed.bridge, failed.ticket);
     return bridge === null ? null : heldRecording(bridge);
@@ -3459,10 +3463,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     discardSessionReview,
     importSession,
     /**
-     * The current or last session's recorded engine calls for a debug export, after a Player error those up to it until
-     * the next Start, or `null` before any Start.
+     * The recorded engine calls the host holds (`heldDebugRecording`): after a Player error whose capture is held, those
+     * up to it until the next Start; else the recorder's current ones, or `null` before any Start.
      */
-    debugRecording: exportedRecording,
+    debugRecording: heldDebugRecording,
     /** The error name of an exception of the Player itself, or `null`. */
     hostError: computed(() => hostError.value),
     /** Whether an exception of the Player itself stopped the session where it stands; until the next Start. */

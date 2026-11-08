@@ -14,7 +14,7 @@ const WRONG_VALUES = {
   integer: ["1", null, true, 1.5, {}, []],
   nullableInteger: ["1", true, 1.5, {}, []],
   boolean: ["true", null, 1, {}, []],
-  // A recording selector: `current`, or a ticket.
+  // A recording selector: `current`, `none`, or a ticket.
   selector: ["other", null, 1, {}, { ticket: 1 }, { ticket: "r1", kind: "recording" }],
 } as const satisfies Record<string, readonly unknown[]>;
 export type ValueClass = keyof typeof WRONG_VALUES;
