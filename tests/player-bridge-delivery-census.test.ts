@@ -126,7 +126,7 @@ const FINDS: readonly [
   Finds<{ stash: (() => void) & { readonly held: Map<string, string> } }>,
 ] = [true, true, true, true, true, true, true];
 
-test("every field of a connection's context, recursively, is an owned registry or classified by its exact path", () => {
+test("the context census classifies its declared types and visible own fields", () => {
   assert.equal(ALL_OWNED, true);
   assert.deepEqual(FINDS, [true, true, true, true, true, true, true]);
   assert.deepEqual(unowned({ ...playerOpsContext() }, ""), []);
@@ -255,7 +255,7 @@ function engineBridgeModules(): string[] {
   return modules.sort();
 }
 
-test("every module-scope binding of the engine bridge that can hold state across calls is classified", () => {
+test("the module syntax census classifies every binding it discovers", () => {
   const found = engineBridgeModules().flatMap((module) =>
     moduleState(module, readFileSync(join(ENGINE_BRIDGE, module), "utf8")),
   );

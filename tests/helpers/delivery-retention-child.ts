@@ -115,13 +115,27 @@ function connection(): Connection {
           const before = reach(context);
           const outcome = await op.run(...args);
           const added = [...reach(context)].filter((value) => !before.has(value));
+          // A new session's whole payload: the held session, and the publication behind its private fields.
           const created =
             outcome.session === undefined ? undefined : sessions!.get(outcome.session);
-          watch.done(
-            [...added, ...(created === undefined ? [] : [created])].map(
-              (value) => new WeakRef(value),
-            ),
+          const publication =
+            created !== undefined &&
+            "publication" in created &&
+            typeof created.publication === "object" &&
+            created.publication !== null
+              ? [created.publication]
+              : [];
+          const payload = created === undefined ? [] : [created, ...publication];
+          // A new slot's waiting task is its payload too.
+          const timers = added.flatMap((value) =>
+            typeof value === "object" &&
+            "timer" in value &&
+            typeof value.timer === "object" &&
+            value.timer !== null
+              ? [value.timer]
+              : [],
           );
+          watch.done([...added, ...payload, ...timers].map((value) => new WeakRef(value)));
           return outcome;
         },
       } satisfies BridgeOp,
@@ -153,10 +167,15 @@ function markedTransfer(marker: string): Promise<string> {
 }
 
 /** Runs `allocation`'s op on `link` for `marker`: its prerequisites first, committed, then the op itself. */
+/**
+ * Runs `allocation`'s op on `link`: its prerequisite plan first, committed, marked with `planMarker`, then the op itself,
+ * whose own input carries `marker` where one can (a plan, sources, a transfer, a session's saved data).
+ */
 async function allocate(
   link: Connection,
   allocation: AllocationClass,
   marker: string,
+  planMarker: string,
   fail: boolean,
 ): Promise<readonly WeakRef<WeakKey>[]> {
   const prepared = async (source: unknown) => {
@@ -171,16 +190,22 @@ async function allocate(
         return { source: { kind: "source", script: markedProject(marker) } };
       case "session":
         return {
-          plan: await prepared({ kind: "plan", text: planText(markedProject(marker)) }),
-          options: START,
+          plan: await prepared({ kind: "plan", text: planText(markedProject(planMarker)) }),
+          // The session's own marker, in its saved data, which its state and publication hold.
+          options: {
+            ...START,
+            scriptStorage: [{ key: `key_${marker}`, value: `value ${marker}` }],
+          },
           recording: false,
         };
       case "transfer":
         return { text: await markedTransfer(marker) };
       case "slot":
-        return { plan: await prepared({ kind: "plan", text: planText(markedProject(marker)) }) };
+        return {
+          plan: await prepared({ kind: "plan", text: planText(markedProject(planMarker)) }),
+        };
       case "cache": {
-        const plan = await prepared({ kind: "source", script: markedProject(marker) });
+        const plan = await prepared({ kind: "source", script: markedProject(planMarker) });
         const metadata = await link.request("planMetadata", { plan });
         // EVIDENCE: fixture: `planMetadata` of a held plan gives its random sites, and the project has two.
         const site = (metadata.result as { randomSites: readonly { path: string }[] })
@@ -205,17 +230,23 @@ async function runCases() {
   for (const allocation of CLASSES) {
     const open = connection();
     connections.push(open);
+    // A case's prerequisite plan has a marker of its own (`…/plan`), or the case's when it has none.
+    const markers = (name: string) => {
+      const seed = seedOf(name);
+      const plan = seedOf(`${name}/plan`) ?? seed;
+      return seed === undefined ? null : ([markerOf(seed), markerOf(plan!)] as const);
+    };
     for (const moment of ["committed", "aborted"] as const) {
-      const seed = seedOf(`${moment}/${allocation}`);
-      if (seed === undefined) continue;
-      const refs = await allocate(open, allocation, markerOf(seed), moment === "aborted");
+      const marked = markers(`${moment}/${allocation}`);
+      if (marked === null) continue;
+      const refs = await allocate(open, allocation, ...marked, moment === "aborted");
       results.push({ name: `${moment}/${allocation}`, refs });
     }
-    const seed = seedOf(`closed/${allocation}`);
-    if (seed === undefined) continue;
+    const marked = markers(`closed/${allocation}`);
+    if (marked === null) continue;
     const closing = connection();
     connections.push(closing);
-    const refs = await allocate(closing, allocation, markerOf(seed), false);
+    const refs = await allocate(closing, allocation, ...marked, false);
     closing.terminate();
     results.push({ name: `closed/${allocation}`, refs });
   }
