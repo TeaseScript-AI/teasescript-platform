@@ -12,10 +12,10 @@
 //   parser returns for a .vue file), found with TypeScript's parser, so text in a string, template literal, regular
 //   expression or JSX text is never a comment. A .vue file the parser reports errors for (a component Vue refuses,
 //   kept as a fixture) still counts the blocks it returns, and is named once on stderr; a block Vue refuses adds
-//   nothing, and a `src` block's file counts as a file of its own. A lint disable is a comment whose text after `//` or `/*` and any spaces begins with the word
-//   `oxlint-disable` or `eslint-disable`, bare or with `-line` or `-next-line`. A `@ts-` directive is one whose text
-//   after `//`, `///` or `/*`, any further `*`, and any spaces begins with `@ts-expect-error` or `@ts-ignore`. Each
-//   comment counts once.
+//   nothing, and a `src` block's file counts as a file of its own. A lint disable is a comment whose text after `//`
+//   or `/*` and any spaces begins with the word `oxlint-disable` or `eslint-disable`, bare or with `-line` or
+//   `-next-line`. A `@ts-` directive is one whose text after `//`, `///` or `/*`, any further `*`, and any spaces
+//   begins with `@ts-expect-error` or `@ts-ignore`. Each comment counts once.
 // - Skipped and todo tests are node:test sites, in three forms: a call `test.skip(…)` (or `it`, `describe`, `suite`);
 //   a `skip` property whose value is not `false` in an object literal passed to a call of one of those four names or a
 //   member of one, such as `test.only`; and `X.skip(…)` where TypeScript's binder resolves the name X to a test's
@@ -99,7 +99,7 @@ function isTestCall(call) {
   return ts.isIdentifier(base) && TEST_NAMES.has(base.text);
 }
 
-/** Whether a declaration is a test's context: the first parameter of a function passed as a test call's last argument. */
+/** Whether a declaration is a test's context: the first parameter of a function that is a test call's last argument. */
 function isTestContext(declaration) {
   if (!declaration || !ts.isParameter(declaration) || !ts.isIdentifier(declaration.name))
     return false;
