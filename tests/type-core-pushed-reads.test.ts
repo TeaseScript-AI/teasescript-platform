@@ -1112,6 +1112,24 @@ function floorControls(): { readonly source: string; readonly horizon: number | 
         ].join("\n") + "\n",
       horizon: null,
     });
+  // (a store below that floor, which native reads at its longer prefix: the floor keeps a key's direct children)
+  for (const read of ["${p2.q.r.c}", "${p2.r.c}"])
+    out.push({
+      source:
+        [
+          "let p0={q:hostValue}",
+          "let p1={a:0,b:0}",
+          "let p2={a:0,b:0}",
+          "p2.q=p0",
+          "p2.q.q.r={c:1}",
+          "if p0.q is object { p1=p0 }",
+          "p2=p1",
+          "p2=p2.q",
+          `say "${read}"`,
+          "exit",
+        ].join("\n") + "\n",
+      horizon: null,
+    });
   for (const condition of ["p0.q.b is integer", "p0.q is object"]) {
     const rows = [
       "let p0={a:0}",
