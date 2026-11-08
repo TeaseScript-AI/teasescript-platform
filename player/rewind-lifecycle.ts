@@ -46,6 +46,13 @@ export interface LifecycleState {
   readonly closing: "adoption" | "gate" | "failed" | null;
   /** Whether Return waits at its gate. */
   readonly returning: boolean;
+  /** The serial of the newest gate asked, `0` before any: each gate's identity, which its settlement names. */
+  readonly gates: number;
+  /**
+   * The gate of each kind asked and still current, by its identity, or `null`: a settlement of any other is obsolete,
+   * and decides nothing.
+   */
+  readonly gate: { readonly [Gate in LifecycleGate]: number | null };
   /** The outcome of an adoption Debug off waited for, which its close carries; `null` when none. */
   readonly adopted: boolean | null;
 }
@@ -62,6 +69,8 @@ export const INITIAL_LIFECYCLE: LifecycleState = Object.freeze({
   adopting: false,
   closing: null,
   returning: false,
+  gates: 0,
+  gate: { step: null, return: null, reinstate: null },
   adopted: null,
 });
 
@@ -82,6 +91,8 @@ export type LifecycleEvent =
   | {
       readonly kind: "gateSettled";
       readonly gate: LifecycleGate;
+      /** The gate's identity (`gates`), as it was asked. */
+      readonly id: number;
       readonly ok: boolean;
       readonly mayShow: boolean;
     }
@@ -110,7 +121,7 @@ export type LifecycleAction =
   | { readonly kind: "readOnly" }
   | { readonly kind: "sendStep" }
   | { readonly kind: "refuse" }
-  | { readonly kind: "gate"; readonly gate: LifecycleGate }
+  | { readonly kind: "gate"; readonly gate: LifecycleGate; readonly id: number }
   | { readonly kind: "drop"; readonly history: number; readonly token: number }
   | { readonly kind: "commit"; readonly history: number; readonly token: number }
   | { readonly kind: "showCandidate" }
@@ -118,7 +129,7 @@ export type LifecycleAction =
   | { readonly kind: "showParked" }
   | { readonly kind: "adoptBegin"; readonly history: number }
   | { readonly kind: "adoptEnd"; readonly history: number; readonly succeeded: boolean }
-  /** A failed open of the history asked for now: the failure is the Player's to report. */
+  /** A failed open of the history asked for now, or a current gate's failure: the Player's to report. */
   | { readonly kind: "reportFailure" };
 
 export interface LifecycleOutcome {
@@ -158,6 +169,15 @@ function abandon(step: LifecycleState["step"]): LifecycleState["step"] {
   return step === null || step.phase === "committed" ? step : { ...step, abandoned: true };
 }
 
+/** Asks gate `which` anew, with the next identity, which only its own settlement names. */
+function ask(state: LifecycleState, which: LifecycleGate): [LifecycleState, LifecycleAction] {
+  const id = state.gates + 1;
+  return [
+    { ...state, gates: id, gate: { ...state.gate, [which]: id } },
+    { kind: "gate", gate: which, id },
+  ];
+}
+
 /** The open a Debug on asked for while Debug off still closed its history, due behind that close. */
 const reopen = (state: LifecycleState): LifecycleAction[] =>
   state.debug && state.opening !== null ? [{ kind: "open", intent: state.opening }] : [];
@@ -165,8 +185,7 @@ const reopen = (state: LifecycleState): LifecycleAction[] =>
 /** The history ends with Debug off: reinstating the parked session through its gate when a restored state shows. */
 function debugOffClose(state: LifecycleState): LifecycleOutcome {
   if (state.history === null) return done({ ...state, closing: null }, { kind: "clearView" });
-  if (state.inspecting)
-    return done({ ...state, closing: "gate" }, { kind: "gate", gate: "reinstate" });
+  if (state.inspecting) return done(...ask({ ...state, closing: "gate" }, "reinstate"));
   const { history } = state;
   return done(
     { ...state, closing: null, history: null },
@@ -188,10 +207,7 @@ function settleAdoption(state: LifecycleState, succeeded: boolean): LifecycleOut
         { kind: "clearView" },
         ...reopen(state),
       );
-    return done(
-      { ...settled, closing: "gate", adopted: false },
-      { kind: "gate", gate: "reinstate" },
-    );
+    return done(...ask({ ...settled, closing: "gate", adopted: false }, "reinstate"));
   }
   if (state.history === null) return done(settled);
   return done(settled, { kind: "adoptEnd", history: state.history, succeeded: succeeded });
@@ -266,6 +282,9 @@ export function advanceLifecycle(state: LifecycleState, event: LifecycleEvent): 
         closing: null,
         adopted: null,
         history: null,
+        // A Return or a reinstatement waiting at its gate is obsolete with the history; a step's gate settles it.
+        returning: false,
+        gate: { ...state.gate, return: null, reinstate: null },
       };
       const close: LifecycleAction[] =
         state.history === null
@@ -288,6 +307,8 @@ export function advanceLifecycle(state: LifecycleState, event: LifecycleEvent): 
         adopted: null,
         inspecting: false,
         adopting: false,
+        returning: false,
+        gate: { ...state.gate, return: null, reinstate: null },
       };
       if (state.history === null && state.opening === null) return done(next);
       const close: LifecycleAction[] =
@@ -353,10 +374,7 @@ export function advanceLifecycle(state: LifecycleState, event: LifecycleEvent): 
       const prepared = { ...state.step, token: event.token };
       if (prepared.abandoned || !state.debug || !event.mayShow)
         return done({ ...state, step: null }, ...exitStep({ ...state, step: prepared }));
-      return done(
-        { ...state, step: { ...prepared, phase: "gate" } },
-        { kind: "gate", gate: "step" },
-      );
+      return done(...ask({ ...state, step: { ...prepared, phase: "gate" } }, "step"));
     }
     case "stepFailed":
       return done({ ...state, step: null });
@@ -390,7 +408,7 @@ export function advanceLifecycle(state: LifecycleState, event: LifecycleEvent): 
     case "retryReinstate":
       // A reinstatement whose gate failed goes through that gate again; Debug's state stays as it was asked.
       if (state.closing !== "failed" || state.history === null) return done(state);
-      return done({ ...state, closing: "gate" }, { kind: "gate", gate: "reinstate" });
+      return done(...ask({ ...state, closing: "gate" }, "reinstate"));
     case "return": {
       if (
         !state.debug ||
@@ -402,7 +420,7 @@ export function advanceLifecycle(state: LifecycleState, event: LifecycleEvent): 
         state.history === null
       )
         return done(state, { kind: "refuse" });
-      return done({ ...state, returning: true }, { kind: "gate", gate: "return" });
+      return done(...ask({ ...state, returning: true }, "return"));
     }
     case "closeSettled": {
       return event.ok ? done(state) : done({ ...state, blocked: true, opening: null });
@@ -416,56 +434,69 @@ function gateSettled(
   state: LifecycleState,
   event: Extract<LifecycleEvent, { kind: "gateSettled" }>,
 ): LifecycleOutcome {
+  // Only the gate still current decides: an obsolete one's success authorizes nothing, and its failure is not reported.
+  if (event.id !== state.gate[event.gate]) return done(state);
+  const settled = { ...state, gate: { ...state.gate, [event.gate]: null } };
   switch (event.gate) {
     case "step": {
-      const { step, history } = state;
-      if (step === null || step.phase !== "gate") return done(state);
+      const { step, history } = settled;
+      if (step === null || step.phase !== "gate") return done(settled);
       // Its history closed meanwhile, and the close took its candidate.
-      if (step.history !== history) return done({ ...state, step: null });
-      if (step.abandoned || !event.ok || !state.debug || !event.mayShow)
-        return done({ ...state, step: null }, ...exitStep(state));
+      if (step.history !== history) return done({ ...settled, step: null });
+      if (step.abandoned || !event.ok || !settled.debug || !event.mayShow)
+        return done({ ...settled, step: null }, ...exitStep(settled));
       // The final handoff: the commit is sent before the candidate shows, and nothing awaits between them.
       return done(
-        { ...state, step: { ...step, phase: "committed" }, inspecting: true },
+        { ...settled, step: { ...step, phase: "committed" }, inspecting: true },
         { kind: "commit", history, token: step.token! },
         { kind: "showCandidate" },
       );
     }
     case "return": {
       const ready =
-        state.returning &&
-        state.debug &&
-        state.inspecting &&
-        state.step === null &&
-        !state.adopting &&
-        state.closing === null &&
-        state.history !== null;
-      if (!ready || !event.ok) return done({ ...state, returning: false }, { kind: "refuse" });
+        settled.returning &&
+        settled.debug &&
+        settled.inspecting &&
+        settled.step === null &&
+        !settled.adopting &&
+        settled.closing === null &&
+        settled.history !== null;
+      // The current gate's failure is the Player's host failure to report.
+      if (!event.ok)
+        return done(
+          { ...settled, returning: false },
+          { kind: "refuse" },
+          { kind: "reportFailure" },
+        );
+      if (!ready) return done({ ...settled, returning: false }, { kind: "refuse" });
       return done(
-        { ...state, returning: false, inspecting: false },
-        { kind: "sendReturn", history: state.history! },
+        { ...settled, returning: false, inspecting: false },
+        { kind: "sendReturn", history: settled.history! },
         { kind: "showParked" },
       );
     }
     case "reinstate": {
-      if (state.closing !== "gate") return done(state);
-      const { history } = state;
+      if (settled.closing !== "gate") return done(settled);
+      const { history } = settled;
+      // The history it closes takes a Return still waiting at its gate with it.
+      const closed = { ...settled, returning: false, gate: { ...settled.gate, return: null } };
       if (history === null)
-        return done({ ...state, closing: null }, { kind: "clearView" }, ...reopen(state));
-      // A failed gate restarts nothing: the history and its sessions stay as they are, and the next open waits.
-      if (!event.ok) return done({ ...state, closing: "failed" });
+        return done({ ...closed, closing: null }, { kind: "clearView" }, ...reopen(closed));
+      // A failed gate restarts nothing: the history and its sessions stay as they are, and the next open waits; its
+      // failure is the Player's host failure to report.
+      if (!event.ok) return done({ ...settled, closing: "failed" }, { kind: "reportFailure" });
       // The close is sent before the parked session shows.
       return done(
-        { ...state, closing: null, history: null, inspecting: false, adopted: null },
+        { ...closed, closing: null, history: null, inspecting: false, adopted: null },
         {
           kind: "close",
           history,
           by: "debugOff",
-          ...(state.adopted === null ? {} : { adoptionSucceeded: state.adopted }),
+          ...(settled.adopted === null ? {} : { adoptionSucceeded: settled.adopted }),
         },
         { kind: "showParked" },
         { kind: "clearView" },
-        ...reopen(state),
+        ...reopen(settled),
       );
     }
   }

@@ -56,8 +56,12 @@ type Move =
   | "return"
   | "returnGateOk"
   | "returnGateRejected"
+  | "returnGateOkNewest"
+  | "returnGateRejectedNewest"
   | "reinstateGateOk"
   | "reinstateGateRejected"
+  | "reinstateGateOkNewest"
+  | "reinstateGateRejectedNewest"
   | "closeOk"
   | "closeFails"
   | "retryReinstate";
@@ -86,8 +90,12 @@ const MOVES: readonly Move[] = [
   "return",
   "returnGateOk",
   "returnGateRejected",
+  "returnGateOkNewest",
+  "returnGateRejectedNewest",
   "reinstateGateOk",
   "reinstateGateRejected",
+  "reinstateGateOkNewest",
+  "reinstateGateRejectedNewest",
   "closeOk",
   "closeFails",
   "retryReinstate",
@@ -108,7 +116,14 @@ interface World {
   readonly closes: number;
   readonly settled: number;
   readonly stepSent: number | null;
-  readonly gates: { readonly step: number; readonly return: number; readonly reinstate: number };
+  /** The gates asked and unanswered, by their identities, oldest first. */
+  readonly gates: {
+    readonly step: readonly number[];
+    readonly return: readonly number[];
+    readonly reinstate: readonly number[];
+  };
+  /** The Return and reinstatement gate still current, by identity: the oracle's own account of supersession. */
+  readonly current: { readonly return: number | null; readonly reinstate: number | null };
   readonly commits: number;
   readonly adopting: boolean;
   // The oracle's ledgers.
@@ -148,7 +163,8 @@ function start(): World {
     closes: 0,
     settled: 0,
     stepSent: null,
-    gates: { step: 0, return: 0, reinstate: 0 },
+    gates: { step: [], return: [], reinstate: [] },
+    current: { return: null, reinstate: null },
     commits: 0,
     adopting: false,
     debug: false,
@@ -170,12 +186,13 @@ function start(): World {
 /** Mutable working copy of a world for one move. */
 type Draft = {
   -readonly [
-    K in Exclude<keyof World, "tokens" | "closed" | "gates" | "sent" | "queued">
+    K in Exclude<keyof World, "tokens" | "closed" | "gates" | "current" | "sent" | "queued">
   ]: World[K];
 } & {
   tokens: Map<number, { history: number; ended: "drop" | "commit" | null }>;
   closed: Set<number>;
-  gates: { step: number; return: number; reinstate: number };
+  gates: { step: number[]; return: number[]; reinstate: number[] };
+  current: { return: number | null; reinstate: number | null };
   sent: number[];
   queued: { intent: number; after: number }[];
 };
@@ -185,7 +202,12 @@ function draftOf(world: World): Draft {
     ...world,
     tokens: new Map([...world.tokens].map(([token, entry]) => [token, { ...entry }])),
     closed: new Set(world.closed),
-    gates: { ...world.gates },
+    gates: {
+      step: [...world.gates.step],
+      return: [...world.gates.return],
+      reinstate: [...world.gates.reinstate],
+    },
+    current: { ...world.current },
     sent: [...world.sent],
     queued: [...world.queued],
   };
@@ -230,29 +252,35 @@ function eventOf(world: Draft, move: Move): LifecycleEvent | null {
     case "gateOk":
     case "gateUnready":
     case "gateRejected":
-      if (world.gates.step === 0) return null;
-      world.gates.step -= 1;
+      if (world.gates.step.length === 0) return null;
       return {
         kind: "gateSettled",
         gate: "step",
+        id: world.gates.step.shift()!,
         ok: move !== "gateRejected",
         mayShow: move !== "gateUnready",
       };
+    // The oldest unanswered gate of its kind settles, or with `Newest` the newest: both orders of an obsolete and a
+    // current gate.
     case "returnGateOk":
     case "returnGateRejected":
-      if (world.gates.return === 0) return null;
-      world.gates.return -= 1;
-      return { kind: "gateSettled", gate: "return", ok: move === "returnGateOk", mayShow: true };
+    case "returnGateOkNewest":
+    case "returnGateRejectedNewest":
     case "reinstateGateOk":
     case "reinstateGateRejected":
-      if (world.gates.reinstate === 0) return null;
-      world.gates.reinstate -= 1;
+    case "reinstateGateOkNewest":
+    case "reinstateGateRejectedNewest": {
+      const gate = move.startsWith("return") ? "return" : "reinstate";
+      const asked = world.gates[gate];
+      if (asked.length === 0) return null;
       return {
         kind: "gateSettled",
-        gate: "reinstate",
-        ok: move === "reinstateGateOk",
+        gate,
+        id: move.endsWith("Newest") ? asked.pop()! : asked.shift()!,
+        ok: move.includes("Ok"),
         mayShow: true,
       };
+    }
     case "commitAcknowledged":
       if (world.commits === 0) return null;
       world.commits -= 1;
@@ -306,7 +334,17 @@ function advance(
   if (event.kind === "adoptionSettled" && w.adoption !== null && w.adoption.outcome === null)
     w.adoption = { ...w.adoption, outcome: event.succeeded };
   if (event.kind === "closeSettled" && !event.ok) w.closeFailed = true;
-  if (event.kind === "gateSettled" && event.gate === "return") w.returnBusy = false;
+  // A settlement of the current Return or reinstatement gate ends it; an obsolete one's changes nothing.
+  const settling =
+    event.kind !== "gateSettled" || event.gate === "step"
+      ? null
+      : { gate: event.gate, id: event.id, ok: event.ok };
+  const currentGate = settling !== null && world.current[settling.gate] === settling.id;
+  const failedCurrent = currentGate && settling.ok === false;
+  if (currentGate) {
+    w.current = { ...w.current, [settling.gate]: null };
+    if (settling.gate === "return") w.returnBusy = false;
+  }
   if (event.kind === "stepFailed" || event.kind === "commitAcknowledged") w.stepPhase = null;
   const opened = event.kind === "opened" ? event.history : null;
   const obsolete =
@@ -354,6 +392,9 @@ function advance(
       );
   }
 
+  // An obsolete gate decides nothing: its success restarts nothing, and its failure is not reported.
+  if (settling !== null && !currentGate && w.sealed === null && actions.length > 0)
+    return fail("an obsolete gate decided something");
   let enrolled = false;
   let closedOpened = false;
   let reported = false;
@@ -387,7 +428,7 @@ function advance(
         break;
       case "close": {
         const { history } = action;
-        if (move === "reinstateGateRejected")
+        if (failedCurrent && settling.gate === "reinstate")
           return fail("a failed reinstatement gate restarted the page");
         if (w.sealed === "disposal" && action.by !== "disposal")
           return fail("a non-disposal close after disposal");
@@ -411,6 +452,9 @@ function advance(
           w.inspecting = false;
           w.offHold = false;
           w.failedHold = false;
+          // A Return or a reinstatement still waiting at its gate is obsolete with the history.
+          w.current = { return: null, reinstate: null };
+          w.returnBusy = false;
         }
         break;
       }
@@ -423,8 +467,7 @@ function advance(
         if (
           move !== "stepAsked" &&
           move !== "return" &&
-          move !== "returnGateOk" &&
-          move !== "returnGateRejected"
+          !(settling?.gate === "return" && currentGate)
         )
           return fail("a refusal no one asked for");
         break;
@@ -433,12 +476,13 @@ function advance(
         if (action.gate === "step") {
           if (prepared === null) return fail("a step gate without its prepared step");
           if (move === "stepPreparedUnready") return fail("an unready step at its gate");
-          w.gates.step += 1;
+          w.gates.step.push(action.id);
           w.gateToken = prepared;
           w.stepPhase = "gate";
         } else if (action.gate === "return") {
           if (move !== "return" || !asked.ret) return fail("a Return gate while Return may not go");
-          w.gates.return += 1;
+          w.gates.return.push(action.id);
+          w.current = { ...w.current, return: action.id };
           w.returnBusy = true;
         } else {
           if (
@@ -447,7 +491,8 @@ function advance(
             !(move === "retryReinstate" && world.failedHold)
           )
             return fail("a reinstatement gate no Debug off asked for");
-          w.gates.reinstate += 1;
+          w.gates.reinstate.push(action.id);
+          w.current = { ...w.current, reinstate: action.id };
           w.failedHold = false;
         }
         break;
@@ -480,16 +525,18 @@ function advance(
           return fail("a candidate shown without its commit");
         break;
       case "sendReturn":
-        if (move !== "returnGateOk" || action.history !== w.held)
+        if (
+          !(settling?.gate === "return" && currentGate && settling.ok) ||
+          action.history !== w.held
+        )
           return fail("a Return sent without its gate");
         w.inspecting = false;
         break;
       case "showParked":
-        if (move !== "returnGateOk" && move !== "reinstateGateOk")
-          return fail("the parked session shown without its gate");
+        if (!(currentGate && settling.ok)) return fail("the parked session shown without its gate");
         if (w.sealed !== null) return fail("the parked session shown after the Player was sealed");
         if (
-          move === "reinstateGateOk" &&
+          settling.gate === "reinstate" &&
           !actions.slice(0, index).some((each) => each.kind === "close")
         )
           return fail("the parked session reinstated before its history's close");
@@ -506,7 +553,8 @@ function advance(
         w.adoption = null;
         break;
       case "reportFailure":
-        if (move !== "openFailed") return fail("a failure reported for no failed open");
+        if (move !== "openFailed" && !failedCurrent)
+          return fail("a failure reported for no failed open or current gate");
         reported = true;
         break;
       case "clearView":
@@ -566,31 +614,40 @@ function advance(
       return fail("a step's gate left its token");
     if (!committed) w.stepPhase = null;
   }
-  if (
-    move === "reinstateGateRejected" &&
-    actions.some((a) => a.kind === "close" || a.kind === "showParked")
-  )
-    return fail("a failed reinstatement gate restarted the page");
-  if (
-    move === "returnGateRejected" &&
-    actions.some((a) => a.kind === "sendReturn" || a.kind === "showParked")
-  )
-    return fail("a failed Return gate restarted the page");
+  // A current gate's failure is the Player's to report, and restarts nothing.
+  if (failedCurrent && w.sealed === null) {
+    if (!actions.some((a) => a.kind === "reportFailure"))
+      return fail("a current gate's failure not reported");
+    if (actions.some((a) => a.kind === "showParked" || a.kind === "sendReturn"))
+      return fail(
+        settling.gate === "reinstate"
+          ? "a failed reinstatement gate restarted the page"
+          : "a failed Return gate restarted the page",
+      );
+  }
   // A successful gate still current transfers: Return reinstates the parked session; Debug off's reinstatement closes
   // the history it holds, then shows the parked session.
-  if (move === "returnGateOk" && asked.ret) {
+  const succeeded = currentGate && settling.ok;
+  if (succeeded && settling.gate === "return" && asked.ret) {
     if (
       !actions.some((a) => a.kind === "sendReturn") ||
       !actions.some((a) => a.kind === "showParked")
     )
       return fail("a successful Return gate did not return");
   } else if (
-    move === "returnGateOk" &&
+    succeeded &&
+    settling.gate === "return" &&
     w.sealed === null &&
     !actions.some((a) => a.kind === "refuse")
   )
     return fail("a Return gate no longer current not refused");
-  if (move === "reinstateGateOk" && world.offHold && world.held !== null && w.sealed === null) {
+  if (
+    succeeded &&
+    settling.gate === "reinstate" &&
+    world.offHold &&
+    world.held !== null &&
+    w.sealed === null
+  ) {
     const closed = actions.some(
       (a) => a.kind === "close" && a.history === world.held && a.by === "debugOff",
     );
@@ -612,7 +669,8 @@ function advance(
   }
   if (!w.debug && w.held !== null && !w.offHold && w.sealed === null)
     return fail("a history held with Debug off");
-  if (move === "reinstateGateRejected" && world.offHold && w.held !== null) w.failedHold = true;
+  if (failedCurrent && settling.gate === "reinstate" && world.offHold && w.held !== null)
+    w.failedHold = true;
   if (move === "retryReinstate" && world.failedHold && w.sealed === null) {
     if (!actions.some((a) => a.kind === "gate" && a.gate === "reinstate"))
       return fail("a retry that did not ask the gate again");
@@ -674,6 +732,20 @@ function explore(from: World, depth: number, decide: Decide = advanceLifecycle, 
 const INITIAL = start();
 const OPEN = play(INITIAL, ["debugOn", "openDue", "opened"]).world;
 const INSPECTING = play(OPEN, ["stepAsked", "stepPrepared", "gateOk", "commitAcknowledged"]).world;
+/** Debug off's gate A, a new session, a later inspection of its history, and Debug off's gate B: A obsolete, B current. */
+const TWO_GATES = play(INSPECTING, [
+  "debugOff",
+  "newSession",
+  "closeOk",
+  "debugOn",
+  "openDue",
+  "opened",
+  "stepAsked",
+  "stepPrepared",
+  "gateOk",
+  "commitAcknowledged",
+  "debugOff",
+]).world;
 
 test("the deciding function keeps every rule over every schedule of its grammar", () => {
   assert.equal(OPEN.held, 12);
@@ -830,6 +902,18 @@ const mutants: readonly { readonly rule: string; readonly from: World; readonly 
           : outcome;
       },
     },
+    {
+      rule: "an obsolete gate decided something",
+      from: TWO_GATES,
+      // The defect Sol r5 found: a gate settles by its kind alone, whichever one was asked.
+      decide: (state, event) =>
+        advanceLifecycle(
+          state,
+          event.kind === "gateSettled" && event.gate !== "step"
+            ? { ...event, id: state.gate[event.gate] ?? event.id }
+            : event,
+        ),
+    },
   ];
 
 test("the oracle finds each rule's defect (negative controls)", () => {
@@ -922,7 +1006,7 @@ test("Sol r3 B3: a failed reinstatement gate keeps the history and its sessions 
     "debugOn",
     "stepAsked",
   ]);
-  assert.deepEqual(kinds(batches), ["gate", "refuse"]);
+  assert.deepEqual(kinds(batches), ["gate", "reportFailure", "refuse"]);
   assert.equal(world.held, OPEN.held);
   assert.deepEqual(kinds(play(world, ["newSession"]).batches), [
     "close:replacement",
@@ -966,4 +1050,25 @@ test("after a loss a new session still ends the inspection, and sends nothing", 
   const { world, batches } = play(lost.world, ["newSession"]);
   assert.equal(world.state.inspecting, false, "the new session is no inspection");
   assert.deepEqual(kinds(batches), []);
+});
+
+test("Sol r5 B1: an obsolete reinstatement gate decides nothing; only the current one reinstates, or reports its failure", () => {
+  // Gate A, then a new session; gate B for a later inspection of the new history.
+  for (const settle of ["reinstateGateOk", "reinstateGateRejected"] as const) {
+    const world = TWO_GATES;
+    assert.equal(world.gates.reinstate.length, 2, "both gates wait");
+    const obsolete = play(world, [settle]);
+    assert.deepEqual(kinds(obsolete.batches), [], `${settle}: A decides nothing`);
+    assert.equal(obsolete.world.state.inspecting, true, `${settle}: the later inspection stands`);
+    const current = play(obsolete.world, [
+      settle === "reinstateGateOk" ? "reinstateGateOk" : "reinstateGateRejected",
+    ]);
+    assert.deepEqual(
+      kinds(current.batches),
+      settle === "reinstateGateOk"
+        ? ["close:debugOff", "showParked", "clearView"]
+        : ["reportFailure"],
+      `${settle}: B decides`,
+    );
+  }
 });

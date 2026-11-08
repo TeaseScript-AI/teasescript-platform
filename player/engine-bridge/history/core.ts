@@ -377,8 +377,7 @@ export class HistoryCore {
   #pending: PendingStep | null = null;
   #nextStep = 1;
   #revision = 0;
-  // Raised by every change to the fields a publication changes (`PublicationRecord`), so a publication's undo can tell
-  // that nothing changed them since.
+  // Raised by every observation the core takes, so a publication's undo can tell that nothing changed it since.
   #mutations = 0;
 
   constructor(
@@ -484,17 +483,9 @@ export class HistoryCore {
   /** The one writer of the core's state; see `advanceHistory`. */
   advance(observation: HistoryObservation): HistoryOutcome {
     if (this.#closed) return { kind: "refused", reason: "the history is closed" };
-    const was = this.publicationRecord();
     const outcome = this.#advance(observation);
-    const now = this.publicationRecord();
-    if (
-      now.points !== was.points ||
-      now.newestActionId !== was.newestActionId ||
-      now.scanned !== was.scanned ||
-      now.live !== was.live ||
-      now.complete !== was.complete
-    )
-      this.#mutations += 1;
+    // Every observation it takes may change the core, a step's preparation or commit as much as a publication.
+    if (outcome.kind !== "refused") this.#mutations += 1;
     return outcome;
   }
 

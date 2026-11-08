@@ -1561,6 +1561,8 @@ async function handoffRow(
   context: TestContext,
   each: LifecycleCase,
   mutate?: (owner: MutableOwner) => void,
+  /** A negative control of the candidate's state: the target captured with a wrong saved value. */
+  wrongTarget = false,
 ): Promise<void> {
   {
     const local = each.operation === "adopt session-local";
@@ -1572,27 +1574,33 @@ async function handoffRow(
     const { host, rewind } = made;
     // The owner is a plain object, whose methods the composable calls through it.
     mutate?.(host.rewind.owner);
-    // The owner's decisions on each adoption's completion, as the composable receives them.
-    const completions: boolean[] = [];
-    const settleOf = host.rewind.owner.adoptionSettled;
-    host.rewind.owner.adoptionSettled = (succeeded) => {
-      const accepted = settleOf(succeeded);
-      completions.push(accepted);
-      return accepted;
-    };
     const want = expectation(each);
     // An adoption that succeeds adopts by its answer, so the session runs on from the restored state; after a loss its
     // completion is refused, and nothing runs on.
     const adopted = each.operation.startsWith("adopt") && each.outcome === "succeeds" && !want.lost;
     // Traced, so a restart shows as a new epoch of the value trace.
     host.setDebugTracing(true);
+    // Each shown state as the page showed it, captured apart from the history: the first point Back restores, and the
+    // tip Forward does.
+    const shownStates: { readonly snapshot: RuntimeSnapshot; readonly sceneTimeMs: number }[] = [];
+    const capture = () => {
+      const page = shownView(host);
+      shownStates.push({
+        snapshot: playerRuntimeSnapshot(page),
+        sceneTimeMs: page.state.observedSessionTimeMs,
+      });
+    };
     await start(context, host);
+    capture();
     await choose(context, host, "One");
+    capture();
     await choose(context, host, "Red");
+    capture();
     // A clear is admitted only once the session ended.
     if (each.event === "clear on an ended session") {
       await choose(context, host, "A");
       assert.equal(host.session.value?.state.status, "halted");
+      capture();
     }
     const bridge = await host.bridge;
     const live = shownView(host);
@@ -1798,13 +1806,6 @@ async function handoffRow(
     await (gated ? operation : operation.catch(() => false));
     await event;
     await settle(context);
-    // After a loss the owner refuses every adoption's completion: the page activates nothing for it.
-    if (want.lost && each.operation.startsWith("adopt"))
-      assert.deepEqual(
-        completions.filter((accepted) => accepted),
-        [],
-        "the owner refuses the completion",
-      );
     // An adoption's answer is admitted only where the adoption runs on: a completion the owner refused admits none.
     if (each.operation.startsWith("adopt"))
       assert.equal(inputAdmitted, want.recording === "continued", "the answer's input admitted");
@@ -1839,7 +1840,31 @@ async function handoffRow(
       // Start's, which this family does not compare.
       if (shown === "candidate") {
         assert.deepEqual(page.events, targetEvents, "the target's events");
-        assert.equal(page.marks.rewoundWhileDebugging?.rewindCount, 1, "the candidate's marks");
+        // Its state is the target's as the page showed it, and its marks one rewind of it.
+        const target = shownStates[each.operation === "forward" ? shownStates.length - 1 : 0]!;
+        const expected = wrongTarget
+          ? {
+              ...target.snapshot,
+              scriptStorage: target.snapshot.scriptStorage.map((entry) =>
+                entry.key === "k" ? { ...entry, value: 999 } : entry,
+              ),
+            }
+          : target.snapshot;
+        assert.equal(
+          plain({ at: playerRuntimeSnapshot(page) }),
+          plain({ at: expected }),
+          "the target's state",
+        );
+        assert.deepEqual(
+          plain({ marks: page.marks }),
+          plain({
+            marks: {
+              editedWhileDebugging: null,
+              rewoundWhileDebugging: { restoredSceneTimeMs: target.sceneTimeMs, rewindCount: 1 },
+            },
+          }),
+          "the candidate's marks",
+        );
       } else if (shown === "restored" && adopted) {
         // Adopted by its answer: the restored session's events, then the answer's.
         const was = before.restored!;
@@ -1979,14 +2004,23 @@ const CALLER_MUTANTS: readonly {
     mutate: (owner) => void (owner.adoptionBegun = () => true),
   },
   {
-    name: "a completion the owner refused activates the page late",
+    // Page flow cannot make a write succeed while the owner refuses its completion (the page's `ownsShown` stops each
+    // such path first), so the caller's branch is decided by refusing an otherwise successful completion: the caller
+    // must then activate nothing, and the row, which expects the adoption to run on, fails.
+    name: "a completion the owner refuses activates nothing",
     row: {
       operation: "adopt persistent",
       boundary: "provider",
       outcome: "succeeds",
-      event: "loss",
+      event: "none",
     },
-    mutate: (owner) => void (owner.adoptionSettled = () => true),
+    mutate: (owner) => {
+      const settle = owner.adoptionSettled;
+      owner.adoptionSettled = (succeeded) => {
+        settle(succeeded);
+        return false;
+      };
+    },
   },
   {
     name: "the page keeps a stale inspection",
@@ -1994,6 +2028,16 @@ const CALLER_MUTANTS: readonly {
     mutate: (owner) => void (owner.newSession = () => []),
   },
 ];
+
+test("a candidate restored with a wrong saved value fails its row (negative control)", async (context) => {
+  const row: LifecycleCase = {
+    operation: "back",
+    boundary: "read",
+    outcome: "none",
+    event: "none",
+  };
+  await assert.rejects(handoffRow(context, row, undefined, true), assert.AssertionError);
+});
 
 test("the caller seam's mutants each fail their row", async (context) => {
   for (const { name, row, mutate } of CALLER_MUTANTS) {
@@ -2218,3 +2262,53 @@ test("Sol r2 S1: an enrollment that fails on a live connection is reported", asy
   await settle(context);
   assert.deepEqual(reported, [failure]);
 });
+
+for (const gateA of ["succeeds", "fails"] as const)
+  test(`Sol r5 B1: an obsolete reinstatement gate that ${gateA} decides nothing; the current one reinstates`, async (context) => {
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
+    const made = createHost(context, memoryStorage().provider);
+    const { host } = made;
+    // Every restart gate held, in the order asked.
+    const gates: { readonly resolve: () => void; readonly reject: (error: Error) => void }[] = [];
+    host.rewind.beforeRestart = () =>
+      new Promise<void>((resolve, reject) => void gates.push({ resolve, reject }));
+    await start(context, host);
+    await choose(context, host, "One");
+    assert.equal(await backTo(made.rewind, 0), true);
+    // Debug off: gate A waits.
+    made.debug.stop();
+    await settle(context);
+    assert.equal(gates.length, 1);
+    // A replacement session, Debug on again, and a later inspection of the new history.
+    await host.loadScriptStorage();
+    host.prepare((recording) =>
+      createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
+    );
+    await host.activate();
+    await settle(context);
+    const again = effectScope();
+    const rewind = again.run(() => useDebugRewind(host))!;
+    context.after(() => again.stop());
+    await settle(context);
+    await choose(context, host, "One");
+    assert.equal(await backTo(rewind, 0), true);
+    await settle(context);
+    const inspected = shownView(host);
+    // Debug off again: gate B waits.
+    again.stop();
+    await settle(context);
+    assert.equal(gates.length, 2);
+    // A settles: obsolete, it decides nothing, its failure is not reported, and the later inspection stands.
+    if (gateA === "succeeds") gates[0]!.resolve();
+    else gates[0]!.reject(new Error("Gate A failed."));
+    await settle(context);
+    assert.deepEqual(reported, [], "nothing reported");
+    assert.equal(host.rewind.inspecting.value, true, "still inspected");
+    assert.equal(shownView(host).lineage, inspected.lineage, "the later inspection shows");
+    // B, the current gate, reinstates.
+    gates[1]!.resolve();
+    await settle(context);
+    assert.equal(host.rewind.inspecting.value, false, "reinstated");
+    assert.notEqual(shownView(host).lineage, inspected.lineage);
+  });

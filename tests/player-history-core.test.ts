@@ -730,7 +730,7 @@ test("the first Back's parked state is reserved within the admission bound, or t
  * post (`player-history-ops.test.ts`). So the guard is decided here, on the registry and a delivery owner of its own: a
  * later change, made and posted before the failed delivery's undo runs, must stand.
  */
-function guardRow(): void {
+function guardRow(later: "publication" | "step"): void {
   const owner = deliveryOwner();
   const registry = new HistoryRegistry(owner);
   const opened = owner.begin();
@@ -741,25 +741,46 @@ function guardRow(): void {
   // The publication whose reply will fail: the first ask's point.
   const failing = owner.begin();
   registry.observePublication(held, session);
-  // A later change before its undo: the next ask's publication, in a delivery of its own that posts.
-  const later = owner.begin();
-  session = observePlayerRuntimeTime(choose(session), 1_000).session;
-  registry.observePublication(held, session);
-  owner.commit(later);
-  const points = registry.core(1)!.timeline().points;
-  assert.equal(points.length, 2);
+  const [point] = registry.core(1)!.timeline().points;
+  // A later change before its undo, in a delivery of its own that posts: the next ask's publication, or a Back that
+  // prepares a step to that point, which changes no field the publication changed.
+  const posted = owner.begin();
+  if (later === "publication") {
+    session = observePlayerRuntimeTime(choose(session), 1_000).session;
+    registry.observePublication(held, session);
+  } else {
+    const prepared = registry.advance(1, {
+      kind: "prepare",
+      move: "back",
+      point: point!.id,
+      parked: {
+        lineage: "l1",
+        position: { log: "l1", eventCount: session.events.length, sceneTimeMs: 0, marks: NO_MARKS },
+        json: playerRuntimeSnapshotJson(session),
+        lastSequence: session.events.at(-1)?.sequence ?? -1,
+      },
+    });
+    assert.notEqual(prepared.outcome.kind, "refused", "Back prepares a step to the point");
+  }
+  owner.commit(posted);
+  const after = registry.core(1)!.timeline();
   owner.rollback(failing);
-  assert.deepEqual(registry.core(1)!.timeline().points, points, "the later change stands");
+  assert.deepEqual(registry.core(1)!.timeline(), after, `the later ${later} stands`);
   assert.equal(registry.bound(1), "l1", "and so does the binding");
+  if (later === "step")
+    assert.notEqual(registry.core(1)!.pendingStep, null, "the step is still prepared");
 }
 
-test("a failed publication's undo leaves a later change standing (its guard)", () => guardRow());
+for (const later of ["publication", "step"] as const)
+  test(`a failed publication's undo leaves a later ${later} standing (its guard)`, () =>
+    guardRow(later));
 
 test("a publication's undo without its guard overwrites the later change (negative control)", () => {
   const guard = Object.getOwnPropertyDescriptor(HistoryCore.prototype, "unchangedSince")!;
   Object.defineProperty(HistoryCore.prototype, "unchangedSince", { ...guard, value: () => true });
   try {
-    assert.throws(guardRow, assert.AssertionError);
+    for (const later of ["publication", "step"] as const)
+      assert.throws(() => guardRow(later), assert.AssertionError, later);
   } finally {
     Object.defineProperty(HistoryCore.prototype, "unchangedSince", guard);
   }

@@ -139,7 +139,7 @@ export function createRewindOwner(host: RewindOwnerHost) {
         if (bridge !== null) close(bridge, action);
         return;
       case "reportFailure":
-        // Applied by the open whose failure it is, which holds the error (`failed`).
+        // Applied by the open or the gate whose failure it is, which holds the error (`failed`, `gate`).
         return;
       case "clearView":
         view.value?.close();
@@ -162,7 +162,7 @@ export function createRewindOwner(host: RewindOwnerHost) {
         settle(false);
         return;
       case "gate":
-        gate(action.gate);
+        gate(action.gate, action.id);
         return;
       case "drop":
         if (bridge !== null)
@@ -339,7 +339,7 @@ export function createRewindOwner(host: RewindOwnerHost) {
     closes = closes.then(() => settled);
   }
 
-  function gate(which: "step" | "return" | "reinstate") {
+  function gate(which: "step" | "return" | "reinstate", id: number) {
     const generation = host.generation();
     let gated: void | Promise<void>;
     try {
@@ -349,12 +349,19 @@ export function createRewindOwner(host: RewindOwnerHost) {
     }
     const mayShow = () => host.ready() && host.generation() === generation;
     void Promise.resolve(gated).then(
-      () => dispatch({ kind: "gateSettled", gate: which, ok: true, mayShow: mayShow() }),
+      () => dispatch({ kind: "gateSettled", gate: which, id, ok: true, mayShow: mayShow() }),
       (error: unknown) => {
         if (which === "step")
           problem.value = error instanceof Error ? error.message : String(error);
-        else host.reportHostError(error);
-        dispatch({ kind: "gateSettled", gate: which, ok: false, mayShow: mayShow() });
+        // A Return's or a reinstatement's failure is reported only when the function says it is the current gate's.
+        const { actions } = dispatch({
+          kind: "gateSettled",
+          gate: which,
+          id,
+          ok: false,
+          mayShow: mayShow(),
+        });
+        if (actions.some((action) => action.kind === "reportFailure")) host.reportHostError(error);
       },
     );
   }
