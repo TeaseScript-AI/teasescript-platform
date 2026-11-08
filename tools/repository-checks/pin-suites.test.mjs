@@ -8,14 +8,63 @@ import {
   PIN_SUITES,
   builtOf,
   groundRefusals,
+  groundsOf,
   pinFormsOf,
+  pinsOf,
+  readingOf,
   refusalsOf,
-  rePinsOf,
+  scanOf,
   suitesFor,
   testFiles,
 } from "./pin-suites.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
+
+/** Each suite whose pins `--check-grounds` reads, with its file's text, scan and pins. */
+const read = () =>
+  PIN_SUITES.filter((suite) => !suite.listed).map((suite) => {
+    const file = suite.in ?? suite.file;
+    const text = readFileSync(join(ROOT, file), "utf8");
+    const raw = text.split("\n");
+    const scan = scanOf(text);
+    return { suite, file, text, raw, scan, pins: pinsOf(scan, raw, suite.pin) };
+  });
+
+/**
+ * `text` with line edits applied (each `[line, removed, ...added]`, 1-based on `text`, in order), and their `git diff -U0`.
+ */
+const edited = (text, ...edits) => {
+  const lines = text.split("\n");
+  const out = [];
+  const hunks = [];
+  let next = 1;
+  for (const [line, removed, ...added] of edits) {
+    out.push(...lines.slice(next - 1, line - 1));
+    hunks.push(
+      `@@ -${line},${removed} +${out.length + 1},${added.length} @@`,
+      ...lines.slice(line - 1, line - 1 + removed).map((old) => `-${old}`),
+      ...added.map((now) => `+${now}`),
+    );
+    out.push(...added);
+    next = line + removed;
+  }
+  out.push(...lines.slice(next - 1));
+  return { head: out.join("\n"), diff: hunks.join("\n") };
+};
+
+/** Each pin line of the read suites that takes a form, with its reading. */
+const pinLines = () =>
+  read().flatMap((entry) =>
+    entry.pins.flatMap(({ from, to }) =>
+      Array.from({ length: to - from + 1 }, (_, index) => from + index).flatMap((line) => {
+        const reading = readingOf(entry.scan[line - 1], entry.suite.forms);
+        return reading?.form === undefined ? [] : [{ ...entry, line, reading }];
+      }),
+    ),
+  );
+
+const refusals = (entry, { head, diff }) =>
+  refusalsOf(entry.file, entry.text, head, diff, entry.suite);
 
 test("a core change lists every pinning suite; another change lists none, a suite's own change or its pins' file itself", () => {
   assert.deepEqual(suitesFor(["src/type-inference/core/admission/literals.ts"]), PIN_SUITES);
@@ -32,7 +81,7 @@ test("a core change lists every pinning suite; another change lists none, a suit
   assert.equal(builtOf("tests/type-core-closure.test.ts"), "dist/tests/type-core-closure.test.js");
 });
 
-test("the list is kept true: each file a pin form finds is declared, each declared suite's pin and ground still find a line", () => {
+test("the list is kept true: each file a pin form finds is declared; each pin, ground and pin line is found, in a declared form, with a header", () => {
   const declared = new Set([...PIN_SUITES, ...NOT_PINS].map((entry) => entry.file));
   const unlisted = testFiles(ROOT).filter(
     (file) => !declared.has(file) && pinFormsOf(readFileSync(join(ROOT, file), "utf8")).length > 0,
@@ -52,6 +101,20 @@ test("the list is kept true: each file a pin form finds is declared, each declar
         `${suite.in ?? suite.file} holds no line ${found} finds (${suite.file})`,
       );
   }
+  for (const { suite, file, scan, raw, pins } of read())
+    for (const { from, to } of pins) {
+      for (let line = from; line <= to; line += 1) {
+        const reading = readingOf(scan[line - 1], suite.forms);
+        assert.ok(
+          reading === null || reading.form !== undefined,
+          `${file}:${line} takes none of ${suite.file}'s forms: declare it`,
+        );
+      }
+      assert.ok(
+        groundsOf(scan, raw, from, suite.ground).header.length > 0,
+        `${file}:${from}: a pin with no header: declare its \`ground\``,
+      );
+    }
   for (const { file } of NOT_PINS)
     assert.ok(
       pinFormsOf(readFileSync(join(ROOT, file), "utf8")).length > 0,
@@ -71,150 +134,159 @@ test("the three pin forms are found by their text, and a pin written another way
   assert.deepEqual(pinFormsOf("    [7995, 60],\n    [7081, 60],"), []);
 });
 
-const suite = (name) =>
-  PIN_SUITES.find((entry) => entry.file === `tests/type-core-${name}.test.ts`);
-
-// (as the closure suite writes its table: a top-level block opened by its ground, each row a name, a source, the totals)
-const HEAD = [
-  "});", // 1
-  "", // 2
-  "/**", // 3
-  " * every unit charged as on `main` at `abc`", // 4
-  " */", // 5
-  "const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [", // 6
-  "  [", // 7
-  '    "an add",', // 8
-  "    'let xs = [1]\\nsay xs\\nexit',", // 9
-  "    [684, 1020, 684, 852, 1071, 1198, 1002, 1121],", // 10
-  "  ],", // 11
-  "  // (18 units more at demand 64 since #1828)", // 12
-  "  [", // 13
-  '    "a list join",', // 14
-  "    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],", // 15
-  "  ],", // 16
-  "];", // 17
-  "const SIZES = [", // 18
-  "  [16, 32],", // 19
-  "];", // 20
-].join("\n");
-const rePin = (comment) =>
-  [
-    "@@ -15 +15 @@",
-    "-    [20044, 21252, 19818, 21009, 32902, 34371, 32052, 33430],",
-    "+    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],",
-    ...(comment ? ["@@ -11,0 +12 @@", "+  // (18 units more at demand 64 since #1828)"] : []),
-  ].join("\n");
-
-test("a re-pin whose ground changed passes; one whose ground did not is refused, naming its line and where to write", () => {
-  assert.deepEqual(refusalsOf("t.test.ts", HEAD, rePin(true), suite("closure")), []);
-  const [refusal, ...more] = refusalsOf("t.test.ts", HEAD, rePin(false), suite("closure"));
-  assert.deepEqual(more, []);
-  assert.match(
-    refusal,
-    /^t\.test\.ts:15: re-pinned \(32920, 34389, 32070, 33448\) with no change to its ground/u,
-  );
-  assert.match(refusal, /directly above it \(lines 12–14\), or in its header \(lines 3–5\)/u);
-  assert.match(refusal, /N units more since #/u);
-  const header = `${rePin(false)}\n@@ -4 +4 @@\n- * every unit charged as on \`main\` at \`old\`\n+ * every unit charged as on \`main\` at \`abc\``;
-  assert.deepEqual(refusalsOf("t.test.ts", HEAD, header, suite("closure")), []);
+test("every expected value of today's pins, moved by one, is refused without its ground and passes with one", () => {
+  let values = 0;
+  for (const entry of pinLines()) {
+    const text = entry.raw[entry.line - 1];
+    const indent = text.slice(0, text.length - text.trimStart().length);
+    for (const { text: value, from, to } of entry.reading.values) {
+      values += 1;
+      const moved = `${text.slice(0, from)}${Number(value.replaceAll("_", "")) + 1}${text.slice(to)}`;
+      const [refusal, ...more] = refusals(entry, edited(entry.text, [entry.line, 1, moved]));
+      assert.deepEqual(more, [], `${entry.file}:${entry.line}`);
+      assert.match(
+        refusal ?? "",
+        new RegExp(`^${entry.file}:${entry.line}: re-pinned .* with no change to its ground`, "u"),
+        `${entry.file}:${entry.line} ${value}`,
+      );
+      // (the ground written directly above, once a line)
+      if (from !== entry.reading.values[0].from) continue;
+      const grounded = edited(entry.text, [
+        entry.line,
+        1,
+        `${indent}// (1 unit more since #1)`,
+        moved,
+      ]);
+      assert.deepEqual(refusals(entry, grounded), [], `${entry.file}:${entry.line} ${value}`);
+    }
+  }
+  assert.ok(values > 300, `${values} expected values`);
 });
 
-test("a number changed in a pin's source or outside its pins, a renamed row and a listed count are no re-pins", () => {
-  const source =
-    "@@ -9 +9 @@\n-    'let xs = [2]\\nsay xs\\nexit',\n+    'let xs = [1]\\nsay xs\\nexit',";
-  assert.deepEqual(refusalsOf("t.test.ts", HEAD, source, suite("closure")), []);
-  const size = "@@ -19 +19 @@\n-  [16, 64],\n+  [16, 32],";
-  assert.deepEqual(rePinsOf(size).rePins.length, 1);
-  assert.deepEqual(refusalsOf("t.test.ts", HEAD, size, suite("closure")), []);
-  const renamed = '@@ -14 +14 @@\n-    "a join",\n+    "a list join",';
-  assert.deepEqual(rePinsOf(renamed).rePins, []);
-  // (a listed-site count is named by its reason, so its file is not read for re-pins)
+test("a changed pin line in no declared form is refused with the fix: a value in a call, a list split across lines", () => {
+  const seen = new Set();
+  let cases = 0;
+  for (const entry of pinLines()) {
+    const key = `${entry.file} ${entry.reading.form}`;
+    // (a counter snapshot's values are in its string, so no call can hold them)
+    if (seen.has(key) || entry.reading.values.length === 0 || entry.reading.form === "counters")
+      continue;
+    seen.add(key);
+    const text = entry.raw[entry.line - 1];
+    const [{ text: value, from, to }] = entry.reading.values;
+    const called = `${text.slice(0, from)}Number(${value})${text.slice(to)}`;
+    const split = text.indexOf(", ", from);
+    const variants = [
+      [called],
+      ...(split > 0 ? [[text.slice(0, split + 1), `  ${text.slice(split + 2)}`]] : []),
+    ];
+    for (const lines of variants) {
+      cases += 1;
+      const found = refusals(entry, edited(entry.text, [entry.line, 1, ...lines]));
+      assert.ok(found.length > 0, `${entry.file}:${entry.line} ${lines.join(" / ")}`);
+      for (const refusal of found)
+        assert.match(
+          refusal,
+          /in none of its declared forms.*declare its form in tools\/repository-checks\/pin-suites\.mjs/su,
+        );
+    }
+  }
+  assert.ok(cases >= 10, `${cases} cases`);
+});
+
+const closure = () =>
+  read().find((entry) => entry.suite.file === "tests/type-core-closure.test.ts");
+const lineOf = (entry, start) => entry.raw.findIndex((text) => text.startsWith(start)) + 1;
+
+test("an input in a pin, a moved or reworded row, and a listed count need no ground; reworded values do", () => {
+  const entry = closure();
+  const chain = lineOf(entry, '  ["the C-R1 chain", chain(16),');
+  const row = entry.raw[chain - 1];
+  for (const now of [
+    row.replace("chain(16)", "chain(32)"),
+    row.replace('"the C-R1 chain"', '"a chain"'),
+  ])
+    assert.deepEqual(refusals(entry, edited(entry.text, [chain, 1, now])), []);
+  const template = entry.raw.findIndex((text) => text.includes("`${chain(4)}")) + 1;
+  const source = entry.raw[template - 1];
+  assert.deepEqual(
+    refusals(entry, edited(entry.text, [template, 1, source.replace("chain(4)", "chain(8)")])),
+    [],
+  );
+  const add = lineOf(entry, '  ["an add",');
+  const moved = edited(entry.text, [chain, 0, entry.raw[add - 1]], [add, 1]);
+  assert.deepEqual(refusals(entry, moved), []);
+  const reworded = entry.raw[add - 1]
+    .replace('"an add"', '"an addition"')
+    .replace("[684,", "[685,");
+  assert.equal(refusals(entry, edited(entry.text, [add, 1, reworded])).length, 1);
+  const split = row.replace("chain(16)", "chain(\n    16\n  )").split("\n");
+  assert.match(
+    refusals(entry, edited(entry.text, [chain, 1, ...split])).join("\n"),
+    /in none of its declared forms/u,
+  );
+  const families = read().find((each) => each.suite.file === "tests/type-core-work-b.test.ts");
+  const size = families.raw.findIndex((text) => /^\s*16: \[$/u.test(text)) + 1;
+  const key = families.raw[size - 1].replace("16", "17");
+  assert.deepEqual(refusals(families, edited(families.text, [size, 1, key])), []);
+  // (a listed-site count is named by its reason, so its file is not read)
   const kept = "tests/type-core-kept.test.ts";
-  const count = '@@ -2 +2 @@\n-  first: [1, "a reason"],\n+  first: [2, "a reason"],';
-  const listed = ["const LISTED = {", '  first: [2, "a reason"],', "};"].join("\n");
-  assert.deepEqual(refusalsOf(kept, listed, count, suite("kept")).length, 1);
+  const listed = 'const LISTED = {\n  "a site": [\n    2,\n    "a reason",\n  ],\n};';
+  const count = edited(listed, [3, 1, "    1,"]);
   assert.deepEqual(
     groundRefusals(
       [kept],
+      () => count.head,
       () => listed,
-      () => count,
+      () => count.diff,
     ),
     [],
   );
 });
 
-test("a pin's ground may be its test's header or its start; a counter snapshot is a pin; a helper's table has its own ground", () => {
-  const work = [
-    "/**", // 1
-    " * main's work, measured on abc", // 2
-    " */", // 3
-    'test("work", () => {', // 4
-    "  // (the counters as main's)", // 5
-    "  const cases = [", // 6
-    '    ["a place", "let a = {n: 1}\\nexit", "checks 142 invSteps 105"],', // 7
-    '    "checks 142 invSteps 105",', // 8
-    "  ];", // 9
-    "});", // 10
-  ].join("\n");
-  const snapshot = '@@ -8 +8 @@\n-    "checks 142 invSteps 103",\n+    "checks 142 invSteps 105",';
-  const [refusal] = refusalsOf("t.test.ts", work, snapshot, suite("work-c"));
-  assert.match(
-    refusal,
-    /:8: re-pinned \(105\).*directly above it \(lines 5–7\), or in its header \(lines 1–3, line 5\)/su,
+test("a pin outside a test is grounded at its declared anchor, not in a template's text or by an earlier block", () => {
+  const entry = closure();
+  const find = (text, has) => text.split("\n").findIndex((line) => line.includes(has)) + 1;
+  const repinned = (text) => {
+    const at = find(text, '    "a list join",') + 2;
+    return [at, 1, text.split("\n")[at - 1].replace("32920", "32921")];
+  };
+  const grounded = (text) => {
+    const at = find(text, "every unit charged as on `main`");
+    return [
+      at,
+      1,
+      text.split("\n")[at - 1].replace("every unit", "(1 unit more since #1) every unit"),
+    ];
+  };
+  assert.equal(refusals(entry, edited(entry.text, repinned(entry.text))).length, 1);
+  assert.deepEqual(
+    refusals(entry, edited(entry.text, grounded(entry.text), repinned(entry.text))),
+    [],
   );
-  for (const ground of [
-    "@@ -2 +2 @@\n- * main's work, measured on old\n+ * main's work, measured on abc",
-    "@@ -5 +5 @@\n-  // (old)\n+  // (the counters as main's)",
-  ])
-    assert.deepEqual(refusalsOf("t.test.ts", work, `${snapshot}\n${ground}`, suite("work-c")), []);
-  const families = [
-    "  /** main's work, measured on abc */", // 1
-    "  readonly main: Readonly<Record<16 | 32, readonly number[][]>>;", // 2
-    "}", // 3
-    "", // 4
-    "export const FAMILIES = [", // 5
-    "  {", // 6
-    "    main: {", // 7
-    "      16: [", // 8
-    "        [51209, 4782, 6799],", // 9
-    "      ],", // 10
-    "    },", // 11
-    "  },", // 12
-    "];", // 13
-  ].join("\n");
-  const row = "@@ -9 +9 @@\n-        [51208, 4782, 6799],\n+        [51209, 4782, 6799],";
-  assert.match(refusalsOf("f.ts", families, row, suite("work-b"))[0], /in its header \(line 1\)/u);
-  const ground =
-    "@@ -1 +1 @@\n-  /** main's work, measured on old */\n+  /** main's work, measured on abc */";
-  assert.deepEqual(refusalsOf("f.ts", families, `${row}\n${ground}`, suite("work-b")), []);
-});
-
-test("a call's argument in a pin is an input, and an unrelated top-level block's comment is no pin's header", () => {
-  const table = [
-    "/** a fixture count */", // 1
-    "const COUNT = 1;", // 2
-    "", // 3
-    "/** every unit as on `main` at `abc` */", // 4
-    "const frozen = 1;", // 5
-    "const OUTSIDE = [", // 6
-    '  ["the chain", chain(16), [11837, 12196, 11837, 12196]],', // 7
-    "];", // 8
-  ].join("\n");
-  const at = (base, head) => `@@ -7 +7 @@\n-  ["the chain", ${base}],\n+  ["the chain", ${head}],`;
-  const input = at(
-    "chain(32), [11837, 12196, 11837, 12196]",
-    "chain(16), [11837, 12196, 11837, 12196]",
-  );
-  assert.deepEqual(refusalsOf("t.test.ts", table, input, suite("closure")), []);
-  const row = at(
-    "chain(16), [11836, 12196, 11837, 12196]",
-    "chain(16), [11837, 12196, 11837, 12196]",
-  );
-  const [refusal, ...more] = refusalsOf("t.test.ts", table, row, suite("closure"));
-  assert.deepEqual(more, []);
-  assert.match(refusal, /:7: re-pinned \(11837\).*in its header \(line 4\)/su);
-  const unrelated = `${row}\n@@ -1 +1 @@\n-/** a count */\n+/** a fixture count */`;
-  assert.equal(refusalsOf("t.test.ts", table, unrelated, suite("closure")).length, 1);
-  const ground = `${row}\n@@ -4 +4 @@\n-/** every unit as on \`main\` at \`old\` */\n+/** every unit as on \`main\` at \`abc\` */`;
-  assert.deepEqual(refusalsOf("t.test.ts", table, ground, suite("closure")), []);
+  // (a block before the ground, and `frozen` written over lines: a template holding a `//` line, or a joined list)
+  let doc = find(entry.text, "every unit charged as on `main`");
+  while (!entry.raw[doc - 1].startsWith("/**")) doc -= 1;
+  const frozen = lineOf(entry, "const frozen");
+  const fixture = [doc, 0, "/** a fixture count */", "const COUNT = 1;", ""];
+  for (const written of [
+    ["const frozen = `let a = {f: [[1]]}", "// (the source's own comment)", "let b = a`;"],
+    ["const frozen = [", '  "let a = {f: [[1]]}",', '  "let b = a",', '].join("\\n");'],
+  ]) {
+    const base = { ...entry, text: edited(entry.text, fixture, [frozen, 1, ...written]).head };
+    const lines = base.text.split("\n");
+    assert.equal(refusals(base, edited(base.text, repinned(base.text))).length, 1);
+    const earlier = [find(base.text, "/** a fixture count */"), 1, "/** (1 unit more since #1) */"];
+    assert.equal(refusals(base, edited(base.text, earlier, repinned(base.text))).length, 1);
+    const comment = find(base.text, "// (the source's own comment)");
+    if (comment > 0) {
+      const source = [comment, 1, "// (1 unit more since #1)"];
+      assert.equal(refusals(base, edited(base.text, source, repinned(base.text))).length, 1);
+    }
+    assert.deepEqual(
+      refusals(base, edited(base.text, grounded(base.text), repinned(base.text))),
+      [],
+      lines[frozen - 1],
+    );
+  }
 });
