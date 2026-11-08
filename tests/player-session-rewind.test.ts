@@ -123,7 +123,11 @@ interface RewindHost {
     details: () => Record<string, never>,
     live: () => boolean,
   ): Promise<{
-    readonly session: { readonly snapshot: RuntimeSnapshot } | null;
+    readonly session: {
+      readonly snapshot: RuntimeSnapshot;
+      readonly events: readonly { readonly sequence: number }[];
+      readonly transcriptEntries: readonly { readonly text: string }[];
+    } | null;
     readonly recording: {
       readonly operations: readonly { readonly kind: string; readonly thrown: string | null }[];
       readonly complete: boolean;
@@ -2393,9 +2397,23 @@ test("an obsolete Back gate's failure leaves no problem on the replacement's his
 
 /*
  * L5h.3b, orchestrator 2's ruling on 21.7: while a rewind lifecycle gate is pending, a debug export captures the shown
- * publication's marks, never the candidate's. One row per pending state: a prepared step whose commit is not yet
- * acknowledged, an adoption begun and not settled, and a reinstatement waiting at its restart gate.
+ * publication's marks, never the candidate's, and copies that publication's events and transcript from the store's view.
+ * One row per pending state: a prepared step whose commit is not yet acknowledged, an adoption begun and not settled,
+ * and a reinstatement waiting at its restart gate.
  */
+/** A session's event sequences and transcript texts, as a candidate copies them; none without a session. */
+function prefixOf(
+  session: {
+    readonly events: readonly { readonly sequence: number }[];
+    readonly transcriptEntries: readonly { readonly text: string }[];
+  } | null,
+): { readonly events: readonly number[]; readonly transcript: readonly string[] } {
+  return {
+    events: session?.events.map((event) => event.sequence) ?? [],
+    transcript: session?.transcriptEntries.map((entry) => entry.text) ?? [],
+  };
+}
+
 test("an export while a rewind gate is pending takes the shown publication's marks", async (context) => {
   const marksOf = async (host: RewindHost) => {
     const candidate = await host.debugExportCandidate(
@@ -2403,11 +2421,17 @@ test("an export while a rewind gate is pending takes the shown publication's mar
       () => true,
     );
     assert.ok(candidate !== null, "the export is a candidate");
-    return { rewound: candidate.rewoundWhileDebugging, edited: candidate.editedWhileDebugging };
+    return {
+      rewound: candidate.rewoundWhileDebugging,
+      edited: candidate.editedWhileDebugging,
+      ...prefixOf(candidate.session),
+    };
   };
+  // The marks of the shown publication, and its events and transcript, which the candidate copies from the store's view.
   const shownMarks = (host: RewindHost) => ({
     rewound: shownView(host).marks.rewoundWhileDebugging,
     edited: shownView(host).marks.editedWhileDebugging,
+    ...prefixOf(shownView(host)),
   });
 
   await context.test("a prepared step, its commit not yet acknowledged", async (subtest) => {
@@ -2574,4 +2598,27 @@ test("a Start that fails before it reaches the host commits its incident in its 
   await settle(context);
   assert.equal(host.hostError.value, "RangeError");
   assert.equal(await exported(), "RangeError");
+});
+
+test("a debug export copies the shown publication's events and transcript, after Back and Return too", async (context) => {
+  const { host, rewind } = createHost(context, memoryStorage().provider);
+  const exportedPrefix = async () =>
+    prefixOf(
+      (
+        await host.debugExportCandidate(
+          () => ({}),
+          () => true,
+        )
+      ).session,
+    );
+  await start(context, host);
+  await choose(context, host, "One");
+  const live = prefixOf(shownView(host));
+  assert.ok(live.events.length > 0 && live.transcript.length > 0, "the session has said something");
+  assert.deepEqual(await exportedPrefix(), live);
+  assert.equal(await backTo(rewind, 0), true);
+  assert.deepEqual(await exportedPrefix(), prefixOf(shownView(host)), "the restored state's");
+  assert.equal(await rewind.returnToSession(), true);
+  await settle(context);
+  assert.deepEqual(await exportedPrefix(), prefixOf(shownView(host)), "the reinstated session's");
 });

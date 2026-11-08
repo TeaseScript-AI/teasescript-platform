@@ -20,8 +20,17 @@ import { preparedPlan } from "./helpers/prepared-plan.js";
  * L5h.3b's export observation family (`recording/export-observation.ts`, `captureExport`), through the host's ops,
  * in-process and over a Worker. The domain: a storage edit before the stop or none × a Player error stop (none, once,
  * twice) × its order against the capture at the same revision × the recording selected (the session's current one, an
- * explicit ticket, no session) × the transport. Each case checks, apart: the capture's identity, its marks, its
- * incident, its recording choice, and that its ticket is let go of. R2-3's row (an edit, then a stop) expects the mark.
+ * explicit ticket, no session) × the transport. Each case checks, apart: the capture's identity, the state's saved
+ * value, its failure, its marks, its incident, the selected recording's calls, and that its ticket is let go of. R2-3's
+ * row (an edit, then a stop) expects the mark.
+ *
+ * The rest of the grammar is decided elsewhere, each where its seam is:
+ * - the main side's copy of events and transcript, at the matched store view, through the real candidate, with the
+ *   lifecycle's pending gates, Back and Return: `player-session-rewind.test.ts`;
+ * - a capture refused by identity, as after a publication the page never received: `player-bridge-recording-ops`;
+ * - an unavailable snapshot or end, and the first failure's recording beside a rewound state: the equivalence rows;
+ * - Start, Continue, introduction and restore routes, and every publication, stop and binding route:
+ *   `player-recording-routes.test.ts`, with Start's and Continue's runs in `player-session-rewind.test.ts`.
  */
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
