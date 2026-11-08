@@ -803,7 +803,7 @@ export function solveDemands(
     const byId = (path: string): string => `.${pass.contract.pathIdOf(splitPath(path))}`;
     const answer =
       pass.solver.answer(key) ??
-      (kind === "c" || kind === "rc"
+      (kind === "c" || kind === "rc" || kind === "a4"
         ? pass.solver.answer(joinParts(kind, pass.contract.canonicalKey(parts.join("|"))))
         : kind === "op" && parts[1] && !parts[1].startsWith(".")
           ? pass.solver.answer(joinParts("op", parts[0]!, byId(parts[1])))

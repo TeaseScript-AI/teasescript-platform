@@ -4,9 +4,9 @@ import test from "node:test";
 import { Admission, admissionRunsInsideSolverRuns } from "../src/type-inference/core/admission.js";
 import { analyseCore, solveDemands } from "../src/type-inference/core/answers.js";
 import { DemandExhausted } from "../src/type-inference/core/budget.js";
-import { isKeyId } from "../src/type-inference/core/contract/key-ids.js";
+import { exportNames, isKeyId } from "../src/type-inference/core/contract/key-ids.js";
 import { keyOf } from "../src/type-inference/core/definitions.js";
-import { InheritedProof, inheritedAt } from "../src/type-inference/core/inherited/inherited.js";
+import { inheritedAt } from "../src/type-inference/core/inherited/inherited.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
@@ -252,7 +252,7 @@ test("a pass's inherited proofs replay by their names, a cursor's by its token",
   assert.ok(inherited.length > 0, "the analysis solves an inherited proof");
   for (const { names, packet } of inherited)
     assert.equal(solveDemands(request, names, packet).length, names.length, names.join(", "));
-  // (a path below a wrapper is a cursor: its proof made again from its demand key, as a replay makes it)
+  // (a path below a wrapper is a cursor: its proof exported by its names and packet, replayed on a fresh pass)
   const { request: boxed, ids } = prepare(`${W}let a = w\nlet box = {f: a}\n${said(["box.f"])}`);
   const pass = narrowingPass(boxed);
   const admission = new Admission(
@@ -262,11 +262,12 @@ test("a pass's inherited proofs replay by their names, a cursor's by its token",
     new Set(),
   );
   const want = inheritedAt(admission, ids.get("box")!, ["f"]);
+  assert.deepEqual(want, { kind: "atom", name: "number" });
   const key = pass.contract.canonicalKey(keyOf(ids.get("box")!, ["f"]));
   assert.ok(isKeyId(key), "a path below a wrapper is a cursor");
   const demand = pass.receivingDomain.replayProof!(key);
   assert.equal(demand.key, `a4|${key}`);
-  const { proof } = pass.solver.run(pass.solver.proven(demand));
-  assert.ok(proof instanceof InheritedProof);
-  assert.deepEqual(proof.term, want);
+  const exported = exportNames(pass.contract, [demand.key]);
+  assert.ok(exported !== null && exported !== undefined);
+  assert.equal(solveDemands(boxed, exported.names, exported.packet).length, 1);
 });
