@@ -23,7 +23,7 @@ import { contributionOf } from "./own.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
 import { inheritedInto } from "../inherited/waiting.js";
 import type { Reads } from "../inherited/reads.js";
-import { partOf, TYPED_ROLES } from "./walk.js";
+import { partOf, partOfRead, TYPED_ROLES } from "./walk.js";
 
 // The carriers' transfers (G3 2c): what a stored value's walk answers, over its tasks' recipes (`expand`): each
 // carrier's operands answer once per pass, whatever value walks to them, a literal's cells with their literal, by path,
@@ -425,7 +425,7 @@ function* regionOf(
                 roles: [],
               }),
             );
-          const task = partOf(admission, part);
+          const task = yield* partOfRead(admission, part);
           const deep = part.deep ?? item.deep;
           const single = item.single && part.single;
           if (part.step !== null) {

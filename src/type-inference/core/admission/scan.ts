@@ -40,7 +40,7 @@ import { joinedDomain, permittedAt } from "./permitted.js";
 import { transferredDecider, writtenDecider } from "./transfers.js";
 import { inheritedInto } from "../inherited/waiting.js";
 import { readNow, type Reads } from "../inherited/reads.js";
-import { compareKeys, expand, stopsOf, viaSignature } from "./walk.js";
+import { compareKeys, expandRead, stopsOfRead, viaSignature } from "./walk.js";
 
 // A2's scan: the stores a path is decided from, and the earliest contribution in evaluation order that decides it.
 
@@ -251,7 +251,7 @@ export function* earliestDecider(
   const { program, values, contract } = admission.pass;
   // (a cursor's span read one step at a time and by its path's id, never made: G3 stage 1)
   const at = restRef(contract, asked);
-  const task = expand(admission, value, node, []);
+  const task = yield* expandRead(admission, value, node, []);
   const written = { root: null, ids: null };
   const transferred = yield* transferredDecider(admission, task, asked, written);
   // #1444(b,c): outside every decision and into no decision's place, the groups' written-decider summary answers; a
@@ -266,7 +266,7 @@ export function* earliestDecider(
           site: program.places[transferred.value]?.site ?? null,
           tags: transferred.tags,
         };
-  const stops = stopsOf(admission, value, node);
+  const stops = yield* stopsOfRead(admission, value, node);
   const siteOf = (stop: Stop): SourceSite | null => program.places[stop.value]?.site ?? null;
   // the earliest copy whose written type reaches the rest of the path
   let copy: {
