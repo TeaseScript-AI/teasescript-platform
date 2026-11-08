@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
@@ -79,6 +87,14 @@ const NOT_COUNTED = {
     line: (w) => `<!-- ${w} -->`,
     wrap: (body) => `<template>\n${body}\n</template>\n`,
   },
+  "block comment opened by a slash": { file: "src/slash.ts", line: (w) => `/*/ ${w} */` },
+  // Inside a character class a regular expression can hold `//` and the word, as a text search would read them.
+  "regular expression": { file: "src/regex.ts", line: (w) => `const r = /[//${w}]/;` },
+  "Vue script inside an HTML comment": {
+    file: "src/Commented.vue",
+    line: (w) => `// ${w}`,
+    wrap: (body) => `<template><p>x</p></template>\n<!--\n<script>\n${body}\n</script>\n-->\n`,
+  },
   Markdown: { file: "docs/notes.md", line: (w) => `// ${w}` },
   "untracked file": { file: "src/untracked.ts", line: (w) => `// ${w}`, untracked: true },
 };
@@ -133,7 +149,55 @@ const SITES = [
   [null, 'const s = "test.skip(";'],
   [null, 'test("m", (t) => { story.skip(); });'],
   [null, "function n(t) { t.skip(); }"],
+  [null, "test(() => t.skip(), (t) => {});"],
+  [null, 'test("r", (u, t) => { t.skip(); });'],
+  [null, "test((t) => { t.skip(); }, () => {});"],
+  [null, 'it.each([1])("s", (t) => { t.skip(); });'],
 ];
+
+// The scope family: a context's use inside each binding form, where the form binds the context's own name `t` (it
+// hides the context, unless the form evaluates the use in the enclosing scope) or another name `u` (the use is the
+// context's). Each case is one line, named by its axis values alone; the expected sites follow from `hides`.
+const FORMS = {
+  parameter: { hides: true, line: (n, use) => `function f(${n}) { ${use}; }` },
+  "destructured parameter": { hides: true, line: (n, use) => `function f({ ${n} }) { ${use}; }` },
+  "arrow parameter": { hides: true, line: (n, use) => `const f = (${n}) => ${use};` },
+  "block const": { hides: true, line: (n, use) => `{ const ${n} = stub; ${use}; }` },
+  "destructured const": {
+    hides: true,
+    line: (n, use) => `{ const { ${n} } = { ${n}: stub }; ${use}; }`,
+  },
+  catch: { hides: true, line: (n, use) => `try { throw stub; } catch (${n}) { ${use}; }` },
+  "for of": { hides: true, line: (n, use) => `for (const ${n} of [stub]) { ${use}; }` },
+  "for let": { hides: true, line: (n, use) => `for (let ${n} = stub; ; ) { ${use}; break; }` },
+  "switch let": {
+    hides: true,
+    line: (n, use) => `switch (0) { case 0: let ${n} = stub; ${use}; }`,
+  },
+  "named function expression": {
+    hides: true,
+    line: (n, use) => `const f = function ${n}() { ${use}; };`,
+  },
+  "named class expression": {
+    hides: true,
+    line: (n, use) => `const C = class ${n} { m() { ${use}; } };`,
+  },
+  subtest: { hides: true, line: (n, use) => `await t.test("sub", (${n}) => { ${use}; });` },
+  "computed class member": { hides: false, line: (n, use) => `class C { [${use}](${n}) {} }` },
+  "computed object member": { hides: false, line: (n, use) => `const o = { [${use}](${n}) {} };` },
+};
+const USES = { shadowed: "t", other: "u" };
+const KINDS = ["skip", "todo"];
+const SCOPES = Object.entries(FORMS).flatMap(([form, { hides, line }]) =>
+  Object.entries(USES).flatMap(([use, name]) =>
+    KINDS.map((kind) => ({
+      name: `${form} ${use} ${kind}`,
+      counted: !(hides && use === "shadowed"),
+      kind,
+      text: `test("${form} ${use} ${kind}", async (t) => { ${line(name, `t.${kind}()`)} });`,
+    })),
+  ),
+);
 
 let fixture;
 let result;
@@ -142,6 +206,7 @@ before(() => {
   const big = `export function big() {\n${"  void 0;\n".repeat(1100)}}\n`;
   Object.assign(files, {
     "tests/sites.test.ts": `${SITES.map(([, line]) => line).join("\n")}\n`,
+    "tests/scopes.test.ts": `const stub = { skip() {}, todo() {} };\n${SCOPES.map((c) => c.text).join("\n")}\n`,
     ".oxlintrc.json": JSON.stringify({
       overrides: [{ files: ["a", "b"] }, { files: ["c"] }, { rules: {} }],
     }),
@@ -173,8 +238,27 @@ test("a directive counts only as a comment, in each carrier, at its line", () =>
 test("each node:test skip and todo form counts, and calls that only look like one do not", () => {
   const at = (kind) =>
     SITES.flatMap(([k], i) => (k === kind ? [`tests/sites.test.ts:${i + 1}`] : []));
-  assert.deepEqual(result.sites.skippedTests, at("skip"));
-  assert.deepEqual(result.sites.todoTests, at("todo"));
+  const of = (sites) => sites.filter((s) => s.startsWith("tests/sites.test.ts:"));
+  assert.deepEqual(of(result.sites.skippedTests), at("skip"));
+  assert.deepEqual(of(result.sites.todoTests), at("todo"));
+});
+
+test("a context's use counts only where the binder resolves its name to the test's context", () => {
+  // Coverage: every form, use and kind, and every pair of them, is a case.
+  const names = new Set(SCOPES.map((c) => c.name));
+  for (const form of Object.keys(FORMS))
+    for (const use of Object.keys(USES))
+      for (const kind of KINDS)
+        assert.ok(names.has(`${form} ${use} ${kind}`), `${form} ${use} ${kind}`);
+  assert.equal(names.size, Object.keys(FORMS).length * Object.keys(USES).length * KINDS.length);
+  for (const kind of KINDS) {
+    const site = kind === "skip" ? "skippedTests" : "todoTests";
+    const expected = SCOPES.flatMap((c, i) =>
+      c.kind === kind && c.counted ? [`tests/scopes.test.ts:${i + 2}`] : [],
+    );
+    const found = result.sites[site].filter((s) => s.startsWith("tests/scopes.test.ts:"));
+    assert.deepEqual(found, expected, kind);
+  }
 });
 
 test("the lists count their entries, the structure signals come from structure-report, and HEAD is named", () => {
@@ -191,7 +275,7 @@ test("the lists count their entries, the structure signals come from structure-r
   );
   assert.deepEqual([c.largeFiles, c.broadFolders, c.longFunctions], [1, 1, 1]);
   assert.deepEqual(c.largestFile, { file: "src/big.ts", lines: 1103 });
-  assert.equal(c.longestFunction.name, "big");
+  assert.deepEqual(c.longestFunction, { file: "src/big.ts", name: "big", lines: 1102 });
   assert.equal(result.commit, git(fixture.root, "rev-parse", "HEAD"));
   const text = run(fixture.root);
   assert.equal(text.status, 0, text.stderr);
@@ -213,13 +297,110 @@ test("a missing list is absent, and a list of another shape or a ROOT that is no
     assert.equal(c[key], null, key);
   assert.match(run(root).stdout, /^Comment external names \(may grow\): absent$/mu);
 
-  const malformed = checkout({ "tools/oxlint/comment-forecasts-allowed.json": "{}" });
-  const m = run(malformed, "--json");
-  assert.equal(m.status, 2);
-  assert.match(m.stderr, /comment-forecasts-allowed\.json is not an array/u);
+  for (const [file, text, message] of [
+    [
+      "tools/oxlint/comment-forecasts-allowed.json",
+      "{}",
+      /comment-forecasts-allowed\.json is not an array/u,
+    ],
+    [
+      ".oxlintrc.json",
+      '{"overrides": null}',
+      /\.oxlintrc\.json is not an object whose `overrides`/u,
+    ],
+    [
+      ".oxlintrc.json",
+      '{"overrides": [{"files": null}]}',
+      /\.oxlintrc\.json is not overrides with `files`/u,
+    ],
+  ]) {
+    const m = run(checkout({ [file]: text }), "--json");
+    assert.equal(m.status, 2, text);
+    assert.match(m.stderr, message);
+  }
 
   const notCheckout = mkdtempSync(path.join(tmpdir(), "counters-test-"));
   folders.push(notCheckout);
   assert.equal(run(notCheckout).status, 2);
   assert.equal(run(path.join(fixture.root, "src")).status, 2);
 });
+
+// This test needs Linux's /proc (the report child from /proc/<pid>/task/<pid>/children, its threads' states and its
+// pending signals from /proc/<pid>/status) and job-control signals (SIGSTOP, SIGCONT). Where that file does not exist
+// the test cannot observe the child, and says so instead of failing.
+const CHILDREN = `/proc/${process.pid}/task/${process.pid}/children`;
+test(
+  "SIGTERM is passed on to structure-report, and the tool removes its temporary folder and exits 143",
+  {
+    skip: existsSync(CHILDREN)
+      ? false
+      : `needs ${CHILDREN.replace(/\d+/gu, "<pid>")} to find the report child`,
+  },
+  async () => {
+    const temporary = mkdtempSync(path.join(tmpdir(), "counters-test-"));
+    folders.push(temporary);
+    const counting = spawn(process.execPath, [tool, fixture.root], {
+      env: { ...process.env, TMPDIR: temporary },
+      stdio: "ignore",
+    });
+    const exited = new Promise((resolve) =>
+      counting.on("exit", (code, signal) => resolve(code ?? signal)),
+    );
+    // A wait, not a bound on speed: poll until the predicate holds, failing only after 30 s.
+    const until = async (what, predicate) => {
+      for (
+        const end = Date.now() + 30000;
+        Date.now() < end;
+        await new Promise((r) => setTimeout(r, 10))
+      ) {
+        const value = predicate();
+        if (value) return value;
+      }
+      assert.fail(`waited 30 s for ${what}`);
+    };
+    const read = (file) => {
+      try {
+        return readFileSync(file, "utf8");
+      } catch {
+        return "";
+      }
+    };
+    let report = null;
+    try {
+      // The report child: started just after the temporary folder, and stopped before it can finish.
+      report = await until("the structure-report child", () =>
+        read(`/proc/${counting.pid}/task/${counting.pid}/children`)
+          .split(" ")
+          .filter(Boolean)
+          .map(Number)
+          .find((pid) => read(`/proc/${pid}/cmdline`).includes("structure-report.mjs")),
+      );
+      process.kill(report, "SIGSTOP");
+      // Every thread stopped: a signal sent to a process whose stop is still in progress can be handled by a thread
+      // that has not stopped yet, so it would not wait as pending.
+      await until("the report to stop", () =>
+        readdirSync(`/proc/${report}/task`).every((tid) =>
+          /^State:\s*T/mu.test(read(`/proc/${report}/task/${tid}/status`)),
+        ),
+      );
+      counting.kill("SIGTERM");
+      // The tool passes the signal on: it waits as pending on the stopped report (signal 15, bit 14 of ShdPnd).
+      await until("SIGTERM pending on the report", () => {
+        const pending = /^ShdPnd:\s*([0-9a-f]+)$/mu.exec(read(`/proc/${report}/status`));
+        return pending && (BigInt(`0x${pending[1]}`) & (1n << 14n)) !== 0n;
+      });
+      process.kill(report, "SIGCONT");
+      assert.equal(await exited, 143);
+      assert.deepEqual(readdirSync(temporary), []);
+    } finally {
+      counting.kill("SIGKILL");
+      if (report) {
+        try {
+          process.kill(report, "SIGKILL");
+        } catch {
+          // already ended
+        }
+      }
+    }
+  },
+);
