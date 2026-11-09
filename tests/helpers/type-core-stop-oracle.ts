@@ -752,13 +752,14 @@ export interface StopRunSide {
  * What a stop's runs found (`stopRuns`):
  * - `open`: the natural plan fails at runtime where the stopped plan runs to its end, or, with no natural plan (a compile
  *   error the stop turned into runtime checks), the stopped plan runs to its end;
- * - `later`: both fail, the stopped plan after saying more, or saying as much and failing at another site;
+ * - `later`: both fail at different sites, the stopped plan after saying more or in a later top-level statement (or
+ *   where neither tells which came first);
  * - `violating`: `stopProblems` reports a violating run the direct comparison classed as none of the above;
- * - `unwitnessed`: the two plans differ, but no run made the natural plan fail and every run was alike: the pool did
- *   not exercise the difference, so nothing is decided;
- * - `stricter`: the stopped plan fails where the natural plan does not;
- * - `closed`: the plans equal, or every run alike with some run failing the natural plan, or the stopped plan failing
- *   first;
+ * - `unwitnessed`: a place the two plans differ that no run made either plan fail inside (`untested`), every run
+ *   otherwise alike or stricter: the pool did not exercise that place, so nothing is decided;
+ * - `stricter`: the stopped plan fails where the natural plan does not, or before it in an earlier statement, every
+ *   place the plans differ exercised;
+ * - `closed`: the plans equal, or every run alike with every place they differ exercised;
  * - `declined`: the stop's compile declined (a refusal, never a missing check);
  * - `natural declined`, `no plan`: nothing to run.
  */
@@ -786,6 +787,8 @@ export interface StopRuns {
   } | null;
   /** `stopProblems`' violating lines, where both compiles have a plan. */
   readonly violating: readonly string[];
+  /** Where `unwitnessed`: each place the plans differ that no run failed either plan inside, by its plan path. */
+  readonly untested?: readonly string[];
   /**
    * With no natural plan: each error of the natural compile, by its code and site, and what the stopped analysis checks
    * there (`typed`, `unknown`, or `none`): the site rule of #2098's ledger.
@@ -888,24 +891,45 @@ export function stopRuns(
     fitting: [],
     violating: pool,
   }).filter((problem) => problem.startsWith("violating "));
+  // (the source span of the top-level statement a failure lies in, by the plan's own top-level instructions)
+  const statementOf = (plan: InstructionPlan, failure: Span): Span | null => {
+    for (const instruction of plan.instructions) {
+      const span = spanOf(instruction);
+      if (span !== null && within(failure, span)) return span;
+    }
+    return null;
+  };
+  // (both fail at different sites: later where the stopped plan says more or fails in a later statement, the natural
+  // plan's having failed before it; stricter where it fails in an earlier statement; later where neither tells)
+  const apart = (
+    a: ReturnType<typeof ranWith>,
+    b: ReturnType<typeof ranWith>,
+  ): StopRunKind | null => {
+    if (a.failure === null || b.failure === null) return null;
+    if (b.said.length !== a.said.length)
+      return b.said.length > a.said.length ? "later" : "stricter";
+    if (b.failure.start === a.failure.start && b.failure.end === a.failure.end) return null;
+    const [mine, theirs] = [statementOf(want, a.failure), statementOf(got, b.failure)];
+    if (mine !== null && theirs !== null && (theirs.end <= mine.start || theirs.start >= mine.end))
+      return theirs.start >= mine.end ? "later" : "stricter";
+    return "later";
+  };
   // (the first run of the most severe kind: open, then later, then stricter)
   const order: readonly StopRunKind[] = ["open", "later", "stricter"];
   let found: StopRuns | null = null;
-  let witnessed = false;
+  // (each place the plans differ is decided only by a run that fails one of the plans inside that place's plan node)
+  const differences = planDifferences(want, got);
+  const failures: Span[] = [];
   for (const each of pool) {
     const [a, b] = [ranWith(want, each), ranWith(got, each)];
-    if (a.failure !== null) witnessed = true;
+    if (a.failure !== null) failures.push(a.failure);
+    if (b.failure !== null) failures.push(b.failure);
     const kind: StopRunKind | null =
       a.failure !== null && b.failure === null
         ? "open"
-        : a.failure !== null &&
-            b.failure !== null &&
-            (b.said.length > a.said.length ||
-              (b.said.length === a.said.length && b.failure.start !== a.failure.start))
-          ? "later"
-          : a.failure === null && b.failure !== null
-            ? "stricter"
-            : null;
+        : a.failure === null && b.failure !== null
+          ? "stricter"
+          : apart(a, b);
     if (kind !== null && (found === null || order.indexOf(kind) < order.indexOf(found.kind)))
       found = {
         ...none,
@@ -916,11 +940,20 @@ export function stopRuns(
       };
   }
   if (found !== null && found.kind !== "stricter") return found;
-  // (a violating run the direct comparison did not class: never closed)
-  if (violating.length > 0) return { ...none, kind: "violating", runs: pool.length, violating };
-  if (found !== null) return found;
-  // (plans apart that no run told apart, the natural plan never failing: nothing decided)
-  if (!witnessed && JSON.stringify(want) !== JSON.stringify(got))
-    return { ...none, kind: "unwitnessed", runs: pool.length, violating };
-  return { ...none, kind: "closed", runs: pool.length, violating };
+  // (a violating run the direct comparison did not class at all, a stricter one being one it did: never closed)
+  if (found === null && violating.length > 0)
+    return { ...none, kind: "violating", runs: pool.length, violating };
+  // (a place the plans differ where no run failed either plan: the pool did not exercise it, nothing decided)
+  const untested = differences.filter(
+    ({ node }) => node === null || !failures.some((failure) => within(failure, node)),
+  );
+  if (untested.length > 0)
+    return {
+      ...none,
+      kind: "unwitnessed",
+      runs: pool.length,
+      violating,
+      untested: untested.map(({ path }) => path),
+    };
+  return found ?? { ...none, kind: "closed", runs: pool.length, violating };
 }

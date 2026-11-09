@@ -38,7 +38,7 @@ import {
   withQuestionBound,
   withQuestionMemory,
 } from "./helpers/type-core-oracles.js";
-import type { InstructionPlan } from "../src/plan/model.js";
+import type { InstructionPlan, TypeCheckPlan } from "../src/plan/model.js";
 import { hostValues, stopRuns } from "./helpers/type-core-stop-oracle.js";
 import { DOUBLING } from "./helpers/type-core-work.js";
 
@@ -625,16 +625,29 @@ test("a decision record is read by its place and its exact path, never by the fi
   );
 });
 
+/** `plan` with each store type check `edit` gives back, removed where it gives `undefined` (a planted change, #2080). */
+function editedTypeChecks(
+  plan: InstructionPlan,
+  edit: (check: TypeCheckPlan) => TypeCheckPlan | undefined,
+): InstructionPlan {
+  const text = JSON.stringify(plan, (key, value: unknown) => {
+    if (key !== "typeCheck") return value;
+    // EVIDENCE: invariant: a plan's `typeCheck` is a `TypeCheckPlan`, a type and the place it is checked at.
+    const check = value as TypeCheckPlan;
+    return edit(check);
+  });
+  // EVIDENCE: invariant: a plan is JSON-safe data, so its text read back is the same plan with the edited checks.
+  return JSON.parse(text) as InstructionPlan;
+}
+
 /** `plan` without its stores' type checks, or without its first one only (a planted lost check, #2080). */
 function withoutTypeChecks(plan: InstructionPlan, firstOnly = false): InstructionPlan {
   let removed = false;
-  const text = JSON.stringify(plan, (key, value: unknown) => {
-    if (key !== "typeCheck" || (firstOnly && removed)) return value;
+  return editedTypeChecks(plan, (check) => {
+    if (firstOnly && removed) return check;
     removed = true;
     return undefined;
   });
-  // EVIDENCE: invariant: a plan is JSON-safe data, so its text read back is the same plan less the checks dropped.
-  return JSON.parse(text) as InstructionPlan;
 }
 
 test("a stop's runs take host data made from the source's own property names: one pool per global it reads, the same each time (#2080)", () => {
@@ -752,4 +765,41 @@ test("a stop's runs report a later failure at another site, and a difference no 
     (plan) => withoutTypeChecks(plan),
   );
   assert.equal(unwitnessed.kind, "unwitnessed");
+});
+
+test("a stop's runs decide each place the plans differ by a run failing inside it: a failure elsewhere decides nothing, and an earlier stricter failure is no later one (#2080, Codex r2 on #2142)", () => {
+  const run = <T>(make: () => T): T => make();
+  // (`hidden`'s check removed, which only a duration reaches; `visible`'s check fails for many values: still undecided)
+  const hidden = stopRuns(
+    [
+      {
+        path: "main.tease",
+        source:
+          'if hostValue is integer {\n  let visible: string = hostOther\n}\nlet hidden: integer = 1\nif hostValue is duration {\n  hidden = hostOther\n}\nsay "after"\nexit\n',
+      },
+    ],
+    ["hostValue", "hostOther"],
+    run,
+    1_000_000,
+    (plan) =>
+      editedTypeChecks(plan, (check) => (check.place.includes("hidden") ? undefined : check)),
+  );
+  assert.equal(hidden.kind, "unwitnessed");
+  // (the first of two stores strengthened from number to integer: at 2.5 it fails first, where the natural plan fails at the second)
+  const stricter = stopRuns(
+    [
+      {
+        path: "main.tease",
+        source: 'let a: number = hostValue\nlet b: integer = hostValue\nsay "after"\nexit\n',
+      },
+    ],
+    ["hostValue"],
+    run,
+    1_000_000,
+    (plan) =>
+      editedTypeChecks(plan, (check) =>
+        check.type.kind === "number" ? { ...check, type: { kind: "integer" } } : check,
+      ),
+  );
+  assert.equal(stricter.kind, "stricter");
 });

@@ -373,11 +373,20 @@ Exit statuses:
 rejects. For each item it compiles the unit unstopped and at the item's demand allowance, in its mode, and runs both
 plans over host data made from the unit's own property names: `stopRuns` and `hostValues` in
 `tests/helpers/type-core-stop-oracle.ts`, which also feed that data to `stopProblems` as its violating runs.
-- An item is `open` where the natural plan fails at runtime and the stopped plan runs to its end, or where the natural
-  compile errs and the stopped plan runs to its end. It is `later`, `stricter`, `closed` or `declined` otherwise.
-- With no natural plan, each natural error's site lists what the stopped analysis checks there.
+- An item's kind:
+  - `open`: the natural plan fails at runtime and the stopped plan runs to its end, or the natural compile errs and the
+    stopped plan runs to its end;
+  - `later`: both fail at different sites, the stopped plan after saying more or in a later statement;
+  - `violating`: `stopProblems` reports a violating run the direct comparison did not class;
+  - `unwitnessed`: a place the plans differ that no run made either plan fail inside, listed in `untested`. The pool
+    did not exercise it, so nothing is decided; it is never `closed`;
+  - `stricter`, `closed` (the plans equal, or every place they differ exercised and every run alike), `declined`,
+    `natural declined` or `no plan`.
+- With no natural plan, each natural error's site lists what the stopped analysis checks there, in the error's file.
 - An item is a `plans.mjs` record's `{set, name, mode, demand}` or a records row's `{files, globals, label, demand}`.
-- It writes `rows.jsonl` and `summary.json` to `--out`, and exits 1 on any `open` or `later` item.
+- It writes `rows.jsonl` and `summary.json` to `--out`, a missing unit's row marked `missing`.
+- It exits 1 on any `open`, `later` or `violating` item, missing unit or exception. It exits 2 on a usage error or a
+  bad `--shard`. `unwitnessed` is counted, not failed.
 
 ```sh
 sx-job submit --commit t=<tree> --shards 8 --mem 6G --campaign <T> --in <items.jsonl> \
