@@ -130,8 +130,8 @@ function infeasible(c: Case): string | null {
     return "the loss rejects every reply in transit";
   if (c.handle === "drawQueued" && c.settlement === "rejection")
     return "what the draw waits for is another section's end, which has no failure of the draw's";
-  if (c.handle === "drawQueued" && c.transition === "sameLineage")
-    return "the Continue's requests wait for the section that holds the draw: a run that never ends it never continues";
+  if (c.handle === "drawQueued" && c.transition === "sameLineage" && c.window !== "inFlight")
+    return "the Continue's requests wait for the section that holds the draw: it goes on only once that ends";
   if (c.handle === "haltAck" && c.settlement === "rejection")
     return "a halt's failed acknowledgement freezes the store as its success does (`PlayerBridge.halt`)";
   return null;
@@ -160,7 +160,10 @@ interface FamilyHost {
   setDebugMode(enabled: boolean): void;
   setDebugTracing(on: boolean): void;
   setRandomControl(control: { readonly sites: readonly [] } | null): void;
-  resolveRandomDraw(drawId: number, outcome: "natural"): Promise<{ readonly kind: string } | null>;
+  resolveRandomDraw(
+    drawId: number,
+    outcome: "natural" | { readonly kind: "number"; readonly value: number },
+  ): Promise<{ readonly kind: string } | null>;
   debugView(request: DebugViewRequest): Promise<object | null>;
   demandCallView(): { release(): void };
   debugExportCandidate(
@@ -354,7 +357,14 @@ function wire(bridge: PlayerBridge) {
     // A halt that stops nothing but a superseded session (no stop) is an end, as a release is. A post that carries a
     // run names it: the carrier's origin.
     const run = typeof args === "object" && args !== null && "run" in args ? args.run : undefined;
-    const label = op === "halt" && args === null ? "halt:plain" : op;
+    // A draw's resolution names whether it was a chosen outcome, as only the queued draw's case asks for one.
+    const outcome =
+      op === "resolveDraw" && typeof args === "object" && args !== null && "outcome" in args
+        ? typeof args.outcome === "string"
+          ? `:${args.outcome}`
+          : ":chosen"
+        : "";
+    const label = op === "halt" && args === null ? "halt:plain" : `${op}${outcome}`;
     posts.push({ op: typeof run === "number" ? `${label}@${run}` : label, phase: state.phase });
     const each = armed.find((candidate) => candidate.op === op && candidate.reply === null);
     if (each === undefined) return answer(hook);
@@ -677,7 +687,8 @@ async function run(context: TestContext, c: Case, mode: Mode): Promise<Seen> {
         await new Promise<void>((resolve) => (unblock = resolve));
       });
       await until(() => blocking, "another section holds the session");
-      pending = host.resolveRandomDraw(draw.drawId, "natural");
+      // A chosen outcome, which a Continue's own natural resolution of the kept draw is not.
+      pending = host.resolveRandomDraw(draw.drawId, { kind: "number", value: 3 });
       held = {
         held: () => blocking,
         release: async (_error, then) => {
@@ -897,6 +908,21 @@ for (const coordinates of FEASIBLE) {
   const c = asCase(coordinates);
   test(`activation family: ${Object.values(c).join(" ")}`, async (context) => {
     const released = await run(context, c, "release");
+    // A Continue of the same lineage waits for the section that holds a queued draw, so no run without letting it go
+    // continues: the draw's own effects are what this case checks.
+    if (c.handle === "drawQueued" && c.transition === "sameLineage") {
+      assert.equal(released.unhandled, 0, "no rejection is left unhandled");
+      assert.ok(released.cleaned, "the host holds no run or ticket of the Players once they went");
+      assert.equal(released.result, "null", "the retired draw gives nothing");
+      assert.deepEqual(
+        released.posts.filter((post) => post === "resolveDraw:chosen"),
+        [],
+        "the retired draw's body sends nothing",
+      );
+      assert.deepEqual(released.revisions, [], "nor writes a revision");
+      completed.push(coordinates);
+      return;
+    }
     const dropped = await run(context, c, reference(c));
     assert.equal(released.unhandled, 0, "no rejection is left unhandled");
     assert.ok(released.cleaned, "the host holds no run or ticket of the Players once they went");
