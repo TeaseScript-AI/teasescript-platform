@@ -347,6 +347,28 @@ function addedLinesSignals(file, text, added, moved) {
 }
 
 /**
+ * With --moved, each file's added lines Git marks as moved (`moved`), and those the pure-move check admits by its forms
+ * 1-3 (an import or re-export line, a bare `export` on a moved declaration, whitespace: `admitted`), by their line in
+ * `HEAD`'s blob.
+ */
+function movedAndAdmitted(mergeBase) {
+  const [moved, admitted] = [new Map(), new Map()];
+  const moves = movedLinesOf(mergeBase, "HEAD");
+  for (const change of moves)
+    if (change.file !== null)
+      moved.set(
+        change.file,
+        new Set(change.addedLines.filter((row) => row.moved).map((row) => row.line)),
+      );
+  for (const [entry, form] of verdictsOf(mergeBase, "HEAD", moves).verdicts)
+    if (entry.side === "added" && ["import", "export", "whitespace"].includes(form)) {
+      if (!admitted.has(entry.file)) admitted.set(entry.file, new Set());
+      admitted.get(entry.file).add(entry.row.line);
+    }
+  return { moved, admitted };
+}
+
+/**
  * The merge base and the signals the change from it to `HEAD` adds to, each `{ signal, line }` with the line it
  * prints; a `file` and an `added` signal also carry `file`, `before` and `after` (its lines at the merge base and at
  * `HEAD`), an `added` one also its `counted` and `moved` added lines.
@@ -417,24 +439,9 @@ function changeSignals(base) {
   };
   const blob = (ref, file) => git("cat-file", "blob", `${ref}:${file}`);
 
-  // with --moved, each file's added lines Git marks as moved, and those the pure-move check admits by its forms 1-3
-  // (an import or re-export line, a bare `export` on a moved declaration, whitespace), by their line in `HEAD`'s blob
-  const movedAdded = new Map();
-  const admittedAdded = new Map();
-  if (discountMoved) {
-    const moves = movedLinesOf(mergeBase, "HEAD");
-    for (const moved of moves)
-      if (moved.file !== null)
-        movedAdded.set(
-          moved.file,
-          new Set(moved.addedLines.filter((row) => row.moved).map((row) => row.line)),
-        );
-    for (const [entry, form] of verdictsOf(mergeBase, "HEAD", moves).verdicts)
-      if (entry.side === "added" && ["import", "export", "whitespace"].includes(form)) {
-        if (!admittedAdded.has(entry.file)) admittedAdded.set(entry.file, new Set());
-        admittedAdded.get(entry.file).add(entry.row.line);
-      }
-  }
+  const { moved: movedAdded, admitted: admittedAdded } = discountMoved
+    ? movedAndAdmitted(mergeBase)
+    : { moved: new Map(), admitted: new Map() };
 
   const found = [];
   const relevant = changes
