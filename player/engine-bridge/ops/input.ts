@@ -73,7 +73,7 @@ function interactionOp<
   Answers extends boolean = true,
 >(
   fields: readonly string[],
-  checkFields: ((args: Record<string, unknown>) => args is F) | (() => boolean),
+  checkFields: ((args: Record<string, unknown>) => args is F) | (() => true),
   run: (session: PlayerRuntimeSession, args: Record<string, unknown>) => Answer,
   answers: Answers | true = true,
 ) {
@@ -115,8 +115,8 @@ type InteractionArguments<Answers extends boolean> = {
   readonly actionId: number;
 } & (Answers extends true ? { readonly input: DebugAnswerInput | null } : unknown);
 
-/** The field check of an interaction op without fields: it reads no argument. */
-const none = () => true;
+/** The field check of an interaction op without fields: a constant `true`, the one non-predicate a builder accepts. */
+const none = (): true => true;
 
 export function inputOps(_context: PlayerOpsContext): BridgeOps {
   return {

@@ -46,7 +46,7 @@ const isCaptureAnswer = (answer: Record<string, unknown>): answer is CaptureAnsw
  * earlier basis accepted. File store and lock answers reach the engine as their payload, which it validates.
  */
 function answerOp<A, C extends Record<string, unknown> = Record<string, unknown>>(
-  checkAnswer: ((answer: Record<string, unknown>) => answer is C) | (() => boolean),
+  checkAnswer: ((answer: Record<string, unknown>) => answer is C) | (() => true),
   answer: (
     session: PlayerRuntimeSession,
     actionId: number,
@@ -88,7 +88,10 @@ export function resourceOps(_context: PlayerOpsContext): BridgeOps {
       isCaptureAnswer,
       answerPlayerRuntimeCapture,
     ),
-    answerFileStore: answerOp<PlayerFileStoreAnswer>(() => true, answerPlayerRuntimeFileStore),
-    answerLock: answerOp<PlayerLockAnswer>(() => true, answerPlayerRuntimeLock),
+    answerFileStore: answerOp<PlayerFileStoreAnswer>(
+      (): true => true,
+      answerPlayerRuntimeFileStore,
+    ),
+    answerLock: answerOp<PlayerLockAnswer>((): true => true, answerPlayerRuntimeLock),
   };
 }
