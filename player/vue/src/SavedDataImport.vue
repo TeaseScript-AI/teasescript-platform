@@ -33,7 +33,9 @@ const props = defineProps<{
   /** Whether a session of the shown script is in progress, which importing that script ends. */
   sessionInProgress: boolean;
   /** Reads a file's bytes or a pasted text in the engine host. */
-  read: (input: { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string }) => Promise<PlayerTransferRead>;
+  read: (
+    input: { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string },
+  ) => Promise<PlayerTransferRead>;
   review: (bundle: StorageBundle) => Promise<SavedDataImportReview>;
   commit: (review: SavedDataImportReview, chosen: ReadonlySet<string>) => Promise<void>;
   reviewSession: (transfer: SessionTransferRead) => Promise<SessionImportReview>;
