@@ -147,6 +147,68 @@ answer component to the key.
 
 **Source.** The orchestrator's ruling on stage S6's review round 5, 2026-10-26.
 
+### r4-83
+
+**Known cost limits need evidence; sharing defects still need repair.**
+
+**Rule.**
+
+- A cost is a technical limit only with evidence that no reasonable fix exists. Superlinear work a reasonable fix
+  removes is a bug.
+- W34's two products keep the limits and gates in the owner's decision on W34's two known products (2026-10-24). The
+  cross-source index stays a separate deferred change; these products are not value-side per-copy discovery.
+- Read chains through nested literals are gated known limits under that decision's regression-gate and remeasurement
+  rules. Their growing keys, charged contract text and admission prefixes belong to the nested-operation class accepted
+  by the owner for PR #1050 (2026-10-27). The trie follow-up covers both; a realistic read chain approaching the
+  allowance reopens the limit.
+- Admission's repeated decider walks over `get` and alias siblings are assessed against F1's mechanism, with a separate
+  bounded admission follow-up where F1 does not cover them.
+- Sharing that changes published diagnostics or checks needs repair. Publication order follows the later rule named
+  below; changed multisets remain a defect, judged by the member-answer oracle.
+- Strictly alternating adds of several sources stay a gated known limit: one step per add per path is within §8 but
+  outside §3.3's gate. A realistic alternating run approaching the allowance, or a sound summary found on paper, reopens
+  it.
+- Another sibling in value-side source sharing calls for reassessing the class keying before another repair.
+
+**Reason.** Real read chains are about ten deep, and straight-line alternating adds number tens. Interned keys require a
+cross-cutting change; an order-aware mixed-run summary requires a redesign of the exact add chain. The cheaper window
+summary dropped a warning and its check, and a prefix memo shares nothing across distinct class sequences. That cost
+outweighed the gain at realistic sizes; the sharing defects had no such justification.
+
+**Source.** The lead's S6c rulings before Sol r4 and the owner's limit rule, PR #1055 at `c63e67974`, 2026-10-27.
+
+**Bounded.** [r4.85](#r4-85) requires one discovery key and source-order-only mixed-add CI gates (PR #1055, 2026-10-27);
+[r4.86](#r4-86) replaces discovery order with source-site publication order (PR #1059, 2026-10-27); [r4.87](#r4-87)
+requires an enumeration of operation families (PR #1055, 2026-10-27).
+
+### r4-85
+
+**Every value-side discovery uses one class key.**
+
+**Rule.** One class-key function serves a literal's computed values, a choice option's selected value, add runs, `get`
+and `otherwise` defaults, and preset entries. The class is `contractClass` plus the role minima. The operation-family
+enumeration required by the later ruling below records what each family composes, its class rule or why it composes
+nothing, and a gate family for every composing family. Preserve published answers except for the later scoped
+corrections named below.
+
+Review constructs a shape per enumerated family, including families said to compose nothing, and states convergence
+against that enumeration. A missing family stops the work for the lead. Mixed-add CI gates run in source order only; the
+laptop series keeps the reversed order, whose measured difference was at most 0.0001.
+
+**Reason.** Computed literal values used `contractClass` and role minima, while selected choice values used `readClass`,
+which a computed `get` lacked. Each differently keyed site reproduced the same family. Another ordering rule would leave
+that cause intact.
+
+**Source.** The lead's ruling on Sol r4 B1 and source-sharing non-convergence, PR #1055 at `ced6f5be4`, 2026-10-27.
+
+**Bounded.** [r4.87](#r4-87) requires an operation-family enumeration, a projection's owner class and roles in its
+class, and a `+` run rule (PR #1055, 2026-10-27); PR #1208 (2026-10-27) summarises computed-key loads below one literal
+path while preserving separate leaves and checks; PR #1212 (2026-10-27) unions projected host-read origins while keeping
+each read's value-side entry and landing stop; the lead's revision-3 decision on #1188 (2026-10-28) replaces exact
+baseline rejection records with the rule that a rejected store adds no contents but keeps its landing, a
+still-disagreeing list gets its own error, later uses follow the first error's decided type and nothing warns or checks
+against a rejected type, with kept sets compared against that invariant.
+
 ### r4-86
 
 **Diagnostics and owed checks are published in source order of their sites.**
@@ -244,6 +306,29 @@ residual queries.
 
 **Source.** The lead's answers to the admission design G3/G4 (Sol round 1, Astra's review), 2026-10-28.
 
+### r4-165
+
+**The question-source guard checks named syntax, with review beyond it.**
+
+**Rule.** `check-question-sources` is syntactic and scoped within the core:
+
+- every identifier reference to `finishedItems` or `#lazilyDecided`, including property accesses, aliases and
+  destructurings by name, lies inside `CoreAnswers.#items`;
+- every reference to `Consumers.#finishingRead` lies inside `Consumers.finishedItems` or a reader listed with its reason
+  in `FINISHING_READERS`: the constructor's admission host read, `#valueItems`, its own recursion, or `#typedRead`.
+
+A listed reader is trusted by its reason. Other named references fail the check. References the syntax does not name,
+such as inherited members through inferred wrappers, generic receivers or computed names, are outside the guard and
+reviewed against the S8 part-2 ruling after Astra r7 on PR #1063 (2026-10-28): one ordered-source endpoint answers every
+direct or composed question. The guard states that scope. The question oracle and composed-shape matrix verify the
+product rule.
+
+**Reason.** Three review rounds found further ways to evade a type-aware guard through members, value flow, wrappers and
+generic calls. A named syntactic boundary is checkable; extending a partial type or flow model did not close the family.
+
+**Source.** S8 part 2, the question-source scope ruling after Codex r26–r28 on PR #1063, 2026-10-28, following the same
+day's S8 ruling that listed host reads are trusted by their stated reasons.
+
 ### r4-171
 
 **A type suggestion is a type at the type position.**
@@ -275,6 +360,33 @@ unlike the rejected alternative of recording every cross-result read during setu
 
 **Bounded by [r4.183](#r4-183):** at most one restart per pass.
 
+### r4-182
+
+**The obligation guard accepts listed forms and reports every other named reference.**
+
+**Rule.** `check-obligation-inventory` is syntactic and name-scoped throughout the core. Its closed list recognises:
+
+- direct `this.<member>(…)`, `this.readChecks.push(…)`, `boundaryCheck(…)` and an `error` parameter's call inside a
+  listed derivation;
+- a dot read of a listed read;
+- a derivation moved to a function identified by its declaration, not its name.
+
+Every other identifier reference by name to `readChecks`, `boundaryCheck`, an `error` parameter, `diagnostics` or any
+`Admission` member is reported as unproved, including aliases and destructurings, wherever it stands and whatever flows
+from it. There is no binding resolver, propagation graph or flow model. References the syntax does not name, including
+inherited or generic access, computed names and values carried through aggregates or copies, are outside scope and a
+review matter; the guard states that boundary.
+
+The evidence covers the recognised forms passing and the reviewers' 24 forms and r1–r5 escapes being reported in both
+layouts. New named forms are reported by construction; unnamed forms do not start further guard rounds. The product
+evidence remains `OBLIGATION_SITES` and S8's stop evidence.
+
+**Reason.** Five rounds found another TypeScript escape each time the guard tried to infer derivations across file
+splits. A closed syntax list avoids turning the inventory check into an incomplete flow analyser.
+
+**Source.** The obligation-inventory scope ruling after Codex r1–r5 on PRs #1360 and #1369, 2026-10-29, following the S8
+ruling that listed host reads are trusted by their stated reasons (PR #1063, 2026-10-28) and [r4.165](#r4-165).
+
 ### r4-183
 
 **At most one restart per pass; a stopped key narrows under a type test.**
@@ -292,6 +404,25 @@ restarts and 13.3M units where one stop had cost 268,254. The bound never leaves
 pass's work. Runtime checks where analysis is too costly are accepted design.
 
 **Source.** Stage S8 part 3, PR #1165, 2026-10-29.
+
+### r4-185
+
+**Only the ring cut's case 5 admits an order-only difference.**
+
+**Rule.** The whole-copy ring cut finds each cycle once per pass over the copies the prefix walk follows, recording its
+ports and stops. A member with one live store at its root is a link; every other member is a stop. Each member's list is
+equal to the baseline entry by entry in every order of asking, with one scoped exception: case 5, where a stop's entries
+merge into one, from two copies reaching one stop or a copy of a place with no store.
+
+For case 5 only, the equality projection admits a difference in item order or kind order in a decided type, taking the
+baseline's open-stop choice. Diagnostics, checks, records, plans and deciders remain equal, and the comparison fails on
+any other difference. Canonical publication order is a separate sharing-neutrality question.
+
+**Reason.** The finite cut removes quadratic prefix entries. The baseline's case-5 choice depended on which place
+entered the cycle first; reproducing it would retain entry dependence and require a second memo without changing the
+checked meaning.
+
+**Source.** G5 commit 5a, the lead's ruling on Codex r1's order criterion for PR #1394, 2026-10-29.
 
 ### r4-196
 
@@ -354,6 +485,66 @@ recognise a reasonless unknown, which would need a marker carried through merges
 
 **Source.** The lead's decision on #1501, after Sol's design round 1, 2026-10-30.
 
+### r4-227
+
+**A layer demand has a replayable logical name.**
+
+**Rule.** Per-consumer layer summaries name a demand from the indexed program and path steps:
+
+- `protoLayer|alias|<original place>||<requested path>`;
+- `protoLayer|projected|<original place>|<source projection path>|<requested path>`.
+
+The name is independent of prefix-query order, allocation numbers, trie versions and solver order. A layer allocation
+number or support-trie node id is never its logical identity. Demand-name comparison, logical expansion and exported
+names remain byte-unchanged; the packet already carries the paths. Import keeps the receiving arena's native tokens for
+this family, and demand solving is unchanged.
+
+Replay uses the pass's own `Contract`: an alias origin is re-derived from its prefix stores and alias layer, a projected
+origin from its projected layer. A cut receiving prefix, unknown origin kind or missing layer is rejected; an arena
+number is never guessed. The descriptor is cached by physical layer and canonical native path id, created and charged
+once; the `recipeDemand` text is made once per pair and retained. The build keeps Sol's invariants and nine mutants,
+Astra's consumer table, the identity and replay controls, and the level-3 evidence with inherited #1424 exceptions named
+separately.
+
+**Reason.** Allocation identity does not survive replay into an arena with a different history. The prototype reproduced
+logical names and packets across histories, while the arena-id mutant failed in every mode, retaining the earlier bound
+and answers.
+
+**Source.** The lead's build-ready ruling for #1466 after Sol's replay-identity prototype r3 passed the replayability
+and allocation-history gate required by Astra's design review, with the #1501 handoff, 2026-10-31.
+
+**Bounded.** PR #1546 (2026-11-01) confines layer-demand identities to internal replay, outside plans and checkpoints.
+
+### r4-245
+
+**An output-bound family may pay an attributed constant per real pair.**
+
+**Rule.** An output-bound family may exceed the baseline under both the per-doubling and largest-size clauses only when:
+
+- `P` independently counts distinct real holder-layer/path answers from the generator's holders, never from demands
+  made;
+- the entire positive difference is attributed to the retained layer index and its solver demand runs;
+- every new site's work is bounded by a fixed number per real pair, plus existing shared or input-sized work and
+  identifier width;
+- excess per real pair does not rise at later doublings;
+- every mode reports total/baseline, excess/`P` and the site ledger, and `checks` stays at or below the baseline at
+  every size.
+
+Enumeration or support copying must not replace the ruled sharing on diamonds or listing chains; other families keep
+their gate. The F1 family uses shared, reversed-join, mixed and pairs controls at one cheap doubling to assert `P` and
+unique-pair demand creation; the 16–128 series and ledgers remain external evidence.
+
+**Reason.** In the sibling with k reads over k layers, both trees owe `P = k² + 2k` answers. The excess per pair fell as
+size grew and came from retained index and solver work. Singleton forwarding still exceeded the baseline and regressed
+rings and diamonds; name interning cannot merge distinct pairs, a reference cache misses every pair, and one summary per
+read re-enumerates support. Keeping PR #1546's head avoided those costs.
+
+**Source.** The lead's ruling after Sol's summary-cost design round r1 on Codex r5 F1, PR #1546 at `14b4eadea` for
+#1466, 2026-11-01.
+
+**Bounded.** The lead's phase-B ruling on PR #1606 for #1526 (2026-11-02) compares newly charged capture work with the
+baseline's charged total plus its uncounted work for the same obligations, judging an output-bound term per output node.
+
 ### r4-251
 
 **A deep read forwards through a singleton layer.**
@@ -372,6 +563,29 @@ closed #1466's deep read: at or under `main` at every sampled depth, with every 
 multiple-top reads keep their summary runs.
 
 **Source.** Sol's deep-read design round for #1466, and the lead's ruling, 2026-11-01.
+
+### r4-262
+
+**A forwarded read makes a path id only when a summary needs it.**
+
+**Rule.** A read that forwards through a singleton source makes its path id only where a summary demand needs it. The
+alternating-feedback family belongs in the family kit and deep-read CI row; changing the source requires the full replay
+again on the new candidate. The excess needs a cost repair, without a scoped growth waiver.
+
+Separately, #1462's program-stop stall in mutual copies is fixed by #1551. Its regression coverage adds plain
+variable-copy cycles stopped later in the walk in a reversed mode, because the existing coverage exercised call cycles
+only.
+
+**Reason.** Read selection made the path id before forwarding, although the forwarded read created no demand. The
+alternating-feedback read therefore paid exactly `2D + 9` extra units in every mode. Both trees were superlinear, so the
+gate's affine-excess clause did not admit it. For #1462, the verify-first comparison isolated the fix to the admission
+boundary change: the parent stalled in reversed modes while the fixed candidate finished.
+
+**Source.** The lead's cost-repair ruling on Astra r1 F1 for PR #1546 at `0ad45cdcc`, with Codex r11 assigned closure;
+the #1462 verify-first ruling on `95e3c1020`, fixed by #1551, 2026-11-01.
+
+**Bounded.** PR #1546 (2026-11-01) forbids making any path or span id during read selection, including alternate
+interning routes.
 
 ### r4-277
 
@@ -392,6 +606,25 @@ spelling had to be kept, or the reverse. Ordering at publication could not tell 
 publication sites read both. A mark carried from the producer can.
 
 **Source.** The lead's ruling on PR #1558's design for #1398, after Codex round 5, 2026-11-02.
+
+### r4-299
+
+**The combined-stop oracle proves open reads coarsely per unit and key.**
+
+**Rule.** The combined-stop oracle uses coarse reading (a): per unit and by key, every open read of the reference run's
+unit is answered by the combined run or quiet-skipped. It does not use dynamic per-invocation occurrence ids. The
+written-set positive, Codex r4's B2 witness and the six `writtenObjectBelow` stops form one counted class, `coarse (a)
+rejection`, with a named reason per member and no per-member exception. The ev9 mutant evidence reruns over every
+family; a surviving mutant is a finding. A production hook for the oracle remains an owner decision, not an authorised
+repair.
+
+**Reason.** ESM consumers are called through local bindings, with no entry to wrap beyond the prototype and per-walk
+fields, and V8's strict-mode call sites expose no call identity. Repeated calls at one loop position collide. An
+inspector harness or rewritten module copy would be excluded test infrastructure, so the earlier ruling's named coarse
+fallback is the available proof.
+
+**Source.** The lead's rulings on Codex r4 B2 for PR #1597, replacing the finer reading in the 12:05 ruling, and on
+Sol's reconciliation sweep at `366a42d42`, 2026-11-02.
 
 ### r4-349
 
