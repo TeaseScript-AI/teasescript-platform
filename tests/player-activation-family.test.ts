@@ -1027,3 +1027,29 @@ test("activation ledger: each entry settles and acts in the order it did, but fo
   }
   assert.deepEqual(ledgers, LEDGER);
 });
+
+// Debug mode's request clears only its own marker (HEAD 0 §2, cleanup): a reply to an earlier request leaves a later
+// one's, so a third change still goes to the host, which a cleared marker would take for done.
+test("a Debug mode reply clears only its own request's marker, so a later change is still sent", async (context) => {
+  browser(context);
+  const bridge = facade.createInProcessBackend(BUILD);
+  const traffic = wire(bridge);
+  const made = playerOn(bridge);
+  context.after(made.stop);
+  const host = made.player;
+  await host.bridge;
+  host.prepare(factory(SCRIPT));
+  await host.activate();
+  await settle();
+  const [on, off] = [traffic.arm("setDebugMode"), traffic.arm("setDebugMode")];
+  host.setDebugMode(true);
+  host.setDebugMode(false);
+  await until(() => on.held() && off.held(), "both changes are in the host");
+  await on.release(null);
+  await settle();
+  host.setDebugMode(true);
+  await off.release(null);
+  await settle();
+  assert.equal(traffic.posts.filter((post) => post.op === "setDebugMode").length, 3);
+  assert.equal(host.session.value?.state.debugMode, true, "the session ends as last asked");
+});

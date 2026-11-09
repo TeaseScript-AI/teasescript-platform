@@ -6,9 +6,10 @@ import type { CapturedMediaRecord } from "../player/media/captured-media.js";
 import type { ExportCaptureReply } from "../player/engine-bridge/session-protocol.js";
 import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import type { PlayerSession } from "../player/runtime/runtime-view.js";
-import type {
-  InitialOrigin,
-  RunOrigin,
+import {
+  useActivationRun,
+  type InitialOrigin,
+  type RunOrigin,
 } from "../player/vue/src/session/activation/useActivationRun.js";
 import { useExportCandidate } from "../player/vue/src/session/activation/useExportCandidate.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
@@ -316,4 +317,111 @@ test("a candidate whose activation retires while it is built hands nothing over,
     observed.push(coordinates);
   }
   assert.deepEqual(coverageGaps(cases, observed, { tuples: true }), []);
+});
+
+/*
+ * Session split S2's resource owners (HEAD 0 §5), on the record owner itself: what an activation's export holds goes
+ * when the activation retires, without waiting for its work to come back. The first activation retires the initial
+ * record as any later one retires its predecessor.
+ */
+function recordOwner() {
+  const run = useActivationRun({ report: () => {} });
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: a begin reads only the host's next run, and a disposal asks it to retire the run.
+  const host = { nextRun: () => 1, retireRun: async () => {} } as unknown as PlayerBridge;
+  return { run, begin: () => void run.begin(host) };
+}
+
+for (const retiring of ["the initial record", "an activation's run"] as const)
+  test(`${retiring} retiring releases its export's lease at once, while a photo read never returns`, async () => {
+    const { run, begin } = recordOwner();
+    if (retiring === "an activation's run") begin();
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads a session's `connection` and `lineage`, which this literal has.
+    const view = {
+      connection: null,
+      lineage: "l1",
+      events: [],
+      transcriptEntries: [],
+    } as unknown as PlayerSession;
+    const { bridge, released } = fakeBridge(view);
+    let reading = false;
+    const owner = useExportCandidate({
+      session: shallowRef(view),
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner calls only `captureExport`, `releaseRecording` and `exportPrepare` of a bridge, which this fake has.
+      bridge: () => bridge as unknown as PlayerBridge,
+      activation: run,
+      halting: ref(false),
+      build: { commit: null, dirty: null, mode: "development", appVersion: "0" },
+      package: { id: null, version: null },
+      readPhoto: () => {
+        reading = true;
+        return new Promise(() => {});
+      },
+    });
+    let settled = false;
+    void owner
+      .debugExportCandidate(
+        () => SHOWN,
+        () => true,
+      )
+      .then(() => (settled = true));
+    for (let turn = 0; turn < 10 && !reading; turn += 1) await Promise.resolve();
+    assert.ok(reading, "the candidate waits for its photo");
+    assert.deepEqual(released, []);
+    begin();
+    assert.deepEqual(released, ["r7"], "the lease goes with the retirement, not with the read");
+    assert.equal(settled, false);
+  });
+
+test("an export waiting for its activation's stop to show settles when the activation retires, and asks nothing more", async () => {
+  const { run, begin } = recordOwner();
+  begin();
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads a session's `connection` and `lineage`, which this literal has.
+  const view = {
+    connection: null,
+    lineage: "l1",
+    events: [],
+    transcriptEntries: [],
+  } as unknown as PlayerSession;
+  const counts = { captures: 0 };
+  const bridge = {
+    // The stop is still committing: the capture is pending, as the host answers then.
+    captureExport: async <T>(
+      _session: PlayerSession | null,
+      _recording: unknown,
+      deliver: (reply: ExportCaptureReply, shown: PlayerSession | null) => T,
+    ) => {
+      counts.captures += 1;
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: a pending capture's reply carries only its kind.
+      return deliver({ kind: "pending" } as unknown as ExportCaptureReply, view);
+    },
+    releaseRecording: async () => {},
+    exportPrepare: async () => ({}),
+  };
+  const halting = ref(true);
+  const owner = useExportCandidate({
+    session: shallowRef(view),
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner calls only `captureExport`, `releaseRecording` and `exportPrepare` of a bridge, which this fake has.
+    bridge: () => bridge as unknown as PlayerBridge,
+    activation: run,
+    halting,
+    build: { commit: null, dirty: null, mode: "development", appVersion: "0" },
+    package: { id: null, version: null },
+    readPhoto: async () => null,
+  });
+  const outcome: { value: string } = { value: "pending" };
+  void owner
+    .debugExportCandidate(
+      () => SHOWN,
+      () => true,
+    )
+    .then((candidate) => (outcome.value = candidate === null ? "null" : "candidate"));
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+  assert.deepEqual([outcome.value, counts.captures], ["pending", 1], "it waits for the stop");
+  begin();
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+  assert.equal(outcome.value, "null", "the retirement settles its wait");
+  // Its watch went with it: the stop's end later asks for no capture.
+  halting.value = false;
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+  assert.equal(counts.captures, 1);
 });
