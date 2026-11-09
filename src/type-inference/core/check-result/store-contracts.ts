@@ -222,7 +222,7 @@ export class Contracts {
               element: this.#inNaturalOrder(
                 type.element,
                 id,
-                [...path, "element"],
+                joinSteps(path, ["element"]),
                 recordsBelow(records, this.#literalOf).elements,
               ),
             };
@@ -242,7 +242,7 @@ export class Contracts {
             type: this.#inNaturalOrder(
               property.type,
               id,
-              [...path, propertyStep(name)],
+              joinSteps(path, [propertyStep(name)]),
               below.fields.get(name) ?? [],
             ),
           };
