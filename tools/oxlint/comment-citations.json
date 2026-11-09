@@ -3,13 +3,13 @@
     "TABLE r4": 1,
     "bare r4.N": 1
   },
-  "tests/families/copies/1323-fold-siblings.mjs": {
+  "tests/families/copies/copy-projections/shared-join-missing-writer-equivalence.mjs": {
     "TABLE r4": 1
   },
-  "tests/families/copies/3a-budget-check.mjs": {
+  "tests/families/copies/copy-work/copy-guard-and-demand-budget-families.mjs": {
     "bare r4.N": 9
   },
-  "tests/families/copies/3a-spike14-gates.mjs": {
+  "tests/families/copies/copy-work/guard-call-handler-and-store-flow-products.mjs": {
     "TABLE §": 1
   },
   "tests/families/messages/1268-astra-r4-growth.mjs": {

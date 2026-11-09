@@ -34,4 +34,4 @@ those as their READMEs say.
   135 of them are in no archive, so no module stands for those runs (its focused pairs are
   `joins/1272-astra-r2-pair-focused`).
 - Three of #1210's review `work.mjs` commands (`astra-m4-i1210-review-evidence/comment-0.md:87`–`88`, `comment-1.md:82`)
-  ran an earlier `work.mjs` no archive keeps; `copies/1210-astra-work.mjs` holds the runs of the kept one.
+  ran an earlier `work.mjs` no archive keeps; `copies/host-ingress/host-list-wrapper-read-work.mjs` holds the runs of the kept one.

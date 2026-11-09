@@ -459,14 +459,17 @@ const rises = (series: readonly number[]) =>
   series.slice(1).map((value, index) => value / series[index]! - 1);
 
 test("the oracle's questions cost per cell they return is flat on W19-record, and on W24-varied, r3-root-copies and W32-own-test rises by a falling step, a log factor, below K (#1837, #1941)", async () => {
-  const gates = "tests/families/copies/3a-spike14-gates.mjs";
+  const gates = "tests/families/copies/copy-work/guard-call-handler-and-store-flow-products.mjs";
   // (flat: under 1 % a step either way, 24.224 / 24.204 / 24.140 / 24.087)
   const flat = perCell(await family(gates, "W19-record", [16, 32, 64, 128]));
   for (const rise of rises(flat)) assert.ok(Math.abs(rise) < 0.01, JSON.stringify(flat));
   for (const cost of flat) assert.ok(cost < QUESTION_UNITS_PER_CELL, JSON.stringify(flat));
   for (const [module, shape] of [
     [gates, "W24-varied"],
-    ["tests/families/copies/f1-astra-r3-field-families.mjs", "r3-root-copies"],
+    [
+      "tests/families/copies/copy-projections/layered-field-store-and-reader-matrix.mjs",
+      "r3-root-copies",
+    ],
     [gates, "W32-own-test"],
   ] as const) {
     const series = perCell(await family(module, shape, [16, 32, 64, 128]));
@@ -513,7 +516,7 @@ test("a binding's admitted type reads its copied value at its own field: the bin
       name: "r3-root-copies [element]",
       path: ["element"],
       sources: await family(
-        "tests/families/copies/f1-astra-r3-field-families.mjs",
+        "tests/families/copies/copy-projections/layered-field-store-and-reader-matrix.mjs",
         "r3-root-copies",
         [16, 32],
       ),

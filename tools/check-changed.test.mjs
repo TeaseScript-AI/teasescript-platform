@@ -35,7 +35,10 @@ const REPRESENTATIVES = {
   "oxlint-rules": ["tools/oxlint/run.mjs", ["oxlint-rules"]],
   tools: ["tools/test-shards.mjs", ["tools"]],
   "repository checks": ["tools/repository-checks/regression-cases.mjs", ["tools"]],
-  families: ["tests/families/copies/1313-astra-composite-cases.mjs", ["families"]],
+  families: [
+    "tests/families/copies/copy-admission/named-and-nested-composite-admission.mjs",
+    ["families"],
+  ],
   fixtures: ["tests/fixtures/type-core/cells.jsonl", ["typescript"]],
   documentation: ["docs/TESTING.md", []],
   // root configuration files, each needing the projects whose checks read it
