@@ -248,6 +248,14 @@ const BYTES = [
     (cell) => onCdp(cell) && isWorker(cell),
     true,
   ],
+  // The byte page is loaded once more, cold, when CDP leaves a request open (`drive.mjs`): the attempts discarded.
+  [
+    "byte pages discarded (a request left open)",
+    "",
+    (r) => (Array.isArray(r.bytes?.discarded) ? r.bytes.discarded.length : null),
+    onCdp,
+    true,
+  ],
 ];
 const NUMBERS = {
   session: [

@@ -177,6 +177,7 @@ function sessionResult({ engine = "chromium", backend = "main" } = {}) {
       ? {
           memory: ["startEnabled", "playable", "firstSave", "afterTurns", "end"].map(heap),
           bytes: {
+            discarded: [],
             requests: [
               {
                 target: "page",

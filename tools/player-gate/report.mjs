@@ -120,6 +120,18 @@ export function buildReport(rows, phase, artifacts = []) {
         summary[name][named] = value;
         lines.push(`| ${named} | ${format(value)} | ${unit} |`);
       }
+    // The byte page's retries, where the bytes are: how many attempts the cell discarded in all.
+    const retry = derived[0].values.findIndex(({ label }) =>
+      label.startsWith("byte pages discarded"),
+    );
+    if (retry !== -1) {
+      const total = derived.reduce((sum, sample) => sum + (sample.values[retry].value ?? 0), 0);
+      summary[name]["byte pages discarded, in all"] = total;
+      lines.push(
+        "",
+        `Byte pages discarded and loaded again: ${total} over ${derived.length} samples.`,
+      );
+    }
     lines.push("");
   }
   const files = artifactLines(artifacts);
