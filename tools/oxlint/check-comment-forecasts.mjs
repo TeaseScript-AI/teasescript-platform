@@ -67,7 +67,7 @@ export function citationCounts(fileName, text) {
 }
 
 /** The anchors of `page`'s headings, as Markdown renderers make them: lower case, punctuation dropped, spaces as `-`. */
-export function recordAnchors(page) {
+function recordAnchors(page) {
   return new Set(
     [...page.matchAll(/^#{1,6}\s+(.+?)\s*#*\s*$/gmu)].map(([, heading]) =>
       heading
