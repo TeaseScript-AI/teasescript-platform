@@ -876,6 +876,47 @@ the accepted plan states for that pull request, at each doubling rather than cum
 acceptance criterion of that pull request, not a project limit or capacity contract. Read each factor against the
 input's own growth: a factor near 4 per doubling of a linearly growing input is quadratic.
 
+A structural repair of the type core has a fixed growth bar, its growth gate, and these rules define what its gate
+report must show. Per-doubling growth is no greater than `main`'s at
+every measured doubling, total work no greater than `main`'s at each family's largest measured size, and work spent on
+checks no greater than `main`'s at every size; any small-size excess is reported with its work-ledger attribution
+(#1444, 2026-10-31). This gate applies instead of requiring cost at or below `main` before other measurements (#1547,
+2026-11-01).
+
+- **The largest-size exception:** where both versions' work is linear, an excess of at most 10 % passes, attributed
+  to the extra representation the repair retains (#1547, 2026-11-01). For landing families whose output grows
+  superlinearly, both versions' landing work is instead bounded by a constant multiple of the paths returned, and the
+  excess lies within named work outside the reporter that is linear in input size; it need not equal that work, and
+  the 10 % is of `main`'s landing work at the largest completed size (#1428 and #1547, 2026-11-04). Per-doubling
+  growth and work spent on checks still meet the gate in every mode. A size where both runs stop establishes nothing.
+- **A count with a fixed intercept:** the gate's count term is read across the measured doublings. A site whose count
+  is exactly linear with a fixed intercept passes when, at each doubling after the smallest, its doubling ratio
+  exceeds total charged work's by no more than that intercept accounts for; its excess at the smallest doubling is the
+  intercept, not growth. A site that exceeds at the largest doubling fails (the lead's reading, #1466, 2026-10-31).
+- **A saving:** a candidate at or below `main` at every measured size passes the growth clause when the saving comes
+  from the accepted representation change and does not shrink in absolute terms over the last doubling, whatever its
+  shape (#1466, 2026-11-01). The report names this `under main at every size`, with the saving's sequence; for a
+  linear saving it reports the common remainder as `main`'s work (#1444, 2026-10-31).
+- **A converging slope:** for an excess whose slope per input size rises and converges, make any bounded repair the
+  ledger identifies, then extend the measurements by one or two doublings where cost allows. The later two slopes
+  within 3 % pass the growth clause, the smaller sizes' deviation from the linear fit being the fixed intercept; the
+  largest-size total still needs the exception's conditions. If the slopes still diverge at the extended sizes, the
+  cost is repaired before READY (#1466, 2026-11-01).
+- **A restored obligation:** where `main` is cheaper because it drops an obligation a correctness repair restores, its
+  cost is not the reference for the largest-size total or work spent on checks on that family. The repaired family's
+  growth is linear, or of `main`'s order where `main` is superlinear, its work is bounded per read, and the ledger
+  attributes the entire excess to the restored obligation; every untouched family stays at or below `main` as a
+  control. The report names this reading, and the PR each repaired family with its ratio and attribution (#1491 and
+  #1502, 2026-11-01).
+- **Work `main` does uncounted:** where the candidate charges inside the analysis work `main` does uncounted after it,
+  the candidate's charged total is compared with `main`'s charged total plus its uncounted work for the same
+  obligations, and an output-bound term is judged by the candidate's work per output node (#1526, 2026-11-02).
+- **A lazily activated index:** a run asked at exactly the activation count, whose walk costs less than the index, may
+  pay at most one construction per run per pass above `main` at the largest size. The excess is linear, grows no faster
+  than `main`'s, and is entirely construction in the ledger; the report names this reading, and the PR lists each such
+  sibling with its excess (#1384, 2026-11-01). Amortised activation, indexing a root only once its walks have paid the
+  index's cost, is a separate mechanism to propose if a real source shows this boundary cost matters.
+
 ## Reproducibility requirements
 
 Tests and benchmarks should use:
