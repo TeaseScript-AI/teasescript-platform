@@ -254,7 +254,10 @@ export class Consumers {
   deciding: number | null = null;
   /** Whether a decision stopped in this pass (`decide`): it is not settled. */
   decisionStopped = false;
-  /** Whether this pass restarted one whose decision stopped: a decision stopping here stops the analysis (TABLE r4.183). */
+  /**
+   * Whether this pass restarted one whose decision stopped: a decision stopping here stops the analysis
+   * (docs/specifications/type-inference-accepted-record.md#r4-183).
+   */
   readonly restarted: boolean;
   #readingNode: FlowNode | null = null;
   #callableNodes: Map<unknown, number> | null = null;
@@ -459,7 +462,7 @@ export class Consumers {
       this.pass.contract.contractOfValueAt(value, rest),
     );
     // C9 (#1073): an item a type test narrowed from external data brings its ingress stores' boundary checks, whatever
-    // its consumer then finds fitting, and host data no ingress store brought its check at the read's root (r4.10, at
+    // its consumer then finds fitting, and host data no ingress store brought its check at the read's root (at
     // the site and with the target the consumers' own requests use, so one check); the test proves its kind, never its
     // ingress (a look at each of the read's items, at most one per kind, inside the read's own charged step)
     for (const item of items)
@@ -490,8 +493,8 @@ export class Consumers {
   }
 
   /**
-   * A consumer's question of a value's items, one demand with the allowance of the read that asks it (S3 §5, TABLE
-   * B1): a demand past it stops, and the read answers its own key's `contract` with the reason `budget` (a contract past
+   * A consumer's question of a value's items, one demand with the allowance of the read that asks it (S3 §5):
+   * a demand past it stops, and the read answers its own key's `contract` with the reason `budget` (a contract past
    * its own allowance, or none, `STOPPED`). Nothing the stopped demand left unfinished is kept, so a later demand of the
    * same key, in either order, computes it again with its own allowance. In the finishing path after a stop the solver
    * answers only from what had finished, else `STOPPED`; it is not asked at all where nothing stopped (the units nested
@@ -647,7 +650,8 @@ export class Consumers {
       this.admission.literalElements(this.order, (site, found) => mixed(this, site, found));
       this.admission.joinElements(this.order, (found) => mixedJoin(this, found));
       // (a pass whose admission gives the stores below a selection other targets starts the passes again, #1275; one in
-      // which a decision stopped is not settled either: the next starts with its key stopped, TABLE r4.180)
+      // which a decision stopped is not settled either: the next starts with its key stopped,
+      // docs/specifications/type-inference-accepted-record.md#r4-180)
       const own = this.#ownTargets(this.admission, (root, path) => {
         decide(this, { root, path }, true);
       });

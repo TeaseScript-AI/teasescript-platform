@@ -404,7 +404,7 @@ export interface BudgetAnswer {
   /** `finishing` by counter, with what was counted apart without a stop (`WorkLedger.apart`). */
   readonly apart: ReadonlyMap<WorkCounter, number>;
   /**
-   * The phase the stop came in (TABLE r4.90's lifecycle): the setup (a pass's own included), admission's walk, the
+   * The phase the stop came in: the setup (a pass's own included), admission's walk, the
    * capture of the stores' contracts after admission settled (`extraction`, #1526), the consumers' walk, the publication
    * of boundaries, or the questions after a finished analysis; `null` without a stop.
    */
@@ -588,7 +588,7 @@ export interface Answers {
    */
   valueAt(node: FlowNode, path: readonly string[]): ValueAnswer;
   /**
-   * The name an obligation gives the value at a node (§10.5 r4.10, `keyLabel`): its key path, else its text; `null`
+   * The name an obligation gives the value at a node (§10.5, `keyLabel`): its key path, else its text; `null`
    * where the node holds no value. The plan side reads an obligation's target by it, never by a name of its own.
    */
   targetName(node: FlowNode): string | null;
@@ -620,9 +620,10 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
     try {
       program.index();
       // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
-      // whose changing stores stay possibilities. A pass in which a decision stops is not settled either (TABLE r4.180):
-      // the next, from the same rejected set, starts with every stopped key stopped, once per rejected set; a decision
-      // stopping in that pass again stops the analysis, as the work allowance does (TABLE r4.183)
+      // whose changing stores stay possibilities. A pass in which a decision stops is not settled either
+      // (docs/specifications/type-inference-accepted-record.md#r4-180): the next, from the same rejected set, starts
+      // with every stopped key stopped, once per rejected set; a decision stopping in that pass again stops the
+      // analysis, as the work allowance does (docs/specifications/type-inference-accepted-record.md#r4-183)
       let cycling: ReadonlySet<number> = new Set();
       const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
       const selecting = selectingStores(program);
@@ -1279,7 +1280,8 @@ class CoreAnswers implements Answers {
     this.dominators = program.dom;
     this.initializers = initializersOf(program);
     // published in source order of their sites, at one site the written types' errors first, then each consumer's in
-    // the order they run (TABLE r4.86 (1)), the finishing path's as the walk's, then a stop's own warning and marks
+    // the order they run (docs/specifications/type-inference-accepted-record.md#r4-86), the finishing path's as the
+    // walk's, then a stop's own warning and marks
     const ranked = (
       item: CoreDiagnostic,
     ): { readonly item: CoreDiagnostic; readonly rule: number } => ({
@@ -1368,7 +1370,7 @@ class CoreAnswers implements Answers {
 
   /**
    * A value's items at a node and a path, for every question, direct or composed: a literal's child's items are its own
-   * question's (`#stoppedShape`), and the last two sources are read here alone (TABLE r4.158; the lint check
+   * question's (`#stoppedShape`), and the last two sources are read here alone (the lint check
    * `check-question-sources.mjs`). After a stop, the finishing read's sources in their order: the
    * solver's finished answer where admission had settled; else what the value's own syntax gives (`#stoppedShape`: a
    * literal's own kinds, a typed call's expected type at every depth); else the domains the consumers' finishing read
@@ -1544,8 +1546,8 @@ class CoreAnswers implements Answers {
       return { items: [makeItem(own, null, { cert: "def" })], names };
     }
     // each child at the path's own step (`literalChildren` keys a collection's elements and a dict's values alike): its
-    // items as its own question answers them, through every ordered source (`#items`: one endpoint for every question,
-    // TABLE r4.158), beside its known siblings, the composition in its one order (#1398); its names its own
+    // items as its own question answers them, through every ordered source (`#items`: one endpoint for every question),
+    // beside its known siblings, the composition in its one order (#1398); its names its own
     // syntax's alone; no item at all is an answer where every child's own syntax proves its own (`absentAt`)
     const items: Item[] = [];
     const names = new Set<string>();

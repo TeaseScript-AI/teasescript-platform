@@ -8,8 +8,8 @@ import type { WrapperHop } from "./model.js";
 import { writtenOf } from "./terms.js";
 import { wrapperFacts } from "./wrapper-facts.js";
 
-// G3 stage 1 (TABLE r4.196): a binding's wrapper shape, the frozen structural part of `wrapperHop`, and the lane the keys
-// of each `(binding, first step)` family take from it.
+// G3 stage 1 (docs/specifications/type-inference-accepted-record.md#r4-196): a binding's wrapper shape, the frozen
+// structural part of `wrapperHop`, and the lane the keys of each `(binding, first step)` family take from it.
 
 /** The representation a family's keys take in a pass: cursors (`key-ids.ts`) or their text. */
 export type KeyLane = "cursor" | "text";
@@ -18,7 +18,7 @@ export type KeyLane = "cursor" | "text";
 export type ShapeAsker = "hop" | "lane";
 
 /**
- * A wrapper shape or a key lane asked, with what the question cost (criterion 2 of r4.196's early selector): its pass
+ * A wrapper shape or a key lane asked, with what the question cost (criterion 2 of the early selector): its pass
  * (in the order the recording first saw it), binding and first step; for a shape its asker, answer (`stopped` where the
  * ledger stopped it), whether its memo answered, and the units it charged by counter, as the demand's own work, a shared
  * build's or work counted apart; for a lane its lane, whether its family was frozen already or was being built, which

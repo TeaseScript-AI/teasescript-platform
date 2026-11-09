@@ -429,7 +429,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
             );
           continue;
         }
-        // §8 r4.13, r4.15: a call is a read of its callee's result key (F20) and a read its source: k calls of one
+        // §8: a call is a read of its callee's result key (F20) and a read its source: k calls of one
         // function, k copies of one source, are one entry at the path, their guards and ingress its annotations
         const source = yield* contract.needValue(value);
         if (contract.copiedKey(value) === null) {
@@ -579,9 +579,9 @@ function aloneLiteral(
 }
 
 /**
- * §8 r4.15: a literal's identity is its structure when no reference and no ingress stands in it (the kinds of its own
+ * §8: a literal's identity is its structure when no reference and no ingress stands in it (the kinds of its own
  * terms, the sources of its reads and calls, its objects' properties at every path), else the literal itself; the
- * marks of its reads are never identity (r4.17).
+ * marks of its reads are never identity (docs/specifications/type-inference-accepted-record.md#r4-17).
  */
 export function literalSignature(contract: Contract, literal: PlaceId): string {
   if (!contract.signatures.has(literal)) {

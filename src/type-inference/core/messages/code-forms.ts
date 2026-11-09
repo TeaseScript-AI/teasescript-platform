@@ -7,7 +7,7 @@ import type { ItemTag } from "../items.js";
 import type { Presence, SiteExpectation } from "../result.js";
 import { expressionKind, OPERANDS, ownText, POSTFIX } from "./words.js";
 
-// The code forms a fix offers (TABLE r4.151): where each stands, and whether its code holds there.
+// The code forms a fix offers: where each stands, and whether its code holds there.
 
 /** Whether every code form is withheld (`inWords`). */
 let withheld = false;

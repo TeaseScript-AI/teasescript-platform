@@ -7,7 +7,7 @@ import type { WorkLedger } from "./budget.js";
  * list of items, one per kind. An item is one kind with a certainty (`def`: every run that reaches the read has a value
  * of this kind; `pos`: some run may), the reasons of an `unknown`, one writer that explains it (F28) and one context
  * word (§3.4). Some items also carry the ingress stores of external data (C9), the guard mark (§3.2) or the identity of
- * the one unknown operand whose operator rows they stand for (§4 r4.14).
+ * the one unknown operand whose operator rows they stand for (§4).
  */
 
 /**
@@ -76,7 +76,7 @@ export interface Item {
   readonly reasons: number;
   readonly writer: Writer | null;
   readonly context: ContextWord | null;
-  /** The word of a `null` that stands beside external data (a typeless load's `default: null`, §3.4 r4.11). */
+  /** The word of a `null` that stands beside external data (a typeless load's `default: null`, §3.4). */
   readonly word?: ContextWord;
   readonly ingress?: IngressNode;
   /** External data that no ingress store brought, merged beside some that one did (C9). */
@@ -103,7 +103,7 @@ export interface Item {
    * on every route that the compiler cannot keep, which warns, never the route rule's error (V30 §13).
    */
   readonly tested?: true;
-  /** The unknown operand, by `fanIdentity`, whose operator rows this item is one of (§4 r4.14). */
+  /** The unknown operand, by `fanIdentity`, whose operator rows this item is one of (§4). */
   readonly fan?: string;
   /**
    * An operation's result kind that every combination giving it holds external data in: possible solely through
@@ -143,9 +143,9 @@ export function joinSpelling(
 }
 
 /**
- * A spelling's part of an identity (TABLE r4.277 (2)): empty for none, `*` for `MIXED`, else its kinds by value. Every
- * key or snapshot that identifies items or a type test's form includes it (`itemsSignature`, `Values.narrowingMark`), so
- * differently marked lists are different values.
+ * A spelling's part of an identity (docs/specifications/type-inference-accepted-record.md#r4-277): empty for none, `*`
+ * for `MIXED`, else its kinds by value. Every key or snapshot that identifies items or a type test's form includes it
+ * (`itemsSignature`, `Values.narrowingMark`), so differently marked lists are different values.
  */
 export function spellingIdentity(spelling: Spelling | undefined): string {
   return spelling === undefined ? "" : spelling.length === 0 ? "*" : spelling.join("+");
@@ -212,7 +212,7 @@ export function computedMarks(from: readonly Item[]): {
   };
 }
 
-/** The mark of an element read that may find no element (TABLE §1 M): not a value, so no consumer checks it. */
+/** The mark of an element read that may find no element: not a value, so no consumer checks it. */
 export const EMPTY: Item = Object.freeze(makeItem("empty"));
 
 /**
@@ -228,7 +228,7 @@ export function writerKey(writer: Writer): string {
   return `${writer.kind}@${writer.file}:${writer.start}`;
 }
 
-/** The identity of an unknown operand in an operation (§4 r4.14): its writer's, or else the operation's site. */
+/** The identity of an unknown operand in an operation (§4): its writer's, or else the operation's site. */
 export function fanIdentity(writer: Writer | null, operation: SourceSite): string {
   return writer === null ? `op@${operation.file}:${operation.start}` : writerKey(writer);
 }
@@ -243,7 +243,7 @@ export function firstContext(a: ContextWord | null, b: ContextWord | null): Cont
 }
 
 /**
- * The word of one unknown's reasons (TABLE §1 r4.23): the first present in the rank `external` (`unknown`), `opaque`
+ * The word of one unknown's reasons: the first present in the rank `external` (`unknown`), `opaque`
  * (`unmodelled`), `deferred` (`deferred-parameter`), `missing` (`missing`), `budget` (`budget`); an unknown without
  * reasons says `unknown`.
  */

@@ -457,8 +457,8 @@ function stopDepths(
 }
 
 /**
- * A list of a walk's stops as the decider reads it, once per list: each snapshot once (TABLE §8: one key read here,
- * r4.68 (1)), so of the reads of one key through one chain of operations at one strip that read the same only the
+ * A list of a walk's stops as the decider reads it, once per list: each snapshot once (one key read here),
+ * so of the reads of one key through one chain of operations at one strip that read the same only the
  * first is read, the later ones holding what it holds (k reads of one host global, decided at k paths: Codex r23 F1);
  * so too k calls of one function (Codex r24 F2's neighbours); `shallow` leaves out the values a projection
  * selects, `classes` all but the first of a class (`classFirsts`).

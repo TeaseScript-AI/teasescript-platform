@@ -558,7 +558,7 @@ export function explainingItem(items: readonly Item[]): Item | undefined {
 export interface OffendingKind {
   /** The item that explains the kind. */
   readonly item: Item;
-  /** The kinds it stands for: its own, or each kind the rows of one unknown operand gave (§4 r4.14). */
+  /** The kinds it stands for: its own, or each kind the rows of one unknown operand gave (§4). */
   readonly kinds: readonly ItemTag[];
 }
 
@@ -589,7 +589,7 @@ export function provenanceOf(item: Item, detail: ContextDetail): Provenance {
 }
 
 /**
- * The step a selection or index adds to a target (§10.5 r4.10): `entry`, a dict's value, when the receiver is a dict on
+ * The step a selection or index adds to a target (§10.5): `entry`, a dict's value, when the receiver is a dict on
  * every run; else `element`, which every list or set element, `first`, `last`, `random`, `get` and `[i]` is.
  */
 export function elementStep(receiver: readonly ItemTag[]): "element" | "entry" {
@@ -598,7 +598,7 @@ export function elementStep(receiver: readonly ItemTag[]): "element" | "entry" {
 }
 
 /**
- * A key path as an obligation's target (§10.5 r4.10): the place's label from the collector (`state`, `use.data`,
+ * A key path as an obligation's target (§10.5): the place's label from the collector (`state`, `use.data`,
  * `packet.result`) and its steps, as `state.party.element.hp`.
  */
 export function targetName(label: string, steps: readonly string[]): string {
@@ -647,7 +647,7 @@ export interface RecordDiagnostic {
 }
 
 /**
- * A result as JSON-safe data in the shape of the expectation set's records (`disposition.md` with TABLE §10.5): sites
+ * A result as JSON-safe data in the shape of the expectation set's records (`disposition.md`): sites
  * by file path, writers as tokens, and `runtimeChecks` holding every warning's obligation, one per warning, and every
  * other check once.
  */

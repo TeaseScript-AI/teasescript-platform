@@ -63,7 +63,7 @@ export function warning(
     provenance: provenanceOf(item, detail(walk, item, site, rule, receiver, read)),
     obligation,
     // (a fixed table of what fits, not a value's kinds: the table's order, the one list `inItsOrder` does not order,
-    // TABLE r4.277 D3, #1398)
+    // #1398)
     fits: kindsInOrder(new Set(fits.filter(concrete).map((found) => found.tag))),
     // (the published answers give it, from the site's other diagnostics, `withBesides`)
     besides: [],

@@ -2,7 +2,7 @@ import { sortCost } from "./definitions.js";
 import type { WorkCounter, WorkLedger } from "./budget.js";
 
 /*
- * The one way stage 3b's narrowing modules walk anything (TABLE §13.3: "List construction, filtering and every visit
+ * The one way stage 3b's narrowing modules walk anything ("List construction, filtering and every visit
  * are charged"): every item taken, every step of a search and every element a copy or a test visits charges one unit
  * of a named counter as it happens, and every function body of `narrowing.ts`, `narrowing-events.ts`,
  * `narrowing-routes.ts` and `narrowing-statements.ts` charges a unit on entry (an arrow handed straight to these

@@ -250,8 +250,8 @@ function fallbackFitsAt(
     );
   }
   if (union !== null && union.has("unknown")) return false;
-  // below the fallback, a definite element of its literals none of whose kinds fits: an error at that element (A8,
-  // r4.35); else both definite and incompatible, no kind of the fallback fitting (r4.46): an error at the fallback;
+  // below the fallback, a definite element of its literals none of whose kinds fits: an error at that element (A8);
+  // else both definite and incompatible, no kind of the fallback fitting: an error at the fallback;
   // possible: one warning and check per offending kind
   const element = offendingElement(walk, value, node, rest, fitsKind);
   if (element !== null) error(walk, "written-target", element.site, rule, element.kinds);

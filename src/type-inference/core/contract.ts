@@ -211,7 +211,7 @@ export { withOwnSelection } from "./contract/value-kinds.js";
  * insensitively: every live definition's value kinds, a written type's tags, `unknown` with its reasons for what the
  * core does not model. An element key's contract is the elements' kinds (E), with the emptiness mark where a source may
  * leave the collection empty (M open). The contract reads its sources through two indexes that share every source by
- * one identity (§8 r4.15): a prefix's whole stores (`prefixStores`, one entry per source identity, with the stores
+ * one identity (§8): a prefix's whole stores (`prefixStores`, one entry per source identity, with the stores
  * that brought it as A5's provenance) and a literal's structure (`literalIndex`). The marks of §3.2 live beside
  * identity, in one holder per source and projection, whose references compose and are never copied.
  */
@@ -490,14 +490,14 @@ export class Contract {
   public constructor(readonly pass: CorePass) {}
 
   /**
-   * TABLE B1, S3 §5: an admission decision that stopped at its demand allowance leaves its key's contract `unknown` with
+   * S3 §5: an admission decision that stopped at its demand allowance leaves its key's contract `unknown` with
    * the reason `budget` for every read, and every key's below it: `contractOf` and every value read of such a key
    * (`Values.keyItems`) answer `STOPPED` before their memo, so whatever reads it, directly or composed, carries it. The
    * pass in which a decision stops is not settled: the next starts with the key stopped (`analyseCore`),
    * so no result read the key before its stop, in any order. An answer the solver kept before the stop read the key if
    * its run asked whether the key, or one below it, stopped (`stopped`, `keyStopped`): the solver forgets those answers
-   * and every answer that read one of them (`Solver.forget`), so each next read of them reaches the stop (TABLE r4.186,
-   * #1403); an answer that never asked is kept. A property or index read's occurrence answer and every position
+   * and every answer that read one of them (`Solver.forget`), so each next read of them reaches the stop (#1403);
+   * an answer that never asked is kept. A property or index read's occurrence answer and every position
    * (`positions.ts`) made since the last stop are forgotten too, and no position stands past a wrapper of a stopped place
    * (`wrapperHop`).
    */
@@ -798,7 +798,8 @@ export class Contract {
 
   /**
    * A chain of property reads' root (`positions.ts`'s `chainOf`), from the pass's memoised index: its making is shared
-   * work (r4.349), counted to the total and to no demand's allowance, whichever reader asks first.
+   * work (docs/specifications/type-inference-accepted-record.md#r4-349), counted to the total and to no demand's
+   * allowance, whichever reader asks first.
    */
   public chainOf(value: PlaceId): ChainRoot | null {
     return this.work.shared(() => chainOf(this, value));

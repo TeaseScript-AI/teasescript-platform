@@ -59,7 +59,7 @@ export function ownSpan(walk: Consumers, value: PlaceId, fallback: SourceSite): 
 }
 
 /**
- * An obligation's target (§10.5 r4.10) as a label's recipe (`contract/labels.ts`): the key path a value reads in the
+ * An obligation's target (§10.5) as a label's recipe (`contract/labels.ts`): the key path a value reads in the
  * contract's vocabulary (`box.n`, every selection or index `xs.element`, a dict's `d.entry`, a parameter `use.data`, a
  * result `f.result`), else its text. One recipe per value, kept, each one step below its owner's with the step spelled
  * here, as `Admission.labelOf` spells it; its text is made only where a check or a diagnostic shows it (`shownLabel`).
@@ -404,9 +404,10 @@ export function kindsOf(walk: Consumers, value: PlaceId, node: FlowNode | null):
 }
 
 /**
- * A member's or a method's receiver: its kinds at the node, and F19a before them (r4.44): where the shared decision
- * on the receiver's contract holds a reference the exact value lacks, its reference kinds too, whose members the
- * consumer's member obligations cover, the two in their one order (`inItsOrder`, #1398).
+ * A member's or a method's receiver: its kinds at the node, and F19a before them
+ * (docs/specifications/type-inference-accepted-record.md#r4-44): where the shared decision on the receiver's contract
+ * holds a reference the exact value lacks, its reference kinds too, whose members the consumer's member obligations
+ * cover, the two in their one order (`inItsOrder`, #1398).
  */
 export function receiverKinds(walk: Consumers, value: PlaceId, node: FlowNode | null): Item[] {
   const kinds = kindsOf(walk, value, node);

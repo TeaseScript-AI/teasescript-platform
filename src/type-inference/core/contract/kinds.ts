@@ -25,7 +25,7 @@ export const REFERENCE: ReadonlySet<ItemTag> = new Set(VALUE_KIND_NAMES.filter(h
 
 export const COLLECTIONS: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "object"]);
 
-/** An unknown with these reasons (TABLE §1). */
+/** An unknown with `reasons`, a set of `REASON` bits. */
 export function unknownItem(reasons: number, writer: Writer | null = null): Item {
   return makeItem("unknown", writer, { reasons });
 }
@@ -43,7 +43,7 @@ export function carried(item: Item, from: readonly Item[]): Item {
     : { ...item, ...marks, cert: "pos", context: item.context ?? guard.context };
 }
 
-/** A typeless load's `default: null` beside its external data: the null carries the ingress's word (§3.4 r4.11). */
+/** A typeless load's `default: null` beside its external data: the null carries the ingress's word (§3.4). */
 export function ingressNull(writer: Writer | null = null): Item {
   return makeItem("null", writer, { cert: "pos", word: "unknown" });
 }
@@ -100,7 +100,7 @@ export const OWN_SELECTION: Item = Object.freeze(
 /** F19a: a reference's member, the runtime's. */
 export const OPAQUE_MEMBER: Item = OWN_SELECTION;
 
-/** F19a (r4.44): what a receiver's kinds hold beside them where its component decided it a reference (`RECEIVER`). */
+/** F19a: what a receiver's kinds hold beside them where its component decided it a reference (`RECEIVER`). */
 export const HELD_REFERENCE: Item = Object.freeze(
   makeItem("unknown", null, { reasons: REASON.opaque }),
 );

@@ -114,7 +114,7 @@ export function propertyName(step: string): string {
   return step.startsWith("'") ? step.slice(1) : step;
 }
 
-/** The steps of an index or an entry; with the selections, `xs.element` in the contract's vocabulary (TABLE §10.5 r4.10). */
+/** The steps of an index or an entry; with the selections, `xs.element` in the contract's vocabulary. */
 const ELEMENT_STEPS: ReadonlySet<string> = new Set(["index", "entry"]);
 
 /** A projection's step as a key's step: every selection and index is `element` (F12). */

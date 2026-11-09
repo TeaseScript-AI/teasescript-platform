@@ -486,8 +486,7 @@ export function* partOfRead(admission: Admission, part: Part): Reads<Expansion> 
  * (A4), the other values no literal of it holds (a read, a call, external data), and its literals, whose fields and
  * elements stand below them; once per value, from its tasks' recipes (`expand`). `once`: later copies or calls of one
  * source identity at a path are one stop (F2), as every walk made before a stop has them; a walk made after one keeps
- * every stop instead, the same boundaries and sites without asking identities nothing else after the stop asks (TABLE
- * r4.55, r4.126).
+ * every stop instead, the same boundaries and sites without asking identities nothing else after the stop asks.
  */
 export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, once = true): Stops {
   return readNow(stopsOfRead(admission, value, node, once));

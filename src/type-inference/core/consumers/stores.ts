@@ -47,12 +47,12 @@ const writerRank = (writer: Writer | null): number =>
 /**
  * One admission decision for one key as one demand (S3 §5), with the program's nodes' allowance (S3 revision 14: a
  * decision's stores come from every call site, so its callable's nodes do not bound its work): past it the decision
- * stops between two solver steps, what it made of its key is taken back (`Admission.stopDecision`), and every read
- * of the key answers `unknown` with the reason `budget`, so each owes its check, with its warning, as for external
- * data (C9). The pass is then not settled: the next starts with the key stopped and runs no decision at or below it
- * (TABLE r4.180); a decision stopping in that next pass stops the analysis there, as the work allowance does, so a
- * pass's work at most doubles. A stopped decision stands for its stores' obligations
- * (`stoppedStores`), whichever pass stopped it.
+ * stops between two solver steps, what it made of its key is taken back (`Admission.stopDecision`), and every read of
+ * the key answers `unknown` with the reason `budget`, so each owes its check, with its warning, as for external data
+ * (C9). The pass is then not settled: the next starts with the key stopped and runs no decision at or below it
+ * (docs/specifications/type-inference-accepted-record.md#r4-180); a decision stopping in that next pass stops the
+ * analysis there, as the work allowance does, so a pass's work at most doubles. A stopped decision stands for its
+ * stores' obligations (`stoppedStores`), whichever pass stopped it.
  */
 /**
  * Whether an item is external data for C9's boundary: an external unknown, or a kind a type test proved of external
@@ -89,7 +89,8 @@ export function decide(walk: Consumers, group: DecidedAt, lazily = false): Decis
     walk.admission.stopDecision(group);
     // (a cursor's steps made once through the charged boundary, for its stores' obligations: G3 stage 1)
     walk.stoppedStores(root, stepsArray(walk.admission.stepsAt(group)));
-    // (in a pass that restarted one whose decision stopped, a second stop stops the analysis: D4, TABLE r4.183)
+    // (in a pass that restarted one whose decision stopped, a second stop stops the analysis: D4,
+    // docs/specifications/type-inference-accepted-record.md#r4-183)
     if (walk.restarted) throw new BudgetExhausted("work");
     return null;
   } finally {
@@ -395,8 +396,7 @@ export function admittedStores(
             (item.tag === "unknown" &&
               (at.length === 0
                 ? isOpaque(item) || isExternal(item)
-                : // (an own read's data is no record's: its boundary checks nothing against the destination,
-                  // TABLE r4.67 (2))
+                : // (an own read's data is no record's: its boundary checks nothing against the destination)
                   below && !admission.ownReadItem(item, d)
                   ? isOpaque(item) && item.reasons !== REASON.missing
                   : contributes(item))),

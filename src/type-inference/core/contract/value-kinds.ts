@@ -117,7 +117,8 @@ function* listsAt(
   // (#1668: the receiver read to decide its members, its unknowns included where the answer holds them as they are)
   const kinds = flow?.child() ?? null;
   const receiver = yield* through(contract, value, stepsRest(stepsTo(rest, at)), from, kinds);
-  // F19a, r4.44: a receiver that may be a reference has the runtime's members, decided once for a whole value
+  // F19a, (docs/specifications/type-inference-accepted-record.md#r4-44): a receiver that may be a reference has the
+  // runtime's members, decided once for a whole value
   // #1668: R, a receiver decision
   const decided = at === 0 ? yield* contract.valueReceiver(value) : receiver;
   if (heldReference(decided) || decided.some((item) => REFERENCE.has(item.tag)))

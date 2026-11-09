@@ -13,7 +13,7 @@ import { indexPaths, pathBelow, stepsOf } from "./literal-index.js";
 import type { Holder, HolderReference, ReadGroup, ReferencesByStep } from "./model.js";
 import { addSource, unionOf } from "./selections.js";
 
-// The mark holders (§8 r4.23): each holder's reads and references, and its mark at a path (§3.2).
+// The mark holders (§8): each holder's reads and references, and its mark at a path (§3.2).
 
 /** A set or map: the smaller of two key sets, intersected with the larger. */
 function common<T>(

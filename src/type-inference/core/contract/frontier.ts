@@ -204,7 +204,10 @@ function frontierOf(contract: Contract): Frontier {
   return frontier;
 }
 
-/** One unit of structure work, shared (r4.349): counted to the analysis's total, never the asker's. */
+/**
+ * One unit of structure work, shared (docs/specifications/type-inference-accepted-record.md#r4-349): counted to the
+ * analysis's total, never the asker's.
+ */
 function step(frontier: Frontier, units = 1): void {
   frontier.contract.pass.program.work.charge("structureSteps", units);
 }
@@ -1407,8 +1410,8 @@ export function pushedValueSlot(contract: Contract, value: PlaceId): string | nu
 
 /**
  * A pushed read's slot where `place` is in a copy cycle through a projection and the nodes `start` finds the graph
- * models, with their leaves; built once per slot and pass as shared work (r4.349), a build that declines or stops
- * keeping nothing.
+ * models, with their leaves; built once per slot and pass as shared work
+ * (docs/specifications/type-inference-accepted-record.md#r4-349), a build that declines or stops keeping nothing.
  */
 function reachSlot(
   contract: Contract,

@@ -807,10 +807,10 @@ function placeText(place: WorkPlace, source: MessageSource): string {
 }
 
 /**
- * The stop's warning and its "not checked (budget)" mark (the owner's D4, TABLE r4.54: the warning as the owner's
- * example words it; the nesting limit's in the same form). The warning counts `moved`, the plan's checks the stop moved
- * to the runtime (#2081), not the warnings it deferred, several of which one check at a store may carry; without a
- * count, or with none, it names none.
+ * The stop's warning and its "not checked (budget)" mark (the owner's D4), and the nesting limit's warning in the same
+ * form. The warning counts `moved`, the plan's
+ * checks the stop moved to the runtime (#2081), not the warnings it deferred, several of which one check at a store may
+ * carry; without a count, or with none, it names none.
  */
 export function budgetMessage(
   diagnostic: BudgetStop | NotChecked,

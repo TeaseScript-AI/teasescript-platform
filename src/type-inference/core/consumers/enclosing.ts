@@ -106,7 +106,8 @@ export function requiredStores(
 ): void {
   if (stores.length === 0) return;
   walk.pass.program.work.charge("checks", stores.length);
-  // (the fresh pass after a stop before admission settled decides no inferred place: TABLE r4.135)
+  // (the fresh pass after a stop before admission settled decides no inferred place:
+  // docs/specifications/type-inference-accepted-record.md#r4-135)
   const requirement = walk.admission.storeRequirement(
     place,
     path,

@@ -12,7 +12,7 @@ import type { SiteExpectation } from "../result.js";
 import { hasMethod, hasProperty, operandDomain } from "./kinds.js";
 import { indexOwner, kindsOf } from "./names.js";
 
-/** The kinds `${...}` shows as text (V30 §8), by their own `shown` (TABLE r4.151 reads it from there). */
+/** The kinds `${...}` shows as text (V30 §8), by their own `shown`, which the fix validity check reads. */
 const SHOWN_KINDS: readonly ValueKind[] = VALUE_KIND_NAMES.filter(
   (kind) => VALUE_KINDS[kind].shown !== null,
 );
@@ -37,8 +37,7 @@ const SAID: readonly ValueKind[] = [...SHOWN_KINDS, "list", "set", "dict", "obje
  * own result depends on the value (an operator's, a member's), the kinds it takes whose result its own site takes in
  * turn, up the expression to a consumer that does not; a comparison, a logic operator, an interpolation give one type
  * whatever they take. Any other consumer takes nothing a fix can prove. A divisor's value divides, and so does any
- * value an operation, a member, a fallback or a default computes its result from where that result divides (TABLE
- * r4.159).
+ * value an operation, a member, a fallback or a default computes its result from where that result divides.
  */
 export function expected(walk: Consumers, site: SourceSite): SiteExpectation {
   // (one task per site or place, on the driver's own stack: a long chain of them is no native call depth, Codex r8)

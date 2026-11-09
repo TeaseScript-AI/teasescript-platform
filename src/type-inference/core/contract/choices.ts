@@ -41,7 +41,7 @@ const OBJECTS_ONLY = new WeakMap<readonly unknown[], boolean>();
 const LABELS = new WeakMap<ValueConstraint, readonly (ValueKind | null | undefined)[]>();
 
 /**
- * V30 §19, TABLE r4.46 (1): an `askChoice`'s answer at `rest`, read by `read`: per option its label's kind, or each of
+ * V30 §19: an `askChoice`'s answer at `rest`, read by `read`: per option its label's kind, or each of
  * its buttons' values. Whether a choice object gives its `value` or its `text` is decided by the key's presence in the
  * object, never by what the key's value resolves to (an empty answer is unresolved, the solver's bottom, never an absent
  * key): a written choice object (the whole option, or an element of a written list or set) by the keys it writes; one

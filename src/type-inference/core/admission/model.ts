@@ -282,7 +282,10 @@ export interface Alias {
   readonly source: Key;
   readonly read: FlowNode;
   readonly at: readonly string[];
-  /** The read itself: the copy whose binding's written type, A4's, its class keeps (TABLE r4.72, Astra r5 B1). */
+  /**
+   * The read itself: the copy whose binding's written type, A4's, its class keeps
+   * (docs/specifications/type-inference-accepted-record.md#r4-72, Astra r5 B1).
+   */
   readonly value: PlaceId;
   /** Whether its class is its read's chain's end (§4.1's chains): its items keep their own link's writer. */
   chained?: true;

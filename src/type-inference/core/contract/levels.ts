@@ -475,7 +475,7 @@ function foldGroups(
       id = pathBelow(contract, id, step);
     }
     const cell = program.cellOwner.get(group.literal)?.kind === "cell" ? "cell" : "";
-    // (its marks: alike where they cannot depend on steps past the path, else its own, §3.2 r4.23)
+    // (its marks: alike where they cannot depend on steps past the path, else its own, §3.2)
     const marks =
       group.holder === null
         ? ""
@@ -493,7 +493,8 @@ function foldGroups(
       continue;
     }
     const into = groups[position]!;
-    // (#1323: the members kept for the group's reads, structure shared by them: r4.349)
+    // (#1323: the members kept for the group's reads, structure shared by them:
+    // docs/specifications/type-inference-accepted-record.md#r4-349)
     program.work.shared(() => {
       contract.keep(group.members?.length ?? 1);
       let list = members[position]!;
@@ -529,15 +530,16 @@ function foldGroups(
 }
 
 /**
- * #1323 (TABLE r4.72, r4.371): a group's items at `rest` (below its steps), annotated and with its writer, F11's pure
- * `missing` among them named as the unshared join names it: by the earliest (`firstWriter`, F28) `missing` writer
- * among its members' own completed reads there, each `contractOfValueAt(member.literal, member.at + rest)`, the other
- * items, reasons, context and the holder's position the group's; `EMPTY` has no writer. The fold's equivalence proves
- * where its members hold a `missing`: only where the group's items do. Reads the equivalence proves alike share one
- * scan of the members (`absenceClass`); where none is proved (a member's read reaching a `.get`, a call's result,
- * other steps), the read declines the fold and each member answers as its entry does with the sharing off. Either
- * way the reads beyond the group's own are its provenance, counted to the total and not to the asking decision
- * (`sharedSteps`, r4.349).
+ * #1323 (docs/specifications/type-inference-accepted-record.md#r4-371): a group's items at `rest` (below its steps),
+ * annotated and with its writer, F11's pure `missing` among them named as the unshared join names it: by the earliest
+ * (`firstWriter`, F28) `missing` writer among its members' own completed reads there, each
+ * `contractOfValueAt(member.literal, member.at + rest)`, the other items, reasons, context and the holder's position
+ * the group's; `EMPTY` has no writer. The fold's equivalence proves where its members hold a `missing`: only where the
+ * group's items do. Reads the equivalence proves alike share one scan of the members (`absenceClass`); where none is
+ * proved (a member's read reaching a `.get`, a call's result, other steps), the read declines the fold and each member
+ * answers as its entry does with the sharing off. Either way the reads beyond the group's own are its provenance,
+ * counted to the total and not to the asking decision (`sharedSteps`,
+ * docs/specifications/type-inference-accepted-record.md#r4-349).
  */
 export function* groupRead(
   contract: Contract,
@@ -641,7 +643,8 @@ function ownAbsence(contract: Contract, literal: PlaceId): ReadonlyMap<Writer, s
   const index = contract.literalIndex(literal);
   let known = OWN_ABSENCE.get(index);
   if (known === undefined) {
-    // (structure shared by every read of the literal, counted to the total and not to the asking decision: r4.349)
+    // (structure shared by every read of the literal, counted to the total and not to the asking decision:
+    // docs/specifications/type-inference-accepted-record.md#r4-349)
     known = contract.pass.program.work.shared(() => ownObjects(contract, index));
     OWN_ABSENCE.set(index, known);
   }

@@ -126,7 +126,7 @@ export { concrete, contributes, deciding, fits, isExternal, isOpaque } from "./a
 export type { Candidate, DecidedAt, Decision } from "./admission/model.js";
 
 /*
- * Admission (checkpoint 9, TABLE §5) and the boundary checks of external data (C9). A place's type is decided once,
+ * Admission (checkpoint 9) and the boundary checks of external data (C9). A place's type is decided once,
  * in source order, at a destination store, from the value that store transfers at its own node (§3): a written type
  * decides (A1, A9); a copy of a written binding is decided by its type (A4); otherwise the earliest definite
  * contribution in source order (A2), where a settled family needs no scan (A3); the candidates a decided type is checked

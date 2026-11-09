@@ -25,8 +25,8 @@ import { placeText, storeRoot, storeSteps, storeWarning } from "./warnings.js";
  * (`publish`); the walk, which finishes every unit, the read boundaries. Every store and transfer into an inferred
  * place is marked at its site, its type undecided; a mark stands for its records within its value.
  * A list join's mixed operands (`joinElements`, #1272) where its operands' own kinds decide them, a join with an
- * operand read through a decision marked as a literal is (`markValue`). No syntax decision is made here (TABLE
- * r4.135): admission decides an inferred place from its contract, which a fresh pass has not solved, so only a settled
+ * operand read through a decision marked as a literal is (`markValue`). No syntax decision is made here:
+ * admission decides an inferred place from its contract, which a fresh pass has not solved, so only a settled
  * stop's finishing read asks the stores' syntax, after the decision admission retained.
  */
 export function freshStores(walk: Consumers): void {

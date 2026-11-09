@@ -86,7 +86,7 @@ export function variable(text: string): string | null {
 }
 
 /**
- * Whether a text is a stable path as written, on one line (TABLE §13 N1): a variable followed by properties, fixed
+ * Whether a text is a stable path as written, on one line: a variable followed by properties, fixed
  * indexes or keys, or indexes and keys held in plain variables; not `.random`, a call or a computed index. It is the
  * only subject a fix's example names, so code that reads it again reads the same value (#1195, the lead after Astra r1
  * and r2). Any other subject, a literal or another expression, gets its fix's sentence alone; a name is never taken

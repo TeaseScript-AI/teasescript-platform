@@ -33,7 +33,7 @@ import {
 import { StatementTree } from "./narrowing-statements.js";
 
 /*
- * Stage 3b's narrowing definitions (checkpoint 9, TABLE §13 N1, N2, §13.3): a test is a definition. A null test or a
+ * Stage 3b's narrowing definitions (checkpoint 9): a test is a definition. A null test or a
  * type test of a stable path at a truth position defines the path at the guarded region's entry (a branch, a `while`
  * body, a `switch` case, the right operand of an `and` or `or`, and so the code after a branch that always leaves,
  * which the way past the test dominates) with the kinds the test leaves. Each narrowing definition G is one entry in its

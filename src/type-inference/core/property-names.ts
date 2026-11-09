@@ -1032,8 +1032,8 @@ export function propertyNames(
         schedule({ literal: at, path: keptArray(work, record.path) }, record.kept);
         continue;
       }
-      // the carrier table's operands, after the value side's decisions (`carriers.ts`: F12, F27, r4.46 (2), F17b,
-      // C10, F10, F7, a list's `+`, V30 §19's choice; nothing through an operation that keeps its own value, F19a)
+      // the carrier table's operands, after the value side's decisions (`carriers.ts`: F12, F27, F17b, C10, F10, F7,
+      // a list's `+`, V30 §19's choice; nothing through an operation that keeps its own value, F19a)
       // (a carrier reads its path's first two steps at most, and keeps the rest)
       if (follows)
         for (const [operand, rest] of carried(program, at, path, dispatch))

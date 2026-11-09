@@ -150,7 +150,7 @@ export function operatorRow(
  * - a combination the table has no row for fails at runtime and gives nothing (C4 reports it);
  * - an `unknown` operand gives, as possibilities, the results of every row the other operands' kinds allow (`x / 4`
  *   with `x` unknown: number, duration, calendar duration, angle), and these items stand for that one operand (`fan`,
- *   §4 r4.14), explained by its writer and reason; a combination of unknowns only, or one whose unknowns are all
+ *   §4), explained by its writer and reason; a combination of unknowns only, or one whose unknowns are all
  *   deferred parameters, stays unknown;
  * - a result kind is definite when no operand is unknown, every operand item is definite, and every combination that
  *   succeeds gives that kind by a row that needs no check by value.

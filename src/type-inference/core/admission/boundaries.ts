@@ -70,7 +70,7 @@ function resolve(admission: Admission, root: IngressNode): boolean {
     if ("ingress" in frame.node) {
       let ingress = leafIngress(admission, frame.node.ingress);
       let found = ingress === null ? undefined : index.byIngress.get(ingress);
-      // (a typed default's data is its call's, r4.63 (3): the call's landing checks it)
+      // (a typed default's data is its call's: the call's landing checks it)
       const covered = found?.call !== undefined && found.stores.size === 0 && !found.own;
       if (covered) {
         ingress = found!.call!;
@@ -165,8 +165,8 @@ export function boundaryFor(
 
 /**
  * Takes back the read checks from `length` on, with the keys they took and the ingress resolutions that made them, so
- * the walk that finishes their unit after a stop makes them again (D4 a′: the running unit's findings are taken back,
- * TABLE r4.54).
+ * the walk that finishes their unit after a stop makes them again (D4 a′:
+ * the running unit's findings are taken back).
  */
 export function takeBackReadChecks(admission: Admission, length: number): void {
   const taken = admission.readCheckKeys.splice(length);
@@ -240,8 +240,8 @@ function againstOf(admission: Admission, d: Definition, path: readonly string[])
   if (!admission.besideDefault(d)) {
     const tags = admission.admitted(d.place, path);
     // (after a stop, where admission retained nothing at the destination, the stored value's read below it as the
-    // finishing read answers it: a finished source contract stands, a domain read as the value by this fixed need,
-    // TABLE r4.126; never below a decision that stopped at its demand allowance, which decides nothing in the unstopped
+    // finishing read answers it: a finished source contract stands, a domain read as the value by this fixed need;
+    // never below a decision that stopped at its demand allowance, which decides nothing in the unstopped
     // analysis either, so a settled stop keeps its boundaries: Astra r1's B2 on #1437; nor where a written type stands,
     // which decides the destination after a stop too, an unrestricted one admitting no kind as every kind fits, #1450)
     const destination = admission.destPath(d);

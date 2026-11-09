@@ -130,9 +130,9 @@ function landingPath(walk: Consumers, node: Landing): readonly string[] {
 
 /**
  * ADR 0021 1.3, A8: a literal's element of another type than the earliest element's (`Admission.literalElements`): an
- * error at the offending element, also where a copy brought it into a property and the copies meet there (A2, TABLE
- * r4.131); where they were not found to meet (a cycle of copies that adds or takes steps, r4.154), at the property's
- * first direct read or store.
+ * error at the offending element, also where a copy brought it into a property and the copies meet there (A2); where
+ * they were not found to meet (a cycle of copies that adds or takes steps,
+ * docs/specifications/type-inference-accepted-record.md#r4-154), at the property's first direct read or store.
  */
 export function mixed(
   walk: Consumers,
@@ -212,8 +212,8 @@ export function mixed(
 /**
  * ADR 0021 1.3, V30 §4 and §16: a list's `+` whose right operand's elements are of another type than the left's
  * (`Admission.joinElements`, #1272): an error at the join, a `+=`'s at its right operand, as the current checker gives
- * it. Its fix declares the variable whose start value the joined list is, with its own start value (#1268, TABLE
- * r4.146), and names the type in words elsewhere (`mixedJoinFix`).
+ * it. Its fix declares the variable whose start value the joined list is, with its own start value (#1268),
+ * and names the type in words elsewhere (`mixedJoinFix`).
  */
 export function mixedJoin(
   walk: Consumers,

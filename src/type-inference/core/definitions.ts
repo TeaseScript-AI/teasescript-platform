@@ -368,7 +368,7 @@ export type PositionRange = readonly [number, number];
 
 /**
  * The definitions of a program, made once: per key the definitions, the stores and transfers C9 and admission index,
- * the literal cells' stores, the owner sets and the global site list (TABLE §8: definitions + sites).
+ * the literal cells' stores, the owner sets and the global site list (definitions + sites).
  */
 export class DefinitionIndex {
   readonly byKey = new Map<Key, Definition[]>();
@@ -1275,7 +1275,7 @@ export class DefinitionLists {
   }
 
   /**
-   * X6: the first own event of a key in a span, by position (§3.4 r4.30: the first in evaluation order names the
+   * X6: the first own event of a key in a span, by position (§3.4: the first in evaluation order names the
    * word): a call site under the owner rule, `call`; a store of the key, a descendant or a prefix, `branch`.
    */
   public eventIn(key: Key, span: readonly PositionRange[]): ContextWord | null {

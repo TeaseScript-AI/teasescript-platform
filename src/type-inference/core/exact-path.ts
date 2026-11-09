@@ -389,7 +389,7 @@ export class ExactPath {
   }
 
   /**
-   * W34 (r4.33, r4.36–r4.38): the forest of whole copies of places, built once. A copy's source answers at the record
+   * W34: the forest of whole copies of places, built once. A copy's source answers at the record
    * level for every path no key below the source overlaps (the exact path of a path no definition names), so a chain
    * is resolved once per copy and projected per field. A test on a source never splits it: the copies a test of their
    * source at a path guards are spans of the forest's walk, indexed per path, so a read finds its chain's marks by one

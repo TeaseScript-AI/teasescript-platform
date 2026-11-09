@@ -83,7 +83,7 @@ function shown(contract: Contract, label: Label): string {
 
 /**
  * A label's text made plain and not kept here, charging nothing (`labelText`'s twin, as `pathText` is `keptText`'s):
- * for a caller that charges the text it keeps itself, the boundary check's (`publish`, TABLE r4.196: its legacy
+ * for a caller that charges the text it keeps itself, the boundary check's (`publish`: its legacy
  * billing stays).
  */
 export function labelPlainText(label: Label): string {

@@ -26,7 +26,7 @@ import type { StatementTree } from "./narrowing-statements.js";
 import { siteKey, stepName, type CoreProgram } from "./program.js";
 
 /*
- * The guard index of the coarse core (checkpoint 9, TABLE §3.2 r4.6–r4.12): a read of key k is guarded inside a branch
+ * The guard index of the coarse core (checkpoint 9, §3.2): a read of key k is guarded inside a branch
  * of its own callable whose condition tests k or a path holding k (a null comparison, a type test or a comparison
  * `<`, `<=`, `>`, `>=`, at a truth position: through `and`, `or` and `not`; a `switch` on it), in the code after a
  * branch that tests it and always leaves (the way past the test is a branch entry of its own), and in the right operand
@@ -88,7 +88,7 @@ export class GuardIndex {
   readonly #operandCallables = new Map<Key, Set<Callable | null>>();
   /** G3 3b: the tested keys (`narrowed`), as a trie. */
   readonly #tested: KeyTrie;
-  /** The keys with a tested key strictly below them: a copy of one carries its read as a mark (§3.2 r4.15). */
+  /** The keys with a tested key strictly below them: a copy of one carries its read as a mark (§3.2). */
   readonly belowTested = new Set<Key>();
   /** Per key, the tested keys strictly below it, and the guard regions of those keys once asked (`guardedBelow`). */
   readonly #testedUnder = new Map<Key, Key[]>();
@@ -98,7 +98,7 @@ export class GuardIndex {
     Key,
     { readonly branches: Map<Callable | null, Nest>; readonly operands: Map<number, Nest> }
   >();
-  /** The tested keys q below each key, per relative path q, and the longest such path (§8 r4.23's holders). */
+  /** The tested keys q below each key, per relative path q, and the longest such path (§8). */
   #testedRelative: Map<string, Set<Key>> | null = null;
   #byPlace: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> | null = null;
   #testedLength = 0;
@@ -780,8 +780,9 @@ export class GuardIndex {
 }
 
 /**
- * The items of a guarded read (§3.2 r4.6): every kind possible and marked, so no consumer errs on it; a known kind the
- * exact path answered without a word of its own takes `branch`, the test's; the emptiness mark stays as it is.
+ * The items of a guarded read (docs/specifications/type-inference-accepted-record.md#section-3-2-guarded): every kind
+ * possible and marked, so no consumer errs on it; a known kind the exact path answered without a word of its own takes
+ * `branch`, the test's; the emptiness mark stays as it is.
  */
 export function marked(items: readonly Item[]): Item[] {
   return items.map((item) =>

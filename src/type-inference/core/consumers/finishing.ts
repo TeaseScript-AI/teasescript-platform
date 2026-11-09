@@ -170,8 +170,8 @@ function typedRead(
         chain.push(link);
       } else {
         // the default itself: its own kinds as a typed default reads them; a default no literal gives (a named one, a
-        // call's result) by its read's finished answer, else by its domain (its written, contract or retained type,
-        // TABLE r4.144) only where one kind no narrower kind refines decides it: a domain is not the value (an
+        // call's result) by its read's finished answer, else by its domain (its written, contract or retained type)
+        // only where one kind no narrower kind refines decides it: a domain is not the value (an
         // `integer?` may hold null alone, which leaves the level open; a `number` an integer), so elsewhere the type
         // stays open, `STOPPED`, and the call is marked (Codex r22 B1)
         const decision = typedDefault(path, false);
@@ -292,8 +292,8 @@ function laterSources(
     const syntax = syntaxRead(walk, value, rest);
     return required(syntax?.kinds ?? [], syntax?.spelling);
   }
-  // else, at a settled stop, the stores' syntax (source 4, TABLE r4.100, r4.135): every store's syntax decides the key
-  // together
+  // else, at a settled stop, the stores' syntax (source 4,
+  // docs/specifications/type-inference-accepted-record.md#r4-135): every store's syntax decides the key together
   const syntax =
     typedTags === null && retained.kinds.length === 0 ? syntaxRead(walk, value, rest) : null;
   const tags = typedTags ?? (retained.kinds.length > 0 ? retained.kinds : (syntax?.kinds ?? []));
@@ -922,10 +922,10 @@ function sameOf(
 }
 
 /**
- * A read's bounded walk (TABLE r4.208): the host data standing at its frontier and at the frontiers of the copies
- * standing there, breadth first, each frontier once, at most `frontierBound.depth` copies deep and `.copies` copies met.
- * Cut where a copy would lead deeper, or past the copies it may meet, to a frontier it has not met: then the read
- * answers its place's component's host data (`placeIngress`).
+ * A read's bounded walk (docs/specifications/type-inference-accepted-record.md#r4-208): the host data standing at its
+ * frontier and at the frontiers of the copies standing there, breadth first, each frontier once, at most
+ * `frontierBound.depth` copies deep and `.copies` copies met. Cut where a copy would lead deeper, or past the copies it
+ * may meet, to a frontier it has not met: then the read answers its place's component's host data (`placeIngress`).
  */
 function explore(
   walk: Consumers,
@@ -1021,9 +1021,9 @@ function valueEdges(walk: Consumers, value: Expansion, edges: Edges, owned?: Pla
 }
 
 /**
- * The host data a read whose walk is cut answers (TABLE r4.208): its place's component's (`placeIngress`), or, for a value
- * no place holds, what its expression brings (`ownIngress`). A superset of what its walk would name, never a dropped
- * check.
+ * The host data a read whose walk is cut answers (docs/specifications/type-inference-accepted-record.md#r4-208): its
+ * place's component's (`placeIngress`), or, for a value no place holds, what its expression brings (`ownIngress`). A
+ * superset of what its walk would name, never a dropped check.
  */
 function cutIngress(walk: Consumers, value: PlaceId): IngressNode | undefined {
   const place = readPlace(walk, value);
@@ -1290,7 +1290,7 @@ export function labelDomain(
 /**
  * A domain read for a requirement that follows from the value's kinds (C10's family; S3 §5 revisions 15, 16): every
  * value in it must give the same requirement. One family without `null` gives it, as possible kinds (a domain proves
- * nothing); `null` only gives none; any other domain leaves it undecided (`STOPPED`: r4.100's mark).
+ * nothing); `null` only gives none; any other domain leaves it undecided (`STOPPED`).
  */
 function required(tags: readonly ItemTag[], spelling: Spelling | undefined): readonly Item[] {
   if (tags.length === 0 || tags.includes("unknown")) return STOPPED;

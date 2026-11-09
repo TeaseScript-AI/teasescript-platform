@@ -283,8 +283,8 @@ export function namedExternalSite(
 /**
  * Whether an external item a store brings is an operation's own read's data alone (C10: a fallback's, a default's):
  * each ingress it names reaches the store's value through an own read, as host data or in named data. Its boundary is
- * against `[unknown]`, so A7's whole-store exception never stands in for the destination's check of it (TABLE r4.67
- * (2)). It reads no path: once per store and provenance node (Codex r23 F1).
+ * against `[unknown]`, so A7's whole-store exception never stands in for the destination's check of it.
+ * It reads no path: once per store and provenance node (Codex r23 F1).
  */
 export function ownReadItem(admission: Admission, item: Item, d: Definition): boolean {
   if (item.ingress === undefined) return false;

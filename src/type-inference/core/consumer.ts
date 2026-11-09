@@ -1145,7 +1145,7 @@ function warningChecks(
       const expression = index.expressionAt(diagnostic.site);
       switch (diagnostic.kind) {
         case "written-target": {
-          // C10's obligation names the fallback as every obligation names its value (§10.5 r4.10: `xs.element` for
+          // C10's obligation names the fallback as every obligation names its value (§10.5: `xs.element` for
           // `xs[0]`, `d.entry` for a dict's, its text where no place holds it), with the element steps of a nested
           // literal's depth; C1's a place (S6's departure 6)
           const held = index.fallbackOf(expression);

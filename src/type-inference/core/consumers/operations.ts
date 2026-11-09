@@ -32,7 +32,7 @@ import { leftOutBy, obligation, shownProperty, warning, type Owner } from "./war
  * before the rest, a choice's options (a list's or a set's elements, else the argument itself; a labelled option gives
  * its label) each selected (V30 §19: a choice object's `value`, or its `text` without one, else the option itself)
  * before the rest, also where a choice is another choice's option or projected, and an external value's own site
- * whatever remains. A variable read stops it: the store, as for a copy of a variable (r4.43's bound options). The first
+ * whatever remains. A variable read stops it: the store, as for a copy of a variable holding choice options. The first
  * in source order.
  */
 /** The consumers that operations and projections are: C2–C6, C11, C12, C13's iterable, ADR 1.5. */

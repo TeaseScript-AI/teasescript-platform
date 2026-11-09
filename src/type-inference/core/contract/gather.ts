@@ -61,7 +61,7 @@ function* belowRead(contract: Contract, read: PlaceId, below: Steps): Work<reado
 }
 
 /**
- * V30 §19, TABLE r4.46 (1): the button values of the options a literal holds at `path`, read at `after` below them,
+ * V30 §19: the button values of the options a literal holds at `path`, read at `after` below them,
  * per record alternative: the `value` of a record that has the key (`byValue`), the `text` of one that has none (the
  * property's own cell, its sources kept); a value that is no record is its own button's value, and a record whose keys
  * are unknown, or a reference, has the runtime's (both with the `value`s). With the number of alternatives it chooses

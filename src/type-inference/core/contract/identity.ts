@@ -17,7 +17,7 @@ import type { Identity, IdentityWork, StoredChoiceKeys } from "./model.js";
 import { writtenOf } from "./terms.js";
 import { resultOf } from "./value-kinds.js";
 
-// The one identity function (§8 r4.15): the key a value copies, a key's and a value's source identity, structures.
+// The one identity function (§8): the key a value copies, a key's and a value's source identity, structures.
 
 /** The key a value copies, through its projections: `seed.f0` reads `seed|f0`; `null` for no read. */
 export function copiedKey(contract: Contract, value: PlaceId): CanonicalKey | null {
@@ -194,7 +194,7 @@ function rootOfPlace(
 
 /**
  * A key's source identity: the key itself through its aliases, and a place of whole copies of one source followed
- * to that source; with its holder (§8 r4.15, r4.23). A loop along those places, then each answered from the last.
+ * to that source; with its holder (§8). A loop along those places, then each answered from the last.
  */
 export function keyIdentity(contract: Contract, asked: Key): Identity {
   // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
@@ -299,7 +299,7 @@ export function* keyIdentityWork(contract: Contract, key: CanonicalKey): Identit
 
 /**
  * A value's source identity: the key a read copies, its callee's result key for a call, a literal's structure, or the
- * value itself; the read's guard an annotation, each with its mark holder (§8 r4.23).
+ * value itself; the read's guard an annotation, each with its mark holder (§8).
  */
 export function identityOf(contract: Contract, value: PlaceId): Identity {
   if (!contract.identities.has(value)) {

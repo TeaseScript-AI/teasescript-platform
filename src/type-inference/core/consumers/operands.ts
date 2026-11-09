@@ -190,7 +190,7 @@ export function integerOnly(
     item.tag === "unknown" ? isOpaque(item) || isExternal(item) : item.tag !== "integer",
   );
   if (offending.length === 0 && owedBy === null) return;
-  // the count or index expression's node, inside its parentheses (§3.4 r4.10)
+  // the count or index expression's node, inside its parentheses (§3.4)
   const at = ownSpan(walk, value, site);
   const target = shownLabel(walk, keyLabel(walk, value));
   if (

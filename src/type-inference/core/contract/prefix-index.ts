@@ -327,7 +327,7 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
           ingress: e.ingress,
         });
         // a source's own stores below the path, listed once per source and path and shared by every prefix that
-        // copies it there (§8 r4.15, r4.38)
+        // copies it there (§8)
         addSubs(f, projectedLayer(contract, copiedPlace, projection));
       }
       continue;
@@ -392,7 +392,7 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
       }
       const copied = contract.copiedKey(d.value!);
       if (copied === null) {
-        // a call's result is its callee's result key (F20, §8 r4.13): k stores of one function's result, one entry
+        // a call's result is its callee's result key (F20, §8): k stores of one function's result, one entry
         const result = contract.resultKey(d.value!);
         yield* adding(contract, f, result !== null ? { key: result } : { value: d.value! });
         continue;

@@ -1375,7 +1375,7 @@ export function joinElements(
 /**
  * The class of a literal element's contracts, for the conflict paths of `literalElements` (§8): a `load` or a parse is
  * typed by its expected type, else by its default (F18), so the k ingresses of one typed default have one class and
- * share one discovery, while each keeps its own identity and its boundary check (C9, §8 r4.15), and a default reading
+ * share one discovery, while each keeps its own identity and its boundary check (C9, §8), and a default reading
  * host data counts by the contract's class of its global and guards (`classOf`, #1196); a read, a literal or an
  * `otherwise` whose class is mixed by its leaves alone that class (`Contract.boundClass`: k reads of one global,
  * #1207, k `load(…) otherwise {…}` of one default and one fallback or objects holding them, #1304, k bindings of loads

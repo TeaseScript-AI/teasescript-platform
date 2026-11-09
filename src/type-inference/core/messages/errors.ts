@@ -1071,7 +1071,7 @@ export function writtenTypeMessage(
   source: MessageSource,
   diagnosed: Diagnosed,
 ): string {
-  // (the suggestion is a type at the type's position, TABLE r4.171)
+  // (the suggestion is a type at the type's position, docs/specifications/type-inference-accepted-record.md#r4-171)
   const suggestion = error.suggestion === null ? null : typeAt(error.suggestion, diagnosed);
   return (
     `A union cannot hold a whole list, set, or dict beside another type, but '${source.text(error.union)}' does. ` +
