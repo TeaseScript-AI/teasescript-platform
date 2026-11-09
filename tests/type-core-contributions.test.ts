@@ -26,7 +26,7 @@ import { keyOf } from "../src/type-inference/core/definitions.js";
 import { makeItem, type Item } from "../src/type-inference/core/items.js";
 import { Solver, type Demand, type Work } from "../src/type-inference/core/solver.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
-import { checkedResult } from "../src/type-inference/core/consumer.js";
+import { checkedResult } from "../src/type-inference/core/check-result/check-result.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { itemScope } from "./helpers/type-core-items.js";
 import { MODES, inMode, type Mode } from "./helpers/type-core-oracles.js";

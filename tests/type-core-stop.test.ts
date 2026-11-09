@@ -7347,8 +7347,8 @@ test("the sentence table and the derived record name every site that words or de
     // (a published warning's `besides`, which `derivedRecord` recomputes from the stopped answers)
     "answers.ts:withBesides:besides",
     // (a kept value's types, asked only where an analysis ran to its end, as `present`)
-    "consumer.ts:#answerTask:keeps",
-    "consumer.ts:expected:keeps",
+    "store-contracts.ts:#answerTask:keeps",
+    "store-contracts.ts:expected:keeps",
     "diagnostics.ts:withFacts:keeps",
     "diagnostics.ts:withFacts:present",
     // (the messages read them; a record carries what they read)

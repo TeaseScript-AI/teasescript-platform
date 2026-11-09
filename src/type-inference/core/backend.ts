@@ -3,15 +3,9 @@ import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js
 import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } from "../backend.js";
 import type { SourceSite } from "../graph.js";
 import { analyseCore, type Answers } from "./answers.js";
-import {
-  asked,
-  coreCheckResult,
-  coreFacts,
-  nodeOf,
-  SLICE_DEPTH,
-  SliceIndex,
-  OutsideContract,
-} from "./consumer.js";
+import { asked, coreCheckResult, coreFacts } from "./check-result/check-result.js";
+import { nodeOf, SliceIndex, OutsideContract } from "./check-result/slice-index.js";
+import { SLICE_DEPTH } from "./contract-descriptors.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
 
@@ -43,7 +37,7 @@ import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
  * (`leftSlice`), the analysis ended there; nothing is refused at a stop or a work count. A stop compiles with its
  * warning and its checks at runtime (D4 a′), but where admission settled and a store's required check is not carried by
  * the published plan, the program is declined: "a store whose check was lost at the budget" (#1526 decision 2,
- * condition 1, `consumer.ts` `lostCheck`).
+ * condition 1, `check-result/runtime-plan.ts` `lostCheck`).
  */
 
 /** Test-only: a program outside the candidate's slice, at the first refusal the route establishes (see above). */

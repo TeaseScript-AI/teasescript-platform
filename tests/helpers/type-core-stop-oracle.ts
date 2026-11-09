@@ -4,7 +4,7 @@ import { run } from "../../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type { Answers } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice } from "../../src/type-inference/core/backend.js";
-import { withMessagesInWords } from "../../src/type-inference/core/consumer.js";
+import { withMessagesInWords } from "../../src/type-inference/core/check-result/check-result.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import type { SourceSite } from "../../src/type-inference/graph.js";

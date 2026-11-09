@@ -6,7 +6,7 @@ import type { InstructionPlan, TypePlan } from "../src/plan/model.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
-import { storeContracts } from "../src/type-inference/core/consumer.js";
+import { storeContracts } from "../src/type-inference/core/check-result/check-result.js";
 import {
   ContractDescriptors,
   type ContractReader,

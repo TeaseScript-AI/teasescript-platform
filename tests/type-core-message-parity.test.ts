@@ -7,7 +7,10 @@ import { parse } from "../src/parser.js";
 import { someNode } from "../src/project-globals.js";
 import { compareProjectPaths } from "../src/project-paths.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
-import { checkedResult, reportedDiagnostics } from "../src/type-inference/core/consumer.js";
+import {
+  checkedResult,
+  reportedDiagnostics,
+} from "../src/type-inference/core/check-result/check-result.js";
 import {
   coreMessage,
   messageSource,

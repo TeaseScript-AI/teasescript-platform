@@ -10,7 +10,7 @@ import {
   type SerializableRuntimeValue,
 } from "../src/runtime/values/serializable-values.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
-import { narrower } from "../src/type-inference/core/consumer.js";
+import { narrower } from "../src/type-inference/core/check-result/kept-checks.js";
 import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 import { runGlobals } from "./helpers/type-core-route.js";
