@@ -18,7 +18,10 @@ import {
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
 } from "../../../player/runtime/runtime-adapter.js";
 import { createPlayerRuntimeSession } from "../../../player/runtime/compile-project.js";
-import { playerRuntimeForeground, type PlayerSession } from "../../../player/runtime/runtime-view.js";
+import {
+  playerRuntimeForeground,
+  type PlayerSession,
+} from "../../../player/runtime/runtime-view.js";
 import type { ScriptStorageProvider } from "../../../player/persistence/script-storage.js";
 import type { KeptRoomStore } from "../../../player/persistence/kept-sessions.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../../../src/index.js";

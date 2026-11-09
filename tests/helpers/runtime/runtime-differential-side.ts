@@ -25,7 +25,10 @@ import type {
   TaggedRuntimeSnapshot,
 } from "../../../src/index.js";
 import type { compileProjectWithBackend, compileSourceWithBackend } from "../../../src/compiler.js";
-import type { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import type {
+  CandidateOutsideSlice,
+  CORE_BACKEND,
+} from "../../../src/type-inference/core/backend.js";
 import {
   canonicalDigest,
   canonicalText,

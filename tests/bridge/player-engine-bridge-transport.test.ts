@@ -15,7 +15,11 @@ import {
 } from "../../player/engine-bridge/client.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import { BRIDGE_VERSION, type BuildIdentity } from "../../player/engine-bridge/protocol.js";
-import { decodeMessage, encodeMessage, NATIVE_NESTING } from "../../player/engine-bridge/transport.js";
+import {
+  decodeMessage,
+  encodeMessage,
+  NATIVE_NESTING,
+} from "../../player/engine-bridge/transport.js";
 import {
   cloneGraphDifference,
   cloneKind,

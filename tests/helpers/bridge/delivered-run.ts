@@ -1,5 +1,9 @@
 import type { PlayerOpsContext } from "../../../player/engine-bridge/player-ops.js";
-import type { BridgeOps, HostSessions, OpOutcome } from "../../../player/engine-bridge/worker-host.js";
+import type {
+  BridgeOps,
+  HostSessions,
+  OpOutcome,
+} from "../../../player/engine-bridge/worker-host.js";
 
 /**
  * Runs the Player's ops directly, as their host does: each inside a delivery of the context's owner (`delivery.ts`),

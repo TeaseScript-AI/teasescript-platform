@@ -7,7 +7,11 @@ import ts from "typescript";
 import type { CapturedMediaStore } from "../../player/media/captured-media.js";
 import type { BridgeClient } from "../../player/engine-bridge/client.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
-import { OWNERSHIP_MODES, type Operated, type Ownership } from "../helpers/player/plan-json-family.js";
+import {
+  OWNERSHIP_MODES,
+  type Operated,
+  type Ownership,
+} from "../helpers/player/plan-json-family.js";
 
 /*
  * The persistence operations of the Player's session host (`player/vue/src/session/persistence/`: keep, the kept

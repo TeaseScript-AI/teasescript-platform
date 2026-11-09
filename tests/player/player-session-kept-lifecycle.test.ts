@@ -25,7 +25,10 @@ import {
   type ScriptStorageProvider,
 } from "../../player/persistence/script-storage.js";
 import type { SessionTransfer } from "../../player/persistence/session-transfer.js";
-import type { StorageBundle, StorageBundleScript } from "../../player/persistence/storage-transfer.js";
+import type {
+  StorageBundle,
+  StorageBundleScript,
+} from "../../player/persistence/storage-transfer.js";
 import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { answerWith, type Intent } from "../helpers/player/player-input.js";

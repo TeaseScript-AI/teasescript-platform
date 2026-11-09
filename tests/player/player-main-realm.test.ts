@@ -71,7 +71,9 @@ test("each export of runtime-adapter.ts and runtime-view.ts has its place in the
   assert.deepEqual(Object.keys(view).sort(), [...VIEW_READERS].sort());
 });
 
-const FIXTURE = fileURLToPath(new URL("../../../tests/fixtures/main-realm-graph/", import.meta.url));
+const FIXTURE = fileURLToPath(
+  new URL("../../../tests/fixtures/main-realm-graph/", import.meta.url),
+);
 const fixtureGraph = (entry: string) =>
   mainRealmGraph({
     root: FIXTURE,

@@ -12,7 +12,11 @@ import {
   connectBridge,
   type BridgeClient,
 } from "../../player/engine-bridge/client.js";
-import { beginRecordingNow, heldPlan, heldRecording } from "../../player/engine-bridge/in-process.js";
+import {
+  beginRecordingNow,
+  heldPlan,
+  heldRecording,
+} from "../../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import { startBridgeHost, type HostPort } from "../../player/engine-bridge/worker-host.js";

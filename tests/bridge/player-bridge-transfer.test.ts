@@ -32,7 +32,10 @@ import {
   readPlayerTransferText,
   restoreSessionTransfer,
 } from "../../player/persistence/session-transfer-read.js";
-import { storageTransferFile, type StorageBundle } from "../../player/persistence/storage-transfer.js";
+import {
+  storageTransferFile,
+  type StorageBundle,
+} from "../../player/persistence/storage-transfer.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 import {
   formObligations,
