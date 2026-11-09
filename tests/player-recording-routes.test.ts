@@ -61,7 +61,7 @@ const BEGINS: Readonly<Record<string, string>> = {
     "the host's begin at a held session",
   [`${SESSION_OPS} beginRecordingAt <- player/engine-bridge/in-process.ts beginRecordingNow`]:
     "`beginRecordingNow`, the in-process facade",
-  [`${SESSION_OPS} beginRecordingAt <- player/engine-bridge/ops/history.ts historyOps > restartAt`]:
+  [`${SESSION_OPS} beginRecordingAt <- player/engine-bridge/ops/history.ts restartAt`]:
     "L5i.6's host restores: Back's and Forward's commit, Return, Debug-off's reinstatement",
   [`${SESSION_OPS} beginRecordingAt <- ${SESSION_OPS} sessionOps > beginRecording > sessionOp:callback#9.2`]:
     "the host `beginRecording` op: Continue",
