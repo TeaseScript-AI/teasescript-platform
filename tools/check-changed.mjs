@@ -137,7 +137,7 @@ export function unknownToCostly(paths) {
 }
 
 /** The extensions `npm run format:check` covers. */
-const FORMATTED = /\.(?:ts|tsx|cts|mts|js|jsx|cjs|mjs)$/u;
+const FORMATTED = /\.(?:ts|tsx|cts|mts|js|jsx|cjs|mjs|vue)$/u;
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
 
