@@ -12,7 +12,10 @@ import {
   type Item,
   type ItemTag,
 } from "../src/type-inference/core/items.js";
-import { narrowedItems, type NarrowingForm } from "../src/type-inference/core/narrowing.js";
+import {
+  narrowedItems,
+  type NarrowingForm,
+} from "../src/type-inference/core/narrowing/narrowings.js";
 import { siteKey } from "../src/type-inference/core/program.js";
 import type { Obligation } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -2411,7 +2414,7 @@ test("a deep path's narrowing makes no text per prefix: its events' kept text gr
   const charge = WorkLedger.prototype.charge;
   let units = 0;
   WorkLedger.prototype.charge = function (this: WorkLedger, ...args) {
-    if (args[0] === "literalUnits" && /narrowing(-events)?\.js/.test(new Error().stack!))
+    if (args[0] === "literalUnits" && /narrowing\/(narrowings|events)\.js/.test(new Error().stack!))
       units += args[1] ?? 1;
     charge.apply(this, args);
   };

@@ -8,7 +8,7 @@ import {
   concatenated,
   sliced,
   joined,
-} from "../narrowing-iteration.js";
+} from "../charged-iteration.js";
 import type { PlaceId } from "../../graph.js";
 import { joinParts, keptArray } from "../budget.js";
 import type { Contract } from "../contract.js";

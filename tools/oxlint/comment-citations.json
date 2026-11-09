@@ -242,19 +242,19 @@
   "src/type-inference/core/method-categories.ts": {
     "TABLE r4": 2
   },
-  "src/type-inference/core/narrowing-events.ts": {
+  "src/type-inference/core/narrowing/events.ts": {
     "TABLE §": 1
   },
-  "src/type-inference/core/narrowing-iteration.ts": {
+  "src/type-inference/core/charged-iteration.ts": {
     "TABLE §": 1
   },
-  "src/type-inference/core/narrowing-routes.ts": {
+  "src/type-inference/core/narrowing/routes.ts": {
     "TABLE §": 1
   },
-  "src/type-inference/core/narrowing-statements.ts": {
+  "src/type-inference/core/narrowing/statement-tree.ts": {
     "TABLE §": 1
   },
-  "src/type-inference/core/narrowing.ts": {
+  "src/type-inference/core/narrowing/narrowings.ts": {
     "TABLE §": 1,
     "TABLE r4": 4
   },
