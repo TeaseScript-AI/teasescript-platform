@@ -210,8 +210,7 @@ For an excess whose slope per input size rises and converges, first make any bou
 then measure one or two further doublings where cost allows (#1466, 2026-11-01). The later two slopes
 within 3 % slack pass the growth clause under the affine reading; the smaller sizes' deviation is the intercept.
 The largest-size clause still needs the scoped exception's conditions. If slopes still diverge at the extended
-sizes, repair the cost before READY. In PR #1546, this reading uses sizes 64, 128 and 256 for
-`nestedJoinDeepCopied`, with the full series and ledger reported in the gate job.
+sizes, repair the cost before READY.
 
 Where `main` is cheaper because it drops an obligation that a correctness repair restores, its cost is not the
 reference for the largest-size total or `checks` on that family (#1491 and #1502, 2026-11-01). The repaired family's
