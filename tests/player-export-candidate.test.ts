@@ -331,7 +331,14 @@ function recordOwner() {
   const run = useActivationRun({ report: () => {} });
   // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: a begin reads only the host's next run, and a disposal asks it to retire the run.
   const host = { nextRun: () => 1, retireRun: async () => {} } as unknown as PlayerBridge;
-  return { run, begin: () => void run.begin(host) };
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads a session's `connection` and `lineage`, which this literal has.
+  const view = {
+    connection: null,
+    lineage: "l1",
+    events: [],
+    transcriptEntries: [],
+  } as unknown as PlayerSession;
+  return { run, begin: () => void run.begin(host), view };
 }
 
 for (const retiring of [
@@ -340,16 +347,9 @@ for (const retiring of [
   "the dialog's cancellation",
 ] as const)
   test(`${retiring} ending the export releases its lease at once, while a photo read never returns`, async () => {
-    const { run, begin } = recordOwner();
+    const { run, begin, view } = recordOwner();
     if (retiring === "an activation's run") begin();
     const wanted = new AbortController();
-    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads a session's `connection` and `lineage`, which this literal has.
-    const view = {
-      connection: null,
-      lineage: "l1",
-      events: [],
-      transcriptEntries: [],
-    } as unknown as PlayerSession;
     const { bridge, released } = fakeBridge(view);
     // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner calls only `captureExport`, `releaseRecording` and `exportPrepare` of a bridge, which this fake has.
     const typed = bridge as unknown as PlayerBridge;
@@ -379,16 +379,9 @@ for (const retiring of [
 
 for (const ending of ["the activation retires", "the dialog cancels it"] as const)
   test(`an export waiting for its activation's stop to show settles when ${ending}, and asks nothing more`, async () => {
-    const { run, begin } = recordOwner();
+    const { run, begin, view } = recordOwner();
     begin();
     const wanted = new AbortController();
-    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads a session's `connection` and `lineage`, which this literal has.
-    const view = {
-      connection: null,
-      lineage: "l1",
-      events: [],
-      transcriptEntries: [],
-    } as unknown as PlayerSession;
     const counts = { captures: 0 };
     const bridge = {
       // The stop is still committing: the capture is pending, as the host answers then.
@@ -398,8 +391,7 @@ for (const ending of ["the activation retires", "the dialog cancels it"] as cons
         deliver: (reply: ExportCaptureReply, shown: PlayerSession | null) => T,
       ) => {
         counts.captures += 1;
-        // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: a pending capture's reply carries only its kind.
-        return deliver({ kind: "pending" } as unknown as ExportCaptureReply, view);
+        return deliver({ kind: "pending" }, view);
       },
       releaseRecording: async () => {},
       exportPrepare: async () => ({}),

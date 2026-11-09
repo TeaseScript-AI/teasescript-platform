@@ -36,8 +36,14 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
 - The session composable is its owners, each one `use…` function under `session/`:
   - `usePlayerSession.ts`, the composition root: the options, the shared state, the owners' composition in setup
     order, the one disposal hook and the return surface;
-  - `session/activation/`: the activation under way (`useSessionActivation.ts`: prepared Start or Continue, begin,
-    error stop), each activation's run (`useActivationRun.ts`), its failure recording and a debug export's candidate;
+  - `session/activation/`: the activation under way (`useSessionActivation.ts`, the scheduler: prepared Start or
+    Continue, begin, the error stop's tokens and the loss), the record (`useActivationRun.ts`: each activation's origin,
+    its admission, the resources it owns until it retires, and the settlement of its replies), its failure recording
+    and a debug export's candidate;
+  - `session/activation/work/`: the work an activation does, acting only through its origin: the trusted adapter
+    (`target.ts`, the session and stop targets, each operation admitting its origin right before it acts), Continue's
+    begin (`continue.ts`), the error stop (`stop.ts`), the adoption (`adopt.ts`), Debug mode's completion
+    (`debugMode.ts`) and the draw (`draw.ts`); `tools/activation-work-checks.mjs` checks its wiring forms;
   - `session/persistence/`: the room and the saved values' route, the saved values, the kept session and its
     persistence operations, the saved data's export and import, a session's export and import;
   - flat: Debug's random control (`useRandomControl.ts`), Debug mode and the value trace (`useDebugModeAndTrace.ts`),
