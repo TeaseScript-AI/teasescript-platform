@@ -25,7 +25,7 @@ import type { ValueKind } from "../../value-kinds.js";
  * `ASKED`, the conversions). The selections, the conversions, and what a method does to its receiver's elements come
  * from the language's own tables (`list-methods.ts`, `dict-operations.ts`, `conversions.ts`), which the compiler and
  * the runtime read too, so a method that removes or clears is a row of its contracts alone; the other methods' results
- * are rows here, which `tests/type-core/type-core-method-categories.test.ts` checks against the contracts.
+ * are rows here, which `tests/type-core-method-categories.test.ts` checks against the contracts.
  */
 
 /** What a method of a collection does and gives. */
