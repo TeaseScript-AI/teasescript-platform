@@ -66,14 +66,16 @@ export function useExportCandidate(options: {
     if (reply.kind !== "captured") return null;
     // The lease is the activation's from here until the dialog holds it: released once, at a refusal, a failed
     // construction or the activation's retirement, whichever comes first.
+    // A retired activation's lease is released at once, inside `own`.
     let released = false;
+    let unown = () => {};
     const release = () => {
       if (released) return;
       released = true;
       unown();
       void host.releaseRecording(reply.ticket).catch(() => {});
     };
-    const unown = options.activation.own(origin, release);
+    unown = options.activation.own(origin, release);
     const matches =
       current === null
         ? session.value === null &&
@@ -172,11 +174,19 @@ export function useExportCandidate(options: {
       host.captureExport(current, recording, (reply, view) =>
         deliver(host, origin, current, reply, view, details, live),
       );
-    let frozen = await capture();
-    // A stop of the run was still committing: once it shows, the capture is tried once more, while its activation lives.
-    if (frozen === PENDING_CAPTURE && lives(origin)) {
-      await stopShown(origin);
-      frozen = live() && lives(origin) ? await capture() : null;
+    let frozen: Awaited<ReturnType<typeof capture>> | null;
+    try {
+      frozen = await capture();
+      // A stop of the run was still committing: once it shows, the capture is tried once more, while its activation
+      // lives.
+      if (frozen === PENDING_CAPTURE && lives(origin)) {
+        await stopShown(origin);
+        frozen = live() && lives(origin) ? await capture() : null;
+      }
+    } catch (error) {
+      // The capture of an activation that retired meanwhile gives nothing, also when it failed.
+      if (!lives(origin)) return null;
+      throw error;
     }
     if (frozen === PENDING_CAPTURE || frozen === null) return null;
     // Until the dialog holds the candidate, this owns its ticket: a construction that fails, or whose activation
