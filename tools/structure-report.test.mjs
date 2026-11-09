@@ -274,8 +274,8 @@ test("--diff measures Git's committed regular files: a function's last line, mer
     {
       // the closing line of a 160-line function
       "src/edge.ts": `${longFunction("edge", 160).replace(/\}$/u, "};")}\n`,
-      // two lines changed with two unchanged ones between them
-      "src/hunks.ts": `${lines(1001).replace("x500 = 500", "x500 = 5000").replace("x503 = 503", "x503 = 5030")}\n`,
+      // two lines changed with two unchanged ones between them, and one line added after the second, so the file grows
+      "src/hunks.ts": `${lines(1001).replace("x500 = 500", "x500 = 5000").replace("x503 = 503;", "x503 = 5030;\nexport const grown = 1;")}\n`,
       // a body line of a function the clean filter moves to line 1 of the blob
       "src/clean.ts": filtered.replace("const v5 = 5;", "const v5 = 55;"),
     },
@@ -296,7 +296,7 @@ test("--diff measures Git's committed regular files: a function's last line, mer
     assert.deepEqual(found, [
       "function over 150 lines that the change writes into: src/clean.ts:1 kept (160 lines)",
       "function over 150 lines that the change writes into: src/edge.ts:1 edge (160 lines)",
-      "file over 1000 lines that the change adds to: src/hunks.ts (1001, was 1001)",
+      "file over 1000 lines that the change adds to: src/hunks.ts (1002, was 1001)",
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -405,7 +405,7 @@ test(
       const moved = report("--diff", base, "--moved");
       assert.match(
         moved,
-        /suppressed \(moved\): file gaining over 300 lines: \+400 src\/b\.ts, 400 moved discounted/u,
+        /suppressed \(moved\): file gaining over 300 lines: \+400 src\/b\.ts, growth 0: 400 moved, 0 admitted, 0 removed \(0 admitted\)/u,
       );
       assert.match(
         moved,
@@ -447,7 +447,7 @@ test("--moved reads a file name with spaces as Git names it", { timeout: 60_000 
     const moved = report("--diff", base, "--moved");
     assert.match(
       moved,
-      /suppressed \(moved\): file gaining over 300 lines: \+400 src\/new file\.ts, 400 moved discounted/u,
+      /suppressed \(moved\): file gaining over 300 lines: \+400 src\/new file\.ts, growth 0: 400 moved, 0 admitted, 0 removed \(0 admitted\)/u,
     );
     assert.doesNotMatch(moved, /^ {2}file gaining over 300 lines/mu);
   } finally {
@@ -655,7 +655,7 @@ test(
       const moved = report("--diff", base, "--moved");
       assert.match(
         moved,
-        /suppressed \(moved\): file over 1000 lines that the change adds to: src\/big\.ts \(1002, was 1002\), 1 admitted lines/u,
+        /suppressed \(moved\): file over 1000 lines that the change adds to: src\/big\.ts \(1002, was 1002\), growth 0: 0 moved, 1 admitted, 1 removed \(1 admitted\)/u,
       );
       assert.doesNotMatch(
         moved,
@@ -672,6 +672,129 @@ test(
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+/** The report's lines for the change from `base` to `change`, files as `history` writes them. */
+function reportOf(roots, base, change, ...args) {
+  const { root, base: commit } = history(base, change);
+  roots.push(root);
+  const result = spawnSync(
+    process.execPath,
+    [tool, "--diff", commit, ...args, "--json", join(root, "change.json")],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  return JSON.parse(readFileSync(join(root, "change.json"), "utf8")).change.map(({ line }) => line);
+}
+
+test(
+  "a file over 1,000 lines fires only when the change grows it, and gaining counts net growth",
+  { timeout: 120_000 },
+  () => {
+    const roots = [];
+    const imports = (count) =>
+      Array.from({ length: count }, (_, i) => `import { f${i} } from "./m${i}.js";`).join("\n");
+    const body = lines(1001);
+    const report = (base, change, ...args) => reportOf(roots, base, change, ...args);
+    try {
+      // #2149's importer: one import line added, nothing else
+      const importer = { "src/big.ts": `${imports(1)}\n${body}\n` };
+      const oneMore = { "src/big.ts": `${imports(2)}\n${body}\n` };
+      assert.deepEqual(report(importer, oneMore, "--moved"), [
+        "suppressed (moved): file over 1000 lines that the change adds to: src/big.ts (1003, was 1002), growth 0: 0 moved, 1 admitted, 0 removed (0 admitted)",
+      ]);
+      // without --moved nothing is discounted: the line it adds is growth
+      assert.deepEqual(report(importer, oneMore), [
+        "file over 1000 lines that the change adds to: src/big.ts (1003, was 1002)",
+      ]);
+      // and one statement beside it: fires
+      assert.deepEqual(
+        report(
+          importer,
+          { "src/big.ts": `${imports(2)}\n${body}\nexport const added = 1;\n` },
+          "--moved",
+        ),
+        ["file over 1000 lines that the change adds to: src/big.ts (1004, was 1002)"],
+      );
+      // five imports out and three statements in: discounting the admitted removals gives 3, the line delta caps it at −2
+      assert.deepEqual(
+        report(
+          { "src/big.ts": `${imports(5)}\n${body}\n` },
+          { "src/big.ts": `${body}\n${lines(3, "export const s")}\n` },
+          "--moved",
+        ),
+        [
+          "suppressed (moved): file over 1000 lines that the change adds to: src/big.ts (1004, was 1006), growth -2: 0 moved, 0 admitted, 5 removed (5 admitted)",
+        ],
+      );
+
+      // edited in place: 40 lines replaced by 40 do not grow the file, 41 by 40 do
+      const long = lines(1100).split("\n");
+      const edited = (count) => `${lines(count, "export const y")}\n${long.slice(40).join("\n")}\n`;
+      const original = { "src/long.ts": `${long.join("\n")}\n` };
+      assert.deepEqual(report(original, { "src/long.ts": edited(40) }), []);
+      assert.deepEqual(report(original, { "src/long.ts": edited(41) }), [
+        "file over 1000 lines that the change adds to: src/long.ts (1101, was 1100)",
+      ]);
+      // a final newline added: Git's −1 +1, no growth
+      assert.deepEqual(
+        report({ "src/long.ts": long.join("\n") }, { "src/long.ts": `${long.join("\n")}\n` }),
+        [],
+      );
+
+      // 320 added and 30 removed: net 290; 331 and 30: net 301
+      const kept = lines(70);
+      const grown = { "src/g.ts": `${lines(100)}\n` };
+      assert.deepEqual(
+        report(grown, { "src/g.ts": `${kept}\n${lines(320, "export const z")}\n` }),
+        [],
+      );
+      assert.deepEqual(
+        report(grown, { "src/g.ts": `${kept}\n${lines(331, "export const z")}\n` }),
+        ["file gaining over 300 lines: +301 src/g.ts"],
+      );
+
+      // a 400-line block moved into an existing file: growth under --moved is 0, without it 400
+      const big = longFunction("big", 400);
+      const before = {
+        "src/a.ts": `${big}\nexport const small = 1;\n`,
+        "src/host.ts": `${lines(50)}\n`,
+      };
+      const after = {
+        "src/a.ts": "export const small = 1;\n",
+        "src/host.ts": `${lines(50)}\n${big}\n`,
+      };
+      assert.ok(report(before, after).includes("file gaining over 300 lines: +400 src/host.ts"));
+      assert.ok(
+        report(before, after, "--moved").includes(
+          "suppressed (moved): file gaining over 300 lines: +400 src/host.ts, growth 0: 400 moved, 0 admitted, 0 removed (0 admitted)",
+        ),
+      );
+      // the same block moved into a file over 1,000 lines with one statement added: it grows by that statement, unless
+      // one of its own lines goes, which the removed lines count (the line delta, 400, does not cap it)
+      const host = lines(1001).split("\n");
+      const into = (kept) => ({
+        "src/a.ts": "export const small = 1;\n",
+        "src/host.ts": `${kept.join("\n")}\n${big}\nexport const added = 1;\n`,
+      });
+      const hosting = {
+        "src/a.ts": `${big}\nexport const small = 1;\n`,
+        "src/host.ts": `${host.join("\n")}\n`,
+      };
+      assert.ok(
+        report(hosting, into(host), "--moved").includes(
+          "file over 1000 lines that the change adds to: src/host.ts (1402, was 1001)",
+        ),
+      );
+      assert.ok(
+        report(hosting, into(host.slice(1)), "--moved").includes(
+          "suppressed (moved): file over 1000 lines that the change adds to: src/host.ts (1401, was 1001), growth 0: 400 moved, 0 admitted, 1 removed (0 admitted)",
+        ),
+      );
+    } finally {
+      for (const root of roots) rmSync(root, { recursive: true, force: true });
     }
   },
 );
