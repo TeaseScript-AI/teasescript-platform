@@ -715,3 +715,77 @@ test(
     }
   },
 );
+
+test(
+  "resolution follows the importer's package context: an ESM import's extension, a folder's main",
+  { timeout: 60_000 },
+  () => {
+    const run = (before, after, map) => {
+      const move = moveOf(before, after);
+      try {
+        return move.run("--renames", move.renames(map));
+      } finally {
+        move.done();
+      }
+    };
+    const esm = '{ "type": "module" }\n';
+    const [one, two] = ["export const value = 1234567890;\n", "export const value = 9876543210;\n"];
+    // in an ESM package, `./new` names no file where `./old.js` named `old.ts`: resolved to missing
+    const importer = (from) =>
+      `import { value as selectedValue } from "${from}";\nexport const resultWithLongIdentifier = selectedValue;\n`;
+    const extensionless = run(
+      { "package.json": esm, "src/a.ts": importer("./old.js"), "src/old.ts": one },
+      { "package.json": esm, "src/a.ts": importer("./new"), "src/old.ts": null, "src/new.ts": one },
+      { "src/old.ts": "src/new.ts" },
+    );
+    assert.equal(extensionless.status, 1, extensionless.out);
+    assert.match(extensionless.out, /bindings differing 2/u);
+    // a CommonJS require of a folder follows its package.json's main; with the entry moved away, it reaches index.ts
+    const required =
+      'import dependencyWithLongIdentifier = require("./dep");\nexport const resultWithLongIdentifier = dependencyWithLongIdentifier.value;\n';
+    const main = '{ "type": "commonjs", "main": "entry.js" }\n';
+    const retarget = run(
+      {
+        "package.json": esm,
+        "src/a.cts": required,
+        "src/dep/package.json": main,
+        "src/dep/entry.ts": one,
+        "src/dep/index.ts": two,
+      },
+      {
+        "package.json": esm,
+        "src/a.cts": null,
+        "src/b.cts": required,
+        "src/dep/package.json": main,
+        "src/dep/entry.ts": null,
+        "src/moved.ts": one,
+        "src/dep/index.ts": two,
+      },
+      { "src/a.cts": "src/b.cts", "src/dep/entry.ts": "src/moved.ts" },
+    );
+    assert.equal(retarget.status, 1, retarget.out);
+    assert.match(retarget.out, /bindings differing 2/u);
+    // the folder renamed whole, its require updated: its main reached on both sides, the same binding
+    const folder = (from) =>
+      `import dependencyWithLongIdentifier = require("${from}");\nexport const resultWithLongIdentifier = dependencyWithLongIdentifier.value;\n`;
+    const renamed = run(
+      {
+        "package.json": esm,
+        "src/a.cts": folder("./old"),
+        "src/old/package.json": main,
+        "src/old/entry.ts": one,
+      },
+      {
+        "package.json": esm,
+        "src/a.cts": folder("./new"),
+        "src/old/package.json": null,
+        "src/old/entry.ts": null,
+        "src/new/package.json": main,
+        "src/new/entry.ts": one,
+      },
+      { "src/old/package.json": "src/new/package.json", "src/old/entry.ts": "src/new/entry.ts" },
+    );
+    assert.equal(renamed.status, 0, renamed.out);
+    assert.match(renamed.out, /bindings differing 0/u);
+  },
+);
