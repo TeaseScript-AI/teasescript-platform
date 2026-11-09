@@ -24,20 +24,20 @@
   "tests/families/shadow-classify.mjs": {
     "bare r4.N": 1
   },
-  "tests/families/stops/1165-family-b1-shapes.mjs": {
+  "tests/families/stops/store-and-reader-work/scalar-list-object-reader-store-work.mjs": {
     "TABLE r4": 1
   },
-  "tests/families/stops/1165-matrix.mjs": {
+  "tests/families/stops/consumer-and-diagnostic-interactions/consumer-position-and-value-stop-product.mjs": {
     "TABLE r4": 1,
     "bare r4.N": 4
   },
-  "tests/families/stops/1165-probe9-matrix.mjs": {
+  "tests/families/stops/consumer-and-diagnostic-interactions/stopped-collection-check-witness-matrix.mjs": {
     "bare r4.N": 1
   },
-  "tests/families/stops/1405-settled-sweep-demand.mjs": {
+  "tests/families/stops/consumer-and-diagnostic-interactions/settled-scalar-record-error-and-proof-stops.mjs": {
     "TABLE r4": 3
   },
-  "tests/families/stops/s8b-r6-astra-matrix.mjs": {
+  "tests/families/stops/consumer-and-diagnostic-interactions/mixed-collection-position-stop-product.mjs": {
     "TABLE r4": 1
   },
   "tests/helpers/type-core-contract-knowledge.ts": {
