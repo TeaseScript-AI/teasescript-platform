@@ -716,6 +716,79 @@ test("a generator's id is its `id` export, else its file name: a renamed generat
   }
 });
 
+test("`baselines.mjs state` takes a tree's commit from its `.sha`, else from the HEAD of the checkout it is the top of, and a written state of a tree with neither is refused", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    // a plain checkout's tree: built, but without `sx-tree`'s `.sha`
+    const tree = join(directory, "tree");
+    mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
+    writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
+    writeFileSync(join(tree, "package-lock.json"), "{}\n");
+    writeFileSync(join(tree, "dist", "tests", "helpers", "type-core-oracles.js"), storable(false));
+    writeSrc(tree);
+    mkdirSync(join(tree, "tests", "families", "area"), { recursive: true });
+    writeFileSync(
+      join(tree, "tests", "families", "area", "a.mjs"),
+      'export const cases = [["same", "same"]];\n',
+    );
+    const root = join(directory, "baselines");
+    const manifest = join(root, SRC, "MANIFEST");
+    const state = (...more: string[]) =>
+      spawnSync(process.execPath, [baselines, "state", tree, root, ...more], { encoding: "utf8" });
+    const commits = () =>
+      readFileSync(manifest, "utf8")
+        .split("\n")
+        .filter((line) => line.startsWith("commit "));
+    const git = (folder: string, ...args: string[]) =>
+      spawnSync("git", ["-C", folder, ...args], { encoding: "utf8" });
+    const commit = (folder: string) => {
+      assert.equal(git(folder, "init", "-q").status, 0);
+      const committed = git(
+        folder,
+        "-c",
+        "user.name=families",
+        "-c",
+        "user.email=families@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "tree",
+      );
+      assert.equal(committed.status, 0, committed.stderr);
+      return git(folder, "rev-parse", "HEAD").stdout.trim();
+    };
+    // (the tree inside another checkout, whose HEAD is not the tree's commit)
+    commit(directory);
+
+    // read only, the commit is not read (a `.sha` that is no file is never opened); written, a tree with no commit is
+    // refused before its baseline is made
+    mkdirSync(join(tree, ".sha"));
+    const read = state("--read-only");
+    assert.notEqual(read.status, 2, read.stderr);
+    assert.match(read.stdout, /"area":"area"[^\n]*"state":"absent"/u);
+    assert.equal(existsSync(root), false);
+    rmSync(join(tree, ".sha"), { recursive: true });
+    const refused = state();
+    assert.equal(refused.status, 2, refused.stderr);
+    assert.match(refused.stderr, /has no \.sha and is no checkout's top/u);
+    assert.equal(existsSync(root), false);
+
+    // the HEAD of the checkout the tree is the top of, then a `.sha` before it
+    const head = commit(tree);
+    const fromHead = state();
+    assert.notEqual(fromHead.status, 2, fromHead.stderr);
+    assert.deepEqual(commits(), [`commit ${head} ${tree}`]);
+    writeFileSync(join(tree, ".sha"), `${"1".repeat(40)}\n`);
+    assert.notEqual(state().status, 2);
+    assert.deepEqual(commits(), [`commit ${head} ${tree}`, `commit ${"1".repeat(40)} ${tree}`]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("the corpus runner stores a tree in the baseline of its src/ tree, verified shard by shard, which judges a head as the base tree beside it does", async () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
@@ -1172,6 +1245,7 @@ test("the stored baselines' tools show no plain write outside the gate in their 
     // (the heap probe thrice: with a source's heap, with NODE_OPTIONS alone, and without it, #1956)
     [
       "the gate's lock holder",
+      "a checkout's HEAD read",
       "the heap probe",
       "the heap probe",
       "the heap probe",
@@ -1235,7 +1309,7 @@ import fs, { writeFileSync as written, promises } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
-import { execSync, spawn } from "node:child_process";
+import { execSync, fork, spawn } from "node:child_process";
 import { outside, pathOf } from "./baselines.mjs";
 const { appendFileSync } = everything;
 const renamed = promisify(fs.rename);
@@ -1267,6 +1341,7 @@ export function climb(root) {
   eval("0");
   spawn("flock", [root, "-c", "true"]);
   spawn("bash", ["-c", 'touch "$0"', root], { stdio: "ignore" });
+  fork("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" });
   execSync("touch notes");
   return [rm, Worker];
 }
@@ -1328,6 +1403,8 @@ if (process.env.NEVER) nodeFs.writeFileSync(process.env.NEVER, "");
           "eval",
           "spawn",
           "spawn",
+          // (a HEAD read's arguments to another child process: `fork` runs a module named git)
+          "fork",
           "execSync",
           // (a creation that climbs out of its baseline)
           "rmSync",
