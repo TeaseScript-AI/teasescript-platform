@@ -10,6 +10,7 @@ import {
   compileProject,
   compileProjectWithBackend,
   compileSourceWithBackend,
+  type CompilationResult,
   type ProjectDiagnostic,
 } from "../../src/compiler.js";
 import type { Expression } from "../../src/ast.js";
@@ -1824,10 +1825,17 @@ test("a store at a stopped decision's key keeps an obligation, whichever pass st
               demand === null ? make() : withTestDemandAllowance(demand, make);
             return work === null ? demanded() : withTestAllowance(work, demanded);
           });
-        const both = () => ({
-          result: compileSourceWithBackend(source, options, CORE_BACKEND),
-          answers: analyseCore(request),
-        });
+        // (#2080: a stop whose stopped mark's completion result was lost declines, no plan; its obligations stand)
+        const both = () => {
+          let result: Pick<CompilationResult, "diagnostics" | "plan">;
+          try {
+            result = compileSourceWithBackend(source, options, CORE_BACKEND);
+          } catch (error) {
+            if (!(error instanceof CandidateOutsideSlice)) throw error;
+            result = { diagnostics: [], plan: null };
+          }
+          return { result, answers: analyseCore(request) };
+        };
         return { ...allowed(both), without: (omit) => allowed(() => withoutRecords(omit, both)) };
       };
       const unbounded = runAt(null, null);

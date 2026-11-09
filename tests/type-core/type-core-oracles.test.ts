@@ -857,11 +857,13 @@ test("a stop's runs catch the design round's controls: a false branch, a nested 
   );
   // (no natural plan; the stop's plan checked at the erring store: the false run fails there, the true run never reaches
   // it, so no run passes it, which the oracle claimed open before the design round)
+  // (#2080 part 1 declines a settled stop's no-plan store that a rejection lost, so the no-plan cases stop on the work
+  // allowance, before admission settles, where the settled gate does not apply)
   const planted = stopRuns(
     unit('let flag: boolean = hostValue\nlet n = 1\nif flag {} else { n = "bad" }\nexit\n'),
     ["hostValue"],
     run,
-    16,
+    1,
     (plan) => ({
       ...plan,
       instructions: plan.instructions.map((instruction) =>
@@ -870,6 +872,7 @@ test("a stop's runs catch the design round's controls: a false branch, a nested 
           : instruction,
       ),
     }),
+    "work",
   );
   assert.equal(planted.natural.plan, false);
   // (no run passes the store, and nothing without a natural plan is ever closed)
@@ -879,7 +882,9 @@ test("a stop's runs catch the design round's controls: a false branch, a nested 
     unit('let n = 1\nif hostValue is duration { n = "bad" }\nexit\n'),
     ["hostValue"],
     run,
-    16,
+    1,
+    undefined,
+    "work",
   );
   assert.equal(unreached.natural.plan, false);
   assert.equal(unreached.kind, "unwitnessed");
@@ -922,6 +927,7 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
     readonly globals: readonly string[];
     readonly demand: number;
     readonly planted?: (plan: InstructionPlan) => InstructionPlan;
+    readonly stop?: "work";
   }[] = [
     // (a retained index check fails where the dropped store check is never reached)
     {
@@ -991,7 +997,9 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
         'let n = 1\nif hostValue is boolean {\n  let gate: duration = hostOther\n  n = "bad"\n}\nexit\n',
       ),
       globals: ["hostValue", "hostOther"],
-      demand: 16,
+      // (#2080 part 1 declines it at a settled stop: the work allowance stops before admission settles)
+      demand: 1,
+      stop: "work",
     },
     // (no natural plan; the erring store in another file, at offsets of a store of the main file)
     {
@@ -1024,9 +1032,9 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
     },
   ];
   for (const mode of HELD_MODES)
-    for (const { name, files, globals, demand, planted } of cases)
+    for (const { name, files, globals, demand, planted, stop } of cases)
       assert.equal(
-        stopRuns(files, globals, (make) => mode.run(make), demand, planted).kind,
+        stopRuns(files, globals, (make) => mode.run(make), demand, planted, stop).kind,
         "unwitnessed",
         `${name} (${mode.name})`,
       );
@@ -1046,8 +1054,9 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
       globals: ["hostValue", "hostOther", "hostInit"],
     },
   ];
+  // (both stop settled at demand 16, where #2080 part 1 declines them: the work allowance keeps them escapes)
   for (const { mode, source, globals } of controls) {
-    const found = stopRuns(unit(source), globals, (make) => mode.run(make), 16);
+    const found = stopRuns(unit(source), globals, (make) => mode.run(make), 1, undefined, "work");
     assert.equal(found.natural.plan, false, source);
     assert.equal(found.kind, "unwitnessed", source);
   }
