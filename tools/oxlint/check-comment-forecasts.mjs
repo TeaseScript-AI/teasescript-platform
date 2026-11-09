@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { checkedFiles, fileComments } from "./comments.mjs";
 
@@ -8,8 +8,8 @@ import { checkedFiles, fileComments } from "./comments.mjs";
 // "(as) before #N". The forms of `COUNTED_CITATIONS` cite the old design record, which is not in the repository
 // (#1977), so they are no citations: each file's exact count of them in comments is in `comment-citations.json`, which
 // may only fall. A comment that points at the accepted record
-// (`docs/specifications/type-inference-accepted-record.md#<anchor>`, #2089) names one of its headings; the doc-links
-// check reads Markdown only and never sees a comment.
+// (`docs/specifications/type-inference-accepted-record/<page>.md#<anchor>`, #2089) names a heading of that page; the
+// doc-links check reads Markdown only and never sees a comment.
 // `comment-forecasts-allowed.json` lists the forecasts this check accepts, and every entry must still be found.
 
 /** The forms of a forecast, #1977's list, each one pattern over a comment's text. */
@@ -37,8 +37,8 @@ const COUNTED_CITATIONS = {
   "other TABLE": /\bTABLE\b(?!\s*(?:r4|§))/gu,
 };
 
-/** The accepted record, which a comment may point at by a heading's anchor. */
-const RECORD = "docs/specifications/type-inference-accepted-record.md";
+/** The accepted record's folder of pages, which a comment may point at by a page and a heading's anchor. */
+const RECORD = "docs/specifications/type-inference-accepted-record";
 
 /** The forecasts in `text`'s comments: each comment line's form and text. */
 export function forecastsIn(fileName, text) {
@@ -79,14 +79,20 @@ function recordAnchors(page) {
   );
 }
 
-/** Each pointer at the accepted record in `text`'s comments whose anchor is no heading of `page`, with its line. */
-export function unresolvedPointers(fileName, text, page) {
-  const anchors = recordAnchors(page);
-  const pointer = new RegExp(`${RECORD.replaceAll(".", "\\.")}#([\\w-]+)`, "gu");
+/**
+ * Each pointer at the accepted record in `text`'s comments whose anchor is no heading of the page it names, with its
+ * line; `pages` maps a page's name to its text, and a pointer at the record's old single page names none.
+ */
+export function unresolvedPointers(fileName, text, pages) {
+  const pointer = new RegExp(
+    `${RECORD.replaceAll(".", "\\.")}(?:/([\\w-]+))?\\.md#([\\w-]+)`,
+    "gu",
+  );
   const found = [];
   for (const comment of fileComments(fileName, text))
-    for (const [, anchor] of comment.text.matchAll(pointer))
-      if (!anchors.has(anchor)) found.push({ line: comment.line, anchor });
+    for (const [, page, anchor] of comment.text.matchAll(pointer))
+      if (!(pages.has(page) && recordAnchors(pages.get(page)).has(anchor)))
+        found.push({ line: comment.line, page, anchor });
   return found;
 }
 
@@ -103,7 +109,11 @@ export function checkCommentForecasts(root) {
   const read = (name) => JSON.parse(readFileSync(new URL(name, import.meta.url), "utf8"));
   const allowed = read("./comment-forecasts-allowed.json");
   const recorded = read("./comment-citations.json");
-  const page = readFileSync(resolve(root, RECORD), "utf8");
+  const pages = new Map(
+    readdirSync(resolve(root, RECORD))
+      .filter((name) => name.endsWith(".md"))
+      .map((name) => [name.slice(0, -3), readFileSync(resolve(root, RECORD, name), "utf8")]),
+  );
   const diagnostics = [];
   const used = new Set();
   const counted = {};
@@ -126,12 +136,12 @@ export function checkCommentForecasts(root) {
           message: `a comment forecasts later work ("${forecast.text}", form "${forecast.form}"): say what holds now, and keep the plan in its issue`,
         });
     }
-    for (const { line, anchor } of unresolvedPointers(file, text, page))
+    for (const { line, page, anchor } of unresolvedPointers(file, text, pages))
       diagnostics.push({
         fileName: file,
         line,
         column: 1,
-        message: `a comment points at ${RECORD}#${anchor}, which is no heading of the accepted record`,
+        message: `a comment points at ${RECORD}${page ? `/${page}` : ""}.md#${anchor}, which is no heading of that accepted-record page`,
       });
     const counts = citationCounts(file, text);
     if (Object.keys(counts).length > 0) counted[file] = counts;
