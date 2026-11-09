@@ -252,6 +252,37 @@ test("the full suite runs every file once, each in its own process, with the cos
   }
 });
 
+test("the full suite fails on a file that reported no test of its own, and names it (#2154)", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  const environment = { ...process.env };
+  delete environment.NODE_TEST_CONTEXT;
+  mkdirSync(resolve(directory, "dist/tests"), { recursive: true });
+  writeFileSync(resolve(directory, "dist/tests/a.test.js"), `require("node:test")("a", () => {});`);
+  const run = () =>
+    spawnSync(process.execPath, [filterPath, "--full-output"], {
+      cwd: directory,
+      encoding: "utf8",
+      env: environment,
+    });
+  const named = "run-test-files: dist/tests/exit.test.js reported no test of its own";
+  try {
+    const alone = run();
+    assert.equal(alone.status, 0, alone.stderr);
+    assert.ok(!alone.stderr.includes("reported no test of its own"), alone.stderr);
+    // (its process ends before its test reports: `node:test` passes it as its file entry alone)
+    writeFileSync(
+      resolve(directory, "dist/tests/exit.test.js"),
+      `require("node:test")("never reported", () => process.exit(0));`,
+    );
+    const beside = run();
+    assert.equal(beside.status, 1, beside.stderr);
+    assert.ok(beside.stderr.includes(named), beside.stderr);
+    assert.match(beside.stdout, /^✔ a \(/mu);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test(
   "Ctrl+C stops the full suite without an error",
   { skip: process.platform === "win32" },
