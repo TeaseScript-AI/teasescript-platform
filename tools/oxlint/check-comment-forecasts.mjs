@@ -52,8 +52,16 @@ const CORE = "src/type-inference/core/";
 export const LABEL =
   /\b(?:S\d-[A-Z]+(?:-[A-Z]+)*|S\d{1,2}[a-z]?|[A-Z]{1,2}\d{1,3}[a-z]?|AD-\d|PLAN|checkpoint \d+)\b/gu;
 
-/** A reviewer's round just before an id makes it a review reference ("Codex r2's B1"), not a label. */
-const REVIEWED = /\b(?:Codex|Astra|Sol|Fable|Opus)\b[^.;]{0,30}$/u;
+/**
+ * A reviewer, a round (`r2's`, `round 10`) or a pull request (`#1422`) just before an id makes it a review
+ * reference ("Codex r2's B1", "r1's and r2's B1", "#1422 B1", "the owner's F1", "the merged S6's B1"),
+ * not a label.
+ */
+const REVIEWED =
+  /(?:\b(?:Codex|Astra|Sol|Fable|Opus)\b[^.;]{0,30}|(?:\br\d+(?:'s)?|\bround \d+|#\d+(?:'s)?|\bowner's(?: reviewer's)?(?: review)?|\bS\d{1,2}[a-z]?'s)(?:\s+(?:and\s+)?[A-Z]{1,2}\d{1,3}[a-z]?,?)*\s+)$/u;
+
+/** A reviewer's review just after an id ("B1 of Astra's review") makes it a review reference too. */
+const REVIEWED_AFTER = /^ of (?:Codex|Astra|Sol|Fable|Opus)'s review/u;
 
 /** Labels that name a repository document, not the plan or the research. */
 const DOCUMENTS = new Set(["V30"]);
@@ -64,7 +72,11 @@ export function labelsIn(fileName, text) {
   for (const comment of fileComments(fileName, text))
     for (const match of comment.text.matchAll(LABEL)) {
       const before = comment.text.slice(Math.max(0, match.index - 40), match.index);
-      if (REVIEWED.test(before) || DOCUMENTS.has(match[0])) continue;
+      const after = comment.text.slice(
+        match.index + match[0].length,
+        match.index + match[0].length + 30,
+      );
+      if (REVIEWED.test(before) || REVIEWED_AFTER.test(after) || DOCUMENTS.has(match[0])) continue;
       found.push({
         line: comment.line + comment.text.slice(0, match.index).split("\n").length - 1,
         label: match[0],
