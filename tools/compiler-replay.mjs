@@ -36,11 +36,12 @@ import { generatorFolders, holdsGenerators } from "../tests/families/sources.mjs
 //
 // `rerun-shard` submits one shard again into its campaign, `submit`'s own submission with the shard written in, as the
 // rerun of `<job>`: its `bash -c` script opens with `: replaces <job>;`, which `collect` reads from the rerun's record
-// (`meta.json`'s `command`, kept verbatim), refusing one that names a job outside its shard. It is refused when `<job>`
-// is not in the campaigns or ran another script or trees; `--host` pins the queue's worker.
+// (`meta.json`'s `command`, kept verbatim), refusing one that names a job outside its shard. `<job>` may itself be a
+// rerun; it is refused when `<job>` is not in the campaigns or ran another script or trees. `--host` pins the worker.
 //
 // `rerun-stalls` reruns the standing area attempts' stalled sources on both trees in one queue job (`stalls.mjs --index`,
-// then `stalls.mjs rerun`, at `--memory`, 12,288 MB unless given) as `<prefix>-rerun`; `--host` pins the worker.
+// then `stalls.mjs rerun`, at `--memory`, 12,288 MB unless given) as `<prefix>-rerun`; `--host` pins the worker. A work
+// record `stalls.mjs` refuses is a usage error, never "no stalled source".
 //
 // `aside` compiles each route-only area difference and each differing set source, in each mode, through the candidate
 // route (`publishedRoute`) on both trees in one queue job as `<prefix>-aside`: a row agrees where the plan's JSON text
@@ -207,9 +208,34 @@ function jobsOf(results, campaign) {
     });
 }
 
-/** The job a rerun's record says it replaces: `rerun-shard` opens the job's script with `: replaces <id>;`. */
-const replacesOf = (record) =>
-  /^: replaces ([0-9a-f]{14});/u.exec(record.command?.at(-1) ?? "")?.[1] ?? null;
+/** A job's script, where its record keeps the command `submit` makes, `bash -c <script>`: else `null`. */
+const scriptOf = ({ command: c }) =>
+  Array.isArray(c) && c.length === 3 && c[0] === "bash" && c[1] === "-c" && typeof c[2] === "string"
+    ? c[2]
+    : null;
+
+/** `rerun-shard`'s opening of a rerun's script, naming the job it replaces. */
+const REPLACES = /^: replaces ([0-9a-f]{14}); /u;
+
+/** The job a rerun's record says it replaces (`REPLACES`), or `null`. */
+const replacesOf = (record) => REPLACES.exec(scriptOf(record) ?? "")?.[1] ?? null;
+
+/**
+ * The last JSON line of `file`, a runner's summary: `undefined` where there is none or it does not parse, as when the
+ * attempt was killed while writing it.
+ */
+function lastLine(file) {
+  if (!existsSync(file)) return undefined;
+  const last = readFileSync(file, "utf8")
+    .split("\n")
+    .filter((line) => line.startsWith("{"))
+    .at(-1);
+  try {
+    return last === undefined ? undefined : JSON.parse(last);
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Whether a job's record shows its runner's own ending: one of the runner's `exits` (`run.mjs` 0, 1 or 3, `plans.mjs` 0
@@ -315,7 +341,7 @@ function shardsRead(prefix, results, replace = []) {
   const areaShards = shardsOf(
     areaJobs,
     ({ name, out }) => {
-      const summary = lines(path.join(out, `${areaOf(name)}.log`)).at(-1);
+      const summary = lastLine(path.join(out, `${areaOf(name)}.log`));
       return summary?.area === undefined ? undefined : summary;
     },
     [0, 1, 3],
@@ -324,7 +350,7 @@ function shardsRead(prefix, results, replace = []) {
   const setShards = shardsOf(
     setJobs,
     ({ out }) => {
-      const summary = lines(path.join(out, "plans.log")).at(-1);
+      const summary = lastLine(path.join(out, "plans.log"));
       return summary?.set === undefined ? undefined : summary;
     },
     [0, 1],
@@ -546,11 +572,18 @@ function rerunStalls({ positional: [prefix, base, head], options }) {
       return existsSync(file) ? [file] : [];
     });
   const index = path.join(mkdtempSync(path.join(tmpdir(), "compiler-replay-")), "index.json");
-  spawnSync(
-    process.execPath,
-    [path.join(ROOT, "tests/families/stalls.mjs"), ...work, "--index", index],
-    { encoding: "utf8" },
-  );
+  if (work.length > 0) {
+    const run = spawnSync(
+      process.execPath,
+      [path.join(ROOT, "tests/families/stalls.mjs"), ...work, "--index", index],
+      { encoding: "utf8" },
+    );
+    // (a record stalls.mjs refuses is no index, never "no stalled source")
+    if (run.status !== 0 && run.status !== 1)
+      throw new Usage(
+        `stalls.mjs refused the work records: ${(run.stderr.trim() || run.stdout.trim()).split("\n").at(-1)}`,
+      );
+  }
   if (!existsSync(index) || JSON.parse(readFileSync(index, "utf8")).entries?.length === 0) {
     process.stdout.write("no stalled source\n");
     return 0;
@@ -610,20 +643,29 @@ function rerunShard({ positional: [prefix, base, head, id], options }) {
     id,
     options.host,
   );
-  // (the job it replaces ran this same script: else the rerun is of another shard, trees or baseline)
-  const script = args.at(-1).slice(`: replaces ${id}; `.length);
+  // (the job it replaces, itself perhaps a rerun, ran this same script on these trees: else the rerun is of another
+  // shard, trees or baseline; a commit this clone resolves is compared by its full SHA, any other by its prefix)
+  const script = args.at(-1).replace(REPLACES, "");
+  const full = (ref) => {
+    const run = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    return run.status === 0 ? run.stdout.trim() : ref;
+  };
+  const trees = { base: full(base), head: full(head) };
   const commits = Object.entries(job.record.commits ?? {});
   if (
-    job.record.command?.at(-1) !== script ||
+    scriptOf(job.record)?.replace(REPLACES, "") !== script ||
     commits.length === 0 ||
-    !commits.every(([tree, sha]) => sha.startsWith({ base, head }[tree] ?? "-"))
+    !commits.every(([tree, sha]) => sha.startsWith(trees[tree] ?? "-"))
   )
     throw new Usage(
       `${id} (${job.name}) ran another script or trees than submit's for this shard; check <base>, <head> and --baseline`,
     );
-  const full = ["submit", ...args, ...(options.dry ? ["--dry"] : [])];
-  if (options.dry) process.stdout.write(`${JSON.stringify(full)}\n`);
-  else for (const rerun of queue(full)) process.stdout.write(`${rerun}\n`);
+  const submit = ["submit", ...args, ...(options.dry ? ["--dry"] : [])];
+  if (options.dry) process.stdout.write(`${JSON.stringify(submit)}\n`);
+  else for (const rerun of queue(submit)) process.stdout.write(`${rerun}\n`);
   return 0;
 }
 

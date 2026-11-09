@@ -361,9 +361,11 @@ set and every area above, in 16 shards each. Each step's inputs, in order:
   killed job of `<prefix>-set` or `<prefix>-areas`. It submits that shard again into its campaign, `submit`'s own
   submission with the shard written in. Its `bash -c` script opens with `: replaces <job>;`, so that the rerun's record
   (`meta.json`'s `command`, kept verbatim) names the job it replaces; `collect` refuses a record naming a job outside
-  its shard. It is refused when `<job>` ran another script or trees. `--host` pins the worker.
+  its shard. `<job>` may itself be a rerun. It is refused when `<job>` ran another script or trees. `--host` pins the
+  worker.
 - **`rerun-stalls <prefix> <base> <head> --owner <owner> [--memory <MB>] [--host <host>]`:** the standing attempts'
   work records. It reruns their stalled sources on both trees in one job (`<prefix>-rerun`), at 12,288 MB unless given.
+  A work record `stalls.mjs` refuses is exit 2, never "no stalled source".
 - **`aside <prefix> <base> <head> --owner <owner> --declare <file>`:** the route-only differences, the differing set
   sources, and a declaration file.
   - The file is a JSON list of `{ "pattern", "reason" }`, passed as an argument and never read from elsewhere.
