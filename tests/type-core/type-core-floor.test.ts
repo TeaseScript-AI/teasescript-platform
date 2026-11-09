@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { roleClasses } from "../helpers/type-core/type-core-roles.js";
-import { BOTH, records, SCALAR, shapesOf, type RuleClass } from "../helpers/type-core/type-core-rule.js";
+import {
+  BOTH,
+  records,
+  SCALAR,
+  shapesOf,
+  type RuleClass,
+} from "../helpers/type-core/type-core-rule.js";
 
 /*
  * The carrier floor (S6-CARRIERS revision 5, §6): Astra's independent 184 shapes of round 4 (`matrix/REPORT.md`,

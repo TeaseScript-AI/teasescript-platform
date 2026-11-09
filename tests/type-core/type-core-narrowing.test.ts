@@ -21,7 +21,12 @@ import type { Obligation } from "../../src/type-inference/core/result.js";
 import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
-import { narrowingAt, narrowingPass, nodeAt, routeAt } from "../helpers/type-core/type-core-narrowing.js";
+import {
+  narrowingAt,
+  narrowingPass,
+  nodeAt,
+  routeAt,
+} from "../helpers/type-core/type-core-narrowing.js";
 import { readFixture } from "../helpers/type-core/type-core-fixture.js";
 import { inMode, MODES, stopSet } from "../helpers/type-core-oracles.js";
 import type { CompactRecord } from "../helpers/type-core-records.js";

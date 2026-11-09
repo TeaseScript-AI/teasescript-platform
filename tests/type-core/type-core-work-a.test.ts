@@ -47,7 +47,11 @@ import {
   type WorkFamily,
 } from "../helpers/type-core/type-core-families.js";
 import { readFixture } from "../helpers/type-core/type-core-fixture.js";
-import { askEveryRead, narrowingPass, narrowingPassIn } from "../helpers/type-core/type-core-narrowing.js";
+import {
+  askEveryRead,
+  narrowingPass,
+  narrowingPassIn,
+} from "../helpers/type-core/type-core-narrowing.js";
 import {
   DOUBLING,
   type Sized,

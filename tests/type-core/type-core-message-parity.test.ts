@@ -21,8 +21,17 @@ import { kindsInOrder } from "../../src/type-inference/core/items.js";
 import { parsedExpression, typeText } from "../../src/type-inference/core/messages/words.js";
 import { VALUE_KINDS } from "../../src/value-kinds.js";
 import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
-import { pasteCases, pastedForms, pasteFailure, type Pasted } from "../helpers/type-core/type-core-paste.js";
-import { heldBack, readFixture, type FixtureRecord } from "../helpers/type-core/type-core-fixture.js";
+import {
+  pasteCases,
+  pastedForms,
+  pasteFailure,
+  type Pasted,
+} from "../helpers/type-core/type-core-paste.js";
+import {
+  heldBack,
+  readFixture,
+  type FixtureRecord,
+} from "../helpers/type-core/type-core-fixture.js";
 import { sentences } from "../helpers/type-core-oracles.js";
 
 /** A diagnostic a rule found: a stop's own warning and marks (`budget`) name no fix and are never compared. */

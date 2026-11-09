@@ -16,7 +16,11 @@ import {
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../../player/runtime-adapter.js";
-import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../../player/session-camera.js";
+import {
+  CaptureService,
+  SessionCamera,
+  type PlayerDiagnostic,
+} from "../../player/session-camera.js";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 

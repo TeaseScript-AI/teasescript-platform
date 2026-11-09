@@ -8,7 +8,10 @@ import {
 } from "../../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { withTestAllowance, withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../../src/type-inference/core/budget.js";
 import { coreRequest } from "../helpers/type-core-analysis.js";
 import { HELD_MODES, heldStops } from "../helpers/type-core-held-host.js";
 import { runGlobals } from "../helpers/type-core-route.js";

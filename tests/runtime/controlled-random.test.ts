@@ -3,7 +3,10 @@ import test from "node:test";
 
 import { compileProject, type ProjectSourceFile } from "../../src/compiler.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
-import { RuntimeDebugContext, type RuntimeDebugRecord } from "../../src/runtime/debug/debug-trace.js";
+import {
+  RuntimeDebugContext,
+  type RuntimeDebugRecord,
+} from "../../src/runtime/debug/debug-trace.js";
 import {
   resumeRandomDraw,
   run,

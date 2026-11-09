@@ -10,7 +10,12 @@ import {
   type Operator,
   type OperatorRow,
 } from "../../src/type-inference/core/operator-table.js";
-import { hasIdentity, VALUE_KIND_NAMES, valueKindOf, type ValueKind } from "../../src/value-kinds.js";
+import {
+  hasIdentity,
+  VALUE_KIND_NAMES,
+  valueKindOf,
+  type ValueKind,
+} from "../../src/value-kinds.js";
 
 // The core's operator table against the runtime, its authority (F16, C4): the runtime evaluates every operator on
 // values of every pair of kinds, and a row must exist exactly where it accepts them, with the kind its result has. A

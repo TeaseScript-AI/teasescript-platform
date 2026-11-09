@@ -4,7 +4,10 @@ import { compileProject, compileSourceWithBackend } from "../../src/compiler.js"
 import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { jsonFieldMismatch, jsonKindMismatch } from "../../src/runtime/values/value-types.js";
 import { analyseCore } from "../../src/type-inference/core/answers.js";
-import { withTestAllowance, withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../../src/type-inference/core/budget.js";
 import {
   checkedResult,
   coreCheckResult,

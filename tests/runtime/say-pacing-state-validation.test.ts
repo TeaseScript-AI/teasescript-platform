@@ -10,7 +10,10 @@ import {
 import { executeInstruction, run } from "../../src/runtime/engine.js";
 import { completeAction } from "../../src/runtime/operations/complete-action.js";
 import { observeTime } from "../../src/runtime/operations/observe-time.js";
-import type { RuntimeSnapshot, RuntimeTemporarySnapshot } from "../../src/runtime/snapshot/state.js";
+import type {
+  RuntimeSnapshot,
+  RuntimeTemporarySnapshot,
+} from "../../src/runtime/snapshot/state.js";
 import type { SerializableRuntimeObject } from "../../src/runtime/values/serializable-values.js";
 import { compileValidPlan as plan } from "../helpers/compile-valid-plan.js";
 import { functionFrames } from "../helpers/runtime-equivalence.js";

@@ -89,7 +89,10 @@ export const PIN_SUITES = [
 /** The files the pin forms find that pin no work, each with what its numbers are. */
 export const NOT_PINS = [
   { file: "tests/runtime/async-timer-runtime.test.ts", is: "timer milliseconds" },
-  { file: "tests/families-runner/families-baseline-fill.test.ts", is: "a runner's fixture timings" },
+  {
+    file: "tests/families-runner/families-baseline-fill.test.ts",
+    is: "a runner's fixture timings",
+  },
   { file: "tests/runtime/list-functions.test.ts", is: "random seeds" },
   { file: "tests/runtime/message-markup.test.ts", is: "character codes" },
   { file: "tests/runtime/runtime-random.test.ts", is: "a generator's expected states" },

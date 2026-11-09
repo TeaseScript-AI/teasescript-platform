@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Admission, admissionRunsInsideSolverRuns } from "../../src/type-inference/core/admission.js";
+import {
+  Admission,
+  admissionRunsInsideSolverRuns,
+} from "../../src/type-inference/core/admission.js";
 import { analyseCore, solveDemands } from "../../src/type-inference/core/answers.js";
 import { DemandExhausted } from "../../src/type-inference/core/budget.js";
 import { exportNames, isKeyId } from "../../src/type-inference/core/contract/key-ids.js";
