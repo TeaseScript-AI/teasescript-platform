@@ -207,6 +207,14 @@ that reaches one of these opens an issue; until then the row is the record.
 | Adds of several sources into one list strictly in turn: each add's answer is the one before it with its value merged in, and certainty depends on the order of the merges, one step per add per path | `A5-two-sources-alternating-adds`, `A5-three-sources-adds`, `A5-cycle-of-8-sources-adds`, `A5-cycle-of-9-sources-adds` (`MIXED_ADD_PRODUCTS`), gates 3.36 / 3.22 / 2.78 / 2.73, in the source order on CI | 3.31 / 3.16 / 2.72 / 2.67 for 2 / 3 / 8 / 9 sources; two alternating sources reach the allowance at about 660 adds (a script writes tens by hand; a loop body is one add) | The lead, 2026-10-27, under the Owner's limit rule (TABLE r4.83): accepted as a known limit, kept with a regression gate at its measured growth instead of an order-aware summary of a mixed run, a redesign of the exact add chain; reconsidered when a realistic straight-line run of alternating adds of several sources into one list approaches the allowance |
 | A literal nested k deep read through k `.first`, index steps or properties: each link reads a key one step longer, whose contract and charged text grow with its depth | `F12-first-chain`, `F12-index-chain`, `F12-member-chain` (`READ_CHAIN_PRODUCTS`), gates 4.89 / 4.49 / 4.94 | 4.89 / 4.48 / 4.93; the list and member chains answer at k = 256 and reach the allowance at k = 512 | The lead, 2026-10-27, under the Owner's limit rule (TABLE r4.83): accepted as a known limit, kept with a regression gate at its measured growth instead of keys that share their prefixes; reconsidered when a realistic read chain approaches the allowance |
 
+**Accepted without a gate:** a compound or multiple-top read through inherited layers runs its summary per layer and
+path, so on synthetic W families at k = 512 and 1,024 it leaves more occurrences unanswered at the program's allowance
+than `main` before PR #1546, which already left thousands unanswered, with 0 differences on the 15,406-source set and
+the fixture. The Owner accepted this with PR #1546 on 2026-11-01 as a known constant, not a new exception clause: with
+today's scripts the limit is not reached in practice, and landing the forwarding does not make the later construction
+harder, since it keeps the architecture, and the gate kit, witnesses and the copies area's counts stand as regression
+oracles. #1550 takes up a summary granularity for compound reads.
+
 ## Local playground tooling bounds
 
 These are development-tool behavior, not TeaseScript or engine capacity. PR #289 removed the unsupported local source,
