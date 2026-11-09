@@ -92,8 +92,10 @@ export async function demoScenario(cdp, origin) {
           stage: rendered(document.querySelector('.stage-media')) ? document.querySelector('.stage-media').getAttribute('src') : null,
           audio: window.__played.map((element) => ({ time: element.currentTime, audible: !element.muted && element.volume > 0 })),
           texts: entries.map((element) => element.textContent),
-          buttons: [...document.querySelectorAll('[data-foreground-controls] button')].map((button) => button.textContent.trim()),
-          placeholder: input && !input.disabled ? input.placeholder : null,
+          // A control is actionable only while it is neither disabled nor read-only: the Player makes the composer
+          // read-only and the buttons disabled while an input is submitting (#2125).
+          buttons: [...document.querySelectorAll('[data-foreground-controls] button')].filter((button) => !button.disabled).map((button) => button.textContent.trim()),
+          placeholder: input && !input.disabled && !input.readOnly ? input.placeholder : null,
         };
       })()`,
     );
