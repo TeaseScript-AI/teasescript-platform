@@ -303,8 +303,10 @@ const SAVED_DATA =
 const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await origin.failure.selection":
     READMITS,
-  "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await capture": READMITS,
-  "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await stopShown": READMITS,
+  "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await capture":
+    "what follows acts only through a capture, which admits before it is sent, the stop's wait, which admits its own, or `goesOn`, which admits before the candidate goes on",
+  "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await stopShown":
+    "what follows is the capture again, which admits its activation and the dialog's wish before it is sent",
   "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await options.readPhoto":
     READMITS,
   "useExportCandidate.ts: useExportCandidate > debugExportCandidate > read: await record.data.arrayBuffer":
