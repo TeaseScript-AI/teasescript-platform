@@ -5,7 +5,11 @@ import { analyseCore, type Answers } from "../../../src/type-inference/core/answ
 import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance } from "../../../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../../../src/type-inference/core/consumers.js";
-import { CoreProgram, propertyName, propertyStep } from "../../../src/type-inference/core/program.js";
+import {
+  CoreProgram,
+  propertyName,
+  propertyStep,
+} from "../../../src/type-inference/core/program.js";
 import { withoutSharing } from "../../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
 import { coreRequest } from "../type-core-analysis.js";

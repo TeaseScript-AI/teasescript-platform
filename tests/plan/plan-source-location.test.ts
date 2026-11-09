@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../../src/compiler.js";
-import { planLocationToSourceSpan, sourceSpanToPlanLocation } from "../../src/plan/source-location.js";
+import {
+  planLocationToSourceSpan,
+  sourceSpanToPlanLocation,
+} from "../../src/plan/source-location.js";
 import { validateInstructionPlan } from "../../src/plan/validation.js";
 import { createSourcePosition, createSourceSpan } from "../../src/source.js";
 

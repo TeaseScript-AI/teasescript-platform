@@ -28,7 +28,10 @@ test("a core change lists every pinning suite; another change lists none, a suit
     suitesFor(["tests/helpers/type-core/type-core-families.ts"]).map((suite) => suite.file),
     ["tests/type-core/type-core-work-b.test.ts"],
   );
-  assert.equal(builtOf("tests/type-core/type-core-closure.test.ts"), "dist/tests/type-core/type-core-closure.test.js");
+  assert.equal(
+    builtOf("tests/type-core/type-core-closure.test.ts"),
+    "dist/tests/type-core/type-core-closure.test.js",
+  );
 });
 
 test("the list is kept true: each file a pin form finds is declared, and each suite's pin is found", () => {

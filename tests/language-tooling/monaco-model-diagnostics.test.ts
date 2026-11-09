@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { watchProjectDiagnostics, type ProjectFileView } from "../../src/editor/model-diagnostics.js";
+import {
+  watchProjectDiagnostics,
+  type ProjectFileView,
+} from "../../src/editor/model-diagnostics.js";
 
 class FakeModel {
   #listener: (() => void) | null = null;

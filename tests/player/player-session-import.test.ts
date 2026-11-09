@@ -10,7 +10,10 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../../player/runtime-adapter.js";
 import type { SavedDataHost } from "../../player/saved-data.js";
-import { createLocalScriptStorage, type ScriptStorageProvider } from "../../player/script-storage.js";
+import {
+  createLocalScriptStorage,
+  type ScriptStorageProvider,
+} from "../../player/script-storage.js";
 import {
   bundleSavedScripts,
   readStorageTransferFile,
@@ -19,7 +22,10 @@ import {
   type StorageBundle,
   type StorageBundleScript,
 } from "../../player/storage-transfer.js";
-import type { RuntimeScriptStorageEntrySnapshot, SerializableRuntimeValue } from "../../src/index.js";
+import type {
+  RuntimeScriptStorageEntrySnapshot,
+  SerializableRuntimeValue,
+} from "../../src/index.js";
 import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 

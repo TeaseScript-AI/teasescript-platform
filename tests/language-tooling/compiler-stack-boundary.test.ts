@@ -41,7 +41,8 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
   const compilerUrl = new URL("../../src/compiler.js", import.meta.url).href;
   const parserUrl = new URL("../../src/parser.js", import.meta.url).href;
   const semanticUrl = new URL("../../src/semantic.js", import.meta.url).href;
-  const compilerLoweringUrl = new URL("../../src/compiler/compile-program.js", import.meta.url).href;
+  const compilerLoweringUrl = new URL("../../src/compiler/compile-program.js", import.meta.url)
+    .href;
   const snapshotConstructionUrl = new URL(
     "../../src/runtime/snapshot/snapshot-construction.js",
     import.meta.url,

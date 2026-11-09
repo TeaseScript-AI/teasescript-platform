@@ -35,7 +35,10 @@ import type { TypeAnalysisRequest, TypeCheckResult } from "../../src/type-infere
 import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { CARRIER_KINDS, type CarrierKind } from "../../src/type-inference/core/carriers.js";
-import { withTestAllowance, withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../../src/type-inference/core/budget.js";
 import {
   checkedResult,
   coreCheckResult,
@@ -74,7 +77,13 @@ import {
   runGlobals,
 } from "../helpers/type-core-route.js";
 import { recordDifferences, recordOf } from "../helpers/type-core-records.js";
-import { BOTH, owed, records, type Endpoint, type RuleClass } from "../helpers/type-core/type-core-rule.js";
+import {
+  BOTH,
+  owed,
+  records,
+  type Endpoint,
+  type RuleClass,
+} from "../helpers/type-core/type-core-rule.js";
 import { WRITTEN_COPY_MATRIX } from "../helpers/type-core/type-core-witnesses.js";
 
 // The coarse core on the test-only candidate route (the port plan's S5): source, candidate compile, plan, runtime.
