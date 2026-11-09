@@ -75,6 +75,7 @@ function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: 
         first !== undefined &&
         ts.isIfStatement(first) &&
         ts.isPrefixUnaryExpression(first.expression) &&
+        first.expression.operator === ts.SyntaxKind.ExclamationToken &&
         ts.isCallExpression(first.expression.operand) &&
         ts.isIdentifier(first.expression.operand.expression) &&
         first.expression.operand.expression.text === "ownsShown" &&
@@ -113,6 +114,18 @@ test("an adoption's read reaches settleAdoption only from its two callbacks, wit
   );
   assert.equal(of('const c = await host.read(s, "captureStorage");').length, 1);
   assert.equal(of("async function settleAdoption() { await write(); }").length, 1);
+  // The ownership check is a negation: another prefix operator on `ownsShown(...)` is no check.
+  const guardedBy = (operator: string) =>
+    of(
+      `async function settleAdoption() { if (${operator}ownsShown(o, s)) return; await write(); }`,
+    );
+  assert.deepEqual(guardedBy("!"), []);
+  for (const operator of ["+", "-", "~"])
+    assert.deepEqual(
+      guardedBy(operator),
+      ["1: settleAdoption does not begin with its ownership check"],
+      operator,
+    );
   // A second settlement chained after the read's, which calls settleAdoption again, is found.
   const read =
     'await host.read(s, "captureStorage").then((c) => settleAdoption(o, s, { capture: c }), (e) => settleAdoption(o, s, { error: e }))';
