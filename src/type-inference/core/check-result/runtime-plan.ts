@@ -344,7 +344,7 @@ export function lostCheck(
   for (const { obligation, result } of gated) {
     // (a stopped decision's own marks stand at every store of it, external data or not: the store's own C1 check and
     // its C9 boundary are the checks it owes when the script runs)
-    if (obligation.epoch !== answers.epoch || obligation.slot.role === "stopped") continue;
+    if (obligation.epoch !== answers.epoch) continue;
     const store = index.storeAt(obligation.slot.site);
     if (
       store === undefined ||

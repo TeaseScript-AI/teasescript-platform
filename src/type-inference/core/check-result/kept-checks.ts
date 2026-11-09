@@ -30,6 +30,15 @@ export function keeps(
   checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
   core: CoreRuntimeChecks,
 ): boolean {
+  // (probe, the design round's settled predicate: a stopped mark with a complete result whose store owes no completion
+  // C1 check or warning)
+  if (obligation.slot.role === "stopped" && result !== null && result.state === "complete") {
+    const stored = unwrap(store.kind === "letStatement" ? store.initializer : store.value);
+    const warnings = answers
+      .completedWarnings()
+      .filter((w) => index.storeOf(index.expressionAt(w.obligation.site)) === store);
+    if (!answers.completedCheck(index.site(stored)) && warnings.length === 0) return true;
+  }
   const own = published.get(store);
   const whole = own?.state === "complete" && checks.has(store);
   // (no result, a completion past its allowance or a stop of the analysis: the plan is the settled pass's, and only its
