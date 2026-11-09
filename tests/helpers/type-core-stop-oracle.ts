@@ -667,9 +667,11 @@ export function stopProblems(c: StopCase): string[] {
 /*
  * A stop's runs against its unstopped compile's (#2080): the stopped plan must stop wherever the natural plan stops with a
  * runtime failure, for any host data. `hostValues` gives each global the source names the values of a pool made from the
- * source's own property names; `stopRuns` compiles a unit unstopped and at a demand allowance in a mode, feeds the pool to
- * `stopProblems` as its violating runs, and also compares each run directly (`ranWith`), since `stopProblems` excuses a
- * run that fails first inside a mark's plan content. `tests/families/stop-runs.mjs` runs it over a set's items.
+ * source's own names and paths and from the types the plans check; `stopRuns` compiles a unit unstopped and at a demand
+ * allowance in a mode, feeds the pool to `stopProblems` as its violating runs, and compares each run directly with the
+ * engine's instruction trace. It claims only what it demonstrates (#2142, under
+ * docs/DEVELOPMENT-WORKFLOW.md#review-convergence; #2080's design round: positive escapes are the blockers, an unwitnessed
+ * cell is unresolved evidence): see `StopRunKind`. `tests/families/stop-runs.mjs` runs it over a set's items.
  */
 
 /** Words a source's property names are never taken from. */
@@ -901,34 +903,26 @@ export interface StopRunSide {
 }
 
 /**
- * What a stop's runs found (`stopRuns`):
- * - `open`: the natural plan fails at runtime where the stopped plan runs to its end, or, with no natural plan (a compile
- *   error the stop turned into runtime checks), a run of the stopped plan executes the instruction holding an error's
- *   site and passes it;
- * - `later`: both fail at different sites, the stopped plan having executed the natural failure's instruction and passed
- *   it (the instruction trace, `docs/RUNTIME.md#instruction-trace`), or where the natural failure's instruction is not
- *   found;
- * - `violating`: `stopProblems` reports a violating run the direct comparison classed as none of the above;
- * - `unwitnessed`: a place the two plans differ that no run made either plan fail inside (`untested`), every run
- *   otherwise alike or stricter: the pool did not exercise that place, so nothing is decided;
- * - `stricter`: the stopped plan fails where the natural plan does not, or before reaching the natural failure's
- *   instruction, every place the plans differ exercised;
- * - `closed`: the plans equal, or every run alike with every place they differ exercised; with no natural plan, every
- *   error site reached and every run reaching one failing there. A finite pool proves no universal closure: `closed`
- *   says every changed place was exercised by values made from its own checked types, nothing more;
+ * What a stop's runs found (`stopRuns`). The oracle claims only what it demonstrates (#2142, the lead's ruling under
+ * docs/DEVELOPMENT-WORKFLOW.md#review-convergence; #2080's design round: positive escapes are the blockers, an
+ * unwitnessed cell is unresolved evidence):
+ * - `open`: a run where the natural plan fails at runtime and the stopped plan runs to its end; with no natural plan (a
+ *   compile error the stop turned into runtime checks), a run in a single-file unit that executes the error's own store
+ *   instruction (the innermost holding the error's site) and passes it: it ends, or it fails elsewhere with no loop round
+ *   in its trace;
+ * - `later`: a run where both fail at different sites and the stopped run executed the natural failure's exact
+ *   instruction and passed it, in a single-file unit with no loop round in its trace (the instruction trace,
+ *   `docs/RUNTIME.md#instruction-trace`);
+ * - `closed`: the two plans are equal. Nothing else is `closed`, and nothing without a natural plan ever is;
+ * - `unwitnessed`: plans that differ with no `open` or `later` run: multi-file units, loops, an earlier or stricter
+ *   failure, a failure of a sibling or of another check, a no-plan error not shown passed. Unresolved evidence, never
+ *   proof that no check is owed; `untested` lists the places the pool never reached, which the type-derived values and
+ *   the per-place witnesses serve to find escapes, never to decide `closed`;
  * - `declined`: the stop's compile declined (a refusal, never a missing check);
  * - `natural declined`, `no plan`: nothing to run.
  */
 export type StopRunKind =
-  | "open"
-  | "later"
-  | "violating"
-  | "unwitnessed"
-  | "stricter"
-  | "closed"
-  | "declined"
-  | "natural declined"
-  | "no plan";
+  "open" | "later" | "unwitnessed" | "closed" | "declined" | "natural declined" | "no plan";
 
 export interface StopRuns {
   readonly kind: StopRunKind;
@@ -945,7 +939,7 @@ export interface StopRuns {
   readonly violating: readonly string[];
   /**
    * Where `unwitnessed`: each place the plans differ that no run failed either plan inside, by its plan path; with no
-   * natural plan, each natural error site no run reached, by its site.
+   * natural plan, each natural error's site. Escape-finding evidence, never a decision.
    */
   readonly untested?: readonly string[];
   /**
@@ -1014,7 +1008,10 @@ export function stopRuns(
   if (stopped.declined !== null) return { ...none, kind: "declined" };
   const [want, got] = [natural.result.plan, stopped.result.plan];
   if (got === null) return { ...none, kind: "no plan" };
-  // (values made from every type either plan checks join the pool, so each part of a changed check is exercised)
+  // (equal plans: nothing to run, and the one `closed`)
+  if (want !== null && JSON.stringify(want) === JSON.stringify(got))
+    return { ...none, kind: "closed" };
+  // (values made from every type either plan checks join the pool, to find escapes)
   const typed: SerializableRuntimeValue[] = [];
   for (const plan of want === null ? [got] : [want, got]) {
     const { types, at } = checkedTypes(plan);
@@ -1026,9 +1023,14 @@ export function stopRuns(
     4000,
     [...new Map(typed.map((v) => [JSON.stringify(v), v])).values()].slice(0, 48),
   );
+  // (instruction spans carry no file, and a trace holds each instruction once: a claim from either needs one file and,
+  // past the stopped plan's own failure, no loop round)
+  const single = files.length === 1;
+  const looped = (plan: InstructionPlan, ran: ReturnType<typeof tracedRun>): boolean =>
+    [...ran.executed].some((index) => plan.instructions[index]?.kind === "loopStart");
   if (want === null) {
-    // (a compile error the stop turned into runtime checks: open where a run executes the instruction holding the error
-    // and passes it; a site no run reaches is untested, never closed)
+    // (a compile error the stop turned into runtime checks: open only where a run executed the error's own store
+    // instruction and passed it)
     const errors = natural.result.diagnostics
       .filter((d) => d.severity === "error")
       .map((d) => {
@@ -1046,34 +1048,30 @@ export function stopRuns(
           site,
           key: siteKey(site),
           checks,
-          holding: instructionHolding(got, site),
+          own: instructionHolding(got, site),
         };
       });
     const sites = errors.map(({ code, key, checks }) => ({ code, site: key, checks }));
-    const visited = new Set<string>();
-    for (const each of pool) {
-      const ran = tracedRun(got, each);
-      for (const error of errors) {
-        if (error.holding === null) continue;
-        const reached = got.instructions.some((instruction, index) => {
-          const span = spanOf(instruction);
-          return span !== null && within(error.site, span) && ran.executed.has(index);
-        });
-        if (reached) visited.add(error.key);
-        if (reached && passed(got, ran, error.holding))
-          return {
-            ...none,
-            kind: "open",
-            runs: pool.length,
-            first: { globals: each, natural: null, stopped: ran },
-            sites,
-          };
+    if (single)
+      for (const each of pool) {
+        const ran = tracedRun(got, each);
+        for (const { own } of errors)
+          if (own !== null && passed(got, ran, own) && (ran.failure === null || !looped(got, ran)))
+            return {
+              ...none,
+              kind: "open",
+              runs: pool.length,
+              first: { globals: each, natural: null, stopped: ran },
+              sites,
+            };
       }
-    }
-    const untested = errors.filter((error) => !visited.has(error.key)).map((error) => error.key);
-    return untested.length > 0
-      ? { ...none, kind: "unwitnessed", runs: pool.length, sites, untested }
-      : { ...none, kind: "closed", runs: pool.length, sites };
+    return {
+      ...none,
+      kind: "unwitnessed",
+      runs: pool.length,
+      sites,
+      untested: errors.map(({ key }) => key),
+    };
   }
   const violating = stopProblems({
     unstopped: natural,
@@ -1081,21 +1079,15 @@ export function stopRuns(
     fitting: [],
     violating: pool,
   }).filter((problem) => problem.startsWith("violating "));
-  // (both fail at different sites: later where the stopped plan executed the natural failure's instruction and passed
-  // it, having run past that check; stricter where it failed before reaching it)
-  const apart = (
-    a: ReturnType<typeof tracedRun>,
-    b: ReturnType<typeof tracedRun>,
-  ): StopRunKind | null => {
-    if (a.failure === null || b.failure === null) return null;
-    if (b.failure.start === a.failure.start && b.failure.end === a.failure.end) return null;
-    const holding = instructionHolding(want, a.failure);
-    return holding === null || passed(got, b, holding) ? "later" : "stricter";
+  // (both fail at different sites: later only where the stopped run executed the natural failure's exact instruction
+  // and passed it, in one file and with no loop round)
+  const later = (a: ReturnType<typeof tracedRun>, b: ReturnType<typeof tracedRun>): boolean => {
+    if (!single || a.failure === null || b.failure === null) return false;
+    if (b.failure.start === a.failure.start && b.failure.end === a.failure.end) return false;
+    const own = instructionHolding(want, a.failure);
+    return own !== null && !looped(got, b) && passed(got, b, own);
   };
-  // (the first run of the most severe kind: open, then later, then stricter)
-  const order: readonly StopRunKind[] = ["open", "later", "stricter"];
   let found: StopRuns | null = null;
-  // (each place the plans differ is decided only by a run that fails one of the plans inside that place's plan node)
   const differences = planDifferences(want, got);
   const failures: Span[] = [];
   for (const each of pool) {
@@ -1103,12 +1095,16 @@ export function stopRuns(
     if (a.failure !== null) failures.push(a.failure);
     if (b.failure !== null) failures.push(b.failure);
     const kind: StopRunKind | null =
-      a.failure !== null && b.failure === null
-        ? "open"
-        : a.failure === null && b.failure !== null
-          ? "stricter"
-          : apart(a, b);
-    if (kind !== null && (found === null || order.indexOf(kind) < order.indexOf(found.kind)))
+      a.failure !== null && b.failure === null ? "open" : later(a, b) ? "later" : null;
+    if (kind === "open")
+      return {
+        ...none,
+        kind,
+        runs: pool.length,
+        first: { globals: each, natural: a, stopped: b },
+        violating,
+      };
+    if (kind === "later" && found === null)
       found = {
         ...none,
         kind,
@@ -1117,21 +1113,16 @@ export function stopRuns(
         violating,
       };
   }
-  if (found !== null && found.kind !== "stricter") return found;
-  // (a violating run the direct comparison did not class at all, a stricter one being one it did: never closed)
-  if (found === null && violating.length > 0)
-    return { ...none, kind: "violating", runs: pool.length, violating };
-  // (a place the plans differ where no run failed either plan: the pool did not exercise it, nothing decided)
+  if (found !== null) return found;
+  // (plans apart with no escape shown: unresolved, the places no run reached listed)
   const untested = differences.filter(
     ({ node }) => node === null || !failures.some((failure) => within(failure, node)),
   );
-  if (untested.length > 0)
-    return {
-      ...none,
-      kind: "unwitnessed",
-      runs: pool.length,
-      violating,
-      untested: untested.map(({ path }) => path),
-    };
-  return found ?? { ...none, kind: "closed", runs: pool.length, violating };
+  return {
+    ...none,
+    kind: "unwitnessed",
+    runs: pool.length,
+    violating,
+    untested: untested.map(({ path }) => path),
+  };
 }

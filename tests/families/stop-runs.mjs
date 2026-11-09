@@ -1,14 +1,17 @@
 // node tests/families/stop-runs.mjs <tree> <items.jsonl> [--shard i/N] --out <folder>
 // A stop's runs against its unstopped compile's (#2080), on one built tree: for each item, the unit compiled unstopped
-// and at the item's demand allowance in its mode, both plans run over host data made from the unit's own property names
-// (`stopRuns`, `tests/helpers/type-core-stop-oracle.ts`: the stop oracle's violating runs, fed `hostValues`). An item is
-// a line of JSON: a plans record's `{set, name, mode, demand}` (`mode` a `HELD_MODES` index; `set` as `plans.mjs` reads
-// it: corpus with CASES_JSON, fixture, held, or an area of the tree's tests/families) or a records row's
-// `{files, globals, label, demand}` (`label` src-on, src-off, rev-on or rev-off, a `MODES` mode). With `--shard i/N`,
-// the items whose index k has k mod N = i. Writes `rows.jsonl` (the item without its files, and `stopRuns`' result) and
-// `summary.json` (the items, each kind's count, missing units and exceptions) to `--out`, a missing unit's row marked
-// `missing`; exit 0 when no item is `open`, `later` or `violating`, none is missing and none threw, else 1
-// (`unwitnessed`, a plan difference no host value exercised, is counted, not failed); 2 on a usage error.
+// and at the item's demand allowance in its mode, both plans run over host data (`stopRuns`, `hostValues`,
+// `tests/helpers/type-core-stop-oracle.ts`). It claims only what it demonstrates (#2142, under
+// docs/DEVELOPMENT-WORKFLOW.md#review-convergence): positive escapes are the blockers, an unwitnessed cell is unresolved
+// evidence (#2080's design round). `open` and `later` are shown escapes, `closed` means the two plans are equal, and
+// every other difference is `unwitnessed`, never proof that no check is owed.
+// An item is a line of JSON: a plans record's `{set, name, mode, demand}` (`mode` a `HELD_MODES` index; `set` as
+// `plans.mjs` reads it: corpus with CASES_JSON, fixture, held, or an area of the tree's tests/families) or a records
+// row's `{files, globals, label, demand}` (`label` src-on, src-off, rev-on or rev-off, a `MODES` mode). With
+// `--shard i/N`, the items whose index k has k mod N = i. Writes `rows.jsonl` (the item without its files, and
+// `stopRuns`' result; a missing unit's row marked `missing`) and `summary.json` (the items, each kind's count, missing
+// units and exceptions) to `--out`. Exit 0 when no item is `open` or `later`, none is missing and none threw, else 1
+// (`unwitnessed` is counted, not failed); 2 on a usage error or a bad `--shard`.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -100,9 +103,9 @@ for (const item of items) {
 }
 writeFileSync(path.join(out, "summary.json"), JSON.stringify(summary));
 process.stdout.write(`${JSON.stringify(summary)}\n`);
-// (a missing unit, an exception, a run a stop let through, or one the oracle reports violating: never a pass)
+// (a missing unit, an exception, or an escape a run showed: never a pass)
 const failed =
-  ["open", "later", "violating"].reduce((sum, kind) => sum + (summary.kinds[kind] ?? 0), 0) +
+  ["open", "later"].reduce((sum, kind) => sum + (summary.kinds[kind] ?? 0), 0) +
   summary.missing +
   summary.exceptions;
 process.exit(failed === 0 ? 0 : 1);
