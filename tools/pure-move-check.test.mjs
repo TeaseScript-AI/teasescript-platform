@@ -54,10 +54,24 @@ function moveOf(before, after) {
     writeFileSync(path, JSON.stringify(entries));
     return path;
   };
-  return { root, run, declare, done: () => rmSync(root, { recursive: true, force: true }) };
+  // the move sweep's map, beside the declarations
+  const renames = (map) => {
+    const path = join(root, "renames.json");
+    writeFileSync(path, JSON.stringify({ renames: map }));
+    return path;
+  };
+  return {
+    root,
+    run,
+    declare,
+    renames,
+    done: () => rmSync(root, { recursive: true, force: true }),
+  };
 }
 
 const main = `${helper("sumOfSquares")}\n\n${helper("weighted")}\n\nexport const used = sumOfSquares([1]) + weighted([2]);\n`;
+/** The split's family: `a.ts` keeps one function, `b.ts` takes the other. */
+const splitFamily = { "a.ts": ["a.ts", "b.ts"] };
 const split = {
   "a.ts": `import { weighted } from "./b.js";\n\n${helper("sumOfSquares")}\n\nexport const used = sumOfSquares([1]) + weighted([2]);\n`,
   "b.ts": `export ${helper("weighted")}\n`,
@@ -66,7 +80,7 @@ const split = {
 test("a true pure split passes, and its shape is printed", { timeout: 60_000 }, () => {
   const move = moveOf({ "a.ts": main }, split);
   try {
-    const { status, out } = move.run();
+    const { status, out } = move.run("--renames", move.renames(splitFamily));
     assert.equal(status, 0, out);
     assert.match(
       out,
@@ -131,7 +145,12 @@ test(
           reason: "the allowance follows the moved function",
         },
       ];
-      const declared = move.run("--declare", move.declare(entries));
+      const declared = move.run(
+        "--declare",
+        move.declare(entries),
+        "--renames",
+        move.renames(splitFamily),
+      );
       assert.equal(declared.status, 0, declared.out);
       assert.match(
         declared.out,
@@ -184,7 +203,7 @@ test(
     };
     const header = moveOf({ "a.ts": main }, headed);
     try {
-      const { status, out } = header.run();
+      const { status, out } = header.run("--renames", header.renames(splitFamily));
       assert.equal(status, 0, out);
       assert.match(out, /header comment 1;/u);
     } finally {
@@ -201,6 +220,8 @@ test(
       assert.match(bare.out, /unadmitted: a\.ts:\d+ \(added\): \/\/ used below/u);
       const line = Number(/unadmitted: a\.ts:(\d+) \(added\): \/\/ used below/u.exec(bare.out)[1]);
       const declared = elsewhere.run(
+        "--renames",
+        elsewhere.renames(splitFamily),
         "--declare",
         elsewhere.declare([{ file: "a.ts", side: "added", line, reason: "a note the move needs" }]),
       );
@@ -311,11 +332,18 @@ test(
   { timeout: 60_000 },
   () => {
     const spaced = moveOf(
-      { "src/space name.ts": 'import { a } from "./x.js";\nexport const b = a;\n' },
-      { "src/space name.ts": 'import { a } from "./y.js";\nexport const b = a;\n' },
+      {
+        "src/space name.ts": 'import { a } from "./x.js";\nexport const b = a;\n',
+        "src/x.ts": "export const a = 1;\n",
+      },
+      {
+        "src/space name.ts": 'import { a } from "./y.js";\nexport const b = a;\n',
+        "src/x.ts": null,
+        "src/y.ts": "export const a = 1;\n",
+      },
     );
     try {
-      const { status, out } = spaced.run();
+      const { status, out } = spaced.run("--renames", spaced.renames({ "src/x.ts": "src/y.ts" }));
       assert.equal(status, 0, out);
       assert.match(out, /admitted import 2,/u);
     } finally {
@@ -433,11 +461,18 @@ test(
   { timeout: 60_000 },
   () => {
     const side = moveOf(
-      { "a.ts": "import { a } from './old.js'; /* side comment */\nexport const result = a;\n" },
-      { "a.ts": "import { a } from './new.js'; /* side comment */\nexport const result = a;\n" },
+      {
+        "a.ts": "import { a } from './old.js'; /* side comment */\nexport const result = a;\n",
+        "old.ts": "export const a = 1;\n",
+      },
+      {
+        "a.ts": "import { a } from './new.js'; /* side comment */\nexport const result = a;\n",
+        "old.ts": null,
+        "new.ts": "export const a = 1;\n",
+      },
     );
     try {
-      const { status, out } = side.run();
+      const { status, out } = side.run("--renames", side.renames({ "old.ts": "new.ts" }));
       assert.equal(status, 0, out);
       assert.match(out, /admitted import 2,/u);
     } finally {
@@ -460,6 +495,72 @@ test(
       assert.match(out, /header comment 2;/u);
     } finally {
       continued.done();
+    }
+  },
+);
+
+test(
+  "a pure move keeps every import's binding: an alias dropped or an export renamed fails",
+  { timeout: 60_000 },
+  () => {
+    const server = (importLine) =>
+      `${importLine}\nexport const makeServerWithLongIdentifier = createNetServer;\n`;
+    const before = {
+      "a.ts": `${server('import { createServer as createNetServer } from "node:net";')}\n${helper("kept")}\n`,
+    };
+    const moved = (importLine) => ({ "a.ts": `${helper("kept")}\n`, "b.ts": server(importLine) });
+    const dropped = moveOf(before, moved('import { createNetServer } from "node:net";'));
+    try {
+      const { status, out } = dropped.run("--renames", dropped.renames(splitFamily));
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /binding only before: a\.ts:1 import from "node:net": createServer as createNetServer/u,
+      );
+      assert.match(out, /binding only after: b\.ts:1 import from "node:net": createNetServer/u);
+    } finally {
+      dropped.done();
+    }
+    const kept = moveOf(
+      before,
+      moved('import { createServer as createNetServer } from "node:net";'),
+    );
+    try {
+      const passed = kept.run("--renames", kept.renames(splitFamily));
+      assert.equal(passed.status, 0, passed.out);
+      assert.match(passed.out, /bindings differing 0/u);
+    } finally {
+      kept.done();
+    }
+    // a split whose kept file imports its new sibling: without the family, that binding is new, and the flag is named
+    const unnamed = moveOf({ "a.ts": main }, split);
+    try {
+      const { status, out } = unnamed.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /binding only after: a\.ts:1 import from "\.\/b\.js": weighted/u);
+      assert.match(out, /the move relocates or adds b\.ts: name its family with --renames FILE/u);
+    } finally {
+      unnamed.done();
+    }
+    const reexport = moveOf(
+      {
+        "a.ts": 'export { helperName } from "./c.js";\n',
+        "c.ts": "export const helperName = 1;\n",
+      },
+      {
+        "a.ts": 'export { helperName as renamed } from "./c.js";\n',
+        "c.ts": "export const helperName = 1;\n",
+      },
+    );
+    try {
+      const { status, out } = reexport.run();
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /binding only after: a\.ts:1 re-export from "\.\/c\.js": helperName as renamed/u,
+      );
+    } finally {
+      reexport.done();
     }
   },
 );
