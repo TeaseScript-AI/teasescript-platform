@@ -597,11 +597,18 @@ if (process.argv[2] === "--child") {
     rmSync(pathOf(progress, "outside"), { force: true });
     writeFileSync(pathOf(progress, "outside"), "", { flag: "wx" });
   }
+  // (a line of a generator whose id is not its file's name, a renamed one's, names its file too: `file`, never stored)
+  let renamed = {};
   const record = (line) => {
-    if (out !== undefined) appendFileSync(pathOf(out, "outside"), `${JSON.stringify(line)}\n`);
+    if (out !== undefined)
+      appendFileSync(pathOf(out, "outside"), `${JSON.stringify({ ...line, ...renamed })}\n`);
   };
   const worked = (line) => {
-    if (work !== undefined) appendFileSync(pathOf(work, "outside"), `${JSON.stringify(line)}\n`);
+    if (work !== undefined)
+      appendFileSync(
+        pathOf(work, "outside"),
+        `${JSON.stringify("generator" in line ? { ...line, ...renamed } : line)}\n`,
+      );
   };
   /** An exception: on stderr with each message (its first line), in `--out` with each stack and the source. */
   const thrown = (line, source) => {
@@ -814,7 +821,12 @@ if (process.argv[2] === "--child") {
 
   const folder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), area);
   // each generator's sources in this shard, and with `--store` all of them (the area's PLAN)
-  const every = await generatorsOf(folder, sizesOption);
+  let every;
+  try {
+    every = await generatorsOf(folder, sizesOption);
+  } catch (error) {
+    refused(error.message);
+  }
   // with `--work` or `--only`, every source's place in the area's order, before a shard or `--only` selects any
   const places =
     work === undefined && !options.has("only") && !itemized
@@ -1049,7 +1061,8 @@ if (process.argv[2] === "--child") {
     },
   });
   let sequence = 0;
-  for (const { name, checks, sources } of generators) {
+  for (const { name, file, checks, sources } of generators) {
+    renamed = file === name ? {} : { file };
     const row = {
       generator: name,
       ...zeros(),
