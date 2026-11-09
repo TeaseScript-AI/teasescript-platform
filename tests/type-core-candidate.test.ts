@@ -909,7 +909,7 @@ test("C1's copy check and C9's boundary check run where external data enters a w
   });
   assertRuns(compiled.plan, source, ["picked", "turn", "turn"], [[1.5, "TSR058@22:39"]]);
 
-  // the literal analogue of r4.29: the element's check against the written element type, `null` admitted
+  // the literal's element check against the written element type, `null` admitted
   const pool = candidate("let pool: integer?[] = [hostValue, null, 7]\nexit\n");
   assert.deepEqual(sited(pool), ["warning TSV041@24"]);
   assert.ok(pool.plan !== null);
@@ -929,12 +929,12 @@ test("C1's copy check and C9's boundary check run where external data enters a w
   assert.deepEqual(sited(compileSource(source, OPTIONS)), []);
 
   // in the core's record, one boundary check per ingress, where it lands: the whole value's place, not each place below
-  // it (TABLE §4 C9; these whole-collection shapes are outside the slice, the literal's element inside it)
+  // it (C9; these whole-collection shapes are outside the slice, the literal's element inside it)
   for (const [shape, ...boundaries] of [
     ["let pool: integer[] = hostValue\nexit\n", 'pool ["list"] @22'],
     ["let xs: integer[][] = [hostValue]\nexit\n", 'xs.element ["list"] @23'],
     ["let pool: integer?[] = [hostValue, null, 7]\nexit\n", 'pool.element ["integer","null"] @24'],
-    // two ingresses in one literal brought by one store: one check for the store, at the first (TABLE §4 C9: one per
+    // two ingresses in one literal brought by one store: one check for the store, at the first (C9: one per
     // ingress store)
     ["let n: integer[] = [hostValue, hostValue]\nexit\n", 'n.element ["integer"] @20'],
     // two stores, two checks
@@ -1095,7 +1095,7 @@ test("admission's decided types and C9's boundary checks compile and run on the 
 
 test("external data a literal carries is warned and checked at its store before any later effect, read or not (the owner's F1)", () => {
   // per program C1's warning at the host expression, the store checks and, per host value, the run's messages and
-  // failure: no consumer reads the list (the first and the third program are also r4.59's sample cells, its decided list
+  // failure: no consumer reads the list (the first and the third program are also sample cells, their decided list
   // element and decided nested list element inline, checked here with its fraction too)
   for (const [source, warnings, checked, runs] of [
     [

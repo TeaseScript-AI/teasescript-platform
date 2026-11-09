@@ -79,7 +79,7 @@ test("the properties of a projected value and of a call's result are known", () 
     ["let xs = [{value: 2}]\nsay xs.removeFirst()", "xs.removeFirst()"],
     ["let xs = [{value: 2}]\nsay xs.removeAt(0)", "xs.removeAt(0)"],
     ['let d = dict {key: {value: 2}}\nsay d.remove("key")', 'd.remove("key")'],
-    // a dict's values (TABLE r4.46 (2))
+    // a dict's values
     ["let d = dict {k: {value: 2}}\nsay d.values.first", "d.values.first"],
   ] as const) {
     const held = analysed(source);

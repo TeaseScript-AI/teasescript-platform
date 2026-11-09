@@ -56,7 +56,7 @@ test("W5's decisions stop at no demand allowance, in either order, and its work 
 });
 
 /**
- * W34 (TABLE §13.3, r4.33–r4.38), W44 and W45 (r4.46 (3)): every variant in the source order and with the consumers'
+ * W34, W44 and W45: every variant in the source order and with the consumers'
  * and the solver's orders reversed, its total and each counter of at least 200 units per doubling of the source. A counter is the raw count of
  * one structure's steps, so a copy walked per field or a mark set made per copy shows in its own counter where the
  * total would hide it; a counter may carry its structure's log factor (a sort, a table of jumps: 2.33 at these sizes
@@ -114,12 +114,13 @@ test("a further list of a set's members, in any order, adds contract steps linea
 });
 
 /**
- * #1466, Codex r5's F1 (TABLE r4.245): k reads of `h.p<i>` each answered by k layers holding a source on its path, so the
- * summaries' demands are the answers' own pairs P, counted from the program's holders: at k 16 and 32 in the four modes
- * the demands are exactly P less the pairs one source answers by reference (TABLE r4.251), one per pair a summary
- * answers, never repeated, never a pass-through layer's, `checks` at or under `main`'s,
- * `invSteps` growing at or under `main`'s, and the total's excess over `main` per pair not rising (r4.245's exception for
- * an output-bound family; the control keeps the total's bound). `main`'s work is the family's measured oracle.
+ * #1466, Codex r5's F1 (docs/specifications/type-inference-accepted-record.md#r4-245): k reads of `h.p<i>` each
+ * answered by k layers holding a source on its path, so the summaries' demands are the answers' own pairs P, counted
+ * from the program's holders: at k 16 and 32 in the four modes the demands are exactly P less the pairs one source
+ * answers by reference, one per pair a summary answers, never repeated, never a pass-through layer's, `checks` at or
+ * under `main`'s, `invSteps` growing at or under `main`'s, and the total's excess over `main` per pair not rising
+ * (docs/specifications/type-inference-accepted-record.md#r4-245: the exception for an output-bound family; the control
+ * keeps the total's bound). `main`'s work is the family's measured oracle.
  */
 test("summaries' demands on output-bound reads are their answers' pairs, at main's growth per pair (#1466)", () => {
   const modes = [

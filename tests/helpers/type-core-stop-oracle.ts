@@ -376,7 +376,7 @@ export function repeatedDecisions(c: Pick<StopCase, "unstopped" | "stopped">): s
 }
 
 /**
- * What a stop changed of the unstopped compile that no deferred mark excuses (TABLE r4.99, r4.108–r4.111), none at a
+ * What a stop changed of the unstopped compile that no deferred mark excuses, none at a
  * sound stop, settled or not. A mark excuses the record with its code at its site and nothing else; before admission
  * settled, a store marked with its type undecided also stands for its records within its value and for the errors it
  * brought, a written store's mark for its records within its value, and C5's error at a literal for

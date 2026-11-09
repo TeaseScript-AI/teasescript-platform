@@ -3,31 +3,34 @@ import { posix, resolve, sep } from "node:path";
 import { ts } from "ts-morph";
 
 /**
- * The question API's one source endpoint (TABLE r4.158; this check's scope, r4.165), read from the syntax alone:
- * `CoreAnswers.#items` answers every question's items, direct or composed, so in `src/type-inference/core/` the two
- * sources it alone reads after a stop, the finishing read's domains (`Consumers.finishedItems`) and the place's lazily
- * decided type (`#lazilyDecided`), are named only inside `#items`, and the finishing read itself
- * (`Consumers.#finishingRead`) only inside `finishedItems` and the consumers' own reads `FINISHING_READERS` lists, each
- * trusted by its reason, as the inventory check's host reads are. Every reference by name counts: a call, a
- * property access, an alias, a destructured or quoted name. `#items` names both sources and `finishedItems` the
- * finishing read. A reference the syntax does not name (an inherited member reached through an inferred wrapper, a
- * generic receiver, a computed name) is outside this check, a review matter against r4.158 (r4.165).
+ * The question API's one source endpoint (this check's scope,
+ * docs/specifications/type-inference-accepted-record.md#r4-165), read from the syntax alone: `CoreAnswers.#items`
+ * answers every question's items, direct or composed, so in `src/type-inference/core/` the two sources it alone reads
+ * after a stop, the finishing read's domains (`Consumers.finishedItems`) and the place's lazily decided type
+ * (`#lazilyDecided`), are named only inside `#items`, and the finishing read itself (`Consumers.#finishingRead`) only
+ * inside `finishedItems` and the consumers' own reads `FINISHING_READERS` lists, each trusted by its reason, as the
+ * inventory check's host reads are. Every reference by name counts: a call, a property access, an alias, a destructured
+ * or quoted name. `#items` names both sources and `finishedItems` the finishing read. A reference the syntax does not
+ * name (an inherited member reached through an inferred wrapper, a generic receiver, a computed name) is outside this
+ * check, a review matter (docs/specifications/type-inference-accepted-record.md#r4-165).
  *
- * Its forms are a closed list, read from the syntax alone (TABLE r4.182, as for the inventory check). A class's members
- * are its own with a body (a method, an accessor, the constructor) and the functions of its files (its entry, and the
- * parts in the folder beside it) whose first parameter's type is the class's name proved: a method whose body moved to
- * a function (#1071). Names compare without `#`, so a member and the function it moved to are one name. A name is
- * proved in a file only as its one top-level declaration there, or as an unrenamed named import of the declaration its
- * source file exports under that name, resolved by declaration there (`export class N`, or `export { M as N }` of its
- * own top-level `M`); nothing further is followed (a re-export from a module, an export of an import, a second import,
- * a renamed, default or namespace import, a type parameter of the class's name prove nothing). A guarded class is the one class of its name in the
- * sources, a nested one included; a second is reported. A public method that only forwards to the function of its name
- * (`return f(this, …)` or `f(this, …);`, its own parameters in order, none with an initializer, no decorator or other
- * modifier), the callee proved as that function of its class, is that function: its call names no reference. Neither
- * does an unrenamed import its own module proves to be the guarded function, its uses checked. Every other place a
- * guarded name is named (a property's initializer, a static block, a function no class owns, an export) is reported.
- * A site this check allows is one declaration: two members of one class and name there, but such a forwarder and its
- * function or a getter and its setter, are reported, so no other declaration takes the site's place.
+ * Its forms are a closed list, read from the syntax alone
+ * (docs/specifications/type-inference-accepted-record.md#r4-182, as for the inventory check). A class's members are its
+ * own with a body (a method, an accessor, the constructor) and the functions of its files (its entry, and the parts in
+ * the folder beside it) whose first parameter's type is the class's name proved: a method whose body moved to a
+ * function (#1071). Names compare without `#`, so a member and the function it moved to are one name. A name is proved
+ * in a file only as its one top-level declaration there, or as an unrenamed named import of the declaration its source
+ * file exports under that name, resolved by declaration there (`export class N`, or `export { M as N }` of its own
+ * top-level `M`); nothing further is followed (a re-export from a module, an export of an import, a second import, a
+ * renamed, default or namespace import, a type parameter of the class's name prove nothing). A guarded class is the one
+ * class of its name in the sources, a nested one included; a second is reported. A public method that only forwards to
+ * the function of its name (`return f(this, …)` or `f(this, …);`, its own parameters in order, none with an
+ * initializer, no decorator or other modifier), the callee proved as that function of its class, is that function: its
+ * call names no reference. Neither does an unrenamed import its own module proves to be the guarded function, its uses
+ * checked. Every other place a guarded name is named (a property's initializer, a static block, a function no class
+ * owns, an export) is reported. A site this check allows is one declaration: two members of one class and name there,
+ * but such a forwarder and its function or a getter and its setter, are reported, so no other declaration takes the
+ * site's place.
  */
 const CORE = "src/type-inference/core";
 
@@ -105,10 +108,10 @@ export function questionSourceDiagnostics(sources, readers) {
       ? name.text
       : null;
 
-  // Identity, in closed forms (TABLE r4.182; Codex r1–r4 B1 on #1371): the files by path, each with its top-level
-  // declarations, import bindings and export lists. A name is proved in a file as its one binding there: a top-level
-  // declaration, or an unrenamed named import of the declaration its own module exports under that name; nothing is
-  // followed further.
+  // Identity, in closed forms (docs/specifications/type-inference-accepted-record.md#r4-182; Codex r1–r4 B1 on #1371):
+  // the files by path, each with its top-level declarations, import bindings and export lists. A name is proved in a
+  // file as its one binding there: a top-level declaration, or an unrenamed named import of the declaration its own
+  // module exports under that name; nothing is followed further.
   const files = new Map();
   for (const { file, sourceFile } of parsed) {
     const top = new Map();

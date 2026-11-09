@@ -44,7 +44,7 @@ export interface CompactCheck {
 }
 
 /**
- * A record as the expectation set is compared with an analysis (TABLE §10.5, with the check sites of the port plan's
+ * A record as the expectation set is compared with an analysis (with the check sites of the port plan's
  * §3.1): the outcome, each diagnostic's kind, class, site, context and N10 payload, and each runtime check's kind,
  * target, required kinds, whether it is a boundary check, and site. This is the form of the fixture the core's cells
  * test reads, with N10's payload where the core's record carries one (the route rule's error, AD-1).

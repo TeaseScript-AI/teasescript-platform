@@ -245,7 +245,7 @@ export const cases = (() => {
       "mixed-dict": 'dict{a: count, b: "bad"}',
       "mixed-nested": '{items: [[count, "bad"]]}',
       "plain-list": "[1, 2]",
-      // (a literal with one named element, no mixed kinds: its composed questions are the children's reads, r4.144 B1)
+      // (a literal with one named element, no mixed kinds: its composed questions are the children's reads)
       "named-list": "[count]",
       "named-set": "set[count]",
       "named-dict": "dict{a: count}",

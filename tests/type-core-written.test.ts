@@ -1150,7 +1150,7 @@ test("a copy keeps its source's written type past a later copy back, and agrees 
 });
 
 /**
- * TABLE r4.80 (the owner's reviewer's F1 on #1049): a field a copy inherits a written type at is decided where the copy's
+ * The owner's reviewer's F1 on #1049: a field a copy inherits a written type at is decided where the copy's
  * own store reaches it, whatever no read asks, in every layer: a misfitting value stored into it is an error at that
  * value; host data stored into it owes its check there, against the inherited type, which the candidate plan holds at
  * the store and which stops a forbidden value before anything is said. For a copy, a copy of a copy and a second copy
@@ -1244,7 +1244,7 @@ test("a copy's inherited written field is decided at the copy's own store in eve
 });
 
 /**
- * Sol's reviews r1 and r2 on #1059 (TABLE r4.80's repair): a place copying itself whole twice decides as before; a record
+ * Sol's reviews r1 and r2 on #1059: a place copying itself whole twice decides as before; a record
  * whose host or misfitting field another copy's written type lands in the copy owes its check or its error at the copy's
  * store, also where the record reaches the copy through a cycle of copies, the check in the plan stopping a forbidden
  * value (all three layers); and a store rejected at a field stays rejected through a cycle of copies that adds a step.

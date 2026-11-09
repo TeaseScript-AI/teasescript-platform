@@ -61,7 +61,7 @@ const witness = (
   ...(storage === undefined ? {} : { storage }),
 });
 
-/** At demand 16 in four modes: a required check is Lost at a settled decision stop (the witnesses' r4.295 column (2)). */
+/** At demand 16 in four modes: a required check is Lost at a settled decision stop. */
 const DECLINED: readonly Witness[] = [
   witness(
     "1645-whole-object",

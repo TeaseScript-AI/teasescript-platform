@@ -54,7 +54,7 @@ import {
 } from "./helpers/type-core-oracles.js";
 
 /*
- * The contract's identity and mark controls (checkpoint 9, TABLE §8's contract row r4.15–r4.27): every path that
+ * The contract's identity and mark controls (checkpoint 9): every path that
  * enters a source into the contract's indexes obtains its identity from one function, so k contributions of one source
  * are one entry on every path; the marks of §3.2 live in one holder per source and projection whose references
  * compose, so the mark structures a program makes and the lookups its reads make grow with k, never with k². The
@@ -273,7 +273,7 @@ test("the mark structures and lookups grow with the aliases, guards and wrappers
 });
 
 /**
- * TABLE r4.46 (3), §8 (review round 5 on #1027): the property a choice object's button value reads is decided once per
+ * §8 (review round 5 on #1027): the property a choice object's button value reads is decided once per
  * record where its literal is indexed, so k reads below the button value inspect each record once per read, never its
  * properties: from 8 to 32 fields and reads a linear count grows four times, a square sixteen times.
  */
@@ -598,7 +598,7 @@ test("each member of a cycle of whole copies has one answer whichever place ente
 });
 
 /**
- * TABLE r4.185 (G5 5a's case 5): a stop whose own entries merge into one (two copies of one member, two copies reaching
+ * G5 5a's case 5: a stop whose own entries merge into one (two copies of one member, two copies reaching
  * one member, a plain and a guarded copy of one member, of one holding an operation's result too, a copy of a parameter
  * no call reaches) was replaced by its entry where `main`'s walk reached it and cut where it was open, so `main`'s answer
  * hung on which place entered the cycle first; the cut is now the open stop's everywhere. What it publishes may differ
@@ -818,7 +818,7 @@ test("a stop whose own entries merge into one publishes main's records, its answ
 });
 
 /**
- * #1466, TABLE r4.251: a read one holder's source answers asks that source by reference at the read's whole path, so
+ * #1466: a read one holder's source answers asks that source by reference at the read's whole path, so
  * the answer is the source's own there (a reference at the path's first step alone answered the object at `g`,
  * `unknown`, for every property), and keeps the mark a tested path's guard leaves on the source's holder (§3.2): the
  * host value stored at `a.g.n`, tested before `b` copies `a`, reads guarded through `b`'s layer, as the source read by
@@ -882,14 +882,14 @@ test("a read its one holder's source answers is that source's answer at its whol
 });
 
 /**
- * #1466, r4.262 (Codex r11's F1, r12's F1 and F2): no path or span id is made while a read's selection runs. A read whose
- * selection passes a listing layer holding nothing at its path (`a`, its own store at `g.r`) to the one holder below it
- * (`seed`) asks that holder's source by reference, as a read finding its holder directly does (`direct`, the control):
- * through each of the four consumers, in the four modes, one forwarded demand and no layer demand, the path arena and the
- * spans' ids unchanged from the consumer's start to the forwarded demand, for each kind of path a read meets: a plain
- * array; a span whose suffixes have no id yet, and a span from a later step whose own id has none; a record whose id is
- * found lazily, a view of one, a join; and a view made again after its first was resolved, which finds the id kept on
- * the steps it views.
+ * #1466 (docs/specifications/type-inference-accepted-record.md#r4-262) (Codex r11's F1, r12's F1 and F2): no path or
+ * span id is made while a read's selection runs. A read whose selection passes a listing layer holding nothing at its
+ * path (`a`, its own store at `g.r`) to the one holder below it (`seed`) asks that holder's source by reference, as a
+ * read finding its holder directly does (`direct`, the control): through each of the four consumers, in the four modes,
+ * one forwarded demand and no layer demand, the path arena and the spans' ids unchanged from the consumer's start to
+ * the forwarded demand, for each kind of path a read meets: a plain array; a span whose suffixes have no id yet, and a
+ * span from a later step whose own id has none; a record whose id is found lazily, a view of one, a join; and a view
+ * made again after its first was resolved, which finds the id kept on the steps it views.
  */
 test("no path or span id is made while a read's selection runs, its one holder's source asked by reference (#1466)", () => {
   const sources = {

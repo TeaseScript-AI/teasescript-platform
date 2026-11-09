@@ -639,8 +639,8 @@ const PROJECTIONS: readonly Decision[] = ["projection", "copy of a projection"];
 /**
  * Where a copied place's own written type comes from besides a whole copy at its start (Sol's round 2: the seeds; Astra's
  * F1, F2): a later store after an empty list (its copy taken before or after the host value) or after `null`, a list of
- * `null` before it, a selected `otherwise`, an empty list's `get` default; its copy keeps the place's decision (r4.75
- * (1)), the place's own `null` included.
+ * `null` before it, a selected `otherwise`, an empty list's `get` default; its copy keeps the place's decision,
+ * the place's own `null` included.
  */
 const SEEDS: readonly Decision[] = [
   "copy of an empty intermediate",

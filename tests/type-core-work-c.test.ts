@@ -242,7 +242,7 @@ test("a read finds the joined layer listing its step by the place's map (#1466)"
  * the same step, asks only the layer holding its property, never a joining layer or a copy it passes through. Below
  * nested joins that layer's one source answers the read by reference, so no summary's demand is made;
  * over the shared record a listing layer lies below the step, so each property's holder makes its summary's demand, one
- * per property: k, at each size and in either order (r4.227's bound; a regression oracle of the selection, where a
+ * per property: k, at each size and in either order (a regression oracle of the selection, where a
  * joining layer asked too would make the read's summaries' demands).
  */
 test("a read below nested or shared joins asks only the layers holding its path (#1466)", () => {
@@ -400,7 +400,7 @@ test("the value side's work on same sources and typed presets grows with the pro
 });
 
 /**
- * TABLE r4.192 (#1403): what a decision's stop forgets by, each demand's reader and each key a demand asked whether it
+ * #1403: what a decision's stop forgets by, each demand's reader and each key a demand asked whether it
  * stopped, is counted apart from the allowance (`countApart`), never in `total`, so no stop point moves. It is kept only
  * where a decision can still stop (#1599): what admission's walk asks of a place before that place's last decision
  * ends, and the readers of what a stop may then forget; nothing once every decision has run. So a program whose later

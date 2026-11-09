@@ -49,7 +49,7 @@ import { itemScope } from "./type-core-items.js";
  * The type core's oracles, one library for the tests and for the generator corpus (`tests/families/`): the
  * diagnostics' identity a stop keeps (`stopIdentity`, `keptErrors`) and the merged stops' (`mergedIdentity`); what a
  * program publishes, exactly (`publishedAnswers`, `publishedRoute`, `publication`) and with two orders set aside
- * (`publishedUpToOrder`, TABLE r4.185); the four modes they are compared in (`MODES`, `inMode`); which decisions
+ * (`publishedUpToOrder`); the four modes they are compared in (`MODES`, `inMode`); which decisions
  * stop and when (`stopSet`); a compile's decision records, its receiving completion's included (`decisionRecords`); and a
  * stopped plan's part checks against the natural plan's (`partProblems`, #1682). A test or generator that needs another
  * projection adds it here.
@@ -529,13 +529,13 @@ export function occurrences(answers: Answers, order: (items: string[]) => string
 }
 
 /**
- * What a program publishes with two orders set aside (TABLE r4.185, G5's stops whose own entries merge into one): the
- * order of the items in an answer and of the kinds in a decided admitted type. Every binding's admitted type and
- * decider site at its root, its element and each known property two levels down; every occurrence's answer
- * (`occurrences`, its items sorted). Test-only, for small sources (`type-core-oracles.test.ts`,
- * `type-core-contract.test.ts`), never a publication the families runner reads; their questions are not under the
- * oracle's own bound (`Questions`): past the finished analysis's allowance they are asked again on the stopped analysis
- * (`asked`), so the text holds the stopped answers with no mark of the stop.
+ * What a program publishes with two orders set aside (docs/specifications/type-inference-accepted-record.md#r4-185,
+ * G5's stops whose own entries merge into one): the order of the items in an answer and of the kinds in a decided
+ * admitted type. Every binding's admitted type and decider site at its root, its element and each known property two
+ * levels down; every occurrence's answer (`occurrences`, its items sorted). Test-only, for small sources
+ * (`type-core-oracles.test.ts`, `type-core-contract.test.ts`), never a publication the families runner reads; their
+ * questions are not under the oracle's own bound (`Questions`): past the finished analysis's allowance they are asked
+ * again on the stopped analysis (`asked`), so the text holds the stopped answers with no mark of the stop.
  */
 export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[]): string {
   return asked(answers, (answers) => upToOrder(answers, bindings));

@@ -6,7 +6,7 @@ import { readCompactRecord, type CompactRecord } from "./type-core-records.js";
 
 /**
  * The expectation set of the coarse core (checkpoint 9) as its compact fixture (`tests/fixtures/type-core/`, made by
- * the port plan's step S0; its `MANIFEST.md` says how): per record its name, the TABLE cells it tests, the class it
+ * the port plan's step S0; its `MANIFEST.md` says how): per record its name, the cells it tests, the class it
  * belongs to (`owner`: `adapter` for the records the kept adapters own), its files, and its expected record.
  */
 export interface FixtureRecord {

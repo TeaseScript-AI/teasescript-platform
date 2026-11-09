@@ -92,7 +92,7 @@ export const cases = (() => {
       [{ hostValue: 2, hostOther: 3 }],
       [{ hostValue: "bad", hostOther: 3 }],
     ],
-    // TABLE r4.100's neighbour: an `otherwise` whose left is an inferred list's element
+    // An `otherwise` whose left is an inferred list's element
     aElementOtherwise: [
       'let items = [2, 3]\nlet value = items[0] otherwise hostValue\nsay value\nsay "AFTER"\nexit\n',
       [{ hostValue: 2, hostOther: 3 }],

@@ -90,7 +90,7 @@ const oneOf = (...forms: readonly RegExp[]): RegExp =>
   new RegExp(forms.map((found) => `(?:${found.source})`).join("|"));
 
 /**
- * Whether a subject is a stable path as written (TABLE §13 N1), the only subject a fix's example names (Astra r1, r2):
+ * Whether a subject is a stable path as written, the only subject a fix's example names (Astra r1, r2):
  * a variable, then properties other than `random`, fixed indexes or keys, or indexes held in plain variables; a literal
  * word such as `true` is none. And whether its own text may stand in code: on one line, without a comment.
  */
@@ -485,7 +485,7 @@ const PORTS: readonly Port[] = [
     from: /^Round the number with the floor, round or ceil function first\.$/,
     to: ([text]) => exact(text),
   },
-  // #1241 under TABLE r4.151: each code form where its predicate holds at the diagnosed site (`codeAt`, which the paste
+  // #1241: each code form where its predicate holds at the diagnosed site (`codeAt`, which the paste
   // test below proves), the same fix in words where it does not; so a kept fix is one of the two, with the actual
   // operand and the receiver as the source writes it (the current checker writes '5 s' into an element and a result)
   {
@@ -1242,7 +1242,7 @@ test("each member, conversion and list fix of the current checker is kept on the
   );
   // (each source pairs a diagnostic with a fix)
   assert.equal(new Set(found.map((pair) => pair.record)).size, CLASSIFIED.length);
-  // TABLE r4.151 (Codex r1, r4, r5, Astra r2): a code form where its predicate holds at the site, the same fix in words
+  // Codex r1, r4, r5, Astra r2: a code form where its predicate holds at the site, the same fix in words
   // where it does not: what the site takes (a typed declaration, an operand), the elements' type, a store's target,
   // an object's property no fact proves; a property stored on a type without it gets no read's repair
   const messages = (source: string): string[] => {
@@ -1361,7 +1361,7 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
   ['let toys = [1]\nif ⟦toys⟧ { say "x" }\nexit\n', /as in '([^']*)'/],
   ['let d = dict{"1": 5}\nlet k = 1\nsay d[⟦k⟧]\nexit\n', /as in '([^']*)'/, ["5"]],
   ["let n = 1\nlet caption: string = ⟦n⟧\nsay caption\nexit\n", /write '([^']*)'/, ["1"]],
-  // a stable path through an index variable (TABLE §13 N1, Astra r2), in a fix the predicate does not test
+  // a stable path through an index variable (Astra r2), in a fix the predicate does not test
   // the null check's fallback, of a kept value and of a composed one; a warning's read by an index, which its program
   // already performs there, wrapped in place
   ["let xs = [7, null]\nsay ⟦xs[0]⟧ + 1\nexit\n", /fallback, as in '([^']*)'/, ["8"]],
@@ -1527,7 +1527,7 @@ test("a list fix's add, on a line of its own, compiles and runs where the fix of
 });
 
 /**
- * TABLE r4.151 (#1241): the paste family's sample (`type-core-paste.ts`): every offer once, the sites in turn, every
+ * #1241: the paste family's sample (`type-core-paste.ts`): every offer once, the sites in turn, every
  * code form its fix offers pasted at its own position compiles and runs to its end through it, a store that receives an
  * answer among them (#1586). The whole family, every offer at every site, is the step's evidence outside CI.
  */
@@ -1919,7 +1919,7 @@ test("a null check's fallback compiles where it is pasted, grouped as written, a
 });
 
 /**
- * #1268, TABLE r4.146: checks, `⟦…⟧` around the use's statement, which the check's example holds as the source writes
+ * #1268: checks, `⟦…⟧` around the use's statement, which the check's example holds as the source writes
  * it (a kept value's read as `value`, its `let` on a line before), and what the source then says: a null check of a
  * variable and of a kept value, on a line of its own and in a block (Astra on #1273); around a condition, a count, an
  * iterable, a store, an interpolation, a receiver; a type test, a length check, a timer's block.
@@ -2010,7 +2010,7 @@ test("a check's example holds the use's statement, compiles in its place, and ru
 });
 
 /**
- * #1268, TABLE r4.146 and r4.162: uses whose statement no check may hold as written, and declarations not on one line:
+ * #1268: uses whose statement no check may hold as written, and declarations not on one line:
  * the step in words, with no block and no placeholder; where the words still offer code, a fallback or a type, `⟦…⟧`
  * marks where it goes.
  */
@@ -2224,7 +2224,7 @@ test("a text join's example puts the operand that is not text in '${...}', and t
 });
 
 /**
- * Length checks, `⟦…⟧` around the collection a read selects from, and whether it is a stable path (TABLE §13 N1): the
+ * Length checks, `⟦…⟧` around the collection a read selects from, and whether it is a stable path: the
  * fix checks a stable path itself, and keeps any other in a new variable first, so the check and the read see one
  * selection (Astra r2: `if groups.random.length > 0 { say groups.random.last }` checks one and reads another).
  */
@@ -2543,7 +2543,7 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       'function show(x: string?) {\n  say x.trim\n}\nshow("a")\nshow(null)\nexit\n',
       "Call the trim method with parentheses.",
     ],
-    // (Codex r7, TABLE r4.160: an argument of a parameter without a type that its body or its result's use does not
+    // (Codex r7: an argument of a parameter without a type that its body or its result's use does not
     // take, a variable's value its reads do not take; a receiver read through a dict's key, which may be absent)
     [
       'let t = "hello"\nfunction use(p) {\n  say p.trim()\n}\nuse(t.size)\nexit\n',
@@ -2554,7 +2554,7 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       "Use the length property.",
     ],
     ['let t = "hello"\nlet v = t.size\nsay v.trim()\nexit\n', "Use the length property."],
-    // (Astra on #1296, TABLE r4.162, r4.168: an error's value read by an index or a dict's key, which may be absent,
+    // (Astra on #1296: an error's value read by an index or a dict's key, which may be absent,
     // the list or the operand a list or a conversion fix reads, either way; an element as a receiver)
     [
       'let d = dict{found: [1]}\nsay d["absent"] + 2\nexit\n',

@@ -272,7 +272,7 @@ test("a generator's shared build counts to the total, never to the asker, and en
 });
 
 /**
- * TABLE r4.55, S3 §5: the pipeline handles depth 10,000; the consumers of statements nested past the core's 256 are
+ * S3 §5: the pipeline handles depth 10,000; the consumers of statements nested past the core's 256 are
  * checked when the script runs, every other statement proved as ever (admission still decides every place from every
  * store), an `else if` one level more: a check inside them is moved, an error outside stands, and one warning names the
  * deepest nesting's place.
@@ -459,14 +459,15 @@ test("the finishing path is bounded after a stop in the setup, in admission's pa
 });
 
 /**
- * TABLE r4.100 (2), r4.126 (Astra r4's shape): after a stop at the first unit a list literal nested k deep finishes in
+ * Astra r4's shape: after a stop at the first unit a list literal nested k deep finishes in
  * work linear in k. The fresh pass's copy sources made each path below the literal again at every depth, k² steps
  * (8,022 finishing units for 140 nodes); each path is now a step from its owner's, made into an array only where a copy
  * lands. Linear, not `16 × nodes`: the program's own index, built after a stop at the first unit, costs about 21 units
  * per node of this shape.
  *
  * A deeply nested list literal, and a typed parse's or load's nested default read as deep: before admission settled the
- * syntax decides nothing (TABLE r4.135), so no read's key is made for it (Astra r1 B2 on #1165: 2.8 to 3.2 per doubling).
+ * syntax decides nothing (docs/specifications/type-inference-accepted-record.md#r4-135), so no read's key is made for
+ * it (Astra r1 B2 on #1165: 2.8 to 3.2 per doubling).
  */
 test("a stop at the first unit finishes a deeply nested literal and a read as deep of a typed default in linear work", () => {
   const nested = (k: number) => `${"{branch: ".repeat(k)}7${"}".repeat(k)}`;
@@ -747,16 +748,16 @@ test("the stores' syntax looks at a cut source or a wide written type a bounded 
 });
 
 /**
- * #1445, TABLE r4.208: after a settled program stop, the finishing read's host data (`heldIngress`) is followed by a walk
- * bounded by constants (`FRONTIER_DEPTH` copies deep, `FRONTIER_COPIES` copies met), past which the read answers its
- * place's component's host data, made once per component; so each read's work is bounded and the finishing work stays
- * linear in the program's size by construction (`frontierGrowthProblems`). The shapes: the copy graph's topologies
- * (`topologySources`: chains, rings, fans, diamonds, shared bases, nested cycles, two-way copies, chains of own stores,
- * Codex r5's readers of unrelated lineages and lineage ties, Sol's staggered pairs and branch readers, the owner
- * reviewer's overlapping ancestor and two-holder ladder), and a place's many stores (Astra r1's B1), plainly, through
- * copies and through a selection (Codex r3's B1). Here at the smaller size pair, one doubling (8 → 16; chains 16 → 32,
- * a shared base read at every field 2 → 4); the worker-side probe runs the same gate at the larger pair (16 → 32), with
- * the uncharged-work probe beside it.
+ * #1445 (docs/specifications/type-inference-accepted-record.md#r4-208): after a settled program stop, the finishing
+ * read's host data (`heldIngress`) is followed by a walk bounded by constants (`FRONTIER_DEPTH` copies deep,
+ * `FRONTIER_COPIES` copies met), past which the read answers its place's component's host data, made once per
+ * component; so each read's work is bounded and the finishing work stays linear in the program's size by construction
+ * (`frontierGrowthProblems`). The shapes: the copy graph's topologies (`topologySources`: chains, rings, fans,
+ * diamonds, shared bases, nested cycles, two-way copies, chains of own stores, Codex r5's readers of unrelated lineages
+ * and lineage ties, Sol's staggered pairs and branch readers, the owner reviewer's overlapping ancestor and two-holder
+ * ladder), and a place's many stores (Astra r1's B1), plainly, through copies and through a selection (Codex r3's B1).
+ * Here at the smaller size pair, one doubling (8 → 16; chains 16 → 32, a shared base read at every field 2 → 4); the
+ * worker-side probe runs the same gate at the larger pair (16 → 32), with the uncharged-work probe beside it.
  */
 test("a settled stop finishes the host data of every copy-graph topology in linear work", () => {
   // (a shared base read at every field grows as k²: its sizes are smaller)

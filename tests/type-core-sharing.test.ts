@@ -79,7 +79,7 @@ import {
 /*
  * The sharing differential: S6's sharing of answers between equivalent values (alias classes and chains
  * of copies, S6-CARRIERS §4.1; levels by structure, §4.6; a walk's stops of one snapshot, the decider's and the named
- * data's, §3.1; a literal's entries for the reads of one key, TABLE §8) and S6c's (a choice's options, a run of adds, a
+ * data's, §3.1; a literal's entries for the reads of one key) and S6c's (a choice's options, a run of adds, a
  * literal's computed values and a prefix's entries by their class, `Contract.classOf`) is an optimization,
  * so it is output-neutral: for every program below, in both orders, the published diagnostics, the owed checks, every
  * binding's admitted type at its root and its element (the decider's site with it) and the candidate route's lowered
@@ -411,8 +411,7 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   let runs = 0;
   // (programs of one exact input, their files in order, share its outcome in each order: each is reported by its name)
   const changed = new Map<string, boolean>();
-  // (the record a program publishes, and its serialized form, is in source order of its sites, the same in both orders:
-  // r4.86 (1))
+  // (the record a program publishes, and its serialized form, is in source order of its sites, the same in both orders)
   const reordered: string[] = [];
   const unsited: string[] = [];
   for (const program of all) {

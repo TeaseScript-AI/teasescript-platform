@@ -49,7 +49,7 @@ const NO_DETAIL: ContextDetail = {
   receiver: null,
 };
 
-// The core's structured result (TABLE §3.4, §4, F28, §10.5): which word and which writer explain a warning, which kinds
+// The core's structured result (§3.4, §4, F28, §10.5): which word and which writer explain a warning, which kinds
 // owe their own diagnostics, how targets are named, and the record the tests compare with the expectation set.
 
 const writer = (kind: string, start: number, file = 0): Writer => ({

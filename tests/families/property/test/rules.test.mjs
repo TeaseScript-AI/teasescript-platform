@@ -21,7 +21,7 @@ function proved(lines) {
   return type === null ? null : typeText(type);
 }
 const written = 'let origin: string[][] = [["a"]]';
-// (each kind of certificate #1440 names, TABLE r4.200: what proves the destination's type and what does not)
+// (each kind of certificate #1440 names: what proves the destination's type and what does not)
 const kinds = {
   "a written destination": [
     [[written, "origin = hostValue"], "string[][]"],

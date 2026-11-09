@@ -3,31 +3,30 @@ import { relative, resolve, sep } from "node:path";
 import { Project, ts } from "ts-morph";
 
 /**
- * The derivation inventory's guard (TABLE r4.138, r4.143), syntactic and scoped by name (TABLE r4.182). `OBLIGATION_SITES`
- * lists every derivation of admission's that creates an obligation; a stop before admission settled runs each in the
- * fresh pass. A derivation of `Admission`'s or `Consumers`' is a member of the class with a body (a method, a getter and
- * setter pair as one, a property holding a function), or a function of its declared files (`admissionFiles`,
- * `consumersFiles`: the entry, the parts in the folder beside it, and for `Admission` also `core/inherited/`, A4's
- * folder) with a parameter typed as the class: a method whose body moved there, known by its declaration. A module of
- * `src/type-inference/core/` outside those files with a function taking `Admission` and a reference the inventory cannot
- * weigh is refused by name, in place of each such reference. A
- * public method whose one statement forwards to the function of its name is that function, its arguments its own
- * parameters. The guarded members are known by the compiler's symbols: every member of `Admission` per the type
- * checker (a constructor's parameter properties, accessors and overloads, each with all its declarations), `readChecks`
- * and `Consumers`' recording arrays among them, `boundaryCheck`, a parameter named `error` in admission's files, and a
- * derivation moved to a function. A reference is every name whose symbol is one, or an alias of one: an import, a
- * namespace's member, a destructuring's key in a declaration or an assignment, a shorthand property; in a value
- * position, a class's `extends` expression and an instantiation expression's (`f<T>`) included, not a type's (an
- * annotation, a type argument, an `implements` heritage) nor in code that emits nothing (an interface, a function-like
- * declaration without a body, a `declare` or `abstract` member, their computed keys included). The check
- * recognises a closed list of its forms: a direct call of a derivation, `R.m(…)` or `f(…)` as written, and an exact
- * forwarder's call; inside a derivation of admission's, a push `R.readChecks.push(…)`, a call `boundaryCheck(…)` or a
- * call of a parameter named `error` (each creating an obligation); inside a consumer derivation, a push onto a
+ * The derivation inventory's guard, syntactic and scoped by name
+ * (docs/specifications/type-inference-accepted-record.md#r4-182). `OBLIGATION_SITES` lists every derivation of
+ * admission's that creates an obligation; a stop before admission settled runs each in the fresh pass. A derivation of
+ * `Admission`'s or `Consumers`' is a member of the class with a body (a method, a getter and setter pair as one, a
+ * property holding a function), or a function of its declared files (`admissionFiles`, `consumersFiles`: the entry, the
+ * parts in the folder beside it, and for `Admission` also `core/inherited/`, A4's folder) with a parameter typed as the
+ * class: a method whose body moved there, known by its declaration. A module of `src/type-inference/core/` outside
+ * those files with a function taking `Admission` and a reference the inventory cannot weigh is refused by name, in
+ * place of each such reference. A public method whose one statement forwards to the function of its name is that
+ * function, its arguments its own parameters. The guarded members are known by the compiler's symbols: every member of
+ * `Admission` per the type checker (a constructor's parameter properties, accessors and overloads, each with all its
+ * declarations), `readChecks` and `Consumers`' recording arrays among them, `boundaryCheck`, a parameter named `error`
+ * in admission's files, and a derivation moved to a function. A reference is every name whose symbol is one, or an
+ * alias of one: an import, a namespace's member, a destructuring's key in a declaration or an assignment, a shorthand
+ * property; in a value position, a class's `extends` expression and an instantiation expression's (`f<T>`) included,
+ * not a type's (an annotation, a type argument, an `implements` heritage) nor in code that emits nothing (an interface,
+ * a function-like declaration without a body, a `declare` or `abstract` member, their computed keys included). The
+ * check recognises a closed list of its forms: a direct call of a derivation, `R.m(…)` or `f(…)` as written, and an
+ * exact forwarder's call; inside a derivation of admission's, a push `R.readChecks.push(…)`, a call `boundaryCheck(…)`
+ * or a call of a parameter named `error` (each creating an obligation); inside a consumer derivation, a push onto a
  * recording array (`diagnostics`, `deferred`, `checks`), a conditional of them included; admission's own code using its
  * own state; a dot read of a `get` accessor `READS` lists, a read (no write, no `delete`); and the reads `LISTED_READS`
- * lists. Every other
- * reference, anywhere in `src/type-inference/core/`, is reported as unproved by the name it contains, whatever flows
- * from it. The check rejects:
+ * lists. Every other reference, anywhere in `src/type-inference/core/`, is reported as unproved by the name it
+ * contains, whatever flows from it. The check rejects:
  * - a name that names more than one derivation;
  * - an `Admission` derivation that creates an obligation and is not an inventory entry, and a creation outside every
  *   derivation;
@@ -40,10 +39,10 @@ import { Project, ts } from "ts-morph";
  * - an `AdmissionHost` member, inherited ones included, that is not a host read `HOST_READS` lists with why it creates
  *   no obligation (a derivation returns what it leaves open to the consumers, which record it), so no new callback
  *   records one for admission whatever its wiring (Codex r23, r24 T1).
- * A listed host read or read is trusted by its reason. A reference the syntax does not name (an
- * inherited member reached through an inferred wrapper, a generic receiver, a computed name, a value passed through an
- * aggregate or a copy) is outside this check, a review matter against r4.182, as r4.165 states it for the question
- * sources.
+ * A listed host read or read is trusted by its reason. A reference the syntax does not name (an inherited member
+ * reached through an inferred wrapper, a generic receiver, a computed name, a value passed through an aggregate or a
+ * copy) is outside this check, a review matter against the closed forms
+ * (docs/specifications/type-inference-accepted-record.md#r4-182), as stated for the question sources.
  */
 const ADMISSION = "src/type-inference/core/admission.ts";
 const CONSUMERS = "src/type-inference/core/consumers.ts";
@@ -530,8 +529,9 @@ export function obligationInventoryDiagnostics(program, root, files) {
     })();
 
   /**
-   * The direct callee of a call (TABLE r4.182's closed forms): `R.m(…)` or `f(…)`, the callee a member access or a
-   * name as written, no wrapper, no `call` or `apply`; the symbol it stands for, an import followed.
+   * The direct callee of a call (docs/specifications/type-inference-accepted-record.md#r4-182: the closed forms):
+   * `R.m(…)` or `f(…)`, the callee a member access or a name as written, no wrapper, no `call` or `apply`; the symbol
+   * it stands for, an import followed.
    */
   const directCallee = (call) => {
     const callee = call.expression;

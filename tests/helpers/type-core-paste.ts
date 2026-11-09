@@ -17,7 +17,7 @@ import { siteKey } from "./site-keys.js";
 import { coreRequest } from "./type-core-analysis.js";
 
 /*
- * The paste family of TABLE r4.151 (#1241): every code form a fix offers, pasted at its own position in the source it
+ * The paste family (#1241): every code form a fix offers, pasted at its own position in the source it
  * was offered for, compiles and runs. Each case is an offer's erroneous expression (`OFFERS`, with the setup its
  * receiver or list needs, the element and value kinds varied) at one site (`SITES`: a declaration, typed or not, a
  * store, an operand per operator class, an argument, a condition, an interpolation, an element, a receiver, a count, a

@@ -350,7 +350,7 @@ test("an operation's result follows the runtime's rows (F16)", () => {
     "calendarDuration pos",
     "angle pos",
   ]);
-  // one unknown, one kind (§4 r4.14): the results stand for that operand, explained by its writer and reason
+  // one unknown, one kind (§4): the results stand for that operand, explained by its writer and reason
   assert.ok(
     quotient.every((item) => item.fan === "assignment@0:20" && item.writer === host.writer),
   );

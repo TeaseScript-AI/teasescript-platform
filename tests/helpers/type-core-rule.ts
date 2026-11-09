@@ -11,7 +11,7 @@ import type { CompactRecord } from "./type-core-records.js";
  * matrix's are placement and endpoint classes, each shape named and inline, without and with a later store, compared in
  * both orders. Each shape's complete multiset of C1, C9 and C10 records (§5.1: every `copy-type` check, a destination's
  * own null-check, and their written-target warnings with their context words) is compared exactly with what this rule
- * function owes, §5.1's table with TABLE r4.60 and r4.63–r4.66:
+ * function owes, §5.1's table:
  * - inline whole data owes one store boundary at the host value's own span, against the type admitted there, and C1
  *   beside it at that span unless its place is published; reached through a projection of the carrier's
  *   result, it is a member of the data;
@@ -93,7 +93,7 @@ function callSpan(source: string, start: number): string {
 type State = "published" | "later" | "decided";
 
 /**
- * The records `floor`'s shape owes by the rule function (§5.1 with TABLE r4.60, r4.63–r4.66), sorted: for its source,
+ * The records `floor`'s shape owes by the rule function (§5.1), sorted: for its source,
  * the named data's binding `name` where it is named (`let name = hostValue` first).
  */
 export function owed(
@@ -124,7 +124,7 @@ export function owed(
   };
   // each destination path's state: the place itself published by its one store or decided by the later one; a
   // collection's element decided at the declaration where the carrier passes the decision on (a typed default's literal
-  // does not: F18 decides the list, its element open beside host data, TABLE r4.66 (3) with A7)
+  // does not: F18 decides the list, its element open beside host data, with A7)
   const whole: State = later ? "later" : "published";
   const element: State = floor.declares === true ? "decided" : whole;
   const paths = (list: string): (readonly [string, string, State])[] => [

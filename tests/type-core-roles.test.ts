@@ -112,7 +112,7 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
  * item's C1 at the store's value, the member's own place's at its read), a choice over a held list (§3.3's
  * record boundary beside C1), a union holding a reference across two carriers (a list or the speaker from an
  * unrestricted dict's values; opaque by dispatch, checked at its consumer), and nullable root and inner receivers of a
- * member (r4.60 beside each receiver's C5 check). The eighth, plain options (`askChoice 1, hostValue`), and the mixed
+ * member (beside each receiver's C5 check). The eighth, plain options (`askChoice 1, hostValue`), and the mixed
  * selected-value and absent-value-text lists in both element orders are the cells test's (D1).
  */
 test("the role matrix's compositions give their exact records, in both orders (§6)", () => {

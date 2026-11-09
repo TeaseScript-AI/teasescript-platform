@@ -166,7 +166,7 @@ const a3GuardedAliasMarks = (() => {
         (k) =>
           `let seed = ${Array.from({ length: k }).reduce((lit) => `{x: ${lit}, t: 3}`, "3")}\nlet p0 = seed\n${many(k - 1, (i) => `if p${i}.x.t is integer { say "ok" }\nlet p${i + 1} = p${i}.x`)}\n${many(k, (j) => `let q${j} = p${k - 1}\nlet o${j}: integer = q${j}.t`)}`,
       ],
-      // r4.23 (round 12): one holder per source and projection, references composing (W36–W38): k guarded projected aliases
+      // (round 12): one holder per source and projection, references composing (W36–W38): k guarded projected aliases
       // of one source read at k siblings (Sol r6 D1, also in wrappers), k enclosing wrappers of one guarded alias (Astra r6
       // D2: no re-seated reads), an alias forest merged into one place (Astra r6 D1b), k reads of one source in a literal
       // (one reference, not k)
@@ -190,7 +190,7 @@ const a3GuardedAliasMarks = (() => {
         (k) =>
           `let seed = {${many(k + 1, (i) => `n${i}: 3`, ", ")}}\nlet merged = seed\n${many(k, (i) => `let a${i} = seed\nif a${i}.n0 is not integer { exit }\nlet b${i} = a${i}\nif b${i}.n0 is not integer { exit }\nlet c${i} = b${i}\nif hostFlag { merged = c${i} }`)}\n${many(k, (j) => `repeat merged.n${j + 1} {}`)}`,
       ],
-      // r4.28 (round 12b, W40): k functions each testing a different field and copying the record into one place, read at k
+      // (round 12b, W40): k functions each testing a different field and copying the record into one place, read at k
       // fields: one group visit per field, never every group
       [
         "callable groups per tested field",
@@ -429,7 +429,7 @@ const a3StoreAndCallCorridors = (() => {
         (k) =>
           `let n = 1\nfunction restore {\nn = 2\n}\n${many(k, () => "if hostFlag { n = null\nrestore() }")}\n${many(k, () => "repeat n {}")}\nexit`,
       ],
-      // round 16 (r4.33): child layers with their own stores or tests share the prefix's
+      // round 16: child layers with their own stores or tests
       [
         "child layers with own stores",
         (k) =>

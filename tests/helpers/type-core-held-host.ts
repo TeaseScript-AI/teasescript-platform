@@ -44,8 +44,8 @@ import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracl
 import { sampled } from "./sweep.js";
 
 /*
- * Host data a script place holds through its stores, read after a settled program stop (#1432, #1415; S3 §5, TABLE
- * r4.113, the mark-ownership rule of S8: a stop changes nothing of the unstopped analysis but what its deferred marks
+ * Host data a script place holds through its stores, read after a settled program stop (#1432, #1415; S3 §5,
+ * the mark-ownership rule of S8: a stop changes nothing of the unstopped analysis but what its deferred marks
  * stand for, each carrying its obligation; at a combined stop the unstopped analysis is the run at the same demand
  * allowance, except where the finishing walk answers a read the demand stop left `unknown`,
  * `combinedStop`). A generated family over the holder: a list's element, an object's property,
@@ -712,7 +712,7 @@ export function testedAllowances(phase: string, low: number, high: number, step 
 const recordOf = (d: { readonly code: string; readonly site: { start: number; end: number } }) =>
   `${d.code} ${d.site.start}:${d.site.end}`;
 
-/** A site's identity: its file and offsets, never offsets alone (TABLE r4.290's inventory, (i)). */
+/** A site's identity: its file and offsets, never offsets alone. */
 const siteKey = (site: {
   readonly file: number;
   readonly start: number;
@@ -747,7 +747,7 @@ function domainOf(against: Obligation["against"]): ReadonlySet<string> {
 const NON_EMPTY: ReadonlySet<string> = new Set(["non-empty"]);
 
 /**
- * A check's accepted domain (TABLE r4.290's inventory, amended): an empty check's non-emptiness, the family it names its
+ * A check's accepted domain: an empty check's non-emptiness, the family it names its
  * label alone (its plan content, a member read's store requirement, reads no `against`: `runtimeChecks` in
  * `core/check-result/runtime-plan.ts`);
  * any other check's kinds by its `against` (`domainOf`).
@@ -770,7 +770,7 @@ const intersect = (a: ReadonlySet<string>, b: ReadonlySet<string>): ReadonlySet<
 const placeOf = (check: Obligation): string =>
   JSON.stringify([siteKey(check.site), check.target, check.boundary]);
 
-/** A check's slot (TABLE r4.290's inventory, (i)): its place and its kind; its accepted domain is compared apart. */
+/** A check's slot: its place and its kind; its accepted domain is compared apart. */
 const slotOf = (check: Obligation): string => JSON.stringify([placeOf(check), check.kind]);
 
 /** The domains of the checks at a slot, as one text (a set of sets). */
@@ -810,8 +810,9 @@ export interface CombinedStop {
    */
   readonly unidentified: ReadonlySet<string>;
   /**
-   * The coarse (a) reading's counted class, never a pass (TABLE r4.299): the reference's consumer checks (a) would take
-   * but for open reads of their unit the stopped analysis did not answer, each with those reads' keys; and their records.
+   * The coarse (a) reading's counted class, never a pass
+   * (docs/specifications/type-inference-accepted-record.md#r4-299): the reference's consumer checks (a) would take but
+   * for open reads of their unit the stopped analysis did not answer, each with those reads' keys; and their records.
    */
   readonly coarse: {
     readonly checks: ReadonlyMap<string, readonly string[]>;
@@ -860,7 +861,7 @@ const unsettled = (items: readonly Item[]): boolean =>
 const LITERAL_KINDS = new Set(["listLiteral", "setLiteral", "dictLiteral", "objectLiteral"]);
 
 /**
- * Whether the store whose value stands at `store` holds the value at `value` (TABLE r4.290's inventory, (iii)): that
+ * Whether the store whose value stands at `store` holds the value at `value`: that
  * value itself, or one its literals hold, through any parentheses (`unwrap`, which the lowering does not materialize),
  * each compared by its whole site.
  */
@@ -924,8 +925,7 @@ interface RecordedLabels {
 
 /**
  * The reads an analysis's consumers made (`Consumers.valueItems`, their one read, unstopped or finishing), the values
- * they left to their contracts and the warnings they emitted: the last walk's, as it published the analysis's checks
- * (TABLE r4.290's inventory, (ii), the coarse reading of r4.299).
+ * they left to their contracts and the warnings they emitted: the last walk's, as it published the analysis's checks.
  */
 const consumerReads = new WeakMap<object, Recorded>();
 
@@ -1409,8 +1409,8 @@ export function labelIdentities(answers: Answers): LabelIdentities | null {
 }
 
 /**
- * The precise label forms a stopped check carries where the demand-only reference spells the generic one (#1595,
- * TABLE r4.322), compared as the compiler made both labels (`LabelIdentity`), never read back from a site, an expression
+ * The precise label forms a stopped check carries where the demand-only reference spells the generic one (#1595),
+ * compared as the compiler made both labels (`LabelIdentity`), never read back from a site, an expression
  * or a name (the lead's ruling on Codex r6). The compiler's label grammar (`keyLabel` in `consumers/names.ts`):
  * - a root: a place's label, a binding's name, a parameter `F.P`, a result `F.result`; else the value's own text;
  * - each step below it: a property's name; a selection, an index or a `get`, spelled `element`, or `entry` where every
@@ -1582,7 +1582,7 @@ export function provenRelabel(
 }
 
 /**
- * r4.322's proof of a more precise label (`provenRelabel`'s condition (1), #1595): the stopped label is one of the
+ * Proof of a more precise label (`provenRelabel`'s condition (1), #1595): the stopped label is one of the
  * compiler's two precise forms of the reference's (`relabelForm`), and the natural analysis names that very value so
  * (a check of its own at `x`'s whole site targeting the label or below it), or the written type at the reference
  * label's root proves its form (`writtenProves`).
@@ -1617,7 +1617,7 @@ function labelProved(
 }
 
 /**
- * TABLE r4.363 (#1708, A′): the 17 diagnostic rule variants (`DiagnosticRule`) and, for each, whether its consumer
+ * #1708, A′: the 17 diagnostic rule variants (`DiagnosticRule`) and, for each, whether its consumer
  * builds the obligation's words from the kinds it read. Only `member`'s does (`memberChecks`: a lacking kind `has`, an
  * unknown the method table's takers, a null `is not null`); every other variant's words are its rule's and label's,
  * compared exactly. A variant missing from this table is refused. `tests/type-core-stop.test.ts` holds the table to the
@@ -1836,7 +1836,7 @@ const sameKinds = (kinds: readonly string[], domain: ReadonlySet<string>): boole
 };
 
 /**
- * The owner's extension of r4.322 to sentence parts (TABLE r4.363, #1708, A′): the stopped analysis owes the reference's
+ * The owner's extension to sentence parts (#1708, A′): the stopped analysis owes the reference's
  * check `u` in words derived from a proven type where all three hold for the stopped check `x`:
  * 1. the stopped record's kinds rest on independently proven type information: the written leaf domain of its label
  *    (`leafKinds`), or a settled read of the same key in the unit that emitted it (never a finishing read, never
@@ -1889,7 +1889,7 @@ export function provenRewording(
     // (3): the labels as recorded, the same or the relabel #1687 proves; the words
     const [from, to] = [referenceLabels.of(u), stoppedLabels.of(x)];
     if (from === null || to === null) return false;
-    // (a changed label carries r4.322's own proof, whatever the words: Codex r1's B2 on #1759)
+    // (a changed label carries its own proof, whatever the words: Codex r1's B2 on #1759)
     if (
       x.target !== u.target &&
       !labelProved(x, from, to, natural, reference.graph, referenceLabels, stoppedLabels)
@@ -2159,7 +2159,7 @@ function ownership(unstopped: Answers, stopped: Answers, rule?: CombinedStop): s
 
 /**
  * Whether a problem `heldProblems` reports is a named exception (counted, never a pass): an issue's, or the coarse (a)
- * reading's class (TABLE r4.299).
+ * reading's class (docs/specifications/type-inference-accepted-record.md#r4-299).
  *
  * @public (the whole family's driver outside CI reads it)
  */
@@ -2194,7 +2194,7 @@ export function widerThan(required: readonly Obligation[], stopped: Answers): st
 }
 
 /**
- * #1604's invariant at a combined stop, against the demand-only run R (TABLE r4.290's (w) made exact by count): at each
+ * #1604's invariant at a combined stop, against the demand-only run R (clause (w) made exact by count): at each
  * place (whole site, target, boundary) and dimension, the checks the stop owes (kept and marks' obligations) are R's
  * there, or replace R's one for one (no more of them than R has) letting through together exactly R's domain, or are
  * none where the rule's (a) takes every check R owes there. Each other place is a problem: `missing` (R owes there, the
