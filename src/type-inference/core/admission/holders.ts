@@ -23,11 +23,17 @@ type Part = ReadonlySet<string> | string;
 /**
  * A list's positions by the first step their contribution can hold there, and the positions of those unproved: per
  * step, the positions of each part holding it, so a literal's names are indexed once however many contributions it
- * reaches (each list in order; a contribution two of whose parts hold a step is in two).
+ * reaches (each list in order; a contribution two of whose parts hold a step is in two). A step's items are made at
+ * its first query and kept for the snapshot (`selected`): each position list's items once, and a step that more than
+ * one list holds merged once, all within `budget`, what is left of the index's own construction's charges.
  */
-interface StepPositions {
+interface StepPositions<T> {
+  readonly list: readonly T[];
   readonly steps: ReadonlyMap<string, readonly (readonly number[])[]>;
   readonly any: readonly number[];
+  readonly items: Map<readonly number[], readonly T[]>;
+  readonly selections: Map<string, readonly T[] | null>;
+  budget: number;
 }
 
 /**
@@ -55,8 +61,8 @@ export interface PrefixHolders {
   /** Whether the whole stores' construction is in `cost`, once their list is known. */
   costsWhole: boolean;
   /** The settled stores' positions and the whole stores', each made once paid for. */
-  entries: StepPositions | null;
-  whole: StepPositions | null;
+  entries: StepPositions<PrefixEntry> | null;
+  whole: StepPositions<Definition> | null;
 }
 
 /** A path's first step where the index can select by it: an ordinary property, its name holding no `.` (`null` else). */
@@ -135,6 +141,7 @@ function holdersOf(
   if (state.saved >= state.cost) {
     state.entries ??= positions(
       admission,
+      state.stores!.list,
       state.supports!.map((own) => (own === null ? null : [own])),
     );
     if (state.list !== null) state.whole = wholePositions(admission, state);
@@ -209,7 +216,7 @@ export function wholeHolding(
 ): readonly Definition[] | null {
   const state = holdersOf(admission, prefix, rest, list, null);
   if (state?.whole == null) return null;
-  return selected(admission, state.whole, firstStep(rest)!, list);
+  return selected(admission, state.whole, firstStep(rest)!);
 }
 
 /** The prefix's settled stores a decided path's offending scan reads (`decide`), as `wholeHolding` selects. */
@@ -221,35 +228,77 @@ export function entriesHolding(
 ): readonly PrefixEntry[] | null {
   const state = holdersOf(admission, prefix, rest, null, stores);
   if (state?.entries == null) return null;
-  return selected(admission, state.entries, firstStep(rest)!, stores.list);
+  return selected(admission, state.entries, firstStep(rest)!);
 }
 
 /**
- * A list's items at the positions of the parts holding the step and the unproved ones, each charged, in the list's
- * order and each once (a sort where more than one part holds it: a contribution may be under two).
+ * A list's items at the positions of the parts holding the step and the unproved ones, in the list's order and each
+ * once, made at the step's first query and kept (the walks' later queries cost their lookup alone): one list's items,
+ * made once for every step it alone holds, or the lists merged, each position each round charged, then their items;
+ * `null`, the whole list, where no store can be left out or the index's budget does not cover them. What the
+ * selections make and keep is at most the index's construction again.
  */
 function selected<T>(
   admission: Admission,
-  index: StepPositions,
+  index: StepPositions<T>,
   step: string,
-  list: readonly T[],
-): T[] {
+): readonly T[] | null {
+  const known = index.selections.get(step);
+  if (known !== undefined) return known;
+  const work = admission.pass.program.work;
   const parts = index.steps.get(step) ?? [];
   const all = index.any.length === 0 ? parts : [...parts, index.any];
-  let size = 0;
-  for (const at of all) size += at.length;
-  // (the merged list is the walk's own, kept by nothing)
-  admission.pass.program.work.charge("checks", size);
-  if (all.length === 1) return all[0]!.map((at) => list[at]!);
-  const merged = all.flat().sort((a, b) => a - b);
-  return merged.filter((at, i) => i === 0 || merged[i - 1] !== at).map((at) => list[at]!);
+  work.charge("indexSteps", all.length);
+  let found: readonly T[] | null = all.length === 0 ? [] : null;
+  const single = all.length === 1 ? index.items.get(all[0]!) : undefined;
+  if (single !== undefined) found = single;
+  else if (all.length > 0) {
+    let size = 0;
+    for (const at of all) size += at.length;
+    const cost = size * (all.length === 1 ? 1 : Math.ceil(Math.log2(all.length)) + 1);
+    if (size < index.list.length && cost <= index.budget) {
+      index.budget -= cost;
+      const at = all.length === 1 ? all[0]! : merged(admission, all);
+      work.charge("indexSteps", at.length);
+      keep(admission.work, at.length);
+      found = at.map((position) => index.list[position]!);
+      if (all.length === 1) index.items.set(all[0]!, found);
+    }
+  }
+  keep(admission.work, 1);
+  index.selections.set(step, found);
+  return found;
+}
+
+/**
+ * Ordered position lists merged in pairs, each round a linear pass over what is left (as many rounds as the log2 of
+ * the lists' count, rounded up), every position each round charged; a position in two lists is kept once.
+ */
+function merged(admission: Admission, lists: readonly (readonly number[])[]): readonly number[] {
+  const work = admission.pass.program.work;
+  let round = lists;
+  while (round.length > 1) {
+    const next: (readonly number[])[] = [];
+    for (let i = 0; i < round.length; i += 2) {
+      const [x, y] = [round[i]!, round[i + 1] ?? []];
+      work.charge("indexSteps", x.length + y.length);
+      const out: number[] = [];
+      for (let a = 0, b = 0; a < x.length || b < y.length;) {
+        const taken = b >= y.length || (a < x.length && x[a]! <= y[b]!) ? x[a++]! : y[b++]!;
+        if (out.at(-1) !== taken) out.push(taken);
+      }
+      next.push(out);
+    }
+    round = next;
+  }
+  return round[0] ?? [];
 }
 
 /**
  * The index of a prefix's whole stores (`wholeOf`'s classes), each charged: each store's parts from the settled stores
  * it brought (read once, by `PrefixEntry.ds`), then per class, its members' parts (`supportOf`), each class under each.
  */
-function wholePositions(admission: Admission, state: PrefixHolders): StepPositions {
+function wholePositions(admission: Admission, state: PrefixHolders): StepPositions<Definition> {
   const work = admission.pass.program.work;
   const stores = state.stores!;
   // (each whole store's literals from the settled stores it brought; `null` where one is unproved)
@@ -276,6 +325,7 @@ function wholePositions(admission: Admission, state: PrefixHolders): StepPositio
   for (const { defs } of stores.also) for (const d of defs) layered.add(d);
   return positions(
     admission,
+    state.list!,
     state.list!.map((representative) => {
       work.charge("indexSteps");
       const parts = new Set<Part>();
@@ -383,10 +433,11 @@ function copySupport(
  * A list's positions by the parts each holds (`null`: every step), then each part's positions under each step it
  * holds, every position, posting and name charged and kept.
  */
-function positions(
+function positions<T>(
   admission: Admission,
+  list: readonly T[],
   supports: readonly (Iterable<Part> | null)[],
-): StepPositions {
+): StepPositions<T> {
   const work = admission.pass.program.work;
   const byPart = new Map<Part, number[]>();
   const any: number[] = [];
@@ -417,5 +468,13 @@ function positions(
       } else known.push(list);
     }
   keep(admission.work, any.length + kept);
-  return { steps, any };
+  // (the selections' budget: this construction's charges, one a position and one a part or name it posts)
+  return {
+    list,
+    steps,
+    any,
+    items: new Map(),
+    selections: new Map(),
+    budget: supports.length + kept,
+  };
 }
