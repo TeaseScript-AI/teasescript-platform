@@ -10,11 +10,11 @@ import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import { Input } from "@/components/ui/input";
 import Switch from "@/components/ui/switch/Switch.vue";
 import { Textarea } from "@/components/ui/textarea";
+import { validateScriptStorageEntries, type SerializableRuntimeValue } from "../../../src/index.js";
 import {
-  validateScriptStorageEntries,
-  type SerializableRuntimeValue,
-} from "../../../src/index.js";
-import { CheckpointError, serializeValidatedRuntimeJson } from "../../../src/runtime/snapshot/checkpoint.js";
+  CheckpointError,
+  serializeValidatedRuntimeJson,
+} from "../../../src/runtime/snapshot/checkpoint.js";
 import { storageNotation } from "../../storage-preview.js";
 import type { PlayerSessionHost, SavedDataEditResult } from "./usePlayerSession";
 
@@ -45,7 +45,8 @@ const text = ref("");
 const flag = ref(false);
 const problem = ref<string | null>(null);
 const saving = ref(false);
-const TOO_LARGE = "This value is too large to show as text. Enter a new value to replace it, or delete it.";
+const TOO_LARGE =
+  "This value is too large to show as text. Enter a new value to replace it, or delete it.";
 
 function typeOf(value: SerializableRuntimeValue): ValueType {
   if (typeof value === "string") return "text";
@@ -216,15 +217,18 @@ async function submit() {
         <DialogTitle class="break-all">{{ title }}</DialogTitle>
         <DialogDescription>
           <template v-if="live">
-            Stored in this browser first; the running session's next load then returns it. Values the script already
-            loaded do not change.
+            Stored in this browser first; the running session's next load then returns it. Values
+            the script already loaded do not change.
           </template>
           <template v-else>Stored in this browser; the next Start loads it.</template>
         </DialogDescription>
       </DialogHeader>
       <form class="grid gap-4 text-sm" novalidate @submit.prevent="submit">
         <template v-if="edit?.kind === 'delete'">
-          <p>The script's next load of this key gets its default. Saved photos stay until no saved value uses them.</p>
+          <p>
+            The script's next load of this key gets its default. Saved photos stay until no saved
+            value uses them.
+          </p>
         </template>
         <template v-else>
           <label v-if="edit?.kind === 'add'" class="grid gap-2">
@@ -239,7 +243,9 @@ async function submit() {
               data-storage-editor-type
               @change="convertDraft"
             >
-              <option v-for="(label, name) in typeLabels" :key="name" :value="name">{{ label }}</option>
+              <option v-for="(label, name) in typeLabels" :key="name" :value="name">
+                {{ label }}
+              </option>
             </select>
           </label>
           <label v-if="type === 'boolean'" class="flex min-h-11 items-center justify-between gap-4">
@@ -272,7 +278,13 @@ async function submit() {
           <AlertDescription>{{ problem }}</AlertDescription>
         </Alert>
         <div class="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="outline" class="min-h-11" :disabled="saving" @click="emit('close')">
+          <Button
+            type="button"
+            variant="outline"
+            class="min-h-11"
+            :disabled="saving"
+            @click="emit('close')"
+          >
             Cancel
           </Button>
           <Button

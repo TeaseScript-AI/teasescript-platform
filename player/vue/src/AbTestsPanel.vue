@@ -35,7 +35,8 @@ function setShare(event: Event) {
 <template>
   <div class="grid gap-4 p-4 text-sm" data-ab-tests-panel>
     <p class="text-muted-foreground">
-      Variants of the Player's look that are being compared. A choice applies at once and stays in this browser.
+      Variants of the Player's look that are being compared. A choice applies at once and stays in
+      this browser.
     </p>
     <fieldset class="grid gap-2 border-t pt-4" data-ab-test="titlebar">
       <legend class="font-medium">Title bar on short screens</legend>

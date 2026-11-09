@@ -43,8 +43,15 @@ function showMore(path: string) {
         </span>
         <div class="flex min-w-0 flex-wrap items-center gap-2">
           <Badge variant="outline">{{ row.preview.type }}</Badge>
-          <span class="min-w-0 break-words font-mono" data-storage-preview>{{ row.preview.text }}</span>
-          <StoragePhoto v-if="row.preview.photo" :key="row.preview.photo" :reference="row.preview.photo" :player="player" />
+          <span class="min-w-0 break-words font-mono" data-storage-preview>{{
+            row.preview.text
+          }}</span>
+          <StoragePhoto
+            v-if="row.preview.photo"
+            :key="row.preview.photo"
+            :reference="row.preview.photo"
+            :player="player"
+          />
         </div>
         <Button
           v-if="row.preview.size"

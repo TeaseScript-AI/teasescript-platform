@@ -67,7 +67,8 @@ const sourceFocus = computed(() => {
 function toggleExpanded() {
   const range = code.value?.enclosing;
   expanded.value = !expanded.value && range != null;
-  sourceRows.value = expanded.value && range ? Math.min(range.to - range.from + 1, 40) : CONTEXT_ROWS;
+  sourceRows.value =
+    expanded.value && range ? Math.min(range.to - range.from + 1, 40) : CONTEXT_ROWS;
 }
 const expandLabels = {
   function: "Show whole function",

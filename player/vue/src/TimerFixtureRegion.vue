@@ -29,14 +29,20 @@ function observe() {
 useIntervalFn(() => {
   if (!props.paused) observe();
 }, 1000);
-watch(() => props.paused, (paused) => {
-  if (paused) observe();
-  else lastObservation = performance.now();
-});
-watch(() => props.reset, () => {
-  elapsedSeconds.value = 0;
-  lastObservation = performance.now();
-});
+watch(
+  () => props.paused,
+  (paused) => {
+    if (paused) observe();
+    else lastObservation = performance.now();
+  },
+);
+watch(
+  () => props.reset,
+  () => {
+    elapsedSeconds.value = 0;
+    lastObservation = performance.now();
+  },
+);
 
 const timers = computed<readonly PlayerTimerPresentation[]>(() => {
   const kind = props.kind;

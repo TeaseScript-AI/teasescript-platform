@@ -434,7 +434,8 @@ watch(
     // Host input happens at the observed time; settling must not be refused once the tab is open.
     const observed = props.observeTime ? props.observeTime() : session;
     const request = observed ? playerRuntimeUrlRequest(observed) : null;
-    if (!observed || request?.actionId !== id || !request.atOnce || !openUrlTab(request.url)) return;
+    if (!observed || request?.actionId !== id || !request.atOnce || !openUrlTab(request.url))
+      return;
     const result = openPlayerRuntimeUrl(observed);
     if (result) emit("update:session", result.session);
   },
@@ -763,8 +764,7 @@ async function imageControl(control: ImageControl) {
   const capture = props.capture;
   if (!capture || !props.session || submitting.value || readingImage.value) return;
   if (control === "file") return composer.value?.openPicker();
-  if (control === "use")
-    return complete(answer("button", (session) => capture.use(session)));
+  if (control === "use") return complete(answer("button", (session) => capture.use(session)));
   const ready = props.prepareInput?.() ?? true;
   if (ready !== true && !(await ready)) return;
   if (control === "camera") capture.openCamera();

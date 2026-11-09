@@ -32,7 +32,8 @@ defineProps<{ view: ImageCaptureView }>();
         <Alert>
           <CameraOff aria-hidden="true" />
           <AlertDescription>
-            The camera cannot be used. Check that it is connected and that this page may use it, then try again.
+            The camera cannot be used. Check that it is connected and that this page may use it,
+            then try again.
           </AlertDescription>
         </Alert>
       </div>

@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import type { AvatarImageProps } from "reka-ui"
-import { AvatarImage } from "reka-ui"
-import { definedProps } from "@/lib/definedProps"
+import type { AvatarImageProps } from "reka-ui";
+import { AvatarImage } from "reka-ui";
+import { definedProps } from "@/lib/definedProps";
 
-const props = defineProps<AvatarImageProps>()
+const props = defineProps<AvatarImageProps>();
 </script>
 
 <template>
-  <AvatarImage data-slot="avatar-image" v-bind="definedProps(props)" class="aspect-square size-full object-cover">
+  <AvatarImage
+    data-slot="avatar-image"
+    v-bind="definedProps(props)"
+    class="aspect-square size-full object-cover"
+  >
     <slot />
   </AvatarImage>
 </template>

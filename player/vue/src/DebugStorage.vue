@@ -29,7 +29,10 @@ async function refresh() {
   try {
     const entries = await props.player.readSavedData();
     // UTF-16 code unit order, as keys compare in the script.
-    next = { state: "ready", entries: [...entries].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)) };
+    next = {
+      state: "ready",
+      entries: [...entries].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
+    };
   } catch {
     next = { state: "unavailable" };
   }
@@ -100,8 +103,8 @@ async function refreshNow() {
       </Button>
     </div>
     <p class="text-muted-foreground">
-      What this script saved in this browser. An edit is stored here first; a running session's next load then returns
-      it, while values the script already loaded stay as they are.
+      What this script saved in this browser. An edit is stored here first; a running session's next
+      load then returns it, while values the script already loaded stay as they are.
     </p>
     <div class="flex min-w-0 flex-wrap items-center gap-2">
       <Button
@@ -120,13 +123,25 @@ async function refreshNow() {
       </Badge>
     </div>
     <p v-if="!canEdit" class="text-muted-foreground">
-      Saved values cannot be changed now: Continue the session first, or wait for an import or clear to finish.
+      Saved values cannot be changed now: Continue the session first, or wait for an import or clear
+      to finish.
     </p>
     <p v-if="savedNote" role="status" data-debug-storage-saved>{{ savedNote }}</p>
     <!-- Stacked rows: a narrow panel has no room for a key column beside nested values. -->
-    <ul v-if="saved.state === 'ready' && saved.entries.length" class="grid divide-y border-y" aria-label="Saved values">
-      <li v-for="entry in saved.entries" :key="entry.key" class="grid min-w-0 gap-1 py-2" data-debug-storage-row>
-        <span class="break-words font-mono font-semibold" data-debug-storage-key>{{ storageNotation(entry.key) }}</span>
+    <ul
+      v-if="saved.state === 'ready' && saved.entries.length"
+      class="grid divide-y border-y"
+      aria-label="Saved values"
+    >
+      <li
+        v-for="entry in saved.entries"
+        :key="entry.key"
+        class="grid min-w-0 gap-1 py-2"
+        data-debug-storage-row
+      >
+        <span class="break-words font-mono font-semibold" data-debug-storage-key>{{
+          storageNotation(entry.key)
+        }}</span>
         <StorageValue :value="entry.value" :player="player" />
         <div class="flex flex-wrap gap-2">
           <Button
@@ -158,7 +173,9 @@ async function refreshNow() {
       <ul class="grid gap-2" data-debug-storage-photos>
         <li v-for="photo in photos" :key="photo.reference" class="flex min-w-0 items-center gap-2">
           <StoragePhoto :key="photo.reference" :reference="photo.reference" :player="player" />
-          <span class="min-w-0 break-all">Used by {{ photo.usedBy.map(storageNotation).join(", ") }}</span>
+          <span class="min-w-0 break-all"
+            >Used by {{ photo.usedBy.map(storageNotation).join(", ") }}</span
+          >
         </li>
       </ul>
     </section>

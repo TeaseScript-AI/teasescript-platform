@@ -108,7 +108,9 @@ function returnFocus(event: Event) {
       </DialogHeader>
 
       <Collapsible class="grid gap-2">
-        <CollapsibleDisclosure data-session-error-technical-toggle>Technical details</CollapsibleDisclosure>
+        <CollapsibleDisclosure data-session-error-technical-toggle
+          >Technical details</CollapsibleDisclosure
+        >
         <CollapsibleContent>
           <div class="grid gap-2 text-xs" data-session-error-technical>
             <p class="break-words" data-session-error-code>

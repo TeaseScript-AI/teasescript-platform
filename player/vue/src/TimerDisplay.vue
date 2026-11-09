@@ -137,7 +137,10 @@ const accessibleName = computed(() => {
 }
 
 .timer-time {
-  color: var(--theme-overlay-text, color-mix(in oklab, var(--timer-foreground) 72%, var(--timer-accent)));
+  color: var(
+    --theme-overlay-text,
+    color-mix(in oklab, var(--timer-foreground) 72%, var(--timer-accent))
+  );
   font-size: calc(var(--timer-size) * 0.32);
   font-weight: 350;
   line-height: 1;
@@ -162,11 +165,17 @@ const accessibleName = computed(() => {
 }
 
 @keyframes timer-mystery-drift {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .timer-arc { transition: none; }
-  .timer-display[data-kind="mystery"] .timer-rotor { animation: none; }
+  .timer-arc {
+    transition: none;
+  }
+  .timer-display[data-kind="mystery"] .timer-rotor {
+    animation: none;
+  }
 }
 </style>

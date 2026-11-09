@@ -116,7 +116,9 @@ function resized(start: FloatingPlace, handle: Handle, dx: number, dy: number): 
   // The kept sides limit the size: the window grows only into the space beyond its moving sides.
   const room = Math.min(
     handle.x < 0 ? start.x + start.width - EDGE : bounds.value.width - EDGE - start.x,
-    widthFitting(handle.y < 0 ? start.y + startHeight - EDGE : bounds.value.height - EDGE - start.y),
+    widthFitting(
+      handle.y < 0 ? start.y + startHeight - EDGE : bounds.value.height - EDGE - start.y,
+    ),
   );
   const width = Math.min(Math.max(start.width + grown, Math.min(MIN_WIDTH, room)), room);
   return clamp({
@@ -244,7 +246,13 @@ function measured(next: number) {
 </template>
 
 <style scoped>
-.floating-viewfinder-anchor { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+.floating-viewfinder-anchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
 .floating-viewfinder {
   position: absolute;
   z-index: 15;
@@ -252,8 +260,12 @@ function measured(next: number) {
   touch-action: none;
   user-select: none;
 }
-.floating-viewfinder:active { cursor: grabbing; }
-.floating-viewfinder:focus-visible { outline: none; }
+.floating-viewfinder:active {
+  cursor: grabbing;
+}
+.floating-viewfinder:focus-visible {
+  outline: none;
+}
 .floating-viewfinder:focus-visible .floating-viewfinder-window {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
@@ -278,13 +290,63 @@ function measured(next: number) {
   backdrop-filter: blur(6px);
 }
 /* Invisible bands over the window's edges and corners, like a desktop window's resize borders; corners lie on top. */
-.floating-viewfinder-handle { position: absolute; }
-[data-handle="n"] { top: -4px; left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
-[data-handle="s"] { bottom: -4px; left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
-[data-handle="w"] { left: -4px; top: 10px; bottom: 10px; width: 8px; cursor: ew-resize; }
-[data-handle="e"] { right: -4px; top: 10px; bottom: 10px; width: 8px; cursor: ew-resize; }
-[data-handle="nw"] { top: -4px; left: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
-[data-handle="ne"] { top: -4px; right: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
-[data-handle="sw"] { bottom: -4px; left: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
-[data-handle="se"] { bottom: -4px; right: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
+.floating-viewfinder-handle {
+  position: absolute;
+}
+[data-handle="n"] {
+  top: -4px;
+  left: 10px;
+  right: 10px;
+  height: 8px;
+  cursor: ns-resize;
+}
+[data-handle="s"] {
+  bottom: -4px;
+  left: 10px;
+  right: 10px;
+  height: 8px;
+  cursor: ns-resize;
+}
+[data-handle="w"] {
+  left: -4px;
+  top: 10px;
+  bottom: 10px;
+  width: 8px;
+  cursor: ew-resize;
+}
+[data-handle="e"] {
+  right: -4px;
+  top: 10px;
+  bottom: 10px;
+  width: 8px;
+  cursor: ew-resize;
+}
+[data-handle="nw"] {
+  top: -4px;
+  left: -4px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+[data-handle="ne"] {
+  top: -4px;
+  right: -4px;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+}
+[data-handle="sw"] {
+  bottom: -4px;
+  left: -4px;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+}
+[data-handle="se"] {
+  bottom: -4px;
+  right: -4px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
 </style>

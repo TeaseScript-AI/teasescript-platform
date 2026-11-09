@@ -53,8 +53,17 @@ const emit = defineEmits<{ switchCamera: [] }>();
 <style scoped>
 /* Above anything the Player draws on the picture, such as the self-timer's countdown. */
 .viewfinder-controls {
-  position: absolute; left: 8px; bottom: 8px; z-index: 1; display: flex; gap: 2px;
-  border: 1px solid var(--media-border); border-radius: 8px; color: var(--media-text);
-  background: var(--media-surface); box-shadow: 0 1px 3px var(--media-shadow); backdrop-filter: blur(3px);
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 1;
+  display: flex;
+  gap: 2px;
+  border: 1px solid var(--media-border);
+  border-radius: 8px;
+  color: var(--media-text);
+  background: var(--media-surface);
+  box-shadow: 0 1px 3px var(--media-shadow);
+  backdrop-filter: blur(3px);
 }
 </style>

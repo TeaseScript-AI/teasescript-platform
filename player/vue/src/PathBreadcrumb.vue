@@ -40,7 +40,8 @@ async function fit() {
   if (props.wrap) return;
   await nextTick();
   const list = (breadcrumb.value?.$el as HTMLElement | undefined)?.querySelector("ol");
-  const overflows = () => list !== null && list !== undefined && list.scrollWidth > list.clientWidth;
+  const overflows = () =>
+    list !== null && list !== undefined && list.scrollWidth > list.clientWidth;
   while (run === fitting && overflows() && hidden.value < parts.value.length - 2) {
     hidden.value += 1;
     await nextTick();

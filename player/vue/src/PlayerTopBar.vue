@@ -31,8 +31,11 @@ let hideTimer: ReturnType<typeof setTimeout> | undefined;
 
 function autoHideActive() {
   const shell = topBar.value?.closest("[data-player-vertical]");
-  return props.option === "overlap" && shell?.getAttribute("data-player-vertical") === "constrained" &&
-    shell.getAttribute("data-player-fullscreen") === "inactive";
+  return (
+    props.option === "overlap" &&
+    shell?.getAttribute("data-player-vertical") === "constrained" &&
+    shell.getAttribute("data-player-fullscreen") === "inactive"
+  );
 }
 
 function cancelHide() {
@@ -44,7 +47,11 @@ function cancelHide() {
 const titleText = ref<HTMLElement | null>(null);
 const truncated = ref(false);
 const fullTitleOpen = ref(false);
-const fullTitle = computed(() => (props.title && props.author ? `${props.title} by ${props.author}` : props.title || `by ${props.author}`));
+const fullTitle = computed(() =>
+  props.title && props.author
+    ? `${props.title} by ${props.author}`
+    : props.title || `by ${props.author}`,
+);
 // Below the bar width that hides the title visually, it stays plain text for assistive technology, never a control.
 function measureTitle() {
   const text = titleText.value;
@@ -80,8 +87,11 @@ function tapFullTitle() {
 
 function hideLater() {
   cancelHide();
-  if (pointerInside || fullTitleOpen.value || topBar.value?.contains(document.activeElement)) return;
-  hideTimer = setTimeout(() => { revealed.value = false; }, 3000);
+  if (pointerInside || fullTitleOpen.value || topBar.value?.contains(document.activeElement))
+    return;
+  hideTimer = setTimeout(() => {
+    revealed.value = false;
+  }, 3000);
 }
 
 function show() {
@@ -103,7 +113,8 @@ function leave(event: PointerEvent) {
 }
 
 function tap(event: MouseEvent) {
-  if (event.target instanceof Element && event.target.closest("button, input, select, textarea, a")) return;
+  if (event.target instanceof Element && event.target.closest("button, input, select, textarea, a"))
+    return;
   show();
 }
 
@@ -127,12 +138,40 @@ onBeforeUnmount(cancelHide);
     <h1 class="player-top-bar-title">
       <Tooltip v-if="truncated" :open="fullTitleOpen" @update:open="changeFullTitle">
         <TooltipTrigger as-child>
-          <button type="button" data-player-title-full @pointerdown.capture="pressFullTitle" @click="tapFullTitle"><DebugRoomMark v-if="debugRoom" :on="debugOn" /><span ref="titleText" class="player-top-bar-title-text">{{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span></span></button>
+          <button
+            type="button"
+            data-player-title-full
+            @pointerdown.capture="pressFullTitle"
+            @click="tapFullTitle"
+          >
+            <DebugRoomMark v-if="debugRoom" :on="debugOn" /><span
+              ref="titleText"
+              class="player-top-bar-title-text"
+              >{{ title
+              }}<span v-if="author" class="player-top-bar-author"
+                >{{ title ? " by " : "by " }}{{ author }}</span
+              ></span
+            >
+          </button>
         </TooltipTrigger>
         <!-- A long title wraps within the screen, also one without spaces. -->
-        <TooltipContent :collision-padding="8" class="max-w-(--reka-tooltip-content-available-width) wrap-anywhere" data-player-title-tooltip>{{ fullTitle }}</TooltipContent>
+        <TooltipContent
+          :collision-padding="8"
+          class="max-w-(--reka-tooltip-content-available-width) wrap-anywhere"
+          data-player-title-tooltip
+          >{{ fullTitle }}</TooltipContent
+        >
       </Tooltip>
-      <span v-else-if="title || author || debugRoom"><DebugRoomMark v-if="debugRoom" :on="debugOn" /><span ref="titleText" class="player-top-bar-title-text">{{ title }}<span v-if="author" class="player-top-bar-author">{{ title ? " by " : "by " }}{{ author }}</span></span></span>
+      <span v-else-if="title || author || debugRoom"
+        ><DebugRoomMark v-if="debugRoom" :on="debugOn" /><span
+          ref="titleText"
+          class="player-top-bar-title-text"
+          >{{ title
+          }}<span v-if="author" class="player-top-bar-author"
+            >{{ title ? " by " : "by " }}{{ author }}</span
+          ></span
+        ></span
+      >
     </h1>
     <div class="player-top-bar-actions" role="group" aria-label="Player display controls">
       <slot name="notifications" />
@@ -150,7 +189,7 @@ onBeforeUnmount(cancelHide);
             <Moon v-else class="size-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{{ themeMode === 'dark' ? 'Light theme' : 'Dark theme' }}</TooltipContent>
+        <TooltipContent>{{ themeMode === "dark" ? "Light theme" : "Dark theme" }}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger as-child>
@@ -167,7 +206,13 @@ onBeforeUnmount(cancelHide);
             <Maximize v-else class="size-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{{ fullscreenSupported ? (fullscreen ? 'Exit fullscreen' : 'Enter fullscreen') : 'Fullscreen unavailable in this browser' }}</TooltipContent>
+        <TooltipContent>{{
+          fullscreenSupported
+            ? fullscreen
+              ? "Exit fullscreen"
+              : "Enter fullscreen"
+            : "Fullscreen unavailable in this browser"
+        }}</TooltipContent>
       </Tooltip>
     </div>
     <p v-if="fullscreenError" role="alert" class="player-top-bar-error">{{ fullscreenError }}</p>
@@ -188,8 +233,11 @@ onBeforeUnmount(cancelHide);
   padding: var(--player-edge-space);
   pointer-events: none;
 }
-.player-top-bar-tools { display: contents; }
-.player-top-bar-tools :deep(button), .player-top-bar-actions {
+.player-top-bar-tools {
+  display: contents;
+}
+.player-top-bar-tools :deep(button),
+.player-top-bar-actions {
   flex-shrink: 0;
   pointer-events: auto;
 }
@@ -269,7 +317,9 @@ onBeforeUnmount(cancelHide);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .player-top-bar { transition: none; }
+  .player-top-bar {
+    transition: none;
+  }
 }
 </style>
 
@@ -307,26 +357,33 @@ onBeforeUnmount(cancelHide);
 }
 
 /* A keeps the bar visible and moves its controls left of the timer rail, only while there is a rail. */
-.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"]:has(.stage-right-rail) .player-top-bar[data-placement="left"] {
+.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"]:has(
+    .stage-right-rail
+  )
+  .player-top-bar[data-placement="left"] {
   right: calc(var(--player-timer-rail-width) + var(--player-edge-space));
 }
 
 /* B keeps the controls right-aligned and hides the bar until revealed. */
-.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"] {
+.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"]
+  .player-top-bar[data-placement="overlap"] {
   opacity: 0;
   pointer-events: auto;
   transition: opacity 150ms ease;
 }
-.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"]:is([data-revealed], :focus-within) {
+.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"]
+  .player-top-bar[data-placement="overlap"]:is([data-revealed], :focus-within) {
   opacity: 1;
 }
-.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"]:not([data-revealed]):not(:focus-within) button {
+.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"]
+  .player-top-bar[data-placement="overlap"]:not([data-revealed]):not(:focus-within)
+  button {
   pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"] {
+  .player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"]
+    .player-top-bar[data-placement="overlap"] {
     transition: none;
   }
 }
-
 </style>
