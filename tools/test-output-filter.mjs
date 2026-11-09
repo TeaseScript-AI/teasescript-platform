@@ -1,8 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
-import { fstatSync, globSync, readdirSync } from "node:fs";
+import { fstatSync, globSync } from "node:fs";
 import { join } from "node:path";
 import { testPathArguments } from "./test-arguments.mjs";
-import { shardFiles, shardOption } from "./test-shards.mjs";
+import { shardFiles, shardOption, suiteTestFiles } from "./test-shards.mjs";
 
 // oxlint-disable-next-line no-control-regex -- EVIDENCE: fixture: the pattern matches the ESC character that starts an ANSI escape sequence.
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
@@ -59,7 +59,7 @@ if (arguments_.some((argument) => argument.startsWith("--shard"))) {
 const fullSuite = arguments_.length === 0;
 let testFiles = arguments_;
 if (fullSuite) {
-  const files = readdirSync("dist/tests").filter((file) => file.endsWith(".test.js"));
+  const files = suiteTestFiles("dist/tests", ".test.js");
   testFiles = shardFiles(files, shard?.index ?? 1, shard?.count ?? 1).map((file) =>
     join("dist/tests", file),
   );

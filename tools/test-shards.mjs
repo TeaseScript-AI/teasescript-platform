@@ -1,3 +1,5 @@
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import {
   costlyTestFiles,
   costlyTestSeconds,
@@ -67,6 +69,27 @@ export function shardSeconds(files, index, count) {
   const slots = Array(testFilesAtOnce).fill(startSeconds(index, count));
   for (const file of files) slots[slots.indexOf(Math.min(...slots))] += seconds(file);
   return Math.max(...slots) + endSeconds(index, count);
+}
+
+/** The folders under `tests/` that hold no test files, so the suite reads none of them: a closed list. */
+const NOT_TEST_FOLDERS = new Set(["fixtures", "helpers"]);
+
+/**
+ * The suite's files under `folder` (`tests/` or `dist/tests/`) whose names end in `suffix`, by their path under it: each
+ * one at the top, and each one in a folder one level down other than `fixtures/` and `helpers/` (`NOT_TEST_FOLDERS`),
+ * as `player/x.test.js`. A file at the top is named by its name alone, as the suite named every file before it had
+ * folders, so the costly table's keys, the shard order and the kept seconds stay those of a flat suite.
+ */
+export function suiteTestFiles(folder, suffix) {
+  const files = [];
+  for (const entry of readdirSync(folder, { withFileTypes: true }))
+    if (!entry.isDirectory()) {
+      if (entry.name.endsWith(suffix)) files.push(entry.name);
+    } else if (!NOT_TEST_FOLDERS.has(entry.name))
+      for (const inner of readdirSync(join(folder, entry.name), { withFileTypes: true }))
+        if (!inner.isDirectory() && inner.name.endsWith(suffix))
+          files.push(`${entry.name}/${inner.name}`);
+  return files.sort();
 }
 
 /** `--shard=i/N`'s shard, or `null` for any other argument; a malformed one throws. */

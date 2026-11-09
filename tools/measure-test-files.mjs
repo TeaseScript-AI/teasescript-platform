@@ -4,7 +4,7 @@ import { availableParallelism, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { run } from "node:test";
 import { filesAtOnce } from "./test-files-at-once.mjs";
-import { shardFiles } from "./test-shards.mjs";
+import { shardFiles, suiteTestFiles } from "./test-shards.mjs";
 
 // Measures what `tools/costly-test-files.mjs` records: each compiled test file's seconds, from its process's start to its
 // end, the seconds of the checks CI's last test job runs before its tests (`npm run check:pretest`), and of the runtime
@@ -115,9 +115,9 @@ let measured;
 if (fromCi !== null) {
   const runs = ciRuns(fromCi);
   // (the suite as the checkout has it: a file no run measured is refused, one the checkout lost is left out)
-  const suite = readdirSync(new URL("../tests/", import.meta.url))
-    .filter((file) => file.endsWith(".test.ts"))
-    .map((file) => file.replace(/\.ts$/, ".js"));
+  const suite = suiteTestFiles(join(import.meta.dirname, "../tests"), ".test.ts").map((file) =>
+    file.replace(/\.ts$/, ".js"),
+  );
   const unmeasured = suite.filter((file) =>
     runs.every((found) => found.seconds[file] === undefined),
   );
@@ -138,7 +138,7 @@ if (fromCi !== null) {
 } else {
   process.env.NODE_COMPILE_CACHE ??= mkdtempSync(join(tmpdir(), "measure-test-files-cache-"));
   if (timed("npm", ["run", "build"], { BUILD_SOURCEMAPS: "0" }) === null) process.exit(1);
-  const names = readdirSync("dist/tests").filter((file) => file.endsWith(".test.js"));
+  const names = suiteTestFiles("dist/tests", ".test.js");
   const paths = shardFiles(names, 1, 1).map((file) => resolve("dist/tests", file));
   const fileSeconds = {};
   const testSeconds = {};

@@ -128,7 +128,7 @@ export const UNKNOWN_TO_COSTLY =
 export function unknownToCostly(paths) {
   return paths.filter(
     (path) =>
-      /^tests\/type-core-[^/]+\.test\.ts$/u.test(path) &&
+      /^tests\/(?:[^/]+\/)?type-core-[^/]+\.test\.ts$/u.test(path) &&
       costlyTestSeconds[path.slice("tests/".length).replace(/\.ts$/u, ".js")] === undefined,
   );
 }

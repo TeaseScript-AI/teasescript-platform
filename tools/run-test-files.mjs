@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { run } from "node:test";
 import { spec } from "node:test/reporters";
@@ -43,9 +43,11 @@ const tests = run({
 trackInFlight((type, listener) => tests.on(type, listener));
 const seconds = {};
 tests.on("test:complete", (data) => {
-  // (a file's own entry is named by its path as given)
+  // (a file's own entry is named by its path as given; its seconds are kept by its path under `dist/tests/`, which for a
+  // file at the top is its name, as `suiteTestFiles` names it)
   if (data.nesting === 0 && data.file !== undefined && resolve(data.name) === data.file)
-    seconds[basename(data.file)] = data.details.duration_ms / 1000;
+    seconds[relative(resolve("dist/tests"), data.file).split(sep).join("/")] =
+      data.details.duration_ms / 1000;
 });
 tests.on("test:summary", (summary) => {
   if (!summary.success) process.exitCode = 1;
