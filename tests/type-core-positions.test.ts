@@ -16,7 +16,7 @@ import { inMode, MODES, orderedItems, publication } from "./helpers/type-core-or
  * of the family below publishes the same (the answers, every binding's admitted types with their deciders, the plan or
  * the rejection, and the observed answer at every flow node with its element and properties) with positions and
  * `withoutPositions`, in both orders, with the sharing on and off. The family varies what keeps a binding from being a
- * wrapper (`Contract.wrapperHop`, `inherited/inherited.ts`'s `scanHop`, `landings.ts`'s `landingHop`) at a middle one:
+ * wrapper (`Contract.wrapperHop`, `inherited/inherited.ts`'s `scanHop`, `landings/landed.ts`'s `landingHop`) at a middle one:
  * a store below it before or after the read, a sibling store, a rejected store before a valid one, a test of it, a
  * store from another callable or a handler, a copy of it, a sibling property, reads at every depth, a literal leaf.
  */

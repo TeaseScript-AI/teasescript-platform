@@ -174,13 +174,13 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/admission/landings.ts",
+    "file": "src/type-inference/core/admission/landings/landed.ts",
     "kind": "docblock",
     "text": "The place whose inherited type a place's is at a path (`inheritedAt`): a place whose only store on the",
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/admission/landings.ts",
+    "file": "src/type-inference/core/admission/landings/landed.ts",
     "kind": "docblock",
     "text": "Whether copies land a path in a place (`Inheritance`): its own landings, else its copies' sources' landings below",
     "waits": "the O4 lead's cleanup"

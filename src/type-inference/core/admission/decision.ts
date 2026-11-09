@@ -36,7 +36,7 @@ import {
   offending,
   SCALAR,
 } from "./kinds.js";
-import { inheritance, landedBelow } from "./landings.js";
+import { inheritance, landedBelow } from "./landings/inheritance.js";
 import type { Alias, Candidate, Decided, DecidedAt, Decision, Inputs } from "./model.js";
 import { permittedAt } from "./permitted.js";
 import { inputsAt, inputsOf, scanAt } from "./scan.js";

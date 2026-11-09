@@ -19,7 +19,7 @@ import {
   spanRef,
 } from "../contract/key-ids.js";
 import { keyLane } from "../contract/lanes.js";
-import { landed, landedKey, passThrough, passThroughKey } from "../admission/landings.js";
+import { landed, landedKey, passThrough, passThroughKey } from "../admission/landings/landed.js";
 import type { Frontier, Inheriting, Stop, Stops, WaitingAnswer } from "../admission/model.js";
 import { permittedAt, unrestricted } from "../admission/permitted.js";
 import { inputsAt, inputsOf, scanAt } from "../admission/scan.js";

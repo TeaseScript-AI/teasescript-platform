@@ -58,7 +58,7 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "the list of the paths collected, each made by a kept helper",
   ],
-  "admission/literals.ts literalElements spread": [
+  "admission/literals/elements.ts literalElements spread": [
     1,
     "a list of paths, each made by a kept helper",
   ],
