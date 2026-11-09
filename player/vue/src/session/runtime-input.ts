@@ -94,7 +94,7 @@ type AnswerRest<O extends InputOp> =
 const answer = <O extends InputOp>(op: O, ...[args, input]: AnswerRest<O>): InputIntent => {
   return () => {
     const fields = args === undefined ? {} : args();
-    // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- EVIDENCE: invariant: `op`'s arguments, which TypeScript does not see in `args()` and `input` for a generic `O`.
+    // EVIDENCE: invariant: `op`'s arguments, which TypeScript does not see in `args()` and `input` for a generic `O`.
     return { op, args: input === undefined ? fields : { ...fields, input } } as InputAnswer;
   };
 };
