@@ -306,6 +306,32 @@ test("a map or declaration file that is not UTF-8 cannot be read: exit 2", (t) =
   assert.match(refused.err, /cannot read the declarations/u);
 });
 
+test("a tracked file that is not UTF-8 is not read and is listed last, and the exit status stays the hits'", (t) => {
+  const r = repository(t);
+  r.write({
+    "src/new.ts": "export const n = 1;\n",
+    "tools/refs.mjs": 'const fresh = "src/new.ts";\n',
+  });
+  r.commit();
+  const map = r.json("map", { renames: { "src/old.ts": "src/new.ts" } });
+  const utf8 = r.run("--renames", map);
+  assert.equal(utf8.status, 0);
+  assert.ok(!utf8.out.includes("not read"), "no section when every file is UTF-8");
+  // Latin-1 é: read as UTF-8, this line would be a form-1 hit.
+  r.write({ "docs/legacy.md": Buffer.from('const stale = "src/old.ts"; caf\xe9\n', "latin1") });
+  r.commit();
+  const unread = r.run("--renames", map);
+  assert.equal(unread.status, 0);
+  assert.deepEqual(section(unread.out, "1"), []);
+  assert.ok(unread.out.endsWith("== not read, not UTF-8: 1 files\ndocs/legacy.md\n"), unread.out);
+  r.write({ "tools/refs.mjs": 'const stale = "src/old.ts";\n' });
+  r.commit();
+  const hit = r.run("--renames", map);
+  assert.equal(hit.status, 1);
+  assert.deepEqual(section(hit.out, "1"), ['tools/refs.mjs:1: const stale = "src/old.ts";']);
+  assert.ok(hit.out.endsWith("== not read, not UTF-8: 1 files\ndocs/legacy.md\n"), hit.out);
+});
+
 test("a declared hit passes, an undeclared one fails, and a declaration that matches nothing cannot run", (t) => {
   const r = moved(t, ['const fixture = "/a/util.js";']);
   const declared = r.json("declared", [

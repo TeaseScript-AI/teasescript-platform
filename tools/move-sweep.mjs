@@ -27,9 +27,9 @@
 //
 // The tree is HEAD's committed tree (commit first): its tracked regular files with a text extension, outside
 // `node_modules/` and `dist/`, read as UTF-8 with a byte-order mark kept as a character (a file that is not UTF-8 is
-// skipped), each line ended by `\n`, `\r\n` or `\r`. The forms are those of the reference sweep this tool replaces (the
-// notes' `shared/move-sweep/move-sweep.py`), which ran in Python, and its text semantics are written out so that the
-// two agree by construction:
+// not read, and is listed), each line ended by `\n`, `\r\n` or `\r`. The forms are those of the reference sweep this
+// tool replaces (the notes' `shared/move-sweep/move-sweep.py`), which ran in Python, and its text semantics are written
+// out so that the two agree by construction:
 //   - a word character is a Unicode letter, digit or underscore, `[\p{L}\p{N}_]`: Python's `\w` for text, exactly, for
 //     every character Unicode 15.1 assigns (Python 3.13's database; a character a later Unicode adds counts here too),
 //     and each of its word boundaries is the same class's lookaround;
@@ -45,17 +45,21 @@
 //     skipped it;
 //   - a symbolic link: its committed blob is its target's path, so it is not read as a text file; the Python opened the
 //     file it pointed to, which the tree holds under its own path anyway.
+// Beside them it prints what the Python left silent: the tracked files neither reads because they are not UTF-8 (a
+// binary or a fixture in another encoding), so that a sweep's "nothing found" says which files it read. That is an
+// output difference, not a hit difference.
 //
 // --declare FILE: a JSON array of `{ "file", "line", "reason" }`, a hit of form 1, 4 or 5 the reader states is not
 // stale (a test fixture's invented path), printed with its reason; every declaration must match such a hit.
 //
 // Output: each form's section, `== <form>. <title>: <count>` and its hits, `<file>:<line>: <the line, trimmed, its
-// first 150 characters>`, in the order 1, 2, 3, 4, 5, then 2b; then the declared hits.
+// first 150 characters>`, in the order 1, 2, 3, 4, 5, then 2b; then the declared hits; last, only when there is one,
+// the files not read, `== not read, not UTF-8: <count> files` and their paths, which leave the exit status as it is.
 //
 // Exit status: 0 when forms 1, 4 and 5 find nothing undeclared (forms 2 and 3 are listed, never failing); 1 when one
 // does; 2 when it cannot run: `--help`, an unknown or valueless option, or no BASE and no --renames (each with the
-// usage), a map or declaration file that cannot be read or has the wrong shape, a declaration that matches no hit, or
-// a file name Git reports that is not UTF-8.
+// usage), a map or declaration file that cannot be read, is not UTF-8 or has the wrong shape, a declaration that
+// matches no hit, or a file name Git reports that is not UTF-8.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -105,6 +109,17 @@ const escape = (text) => text.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&");
 const byLengthDown = (a, b) => b.length - a.length;
 const stem = (file) => file.split("/").at(-1).replace(STRIP, "");
 const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+/**
+ * `bytes` as UTF-8 text, a byte-order mark kept as a character, or null when they are not UTF-8: the one decoding of
+ * every byte the tool reads, never a replacement character. Each caller states what null means for its input.
+ */
+function textOf(bytes) {
+  try {
+    return decoder.decode(bytes);
+  } catch {
+    return null;
+  }
+}
 
 /** Git's output as bytes, from the repository at `cwd`. */
 const gitBytes = (cwd, args, input) =>
@@ -114,11 +129,7 @@ function namesOf(bytes) {
   const names = [];
   let start = 0;
   for (let at = bytes.indexOf(0); at !== -1; start = at + 1, at = bytes.indexOf(0, start)) {
-    try {
-      names.push(decoder.decode(bytes.subarray(start, at)));
-    } catch {
-      refuse("a file name Git reports is not UTF-8");
-    }
+    names.push(textOf(bytes.subarray(start, at)) ?? refuse("a file name Git reports is not UTF-8"));
   }
   return names;
 }
@@ -141,15 +152,25 @@ export function derivedRenames(cwd, base) {
   return renames;
 }
 
+/** The JSON of one of the tool's own input files; one that cannot be read, is not UTF-8 or is not JSON cannot run. */
+function jsonFile(file, what) {
+  let bytes;
+  try {
+    bytes = readFileSync(file);
+  } catch (error) {
+    refuse(`cannot read the ${what} ${file}: ${error.message}`);
+  }
+  const text = textOf(bytes) ?? refuse(`cannot read the ${what} ${file}: it is not UTF-8`);
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    return refuse(`cannot read the ${what} ${file}: ${error.message}`);
+  }
+}
+
 /** A map file's renames, each old path to its list of new paths. */
 function renamesFile(file) {
-  let parsed;
-  try {
-    // The fatal decoder: a file that is not UTF-8 cannot be read, as the Python sweep's strict reader could not.
-    parsed = JSON.parse(decoder.decode(readFileSync(file)));
-  } catch (error) {
-    refuse(`cannot read the map ${file}: ${error.message}`);
-  }
+  const parsed = jsonFile(file, "map");
   if (
     typeof parsed?.renames !== "object" ||
     parsed.renames === null ||
@@ -167,7 +188,7 @@ function renamesFile(file) {
   return renames;
 }
 
-/** HEAD's tracked text files, each with its lines, in Git's order. */
+/** HEAD's tracked text files, each with its lines, in Git's order, and those not read because they are not UTF-8. */
 function treeOf(cwd) {
   const entries = namesOf(gitBytes(cwd, ["ls-tree", "-r", "-z", "--full-tree", "HEAD"]));
   const files = [];
@@ -197,13 +218,14 @@ function treeOf(cwd) {
     const size = Number(contents.subarray(at, headerEnd).toString("latin1").split(" ")[2]);
     const body = contents.subarray(headerEnd + 1, headerEnd + 1 + size);
     at = headerEnd + 1 + size + 1;
-    try {
-      entry.lines = decoder.decode(body).replace(/\r\n?/gu, "\n").split("\n");
-    } catch {
-      entry.lines = null;
-    }
+    // Not UTF-8 (a binary, a fixture in another encoding): not read, as the Python did not, and listed, as it was not.
+    entry.lines = textOf(body)?.replace(/\r\n?/gu, "\n").split("\n") ?? null;
   }
-  return { tracked, files: files.filter((f) => f.lines !== null) };
+  return {
+    tracked,
+    files: files.filter((f) => f.lines !== null),
+    notRead: files.filter((f) => f.lines === null).map((f) => f.file),
+  };
 }
 
 /** The path text before the separator at `slash`, with regex escaping undone (`\/` read as `/`). */
@@ -221,9 +243,12 @@ function pathBefore(line, slash) {
     .replace(/\\+$/u, "");
 }
 
-/** The hits of every form in `forms` over HEAD's tree at `cwd`, for `renames` (each old path to its new paths). */
+/**
+ * The hits of every form in `forms` over HEAD's tree at `cwd`, for `renames` (each old path to its new paths), and the
+ * files not read.
+ */
 export function sweep(cwd, renames, forms = new Set(["1", "2", "3", "4", "5"])) {
-  const { tracked, files } = treeOf(cwd);
+  const { tracked, files, notRead } = treeOf(cwd);
   const moved = new Set(Object.keys(renames).map(stem));
   const names = [...moved].map(escape).sort(byLengthDown).join("|");
   const present = new Set(
@@ -344,18 +369,12 @@ export function sweep(cwd, renames, forms = new Set(["1", "2", "3", "4", "5"])) 
         }
     }
   }
-  return hits;
+  return { hits, notRead };
 }
 
 /** The declarations of `file`, each `{ file, line, reason }`. */
 function declarationsOf(file) {
-  let parsed;
-  try {
-    // The fatal decoder: a file that is not UTF-8 cannot be read, as the Python sweep's strict reader could not.
-    parsed = JSON.parse(decoder.decode(readFileSync(file)));
-  } catch (error) {
-    refuse(`cannot read the declarations ${file}: ${error.message}`);
-  }
+  const parsed = jsonFile(file, "declarations");
   const valid = (d) =>
     typeof d?.file === "string" &&
     Number.isInteger(d.line) &&
@@ -404,7 +423,7 @@ export function main(argv, cwd = process.cwd(), print = console.log) {
   for (const form of forms)
     if (!["1", "2", "3", "4", "5"].includes(form)) refuse(`--forms names no form ${form}`);
   const declarations = options.has("--declare") ? declarationsOf(options.get("--declare")) : [];
-  const hits = sweep(cwd, renames, forms);
+  const { hits, notRead } = sweep(cwd, renames, forms);
 
   const findings = ["1", "4", "5"].flatMap((form) => hits[form]);
   const key = (h) => `${h.file}\0${h.line}`;
@@ -419,6 +438,10 @@ export function main(argv, cwd = process.cwd(), print = console.log) {
     for (const h of hits[form]) print(`${h.file}:${h.line}: ${h.text}`);
   }
   for (const d of declarations) print(`declared: ${d.file}:${d.line}: ${d.reason}`);
+  if (notRead.length > 0) {
+    print(`== not read, not UTF-8: ${notRead.length} files`);
+    for (const file of notRead) print(file);
+  }
   return findings.some((h) => !declared.has(key(h))) ? 1 : 0;
 }
 
