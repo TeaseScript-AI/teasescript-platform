@@ -787,14 +787,22 @@ test("Sol code r5's witnesses stay caught or labelled: a reversed bridge round t
 
 /**
  * The reader boundary, from the parsed source (orchestrator 2's ruling after Sol code r8): raw records exist only as
- * `deriveSample`'s `row`; every binding that holds it, or anything read from it, is tainted. Any use of a tainted binding
+ * `deriveSample`'s second parameter, found by the function's declaration, never by the parameter's name (Sol code r9);
+ * every binding that holds it is tainted. The guard fails closed: no single `deriveSample` declaration, or one whose
+ * signature is not `(cell, row)` with a plain identifier for the row, is reported as "raw root not found". Any use of a tainted binding
  * is a violation (a dot or bracket read, a destructuring pattern, `in`, a spread, a call such as `Object.keys` or
  * `Reflect.get`, an assignment or a return) except passing it to `strictRecord` or `nullable`, the reader's calls; and
  * a plain alias (`const copy = row`) is itself tainted. Every subtraction in the scanned code must be one of `allowed`.
  */
-function readerViolations(text, file, allowedSubtractions = []) {
+function readerViolations(
+  text,
+  file,
+  allowedSubtractions = [],
+  expectRoot = file === "validate.mjs",
+) {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const violations = [];
+  let roots = 0;
   const at = (node, what) =>
     violations.push(
       `${file}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}: ${what}`,
@@ -811,11 +819,18 @@ function readerViolations(text, file, allowedSubtractions = []) {
     if (ts.isIdentifier(node) && ["RAW", "PATH"].includes(node.text))
       at(node, "a read past the reader");
     if (!ts.isFunctionDeclaration(node) || node.name?.text !== "deriveSample") return;
-    const tainted = new Set(
-      node.parameters
-        .map((parameter) => parameter.name.getText(source))
-        .filter((name) => name === "row"),
-    );
+    roots += 1;
+    const raw = node.parameters[1];
+    if (
+      node.parameters.length !== 2 ||
+      raw === undefined ||
+      !ts.isIdentifier(raw.name) ||
+      raw.initializer !== undefined
+    ) {
+      at(node, "raw root not found: deriveSample's signature is not (cell, row)");
+      return;
+    }
+    const tainted = new Set([raw.name.text]);
     const READER = new Set(["strictRecord", "nullable"]);
     // Aliases first, to a fixed point; then every other use of a tainted name.
     for (let grew = true; grew;) {
@@ -867,6 +882,8 @@ function readerViolations(text, file, allowedSubtractions = []) {
       at(inner, `a raw read of '${inner.text}': ${form}`);
     });
   });
+  if (expectRoot && roots !== 1)
+    violations.push(`${file}: raw root not found: ${roots} deriveSample declarations, not one`);
   return violations;
 }
 
@@ -897,6 +914,37 @@ test("the reader guard fails every raw-read form at the wrapping site, and the p
     spread: site.replace("strict.result", "{ ...row }.result"),
     in: site.replace("strict.result", '"result" in row ? strict.result : strict.result'),
   };
+  // Renaming the raw parameter must not switch the guard off (Sol code r9): the rename plus a bracket read.
+  const renamed = original
+    .replace(
+      "export function deriveSample(cell, row) {",
+      "export function deriveSample(cell, rawRow) {",
+    )
+    .replace('strictRecord(row, "row")', 'strictRecord(rawRow, "row")')
+    .replace(site, site.replace("strict.result", 'rawRow["result"]'));
+  assert.ok(renamed.includes("deriveSample(cell, rawRow)") && renamed.includes('rawRow["result"]'));
+  assert.ok(
+    readerViolations(renamed, "validate.mjs", NO_INTERVALS).some((violation) =>
+      violation.includes("a raw read of 'rawRow': a bracket read"),
+    ),
+    "the rename-plus-bracket mutant passed the guard",
+  );
+  // No root, or an unexpected signature: the guard fails closed.
+  for (const broken of [
+    original.replace(
+      "export function deriveSample(cell, row) {",
+      "export function sampleOf(cell, row) {",
+    ),
+    original.replace(
+      "export function deriveSample(cell, row) {",
+      "export function deriveSample({ result }) {",
+    ),
+  ])
+    assert.ok(
+      readerViolations(broken, "validate.mjs", NO_INTERVALS).some((violation) =>
+        violation.includes("raw root not found"),
+      ),
+    );
   for (const [form, mutant] of Object.entries(mutants))
     assert.ok(
       readerViolations(original.replace(site, mutant), "validate.mjs", NO_INTERVALS).some(

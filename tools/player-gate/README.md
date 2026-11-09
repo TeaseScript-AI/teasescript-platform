@@ -37,7 +37,7 @@ exits 2.
 
   `deriveSample` is the one wrapping site, and its one `try` turns any of the reader's errors (missing evidence, a
   reversed interval, a contradicted cache) into that sample's problem. A kit test parses the derivations (the
-  TypeScript compiler API) and fails on any use of `deriveSample`'s raw `row` other than passing it to the reader, in
+  TypeScript compiler API) and fails on any use of `deriveSample`'s raw row (its second parameter, found by the declaration, whatever its name; no such root fails the test) other than passing it to the reader, in
   every form (dot, bracket, destructuring, `in`, spread, `Object.keys`, `Reflect.get`, an alias), and on any
   subtraction outside `span`; its negative controls are those forms at the wrapping site.
 
