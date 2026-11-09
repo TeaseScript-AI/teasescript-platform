@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import {
   BridgeRequestError,
   connectBridge,
@@ -14,22 +14,22 @@ import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import { startBridgeHost, type HostPort } from "../player/engine-bridge/worker-host.js";
 import { playerBridgeOps, playerOpsContext } from "../player/engine-bridge/player-ops.js";
-import { ForeignSessionError, PlayerBridge } from "../player/player-bridge.js";
+import { ForeignSessionError, PlayerBridge } from "../player/runtime/player-bridge.js";
 import {
   observePlayerRuntimeTime,
   playerRuntimeSnapshot,
   restorePlayerRuntimeSessionAt,
   stepPlayerRuntimeTime,
-} from "../player/runtime-adapter.js";
-import type { PlayerSession } from "../player/runtime-view.js";
-import { PublicationGapError, SessionStore } from "../player/session-store.js";
+} from "../player/runtime/runtime-adapter.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
+import { PublicationGapError, SessionStore } from "../player/persistence/session-store.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { viewCalls, viewed, withoutViews } from "./helpers/debug-readers.js";
 import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
-import { NO_MARKS } from "../player/debug-history-marks.js";
+import { NO_MARKS } from "../player/debug/debug-history-marks.js";
 import { clockTicket } from "./helpers/clock-ticket.js";
 import type * as Clock from "../player/vue/src/session/useRuntimeSceneClock.js";
 
@@ -674,7 +674,7 @@ const FOREIGN_CALLS: Record<string, (a: PlayerBridge, foreign: PlayerSession) =>
 };
 
 test("every PlayerBridge method that takes a PlayerSession checks it is the bridge's own", () => {
-  const text = readFileSync(new URL("../../player/player-bridge.ts", import.meta.url), "utf8");
+  const text = readFileSync(new URL("../../player/runtime/player-bridge.ts", import.meta.url), "utf8");
   const methods = sessionMethods(text);
   assert.deepEqual(
     [...methods].filter(([, checked]) => !checked).map(([name]) => name),

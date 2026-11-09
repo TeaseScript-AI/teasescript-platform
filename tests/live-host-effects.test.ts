@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { CapturedMediaRecord } from "../player/captured-media.js";
+import type { CapturedMediaRecord } from "../player/media/captured-media.js";
 import { LiveHostEffects } from "./helpers/live-host-effects.js";
 
 // The live host's effect witness (`tests/helpers/live-host-effects.ts`, #1919): a wrapped service counts its mutating

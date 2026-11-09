@@ -7,12 +7,12 @@ import {
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeControlResult,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime/runtime-adapter.js";
 import {
   playerRuntimeForeground,
   playerRuntimeMedia,
   playerRuntimeTimers,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 import { compileSource } from "../src/index.js";
 import { harness } from "./helpers/player-media.js";
 

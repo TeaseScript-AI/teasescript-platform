@@ -8,16 +8,16 @@ import type {
   CapturedMediaRepository,
   CapturedMediaStore,
   CapturedMediaUrls,
-} from "../../player/captured-media.js";
-import type { LockServices } from "../../player/encryption/lock.js";
+} from "../../player/media/captured-media.js";
+import type { LockServices } from "../../player/encryption/content-lock.js";
 import {
   memoryKeptRoomStore,
   memoryKeptSessionStore,
   type KeptRoomStore,
   type KeptSessionStore,
-} from "../../player/kept-sessions.js";
-import type { MediaDeviceElement } from "../../player/media-device.js";
-import type { ScriptStorageProvider } from "../../player/script-storage.js";
+} from "../../player/persistence/kept-sessions.js";
+import type { MediaDeviceElement } from "../../player/media/media-device.js";
+import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type {
   RuntimeScriptStorageEntrySnapshot,
   SerializableRuntimeValue,
@@ -424,7 +424,7 @@ export class LiveHostEffects {
   readonly lockServices: LockServices = this.#recorded(
     "lockServices",
     {
-      tlock: () => import("../../player/encryption/tlock.js"),
+      tlock: () => import("../../player/encryption/time-lock.js"),
       age: () => import("../../player/encryption/age.js"),
       fetch: async (...args: Parameters<typeof fetch>) => {
         this.#lockFetches.push(String(args[0]));

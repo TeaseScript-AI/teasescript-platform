@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import { inputOps } from "../player/engine-bridge/ops/input.js";
 import { HeldSession, publishing } from "../player/engine-bridge/ops/session.js";
 import { playerOpsContext } from "../player/engine-bridge/player-ops.js";
@@ -11,10 +11,10 @@ import {
   beginPlayerRuntimeCatchUp,
   observePlayerRuntimeTime,
   withPlayerRuntimeDebugTrace,
-} from "../player/runtime-adapter.js";
-import { activePlayerRuntimeInteraction } from "../player/runtime-view.js";
+} from "../player/runtime/runtime-adapter.js";
+import { activePlayerRuntimeInteraction } from "../player/runtime/runtime-view.js";
 import { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
-import { NO_MARKS } from "../player/debug-history-marks.js";
+import { NO_MARKS } from "../player/debug/debug-history-marks.js";
 
 /*
  * Clarity audit part 2, item 15: how an op's result session is adopted in the host is decided once

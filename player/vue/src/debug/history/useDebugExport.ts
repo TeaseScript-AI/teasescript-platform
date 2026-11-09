@@ -8,16 +8,16 @@ import {
   type DebugExportCandidate,
   type DebugExportChoices,
   type DebugExportPart,
-} from "../../../../debug-export-assembly.js";
+} from "../../../../debug/debug-export-assembly.js";
 import {
   DEBUG_EXPORT_MAX_JSON_BYTES,
   debugExportFileName,
   debugExportJson,
   measuredDebugExportFile,
   type DebugExport,
-} from "../../../../debug-export.js";
-import { gzipSupported } from "../../../../transfer-encoding.js";
-import type { PlayerSession } from "../../../../runtime-view.js";
+} from "../../../../debug/debug-export.js";
+import { gzipSupported } from "../../../../persistence/transfer-encoding.js";
+import type { PlayerSession } from "../../../../runtime/runtime-view.js";
 import type { PlayerSessionHost } from "../../session/usePlayerSession";
 
 /** The largest file the Player offers, safely under GitHub's 25 MB attachment limit. */

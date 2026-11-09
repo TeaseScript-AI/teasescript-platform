@@ -1,13 +1,13 @@
 import type { InstructionPlan } from "../../src/playback.js";
 import { ensureRun, RetiredRunError, type RunBegin } from "./recording/export-observation.js";
-import type { DebugRecording } from "../debug-recorder.js";
+import type { DebugRecording } from "../debug/debug-recorder.js";
 import {
   createPlayerRuntimeSession,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../runtime-adapter.js";
-import type { PlayerSession } from "../runtime-view.js";
-import { PlayerBridge } from "../player-bridge.js";
+} from "../runtime/runtime-adapter.js";
+import type { PlayerSession } from "../runtime/runtime-view.js";
+import { PlayerBridge } from "../runtime/player-bridge.js";
 import { openBridge, type ClientPort } from "./client.js";
 import {
   alignTrace,
@@ -30,7 +30,7 @@ import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js
 import type { RandomControlOptions } from "../../src/runtime/random/random-control.js";
 import type { Delivery } from "./delivery.js";
 import { decodeMessage } from "./transport.js";
-import { parseHistoryMarks, type HistoryMarks } from "../debug-history-marks.js";
+import { parseHistoryMarks, type HistoryMarks } from "../debug/debug-history-marks.js";
 import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host.js";
 
 /*

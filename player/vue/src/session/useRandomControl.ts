@@ -5,15 +5,15 @@ import type {
   RandomTriedView,
   ResolveDrawResult,
 } from "../../../engine-bridge/ops/random.js";
-import type { RandomNext } from "../../../random-decisions.js";
+import type { RandomNext } from "../../../debug/random-decisions.js";
 import {
   bridgeOf,
   endsQuietly,
   refusalCode,
   type PlayerBridge,
   type SessionSection,
-} from "../../../player-bridge.js";
-import type { PlayerSession } from "../../../runtime-view.js";
+} from "../../../runtime/player-bridge.js";
+import type { PlayerSession } from "../../../runtime/runtime-view.js";
 import type { SectionWork, useRuntimeSceneClock } from "./useRuntimeSceneClock";
 import type { ActivationRun, useActivationRun } from "./activation/useActivationRun.js";
 

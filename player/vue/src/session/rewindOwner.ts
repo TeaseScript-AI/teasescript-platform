@@ -1,8 +1,8 @@
 import { computed, ref, shallowRef } from "vue";
-import { DebugHistoryView, rewindFutureOf } from "../../../debug-history.js";
+import { DebugHistoryView, rewindFutureOf } from "../../../debug/debug-history.js";
 import type { HistoryDelta, HistoryTimeline } from "../../../engine-bridge/history/core.js";
 import type { HistoryOpResult } from "../../../engine-bridge/ops/history.js";
-import { endsQuietly, type PlayerBridge } from "../../../player-bridge.js";
+import { endsQuietly, type PlayerBridge } from "../../../runtime/player-bridge.js";
 import {
   INITIAL_LIFECYCLE,
   advanceLifecycle,
@@ -10,8 +10,8 @@ import {
   type LifecycleEvent,
   type LifecycleOutcome,
   type LifecycleState,
-} from "../../../rewind-lifecycle.js";
-import type { PlayerSession } from "../../../runtime-view.js";
+} from "../../../debug/rewind-lifecycle.js";
+import type { PlayerSession } from "../../../runtime/runtime-view.js";
 
 type Stepped = Awaited<ReturnType<PlayerBridge["historyStep"]>>;
 

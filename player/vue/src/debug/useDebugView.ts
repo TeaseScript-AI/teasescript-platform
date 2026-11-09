@@ -1,5 +1,5 @@
 import { shallowRef, watch, type ShallowRef } from "vue";
-import type { DebugView, DebugViewRequest } from "../../../debug-view.js";
+import type { DebugView, DebugViewRequest } from "../../../debug/debug-view.js";
 import type { PlayerSessionHost } from "../session/usePlayerSession";
 
 /**

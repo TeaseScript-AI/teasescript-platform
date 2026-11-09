@@ -1,10 +1,10 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
-import { debugCountdownText } from "../../../presentation.js";
+import { debugCountdownText } from "../../../presentation/presentation.js";
 import {
   playerRuntimeDebugCountdown,
   playerRuntimeTranscriptEventSequence,
-} from "../../../runtime-view.js";
+} from "../../../runtime/runtime-view.js";
 import { useDebugLog, type DebugLog } from "./useDebugLog";
 import { useDebugRandom, type DebugRandom } from "./random/useDebugRandom";
 import { useDebugRewind, type DebugRewind } from "./history/useDebugRewind";

@@ -8,21 +8,21 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import { playerRuntimeForeground, playerRuntimeMedia } from "../player/runtime-view.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import { playerRuntimeForeground, playerRuntimeMedia } from "../player/runtime/runtime-view.js";
 import {
   assembleDebugExport,
   chooseDebugCategory,
   chooseDebugPhoto,
   NO_PERSONAL_CONTENT,
   type DebugExportCandidate,
-} from "../player/debug-export-assembly.js";
-import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
-import { memoryKeptSessionStore, type KeptSessionStore } from "../player/kept-sessions.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+} from "../player/debug/debug-export-assembly.js";
+import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug/debug-export.js";
+import { memoryKeptSessionStore, type KeptSessionStore } from "../player/persistence/kept-sessions.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
@@ -629,7 +629,7 @@ test("a debug export whose photo read waits while a new Start retires its activa
   await host.activate();
   await answer(host, await chosen(host, "used.png"));
   await answer(host, await chosen(host, "second.png"));
-  const media: Record<string, unknown> = await loadPlayerModule("player/captured-media.ts");
+  const media: Record<string, unknown> = await loadPlayerModule("player/media/captured-media.ts");
   const facade: Record<string, unknown> = await loadPlayerModule(
     "player/engine-bridge/in-process.ts",
   );

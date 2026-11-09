@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, shallowRef, type ComputedRef, type Ref } from "vue";
 
-import { PlayerNotices, playerNotices, type PlayerNotice } from "../player/notices.js";
+import { PlayerNotices, playerNotices, type PlayerNotice } from "../player/presentation/notices.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
 interface Notification {

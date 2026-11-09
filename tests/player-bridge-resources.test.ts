@@ -1,27 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject } from "../player/compile-project.js";
+import { compilePlayerProject } from "../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { admissionOf, heldMedia, isHeldMedia } from "../player/engine-bridge/held-media.js";
 import { heldRecording } from "../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
-import { PlayerBridge } from "../player/player-bridge.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
 import {
   observePlayerRuntimeTime,
   playerRuntimeSnapshot,
   type PlayerCaptureAnswer,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime/runtime-adapter.js";
 import {
   activePlayerRuntimeCapture,
   activePlayerRuntimeFileStore,
   activePlayerRuntimeLock,
   type PlayerSession,
-} from "../player/runtime-view.js";
-import { CaptureService, type PlayerDiagnostic } from "../player/session-camera.js";
-import { CapturedMediaStore } from "../player/captured-media.js";
-import { FileStoreService } from "../player/stored-files.js";
+} from "../player/runtime/runtime-view.js";
+import { CaptureService, type PlayerDiagnostic } from "../player/media/session-camera.js";
+import { CapturedMediaStore } from "../player/media/captured-media.js";
+import { FileStoreService } from "../player/media/stored-files.js";
 import type { ActionCompletionOutcome } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";

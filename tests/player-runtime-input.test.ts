@@ -5,21 +5,21 @@ import test, { before, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { effectScope, watch, type Ref } from "vue";
 
-import type * as CompileProject from "../player/compile-project.js";
+import type * as CompileProject from "../player/runtime/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import type * as RuntimeAdapter from "../player/runtime-adapter.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import type * as RuntimeAdapter from "../player/runtime/runtime-adapter.js";
 import type {
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime/runtime-adapter.js";
 import {
   playerRuntimeForeground,
   playerRuntimePacingGate,
   type PlayerSession,
   type PlayerSessionView,
-} from "../player/runtime-view.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+} from "../player/runtime/runtime-view.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import {
   presentedAction,
@@ -28,7 +28,7 @@ import {
   type RuntimeInput,
 } from "./helpers/player-input.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
-import type { ClockTicket } from "../player/clock-ticket.js";
+import type { ClockTicket } from "../player/runtime/clock-ticket.js";
 import { clockTicket } from "./helpers/clock-ticket.js";
 import type { InputSectionHost } from "../player/vue/src/session/runtime-input.js";
 
@@ -91,9 +91,9 @@ before(async () => {
   // EVIDENCE: validation: the bundle the composable runs in, whose facade reaches its sessions.
   facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof facade;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
-  compiler = (await loadPlayerModule("player/compile-project.ts")) as typeof compiler;
+  compiler = (await loadPlayerModule("player/runtime/compile-project.ts")) as typeof compiler;
   // EVIDENCE: validation: the bundle's adapter, whose sessions the facade's host holds.
-  adapter = (await loadPlayerModule("player/runtime-adapter.ts")) as typeof adapter;
+  adapter = (await loadPlayerModule("player/runtime/runtime-adapter.ts")) as typeof adapter;
   input = await runtimeInput();
 });
 

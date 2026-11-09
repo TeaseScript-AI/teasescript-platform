@@ -209,31 +209,31 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "read",
     ["BridgeClient.request"],
   ],
-  "player/lock-service.ts LockService > request > later:callback": [
+  "player/encryption/lock-service.ts LockService > request > later:callback": [
     "own observation",
     ["BridgeClient.request"],
   ],
-  "player/media-device.ts MediaDevice > #create > listen:callback#4": [
+  "player/media/media-device.ts MediaDevice > #create > listen:callback#4": [
     "clock: audioEnded",
     ["BridgeClient.request"],
   ],
-  "player/player-bridge.ts PlayerBridge > #collected > FinalizationRegistry:callback": [
+  "player/runtime/player-bridge.ts PlayerBridge > #collected > FinalizationRegistry:callback": [
     "lifecycle",
     ["BridgeClient.request"],
   ],
-  "player/player-bridge.ts PlayerBridge > request > #send:callback": [
+  "player/runtime/player-bridge.ts PlayerBridge > request > #send:callback": [
     "bridge plumbing",
     ["BridgeClient.request"],
   ],
-  "player/player-bridge.ts PlayerBridge > viewCalls > #send:callback": [
+  "player/runtime/player-bridge.ts PlayerBridge > viewCalls > #send:callback": [
     "bridge plumbing",
     ["BridgeClient.request"],
   ],
-  "player/session-camera.ts CaptureService > request > later:callback": [
+  "player/media/session-camera.ts CaptureService > request > later:callback": [
     "own observation",
     ["BridgeClient.request"],
   ],
-  "player/stored-files.ts FileStoreService > request > later:callback": [
+  "player/media/stored-files.ts FileStoreService > request > later:callback": [
     "own observation",
     ["BridgeClient.request"],
   ],
@@ -528,8 +528,8 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
   // The reply hooks a request passes on: a debug export's capture releases its ticket from its hook.
   "player/engine-bridge/client.ts openBridge > Promise:callback > request > exclusive:callback {onReply}":
     "bridge plumbing",
-  "player/player-bridge.ts PlayerBridge > request > #send:callback {onReply}": "bridge plumbing",
-  "player/lock-service.ts LockService > #present > wake {wake}": "own observation",
+  "player/runtime/player-bridge.ts PlayerBridge > request > #send:callback {onReply}": "bridge plumbing",
+  "player/encryption/lock-service.ts LockService > #present > wake {wake}": "own observation",
   "player/vue/src/session/useCallView.ts useCallView {followCallView}": "lifecycle",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > then:callback {bridgeLost}":
     "lifecycle",
@@ -547,9 +547,9 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > readTransfer {readTransfer}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > reviewSessionImport {reviewSessionImport}",
   "player/engine-bridge/client.ts openBridge > Promise:callback > request {request}",
-  "player/player-bridge.ts PlayerBridge > captureExport > onReply {onReply}",
-  "player/player-bridge.ts PlayerBridge > request > #send:callback > onReply {onReply}",
-  "player/player-bridge.ts PlayerBridge > viewCalls > #send:callback > onReply {onReply}",
+  "player/runtime/player-bridge.ts PlayerBridge > captureExport > onReply {onReply}",
+  "player/runtime/player-bridge.ts PlayerBridge > request > #send:callback > onReply {onReply}",
+  "player/runtime/player-bridge.ts PlayerBridge > viewCalls > #send:callback > onReply {onReply}",
   "player/engine-bridge/client.ts openBridge > Promise:callback > signal {signal}",
   "player/vue/src/session/useCallView.ts useCallView > demandCallView {demandCallView}",
   "player/vue/src/session/useCallView.ts useCallView {reportHostError}",
@@ -1049,7 +1049,7 @@ const OBSERVATION_USES: readonly string[] = [
   "before <- player/vue/src/session/persistence/useKeptSession.ts useKeptSession > startKeeping > useEventListener:callback.2 [unawaited]",
   "before <- player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > before [exposed]",
   "before <- player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > useEventListener:callback#2 [returned]",
-  "requestObservation (device) <- player/media-device.ts MediaDevice > #create > listen:callback#4 [returned]",
+  "requestObservation (device) <- player/media/media-device.ts MediaDevice > #create > listen:callback#4 [returned]",
 ];
 
 test("every use of the observation API is awaited, returned, handled or exposed (R2)", () => {

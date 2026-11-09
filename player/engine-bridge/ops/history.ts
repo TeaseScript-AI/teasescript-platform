@@ -1,11 +1,11 @@
 import type { RuntimeScriptStorageEntrySnapshot } from "../../../src/index.js";
 import type { InterpreterEvent } from "../../../src/runtime/events.js";
-import type { HistoryMarks } from "../../debug-history-marks.js";
+import type { HistoryMarks } from "../../debug/debug-history-marks.js";
 import {
   playerRuntimeSnapshot,
   playerRuntimeSnapshotJson,
   restorePlayerRuntimeSessionAt,
-} from "../../runtime-adapter.js";
+} from "../../runtime/runtime-adapter.js";
 import type { Delivery } from "../delivery.js";
 import { exactly, isEventLog, isRecord } from "../argument-checks.js";
 import type {

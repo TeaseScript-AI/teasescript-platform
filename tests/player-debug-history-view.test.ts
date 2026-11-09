@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject } from "../player/compile-project.js";
-import { DebugHistoryView, rewindFutureOf } from "../player/debug-history.js";
+import { compilePlayerProject } from "../player/runtime/compile-project.js";
+import { DebugHistoryView, rewindFutureOf } from "../player/debug/debug-history.js";
 import type { HistoryDelta, HistoryTimeline } from "../player/engine-bridge/history/core.js";
 import type { HistoryOpened } from "../player/engine-bridge/ops/history.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import { playerRuntimeForeground, type PlayerSession } from "../player/runtime-view.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import { playerRuntimeForeground, type PlayerSession } from "../player/runtime/runtime-view.js";
 import type { InterpreterEvent } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
 /*
- * L5i.6: the main side's view of the host's rewind history (`DebugHistoryView`, `player/debug-history.ts`): it follows
+ * L5i.6: the main side's view of the host's rewind history (`DebugHistoryView`, `player/debug/debug-history.ts`): it follows
  * the deltas each publication carries, resyncs on any delta that does not continue it, and holds an event log while a
  * position names it.
  */

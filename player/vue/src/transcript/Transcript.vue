@@ -18,15 +18,15 @@ import {
   observeElementRect,
   useVirtualizer,
 } from "@tanstack/vue-virtual";
-import { ChangedContentMeasurement } from "../../../transcript-measurement.js";
-import { ConversationEntrances, ConversationGlide } from "../../../conversation-motion.js";
+import { ChangedContentMeasurement } from "../../../presentation/transcript-measurement.js";
+import { ConversationEntrances, ConversationGlide } from "../../../presentation/conversation-motion.js";
 import { usePreferredReducedMotion, useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type {
   PlayerTranscriptEntryPresentation,
   PlayerSpeakerPresentation,
-} from "../../../model.js";
+} from "../../../presentation/model.js";
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { recordSpeakerAvatarMessage, speakerAvatarPalette } from "./speakerAvatar";
 import { backdropBehind, resolveColour, vignetteEdge } from "./messageContrast";

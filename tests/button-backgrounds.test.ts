@@ -12,9 +12,9 @@ import {
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   playerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import { playerRuntimeForeground } from "../player/runtime-view.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import { playerRuntimeForeground } from "../player/runtime/runtime-view.js";
 import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 const colours = ["gold", "oklch(0.7 0.18 45)"];

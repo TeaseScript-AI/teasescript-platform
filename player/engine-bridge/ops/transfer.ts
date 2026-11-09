@@ -1,11 +1,11 @@
 import { serializeValidatedRuntimeJson } from "../../../src/runtime/snapshot/checkpoint-json.js";
-import { playerRuntimeSnapshotJson } from "../../runtime-adapter.js";
-import type { SessionTransfer } from "../../session-transfer.js";
+import { playerRuntimeSnapshotJson } from "../../runtime/runtime-adapter.js";
+import type { SessionTransfer } from "../../persistence/session-transfer.js";
 import {
   readPlayerTransferFile,
   readPlayerTransferText,
   restoreSessionTransfer,
-} from "../../session-transfer-read.js";
+} from "../../persistence/session-transfer-read.js";
 import { exactly, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
 import type { BridgeOps } from "../worker-host.js";

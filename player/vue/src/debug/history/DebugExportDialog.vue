@@ -15,7 +15,7 @@ import DialogHeader from "@/components/ui/dialog/DialogHeader.vue";
 import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import Switch from "@/components/ui/switch/Switch.vue";
-import { REPLAY_PREREQUISITES, type DebugCategory } from "../../../../debug-export-assembly.js";
+import { REPLAY_PREREQUISITES, type DebugCategory } from "../../../../debug/debug-export-assembly.js";
 import type { DebugExportState } from "./useDebugExport";
 
 // Lets the player download a debug export for a developer, choosing what personal content it includes

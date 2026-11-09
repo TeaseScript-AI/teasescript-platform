@@ -2,11 +2,11 @@
 
 ## Player and playground execution adapters
 
-`player/runtime-adapter.ts` is the framework-independent Player adapter shared by the Player and the
+`player/runtime/runtime-adapter.ts` is the framework-independent Player adapter shared by the Player and the
 playground's action lookup/completion path. It maps validated pending actions and runtime events to Player presentation,
 submits typed interactions, pacing/time observations, media load reports, and media progress, projects the Stage and
 active media for playback, and uses the canonical runtime checkpoint operations. The Player plays the
-projected audio through `player/media-device.ts` and shows the Stage image; browser video playback remains deferred.
+projected audio through `player/media/media-device.ts` and shows the Stage image; browser video playback remains deferred.
 `playground/workspace/controller.ts` retains the DOM-free compiler/execution and development-automation workspace
 facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
 independent action lifecycle.
@@ -22,7 +22,7 @@ debug recorder's anchors, which are checked where they are restored or exported.
 session export's checkpoint and the plan's JSON a first save stores, restores the kept session Continue offers, and reads
 an exported file of saved data or a session, whose checkpoint it restores and keeps for the import; the main realm stores
 and posts them as text. The host holds the plan's JSON for the page's current plan while the page is
-open (`player/plan-json-lease.ts`). Continue and a rewind restore with
+open (`player/persistence/plan-json-lease.ts`). Continue and a rewind restore with
 `restoreRuntimeSession`, a restore point with `deserializeRuntimeSession`, each checking the state once (Boundaries
 below). An operation goes through a publication that shows the current state; once an operation changed the state, one
 made from an earlier publication throws. When an operation throws, the error reaches the Player, and the next use
@@ -1381,7 +1381,7 @@ The Player opens the session camera from the activating Start or Continue click,
 the trusted host grants the camera capability; a camera failure does not stop the start. It answers each capture
 once from that open stream, and delivers the answer until the runtime settles it. Captured photos are session media; a
 save stores the photos its value references durably before the value is persisted
-(`player/captured-media-persistence.ts`); when that fails, the host acknowledges the `storageWrite` as `failed`, so the
+(`player/media/captured-media-persistence.ts`); when that fails, the host acknowledges the `storageWrite` as `failed`, so the
 previous value is kept as for any failed persistent write. Media no saved value references, nor a session the Player
 keeps for a reload ([Session start](ui/PLAYER-UI.md#session-start-and-user-activation)), is reclaimed opportunistically
 when a Player opens while no Player of the same scope is live in any tab (Web Locks) and the saved values can be read (a
@@ -1695,7 +1695,7 @@ WebM signatures are read as they intend, Ogg is audio, and an M4A major brand is
 | `video/webm`               | an EBML header whose document type is `webm`                                      |
 | `application/octet-stream` | anything else, such as SVG, HTML, BMP, AVIF, or text                              |
 
-The Player (`player/stored-files.ts`) answers each file store once, as it answers a photo: it keeps each file to store
+The Player (`player/media/stored-files.ts`) answers each file store once, as it answers a photo: it keeps each file to store
 as session media of its kind, with the lifecycle of a photo, durable while a saved value or a kept session uses it, and
 reads stored files' bytes, from durable storage when needed, and hashes them with `crypto.subtle.digest`. When it cannot
 decode, keep, read, or hash them, as outside a secure context, where the browser has no `crypto.subtle`, it answers
@@ -1777,7 +1777,7 @@ default. The player's typed password stays in the Player and never reaches the e
 step's outcome and result, so a restore or a replay of recorded completions needs neither the network, the store, nor a
 secret.
 
-The Player (`player/lock-service.ts`) answers each `work` step once and offers the answer until it settles, as for a
+The Player (`player/encryption/lock-service.ts`) answers each `work` step once and offers the answer until it settles, as for a
 file store, and shows each `ask` step's dialog, or the composer's password field for a call with a password field
 ([Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation)); what the player typed it keeps in memory for the
 step after the dialog or field. A step it cannot do, as outside a secure context,

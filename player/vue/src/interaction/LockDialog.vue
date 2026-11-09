@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import PasswordField from "./PasswordField.vue";
 import PublicKeyHelp from "./PublicKeyHelp.vue";
-import type { LockDialog, LockDialogInput } from "../../../lock-service.js";
+import type { LockDialog, LockDialogInput } from "../../../encryption/lock-service.js";
 import { invalidAnswerMessage } from "../../../../src/interaction-answers.js";
 import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey } from "../../../../src/public-keys.js";
 

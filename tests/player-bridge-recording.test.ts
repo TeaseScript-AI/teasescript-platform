@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
-import { rebuildRecordedSession } from "../player/debug-export.js";
-import { DebugRecorder } from "../player/debug-recorder.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import { rebuildRecordedSession } from "../player/debug/debug-export.js";
+import { DebugRecorder } from "../player/debug/debug-recorder.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { admissionOf, type HeldMedia } from "../player/engine-bridge/held-media.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
@@ -11,7 +11,7 @@ import { heldRecording, introduceNow } from "../player/engine-bridge/in-process.
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import type { Introduction } from "../player/engine-bridge/session-protocol.js";
-import { PlayerBridge } from "../player/player-bridge.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
 import {
   adoptPlayerRuntimeCatchUp,
   answeredByPlayerInput,
@@ -28,7 +28,7 @@ import {
   submitPlayerRuntimeComposer,
   type PlayerRuntimeCatchUp,
   type PlayerRuntimeSession,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime/runtime-adapter.js";
 import {
   activePlayerRuntimeCapture,
   activePlayerRuntimeInteraction,
@@ -37,7 +37,7 @@ import {
   playerRuntimeMedia,
   type PlayerSession,
   type PlayerSessionView,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { hatch, inProcessBridge } from "./helpers/in-process-bridge.js";
@@ -62,9 +62,9 @@ import {
 } from "./helpers/replay-harness.js";
 import type { EffectSample } from "./helpers/live-host-effects.js";
 import { compareStructures, renderPath } from "./helpers/runtime-state-comparison.js";
-import type * as RuntimeAdapter from "../player/runtime-adapter.js";
+import type * as RuntimeAdapter from "../player/runtime/runtime-adapter.js";
 import type { RuntimeSnapshot } from "../src/index.js";
-import { NO_MARKS } from "../player/debug-history-marks.js";
+import { NO_MARKS } from "../player/debug/debug-history-marks.js";
 
 /*
  * L5g's B-record evidence: the recording of every engine call, made by the connection's recorder, is the same in-process
@@ -901,7 +901,7 @@ const bundle = () =>
     const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
     // EVIDENCE: validation: Vite loaded the real source module; this is its host API.
     const usePlayerSession = module.usePlayerSession as LiveHostModules["usePlayerSession"];
-    const captured = await loadPlayerModule("player/captured-media.ts");
+    const captured = await loadPlayerModule("player/media/captured-media.ts");
     // EVIDENCE: validation: the bundle's captured-media module exports its store class.
     const capturedMediaStore = captured.CapturedMediaStore as LiveHostModules["capturedMediaStore"];
     return {
@@ -909,7 +909,7 @@ const bundle = () =>
       // EVIDENCE: validation: the bundle's in-process backend, whose sessions the composable's facade reaches.
       facade: (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof InProcess,
       // EVIDENCE: validation: the bundle's adapter, whose sessions the bundle's host holds.
-      adapter: (await loadPlayerModule("player/runtime-adapter.ts")) as typeof RuntimeAdapter,
+      adapter: (await loadPlayerModule("player/runtime/runtime-adapter.ts")) as typeof RuntimeAdapter,
     };
   })());
 

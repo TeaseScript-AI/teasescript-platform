@@ -1,6 +1,6 @@
-import type { DebugAnswerInput } from "../../../debug-export.js";
-import type { PlayerRuntimeControlResult } from "../../../runtime-adapter.js";
-import type { PlayerSession } from "../../../runtime-view.js";
+import type { DebugAnswerInput } from "../../../debug/debug-export.js";
+import type { PlayerRuntimeControlResult } from "../../../runtime/runtime-adapter.js";
+import type { PlayerSession } from "../../../runtime/runtime-view.js";
 import type { SectionWork } from "./useRuntimeSceneClock.js";
 
 /*

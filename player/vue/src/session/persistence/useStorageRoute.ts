@@ -1,13 +1,13 @@
 import { ref, shallowRef } from "vue";
-import { browserMediaUrls } from "../../../../browser-capture.js";
-import { CapturedMediaStore, type CapturedMediaRecord } from "../../../../captured-media.js";
+import { browserMediaUrls } from "../../../../media/browser-capture.js";
+import { CapturedMediaStore, type CapturedMediaRecord } from "../../../../media/captured-media.js";
 import {
   withCapturedMedia,
   type CapturedMediaStorage,
-} from "../../../../captured-media-persistence.js";
-import { memoryKeptRoomStore } from "../../../../kept-sessions.js";
-import type { PersistenceOwnership } from "../../../../persistence-ownership.js";
-import type { ScriptStorageProvider } from "../../../../script-storage.js";
+} from "../../../../media/captured-media-persistence.js";
+import { memoryKeptRoomStore } from "../../../../persistence/kept-sessions.js";
+import type { PersistenceOwnership } from "../../../../persistence/persistence-ownership.js";
+import type { ScriptStorageProvider } from "../../../../persistence/script-storage.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../../../../../src/index.js";
 import type { PlayerSessionOptions } from "../usePlayerSession.js";
 

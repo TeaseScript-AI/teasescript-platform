@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useIntervalFn } from "@vueuse/core";
-import type { PlayerTimerKind, PlayerTimerPresentation } from "../../../model.js";
+import type { PlayerTimerKind, PlayerTimerPresentation } from "../../../presentation/model.js";
 import TimerRegion from "../interaction/TimerRegion.vue";
 
 const props = defineProps<{

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import type { PlayerBridge } from "../../player/player-bridge.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { InstructionPlan } from "../../src/index.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 

@@ -2,7 +2,7 @@ import type {
   RunBegin,
   StopArguments,
 } from "../../../../engine-bridge/recording/export-observation.js";
-import type { PlayerBridge } from "../../../../player-bridge.js";
+import type { PlayerBridge } from "../../../../runtime/player-bridge.js";
 import { useFailureRecording } from "./useFailureRecording.js";
 
 /*

@@ -2,7 +2,7 @@
 import { Toggle } from "reka-ui";
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import PlayerActionButton from "../components/PlayerActionButton.vue";
-import type { PlayerFormPresentation } from "../../../model.js";
+import type { PlayerFormPresentation } from "../../../presentation/model.js";
 
 // One form stays in place while the player edits it: its fields wrap and scroll in a bounded region, and its submit
 // and cancel buttons stay visible below them. Each toggle shows and announces its own state. A toggle with options and a

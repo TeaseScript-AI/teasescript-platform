@@ -8,7 +8,7 @@ import {
   drawKey,
   sameDraw,
   type DrawIdentity,
-} from "../../../../random-draw-identity.js";
+} from "../../../../debug/random-draw-identity.js";
 import type { PlayerSessionHost } from "../../session/usePlayerSession";
 
 /** What a site does when it draws next: ask in the picker, go on naturally, or take its least-taken outcome. */

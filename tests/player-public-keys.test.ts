@@ -15,7 +15,7 @@ import {
   openWithKey,
   readLock,
   type LockServices,
-} from "../player/encryption/lock.js";
+} from "../player/encryption/content-lock.js";
 import { parsePublicKey, type PublicKey } from "../src/public-keys.js";
 import {
   base64,

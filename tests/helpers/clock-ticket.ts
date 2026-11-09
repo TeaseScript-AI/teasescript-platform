@@ -1,4 +1,4 @@
-import type { ClockTicket } from "../../player/clock-ticket.js";
+import type { ClockTicket } from "../../player/runtime/clock-ticket.js";
 
 /** A ticket for a test that opens a section itself, where the Player's scene clock would (`useRuntimeSceneClock`). */
 export function clockTicket(): ClockTicket {

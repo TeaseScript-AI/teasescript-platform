@@ -6,12 +6,12 @@ import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
 import CollapsibleDisclosure from "@/components/ui/collapsible/CollapsibleDisclosure.vue";
 import { useDebugView } from "./useDebugView";
-import type { DebugStageImageStatus } from "../../../presentation.js";
+import type { DebugStageImageStatus } from "../../../presentation/presentation.js";
 import {
   playerRuntimeDebugNow,
   type PlayerDebugSourceLocation,
   type PlayerDebugWaitKind,
-} from "../../../runtime-view.js";
+} from "../../../runtime/runtime-view.js";
 import { debugStageImage } from "./debugStageImage";
 import type { PlayerSessionHost } from "../session/usePlayerSession";
 

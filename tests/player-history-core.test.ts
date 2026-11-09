@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import {
   CANNOT_KEEP,
   HistoryCore,
@@ -23,12 +23,12 @@ import {
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
-} from "../player/runtime-adapter.js";
-import { playerRuntimeForeground } from "../player/runtime-view.js";
+} from "../player/runtime/runtime-adapter.js";
+import { playerRuntimeForeground } from "../player/runtime/runtime-view.js";
 import { deliveryOwner } from "../player/engine-bridge/delivery.js";
 import { HistoryRegistry } from "../player/engine-bridge/history/registry.js";
-import { DebugHistoryView } from "../player/debug-history.js";
-import type { HistoryMarks } from "../player/debug-history-marks.js";
+import { DebugHistoryView } from "../player/debug/debug-history.js";
+import type { HistoryMarks } from "../player/debug/debug-history-marks.js";
 import { CheckpointError } from "../src/runtime/snapshot/checkpoint-json.js";
 import { obligations, transferCoverage } from "./helpers/rewind-transfer-domain.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";

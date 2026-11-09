@@ -22,7 +22,7 @@ import { deliveredRun } from "./delivered-run.js";
 // Where `drawCode` can be paused: after its sidecar's text arrives, and after the renderer loads.
 const POINTS = {
   sidecar: "const text = await textOf(candidate);",
-  renderer: 'const { drawCode, fileCode } = await import("../../random-draw-code.js");',
+  renderer: 'const { drawCode, fileCode } = await import("../../debug/random-draw-code.js");',
 };
 let pause: {
   readonly point: string;

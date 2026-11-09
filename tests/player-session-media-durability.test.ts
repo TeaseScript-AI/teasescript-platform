@@ -7,17 +7,17 @@ import {
   memoryKeptSessionStore,
   type KeptRoomStore,
   type KeptSessionStore,
-} from "../player/kept-sessions.js";
+} from "../player/persistence/kept-sessions.js";
 import {
   activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
   submitPlayerRuntimeComposer as rawSubmitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import { createLocalScriptStorage, type ScriptStorageProvider } from "../player/script-storage.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import { createLocalScriptStorage, type ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import type { InstructionPlan } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";

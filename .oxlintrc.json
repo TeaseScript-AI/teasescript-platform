@@ -57,7 +57,7 @@
   "overrides": [
     {
       "files": [
-        "player/captured-media.ts",
+        "player/media/captured-media.ts",
         "src/deterministic-math.ts",
         "src/message-markup.ts",
         "src/runtime/random/random.ts",

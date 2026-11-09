@@ -1,13 +1,13 @@
 import { createApp, h } from "vue";
-import { openIndexedDbMediaRepository } from "../../indexeddb-media-repository.js";
+import { openIndexedDbMediaRepository } from "../../media/indexeddb-media-repository.js";
 import {
   memoryKeptRoomStore,
   memoryKeptSessionStore,
   openIndexedDbKeptRoomStore,
   openIndexedDbKeptSessionStore,
-} from "../../kept-sessions.js";
-import { browserSavedData } from "../../saved-data.js";
-import { createLocalScriptStorage } from "../../script-storage.js";
+} from "../../persistence/kept-sessions.js";
+import { browserSavedData } from "../../persistence/saved-data.js";
+import { createLocalScriptStorage } from "../../persistence/script-storage.js";
 import { demoSource, demoStorageScope, resolveDemoAsset } from "./demoHost";
 import { prepareHostedScript, type ScriptHost } from "./hostedScript";
 import { developmentPackageHost } from "./packageHost";

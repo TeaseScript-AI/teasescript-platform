@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
-import { NO_MARKS, type HistoryMarks } from "../player/debug-history-marks.js";
+import { NO_MARKS, type HistoryMarks } from "../player/debug/debug-history-marks.js";
 import { BridgeRequestError } from "../player/engine-bridge/client.js";
 import { introduceNow } from "../player/engine-bridge/in-process.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
 /*
@@ -111,10 +111,10 @@ test("every storage edit a held session takes passes the edit's mark: one adapte
   };
   walk(root, "player/");
   assert.deepEqual(calls.sort(), [
-    "player/debug-export.ts: return settled(session.applyExternalStorageEdit(first));",
-    "player/debug-export.ts: return withOutcome(applyExternalStorageEdit(plan, snapshot, first));",
+    "player/debug/debug-export.ts: return settled(session.applyExternalStorageEdit(first));",
+    "player/debug/debug-export.ts: return withOutcome(applyExternalStorageEdit(plan, snapshot, first));",
     "player/engine-bridge/ops/input.ts: const result = applyPlayerRuntimeStorageEdit(held.sessionForOperation(), edit);",
-    "player/runtime-adapter.ts: runtime.applyExternalStorageEdit(edit, traceOptions(session.debugTrace)),",
+    "player/runtime/runtime-adapter.ts: runtime.applyExternalStorageEdit(edit, traceOptions(session.debugTrace)),",
   ]);
   const input = readFileSync(new URL("engine-bridge/ops/input.ts", root), "utf8");
   assert.match(input, /if \(result\.outcome\.kind === "applied"\) held\.marksEdited\(\);/u);

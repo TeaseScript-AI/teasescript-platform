@@ -19,8 +19,8 @@ import {
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeCatchUp,
   type PlayerRuntimeSession,
-} from "../../runtime-adapter.js";
-import { playerRuntimePacingGate } from "../../runtime-view.js";
+} from "../../runtime/runtime-adapter.js";
+import { playerRuntimePacingGate } from "../../runtime/runtime-view.js";
 import { isValidEpochMilliseconds } from "../../../src/temporal.js";
 import {
   everyItem,
@@ -40,7 +40,7 @@ import {
   type RandomIntent,
 } from "../connection-state.js";
 import { planMetadata, type PlanMetadata } from "../plan-facts.js";
-import { NO_MARKS, marksAfterEdit, type HistoryMarks } from "../../debug-history-marks.js";
+import { NO_MARKS, marksAfterEdit, type HistoryMarks } from "../../debug/debug-history-marks.js";
 import type { CallViewReply, Introduction, Publication, StopReply } from "../session-protocol.js";
 import {
   advanceExportObservation,

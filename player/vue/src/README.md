@@ -53,16 +53,16 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   restoring a session rebases the clock so no gap is consumed; see
   [timers and scene time](../../../docs/RUNTIME.md#timers-and-scene-time). The host prepares a new session for
   the explicit Start control on the start page (`SessionActivation.vue`, with the header's title and author) and
-  creates it only on that click. It keeps the session in `player/kept-sessions.ts`, so a reload shows Continue, which
+  creates it only on that click. It keeps the session in `player/persistence/kept-sessions.ts`, so a reload shows Continue, which
   restores it, or Start with the reason when a Player update changed the session's format (`ProblemCard.vue`, the card
   `ScriptProblems.vue` shows too); closing the end dialog after `exit` returns to the start page. With `room=debug`, or once Debug goes on in
   the normal room, the debug room ([`DEBUGGER.md`](../../../docs/DEBUGGER.md#debug-room)) stands in with its own saved
   values, photos, and session; `DebugRoomMark.vue` marks it in the title pill, and `ConfirmDialog.vue` asks before Debug
   on overwrites its session. Start and Continue record the wall clock and the player's zone and presentation, which the host-supplied
-  `temporalContext` resolves (the browser's by default). The host also owns the framework-independent `player/media-device.ts`: it reconciles the session's media
+  `temporalContext` resolves (the browser's by default). The host also owns the framework-independent `player/media/media-device.ts`: it reconciles the session's media
   projection onto `Audio` elements, reports loading through the adapter, and contributes measured progress to every
   clock observation, which runs every 100 ms while media loads or plays. Start and Continue first open the
-  session camera (`player/session-camera.ts`) when the Player has the camera capability, and a Start with script
+  session camera (`player/media/session-camera.ts`) when the Player has the camera capability, and a Start with script
   storage, which `main.ts` always gives, then reads the script's saved values again
   ([`DATA-AND-API.md`](../../../docs/DATA-AND-API.md#script-storage-in-the-browser)). The session is created after these
   waits, so in the shipped Player only a Continue without the camera starts it within the click. Because some browsers
@@ -71,7 +71,7 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   ensuring at least two; elements allocated beyond the pool fall back to the refused-playback retry. For the same reason, as Safari grants a page's
   first screen wake lock only right after a click, `useScreenWakeLock.ts` asks for it within that click, before the
   camera opens, and holds it while the session plays. In a Player that can capture or read stored
-  photos, a save first stores the captured photos its value references (`player/captured-media-persistence.ts`);
+  photos, a save first stores the captured photos its value references (`player/media/captured-media-persistence.ts`);
   captured references resolve only through that trusted store, and authored
   media references only through the host-supplied `resolveAsset`. `PlayerApp.vue` derives the Stage image from
   runtime state and provides the same resolver to `TranscriptMessage.vue` for speaker avatars.
@@ -93,7 +93,7 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   `useDevelopmentTime.ts` drives through the session host's `publishJump`, and of `useDebugRewind.ts`, which shows the
   engine's host's rewind history and asks the host for each step, showing what it restores through the session host's
   `rewind`, and of `useDebugRandom.ts`, which sends Debug's random settings to the engine's
-  host (`setRandomControl`, `forgetRandomHistory`), where `player/random-decisions.ts` decides draws and keeps each
+  host (`setRandomControl`, `forgetRandomHistory`), where `player/debug/random-decisions.ts` decides draws and keeps each
   site's history, and resolves a waiting draw there (`resolveRandomDraw`, `randomTried`); `DebugPanel.vue` and
   `DebugStatus.vue` present them. While a draw waits,
   `RandomDrawPicker.vue` asks for its outcome from what `randomDrawPresentation.ts` derives, showing the code in the

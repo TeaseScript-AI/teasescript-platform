@@ -1,10 +1,10 @@
 import { ref, shallowRef, type Ref } from "vue";
-import { NO_MARKS, type HistoryMarks } from "../../../../debug-history-marks.js";
-import type { DebugRecording } from "../../../../debug-recorder.js";
+import { NO_MARKS, type HistoryMarks } from "../../../../debug/debug-history-marks.js";
+import type { DebugRecording } from "../../../../debug/debug-recorder.js";
 import { heldRecording, introduceNow } from "../../../../engine-bridge/in-process.js";
-import type { PlayerRuntimeSession } from "../../../../runtime-adapter.js";
-import { playerTemporalContext, type PlayerSession } from "../../../../runtime-view.js";
-import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../../player-bridge.js";
+import type { PlayerRuntimeSession } from "../../../../runtime/runtime-adapter.js";
+import { playerTemporalContext, type PlayerSession } from "../../../../runtime/runtime-view.js";
+import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../../runtime/player-bridge.js";
 import type { RandomIntent, TracingIntent } from "../../../../engine-bridge/player-ops.js";
 import type { StartRandom } from "../../../../engine-bridge/ops/session.js";
 import type { TemporalContext } from "../../../../../src/index.js";

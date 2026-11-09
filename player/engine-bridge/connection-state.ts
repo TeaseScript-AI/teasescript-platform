@@ -4,7 +4,7 @@ import type {
   RandomDrawView,
 } from "../../src/runtime/random/random-control.js";
 import { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
-import { decideDraw, RandomHistory, type RandomNext } from "../random-decisions.js";
+import { decideDraw, RandomHistory, type RandomNext } from "../debug/random-decisions.js";
 import { everyItem, exactly, isRecord } from "./argument-checks.js";
 import type { PlayerOpsContext } from "./player-ops.js";
 

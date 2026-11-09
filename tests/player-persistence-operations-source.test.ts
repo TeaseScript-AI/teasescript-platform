@@ -4,15 +4,15 @@ import { resolve } from "node:path";
 import test from "node:test";
 import ts from "typescript";
 
-import type { CapturedMediaStore } from "../player/captured-media.js";
+import type { CapturedMediaStore } from "../player/media/captured-media.js";
 import type { BridgeClient } from "../player/engine-bridge/client.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import { OWNERSHIP_MODES, type Operated, type Ownership } from "./helpers/plan-json-family.js";
 
 /*
  * The persistence operations of the Player's session host (`player/vue/src/session/persistence/`: keep, the kept
  * session's restore, the session import, the saved-data import) reach the page's stores and the host only through their
- * ownership's handles (`player/persistence-ownership.ts`), so a stale operation's call is refused wherever it is made.
+ * ownership's handles (`player/persistence/persistence-ownership.ts`), so a stale operation's call is refused wherever it is made.
  * This check reads the syntax tree of every module of the host (`HOST_MODULES`). One recognizer (`useAt`) finds each use
  * of a raw resource, the media store, a member of the host, or a member it cannot read; the check fails a place with
  * one that no table below classifies, and in an operation, with every closure nested in it, each use the one deciding

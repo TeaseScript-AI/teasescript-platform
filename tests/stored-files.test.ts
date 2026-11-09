@@ -24,7 +24,7 @@ import {
 } from "../src/runtime/host-data/stored-files.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import type { PlayerFileStoreAnswer } from "../player/runtime-adapter.js";
+import type { PlayerFileStoreAnswer } from "../player/runtime/runtime-adapter.js";
 import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 /*

@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import test, { before } from "node:test";
 import { effectScope, nextTick, reactive } from "vue";
 
-import type * as CompileProject from "../player/compile-project.js";
-import type * as RuntimeAdapter from "../player/runtime-adapter.js";
+import type * as CompileProject from "../player/runtime/compile-project.js";
+import type * as RuntimeAdapter from "../player/runtime/runtime-adapter.js";
 import type { RandomDrawView } from "../src/index.js";
-import { drawKey } from "../player/random-draw-identity.js";
+import { drawKey } from "../player/debug/random-draw-identity.js";
 import { coverageGaps, product } from "./helpers/family-coverage.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
@@ -32,9 +32,9 @@ before(async () => {
   // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
   useRandomDrawPickerState = state.useRandomDrawPickerState as typeof useRandomDrawPickerState;
   // EVIDENCE: validation: the bundle's compiler and adapter, from the same module graph.
-  compiler = (await loadPlayerModule("player/compile-project.ts")) as typeof compiler;
+  compiler = (await loadPlayerModule("player/runtime/compile-project.ts")) as typeof compiler;
   // EVIDENCE: validation: as above.
-  adapter = (await loadPlayerModule("player/runtime-adapter.ts")) as typeof adapter;
+  adapter = (await loadPlayerModule("player/runtime/runtime-adapter.ts")) as typeof adapter;
 });
 
 // The family's axes, declared once.
@@ -160,7 +160,7 @@ const PICKER_MODULES = {
   "player/vue/src/debug/random/useRandomDrawPickerState.ts": [],
   "player/vue/src/debug/random/randomDrawPresentation.ts": [],
   "player/vue/src/debug/random/useDebugRandom.ts": [/identity\.drawId/u],
-  "player/random-draw-identity.ts": [
+  "player/debug/random-draw-identity.ts": [
     /readonly drawId: number;/u,
     /drawId: draw\.drawId/u,
     /identity\.drawId/u,

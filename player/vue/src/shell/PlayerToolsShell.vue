@@ -48,7 +48,7 @@ import type {
   SessionTransferRead,
 } from "../session/persistence/useSessionTransfer";
 import type { SavedDataImportReview } from "../session/persistence/useSavedDataTransfer";
-import type { SavedScript, StorageBundle } from "../../../storage-transfer.js";
+import type { SavedScript, StorageBundle } from "../../../persistence/storage-transfer.js";
 import {
   computed,
   nextTick,

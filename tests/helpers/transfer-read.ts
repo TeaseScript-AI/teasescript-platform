@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { sessionTransferFile, type SessionTransfer } from "../../player/session-transfer.js";
+import { sessionTransferFile, type SessionTransfer } from "../../player/persistence/session-transfer.js";
 
 /** A session read for an import, as these tests pass it to a review: its checkpoint stays in the host. */
 export interface SessionRead {

@@ -1,13 +1,13 @@
 import type { Ref } from "vue";
-import { browserMediaUrls } from "../../../../browser-capture.js";
-import { CapturedMediaNotStoredError, CapturedMediaStore } from "../../../../captured-media.js";
+import { browserMediaUrls } from "../../../../media/browser-capture.js";
+import { CapturedMediaNotStoredError, CapturedMediaStore } from "../../../../media/captured-media.js";
 import {
   withCapturedMedia,
   type CapturedMediaStorage,
-} from "../../../../captured-media-persistence.js";
-import type { ImageDecoder } from "../../../../image-file.js";
-import { StaleOperation, type PersistenceOwnership } from "../../../../persistence-ownership.js";
-import type { ScriptStorageProvider } from "../../../../script-storage.js";
+} from "../../../../media/captured-media-persistence.js";
+import type { ImageDecoder } from "../../../../media/image-file.js";
+import { StaleOperation, type PersistenceOwnership } from "../../../../persistence/persistence-ownership.js";
+import type { ScriptStorageProvider } from "../../../../persistence/script-storage.js";
 import {
   checkStorageTransferImages,
   collectSavedScript,
@@ -17,7 +17,7 @@ import {
   type SavedScript,
   type StorageBundle,
   type StorageBundleScript,
-} from "../../../../storage-transfer.js";
+} from "../../../../persistence/storage-transfer.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../../../../../src/index.js";
 import type { Problem } from "../../start-and-end/ProblemCard.vue";
 import type { PlayerSessionOptions, PlayerSessionStart } from "../usePlayerSession.js";

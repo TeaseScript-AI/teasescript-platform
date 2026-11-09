@@ -3,15 +3,15 @@ import test, { after, before, type TestContext } from "node:test";
 import { effectScope, watch, type Ref } from "vue";
 
 import type * as Client from "../player/engine-bridge/client.js";
-import type * as CompileProject from "../player/compile-project.js";
+import type * as CompileProject from "../player/runtime/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
-import type { DebugView, DebugViewRequest } from "../player/debug-view.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
+import type { DebugView, DebugViewRequest } from "../player/debug/debug-view.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import type {
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import type { PlayerSession } from "../player/runtime-view.js";
+} from "../player/runtime/runtime-adapter.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { listRandomSites } from "../src/playback.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
@@ -59,7 +59,7 @@ before(async () => {
   // EVIDENCE: validation: the bundle the composable runs in, whose facade reaches its host.
   facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof facade;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
-  compiler = (await loadPlayerModule("player/compile-project.ts")) as typeof compiler;
+  compiler = (await loadPlayerModule("player/runtime/compile-project.ts")) as typeof compiler;
   const client = await loadPlayerModule("player/engine-bridge/client.ts");
   // EVIDENCE: validation: the bundle's client module, whose loss error the client's listeners receive.
   BridgeLostError = client.BridgeLostError as typeof BridgeLostError;

@@ -1,23 +1,23 @@
 import assert from "node:assert/strict";
 import test, { before } from "node:test";
 
-import { CapturedMediaStore } from "../player/captured-media.js";
-import { rebuildRecordedSession } from "../player/debug-export.js";
-import { DebugRecorder } from "../player/debug-recorder.js";
-import { loadAge, loadTlock, readLock, type LockServices } from "../player/encryption/lock.js";
+import { CapturedMediaStore } from "../player/media/captured-media.js";
+import { rebuildRecordedSession } from "../player/debug/debug-export.js";
+import { DebugRecorder } from "../player/debug/debug-recorder.js";
+import { loadAge, loadTlock, readLock, type LockServices } from "../player/encryption/content-lock.js";
 import { roundTimeMs } from "../player/encryption/drand.js";
-import { LockService, type LockDialog, type LockDialogInput } from "../player/lock-service.js";
+import { LockService, type LockDialog, type LockDialogInput } from "../player/encryption/lock-service.js";
 import {
   answerPlayerRuntimeLock,
   createPlayerRuntimeRestorePoint,
   playerRuntimeSnapshot,
   restorePlayerRuntimeSession,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import type { PlayerDiagnostic } from "../player/session-camera.js";
-import { activePlayerRuntimeLock, type PlayerSession } from "../player/runtime-view.js";
-import { bytesFromBase64 } from "../player/stored-files.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import type { PlayerDiagnostic } from "../player/media/session-camera.js";
+import { activePlayerRuntimeLock, type PlayerSession } from "../player/runtime/runtime-view.js";
+import { bytesFromBase64 } from "../player/media/stored-files.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { fromBase64, openAge, sshIdentity, x25519Identity } from "./helpers/age-keyholder.js";
 import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";

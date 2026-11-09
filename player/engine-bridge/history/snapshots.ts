@@ -1,5 +1,5 @@
 /**
- * Where Debug's rewind history keeps snapshots beyond memory (`player/debug-history-indexeddb.ts`). It lives only as
+ * Where Debug's rewind history keeps snapshots beyond memory (`player/debug/debug-history-indexeddb.ts`). It lives only as
  * long as its history, which destroys it. Its methods take and return plain data.
  */
 export interface DebugHistorySpill {

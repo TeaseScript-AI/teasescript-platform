@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ref, shallowRef } from "vue";
 
-import type { CapturedMediaRecord } from "../player/captured-media.js";
+import type { CapturedMediaRecord } from "../player/media/captured-media.js";
 import type { ExportCaptureReply } from "../player/engine-bridge/session-protocol.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import type { PlayerSession } from "../player/runtime-view.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
 import type { ActivationRun } from "../player/vue/src/session/activation/useActivationRun.js";
 import { useExportCandidate } from "../player/vue/src/session/activation/useExportCandidate.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";

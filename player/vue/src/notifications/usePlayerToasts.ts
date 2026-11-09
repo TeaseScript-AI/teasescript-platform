@@ -1,5 +1,5 @@
 import { nextTick, watch, type Ref } from "vue";
-import type { PlayerNotice } from "../../../notices.js";
+import type { PlayerNotice } from "../../../presentation/notices.js";
 import type { PlayerNotification } from "./usePlayerNotifications.js";
 
 /** Draws and retires toasts by id: Sonner in the Player. */

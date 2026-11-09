@@ -4,14 +4,14 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-import * as compileProject from "../player/compile-project.js";
-import * as assembly from "../player/debug-export-assembly.js";
-import * as debugExport from "../player/debug-export.js";
-import * as recorder from "../player/debug-recorder.js";
+import * as compileProject from "../player/runtime/compile-project.js";
+import * as assembly from "../player/debug/debug-export-assembly.js";
+import * as debugExport from "../player/debug/debug-export.js";
+import * as recorder from "../player/debug/debug-recorder.js";
 import { prepareExport } from "../player/engine-bridge/recording/export-replay.js";
-import * as adapter from "../player/runtime-adapter.js";
-import * as view from "../player/runtime-view.js";
-import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
+import * as adapter from "../player/runtime/runtime-adapter.js";
+import * as view from "../player/runtime/runtime-view.js";
+import type { PlayerRuntimeSession } from "../player/runtime/runtime-adapter.js";
 import type { RuntimeSnapshot } from "../src/index.js";
 
 /*

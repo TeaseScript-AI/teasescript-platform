@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from "vue";
 import PlayerActionButton from "@/components/PlayerActionButton.vue";
-import type { PlayerPermanentButtonPresentation } from "../../../model.js";
+import type { PlayerPermanentButtonPresentation } from "../../../presentation/model.js";
 
 // The script's permanent buttons in creation order. A button whose block runs stays in place, inactive, and keeps
 // keyboard focus; when a focused button is removed, focus moves to the button that takes its place.

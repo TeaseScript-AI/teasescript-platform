@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { observePlayerRuntimeTime, type PlayerRuntimeSession } from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+import { observePlayerRuntimeTime, type PlayerRuntimeSession } from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import {
   playerRuntimeAwaitsHost,
   playerRuntimeDeadlines,
   playerRuntimeTimers,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 import { interruptFrame } from "../src/runtime/scopes/activations.js";
 import type { RuntimeForegroundActionSnapshot } from "../src/runtime/actions/model.js";
 import {

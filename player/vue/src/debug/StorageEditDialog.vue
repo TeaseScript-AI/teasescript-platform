@@ -16,7 +16,7 @@ import {
   CheckpointError,
   serializeValidatedRuntimeJson,
 } from "../../../../src/runtime/snapshot/checkpoint-json.js";
-import { storageNotation } from "../../../storage-preview.js";
+import { storageNotation } from "../../../persistence/storage-preview.js";
 import type { PlayerSessionHost } from "../session/usePlayerSession";
 import type { SavedDataEditResult } from "../session/persistence/useSavedValues";
 

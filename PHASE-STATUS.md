@@ -77,7 +77,7 @@ accept syntax, architecture, or implementation details.
   (`docs/DEBUGGER.md#player-debug`), and a debug export a player
   downloads with their consent from the error dialog, Settings, or the Debug panel, which `tools/debug-export.mjs`
   inspects and replays offline (`docs/DEBUGGER.md#debug-export`). It shows the runtime Stage image and plays authored
-  audio through `player/media-device.ts` after the explicit Start activation (#446). The default build plays the
+  audio through `player/media/media-device.ts` after the explicit Start activation (#446). The default build plays the
   repository demo `examples/demo/demo.tease` (#448), or with `?package=<id>` a package of the playground's development
   package root as one project, listing its diagnostics when it does not compile (#570); the development server or
   `?dev` loads the development preview with Visual Lab and Layout Debug instead.

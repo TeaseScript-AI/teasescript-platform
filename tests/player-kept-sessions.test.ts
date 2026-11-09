@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CapturedMediaStore } from "../player/captured-media.js";
+import { CapturedMediaStore } from "../player/media/captured-media.js";
 import {
   sweepCapturedMedia,
   type CapturedMediaLocks,
-} from "../player/captured-media-persistence.js";
+} from "../player/media/captured-media-persistence.js";
 import {
   capturedMediaReferencesIn,
   keptPhotoReferences,
@@ -13,15 +13,15 @@ import {
   memoryKeptRoomStore,
   memoryKeptSessionStore,
   type StoredKeptSession,
-} from "../player/kept-sessions.js";
+} from "../player/persistence/kept-sessions.js";
 import {
   activatePlayerRuntimeButton,
   applyPlayerRuntimeStorageEdit,
   playerRuntimeSnapshotJson,
   pressPlayerRuntimePermanentButton,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import { interpreterEventProblem, type InterpreterEvent } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 

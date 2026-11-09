@@ -2,21 +2,21 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, watch, type Ref } from "vue";
 
-import type * as CompileProject from "../player/compile-project.js";
+import type * as CompileProject from "../player/runtime/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
-import type * as RuntimeAdapter from "../player/runtime-adapter.js";
+import type * as RuntimeAdapter from "../player/runtime/runtime-adapter.js";
 import type { StartOptions } from "../player/engine-bridge/ops/session.js";
 import { startBridgeHost, type HostSession } from "../player/engine-bridge/worker-host.js";
 import { BRIDGE_VERSION } from "../player/engine-bridge/protocol.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import type { DebugView, DebugViewRequest } from "../player/debug-view.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import type { DebugView, DebugViewRequest } from "../player/debug/debug-view.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import type {
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import type * as RuntimeView from "../player/runtime-view.js";
-import type { PlayerSession } from "../player/runtime-view.js";
+} from "../player/runtime/runtime-adapter.js";
+import type * as RuntimeView from "../player/runtime/runtime-view.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { clockTicket } from "./helpers/clock-ticket.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
@@ -82,11 +82,11 @@ before(async () => {
   // EVIDENCE: validation: the bundle the composable runs in, whose facade reaches its sessions.
   facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof facade;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
-  compiler = (await loadPlayerModule("player/compile-project.ts")) as typeof compiler;
+  compiler = (await loadPlayerModule("player/runtime/compile-project.ts")) as typeof compiler;
   // EVIDENCE: validation: the bundle's adapter, whose sessions the facade's host holds.
-  adapter = (await loadPlayerModule("player/runtime-adapter.ts")) as typeof adapter;
+  adapter = (await loadPlayerModule("player/runtime/runtime-adapter.ts")) as typeof adapter;
   // EVIDENCE: validation: the bundle's session view module, from the same module graph.
-  view = (await loadPlayerModule("player/runtime-view.ts")) as typeof view;
+  view = (await loadPlayerModule("player/runtime/runtime-view.ts")) as typeof view;
   const views = await loadPlayerModule("player/vue/src/debug/useDebugView.ts");
   // EVIDENCE: validation: Vite loaded the real source module; this is its composable.
   useDebugView = views.useDebugView as typeof useDebugView;

@@ -10,7 +10,7 @@ import {
   playerDebugVariables,
   type PlayerDebugTraceRow,
   type PlayerDebugTraceView,
-} from "../player/debug-variables.js";
+} from "../player/debug/debug-variables.js";
 import {
   advancePlayerRuntimeTime,
   createPlayerRuntimeRestorePoint,
@@ -19,12 +19,12 @@ import {
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
   playerRuntimeDebugVariables,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import {
   playerRuntimeTranscriptEventSequence,
   playerRuntimeTranscriptMessage,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 
 /*
  * Player Debug's Variables view (DEBUGGER.md "Player Debug") as the Player derives it from a session and its value trace:

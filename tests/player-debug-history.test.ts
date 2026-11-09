@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DebugHistoryView, rewindFutureOf } from "../player/debug-history.js";
-import { openDebugHistorySpill } from "../player/debug-history-indexeddb.js";
+import { DebugHistoryView, rewindFutureOf } from "../player/debug/debug-history.js";
+import { openDebugHistorySpill } from "../player/debug/debug-history-indexeddb.js";
 import { CANNOT_KEEP, type HistoryTimeline } from "../player/engine-bridge/history/core.js";
 import type { DebugHistorySpill } from "../player/engine-bridge/history/snapshots.js";
 import { createInProcessBackend } from "../player/engine-bridge/in-process.js";
@@ -10,16 +10,16 @@ import {
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeForm,
   playerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession as compiledSession } from "../player/compile-project.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession as compiledSession } from "../player/runtime/compile-project.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import {
   playerRuntimeForeground,
   playerTemporalContext,
   type PlayerSession,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 import { hatch, introduced } from "./helpers/in-process-bridge.js";
-import type { PlayerTranscriptEntryPresentation } from "../player/model.js";
+import type { PlayerTranscriptEntryPresentation } from "../player/presentation/model.js";
 
 // Debug's rewind history keeps a point for each newly presented interaction and restores it exactly: its state, and its
 // transcript rebuilt from the events that led to it (DEBUGGER.md "Rewind"). The history is the engine's host's

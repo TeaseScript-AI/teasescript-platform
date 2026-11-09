@@ -1,14 +1,14 @@
 import { computed, ref, watch } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
 import type { PlayerCriticalState } from "../../../engine-bridge/session-protocol.js";
-import { bridgeOf } from "../../../player-bridge.js";
+import { bridgeOf } from "../../../runtime/player-bridge.js";
 import {
   activePlayerRuntimeInteraction,
   nextPlayerRuntimeEventMs,
   playerRuntimeAwaitsHost,
   playerRuntimeMedia,
   type PlayerSession,
-} from "../../../runtime-view.js";
+} from "../../../runtime/runtime-view.js";
 import type { PlayerSessionHost } from "../session/usePlayerSession";
 
 // How long one task may observe events of a jump before it yields to input and rendering.

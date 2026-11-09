@@ -6,7 +6,7 @@ import {
   readWorkerMessage,
   sameBuild,
 } from "./protocol.js";
-import type { ClockTicket } from "../clock-ticket.js";
+import type { ClockTicket } from "../runtime/clock-ticket.js";
 import { decodeMessage, encodeMessage } from "./transport.js";
 
 /** How the Player side reaches its engine Worker, whatever runs it: a browser Worker, a Node worker or a test port. */

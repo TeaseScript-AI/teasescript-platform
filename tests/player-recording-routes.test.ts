@@ -37,7 +37,7 @@ before(async () => {
   census = (tool.createSessionWorkCensus as (root: string) => Census)(process.cwd());
 });
 
-const ADAPTER = "player/runtime-adapter.ts";
+const ADAPTER = "player/runtime/runtime-adapter.ts";
 const SESSION_OPS = "player/engine-bridge/ops/session.ts";
 
 /** What reaches each target, as `target <- caller [use]`. */
@@ -49,7 +49,7 @@ function callers(targets: readonly { readonly file: string; readonly path: strin
 
 /** Each place that begins a recording, by the begin route it serves (§21.2 "Recording provenance"). */
 const BEGINS: Readonly<Record<string, string>> = {
-  "player/debug-recorder.ts DebugRecorder > begin <- player/runtime-adapter.ts PlayerRuntimeEngine > beginRecording":
+  "player/debug/debug-recorder.ts DebugRecorder > begin <- player/runtime/runtime-adapter.ts PlayerRuntimeEngine > beginRecording":
     "the one convergence: it records the engine and the begin's epoch",
   [`${ADAPTER} PlayerRuntimeEngine > beginRecording <- ${ADAPTER} createPlayerRuntimeSession`]:
     "a host Start, and `introduceNow` with an object or a factory",
@@ -69,7 +69,7 @@ const BEGINS: Readonly<Record<string, string>> = {
 
 test("every begin of a recording converges on the recorder's begin from a classified route", () => {
   const found = callers([
-    { file: "player/debug-recorder.ts", path: "DebugRecorder > begin" },
+    { file: "player/debug/debug-recorder.ts", path: "DebugRecorder > begin" },
     { file: ADAPTER, path: "PlayerRuntimeEngine > beginRecording" },
     { file: ADAPTER, path: "beginPlayerRuntimeRecording" },
     { file: SESSION_OPS, path: "beginRecordingAt" },
@@ -123,14 +123,14 @@ test("the failure capture's and the export capture's replies each reach one sett
         file: "player/vue/src/session/activation/useFailureRecording.ts",
         path: "useFailureRecording > settle",
       },
-      { file: "player/player-bridge.ts", path: "PlayerBridge > captureExport" },
+      { file: "player/runtime/player-bridge.ts", path: "PlayerBridge > captureExport" },
       {
         file: "player/vue/src/session/activation/useExportCandidate.ts",
         path: "useExportCandidate > deliver",
       },
     ]),
     [
-      "player/player-bridge.ts PlayerBridge > captureExport <- player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture",
+      "player/runtime/player-bridge.ts PlayerBridge > captureExport <- player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture",
       "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > deliver <- player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture > captureExport:callback",
       "player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > settle <- player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped > then:callback.1",
       "player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > settle <- player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped > then:callback.2",
@@ -157,7 +157,7 @@ test("the page's diagnostic senders each check their activation's admission, and
     "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation";
   const OWNER = "player/vue/src/session/activation/useActivationRun.ts";
   const senders = callers([
-    { file: "player/player-bridge.ts", path: "PlayerBridge > commitIncident" },
+    { file: "player/runtime/player-bridge.ts", path: "PlayerBridge > commitIncident" },
     { file: OWNER, path: "stopArguments" },
     {
       file: "player/vue/src/session/activation/useFailureRecording.ts",
@@ -165,7 +165,7 @@ test("the page's diagnostic senders each check their activation's admission, and
     },
   ]);
   assert.deepEqual(senders, [
-    `player/player-bridge.ts PlayerBridge > commitIncident <- ${ACTIVATION} > reportHostError > incident`,
+    `player/runtime/player-bridge.ts PlayerBridge > commitIncident <- ${ACTIVATION} > reportHostError > incident`,
     `${OWNER} stopArguments <- ${ACTIVATION} > reportHostError > incident`,
     `${OWNER} stopArguments <- ${ACTIVATION} > stopAt`,
     `player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped <- ${ACTIVATION} > stopAt`,

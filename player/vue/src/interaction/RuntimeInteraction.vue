@@ -7,7 +7,7 @@ import FormControls from "./FormControls.vue";
 import PopupDialog from "./PopupDialog.vue";
 import ExportTextDialog from "./ExportTextDialog.vue";
 import LockDialog from "./LockDialog.vue";
-import type { LockDialog as LockDialogState, LockDialogInput } from "../../../lock-service.js";
+import type { LockDialog as LockDialogState, LockDialogInput } from "../../../encryption/lock-service.js";
 import { computed, nextTick, onUnmounted, ref, watch, type Ref } from "vue";
 import { useEventListener } from "@vueuse/core";
 import {
@@ -18,7 +18,7 @@ import {
   playerRuntimePacingGate,
   playerRuntimeInteractionActionIds,
   type PlayerSession,
-} from "../../../runtime-view.js";
+} from "../../../runtime/runtime-view.js";
 import { invalidAnswerMessage } from "../../../../src/interaction-answers.js";
 import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
@@ -28,8 +28,8 @@ import type {
   PlayerFormPresentation,
   PlayerTranscriptEntryPresentation,
   PlayerSpeakerPresentation,
-} from "../../../model.js";
-import { imagePickerAccept, type ImageFileFilters } from "../../../image-file.js";
+} from "../../../presentation/model.js";
+import { imagePickerAccept, type ImageFileFilters } from "../../../media/image-file.js";
 import { openUrlTab } from "../../../url-tab.js";
 import {
   draftInput,

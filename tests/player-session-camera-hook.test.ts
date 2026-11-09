@@ -6,10 +6,10 @@ import {
   createPlayerRuntimeRestorePoint as rawCreatePlayerRuntimeRestorePoint,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import { pendingPlayerRuntimeStorageWrite } from "../player/runtime-view.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import { pendingPlayerRuntimeStorageWrite } from "../player/runtime/runtime-view.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";

@@ -1,24 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject } from "../player/compile-project.js";
+import { compilePlayerProject } from "../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { hatch } from "../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { CheckpointCapture, KeepCapture } from "../player/engine-bridge/ops/persistence.js";
 import { playerBridgeOps, type PrepareResult } from "../player/engine-bridge/player-ops.js";
-import { PlayerBridge } from "../player/player-bridge.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
 import {
   createPlayerRuntimeRestorePoint,
   playerRuntimeSnapshotJson,
-} from "../player/runtime-adapter.js";
-import type { PlayerSession } from "../player/runtime-view.js";
+} from "../player/runtime/runtime-adapter.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { formObligations, malformedArguments } from "./helpers/argument-forms.js";
 import { cloneGraphDifference } from "./helpers/clone-graph.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
-import { NO_MARKS } from "../player/debug-history-marks.js";
+import { NO_MARKS } from "../player/debug/debug-history-marks.js";
 
 /*
  * L5h.1's ops: what the Player keeps and exports of a session, read in the host after the session's earlier requests,

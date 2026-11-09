@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, type Ref } from "vue";
 
-import type * as Adapter from "../player/runtime-adapter.js";
-import type * as CompileProject from "../player/compile-project.js";
-import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
+import type * as Adapter from "../player/runtime/runtime-adapter.js";
+import type * as CompileProject from "../player/runtime/compile-project.js";
+import type { PlayerRuntimeSession } from "../player/runtime/runtime-adapter.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { loadHostFacade, onHostAll } from "./helpers/host-sessions.js";
 
@@ -40,8 +40,8 @@ before(async () => {
     "player/vue/src/transcript/useMessageUpdateAnnouncements.ts",
   );
   const loaded = {
-    ...(await loadPlayerModule("player/runtime-adapter.ts")),
-    ...(await loadPlayerModule("player/compile-project.ts")),
+    ...(await loadPlayerModule("player/runtime/runtime-adapter.ts")),
+    ...(await loadPlayerModule("player/runtime/compile-project.ts")),
   };
   assert.equal(typeof host.usePlayerSession, "function");
   assert.equal(typeof announcements.useMessageUpdateAnnouncements, "function");
