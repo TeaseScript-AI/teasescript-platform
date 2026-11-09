@@ -676,6 +676,13 @@ the gate's fixtures (one small source per mechanism group the corpus never meets
 reports what each tape met (`inventory.ts`); `census.mjs` counts every mechanism, lists those no tape met and those met
 only in incomplete tapes, and picks the browser and Pixel cohorts.
 
+In a browser, `node tools/player-gate/tapes/browser.mjs --engine E --bridge DIR --tapes DIR --census FILE --out FILE`
+replays the census's pinned cohort, each tape checked against its pinned hash, on the bridge page's replay mode
+(`tools/player-gate/bridge/replay.mjs`) through both backends, with the same comparison and no tolerance. A tape that
+differs in one engine is a measured value: WebKit replays F `OwlSays` with a colour whose last digits differ from
+Node's, on both backends, because `normalizeColor` prints colorjs.io's OKLCH conversion as full doubles and the JS
+engines' `Math.cbrt`, `atan2` and `pow` differ in their last bits (#2147).
+
 ## Implemented Phase 1 deterministic property harness
 
 The repository keeps one small deterministic campaign around the current public
