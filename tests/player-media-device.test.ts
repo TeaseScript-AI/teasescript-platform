@@ -283,6 +283,8 @@ test("an element error between the loaded report and its publication is still re
   const deferred: Array<Parameters<typeof reconcile>[0]> = [];
   device.reconcile = (media) => void deferred.push(media);
   element!.metadata(10);
+  // Twice, before either publication: the device's own flag keeps it to one report.
+  element!.emit("error");
   element!.emit("error");
   device.reconcile = reconcile;
   for (const media of deferred) reconcile(media);
