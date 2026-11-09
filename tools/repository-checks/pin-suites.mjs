@@ -49,6 +49,11 @@ export const PIN_SUITES = [
     pin: /^\s*assert\.equal\(budget\.total,/u,
   },
   {
+    file: "tests/type-core/type-core-declared-escapes.test.ts",
+    pins: "main's stop states and plan and runs digests at the declared difference's window edges",
+    pin: /^const MAIN: /u,
+  },
+  {
     file: "tests/type-core/type-core-f18.test.ts",
     pins: "a literal default's total, decision and default work",
     pin: /^\s*\{ total: \d/u,
