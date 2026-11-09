@@ -34,53 +34,53 @@ const CORE = "src/type-inference/core/";
  */
 export const PIN_SUITES = [
   {
-    file: "tests/type-core-candidate.test.ts",
+    file: "tests/type-core/type-core-candidate.test.ts",
     pins: "an integer rule's total and checks",
     pin: /^\s*assert\.deepEqual\(units, \[/u,
   },
   {
-    file: "tests/type-core-closure.test.ts",
+    file: "tests/type-core/type-core-closure.test.ts",
     pins: "work totals at two demands, four modes",
     pin: /^const OUTSIDE\b/u,
   },
   {
-    file: "tests/type-core-contract-capture.test.ts",
+    file: "tests/type-core/type-core-contract-capture.test.ts",
     pins: "one capture total",
     pin: /^\s*assert\.equal\(budget\.total,/u,
   },
   {
-    file: "tests/type-core-f18.test.ts",
+    file: "tests/type-core/type-core-f18.test.ts",
     pins: "a literal default's total, decision and default work",
     pin: /^\s*\{ total: \d/u,
   },
   {
-    file: "tests/type-core-key-ids.test.ts",
+    file: "tests/type-core/type-core-key-ids.test.ts",
     pins: "listed copy sites",
     pin: /^const COPIES_LISTED\b/u,
   },
   {
-    file: "tests/type-core-kept.test.ts",
+    file: "tests/type-core/type-core-kept.test.ts",
     pins: "listed construction sites",
     pin: /^const (?:LISTED|STORED)\b/u,
   },
   {
-    file: "tests/type-core-work-a.test.ts",
+    file: "tests/type-core/type-core-work-a.test.ts",
     pins: "a store check's work per mode",
     pin: /^\s*assert\.deepEqual\(measured, \[/u,
   },
   {
-    file: "tests/type-core-work-b.test.ts",
+    file: "tests/type-core/type-core-work-b.test.ts",
     pins: "main's work per family, as bounds",
     pin: /^\s*main: \{\s*$/u,
-    in: "tests/helpers/type-core-families.ts",
+    in: "tests/helpers/type-core/type-core-families.ts",
   },
   {
-    file: "tests/type-core-work-c.test.ts",
+    file: "tests/type-core/type-core-work-c.test.ts",
     pins: "main's work per shape, as bounds",
     pin: /^\s*(?:(?:shared|unshared): \{|setup: \[|"checks \d|\[\d{4,}(?:, \d{4,}){3}\])/u,
   },
   {
-    file: "tests/type-core-contract.test.ts",
+    file: "tests/type-core/type-core-contract.test.ts",
     pins: "the published answers' digests (TABLE r4.185)",
     pin: /^\s*upToOrder: "[0-9a-f]{16}",/u,
   },
@@ -88,12 +88,15 @@ export const PIN_SUITES = [
 
 /** The files the pin forms find that pin no work, each with what its numbers are. */
 export const NOT_PINS = [
-  { file: "tests/async-timer-runtime.test.ts", is: "timer milliseconds" },
-  { file: "tests/families-baseline-fill.test.ts", is: "a runner's fixture timings" },
-  { file: "tests/list-functions.test.ts", is: "random seeds" },
-  { file: "tests/message-markup.test.ts", is: "character codes" },
-  { file: "tests/runtime-random.test.ts", is: "a generator's expected states" },
-  { file: "tests/type-core-message-parity.test.ts", is: "random seeds" },
+  { file: "tests/runtime/async-timer-runtime.test.ts", is: "timer milliseconds" },
+  {
+    file: "tests/families-runner/families-baseline-fill.test.ts",
+    is: "a runner's fixture timings",
+  },
+  { file: "tests/runtime/list-functions.test.ts", is: "random seeds" },
+  { file: "tests/runtime/message-markup.test.ts", is: "character codes" },
+  { file: "tests/runtime/runtime-random.test.ts", is: "a generator's expected states" },
+  { file: "tests/type-core/type-core-message-parity.test.ts", is: "random seeds" },
 ];
 
 /** The three pin forms the list's test finds by their text. */

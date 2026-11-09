@@ -1,8 +1,8 @@
 # node-vibrant reference swatches
 
-`node-vibrant.json` holds what node-vibrant 4.0.4 measures for six photos. In `tests/player-photo-swatches.test.ts` the
+`node-vibrant.json` holds what node-vibrant 4.0.4 measures for six photos. In `tests/player/player-photo-swatches.test.ts` the
 Player's own extraction (`player/theme/node-vibrant/swatches.ts`) must give the same colours and swatches;
-`tests/player-photo-theme.test.ts` checks the contrast of their photo colours.
+`tests/player/player-photo-theme.test.ts` checks the contrast of their photo colours.
 
 The photos are from Unsplash (Unsplash License), 1500 × 1000 through picsum.photos: P1 green forest valley by Jerry
 Adney (`_WiFMBRT7Aw`), P2 blue sea by Isaak Dury (`YhZbnxqtooM`), P3 portrait in a yellow field by Alexander Shustov

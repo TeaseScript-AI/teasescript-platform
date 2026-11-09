@@ -1,0 +1,407 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { compileSource } from "../../src/compiler.js";
+import { CONVERSIONS, type Conversion } from "../../src/conversions.js";
+import { CONVERSION_FUNCTIONS } from "../../src/language-facts.js";
+import { run } from "../../src/runtime/engine.js";
+import { compileValidPlan } from "../helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
+import { assertRuntimeResumeEquivalent } from "../helpers/runtime-equivalence.js";
+import { runValidSource } from "../helpers/run-valid-source.js";
+import { sayTexts } from "../helpers/runtime-events.js";
+
+function said(source: string): string[] {
+  const result = runValidSource(source);
+  assert.equal(result.snapshot.failure, null, source);
+  return sayTexts(result);
+}
+
+/** Runs `source` with host globals, whose values the compiler cannot know. */
+function runWithGlobals(source: string, globals: Record<string, string | number | boolean | null>) {
+  const plan = compileValidPlan(source, { globals: Object.keys(globals) });
+  return run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals }));
+}
+
+function diagnostics(source: string): [string, string, string][] {
+  return compileSource(source).diagnostics.map((diagnostic) => [
+    diagnostic.code,
+    diagnostic.message,
+    source.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
+  ]);
+}
+
+test("conversions turn text into numbers and true or false, and scalars into text", () => {
+  assert.deepEqual(
+    said(
+      [
+        'say "${toNumber("2.5")} ${toNumber(" -4 ")} ${toNumber("1e3")} ${toNumber(".5")} ${toNumber("-0")} ${toNumber(7)}"',
+        'say "${toInteger(2.7)} ${toInteger(-2.7)} ${toInteger("2.7")} ${toInteger("-2.7")} ${toInteger("12")} ${toInteger(-0.5)}"',
+        'say "${toBoolean("true")} ${toBoolean(" false ")} ${toBoolean(false)}"',
+        'say "[${toString("text")}] [${toString(2.5)}] [${toString(-0)}] [${toString(true)}] [${toString(null)}] [${toString(90 seconds)}]"',
+        'say toString(3).padStart(3, "0")',
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      "2.5 -4 1000 0.5 0 7",
+      "2 -2 2 -2 12 0",
+      "true false false",
+      "[text] [2.5] [0] [true] [null] [1 minute 30 seconds]",
+      "003",
+    ],
+  );
+});
+
+test("round ties away from zero, floor rounds down, and ceil rounds up", () => {
+  assert.deepEqual(
+    said(
+      [
+        'say "${round(2.4)} ${round(2.5)} ${round(-2.5)} ${round(0.5)} ${round(-0.5)} ${round(-0.4)} ${round(7)}"',
+        'say "${floor(2.7)} ${floor(-2.5)} ${ceil(2.1)} ${ceil(-2.5)} ${floor(10 / 4)}"',
+        "exit",
+      ].join("\n"),
+    ),
+    ["2 3 -3 1 -1 0 7", "2 -3 3 -2 2"],
+  );
+});
+
+test("default: is the result only when a value the compiler cannot know does not convert", () => {
+  const result = runWithGlobals(
+    [
+      'say "${toNumber(word, default: 0)} ${toNumber(digits, default: 0)} ${toInteger(word, default: -1)}"',
+      'say "${toBoolean(word, default: false)} ${toBoolean(flag, default: false)} ${toNumber(missing, default: 1.5)}"',
+      "exit",
+    ].join("\n"),
+    { word: "many", digits: "42", flag: "true", missing: null },
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(sayTexts(result), ["0 42 -1", "false true 1.5"]);
+});
+
+test("conversions and rounding have static result types", () => {
+  assert.deepEqual(
+    diagnostics(
+      [
+        'let amount: number = toNumber("2.5")',
+        'let count: integer = toInteger("3") + round(2.5) + floor(2.5) + ceil(2.5)',
+        "let shown: string = toString(count)",
+        'let ready: boolean = toBoolean("true")',
+        'let text = "4"',
+        "let widened: number = toNumber(text, default: 0)",
+        "exit",
+      ].join("\n"),
+    ),
+    [],
+  );
+  assert.deepEqual(diagnostics('let count: integer = toNumber("2")\nexit'), [
+    [
+      "TSV041",
+      "'count' is declared as integer, so it cannot start as a number. Round it with floor(...), round(...), or ceil(...), or declare it as 'let count: number = ...'.",
+      'toNumber("2")',
+    ],
+  ]);
+});
+
+test("conversions the compiler can prove invalid and misused arguments are compile errors", () => {
+  const cases: [string, string, string, string][] = [
+    [
+      'say toNumber("hello")\nexit',
+      "TSV043",
+      'toNumber(...) cannot convert text (string) "hello" to a number. The text must be a number such as 2.5 or -3.',
+      '"hello"',
+    ],
+    [
+      'say toInteger("${2} apples", default: 0)\nexit',
+      "TSV043",
+      'toInteger(...) cannot convert text (string) "2 apples" to a whole number (integer). The text must be a number such as 2.5 or -3.',
+      '"${2} apples"',
+    ],
+    [
+      'say toBoolean("yes")\nexit',
+      "TSV043",
+      'toBoolean(...) cannot convert text (string) "yes" to true or false (boolean). The text must be "true" or "false".',
+      '"yes"',
+    ],
+    [
+      "say toNumber(null)\nexit",
+      "TSV043",
+      "toNumber(...) converts text and numbers, not null.",
+      "null",
+    ],
+    [
+      "say toNumber(true)\nexit",
+      "TSV043",
+      "toNumber(...) converts text and numbers, not true or false (boolean).",
+      "true",
+    ],
+    [
+      "let pause = 5 s\nsay toInteger(pause)\nexit",
+      "TSV043",
+      "toInteger(...) converts text and numbers, not a duration. Divide a duration by a unit instead, such as value / 1 s.",
+      "pause",
+    ],
+    [
+      "let count = 1\nsay toBoolean(count)\nexit",
+      "TSV043",
+      "toBoolean(...) converts text and true or false (boolean), not a whole number (integer). Compare the number instead, such as value != 0.",
+      "count",
+    ],
+    [
+      "say toString([1, 2])\nexit",
+      "TSV043",
+      "toString(...) cannot convert a list (integer[]). Use .join() to combine its elements as text.",
+      "[1, 2]",
+    ],
+    [
+      "let rounds = [[1, 2], [3]]\nsay toString(rounds)\nexit",
+      "TSV043",
+      "toString(...) cannot convert a list (integer[][]), and .join() cannot combine its elements, which hold a list (integer[]). Show the whole list with say, or select a value inside it that toString(...) converts.",
+      "rounds",
+    ],
+    [
+      "say toString(dict{ a: { n: 1 } })\nexit",
+      "TSV043",
+      "toString(...) cannot convert a dict (object dict), and .values.join() cannot combine its values, which hold an object. Show the whole dict with say, or select a value inside it that toString(...) converts.",
+      "dict{ a: { n: 1 } }",
+    ],
+    [
+      "say toString(set[1, 2])\nexit",
+      "TSV043",
+      "toString(...) cannot convert a set (integer set). Use .toList().join() to combine its elements as text.",
+      "set[1, 2]",
+    ],
+    [
+      "say toString(1..3)\nexit",
+      "TSV043",
+      "toString(...) converts text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes, not a range.",
+      "1..3",
+    ],
+    [
+      'say toNumber("5", default: "0")\nexit',
+      "TSV043",
+      "toNumber(...) needs a number as its default:, not text (string).",
+      '"0"',
+    ],
+    [
+      'say toInteger("5", default: 0.5)\nexit',
+      "TSV043",
+      "toInteger(...) needs a whole number (integer) as its default:, not a number.",
+      "0.5",
+    ],
+    [
+      "say toString(5, default: null)\nexit",
+      "TSV043",
+      "toString(...) needs text (string) as its default:, not null.",
+      "null",
+    ],
+    [
+      'say toNumber("5", fallback: 0)\nexit',
+      "TSV022",
+      "toNumber() has no parameter 'fallback'. Its only named argument is 'default:'.",
+      "fallback",
+    ],
+    [
+      "say toNumber()\nexit",
+      "TSV020",
+      "toNumber() takes 1 argument (value), received 0.",
+      "toNumber()",
+    ],
+    [
+      'say round("2.5")\nexit',
+      "TSV043",
+      "round(...) needs a number, not text (string). Convert the text with the toNumber function.",
+      '"2.5"',
+    ],
+    [
+      "say floor(2, 3)\nexit",
+      "TSV020",
+      "floor() takes 1 argument (value), received 2.",
+      "floor(2, 3)",
+    ],
+    [
+      "say ceil(2, to: 1)\nexit",
+      "TSV022",
+      "ceil() takes its arguments without names. Remove 'to:'.",
+      "to",
+    ],
+  ];
+  for (const [source, code, message, text] of cases)
+    assert.deepEqual(diagnostics(source), [[code, message, text]], source);
+});
+
+test("values that do not convert at runtime raise errors that name the fix", () => {
+  const cases: [string, Record<string, string | number | boolean | null>, string, string][] = [
+    [
+      "say toNumber(value)\nexit",
+      { value: "many" },
+      "TSR058",
+      `toNumber(...) cannot convert text (string) "many" to a number. The text must be a number such as 2.5 or -3. Give a fallback with 'default:' if the value may not convert.`,
+    ],
+    [
+      "say toInteger(value)\nexit",
+      { value: true },
+      "TSR058",
+      "toInteger(...) cannot convert true (boolean) to a whole number (integer). Give a fallback with 'default:' if the value may not convert.",
+    ],
+    [
+      "say toBoolean(value)\nexit",
+      { value: "yes" },
+      "TSR058",
+      'toBoolean(...) cannot convert text (string) "yes" to true or false (boolean). The text must be "true" or "false". Compare the text instead, such as \'(value == "yes")\'.',
+    ],
+    [
+      "say toBoolean(value)\nexit",
+      { value: 1 },
+      "TSR058",
+      "toBoolean(...) converts text and true or false (boolean), not the number 1. Compare the number instead, such as '(value != 0)'.",
+    ],
+    [
+      "say toNumber(value)\nexit",
+      { value: "1e400" },
+      "TSR058",
+      `toNumber(...) cannot convert text (string) "1e400" to a number. The text must be a number such as 2.5 or -3. Give a fallback with 'default:' if the value may not convert.`,
+    ],
+    [
+      "say round(value)\nexit",
+      { value: "2.5" },
+      "TSV043",
+      "round(...) needs a number, not text (string). Convert the text with the toNumber function.",
+    ],
+  ];
+  for (const [source, globals, code, message] of cases) {
+    const result = runWithGlobals(source, globals);
+    assert.deepEqual(
+      [result.snapshot.failure?.code, result.snapshot.failure?.message],
+      [code, message],
+      `${source} ${JSON.stringify(globals)}`,
+    );
+    const call = source.split("\n")[0]!.replace(/^say /u, "");
+    assert.deepEqual(
+      [result.snapshot.failure?.span.start.offset, result.snapshot.failure?.span.end.offset],
+      [4, 4 + call.length],
+      source,
+    );
+  }
+  // A default is checked when it is used, at the default (owner decision, 2026-10-16).
+  const source = "say toNumber(value, default: backup)\nexit";
+  const unused = runWithGlobals(source, { value: "1", backup: "0" });
+  assert.equal(unused.snapshot.failure, null);
+  assert.deepEqual(sayTexts(unused), ["1"]);
+  const used = runWithGlobals(source, { value: "x", backup: "0" });
+  assert.deepEqual(
+    [used.snapshot.failure?.code, used.snapshot.failure?.message],
+    ["TSR058", "toNumber(...) needs a number as its default:, not text (string)."],
+  );
+  assert.deepEqual(
+    [used.snapshot.failure?.span.start.offset, used.snapshot.failure?.span.end.offset],
+    [source.indexOf("backup"), source.indexOf("backup") + "backup".length],
+  );
+  const list = runValidSource(
+    "function dynamic(value) { return value }\nsay toString(dynamic([1]))\nexit",
+  );
+  assert.deepEqual(
+    [list.snapshot.failure?.code, list.snapshot.failure?.message],
+    [
+      "TSR058",
+      "toString(...) cannot convert a list to text (string). Call join() on the list to combine its elements as text.",
+    ],
+  );
+});
+
+test("text the compiler can see fails as the runtime fails on it, with the runtime's text (V30 §13, §35)", () => {
+  // Every conversion of a value that does not convert "x"; the runtime goes on with what to do.
+  for (const name of CONVERSION_FUNCTIONS) {
+    const conversion: Conversion = CONVERSIONS[name];
+    if (conversion.takes !== "value" || conversion.textProblem("x") === undefined) continue;
+    const compiled = compileSource(`say ${name}("x")\nexit`).diagnostics;
+    const failure = runWithGlobals(`say ${name}(value)\nexit`, { value: "x" }).snapshot.failure;
+    assert.deepEqual(
+      compiled.map(({ code }) => code),
+      ["TSV043"],
+      name,
+    );
+    assert.equal(failure?.code, "TSR058", name);
+    const message = compiled[0]!.message;
+    assert.equal(failure.message.slice(0, message.length), message, name);
+    assert.match(
+      failure.message.slice(message.length),
+      /^ (?:Give a fallback with 'default:' if the value may not convert\.|Compare the text instead, such as '\(value == "x"\)'\.)$/u,
+      name,
+    );
+  }
+});
+
+test("a conversion checks its value as it was evaluated, before later arguments run", () => {
+  assert.deepEqual(
+    said(
+      [
+        "let value = null",
+        "function backup {",
+        "    value = [1]",
+        '    return "fallback"',
+        "}",
+        "say toString(value, default: backup())",
+        "exit",
+      ].join("\n"),
+    ),
+    ["null"],
+  );
+});
+
+test("conversions are checkpoint and resume equivalent", () => {
+  assertRuntimeResumeEquivalent(
+    [
+      'let entries = "3, 1.5, x, 4".split(", ")',
+      "let total = 0.0",
+      "for entry in entries {",
+      "    total += toNumber(entry, default: 0)",
+      "}",
+      'say "${round(total)} ${floor(total)} ${toInteger(total)} ${toString(total).length}"',
+      "exit",
+    ].join("\n"),
+  );
+});
+
+test("a conversion that the runtime refuses shows its fix with the argument as the source writes it, and otherwise in words", () => {
+  const dynamic = "function dynamic(value) {\n    return value\n}\n";
+  const values =
+    'let items = dynamic([1, 2])\nlet tags = dynamic(set["a"])\nlet prices = dynamic(dict{"tea": 2})\n' +
+    'let n = dynamic(1)\nlet t = dynamic("yes")\nlet p = { items: dynamic([3]) }\n';
+  const failed = (source: string) =>
+    runValidSource(`${dynamic}${values}say ${source}\nexit`).snapshot.failure?.message;
+  // A name or a member: the code replaces the call, and runs, also next to another operator.
+  for (const [call, fix] of [
+    ["toString(items)", "items.join()"],
+    ["toString(p.items)", "p.items.join()"],
+    ["toString(tags)", "tags.toList().join()"],
+    ["toString(prices)", "prices.values.join()"],
+    ["toBoolean(n)", "(n != 0)"],
+    ["toBoolean(t)", '(t == "yes")'],
+  ] as const) {
+    const text = fix.includes("join");
+    for (const site of text
+      ? ["#", '# + "!"', '"${#}"']
+      : ["#", "# == true", "false == #", "# and true"]) {
+      const source = site.replace("#", call);
+      assert.ok(failed(source)?.includes(`'${fix}'`), `${source}: ${failed(source)}`);
+      const pasted = runValidSource(`${dynamic}${values}say ${site.replace("#", fix)}\nexit`);
+      assert.equal(pasted.snapshot.failure, null, `${site}: ${fix}`);
+    }
+  }
+  // Another argument, such as a call: the fix in words.
+  for (const [call, fix] of [
+    ["toString(dynamic([1]))", "Call join() on the list to combine its elements as text."],
+    [
+      'toString(dynamic(set["a"]))',
+      "Copy the set into a list with toList(), then call join() on that list to combine its elements as text.",
+    ],
+    [
+      'toString(dynamic(dict{"tea": 2}))',
+      "Call join() on the values of the dict to combine them as text.",
+    ],
+    ["toBoolean(dynamic(1))", "Compare the number with 0 instead."],
+    ['toBoolean(dynamic("yes"))', "Compare the text using '==' instead."],
+  ] as const)
+    assert.ok(failed(call)?.endsWith(` ${fix}`), `${call}: ${failed(call)}`);
+});

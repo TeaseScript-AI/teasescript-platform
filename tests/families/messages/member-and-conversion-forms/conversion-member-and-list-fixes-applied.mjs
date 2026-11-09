@@ -2,7 +2,7 @@
 export const id = "1241-astra-paste.mjs";
 // the forms #1241 r1's paste runs pasted, each compiled and, where it compiled, analysed; #1241, Astra r1
 // (R/astra-m4-i1241-review/paste.mjs on the head, in full and sampled, and on a mutant that offers every form whatever
-// fits). The cases it read from the repository's paste family (`pasteCases`, `tests/helpers/type-core-paste.ts`) are not
+// fits). The cases it read from the repository's paste family (`pasteCases`, `tests/helpers/type-core/type-core-paste.ts`) are not
 // copied; the programs it pasted from them are, as `paste-clean.json`, `paste-mutant.json` and `paste-clean-sample.json`
 // record them. A form with a compile error was only compiled, without globals.
 export const cases = [

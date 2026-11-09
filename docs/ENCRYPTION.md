@@ -115,12 +115,12 @@ Player goes offline later.
   offers none.
 - **Maintenance:** follow Noble's releases (curves and hashes together) and keep `tlock.ts`, a port of tlock-js's
   `encryptOnG2RFC9380` and `decryptOnG2` (MIT OR Apache-2.0, Protocol Labs), interoperable:
-  `tests/player-encryption.test.ts` opens a ciphertext that upstream tlock-js made and checks real quicknet beacons.
+  `tests/player/player-encryption.test.ts` opens a ciphertext that upstream tlock-js made and checks real quicknet beacons.
 - **Public keys:** `@noble/ciphers` is needed because no browser offers ChaCha20-Poly1305 in WebCrypto, and age uses it
   for every stanza and the payload. The alternative, the `age-encryption` package (typage) 0.3.1, is a complete age
   implementation that also depends on `@noble/post-quantum`, which pulls a second, older `@noble/curves` and
   `@noble/hashes` (2.0.1), where this opener only writes X25519 and `ssh-ed25519` stanzas. Follow ciphers' releases
-  with curves and hashes; `tests/player-public-keys.test.ts` opens the age files with an age reader after the
+  with curves and hashes; `tests/player/player-public-keys.test.ts` opens the age files with an age reader after the
   specification and, where the `age` tool is installed (`AGE_BIN`), with `age -d` for an age identity and an OpenSSH
   key.
 - **Security:** Noble's audits cover the primitives, not this port's glue (the IBE hashes, the scalar derivation, and

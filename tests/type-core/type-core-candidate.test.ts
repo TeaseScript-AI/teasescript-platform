@@ -1,0 +1,4086 @@
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import test from "node:test";
+
+import {
+  compileProject,
+  compileProjectWithBackend,
+  compileSource,
+  compileSourceWithBackend,
+  type CompilationResult,
+} from "../../src/compiler.js";
+import { REPEAT_COUNT_RULE } from "../../src/loop-rules.js";
+import {
+  TEXT_METHODS,
+  type TextParameterKind,
+  type TextSignature,
+} from "../../src/text-operations.js";
+import type { InstructionPlan, TypePlan } from "../../src/plan/model.js";
+import { run } from "../../src/runtime/engine.js";
+import type { InterpreterEvent } from "../../src/runtime/events.js";
+import { observeTime } from "../../src/runtime/operations/observe-time.js";
+import {
+  createCheckpoint,
+  deserializeCheckpoint,
+  serializeCheckpoint,
+} from "../../src/runtime/snapshot/checkpoint.js";
+import { createFreshRuntimeSnapshot } from "../../src/runtime/snapshot/snapshot-construction.js";
+import type { RuntimeSnapshot } from "../../src/runtime/snapshot/state.js";
+import {
+  createCapturedSerializableList,
+  type SerializableRuntimeValue,
+} from "../../src/runtime/values/serializable-values.js";
+import type { TypeAnalysisRequest, TypeCheckResult } from "../../src/type-inference/backend.js";
+import { analyseCore } from "../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { CARRIER_KINDS, type CarrierKind } from "../../src/type-inference/core/carriers.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../../src/type-inference/core/budget.js";
+import {
+  checkedResult,
+  coreCheckResult,
+  reportedDiagnostics,
+} from "../../src/type-inference/core/check-result/check-result.js";
+import { nodeOf, SliceIndex } from "../../src/type-inference/core/check-result/slice-index.js";
+import { withConsumerOrder } from "../../src/type-inference/core/consumers.js";
+import { coreRecord } from "../../src/type-inference/core/result.js";
+import { CoreProgram } from "../../src/type-inference/core/program.js";
+import { withoutSharing } from "../../src/type-inference/core/sharing.js";
+import { withSolverSeam } from "../../src/type-inference/core/solver.js";
+import { analyzeTypes } from "../../src/type-inference/index.js";
+import { withValidationTestStatistics } from "../../src/validation-testing.js";
+import { VALUE_KIND_NAMES } from "../../src/value-kinds.js";
+import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
+import { toMonacoMarkers } from "../../src/editor/monaco-mapping.js";
+import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
+import {
+  companions,
+  derive,
+  derivedText,
+  evaluate,
+  syntaxOf,
+  Underivable,
+  type CheckEvent,
+  type PredictedRun,
+} from "../helpers/type-core-derived.js";
+import { heldBack, readFixture } from "../helpers/type-core/type-core-fixture.js";
+import { inMode, MODES } from "../helpers/type-core-oracles.js";
+import {
+  assignments,
+  derivedContent,
+  derivedStores,
+  plannedContent,
+  plannedStores,
+  runGlobals,
+} from "../helpers/type-core-route.js";
+import { recordDifferences, recordOf } from "../helpers/type-core-records.js";
+import {
+  BOTH,
+  owed,
+  records,
+  type Endpoint,
+  type RuleClass,
+} from "../helpers/type-core/type-core-rule.js";
+import { WRITTEN_COPY_MATRIX } from "../helpers/type-core/type-core-witnesses.js";
+
+// The coarse core on the test-only candidate route (the port plan's S5): source, candidate compile, plan, runtime.
+
+const OPTIONS = { globals: ["hostValue"] };
+
+function candidate(source: string): CompilationResult {
+  return compileSourceWithBackend(source, OPTIONS, CORE_BACKEND);
+}
+
+/** The result of `compile`, or `null` for a program outside the candidate's slice. */
+function insideSlice<T>(compile: () => T): T | null {
+  try {
+    return compile();
+  } catch (error) {
+    if (error instanceof CandidateOutsideSlice) return null;
+    throw error;
+  }
+}
+
+/** The diagnostics as these tests compare them: severity, code and start offset. */
+function sited(result: Pick<CompilationResult, "diagnostics">): string[] {
+  return result.diagnostics.map(
+    (diagnostic) => `${diagnostic.severity} ${diagnostic.code}@${diagnostic.span.start.offset}`,
+  );
+}
+
+/** `run` in the source order and with the consumers' and the solver's orders reversed: the two results, equal. */
+function inBothOrders<T>(run: () => T): T {
+  return inBothOrdersAs(run, (result) => result)[0];
+}
+
+/**
+ * `inBothOrders` with the two results compared as `project` gives them: the forward result whole, and its projection.
+ * A test that runs the forward plan compiles no third time: each run starts from a fresh snapshot.
+ */
+function inBothOrdersAs<R, T>(run: () => R, project: (result: R) => T): readonly [R, T] {
+  const forward = run();
+  const projected = project(forward);
+  const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+    withConsumerOrder(
+      (list) => [...list].reverse(),
+      () => project(run()),
+    ),
+  );
+  assert.deepEqual(reversed, projected);
+  return [forward, projected];
+}
+
+/** A run of `plan` to its end without reading pauses, with `hostValue`: its status, messages and failure. */
+function runWith(plan: InstructionPlan, hostValue: SerializableRuntimeValue) {
+  const { said, ...ran } = runSited(plan, hostValue);
+  return { ...ran, says: said.map(({ text }) => text) };
+}
+
+/** `runWith`'s run, each message with the offset its statement starts at: an effect's place in the source. */
+function runSited(plan: InstructionPlan, hostValue: SerializableRuntimeValue) {
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue } }));
+  const failure = result.events.find((event) => event.kind === "runtimeFailure");
+  return {
+    status: result.snapshot.status,
+    said: result.events.flatMap((event) =>
+      event.kind === "say" ? [{ text: event.text, at: event.span.start.offset }] : [],
+    ),
+    failure:
+      failure?.kind === "runtimeFailure"
+        ? `${failure.code}@${failure.span.start.offset}:${failure.span.end.offset}`
+        : null,
+  };
+}
+
+/**
+ * The run oracle of an enforcement test: per host value its expected failure, `CODE@start:end`, or `null`.
+ * A run without one says exactly `said` and halts at the end; a run with one ends failed with exactly it, nothing said
+ * by a statement at or after the failing check's start.
+ */
+function assertRuns(
+  plan: InstructionPlan,
+  name: string,
+  said: readonly string[],
+  runs: readonly (readonly [SerializableRuntimeValue, string | null])[],
+): void {
+  for (const [value, failure] of runs) {
+    const ran = runSited(plan, value);
+    const start = failure === null ? -1 : Number(/@(\d+):/.exec(failure)![1]);
+    assert.deepEqual(
+      {
+        status: ran.status,
+        failure: ran.failure,
+        said: ran.said.flatMap(({ text, at }) => (at >= start ? [text] : [])),
+      },
+      {
+        status: failure === null ? "halted" : "failed",
+        failure,
+        said: failure === null ? said : [],
+      },
+      `${name} with ${JSON.stringify(value)}`,
+    );
+  }
+}
+
+/** A plan's stores that check their value (`typeCheck`): per instruction, its file, span and checked type. */
+function typeChecks(
+  plan: InstructionPlan,
+): { readonly file: string; readonly so: number; readonly eo: number; readonly type: TypePlan }[] {
+  const out: { file: string; so: number; eo: number; type: TypePlan }[] = [];
+  for (const [index, instruction] of plan.instructions.entries())
+    if (
+      (instruction.kind === "declareBinding" || instruction.kind === "assign") &&
+      instruction.typeCheck !== undefined
+    )
+      out.push({
+        file:
+          plan.files.find((file) => file.startInstruction <= index && index < file.endInstruction)
+            ?.path ?? "",
+        so: instruction.span.so,
+        eo: instruction.span.eo,
+        type: instruction.typeCheck.type,
+      });
+  return out;
+}
+
+/** A checked type in full, as these tests compare it: `integer`, `list<list<integer>>`, `{name: string}`, `a|b`. */
+function typeText(type: TypePlan | null): string {
+  if (type === null) return "any";
+  if (type.kind === "union") return type.members.map(typeText).join("|");
+  if (type.kind === "list" || type.kind === "set" || type.kind === "dict")
+    return `${type.kind}<${typeText(type.element)}>`;
+  if (type.kind === "object")
+    return `{${type.properties.map(({ name, type: of }) => `${name}: ${typeText(of)}`).join(", ")}}`;
+  return type.kind;
+}
+
+/** A plan's checked stores, each as `start:end type`: the store that checks, and the whole type it checks. */
+function checksOf(plan: InstructionPlan): string[] {
+  return typeChecks(plan).map(({ so, eo, type }) => `${so}:${eo} ${typeText(type)}`);
+}
+
+/** The code a checked store fails with (S3 §4). */
+const STORE_CODES: readonly (string | null)[] = ["TSR058"];
+
+/**
+ * The codes each runtime discharge fails with, as the derived evaluation gives them: a whole-number use at a count or an
+ * index, an element of an empty list, a member a receiver may lack or not be able to hold, a selected fallback; a typed
+ * parse's or load's reading never fails (`null`, its event).
+ */
+const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
+  "integer-use": ["TSR024", "TSR043"],
+  // (C13, S9b: a loop's own check of its source, a call's of its argument)
+  iteration: ["TSR044"],
+  argument: ["TSV043", "TSV042", "TSR024"],
+  empty: ["TSR018", "TSR019"],
+  member: ["TSR003", "TSR004", "TSR008", "TSR016", "TSR017", "TSR061", "TSR062"],
+  fallback: ["TSR058"],
+  "typed-ingress": [null],
+};
+
+/**
+ * The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; the lead's answer 3). Every
+ * record of the positive list (the cells test's: all but those `heldBack` names) is tried on the candidate route in both
+ * orders. A record the route accepts is checked in four layers, each derived from the record and its source alone:
+ * - **records:** its C1 and C2 diagnostics at their whole sites, its obligations exactly (the cells test's comparison),
+ *   and a plan exactly where it is not a compile error, alike on the one-file route;
+ * - **discharges:** each obligation discharged by one rule (`derive`), a checked store or the runtime;
+ * - **checked stores:** the plan's are exactly the derived ones, target, spans and whole type;
+ * - **runs:** the original as written, its outcome with each host input at the value that fits the earliest check it
+ *   feeds, and the original and every companion under every assignment of the domain to their host inputs, each
+ *   predicted by the rules and run on the engine. A companion keeps its record's spans, kinds and decisions, so it
+ *   compiles on the route with the record's derived checked stores, or the test fails (Codex r20 H1).
+ * Each discharge is then classified by the runs: violable (a run fails there), preempted (a value that violates it
+ * always fails an earlier check first), not violable (no derived value violates it) or unreachable (no run evaluates
+ * it). A record the route rejects (`CandidateOutsideSlice`) is counted by its first construct outside the slice.
+ */
+/** The codes of each record kind's rules on the route (D3): a store's or a literal's, a count's or an index's, a member's. */
+const RECORD_CODES: Readonly<Record<string, readonly string[]>> = {
+  "written-target": ["TSV041", "TSV044"],
+  "integer-use": ["TSV011", "TSV043"],
+  // (C13: a `for` loop's iterable, a method's argument; the elements a `join` or a `sort` reads are a member's)
+  operator: ["TSV012", "TSV043"],
+  "member-read": ["TSV042", "TSV043"],
+  // (the checks that owe the runtime nothing, `staticCode`: a repeat count, a conversion, an empty range, a fallback
+  // never used)
+  static: ["TSV011", "TSV043", "TSV046", "TSV062"],
+};
+
+type ExpectedDiagnostic = ReturnType<typeof readFixture>[number]["expected"]["diagnostics"][number];
+
+/**
+ * The route's diagnostics and a record's that no one-to-one pairing matches (D2, D3): each reported diagnostic paired
+ * with its own expected one of its severity, at its whole site, with a code of the expected kind's rules. Kinds share a
+ * code, so the pairing is a matching (by augmenting paths), not a first fit.
+ */
+function unmatchedDiagnostics(
+  reported: CompilationResult["diagnostics"],
+  expected: readonly ExpectedDiagnostic[],
+): string[] {
+  const fits = (
+    diagnostic: CompilationResult["diagnostics"][number],
+    wanted: ExpectedDiagnostic,
+  ): boolean =>
+    (wanted.class === "compile-error" ? "error" : "warning") === diagnostic.severity &&
+    wanted.site.offset === diagnostic.span.start.offset &&
+    wanted.site.end === diagnostic.span.end.offset &&
+    RECORD_CODES[wanted.kind]?.includes(diagnostic.code) === true;
+  const pairedWith = expected.map((): number => -1);
+  const pair = (index: number, seen: Set<number>): boolean =>
+    expected.some((wanted, at) => {
+      if (seen.has(at) || !fits(reported[index]!, wanted)) return false;
+      seen.add(at);
+      if (pairedWith[at] !== -1 && !pair(pairedWith[at]!, seen)) return false;
+      pairedWith[at] = index;
+      return true;
+    });
+  return [
+    ...reported
+      .filter((_, index) => !pair(index, new Set()))
+      .map(
+        (diagnostic) =>
+          `reported ${diagnostic.severity} ${diagnostic.code} ${diagnostic.span.start.offset}:${diagnostic.span.end.offset}`,
+      ),
+    ...expected
+      .filter((_, at) => pairedWith[at] === -1)
+      .map(
+        (wanted) =>
+          `expected ${wanted.class} ${wanted.kind} ${wanted.site.offset}:${wanted.site.end}`,
+      ),
+  ];
+}
+
+test("the route's diagnostics pair one to one with a record's, so one expected diagnostic never answers two (D2, D3)", () => {
+  // a member read of host data: a store's warning and the member's, both at `v.n`
+  const record = readFixture().find(
+    (found) => found.name === "cp9-cells/r46/m3/sol-m3/external-30",
+  );
+  assert.ok(record !== undefined);
+  const reported = compileProjectWithBackend(
+    record.files,
+    OPTIONS,
+    CORE_BACKEND,
+  ).diagnostics.filter(
+    (diagnostic) => diagnostic.code === "TSV041" || diagnostic.code === "TSV043",
+  );
+  assert.deepEqual(reported.map((diagnostic) => diagnostic.code).sort(), ["TSV041", "TSV043"]);
+  assert.deepEqual(unmatchedDiagnostics(reported, record.expected.diagnostics), []);
+  // the member's code replaced by the store's: the store's expected diagnostic cannot answer both
+  const twice = reported.map((diagnostic) => ({ ...diagnostic, code: "TSV041" }));
+  assert.equal(unmatchedDiagnostics(twice, record.expected.diagnostics).length, 2);
+});
+
+test("every positive-list record the candidate route reaches plans and runs as its record derives, in both orders (§5.2, r4.59)", (t) => {
+  const routed = new Set(Object.values(RECORD_CODES).flat());
+  const accepted: string[] = [];
+  const outside = new Map<string, number>();
+  const classes = new Map<string, number>();
+  const originals = new Map<string, string | null>();
+  const classOf = new Map<string, string>();
+  const companionRuns = new Map<string, PredictedRun[]>();
+  let positive = 0;
+  let plans = 0;
+  let runs = 0;
+  let compared = 0;
+  for (const record of readFixture()) {
+    if (heldBack(record) !== null) continue;
+    positive += 1;
+    let result: ReturnType<typeof compileProjectWithBackend>;
+    try {
+      result = inBothOrders(() => compileProjectWithBackend(record.files, OPTIONS, CORE_BACKEND));
+    } catch (error) {
+      if (!(error instanceof CandidateOutsideSlice)) throw error;
+      const what = record.files.length > 1 ? "several files" : error.what.replace(/^this /, "");
+      outside.set(what, (outside.get(what) ?? 0) + 1);
+      continue;
+    }
+    accepted.push(record.name);
+    assert.equal(record.files.length, 1, `${record.name}: one file`);
+    const source = record.files[0]!.source;
+    // records: the diagnostics at their whole sites, each with a code of its kind's rules (D2, D3), the obligations
+    // exactly, alike on the one-file route
+    const reported = (compiled: Pick<CompilationResult, "diagnostics">) =>
+      compiled.diagnostics.filter((diagnostic) => routed.has(diagnostic.code));
+    const diagnosed = (compiled: Pick<CompilationResult, "diagnostics">): string[] =>
+      reported(compiled)
+        .map(
+          (diagnostic) =>
+            `${diagnostic.severity} ${diagnostic.code} ${diagnostic.span.start.offset}:${diagnostic.span.end.offset} ` +
+            diagnostic.message,
+        )
+        .sort();
+    const request = coreRequest(record.files);
+    assert.ok(request !== null, record.name);
+    // (a warning on a line that never runs is the record's, but the compiler reports the line instead, #1195)
+    const analysis = analyseCore(request);
+    const shown = new Set(reportedDiagnostics(analysis));
+    const silent = analysis.diagnostics.filter((diagnostic) => !shown.has(diagnostic));
+    const expected = [...record.expected.diagnostics];
+    for (const quiet of silent) {
+      const at = expected.findIndex(
+        (wanted) =>
+          wanted.class === quiet.class &&
+          wanted.kind === quiet.kind &&
+          wanted.site.offset === quiet.site.start &&
+          wanted.site.end === quiet.site.end,
+      );
+      assert.ok(at >= 0, record.name);
+      expected.splice(at, 1);
+    }
+    assert.deepEqual(unmatchedDiagnostics(reported(result), expected), [], record.name);
+    assert.deepEqual(recordDifferences(record.expected, compactAnalysis(request)), [], record.name);
+    assert.equal(result.plan === null, record.expected.outcome === "compile-error", record.name);
+    const single = inBothOrders(() => candidate(source));
+    assert.deepEqual(diagnosed(single), diagnosed(result), `${record.name}: the one-file route`);
+    if (result.plan === null) continue;
+    plans += 1;
+    // discharges and checked stores, by rule (a construct the rules do not cover fails here, named); the source's syntax
+    // serves every evaluation of it below
+    const derived = (() => {
+      try {
+        const syntax = syntaxOf(source);
+        return [syntax, derive(syntax, record.expected)] as const;
+      } catch (error) {
+        if (error instanceof Underivable)
+          throw new Error(`${record.name}: underivable: ${error.message}`);
+        throw error;
+      }
+    })();
+    const [syntax, { stores, discharges, content }] = derived;
+    assert.deepEqual(
+      plannedContent(result.plan, source),
+      derivedContent(content, source),
+      `${record.name}: S7 content`,
+    );
+    assert.deepEqual(
+      plannedContent(single.plan!, source),
+      derivedContent(content, source),
+      `${record.name}: one-file S7 content`,
+    );
+    assert.deepEqual(
+      plannedStores(result.plan),
+      derivedStores(stores),
+      `${record.name}: the checked stores`,
+    );
+    assert.deepEqual(
+      plannedStores(single.plan!),
+      derivedStores(stores),
+      `${record.name}: the one-file route's`,
+    );
+    // runs: the original under every assignment of its host input (in the domain's order), each run once, predicted
+    // stopping at its first failing check and evaluated through every check (for the discharges)
+    const plan = result.plan;
+    const own = assignments(["hostValue"]).map((inputs) => ({
+      inputs,
+      ran: runGlobals(plan, inputs),
+      predicted: evaluate(syntax, stores, inputs, false, content).run,
+      events: evaluate(syntax, stores, inputs, true, content).events,
+    }));
+    // the original, as written: each input at the value fitting the earliest check it feeds
+    const original =
+      own.find(({ events }) => {
+        const fed = events.find((event) => event.from.has("hostValue"));
+        return fed === undefined || fed.fits;
+      }) ?? own[0]!;
+    assert.deepEqual(original.ran, original.predicted, `${record.name}: the original`);
+    originals.set(record.name, original.ran.failure);
+    compared += 1;
+    // under every assignment: a violating value stops at its check, as derived
+    const observed: { run: PredictedRun; events: readonly CheckEvent[] }[] = [];
+    for (const { inputs, ran, predicted, events } of own) {
+      assert.deepEqual(
+        ran,
+        predicted,
+        `${record.name}, the original with ${JSON.stringify(inputs)}`,
+      );
+      observed.push({ run: ran, events });
+      runs += 1;
+      compared += 1;
+    }
+    // the companions with the same checked stores, under every assignment of their inputs
+    const ranCompanions = companionRuns.get(record.name) ?? [];
+    for (const companion of companions(syntax)) {
+      const compiled = insideSlice(() =>
+        inBothOrders(() =>
+          compileSourceWithBackend(
+            companion.source,
+            { globals: [...companion.globals] },
+            CORE_BACKEND,
+          ),
+        ),
+      );
+      const at = `${record.name}, companion ${companion.label}`;
+      assert.ok(compiled !== null, `${at}: inside the slice`);
+      assert.ok(compiled.plan !== null, `${at}: a plan`);
+      assert.deepEqual(
+        plannedStores(compiled.plan),
+        derivedStores(stores),
+        `${at}: the checked stores`,
+      );
+      const companionSyntax = syntaxOf(companion.source);
+      const companionContent = derive(companionSyntax, record.expected).content;
+      assert.deepEqual(
+        plannedContent(compiled.plan, companion.source),
+        derivedContent(companionContent, companion.source),
+        `${at}: S7 content`,
+      );
+      for (const inputs of assignments(companion.globals)) {
+        const ran = runGlobals(compiled.plan, inputs);
+        assert.deepEqual(
+          ran,
+          evaluate(companionSyntax, stores, inputs, false, companionContent).run,
+          `${record.name}, companion ${companion.label}, with ${JSON.stringify(inputs)}`,
+        );
+        observed.push({
+          run: ran,
+          events: evaluate(companionSyntax, stores, inputs, true, companionContent).events,
+        });
+        ranCompanions.push(ran);
+        runs += 1;
+        compared += 1;
+      }
+    }
+    if (ranCompanions.length > 0) companionRuns.set(record.name, ranCompanions);
+    // each discharge classified by the runs: a store's at its value, the runtime's at its use, each by its own check
+    for (const discharge of discharges) {
+      if (discharge.by === "native" && discharge.what === "representable") {
+        classes.set(
+          "not violable (representable)",
+          (classes.get("not violable (representable)") ?? 0) + 1,
+        );
+        continue;
+      }
+      const named =
+        discharge.by === "store"
+          ? `${discharge.store.valueSo}:${discharge.store.valueEo}`
+          : discharge.site;
+      // each discharge by its own check's codes, never another's at the same site
+      const codes = discharge.by === "store" ? STORE_CODES : (NATIVE_CODES[discharge.what] ?? []);
+      const own = (code: string | null): boolean => codes.includes(code);
+      const key = `${record.name}#${discharge.by === "store" ? "store" : discharge.what}@${named}`;
+      if (classOf.has(key)) continue;
+      const ownAt = (event: CheckEvent): boolean => event.site === named && own(event.code);
+      const verdict = observed.some(({ run: ran }) => {
+        const [code, at] = ran.failure?.split("@") ?? [];
+        return at === named && own(code ?? null);
+      })
+        ? "violable"
+        : observed.some(({ events }) => events.some((event) => ownAt(event) && !event.fits))
+          ? "preempted"
+          : observed.some(({ events }) => events.some(ownAt))
+            ? "not violable"
+            : "unreachable";
+      classOf.set(key, verdict);
+      classes.set(verdict, (classes.get(verdict) ?? 0) + 1);
+    }
+  }
+  const counted = [...outside.values()].reduce((sum, count) => sum + count, 0);
+  const listed = (map: ReadonlyMap<string, number>): string =>
+    [...map]
+      .sort((a, b) => b[1] - a[1])
+      .map(([what, count]) => `${what} ${count}`)
+      .join(", ");
+  t.diagnostic(
+    `${positive} positive-list records: ${accepted.length} on the candidate route, ${plans} with a plan, ${runs} ` +
+      `runs, ${compared} comparisons with a predicted run (each original's is its fitting assignment's run); ` +
+      `discharges: ${listed(classes)}; outside the candidate slice (later port steps): ${listed(outside)}`,
+  );
+  assert.equal(accepted.length + counted, positive);
+  // the literal witnesses of the rules (§5.2): each class and each original outcome the note names
+  // each discharge by its kind and site: two at one site are classified each by its own check
+  const verdicts: readonly (readonly [string, string, string])[] = [
+    ["cp9-cells/r6-bugs/admission/use-before-overwrite", "integer-use@38:43", "preempted"],
+    ["cp9-cells/r6-bugs/admission/use-before-overwrite", "store@12:30", "violable"],
+    ["cp9-cells/s4/s6/owner/ingress/dead-consumer", "integer-use@42:47", "unreachable"],
+    ["cp9-cells/s4/s6/owner/ingress/dead-consumer", "store@9:23", "violable"],
+    ["cp9-cells/s4/followup/fit/literal-mixed-repeat", "integer-use@7:18", "violable"],
+    ["cp9-cells/r46/m3/two-ingress-targets", "store@59:63", "violable"],
+    ["cp9-cells/r46/m3/two-ingress-targets", "store@80:84", "violable"],
+    // a member check and a count at one site: the run fails the member first, or the count with the member there
+    ["cp9-cells/witness/sol-missing-member-direct", "member@54:62", "violable"],
+    ["cp9-cells/witness/sol-missing-member-direct", "integer-use@54:62", "preempted"],
+    ["cp9-cells/r44/own-selector/own-last-count", "member@27:33", "not violable"],
+    ["cp9-cells/r44/own-selector/own-last-count", "integer-use@27:33", "violable"],
+  ];
+  assert.deepEqual(
+    verdicts.map(([name, at]) => `${name}#${at} ${classOf.get(`${name}#${at}`)}`),
+    verdicts.map(([name, at, verdict]) => `${name}#${at} ${verdict}`),
+    JSON.stringify(
+      [...classOf].filter(([key]) => verdicts.some(([name]) => key.startsWith(`${name}#`))),
+    ),
+  );
+  for (const [name, failure] of [
+    ["cp9-cells/X5/outside-definition", "TSR043@28:29"],
+    ["cp9-cells/r46/m3/two-ingress-targets", "TSR058@80:84"],
+    ["cp9-cells/review/list-position-absent", "TSR025@33:34"],
+    ["cp9-cells/r46/m3/empty-index", "TSR025@30:31"],
+    ["cp9-cells/s4/followup/fit/literal-mixed-repeat", null],
+  ] as const)
+    assert.equal(originals.get(name), failure, `${name}: the original`);
+  // a companion gives what the original cannot: X5's integer writer and two-ingress-targets' independent inputs halt
+  for (const name of ["cp9-cells/X5/outside-definition", "cp9-cells/r46/m3/two-ingress-targets"])
+    assert.ok(
+      companionRuns
+        .get(name)
+        ?.some((ran) => ran.status === "halted" && ran.said.at(-1)?.text === "AFTER"),
+      `${name}: a fitting companion says AFTER and halts`,
+    );
+  // a record of the set for each cell of the slice (the pull request lists every record inside it; stage 3b's
+  // `r7-bugs/m2/host-local` waits with S10)
+  for (const name of [
+    "cp9-cells/F1/let",
+    "cp9-cells/F2/written-pass",
+    "cp9-cells/F2/written-fail",
+    "cp9-cells/F3/whole",
+    "cp9-cells/F12/0",
+    "cp9-cells/X1/dead",
+    "cp9-cells/X5/outside-definition",
+    "cp9-cells/C1/fail",
+    "cp9-cells/C2/fail",
+    "cp9-cells/A1/fail",
+    "cp9-cells/A3/numeric-family",
+    "cp9-cells/P7/repeat-zero",
+    "cp9-cells/review/list-position-absent",
+    "cp9-cells/r8/written-list/mixed",
+  ])
+    assert.ok(accepted.includes(name), `${name} inside the slice`);
+});
+
+test("the S7 oracle derives receiving written types and observes native discharges", () => {
+  for (const [prefix, initializer] of [
+    ["let out: number = ", 'fromJson("2.5", default: 0, files: false)'],
+    ["let out: number = ", 'load("count", default: 0)'],
+    ["let out: number? = 0\nout = ", 'fromJson("2.5", default: null, files: false)'],
+    ["let out: number? = 0\nout = ", 'load("count", default: 0)'],
+    ["let out: number? = ", 'fromJson("null", default: 0, files: false)'],
+  ] as const) {
+    const source = `${prefix}${initializer}\nsay out\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const syntax = syntaxOf(source);
+    const derived = derive(syntax, compactAnalysis(request));
+    const owner = `${prefix.length}:${source.indexOf("\n", prefix.length)}`;
+    assert.deepEqual(
+      derivedContent(derived.content, source),
+      [
+        initializer.startsWith("load")
+          ? `load ${owner} ${prefix.includes("number?") ? "null|number" : "number"} repair=false`
+          : `expected ${owner} ${prefix.includes("number?") ? "null|number" : "number"}`,
+      ],
+      source,
+    );
+    const compiled = candidate(source);
+    assert.ok(compiled.plan !== null, source);
+    assert.deepEqual(
+      plannedContent(compiled.plan, source),
+      derivedContent(derived.content, source),
+      source,
+    );
+    assert.deepEqual(
+      runGlobals(compiled.plan, {}),
+      evaluate(syntax, derived.stores, {}, false, derived.content).run,
+      source,
+    );
+  }
+  for (const operand of ['load("count", default: 0)', 'fromJson("1", default: 0, files: false)']) {
+    const source = `say ${operand}\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const syntax = syntaxOf(source);
+    const derived = derive(syntax, compactAnalysis(request));
+    const ingress = derived.discharges.filter(
+      (entry) => entry.by === "native" && entry.what === "typed-ingress",
+    );
+    assert.equal(ingress.length, 1, source);
+    const predicted = evaluate(syntax, derived.stores, {}, false, derived.content);
+    assert.ok(
+      predicted.events.some((event) => event.site === `4:${source.indexOf("\n")}` && event.fits),
+      source,
+    );
+    const compiled = candidate(source);
+    assert.ok(compiled.plan !== null, source);
+    assert.deepEqual(runGlobals(compiled.plan, {}), predicted.run, source);
+  }
+  for (const access of ["v.first", "v.last", "v[0]"]) {
+    const source = `let v = hostValue\nlet out: integer = ${access}\nsay out\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const syntax = syntaxOf(source);
+    const derived = derive(syntax, compactAnalysis(request));
+    const accessSite = `${source.indexOf(access)}:${source.indexOf(access) + access.length}`;
+    assert.ok(
+      derived.discharges.some(
+        (entry) => entry.by === "native" && entry.what === "member" && entry.site === accessSite,
+      ),
+      source,
+    );
+    if (access !== "v[0]")
+      assert.ok(
+        derived.discharges.some(
+          (entry) => entry.by === "native" && entry.what === "empty" && entry.site === accessSite,
+        ),
+        source,
+      );
+    const compiled = candidate(source);
+    assert.ok(compiled.plan !== null, source);
+    for (const hostValue of [
+      null,
+      { kind: "list", items: [] },
+      { kind: "list", items: [2] },
+      { kind: "set", items: [] },
+      { kind: "dict", entries: [] },
+    ] satisfies SerializableRuntimeValue[]) {
+      const predicted = evaluate(syntax, derived.stores, { hostValue }, false, derived.content);
+      assert.deepEqual(
+        runGlobals(compiled.plan, { hostValue }),
+        predicted.run,
+        `${access}: ${JSON.stringify(hostValue)}`,
+      );
+      if (hostValue?.kind === "list" && hostValue.items.length === 0)
+        assert.equal(
+          predicted.run.failure,
+          access === "v[0]"
+            ? `TSR025@${source.indexOf("0]")}:${source.indexOf("0]") + 1}`
+            : `TSR018@${accessSite}`,
+          source,
+        );
+    }
+  }
+});
+
+test("the S7 oracle derives object admissions and default structures from their source places", () => {
+  const cases = [
+    ["let p = {n: 1}\np = hostValue\nsay p.n\nexit\n", "store", "{n: integer}"],
+    [
+      "let p = {stats: {n: 1}}\np = hostValue\nsay p.stats.n\nexit\n",
+      "store",
+      "{stats: {n: integer}}",
+    ],
+    ["let p: object = {n: 1}\np = hostValue\nsay p.n\nexit\n", "store", "{}"],
+    // a copied written `object` stays any object below it, its neighbours restricted, no field read (#1215)
+    ['let typed: object = {n: 1}\nlet p = typed\np = hostValue\nsay "DONE"\nexit\n', "store", "{}"],
+    [
+      'let typed: object? = {n: 1}\nlet p = typed\np = hostValue\nsay "DONE"\nexit\n',
+      "store",
+      "null|{}",
+    ],
+    [
+      'let typed: object[] = [{n: 1}]\nlet p = typed\np = hostValue\nsay "DONE"\nexit\n',
+      "store",
+      "list<{}>",
+    ],
+    [
+      'let typed: object = {n: 1}\nlet a = typed\nlet b = a\nlet p = b\np = hostValue\nsay "DONE"\nexit\n',
+      "store",
+      "{}",
+    ],
+    [
+      'let typed: object = {n: 1}\nlet rec = {o: typed}\nlet p = rec.o\np = hostValue\nsay "DONE"\nexit\n',
+      "store",
+      "{}",
+    ],
+    [
+      'let typed: object = {n: 1}\nlet p = {o: typed}\np = hostValue\nsay "DONE"\nexit\n',
+      "store",
+      "{o: {}}",
+    ],
+    [
+      'let typed: object = {n: 1}\nlet count: integer = 2\nlet p = {c: count, o: typed}\np = hostValue\nsay "DONE"\nexit\n',
+      "store",
+      "{c: integer, o: {}}",
+    ],
+    ['let rec = {n: 1}\nlet p = rec\np = hostValue\nsay "DONE"\nexit\n', "store", "{n: integer}"],
+    // a written `list` destination's open element takes a typed parse's open default (Sol's r1 B2 on #1218)
+    [
+      'let p: list = fromJson(hostValue, default: [], files: false)\nsay "DONE"\nexit\n',
+      "expected",
+      "list<any>",
+    ],
+    [
+      "let p = fromJson(hostValue, default: [{stats: {n: 0}}, {stats: {n: 1.5}}], files: false)\nsay p[0].stats.n\nexit\n",
+      "expected",
+      "list<{stats: {n: number}}>",
+    ],
+    [
+      'let p = fromJson(hostValue, default: fromJson("{}", default: {n: 0}, files: false), files: false)\nsay p.n\nexit\n',
+      "expected",
+      "{n: integer}",
+    ],
+    [
+      'let p = fromJson(hostValue, default: load("p", default: {n: 0}), files: false)\nsay p.n\nexit\n',
+      "expected",
+      "{n: integer}",
+    ],
+    [
+      "let xs: number[] = [fromJson(hostValue, default: 0, files: false)]\nsay xs[0]\nexit\n",
+      "expected",
+      "number",
+    ],
+    [
+      'let n: number? = fromJson(hostValue, default: 0, files: false) otherwise fromJson("2.5", default: 0, files: false)\nsay n\nexit\n',
+      "expected",
+      "null|number",
+    ],
+    [
+      // a `null` field of the default that nothing else types stays unknown (ADR 0021 2.6)
+      "let p = fromJson(hostValue, default: {n: null, m: 0}, files: false)\nsay p.m\nexit\n",
+      "expected",
+      `{n: ${derivedText({ kind: "kinds", kinds: VALUE_KIND_NAMES })}, m: integer}`,
+    ],
+    // a written `object` reads the default's properties with their types and keeps every other key, at every level of
+    // it, as an optional's member and as a list's element (#1223)
+    [
+      "let p: object = fromJson(hostValue, default: {n: 0, k: null}, files: false)\nsay p.n\nsay p.m\nexit\n",
+      "expected",
+      `{n: integer, k: ${derivedText({ kind: "kinds", kinds: VALUE_KIND_NAMES })}, ...}`,
+    ],
+    [
+      'let p: object = load("p", default: {n: 0})\nsay p.n\nexit\n',
+      "load",
+      "{n: integer, ...} repair=true",
+    ],
+    [
+      'let p: object? = fromJson(hostValue, default: {a: {n: 0}, xs: [{m: 1.5}]}, files: false)\nsay "DONE"\nexit\n',
+      "expected",
+      "null|{a: {n: integer, ...}, xs: list<{m: number, ...}>, ...}",
+    ],
+    [
+      'let p: object[] = fromJson(hostValue, default: [{n: 0}], files: false)\nsay "DONE"\nexit\n',
+      "expected",
+      "list<{n: integer, ...}>",
+    ],
+  ] as const;
+  const inputs: readonly SerializableRuntimeValue[] = [
+    // the fixture route's domain
+    2,
+    "text",
+    true,
+    2.5,
+    null,
+    "null",
+    "1.5",
+    "{}",
+    '{"n":3}',
+    '{"stats":{"n":3}}',
+    // (#1223: other keys beside a wrong or missing field, at two levels and in a list)
+    '{"n":"text","m":1}',
+    '{"a":{"n":"text","extra":2},"xs":[{"m":2,"z":3}],"other":3}',
+    '[{"n":1,"m":2}]',
+    { kind: "object", properties: [{ name: "n", value: 3 }] },
+    { kind: "object", properties: [{ name: "n", value: "bad" }] },
+    {
+      kind: "object",
+      properties: [
+        { name: "stats", value: { kind: "object", properties: [{ name: "n", value: 3 }] } },
+      ],
+    },
+    // (#1215: an absent field, a fresh object, lists, a nested field and a misfitting field beside)
+    { kind: "object", properties: [] },
+    { kind: "object", properties: [{ name: "m", value: true }] },
+    { kind: "list", items: [{ kind: "object", properties: [{ name: "n", value: "bad" }] }] },
+    { kind: "list", items: [2] },
+    {
+      kind: "object",
+      properties: [
+        { name: "c", value: 1 },
+        { name: "o", value: { kind: "object", properties: [{ name: "n", value: "bad" }] } },
+      ],
+    },
+    {
+      kind: "object",
+      properties: [
+        { name: "c", value: "bad" },
+        { name: "o", value: { kind: "object", properties: [{ name: "n", value: 1 }] } },
+      ],
+    },
+    {
+      kind: "object",
+      properties: [
+        { name: "c", value: 1 },
+        { name: "o", value: 2 },
+      ],
+    },
+  ];
+  const failures: string[] = [];
+  for (const [source, check, expected] of cases) {
+    try {
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null);
+      const syntax = syntaxOf(source);
+      const derived = derive(syntax, compactAnalysis(request));
+      const content = derivedContent(derived.content, source);
+      assert.ok(
+        (check === "store"
+          ? derivedStores(derived.stores)
+          : content.filter((entry) => entry.startsWith(`${check} `))
+        ).some((entry) => entry.endsWith(` ${expected}`)),
+        source,
+      );
+      const compiled = inBothOrders(() => candidate(source));
+      assert.ok(compiled.plan !== null, source);
+      assert.deepEqual(plannedStores(compiled.plan), derivedStores(derived.stores), source);
+      assert.deepEqual(plannedContent(compiled.plan, source), content, source);
+      for (const hostValue of inputs)
+        assert.deepEqual(
+          runGlobals(compiled.plan, { hostValue }),
+          evaluate(syntax, derived.stores, { hostValue }, false, derived.content).run,
+          `${source} with ${JSON.stringify(hostValue)}`,
+        );
+    } catch (error) {
+      failures.push(`${source}\n${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  assert.deepEqual(failures, [], failures.join("\n"));
+});
+
+test("C1's copy check and C9's boundary check run where external data enters a written place", () => {
+  // the shape of the set's `s4/choice-external/written` with a literal for the choice: the warning and the boundary
+  // check at the external value inside the literal, one check on the store
+  const source =
+    'let picked: integer = [hostValue, 1][0]\nsay "picked"\nrepeat picked {\n  say "turn"\n}\nexit\n';
+  const compiled = candidate(source);
+  assert.deepEqual(sited(compiled), ["warning TSV041@23"]);
+  assert.ok(compiled.plan !== null);
+  assert.deepEqual(checksOf(compiled.plan), ["0:39 integer"]);
+  // a value that passes runs on; one that does not stops at the store with the runtime's error
+  assert.deepEqual(runWith(compiled.plan, 2), {
+    status: "halted",
+    says: ["picked", "turn", "turn"],
+    failure: null,
+  });
+  assert.deepEqual(runWith(compiled.plan, "x"), {
+    status: "failed",
+    says: [],
+    failure: "TSR058@22:39",
+  });
+  assertRuns(compiled.plan, source, ["picked", "turn", "turn"], [[1.5, "TSR058@22:39"]]);
+
+  // the literal's element check against the written element type, `null` admitted
+  const pool = candidate("let pool: integer?[] = [hostValue, null, 7]\nexit\n");
+  assert.deepEqual(sited(pool), ["warning TSV041@24"]);
+  assert.ok(pool.plan !== null);
+  assert.deepEqual(checksOf(pool.plan), ["0:43 list<integer|null>"]);
+  assertRuns(
+    pool.plan,
+    "pool",
+    [],
+    [
+      [null, null],
+      [3, null],
+      ["x", "TSR058@23:43"],
+    ],
+  );
+
+  // the root compile, on the production default, does not warn: the candidate is reached only by its entry
+  assert.deepEqual(sited(compileSource(source, OPTIONS)), []);
+
+  // in the core's record, one boundary check per ingress, where it lands: the whole value's place, not each place below
+  // it (C9; these whole-collection shapes are outside the slice, the literal's element inside it)
+  for (const [shape, ...boundaries] of [
+    ["let pool: integer[] = hostValue\nexit\n", 'pool ["list"] @22'],
+    ["let xs: integer[][] = [hostValue]\nexit\n", 'xs.element ["list"] @23'],
+    ["let pool: integer?[] = [hostValue, null, 7]\nexit\n", 'pool.element ["integer","null"] @24'],
+    // two ingresses in one literal brought by one store: one check for the store, at the first (C9: one per
+    // ingress store)
+    ["let n: integer[] = [hostValue, hostValue]\nexit\n", 'n.element ["integer"] @20'],
+    // two stores, two checks
+    [
+      "let n: integer[] = [hostValue]\nn = [hostValue]\nexit\n",
+      'n.element ["integer"] @20',
+      'n.element ["integer"] @36',
+    ],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source: shape }]);
+    assert.ok(request !== null);
+    assert.deepEqual(
+      compactAnalysis(request)
+        .checks.filter((check) => check.boundary)
+        .map((check) => `${check.target} ${JSON.stringify(check.against)} @${check.site.offset}`)
+        .sort(),
+      boundaries,
+      shape,
+    );
+  }
+});
+
+test("admission's decided types and C9's boundary checks compile and run on the candidate route (S6)", () => {
+  const list = (...items: SerializableRuntimeValue[]): SerializableRuntimeValue => ({
+    kind: "list",
+    items,
+  });
+  for (const [source, diagnostics, checked, runs] of [
+    // A2: a decided type checks a later store, the boundary of the host value against it (C9), C2 at the count
+    [
+      "let n = 1\nn = hostValue\nrepeat n {}\nexit\n",
+      ["warning TSV041@14", "warning TSV011@31"],
+      ["10:23 integer"],
+      [
+        [2, null],
+        [1.5, "TSR058@14:23"],
+        ["x", "TSR058@14:23"],
+      ],
+    ],
+    // A6: a definite contribution that does not fit is an error at the store
+    ['let n = 1\nn = "x"\nexit\n', ["error TSV041@14"], null, []],
+    // A4 and A8: a copy of a written binding is decided by its type, a literal's element checked against it
+    ['let a: integer[] = []\nlet b = a\nb = ["bad"]\nexit\n', ["error TSV041@37"], null, []],
+    ["let b = 1\nlet a: integer = 2\nb = a\nexit\n", [], [], []],
+    // C9: external data in an inferred collection, checked at its store against the elements' admitted type, at any
+    // depth (review r1: the plan held an element check of no type)
+    [
+      'let xs = [1, hostValue]\nsay "after ingress"\nrepeat xs[0] {}\nexit\n',
+      ["warning TSV011@51", "warning TSV041@13"],
+      ["0:23 list<integer>"],
+      [
+        [2, null],
+        ["bad", "TSR058@9:23"],
+      ],
+    ],
+    [
+      "let xs = [[1, hostValue]]\nrepeat xs[0][0] {}\nexit\n",
+      ["warning TSV011@33", "warning TSV041@14"],
+      ["0:25 list<list<integer>>"],
+      [
+        [2, null],
+        ["bad", "TSR058@9:25"],
+      ],
+    ],
+    // A4: a copy of a written integer stays an integer where a number is possible (review r3: its plan took
+    // `number`), at its store's check and at a later store's boundary check
+    [
+      'let typed: integer = 1\nlet copy = typed\ncopy = [2, 2.5][1]\nsay "after store"\nexit\n',
+      ["warning TSV041@47"],
+      ["40:58 integer"],
+      [[null, "TSR058@47:58"]],
+    ],
+    [
+      'let typed: integer = 1\nlet copy = typed\ncopy = [2, 2.5][0]\ncopy = hostValue\nsay "after store"\nexit\n',
+      ["warning TSV041@47", "warning TSV041@66"],
+      ["40:58 integer", "59:75 integer"],
+      [
+        [2, null],
+        [2.5, "TSR058@66:75"],
+      ],
+    ],
+    // A4: a copy of a written list keeps its element type where no read asks for it (review r4: the store's check and
+    // a whole host value's took `list<number>`)
+    [
+      'let typed: integer[] = [1]\nlet copy = typed\ncopy = [[1], [2.5]][1]\nsay "after store"\nexit\n',
+      ["warning TSV041@51"],
+      ["44:66 list<integer>"],
+      [[null, "TSR058@51:66"]],
+    ],
+    [
+      'let typed: integer[] = [1]\nlet copy = typed\ncopy = [[1], [2.5]][0]\ncopy = hostValue\nsay "after store"\nexit\n',
+      ["warning TSV041@51", "warning TSV041@74", "warning TSV041@74"],
+      ["44:66 list<integer>", "67:83 list<integer>"],
+      [
+        [list(1), null],
+        [list(2.5), "TSR058@74:83"],
+      ],
+    ],
+    // A2, A4, A8: the earliest element decides a literal's elements, a later copy of a written integer fitting a number
+    // (review: Astra's B2, a false error), nested too
+    [
+      'let whole: integer = 1\nlet xs = [2.5, whole]\nxs = [3.5]\nsay "after"\nexit\n',
+      [],
+      [],
+      [[null, null]],
+    ],
+    [
+      'let whole: integer = 1\nlet xs = [[2.5, whole]]\nxs = [[3.5]]\nsay "after"\nexit\n',
+      [],
+      [],
+      [[null, null]],
+    ],
+    // A8 (the owner's F2): a named list in a literal brings its elements' type, as a literal one does; whole numbers
+    // with numbers
+    ['let a = [1]\nlet b = ["bad"]\nlet xs = [a, b]\nexit\n', ["error TSV044@41"], null, []],
+    ['let a = [1]\nlet b = ["bad"]\nlet xs = [[a], [b]]\nexit\n', ["error TSV044@43"], null, []],
+    ['let a = [1]\nlet b = ["bad"]\nlet xs = a\nxs = b\nexit\n', ["error TSV041@44"], null, []],
+    ['let a = [1]\nlet b = [2.5]\nlet xs = [a, b]\nsay "after"\nexit\n', [], [], [[2, null]]],
+    // C9: external data stored whole into a written collection, checked there with its elements
+    [
+      "let pool: integer[] = hostValue\nexit\n",
+      ["warning TSV041@22", "warning TSV041@22"],
+      ["0:31 list<integer>"],
+      [
+        [list(1, 2), null],
+        [list("x"), "TSR058@22:31"],
+        ["x", "TSR058@22:31"],
+      ],
+    ],
+    // C9: a host value a consumer reads directly is checked at the read, the runtime's own validation; C2 at the use
+    [
+      "repeat hostValue {}\nexit\n",
+      ["warning TSV011@7"],
+      [],
+      [
+        [2, null],
+        [1.5, "TSR043@7:16"],
+      ],
+    ],
+  ] as const) {
+    const [{ plan }, compiled] = inBothOrdersAs(
+      () => candidate(source),
+      (result) => ({
+        diagnostics: sited(result),
+        checked: result.plan === null ? null : checksOf(result.plan),
+      }),
+    );
+    assert.deepEqual(compiled.diagnostics.sort(), [...diagnostics].sort(), source);
+    assert.deepEqual(compiled.checked, checked, source);
+    if (runs.length > 0) {
+      assert.ok(plan !== null, source);
+      // (its programs say each message once, in order)
+      const said = [...source.matchAll(/say "([^"]*)"/g)].map((match) => match[1]!);
+      assertRuns(plan, source, said, runs);
+    }
+  }
+});
+
+test("external data a literal carries is warned and checked at its store before any later effect, read or not (the owner's F1)", () => {
+  // per program C1's warning at the host expression, the store checks and, per host value, the run's messages and
+  // failure: no consumer reads the list (the first and the third program are also sample cells, their decided list
+  // element and decided nested list element inline, checked here with its fraction too)
+  for (const [source, warnings, checked, runs] of [
+    [
+      'let xs = [1, hostValue]\nsay "AFTER"\nexit\n',
+      ["warning TSV041@13"],
+      ["0:23 list<integer>"],
+      [
+        [2, ["AFTER"], null],
+        ["bad", [], "TSR058@9:23"],
+        [2.5, [], "TSR058@9:23"],
+      ],
+    ],
+    [
+      'let xs = [hostValue, 1]\nsay "AFTER"\nexit\n',
+      ["warning TSV041@10"],
+      ["0:23 list<integer>"],
+      [
+        [2, ["AFTER"], null],
+        [1.5, [], "TSR058@9:23"],
+      ],
+    ],
+    [
+      'let xs = [[1], [hostValue]]\nsay "AFTER"\nexit\n',
+      ["warning TSV041@16"],
+      ["0:27 list<list<integer>>"],
+      [
+        [2, ["AFTER"], null],
+        ["bad", [], "TSR058@9:27"],
+        [2.5, [], "TSR058@9:27"],
+      ],
+    ],
+    [
+      'let ys = [1, hostValue]\nlet xs = ys\nsay "AFTER"\nexit\n',
+      ["warning TSV041@13"],
+      ["0:23 list<integer>"],
+      [
+        [2, ["AFTER"], null],
+        ["bad", [], "TSR058@9:23"],
+      ],
+    ],
+    // named, the same (round 10 B1)
+    [
+      'let a = hostValue\nlet xs = [1, a]\nsay "AFTER"\nexit\n',
+      ["warning TSV041@27"],
+      ["18:33 list<integer>"],
+      [
+        [2, ["AFTER"], null],
+        ["bad", [], "TSR058@27:33"],
+      ],
+    ],
+    // host data alone admits no type: nothing to check it against
+    ['let xs = [hostValue, hostValue]\nsay "AFTER"\nexit\n', [], [], [["bad", ["AFTER"], null]]],
+  ] as const) {
+    const [{ plan }, compiled] = inBothOrdersAs(
+      () => candidate(source),
+      (result) => ({
+        diagnostics: sited(result),
+        checked: result.plan === null ? null : checksOf(result.plan),
+      }),
+    );
+    assert.deepEqual(compiled, { diagnostics: warnings, checked }, source);
+    assert.ok(plan !== null, source);
+    for (const [value, says, failure] of runs)
+      assert.deepEqual(
+        runWith(plan, value),
+        { status: failure === null ? "halted" : "failed", says, failure },
+        `${source} with ${JSON.stringify(value)}`,
+      );
+  }
+});
+
+test("C1 warns where some kind of the stored value fits and errs only where none does, in both orders (r4.46)", () => {
+  // a list literal's element at an index: the items `integer` and `number`, both definite, one fitting; with a host value
+  // the external item beside a `number`, and C9's boundary check at the host value. The context words (§3.4): the
+  // element read that gathers several elements gives `member`, the host value its reason's `unknown`
+  for (const [source, warnings, contexts, boundary, passing, failing] of [
+    [
+      'let result: integer = [2, 2.5][0]\nsay "selected"\nexit\n',
+      ["warning TSV041@22"],
+      ["written-target@22 member"],
+      null,
+      null,
+      null,
+    ],
+    [
+      'let result: integer = [2.5, 2][1]\nsay "selected"\nexit\n',
+      ["warning TSV041@22"],
+      ["written-target@22 member"],
+      null,
+      null,
+      null,
+    ],
+    [
+      'let result: integer = [hostValue, 2.5][0]\nsay "selected"\nexit\n',
+      ["warning TSV041@22", "warning TSV041@23"],
+      ["written-target@22 member", "written-target@23 unknown"],
+      'result ["integer"] @23',
+      3,
+      1.5,
+    ],
+    [
+      'let result: integer = [2.5, hostValue][1]\nsay "selected"\nexit\n',
+      ["warning TSV041@22", "warning TSV041@28"],
+      ["written-target@22 member", "written-target@28 unknown"],
+      'result ["integer"] @28',
+      3,
+      "x",
+    ],
+  ] as const) {
+    const compiled = inBothOrders(() => {
+      const result = candidate(source);
+      return { sited: sited(result), plan: result.plan };
+    });
+    assert.deepEqual(compiled.sited, warnings, source);
+    assert.ok(compiled.plan !== null, source);
+    // the destination's check on the store, which the selected value passes or fails at runtime
+    const end = source.indexOf("\n");
+    assert.deepEqual(checksOf(compiled.plan), [`0:${end} integer`], source);
+    if (passing === null)
+      assert.deepEqual(runWith(compiled.plan, null), {
+        status: "halted",
+        says: ["selected"],
+        failure: null,
+      });
+    else {
+      assert.deepEqual(
+        runWith(compiled.plan, passing),
+        { status: "halted", says: ["selected"], failure: null },
+        source,
+      );
+      assert.deepEqual(
+        runWith(compiled.plan, failing),
+        { status: "failed", says: [], failure: `TSR058@22:${end}` },
+        source,
+      );
+    }
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const record = inBothOrders(() => compactAnalysis(request));
+    assert.deepEqual(
+      record.diagnostics
+        .map((diagnostic) => `${diagnostic.kind}@${diagnostic.site.offset} ${diagnostic.context}`)
+        .sort(),
+      contexts,
+      source,
+    );
+    assert.deepEqual(
+      record.checks
+        .filter((check) => check.boundary)
+        .map((check) => `${check.target} ${JSON.stringify(check.against)} @${check.site.offset}`),
+      boundary === null ? [] : [boundary],
+      source,
+    );
+  }
+  // the selected value that does not fit stops at the store
+  const fractional = candidate('let result: integer = [2, 2.5][1]\nsay "selected"\nexit\n');
+  assert.ok(fractional.plan !== null);
+  assert.deepEqual(checksOf(fractional.plan), ["0:33 integer"]);
+  assertRuns(fractional.plan, "the fractional element", ["selected"], [[null, "TSR058@22:33"]]);
+  // no kind fits: still the error, also for a literal's element written as `integer[]` (A8)
+  for (const [source, error] of [
+    ["let result: integer = [2.5, 3.5][0]\nexit\n", "error TSV041@22"],
+    ["let result: integer = 2.5\nexit\n", "error TSV041@22"],
+    ["let xs: integer[] = [2, 2.5]\nexit\n", "error TSV041@24"],
+  ] as const) {
+    const compiled = inBothOrders(() => {
+      const result = candidate(source);
+      return { sited: sited(result), plan: result.plan === null };
+    });
+    assert.deepEqual(compiled, { sited: [error], plan: true }, source);
+  }
+});
+
+test("the candidate hears of each file it walks, as the production default does", () => {
+  const request = coreRequest([
+    { path: "main.tease", source: "let first = 1\nexit\n" },
+    { path: "other.tease", source: "let other = 2\nexit\n" },
+  ]);
+  assert.ok(request !== null);
+  const heard = (backend?: typeof CORE_BACKEND): number[] => {
+    const files: number[] = [];
+    analyzeTypes({ ...request, onFile: (file) => files.push(file) }, backend);
+    return files;
+  };
+  assert.deepEqual(heard(), [0, 1]);
+  assert.deepEqual(heard(CORE_BACKEND), [0, 1]);
+});
+
+test("C2's integer check warns with TSV011 at a count and TSV043 at a list index, and runs at the use", () => {
+  const count = candidate(
+    'let count = hostValue\nsay "ready"\nrepeat count {\n  say "turn"\n}\nexit\n',
+  );
+  assert.deepEqual(sited(count), ["warning TSV011@41"]);
+  assert.ok(count.diagnostics[0]!.message.startsWith(REPEAT_COUNT_RULE));
+  assert.ok(count.plan !== null);
+  assert.deepEqual(checksOf(count.plan), []);
+  assert.deepEqual(runWith(count.plan, 2), {
+    status: "halted",
+    says: ["ready", "turn", "turn"],
+    failure: null,
+  });
+  assert.deepEqual(runWith(count.plan, 2.5), {
+    status: "failed",
+    says: ["ready"],
+    failure: "TSR043@41:46",
+  });
+  assertRuns(count.plan, "the count", ["ready", "turn", "turn"], [["x", "TSR043@41:46"]]);
+
+  const index = candidate("let rows = [10, 20]\nlet at = hostValue\nrepeat rows[at] {}\nexit\n");
+  assert.deepEqual(sited(index), ["warning TSV043@51"]);
+  assert.ok(index.plan !== null);
+  assert.deepEqual(checksOf(index.plan), []);
+  assertRuns(
+    index.plan,
+    "the index",
+    [],
+    [
+      [1, null],
+      [0.5, "TSR024@51:53"],
+      [2, "TSR025@51:53"],
+      ["x", "TSR024@51:53"],
+    ],
+  );
+
+  // the proven cases stay errors under the same codes, a written `number` read among them (#1173)
+  assert.deepEqual(sited(candidate("let count: number = hostValue\nrepeat count {}\nexit\n")), [
+    "warning TSV041@20",
+    "error TSV011@37",
+  ]);
+  assert.deepEqual(sited(candidate("let n = 2.5\nrepeat n {}\nexit\n")), ["error TSV011@19"]);
+  assert.deepEqual(sited(candidate("let n: integer = 2.5\nexit\n")), ["error TSV041@17"]);
+  assert.deepEqual(sited(candidate("let xs = [10, 20]\nlet i = 1.5\nrepeat xs[i] {}\nexit\n")), [
+    "error TSV043@40",
+  ]);
+  // in parentheses the diagnostic stands at the content (§3.4), once, and names the index's rule
+  assert.deepEqual(sited(candidate("let n = 2.5\nrepeat (n) {}\nexit\n")), ["error TSV011@20"]);
+  const parenthesized = candidate(
+    "let rows = [10, 20]\nlet at = 0.5\nrepeat rows[(at)] {}\nexit\n",
+  );
+  assert.deepEqual(sited(parenthesized), ["error TSV043@46"]);
+  assert.match(parenthesized.diagnostics[0]!.message, /^A list index must be a whole number/);
+});
+
+/**
+ * #1242 (V30 §15, ADR 0021 §1.8, C12, C5b): an index or a key owes a list's whole number or a dict's text
+ * only where the receiver may be a list or a dict, and a `removeAt`, `take` or `takeLast` argument only where it may
+ * have the method; any other receiver gets its own error alone, as the current checker gives it: an object indexed by
+ * text, a truth value or a number, read or stored, by `get`; a whole number, true or false, text. A list's index and a
+ * dict's key keep their rules.
+ */
+test("a receiver without an index gets its own error alone, never a list index's (#1242)", () => {
+  const original = inBothOrders(() =>
+    candidate('let door = {name: "hall"}\nsay door["name"]\nexit\n'),
+  );
+  assert.deepEqual(sited(original), ["error TSV043@30"]);
+  assert.match(original.diagnostics[0]!.message, /^An object has no elements, so 'door\["name"\]'/);
+  const rules = (source: string): string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    return analyseCore(request).diagnostics.map((diagnostic) =>
+      // (a stop's warning has no rule: its kind, as a written type's error)
+      diagnostic.kind === "written-type" || diagnostic.kind === "budget"
+        ? diagnostic.kind
+        : `${diagnostic.class} ${diagnostic.rule.rule} ${source.slice(diagnostic.site.start, diagnostic.site.end)}`,
+    );
+  };
+  for (const [source, expected] of [
+    ['let box = {n: 1}\nbox["n"] = 2\nexit\n', 'member box["n"]'],
+    ["let a = {n: 1}\nsay a[true]\nexit\n", "member a[true]"],
+    ["let a = {n: 1}\nsay a[1.5]\nexit\n", "member a[1.5]"],
+    ['let a = {n: 1}\nsay a.get("n", default: 0)\nexit\n', 'member a.get("n", default: 0)'],
+    ['let a = 1\nsay a["n"]\nexit\n', 'member a["n"]'],
+    ["let a = true\na[false] = 2\nexit\n", "member a[false]"],
+    ['let t = "abc"\nsay t["n"]\nexit\n', 'member t["n"]'],
+    ['let a = {n: 1}\na.removeAt("x")\nexit\n', 'member a.removeAt("x")'],
+    ['let t = "abc"\nsay t.take("x")\nexit\n', 'member t.take("x")'],
+    ['let a = [1]\nsay a["n"]\nexit\n', 'count "n"'],
+    ["let a = dict{n: 1}\nsay a[0]\nexit\n", "key 0"],
+    ['let xs = [1, 2]\nsay xs.take("x")\nexit\n', 'count "x"'],
+  ] as const)
+    assert.deepEqual(rules(source), [`compile-error ${expected}`], source);
+});
+
+/**
+ * V30 §8 (#1701): a method of text's argument that is visibly out of range, empty, or names a group the regex lacks is a
+ * compile error, the runtime's sentence at the argument (TSV043), where its values are known; a fitting call plans and
+ * runs; an unknown argument keeps its runtime check. The issue's witnesses, their controls and a host argument, in the
+ * four modes.
+ */
+test("a known text argument a method's domain rejects is a compile error with the runtime's sentence (V30 §8, #1701)", () => {
+  const errors = [
+    [
+      'say "abc".substring(4)\nsay "AFTER"\nexit\n',
+      20,
+      "substring() needs 'start' from 0 through 3 (the length of the text), not 4.",
+    ],
+    [
+      'say "abc".padStart(5, "")\nsay "AFTER"\nexit\n',
+      22,
+      "padStart() needs non-empty text for 'fill'.",
+    ],
+    [
+      'say "a".replace(/(a)/, "$2")\nsay "AFTER"\nexit\n',
+      23,
+      "'$2' in the replacement refers to group 2, but this regex has 1 group. Write '$0' for the whole match or '$1' " +
+        "for its group, or '$$' for a '$'.",
+    ],
+    [
+      'let t = "abc"\nsay t.substring(4)\nexit\n',
+      30,
+      "substring() needs 'start' from 0 through 3 (the length of the text), not 4.",
+    ],
+  ] as const;
+  for (const [source, at, message] of errors)
+    for (const sharing of [<T>(run: () => T): T => run(), withoutSharing]) {
+      const result = inBothOrders(() => sharing(() => candidate(source)));
+      assert.deepEqual(sited(result), [`error TSV043@${at}`], source);
+      assert.equal(result.diagnostics[0]!.message, message, source);
+      assert.equal(result.plan, null, source);
+    }
+  // (Codex r1: a written `string` that holds host data is text, its fill known empty; an argument the analysis
+  // rejects is read by no domain, in parentheses too; a domain's error inside parentheses stands at the content)
+  for (const [source, sitedAs] of [
+    [
+      'let t: string = hostValue\nsay t.padStart(5, "")\nexit\n',
+      ["warning TSV041@16", "error TSV043@44"],
+    ],
+    // (Codex r3: an admitted text element is text, `empty` ignored; a receiver that may be null keeps its own check
+    // first, the fill unread; host data unwritten is no proof of text, for `count` as for any method)
+    [
+      'let xs: string[] = hostValue\nsay xs[0].padStart(5, "")\nexit\n',
+      ["warning TSV041@19", "warning TSV041@19", "error TSV043@51"],
+    ],
+    [
+      'let t: string? = hostValue\nsay t.padStart(5, "")\nexit\n',
+      ["warning TSV041@17", "warning TSV043@31"],
+    ],
+    ['say hostValue.count("")\nexit\n', ["warning TSV043@4"]],
+    ['say "abc".substring(1.5, 1)\nexit\n', ["error TSV043@20"]],
+    ['say "abc".substring((4.5))\nexit\n', ["error TSV043@21"]],
+    ['say "abc".substring((4))\nexit\n', ["error TSV043@21"]],
+  ] as const)
+    for (const sharing of [<T>(run: () => T): T => run(), withoutSharing])
+      assert.deepEqual(
+        sited(inBothOrders(() => sharing(() => candidate(source)))),
+        sitedAs,
+        source,
+      );
+  for (const [source, says] of [
+    ['say "abc".substring(1)\nexit\n', "bc"],
+    ['say "abc".padStart(5, "-")\nexit\n', "--abc"],
+    ['say "a".replace(/(a)/, "$1")\nexit\n', "a"],
+  ] as const) {
+    const result = inBothOrders(() => candidate(source));
+    assert.deepEqual(sited(result), [], source);
+    assert.ok(result.plan !== null, source);
+    assertRuns(result.plan, source, [says], [[null, null]]);
+  }
+  const host = candidate('say "abc".substring(hostValue)\nexit\n');
+  assert.deepEqual(sited(host), ["warning TSV043@20"]);
+  assert.ok(host.plan !== null);
+  assertRuns(
+    host.plan,
+    "a host argument",
+    ["c"],
+    [
+      [2, null],
+      [4, "TSV043@4:30"],
+    ],
+  );
+});
+
+/**
+ * #1701 over every method of text (`TEXT_METHODS`): the current checker is the reference. Each method is called on known
+ * text, and on a list, with every combination of known arguments of its parameters' kinds (empty and other text, a regex with one group,
+ * replacements naming groups 1 and 2, positions inside and past the text, end before start); the candidate's errors at
+ * the arguments, code and sentence, are the current checker's, in the source order.
+ */
+test("every method of text's known-argument errors are the current checker's (#1701)", () => {
+  const byKind: Record<TextParameterKind, readonly string[]> = {
+    text: ['""', '"b"', '"$1"', '"$2"'],
+    regex: ["/(b)/"],
+    textOrRegex: ['""', '"b"', "/(b)/"],
+    position: ["0", "2", "4"],
+    count: ["0", "2"],
+  };
+  let compared = 0;
+  for (const entry of Object.values(TEXT_METHODS)) {
+    const method: TextSignature = entry;
+    const name = method.name;
+    let calls: string[][] = [[]];
+    for (const parameter of method.parameters) {
+      const next = calls.flatMap((call) => byKind[parameter.kind].map((value) => [...call, value]));
+      calls = parameter.optional === true ? [...calls, ...next] : next;
+    }
+    // (a list receiver too: a list's method of the same name takes no text domain)
+    for (const receiver of ['"abc"', '["abc"]'])
+      for (const call of calls) {
+        const source = `say ${receiver}.${name}(${call.join(", ")})\nexit\n`;
+        // (the errors at the arguments, where a domain's stands: a receiver without the method is its member check's)
+        const opening = source.indexOf("(");
+        const atArguments = (result: CompilationResult) =>
+          result.diagnostics
+            .filter((d) => d.severity === "error" && d.span.start.offset > opening)
+            .map((d) => `${d.code}@${d.span.start.offset}: ${d.message}`);
+        const current = atArguments(compileSource(source, OPTIONS));
+        const found = insideSlice(() => atArguments(candidate(source)));
+        if (found === null) continue;
+        compared += 1;
+        assert.deepEqual(found, current, source);
+      }
+  }
+  assert.ok(compared >= 75, `${compared} calls compared`);
+});
+
+/**
+ * V30 §6 (#1173): a range a `for` loop goes through as written has whole-number bounds. A bound the core knows to be a
+ * number or text is a compile error at the bound (TSV010, as the current checker gives); a whole one is quiet; one
+ * from outside the script warns and keeps the runtime's check of the range.
+ */
+test("a for loop's range bound that is a number or text is an error at the bound, its host bound checked when it runs (V30 §6, #1173)", () => {
+  const errors = [
+    [
+      "for i in 1..2.0 { say i }\nexit\n",
+      12,
+      "'2.0' is a number that can have decimals. Round the number with the floor, round or ceil function first.",
+    ],
+    [
+      "for i in 1.0..2 { say i }\nexit\n",
+      9,
+      "'1.0' is a number that can have decimals. Round the number with the floor, round or ceil function first.",
+    ],
+    [
+      "let x = 2.5\nfor i in 1..x { say i }\nexit\n",
+      24,
+      "'x' is a number that can have decimals. Round the number with the floor, round or ceil function first.",
+    ],
+    [
+      'let t = "a"\nfor i in 1..t.trim() { say i }\nexit\n',
+      24,
+      "'t.trim()' is text (string). Use a whole number here.",
+    ],
+  ] as const;
+  for (const [source, at, cause] of errors) {
+    const result = inBothOrders(() => candidate(source));
+    assert.deepEqual(sited(result), [`error TSV010@${at}`], source);
+    assert.equal(
+      result.diagnostics[0]!.message,
+      `A 'for' loop needs a range of whole numbers, but ${cause}`,
+      source,
+    );
+    assert.equal(result.plan, null, source);
+  }
+  const whole = candidate('let x: integer = 2\nfor i in x..=3 {\n  say "turn"\n}\nexit\n');
+  assert.deepEqual(sited(whole), []);
+  assert.ok(whole.plan !== null);
+  assertRuns(whole.plan, "a whole range", ["turn", "turn"], [[null, null]]);
+  const host = inBothOrders(() => candidate('for i in 1..=hostValue {\n  say "turn"\n}\nexit\n'));
+  assert.deepEqual(sited(host), ["warning TSV010@13"]);
+  assert.ok(host.plan !== null);
+  assertRuns(
+    host.plan,
+    "a host bound",
+    ["turn", "turn"],
+    [
+      [2, null],
+      [2.5, "TSR045@9:22"],
+    ],
+  );
+});
+
+/**
+ * #1173 (the owner's option C): an integer-only use is checked against the type of the place it reads, a place written
+ * `number` an error whatever value it holds (a copy of one, and a place widened by a later store, rule 1.2, are #1173's
+ * next part). The current checker is the reference here: over every integer-only use the candidate route reaches (a
+ * repeat count, a list index, a `for` range's start and end, `take`, a text method's position, count or length) and
+ * the places a use reads (written `number`, `number?`, `integer` or none, a whole or fractional start value, host data
+ * into a `number`), the candidate's errors are the current checker's, in the four modes. A `number` narrowed by `is integer` is quiet (`type-core-narrowing.test.ts`).
+ */
+test("an integer-only use of a written number place is the current checker's error at every use, in the four modes (#1173)", () => {
+  const uses = [
+    (read: string) => `repeat ${read} { say "x" }`,
+    (read: string) => `let xs = [1, 2]\nsay xs[${read}]`,
+    (read: string) => `for i in ${read}..3 { say i }`,
+    (read: string) => `for i in 1..${read} { say i }`,
+    (read: string) => `let ys = [1, 2, 3]\nsay ys.take(${read})`,
+    // (a text method's whole-number argument: its position, count or length, Astra r1)
+    (read: string) => `say "abc".substring(${read})`,
+    (read: string) => `say "abc".substring(0, ${read})`,
+    (read: string) => `say "abc".repeat(${read})`,
+    (read: string) => `say "abc".padStart(${read}, "x")`,
+    (read: string) => `say "abc".padEnd(${read}, "x")`,
+  ];
+  const programs = (use: (read: string) => string): readonly string[] => [
+    use("1"),
+    use("1.5"),
+    // (a `get` result reads its receiver's element: Codex r1 B1)
+    `let ps: number[] = [1]\n${use("ps.get(0, default: 0)")}`,
+    `let ps: integer[] = [1]\n${use("ps.get(0, default: 0)")}`,
+    // (every read form that gives a part of a written place, composed too: Codex r2)
+    `let ps: number[][] = [[1]]\n${use("ps.get(0, default: [0])[0]")}`,
+    `let ps: number[][] = [[1]]\n${use("ps.get(0, default: [0]).get(0, default: 0)")}`,
+    `let ps: integer[][] = [[1]]\n${use("ps.get(0, default: [0])[0]")}`,
+    // (a call's result reads its function's written result type, through `analyseCore`: functions are outside the
+    // candidate route's slice)
+    `function f: number {\n  return 1\n}\n${use("f()")}`,
+    `function f: integer {\n  return 1\n}\n${use("f()")}`,
+    `function f: number[] {\n  return [1]\n}\n${use("f().get(0, default: 0)")}`,
+    `function f: integer[] {\n  return [1]\n}\n${use("f().get(0, default: 0)")}`,
+    // (a `remove` gives a dict's value, a list's `null`; composed with an index and from a call's result: Codex r4)
+    `let ps: number dict = dict{a: 1}\n${use('ps.remove("a")')}`,
+    `let ps: integer dict = dict{a: 1}\n${use('ps.remove("a")')}`,
+    `let ps: number[] = [1, 2]\n${use("ps.remove(1)")}`,
+    `let ps: number[][] = [[1], [2]]\n${use("ps.removeFirst()[0]")}`,
+    `function f: number dict {\n  return dict{a: 1}\n}\n${use('f().remove("a")')}`,
+    // (a removal per member of an optional receiver, composed too; a written union of a collection beside another type
+    // is TSV075's error, so `?` is the union a receiver has: Codex r5)
+    `let ps: (number dict)? = dict{a: 1}\n${use('ps.remove("a")')}`,
+    `let ps: (integer dict)? = dict{a: 1}\n${use('ps.remove("a")')}`,
+    `let ps: number dict[] = [dict{a: 1}]\n${use('ps[0].remove("a")')}`,
+    `let ps: integer dict[] = [dict{a: 1}]\n${use('ps[0].remove("a")')}`,
+    `let ps: (number[])? = [1, 2]\n${use("ps.removeFirst()")}`,
+
+    ...["removeFirst()", "removeLast()", "removeAt(0)"].flatMap((removal) => [
+      `let ps: number[] = [1, 2]\n${use(`ps.${removal}`)}`,
+      `let ps: integer[] = [1, 2]\n${use(`ps.${removal}`)}`,
+    ]),
+    ...[
+      "let p: number = 1",
+      "let p: number = 1.5",
+      "let p: number? = 1",
+      "let p: integer = 1",
+      "let p = 1",
+      "let p = 1.5",
+      "let p: number = hostValue",
+    ].map((declaration) => `${declaration}\n${use("p")}`),
+  ];
+  // (the candidate's errors, or, for a use the candidate route does not lower yet (`take`), the core analysis's)
+  const errors = (result: CompilationResult) =>
+    result.diagnostics
+      .filter((d) => d.severity === "error")
+      .map((d) => `${d.code}@${d.span.start.offset}`);
+  const coreErrors = (source: string): string[] => {
+    const inside = insideSlice(() => errors(candidate(source)));
+    if (inside !== null) return inside;
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    return analyseCore(request)
+      .diagnostics.filter((d) => d.class === "compile-error")
+      .map((d) => `${d.code}@${d.site.start}`);
+  };
+  for (const use of uses)
+    for (const program of programs(use)) {
+      const source = `${program}\nexit\n`;
+      const current = errors(compileSource(source, OPTIONS));
+      assert.deepEqual(
+        inBothOrders(() => coreErrors(source)),
+        current,
+        source,
+      );
+      assert.deepEqual(
+        inBothOrders(() => withoutSharing(() => coreErrors(source))),
+        current,
+        `${source} (unshared)`,
+      );
+    }
+  // (a receiver that may be null: the current checker reports the receiver's null where the core reports the use, both
+  // an error at that site, the null contributing nothing to the removed value; since AD-1 the core also reports the
+  // receiver's null there, the route rule's error, so the sites are compared once each)
+  for (const use of uses)
+    for (const program of [
+      `let ps: (number dict)?[] = [dict{a: 1}]\n${use('ps[0].remove("a")')}`,
+      `function f: (number dict)? {\n  return dict{a: 1}\n}\n${use('f().remove("a")')}`,
+    ]) {
+      const source = `${program}\nexit\n`;
+      const sites = (found: readonly string[]) => [
+        ...new Set(found.map((error) => error.split("@")[1])),
+      ];
+      const current = sites(errors(compileSource(source, OPTIONS)));
+      assert.ok(current.length > 0, source);
+      assert.deepEqual(
+        inBothOrders(() => sites(coreErrors(source))),
+        current,
+        source,
+      );
+    }
+  // (a set's `remove` gives `null`, no element: its error names the null, not a number, Codex r3)
+  const removed = coreRequest([
+    {
+      path: "main.tease",
+      source: 'let ps: number set = set[1]\nrepeat ps.remove(1) { say "X" }\nexit\n',
+    },
+  ]);
+  assert.ok(removed !== null);
+  assert.deepEqual(
+    analyseCore(removed)
+      .diagnostics.filter((d) => d.kind === "integer-use")
+      .map((d) => ("kinds" in d ? d.kinds : null)),
+    [["null"]],
+  );
+  // (a written type without `number` asks no key for the rule: main's counters, so no stop moves, Codex r1 B2)
+  const integer = coreRequest([
+    { path: "main.tease", source: 'let p: integer = 1\nrepeat p { say "X" }\nexit\n' },
+  ]);
+  assert.ok(integer !== null);
+  for (const mode of MODES) {
+    const units = inMode(mode, (): [number, number | undefined] => {
+      const { budget } = analyseCore(integer);
+      return [budget.total, budget.counts.get("checks")];
+    });
+    assert.deepEqual(units, [194, 17], JSON.stringify(mode));
+  }
+});
+
+/**
+ * #1173's narrowing exception: a read under a test of its key (`if p is integer`) is left to its items, so the use is
+ * no error there, as in the current checker; the same read untested is one. The core's own analysis (a type test is
+ * outside the candidate route's slice), in both orders.
+ */
+test("a written number read that 'is integer' narrows is no integer-use error, untested it is one (#1173)", () => {
+  const uses = [
+    (read: string) => `repeat ${read} { say "x" }`,
+    (read: string) => `let xs = [1, 2]\nsay xs[${read}]`,
+    (read: string) => `for i in ${read}..3 { say i }`,
+    (read: string) => `for i in 1..${read} { say i }`,
+  ];
+  const errors = (source: string): number => {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    return inBothOrders(
+      () =>
+        analyseCore(request).diagnostics.filter(
+          (diagnostic) => diagnostic.kind === "integer-use" && diagnostic.class === "compile-error",
+        ).length,
+    );
+  };
+  for (const use of uses) {
+    const narrowed = `let p: number = hostValue\nif p is integer {\n${use("p")}\n}\nexit\n`;
+    assert.equal(errors(narrowed), 0, narrowed);
+    assert.deepEqual(
+      sited(compileSource(narrowed, OPTIONS)).filter((d) => d.startsWith("error")),
+      [],
+      narrowed,
+    );
+    const untested = `let p: number = hostValue\n${use("p")}\nexit\n`;
+    assert.equal(errors(untested), 1, untested);
+  }
+});
+
+test("parentheses answer for their content: a parenthesised count and index read as bare ones (S3 3.4)", () => {
+  // the flow graph's node of a parenthesised expression is its content's, the value the parentheses hold
+  const source = "let n = 2\nrepeat ((n)) {}\nlet xs = [1, 2]\nlet y = xs[(n)]\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const answers = analyseCore(request);
+  const index = new SliceIndex(request.files.map((file) => file.program));
+  for (const expression of index.expressions)
+    if (expression.kind === "parenthesizedExpression")
+      assert.deepEqual(
+        answers.at(nodeOf(answers, index, expression))?.items.map((item) => item.tag),
+        ["integer"],
+        source.slice(expression.span.start.offset, expression.span.end.offset),
+      );
+  // on the candidate route: the content's site, the kinds the core names, and the check at the content
+  const count = inBothOrders(() => candidate("repeat ((2.5)) {}\nexit\n").diagnostics);
+  assert.deepEqual(sited({ diagnostics: count }), ["error TSV011@9"]);
+  assert.equal(
+    count[0]!.message,
+    "A repeat count must be a whole number (integer) of at least 0, but '2.5' is a number that can have decimals. Round the number with " +
+      "the floor, round or ceil function first.",
+  );
+  const listed = inBothOrders(
+    () => candidate("let xs = [1, 2]\nlet y = xs[(0.5)]\nexit\n").diagnostics,
+  );
+  assert.deepEqual(sited({ diagnostics: listed }), ["error TSV043@28"]);
+  assert.equal(
+    listed[0]!.message,
+    "A list index must be a whole number (integer), but '0.5' is a number that can have decimals. Round the number with the floor, round " +
+      "or ceil function first.",
+  );
+  const host = candidate("repeat ((hostValue)) {}\nexit\n");
+  assert.deepEqual(sited(host), ["warning TSV011@9"]);
+  assert.ok(host.plan !== null);
+  assertRuns(
+    host.plan,
+    "the parenthesised count",
+    [],
+    [
+      [2, null],
+      [1.5, "TSR043@9:18"],
+    ],
+  );
+  const hostIndex = candidate("let xs = [1, 2]\nlet y = xs[(hostValue)]\nexit\n");
+  assert.deepEqual(sited(hostIndex), ["warning TSV043@28"]);
+  assert.ok(hostIndex.plan !== null);
+  assertRuns(
+    hostIndex.plan,
+    "the parenthesised index",
+    [],
+    [
+      [1, null],
+      [0.5, "TSR024@28:37"],
+    ],
+  );
+});
+
+/**
+ * §5.2's evaluator against the engine where a value is parenthesised (Codex r20 H4): a count's, an index's and a checked
+ * store's failure is sited at the content, as the engine reports it, and the store's checked value span with it.
+ */
+test("the derived evaluator sites a parenthesised value's failure at its content, as the engine does (§5.2, H4)", () => {
+  for (const [source, hostValue, failure] of [
+    ['repeat (hostValue) {\n  say "RUN"\n}\nexit\n', 2.5, "TSR043@8:17"],
+    ["let xs = [1, 2]\nlet y = xs[(hostValue)]\nexit\n", 0.5, "TSR024@28:37"],
+    ['let out = ([1, hostValue][1])\nsay "AFTER"\nexit\n', "text", "TSR058@11:28"],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const syntax = syntaxOf(source);
+    const { stores } = derive(syntax, compactAnalysis(request));
+    const compiled = inBothOrders(() => candidate(source));
+    assert.ok(compiled.plan !== null, source);
+    assert.deepEqual(plannedStores(compiled.plan), derivedStores(stores), source);
+    const ran = runGlobals(compiled.plan, { hostValue });
+    assert.equal(ran.failure, failure, source);
+    assert.deepEqual(ran, evaluate(syntax, stores, { hostValue }).run, source);
+  }
+});
+
+test("a projection of a literal carries its elements' types and host data on the candidate route (round 11)", () => {
+  // A8 through the projection, direct and named; A2 across a change of the named list; C1 and C9 at the store, before
+  // any later effect
+  for (const [source, diagnostics] of [
+    ['let xs = [[[1]][0], [["bad"]][0]]\nsay "AFTER"\nexit\n', ["error TSV044@20"]],
+    [
+      'let v1 = [1]\nlet v2 = ["bad"]\nlet xs = [[v1][0], [v2][0]]\nsay "AFTER"\nexit\n',
+      ["error TSV044@49"],
+    ],
+    [
+      'let a = [1]\nlet xs = []\nxs = [[a][0], [[1]][0]]\na = ["bad"]\nxs = [[a][0], [[1]][0]]\nexit\n',
+      ["error TSV041@53"],
+    ],
+  ] as const)
+    assert.deepEqual(
+      inBothOrders(() => sited(candidate(source))),
+      diagnostics,
+      source,
+    );
+  const host = 'let a = [hostValue]\nlet xs = [[[1]][0], [a][0]]\nsay "AFTER"\nexit\n';
+  const [{ plan }, compiled] = inBothOrdersAs(
+    () => candidate(host),
+    (result) => ({
+      diagnostics: sited(result),
+      checked: result.plan === null ? null : checksOf(result.plan),
+    }),
+  );
+  assert.deepEqual(compiled, {
+    diagnostics: ["warning TSV041@29"],
+    checked: ["20:47 list<list<integer>>"],
+  });
+  assert.ok(plan !== null);
+  assert.deepEqual(runWith(plan, 2), { status: "halted", says: ["AFTER"], failure: null });
+  assert.deepEqual(runWith(plan, "bad"), { status: "failed", says: [], failure: "TSR058@29:47" });
+});
+
+test("a projected written integer list stays strict on the candidate route (A4, round 15 B3)", () => {
+  const source = 'let typed: integer[] = [1]\nlet xs = [typed][0]\nxs = [2.5]\nsay "AFTER"\nexit\n';
+  const [compiled, diagnostics] = inBothOrdersAs(() => candidate(source), sited);
+  assert.deepEqual(diagnostics, [`error TSV041@${source.indexOf("2.5")}`]);
+  assert.equal(compiled.plan, null);
+});
+
+test("a projection of a written nested list stays strict on the candidate route (A4, F12, Astra r2 B2)", () => {
+  const source =
+    'let source: integer[][] = [[4]]\nlet result = source[0]\nresult = [3.5]\nsay "AFTER"\nexit\n';
+  const [compiled, diagnostics] = inBothOrdersAs(() => candidate(source), sited);
+  assert.deepEqual(diagnostics, [`error TSV041@${source.indexOf("3.5")}`]);
+  assert.equal(compiled.plan, null);
+});
+
+test("a written scalar a singleton literal gives stays strict on the candidate route (A4, Codex r16 B1)", () => {
+  const source = 'let typed: integer = 1\nlet xs = [typed][0]\nxs = 2.5\nsay "AFTER"\nexit\n';
+  const [compiled, diagnostics] = inBothOrdersAs(() => candidate(source), sited);
+  assert.deepEqual(diagnostics, [`error TSV041@${source.lastIndexOf("2.5")}`]);
+  assert.equal(compiled.plan, null);
+});
+
+/**
+ * #1240 (V30 §15, ADR 0021 §1.4): a store into an object's own `first`, `last` or `random` sets that property, as any
+ * property's store does, its value checked against the property's type; the runtime assigns it so. Its read stays F11's
+ * warning, never an error. Each name, a copy, a nested object and a list's element compile and run with the stored
+ * value, quiet as the current checker where nothing reads the property back; inside `if`, a function and a compound
+ * store (outside the slice) the core finds nothing; a value of another type gets the current checker's error and fix,
+ * and a list, which has no property to assign, its error.
+ */
+test("a store into an object's own first, last or random sets that property and checks its type (#1240)", () => {
+  for (const [source, says, quiet] of [
+    ['let record = {first: 1}\nrecord.first = 2\nsay "DONE"\nexit\n', ["DONE"], true],
+    ["let a = {last: 1}\na.last = 2\nexit\n", [], true],
+    ['let box = {entry: {random: 1}}\nbox.entry.random = 2\nsay "DONE"\nexit\n', ["DONE"], true],
+    ["let a = {last: 1}\na.last = 2\nsay a.last\nexit\n", ["2"], false],
+    [
+      "let source = {first: 1}\nlet copied = source\ncopied.first = 2\nsay copied.first\nexit\n",
+      ["2"],
+      false,
+    ],
+    ["let xs = [{random: 1}]\nxs[0].random = 2\nsay xs[0].random\nexit\n", ["2"], false],
+  ] as const) {
+    const [{ plan }, diagnostics] = inBothOrdersAs(() => candidate(source), sited);
+    assert.ok(
+      quiet
+        ? diagnostics.length === 0
+        : diagnostics.every((diagnostic) => diagnostic.startsWith("warning")),
+      `${source}: ${diagnostics.join(", ")}`,
+    );
+    assert.ok(plan !== null, source);
+    assert.deepEqual(runWith(plan, 0).says, says, source);
+  }
+  for (const source of [
+    "let a = {first: 1, n: 2}\nif a.n > 1 {\n  a.first = 3\n}\nexit\n",
+    "let a = {last: 1}\nfunction f {\n  a.last = 4\n}\nf()\nexit\n",
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    assert.deepEqual(analyseCore(request).diagnostics, [], source);
+  }
+  // a compound store reads the own property first, as its binary form does (F11's own selection, opaque: Astra's G2)
+  const operands = (source: string): string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    return compactAnalysis(request)
+      .checks.filter((check) => check.kind === "operand")
+      .map((check) => `${check.target} [${check.against.join(", ")}] @${check.site.offset}`);
+  };
+  assert.deepEqual(operands("let a = {random: 1}\na.random += 2\nexit\n"), [
+    "a.random [integer, number] @20",
+  ]);
+  assert.deepEqual(
+    operands("let a = {random: 1}\na.random += 2\nexit\n"),
+    operands("let a = {random: 1}\na.random = a.random + 2\nexit\n").map((check) =>
+      check.replace("@31", "@20"),
+    ),
+  );
+  const wrong = candidate('let a = {first: 1}\na.first = "bad"\nexit\n');
+  assert.deepEqual(sited(wrong), ["error TSV041@29"]);
+  assert.match(
+    wrong.diagnostics[0]!.message,
+    / Use a separate property for a value of another type\.$/,
+  );
+  assert.deepEqual(sited(candidate("let xs = [1, 2]\nxs.first = 5\nexit\n")), ["error TSV043@16"]);
+});
+
+/**
+ * #1275 (ADR 0021 §1.1, §1.4, §1.10): a store below an object's own `first`, `last` or `random` stores into the
+ * property below it, so its value is checked against that property's type as below any other property, while F11 still
+ * reads such a property opaquely. The owner's reviewer's matrix: each name × a direct, a copied, a projected and an
+ * indexed receiver × a literal of another type (the current checker's TSV041, no plan) and a host value (its store
+ * checked: text stops the run there, a whole number is stored), in both orders and with the sharing on and off. A final
+ * store keeps #1260's check, an object's own `random` draws nothing, and a list's selection stays its element.
+ */
+test("a store below an object's own first, last or random checks the property it stores into (#1275)", () => {
+  const receivers = [
+    ["let box = {NAME: {n: 1}}\n", "box"],
+    ["let seed = {NAME: {n: 1}}\nlet box = seed\n", "box"],
+    ["let outer = {box: {NAME: {n: 1}}}\n", "outer.box"],
+    ["let boxes = [{NAME: {n: 1}}]\n", "boxes[0]"],
+  ] as const;
+  for (const name of ["first", "last", "random"])
+    for (const [declaration, receiver] of receivers)
+      for (const value of ['"bad"', "hostValue"]) {
+        const store = `${receiver}.${name}.n = ${value}\n`;
+        const source =
+          `${declaration.replace("NAME", name)}say "BEFORE"\n${store}` +
+          `say ${receiver}.${name}.n\nsay "AFTER"\nexit\n`;
+        const at = source.indexOf(store) + store.indexOf(value);
+        for (const shared of [true, false]) {
+          const [{ plan }, diagnostics] = (shared ? <T>(run: () => T) => run() : withoutSharing)(
+            () => inBothOrdersAs(() => candidate(source), sited),
+          );
+          const errors = diagnostics.filter((diagnostic) => diagnostic.startsWith("error"));
+          if (value !== "hostValue") {
+            assert.deepEqual(errors, [`error TSV041@${at}`], source);
+            assert.equal(plan, null, source);
+            continue;
+          }
+          assert.deepEqual(errors, [], source);
+          assert.ok(diagnostics.includes(`warning TSV041@${at}`), `${source}: ${diagnostics}`);
+          assert.ok(plan !== null, source);
+          assert.deepEqual(
+            runWith(plan, "bad"),
+            { status: "failed", failure: `TSR058@${at}:${at + value.length}`, says: ["BEFORE"] },
+            source,
+          );
+          assert.deepEqual(runWith(plan, 2).says, ["BEFORE", "2", "AFTER"], source);
+        }
+      }
+  // a receiver admission decided keeps its object proof beside a later host value or a rejected store (Codex r1 on
+  // #1310)
+  for (const [parent, expected] of [
+    ["hostValue", ["error TSV041@91"]],
+    ["[]", ["error TSV041@57", "error TSV041@84"]],
+  ] as const) {
+    const source = `let a = {first: {last: {random: {n: 1}}}}\na.first.last = ${parent}\na.first.last.random.n = "bad"\nexit\n`;
+    const compiled = inBothOrders(() => candidate(source));
+    assert.deepEqual(
+      sited(compiled).filter((diagnostic) => diagnostic.startsWith("error")),
+      expected,
+      source,
+    );
+    assert.equal(compiled.plan, null, source);
+  }
+  // #1260's final store keeps its check
+  const final = candidate("let box = {first: 1}\nbox.first = hostValue\nsay box.first\nexit\n");
+  assert.ok(sited(final).includes("warning TSV041@33"), sited(final).join(", "));
+  assert.equal(runWith(final.plan!, "bad").failure, "TSR058@33:42");
+  // an object's own `random` is its property: storing below it draws nothing
+  const own = candidate(
+    "let box = {random: {n: 1}}\nbox.random.n = hostValue\nsay box.random.n\nexit\n",
+  );
+  const start = createImmediatePacingRuntimeSnapshot(own.plan!, { globals: { hostValue: 2 } });
+  assert.deepEqual(run(own.plan!, start).snapshot.rng, start.rng);
+  // a list's selection stays its element, its element's property checked
+  for (const [source, expected] of [
+    ['let xs = [{n: 1}]\nxs.first.n = "bad"\nexit\n', ["compile-error store"]],
+    ['let xs = [{n: 1}]\nxs.random.n = "bad"\nexit\n', ["compile-error store"]],
+    ["let xs = [{n: 1}]\nxs.first.n = 2\nexit\n", []],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    assert.deepEqual(
+      analyseCore(request).diagnostics.map((diagnostic) =>
+        diagnostic.kind === "written-type" || diagnostic.kind === "budget"
+          ? diagnostic.kind
+          : `${diagnostic.class} ${diagnostic.rule.rule}`,
+      ),
+      expected,
+      source,
+    );
+  }
+});
+
+/**
+ * Deep and broad list literals on the candidate route: their indexes share one text per path and order
+ * their identities by path id, and the core charges what they keep. A read 64 levels into a literal, through two
+ * aliases, of external data 32 levels in and of the last of 512 elements or 300 rows; and two literals 40 deep stored
+ * into one place, alike, differing at their leaf's kind, or one holding an empty list at its depth: each compiles to
+ * its diagnostics, and its plan runs to the says and the failure its leaves give, in both orders. (Records, dicts and
+ * sets are outside the slice until it is complete, S9b; the core's deep reads of them are `deep-literal-scale.test.ts`'s.)
+ */
+test("deep and broad list literals compile and run as their leaves give, in both orders (TABLE r4.58)", () => {
+  const nested = (depth: number, leaf: string): string =>
+    `${"[".repeat(depth)}${leaf}${"]".repeat(depth)}`;
+  const reads = (name: string, depth: number): string => `${name}${"[0]".repeat(depth)}`;
+  const counted = (read: string, word: string): string =>
+    `let n: integer = ${read}\nrepeat n {\n  say "${word}"\n}\nexit\n`;
+  const compiled = (source: string) =>
+    inBothOrders(() => {
+      const result = candidate(source);
+      return { sited: sited(result), plan: result.plan };
+    });
+  const says = (word: string, count: number): string[] => Array<string>(count).fill(word);
+
+  // a read 64 levels in, quiet, and the same read of text, C1's error at the read
+  const deep = `let value = ${nested(64, "3")}\n${counted(reads("value", 64), "deep")}`;
+  const quiet = compiled(deep);
+  assert.deepEqual(quiet.sited, []);
+  assert.ok(quiet.plan !== null);
+  assert.deepEqual(checksOf(quiet.plan), []);
+  assertRuns(quiet.plan, "deep", says("deep", 3), [[0, null]]);
+  const text = `let value = ${nested(64, '"x"')}\n${counted(reads("value", 64), "deep")}`;
+  assert.deepEqual(compiled(text), {
+    sited: [`error TSV041@${text.indexOf("value[0]")}`],
+    plan: null,
+  });
+
+  // external data 32 levels in: the store warns and checks it, where the read stands
+  const host = `let value = ${nested(32, "hostValue")}\n${counted(reads("value", 32), "host")}`;
+  const read = host.indexOf("value[0]");
+  const external = compiled(host);
+  assert.deepEqual(external.sited, [`warning TSV041@${read}`]);
+  assert.ok(external.plan !== null);
+  assertRuns(external.plan, "host", says("host", 2), [
+    [2, null],
+    ["x", `TSR058@${read}:${read + reads("value", 32).length}`],
+  ]);
+
+  // two aliases of a literal 48 deep; the last of 512 elements; the last of 300 rows
+  for (const [name, source, count] of [
+    [
+      "aliases",
+      `let a = ${nested(48, "2")}\nlet b = a\nlet c = b\n${counted(reads("c", 48), "aliases")}`,
+      2,
+    ],
+    ["breadth", `let row = [${"0, ".repeat(511)}2]\n${counted("row[511]", "breadth")}`, 2],
+    [
+      "rows",
+      `let grid = [${Array.from({ length: 300 }, (_, i) => `[${i % 3}]`).join(", ")}]\n${counted("grid[299][0]", "rows")}`,
+      299 % 3,
+    ],
+  ] as const) {
+    const result = compiled(source);
+    assert.deepEqual(result.sited, [], name);
+    assert.ok(result.plan !== null, name);
+    assertRuns(result.plan, name, says(name, count), [[0, null]]);
+  }
+
+  // two literals 40 deep stored into one place: alike they are one integer; a text leaf is A6's error at it; an empty
+  // list at their depth fails the read where it is taken
+  const twice = (other: string, word: string): string =>
+    `let pick = ${nested(40, "1")}\nlet flag: boolean = hostValue\nif flag {\n  pick = ${other}\n}\n${counted(reads("pick", 40), word)}`;
+  const flag = (source: string): string => {
+    const at = source.indexOf("hostValue");
+    return `TSR058@${at}:${at + "hostValue".length}`;
+  };
+  const alike = twice(nested(40, "2"), "alike");
+  const both = compiled(alike);
+  assert.deepEqual(both.sited, [`warning TSV041@${alike.indexOf("hostValue")}`]);
+  assert.ok(both.plan !== null);
+  assertRuns(both.plan, "alike", says("alike", 1), [
+    [false, null],
+    [2, flag(alike)],
+  ]);
+  assertRuns(both.plan, "alike", says("alike", 2), [[true, null]]);
+  const textual = twice(nested(40, '"x"'), "textual");
+  assert.deepEqual(compiled(textual), {
+    sited: [
+      `warning TSV041@${textual.indexOf("hostValue")}`,
+      `error TSV041@${textual.indexOf('"x"')}`,
+    ],
+    plan: null,
+  });
+  const emptied = twice(nested(39, "[]"), "emptied");
+  const empty = compiled(emptied);
+  assert.deepEqual(empty.sited, [`warning TSV041@${emptied.indexOf("hostValue")}`]);
+  assert.ok(empty.plan !== null);
+  assertRuns(empty.plan, "emptied", says("emptied", 1), [[false, null]]);
+  const last = emptied.lastIndexOf("[0]") + 1;
+  assert.deepEqual(runWith(empty.plan, true), {
+    status: "failed",
+    says: [],
+    failure: `TSR025@${last}:${last + 1}`,
+  });
+});
+
+/** The admitted type of the binding `name` at `path`: its kinds and its decider's offset. */
+function admittedOf(source: string, name: string, path: readonly string[] = []): string {
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null, source);
+  // (the core numbers its places alike in every analysis of a request)
+  const place = new CoreProgram(request).places.find(
+    ({ kind }) => kind.kind === "binding" && kind.name === name,
+  );
+  assert.ok(place !== undefined, `${source}: ${name}'s place`);
+  const admitted = analyseCore(request).place(place.id, path).admitted;
+  return admitted.by === "decided"
+    ? `decided ${admitted.kinds.join("|")}@${admitted.decider?.start ?? "-"}`
+    : admitted.by;
+}
+
+test("a place published with a kind checks the external data stored into it, named or inline, at any endpoint (A7, C9 r4.12, r4.50 (1), R4-F1)", () => {
+  // the external reviewer's endpoint matrix: per kind (a known element, a fitting host value and bad ones, an integer's
+  // fractional one too), projection (an index, a nested index, parentheses, an index held in a variable), host data
+  // inline or named, and without or with a later store: the place is decided by the known element (or the later store),
+  // named data warns where it is read with its check, inline data has its boundary, the declaration's store alone checks
+  // the kind, a bad value fails at the declaration's value with nothing said, and the fitting one says AFTER and halts
+  const kinds = [
+    ["1", 2, ["bad", 2.5]],
+    ['"a"', "b", [1]],
+    ["true", false, ["bad"]],
+  ] as const;
+  const forms = [
+    (data: string): string => `[K, ${data}][1]`,
+    (data: string): string => `[[K, ${data}]][0][1]`,
+    (data: string): string => `([K, ${data}])[1]`,
+    (data: string): string => `[K, ${data}][i]`,
+  ];
+  let shapes = 0;
+  for (const [known, good, bad] of kinds)
+    for (const [index, form] of forms.entries())
+      for (const named of [false, true])
+        for (const later of [false, true]) {
+          const lines = [
+            ...(named ? ["let raw = hostValue"] : []),
+            ...(index === 3 ? ["let i = 1"] : []),
+            `let out = ${form(named ? "raw" : "hostValue").replace("K", known)}`,
+            ...(later ? [`out = ${known}`] : []),
+            'say "AFTER"',
+            "exit",
+          ];
+          const source = `${lines.join("\n")}\n`;
+          const declaration = source.indexOf("let out");
+          const decider = later ? source.lastIndexOf(known) : source.indexOf(known, declaration);
+          const kind = known === "1" ? "integer" : known === "true" ? "boolean" : "string";
+          assert.equal(admittedOf(source, "out"), `decided ${kind}@${decider}`, source);
+          // (named data warns where it is read; with a later decider, C1 warns at the stored value, inline data at
+          // its host value)
+          const value = declaration + "let out = ".length;
+          const end = source.indexOf("\n", declaration);
+          const data = named ? source.indexOf("raw", declaration) : source.indexOf("hostValue");
+          const warned = named ? (later ? value : data) : later ? data : null;
+          const [{ plan }, compiled] = inBothOrdersAs(
+            () => candidate(source),
+            (result) => ({
+              diagnostics: sited(result),
+              checks: result.plan === null ? null : checksOf(result.plan),
+            }),
+          );
+          assert.deepEqual(
+            compiled,
+            {
+              diagnostics: warned === null ? [] : [`warning TSV041@${warned}`],
+              checks: [`${declaration}:${end} ${kind}`],
+            },
+            source,
+          );
+          assert.ok(plan !== null, source);
+          assert.deepEqual(
+            runWith(plan, good),
+            { status: "halted", says: ["AFTER"], failure: null },
+            `${source} with ${JSON.stringify(good)}`,
+          );
+          for (const refused of bad)
+            assert.deepEqual(
+              runWith(plan, refused),
+              { status: "failed", says: [], failure: `TSR058@${value}:${end}` },
+              `${source} with ${JSON.stringify(refused)}`,
+            );
+          shapes += 1;
+        }
+  assert.equal(shapes, 48);
+  // the controls: host data alone admits no kind (nothing to check it against), known elements need no check
+  for (const [source, admitted] of [
+    ['let raw = hostValue\nlet out = [raw][0]\nsay "AFTER"\nexit\n', "undecided"],
+    ['let out = [1, 2][1]\nsay "AFTER"\nexit\n', "decided integer@10"],
+  ] as const) {
+    assert.equal(admittedOf(source, "out"), admitted, source);
+    const [{ plan }, diagnostics] = inBothOrdersAs(() => candidate(source), sited);
+    assert.deepEqual(diagnostics, [], source);
+    assert.ok(plan !== null, source);
+    assert.deepEqual(checksOf(plan), [], source);
+    assert.deepEqual(
+      runWith(plan, "bad"),
+      { status: "halted", says: ["AFTER"], failure: null },
+      source,
+    );
+  }
+});
+
+/**
+ * Per carrier kind, the ways a declaration gives host data through the carrier beside a known integer, each at a scalar
+ * endpoint (the place's value) and at a collection one (its element): the data inside a literal operand, the whole
+ * operand, the operation's own read, or the receiver whose member the runtime reads (F15: the destination's own
+ * check beside C5's obligation on the receiver). `lists` counts the lists around the host value at each endpoint;
+ * `read` names the read that brings the data into the declaration where it is not the data's (a loop variable).
+ */
+interface CarrierShape {
+  readonly data: string;
+  readonly scalar: string;
+  readonly collection: string | { readonly none: string };
+  /** Where the data stands by the rule function's terms (§5.1's rows), per endpoint where they differ. */
+  readonly rule: Rule | ((endpoint: Endpoint) => Rule);
+  readonly lists?: readonly [scalar: number, collection: number];
+  readonly read?: string;
+}
+
+/** A shape's class for the rule function (`owed`): its data's row and the carrier's facts. */
+type Rule = Omit<RuleClass, "carrier" | "placement" | "form" | "endpoints">;
+
+const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
+  projection: [
+    {
+      data: "in a literal",
+      scalar: "let out = [1, D][1]",
+      collection: "let out = [[1, D]][0]",
+      rule: { data: "cell", declares: true },
+    },
+    {
+      data: "a member",
+      scalar: "let out = [1, D[0]][1]",
+      collection: "let out = [[1], D[0]][1]",
+      lists: [1, 2],
+      rule: { data: "member", declares: true, member: (h) => `${h}[0]` },
+    },
+  ],
+  iteration: [
+    {
+      data: "in a literal",
+      scalar: "for entry in [1, D] {\n  let out = entry\n  LATER\n}",
+      collection: "for entry in [[1, D]] {\n  let out = entry\n  LATER\n}",
+      rule: { data: "loop-cell", loop: true },
+    },
+    {
+      data: "a member",
+      scalar: "for entry in D {\n  let out = [1, entry][1]\n  LATER\n}",
+      collection: "for entry in D {\n  let out = [[1], entry][1]\n  LATER\n}",
+      lists: [1, 2],
+      read: "entry",
+      rule: { data: "loop-operand", loop: true, declares: true },
+    },
+  ],
+  otherwise: [
+    {
+      data: "the operand",
+      scalar: "let out = D otherwise 1",
+      collection: "let out = D otherwise [1]",
+      lists: [0, 1],
+      rule: { data: "whole" },
+    },
+  ],
+  get: [
+    {
+      data: "in a literal",
+      scalar: "let out = [1, D].get(1, default: 1)",
+      collection: "let out = [[1, D]].get(0, default: [])",
+      rule: { data: "cell", declares: true },
+    },
+    {
+      data: "a member",
+      scalar: "let out = D.get(0, default: 1)",
+      collection: "let out = D.get(0, default: [1])",
+      lists: [1, 2],
+      rule: { data: "member", member: (h, k) => `${h}.get(0, default: ${k})` },
+    },
+  ],
+  "load default": [
+    {
+      data: "its own read",
+      scalar: 'let out = load("k", default: [1, D][1])',
+      collection: 'let out = load("k", default: [1, D])',
+      rule: { data: "typed", own: (k, _, h) => (k === "1" ? `[1, ${h}][1]` : `[1, ${h}]`) },
+    },
+  ],
+  "parse default": [
+    {
+      data: "its own read",
+      // text that is not JSON, so the default is the value
+      scalar: 'let out = fromJson("broken", default: [1, D][1])',
+      collection: 'let out = fromJson("broken", default: [1, D])',
+      rule: { data: "typed", own: (k, _, h) => (k === "1" ? `[1, ${h}][1]` : `[1, ${h}]`) },
+    },
+  ],
+  copy: [
+    {
+      data: "in a literal",
+      scalar: "let out = [1, D].take(2)[1]",
+      collection: "let out = [1, D].take(2)",
+      rule: { data: "cell", declares: true },
+    },
+    {
+      data: "a member",
+      scalar: "let out = [1, D.take(1)[0]][1]",
+      collection: "let out = [[1], D.take(1)][1]",
+      lists: [1, 1],
+      // (the copy is what the operation reads of its receiver, the member C1 sits at)
+      rule: { data: "member", declares: true, member: (h) => `${h}.take(1)`, listed: true },
+    },
+  ],
+  removal: [
+    {
+      data: "in a literal",
+      scalar: "let out = [1, D].removeFirst()",
+      collection: "let out = [[1, D]].removeFirst()",
+      rule: { data: "cell", combining: true },
+    },
+    {
+      data: "a member",
+      scalar: "let out = [1, D.removeFirst()][1]",
+      collection: "let out = [[1], D.removeFirst()][1]",
+      lists: [1, 2],
+      rule: { data: "member", declares: true, member: (h) => `${h}.removeFirst()` },
+    },
+  ],
+  concatenation: [
+    {
+      data: "the operand",
+      scalar: "let out = ([1] + D)[1]",
+      collection: "let out = [1] + D",
+      lists: [1, 1],
+      // (an element of the result is a member of the data; the result itself a list whatever the data holds)
+      rule: (endpoint) =>
+        endpoint === "scalar"
+          ? { data: "through", combining: true }
+          : { data: "whole", combining: true, listed: true },
+    },
+  ],
+  choice: [
+    {
+      data: "an option",
+      scalar: "let out = askChoice 1, D",
+      collection: { none: "a button's value is never a list or a set (V30 §19, TSV029)" },
+      rule: { data: "cell" },
+    },
+  ],
+};
+
+/**
+ * Invariant O over the carrier table (`carriers.ts`), without exception: each kind of `CARRIER_KINDS` has its
+ * shapes, each named or inline, without and with a later store, in both orders. The place is admitted an integer where
+ * the data stands (published or decided), and the shape's complete multiset of C1, C9 and C10 records is what the rule
+ * function owes (`type-core-rule.ts`, §5.1): named data A7's `copy-type` warning and check beside its source's
+ * own boundary, inline data C9's boundary or C1's check, a member's C1 at what is read of it,
+ * data in the operation's own read the operation's boundary (C10), every site and multiplicity (Astra r5 D2).
+ * Where the candidate route reaches a shape, its plan checks the declaration against the whole type, a
+ * fitting value says AFTER and halts, and each bad one fails at the declaration's value with nothing said; a shape
+ * outside the slice is proved at the answers, the route's reason reported.
+ */
+test("every carrier kind leaves an obligation for the external data it gives a place admitted a kind (O, A7, C9 r4.12, C10, r4.59)", (t) => {
+  assert.deepEqual(Object.keys(CARRIER_SHAPES).sort(), [...CARRIER_KINDS].sort());
+  const outside = new Map<string, string>();
+  const none: string[] = [];
+  let shapes = 0;
+  let routed = 0;
+  for (const kind of CARRIER_KINDS)
+    for (const { data: placed, scalar, collection, rule, lists = [0, 0], read } of CARRIER_SHAPES[
+      kind
+    ])
+      for (const [endpoint, template, wrap] of [
+        ["scalar", scalar, lists[0]],
+        ["collection", collection, lists[1]],
+      ] as const) {
+        if (typeof template !== "string") {
+          none.push(`${kind} at a collection: ${template.none}`);
+          continue;
+        }
+        const shape: string = template;
+        for (const named of [false, true])
+          for (const later of [false, true]) {
+            const store = endpoint === "scalar" ? "out = 1" : "out = [1]";
+            const filled = shape.replace("D", named ? "raw" : "hostValue");
+            const body: string = filled.includes("LATER")
+              ? filled.replace(later ? "LATER" : /\n *LATER/, later ? store : "")
+              : `${filled}${later ? `\n${store}` : ""}`;
+            const source: string = `${named ? "let raw = hostValue\n" : ""}${body}\nsay "AFTER"\nexit\n`;
+            const name =
+              `${kind}, the data ${placed}, at a ${endpoint}, ${named ? "named" : "inline"}` +
+              (later ? ", a later store" : "");
+            // the data's read, and the statement that holds it: its place and its value
+            const data =
+              read !== undefined
+                ? source.indexOf(read, source.indexOf("let out"))
+                : named
+                  ? source.indexOf("raw", source.indexOf("\n"))
+                  : source.indexOf("hostValue");
+            const holder = source.lastIndexOf("\n", data) + 1;
+            const end = source.indexOf("\n", holder);
+            const [opening] = /^ *(?:let|for) \w+ (?:=|in) /.exec(source.slice(holder))!;
+            const value = holder + opening.length;
+            // the complete C1, C9 and C10 multiset the rule function owes (S6-CARRIERS §5.1), the named source's own
+            // boundary, every site and multiplicity included, in both orders (Astra r5 D2)
+            const owes = typeof rule === "function" ? rule(endpoint) : rule;
+            assert.deepEqual(
+              records(source),
+              owed(
+                { carrier: kind, placement: placed, form: () => "", endpoints: BOTH, ...owes },
+                endpoint,
+                named,
+                later,
+                source,
+                "raw",
+              ),
+              name,
+            );
+            assert.equal(
+              admittedOf(source, "out", endpoint === "scalar" ? [] : ["element"]).split("@")[0],
+              "decided integer",
+              name,
+            );
+            shapes += 1;
+            let compiled: readonly [
+              CompilationResult,
+              { readonly checks: readonly string[] | null },
+            ];
+            try {
+              compiled = inBothOrdersAs(
+                () => candidate(source),
+                (result) => ({ checks: result.plan === null ? null : checksOf(result.plan) }),
+              );
+            } catch (error) {
+              if (!(error instanceof CandidateOutsideSlice)) throw error;
+              outside.set(`${kind} (${placed})`, error.what.replace(/^this /, ""));
+              continue;
+            }
+            const [result, { checks }] = compiled;
+            // (the checked store, a loop body's after its indentation)
+            const statement = holder + /^ */.exec(source.slice(holder))![0].length;
+            assert.deepEqual(
+              checks,
+              [`${statement}:${end} ${endpoint === "scalar" ? "integer" : "list<integer>"}`],
+              name,
+            );
+            const plan = result.plan!;
+            const host = (
+              scalar: SerializableRuntimeValue,
+              depth = wrap,
+            ): SerializableRuntimeValue =>
+              depth === 0 ? scalar : { kind: "list", items: [host(scalar, depth - 1)] };
+            assert.deepEqual(
+              runWith(plan, host(2)),
+              { status: "halted", says: ["AFTER"], failure: null },
+              `${name} with 2`,
+            );
+            for (const bad of ["bad", 2.5])
+              assert.deepEqual(
+                runWith(plan, host(bad)),
+                { status: "failed", says: [], failure: `TSR058@${value}:${end}` },
+                `${name} with ${JSON.stringify(bad)}`,
+              );
+            routed += 1;
+          }
+      }
+  t.diagnostic(
+    `${shapes} shapes, ${routed} on the candidate route; outside the slice (later port steps; the answers only): ` +
+      [...outside].map(([shape, what]) => `${shape}: ${what}`).join(", ") +
+      `; no shape: ${none.join("; ")}`,
+  );
+});
+
+/**
+ * A copy of a written binding keeps its type beside an unwritten copy of the same source (A4, Astra r5
+ * B1): `let a = raw`, `let b: integer[] = raw`, then `out` takes both, and a later store brings other host data. The
+ * written copy decides `out`'s element by `integer[]`, whichever copy comes first, at depths one and two: each of the
+ * three stores owes its C1 against the whole written type, the host data its boundary; the plan checks every store; the
+ * fitting host value says AFTER and each bad one fails at the third store's value, nothing said.
+ */
+test("a copy of a written binding keeps its type beside a copy of the same source, in both orders (A4, TABLE r4.72)", () => {
+  for (const nested of [false, true])
+    for (const [first, second] of [
+      ["a", "b"],
+      ["b", "a"],
+    ] as const) {
+      const wrap = (text: string): string => (nested ? `[${text}]` : text);
+      const source =
+        `let raw = [${wrap("hostValue")}]\nlet a = raw\nlet b: integer[]${nested ? "[]" : ""} = raw\n` +
+        `let out = ${first}\nout = ${second}\nout = [${wrap("otherHost")}]\nsay "AFTER"\nexit\n`;
+      const name = `${nested ? "depth two" : "depth one"}, ${first} then ${second}`;
+      const target = nested ? "out.element.element" : "out.element";
+      const at = (text: string, from = 0): string => {
+        const start = source.indexOf(text, from);
+        return `${start}:${start + text.length}`;
+      };
+      const host = at("otherHost");
+      const tail = source.indexOf("out = [");
+      const checks = inBothOrders(() => {
+        const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "otherHost"]);
+        assert.ok(request !== null, name);
+        return compactAnalysis(request)
+          .checks.filter((check) => check.target === target && check.kind === "copy-type")
+          .map(
+            (check) =>
+              `${check.boundary ? "B" : "C"} [${check.against.join("|")}] ${check.site.offset}:${check.site.end}`,
+          )
+          .sort();
+      });
+      assert.deepEqual(
+        checks,
+        [
+          `C [integer] ${at(first, source.indexOf("let out = "))}`,
+          `C [integer] ${at(second, source.indexOf("\nout = "))}`,
+          `C [integer] ${host}`,
+          `B [integer] ${host}`,
+        ].sort(),
+        name,
+      );
+      const options = { globals: ["hostValue", "otherHost"] };
+      const plan = inBothOrders(() => compileSourceWithBackend(source, options, CORE_BACKEND).plan);
+      assert.ok(plan !== null, name);
+      const type = nested ? "list<list<integer>>" : "list<integer>";
+      // (each statement's span: `b`'s declaration, which holds host data under its written type, and out's three stores)
+      const line = (text: string): string => {
+        const start = source.indexOf(text);
+        return `${start}:${source.indexOf("\n", start)} ${type}`;
+      };
+      assert.deepEqual(
+        checksOf(plan),
+        [line("let b"), line("let out"), line(`out = ${second}`), line("out = [")],
+        `${name}: b's store and every store of out checked`,
+      );
+      const end = source.indexOf("\n", tail);
+      for (const otherHost of [1, 2.5, "bad"]) {
+        const result = run(
+          plan,
+          createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue: 1, otherHost } }),
+        );
+        const failure = result.events.find((event) => event.kind === "runtimeFailure");
+        assert.deepEqual(
+          {
+            status: result.snapshot.status,
+            says: result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+            failure:
+              failure?.kind === "runtimeFailure"
+                ? `${failure.code}@${failure.span.start.offset}:${failure.span.end.offset}`
+                : null,
+          },
+          otherHost === 1
+            ? { status: "halted", says: ["AFTER"], failure: null }
+            : { status: "failed", says: [], failure: `TSR058@${tail + 6}:${end}` },
+          `${name} with ${JSON.stringify(otherHost)}`,
+        );
+      }
+    }
+});
+
+/**
+ * A checked store followed by an effect inside a branch (S6-CARRIERS §5.3, Astra r5 D3): the declaration owes exactly
+ * its C1 and its boundary, the plan checks it against `integer` before the branch, the fitting host value says AFTER
+ * and halts, and each bad one fails at the declaration's value before the branch's effect, nothing said.
+ */
+test("a checked store's check runs before an effect inside a later branch (S6-CARRIERS §5.3)", () => {
+  const source = 'let n: integer = hostValue\nif true {\n  say "AFTER"\n}\nexit\n';
+  const record = inBothOrders(() =>
+    compactAnalysis(coreRequest([{ path: "main.tease", source }])!),
+  );
+  assert.deepEqual(
+    recordDifferences(
+      recordOf(`outcome warning-runtime-check
+        D written-target warning 17:26 unknown
+        C copy-type n [integer] 17:26
+        B copy-type n [integer] 17:26`),
+      record,
+    ),
+    [],
+  );
+  const plan = inBothOrders(() => candidate(source).plan);
+  assert.ok(plan !== null);
+  assert.deepEqual(checksOf(plan), ["0:26 integer"]);
+  assert.deepEqual(runWith(plan, 2), { status: "halted", says: ["AFTER"], failure: null });
+  for (const bad of [2.5, "bad"])
+    assert.deepEqual(
+      runWith(plan, bad),
+      { status: "failed", says: [], failure: "TSR058@17:26" },
+      JSON.stringify(bad),
+    );
+});
+
+/**
+ * A2 with F17b and A8: of a literal's elements, one read the literal's `get` never gives and a direct read of the same
+ * snapshot beside it, the direct read decides; a walk's stop shares another's only through the same operations, selected
+ * alike (Astra r5 D1): the decider is the direct `raw` at 68:71, never the later `"tail"`.
+ */
+test("a decider beside an unselected read of its source is the selected read itself (A2, F17b, Astra r5 D1)", () => {
+  const source =
+    'let raw = hostValue\nraw = 1\nlet out = [[raw].get(9, default: null), raw, "tail"]\nrepeat out[0] {}\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const place = new CoreProgram(request).places.find(
+    ({ kind }) => kind.kind === "binding" && kind.name === "out",
+  )!;
+  assert.deepEqual(
+    inBothOrders(() => analyseCore(request).place(place.id, ["element"]).admitted),
+    {
+      by: "decided",
+      kinds: ["integer", "null"],
+      decider: { file: 0, start: 68, end: 71 },
+      inherited: false,
+    },
+  );
+});
+
+/**
+ * External round 7 B1 (the lead's ruling; A4, F17b; ADR 0021 1.3): a place a written type decides, itself or through
+ * a copy taken before or after the host store, admits the written domain at every collection level, `null` included,
+ * whatever kinds are stored; inferred places stay as their contributions decide. Over `WRITTEN_COPY_MATRIX`, in both
+ * orders and with the sharing on and off: the place's admitted domain at each level and C9's `against` at each of its
+ * targets (decision), the one checked store with the whole written type (plan), a fitting value and a written `null`
+ * saying DONE, a misfit (a fraction or text for an integer, a `null` none is written for) stopping at TSR058 at the
+ * store's value with nothing said (execution).
+ */
+test("a copy of a written collection admits its written domain at every level, null included (external r7 B1)", (t) => {
+  const wrong: string[] = [];
+  const sorted = (kinds: readonly string[]): string[] => [...kinds].sort();
+  for (const c of WRITTEN_COPY_MATRIX) {
+    const request = coreRequest([{ path: "main.tease", source: c.source }]);
+    assert.ok(request !== null, c.name);
+    const place = new CoreProgram(request).places.find(
+      ({ kind }) => kind.kind === "binding" && kind.name === c.place,
+    )!;
+    const levelOf = (target: string): number =>
+      target.split(".").filter((step) => step === "element").length;
+    const expected = {
+      levels: c.levels.map(sorted),
+      checks: [`${c.store} ${c.checked}`],
+      runs: [
+        ...c.fits.map(() => ({ status: "halted", failure: null, says: ["DONE"] })),
+        ...c.misfits.map(() => ({ status: "failed", failure: `TSR058@${c.value}`, says: [] })),
+      ],
+    };
+    const observe = () => {
+      const answers = analyseCore(request);
+      const plan = candidate(c.source).plan!;
+      return {
+        levels: c.levels.map((_, level) => {
+          const admitted = answers.place(place.id, Array<string>(level).fill("element")).admitted;
+          return admitted.by === "undecided" ? ["undecided"] : sorted(admitted.kinds);
+        }),
+        against: answers.checks
+          .filter((check) => check.boundary && check.target.split(".")[0] === c.place)
+          .map((check) => ({ target: check.target, kinds: sorted(check.against) })),
+        checks: checksOf(plan),
+        runs: [...c.fits, ...c.misfits].map((value) => runWith(plan, value)),
+      };
+    };
+    for (const shared of [true, false]) {
+      const { against, ...observed } = inBothOrders(() =>
+        shared ? observe() : withoutSharing(observe),
+      );
+      const name = `${c.name}${shared ? "" : " (no sharing)"}`;
+      if (JSON.stringify(observed) !== JSON.stringify(expected))
+        wrong.push(`${name}: ${JSON.stringify(observed)}`);
+      for (const { target, kinds } of against)
+        if (JSON.stringify(kinds) !== JSON.stringify(sorted(c.levels[levelOf(target)]!)))
+          wrong.push(`${name}: C9 at ${target} against ${JSON.stringify(kinds)}`);
+    }
+  }
+  t.diagnostic(
+    `${WRITTEN_COPY_MATRIX.length} sources, each in both orders with the sharing on and off`,
+  );
+  assert.deepEqual(wrong, []);
+});
+
+/**
+ * AD-3 (X1 drops flow facts, never a written type): host data stored into a written place in dead code (a
+ * function nothing calls, after `exit`, a branch on `false`) is checked against the written domain, as in live code,
+ * never against `unknown`. Per place and dead shape, the dead program and its live form (the function called; the
+ * statements live), in both orders: the admitted domain at each collection level, the one boundary against the written
+ * element kind at the host read, and, where the candidate route takes the program, the one checked store, the host
+ * value's, with the whole written type.
+ */
+test("a dead store of host data into a written place is checked against its written domain, as live (AD-3)", (t) => {
+  const sorted = (kinds: readonly string[]): string[] => [...kinds].sort();
+  // per place: its name, the statements, its written kinds per level, and the store bringing the host value with the
+  // whole type the plan checks there
+  const places: readonly (readonly [
+    what: string,
+    name: string,
+    body: string,
+    levels: readonly (readonly string[])[],
+    store: string,
+    checked: string,
+  ])[] = [
+    [
+      "a written scalar",
+      "out",
+      "let out: integer = 1\nout = hostValue",
+      [["integer"]],
+      "out = hostValue",
+      "integer",
+    ],
+    [
+      "a written list",
+      "out",
+      "let out: integer[] = [1]\nout = [hostValue]",
+      [["list"], ["integer"]],
+      "out = [hostValue]",
+      "list<integer>",
+    ],
+    [
+      "a written list of lists",
+      "out",
+      "let out: integer[][] = [[1]]\nout = [[hostValue]]",
+      [["list"], ["list"], ["integer"]],
+      "out = [[hostValue]]",
+      "list<list<integer>>",
+    ],
+    [
+      "a copy of a written list",
+      "copy",
+      "let typed: integer[] = [1]\nlet copy = typed\ncopy = [hostValue]",
+      [["list"], ["integer"]],
+      "copy = [hostValue]",
+      "list<integer>",
+    ],
+  ];
+  const indented = (body: string): string =>
+    body
+      .split("\n")
+      .map((line) => `  ${line}`)
+      .join("\n");
+  // per dead shape: the program with `body` dead, its live form, and whether the candidate route takes them (a function
+  // is outside its slice)
+  const shapes: readonly (readonly [
+    string,
+    (body: string) => string,
+    (body: string) => string,
+    boolean,
+  ])[] = [
+    [
+      "a function nothing calls",
+      (body) => `function use(x) {\n${indented(body)}\n}\nexit\n`,
+      (body) => `function use(x) {\n${indented(body)}\n}\nuse(1)\nexit\n`,
+      false,
+    ],
+    ["after exit", (body) => `exit\n${body}\n`, (body) => `${body}\nexit\n`, true],
+    [
+      "a branch on a literal false",
+      (body) => `if false {\n${indented(body)}\n}\nexit\n`,
+      (body) => `${body}\nexit\n`,
+      true,
+    ],
+  ];
+  const observe = (source: string, name: string, levels: number) => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const place = new CoreProgram(request).places.find(
+      ({ kind }) => kind.kind === "binding" && kind.name === name,
+    )!;
+    const text = (start: number, end: number): string => `'${source.slice(start, end)}'`;
+    return inBothOrders(() => {
+      const answers = analyseCore(request);
+      const plan = insideSlice(() => candidate(source))?.plan ?? null;
+      return {
+        levels: Array.from({ length: levels }, (_, level) => {
+          const admitted = answers.place(place.id, Array<string>(level).fill("element")).admitted;
+          return admitted.by === "undecided" ? ["undecided"] : sorted(admitted.kinds);
+        }),
+        boundaries: answers.checks
+          .filter((check) => check.boundary)
+          .map(
+            (check) =>
+              `${check.target} [${sorted(check.against).join(", ")}] ${text(check.site.start, check.site.end)}`,
+          )
+          .sort(),
+        plan:
+          plan === null
+            ? null
+            : typeChecks(plan).map(({ so, eo, type }) => `${text(so, eo)} ${typeText(type)}`),
+      };
+    });
+  };
+  const wrong: string[] = [];
+  let plans = 0;
+  for (const [what, name, body, levels, store, checked] of places)
+    for (const [where, dead, live, planned] of shapes) {
+      const element = levels.at(-1)!;
+      const expected = {
+        levels: levels.map(sorted),
+        boundaries: [
+          `${[name, ...Array<string>(levels.length - 1).fill("element")].join(".")} [${sorted(element).join(", ")}] 'hostValue'`,
+        ],
+        plan: planned ? [`'${store}' ${checked}`] : null,
+      };
+      if (planned) plans += 2;
+      for (const [form, source] of [
+        ["dead", dead(body)],
+        ["live", live(body)],
+      ] as const) {
+        const found = observe(source, name, levels.length);
+        if (JSON.stringify(found) !== JSON.stringify(expected))
+          wrong.push(`${what}, ${where}, ${form}: ${JSON.stringify(found)}`);
+      }
+    }
+  t.diagnostic(
+    `${places.length * shapes.length * 2} programs, ${plans} planned on the candidate route`,
+  );
+  assert.deepEqual(wrong, []);
+});
+
+/**
+ * The owner's rule over a sample of the cells the candidate route reaches: host data, its slice's ingress,
+ * inline and named, into a written, a decided and a published place, at a scalar and at a collection endpoint. Each
+ * program compiles alike in both orders and checks exactly the store that brings the data, against the whole type its
+ * place holds there (the host value's kind at the value's position: an element's, a nested element's). A fitting host
+ * value says AFTER and halts; each bad one fails at that store's value with TSR058, nothing said.
+ */
+test("a sample of the slice's cells checks host data in the plan and stops a bad value before the next effect (r4.59)", () => {
+  const sample: readonly (readonly [
+    name: string,
+    body: string,
+    store: string,
+    type: string,
+    good: SerializableRuntimeValue,
+    bad: readonly SerializableRuntimeValue[],
+  ])[] = [
+    ["written scalar, inline", "let n: integer = hostValue", "", "integer", 2, ["bad", 2.5]],
+    [
+      "written scalar, named",
+      "let raw = hostValue\nlet n: integer = raw",
+      "let n",
+      "integer",
+      2,
+      ["bad", 2.5],
+    ],
+    [
+      "written list element, inline",
+      "let xs: integer[] = [hostValue]",
+      "",
+      "list<integer>",
+      2,
+      ["bad", 2.5],
+    ],
+    [
+      "written list element, named",
+      "let raw = hostValue\nlet xs: integer[] = [raw]",
+      "let xs",
+      "list<integer>",
+      2,
+      [2.5],
+    ],
+    [
+      "decided list element, named",
+      "let raw = hostValue\nlet xs = [1, raw]",
+      "let xs",
+      "list<integer>",
+      2,
+      ["bad", 2.5],
+    ],
+    // (the decided list element and the decided nested list element, inline, are the owner's F1 test's first and third
+    // programs, checked there with these values)
+    ["decided scalar, a later store", "let n = hostValue\nn = 1", "", "integer", 2, ["bad", 2.5]],
+    ["published scalar, inline", "let n = [1, hostValue][1]", "", "integer", 2, ["bad", 2.5]],
+    [
+      "published scalar, named",
+      "let raw = hostValue\nlet n = [1, raw][1]",
+      "let n",
+      "integer",
+      2,
+      ["bad", 2.5],
+    ],
+    [
+      "published text, named",
+      'let raw = hostValue\nlet n = ["a", raw][1]',
+      "let n",
+      "string",
+      "b",
+      [1],
+    ],
+    [
+      "published truth value, named",
+      "let raw = hostValue\nlet n = [true, raw][1]",
+      "let n",
+      "boolean",
+      false,
+      ["bad"],
+    ],
+  ];
+  for (const [name, body, store, type, good, bad] of sample) {
+    const source = `${body}\nsay "AFTER"\nexit\n`;
+    // (the checked store: the line that starts with `store`, its value after the `=`)
+    const start = source.indexOf(store);
+    const end = source.indexOf("\n", start);
+    const value = source.indexOf("=", start) + 2;
+    const [result, checks] = inBothOrdersAs(
+      () => candidate(source),
+      (compiled) => (compiled.plan === null ? null : checksOf(compiled.plan)),
+    );
+    assert.deepEqual(checks, [`${start}:${end} ${type}`], name);
+    const plan = result.plan!;
+    assert.deepEqual(
+      runWith(plan, good),
+      { status: "halted", says: ["AFTER"], failure: null },
+      `${name} with ${JSON.stringify(good)}`,
+    );
+    for (const refused of bad)
+      assert.deepEqual(
+        runWith(plan, refused),
+        { status: "failed", says: [], failure: `TSR058@${value}:${end}` },
+        `${name} with ${JSON.stringify(refused)}`,
+      );
+  }
+});
+
+/** Runs a plan to its end, observing each reading pause's deadline: the events and the final snapshot. */
+function finish(
+  plan: InstructionPlan,
+  start: RuntimeSnapshot,
+): { readonly events: readonly InterpreterEvent[]; readonly snapshot: RuntimeSnapshot } {
+  const events: InterpreterEvent[] = [];
+  let snapshot = start;
+  for (let rounds = 0; rounds < 100; rounds += 1) {
+    const gate = snapshot.foregroundAction;
+    if (snapshot.status === "waiting" && gate?.kind === "chatPacingGate") {
+      const settled = observeTime(plan, snapshot, gate.deadlineMs);
+      events.push(...settled.events);
+      snapshot = settled.snapshot;
+    }
+    if (snapshot.status === "halted" || snapshot.status === "failed") return { events, snapshot };
+    const result = run(plan, snapshot);
+    events.push(...result.events);
+    snapshot = result.snapshot;
+  }
+  assert.fail("the run did not end");
+}
+
+test("a checkpoint after a passed check resumes with the same state, and the later check still runs", () => {
+  const source =
+    'let count: integer = hostValue\nsay "checked"\nrepeat count {\n  say "turn"\n}\nexit\n';
+  const compiled = candidate(source);
+  assert.ok(compiled.plan !== null);
+  const plan = compiled.plan;
+  assert.deepEqual(checksOf(plan), ["0:30 integer"]);
+  // (the repeat's own count check, the runtime's: TSR043 at the count, nothing said after it)
+  const count = source.indexOf("count {");
+  for (const [hostValue, ending] of [
+    [2, "halted"],
+    [-1, "failed"],
+  ] as const) {
+    // the store's check has passed when the session waits at the reading pause after it
+    const waiting = run(plan, createFreshRuntimeSnapshot(plan, { globals: { hostValue } }));
+    assert.equal(waiting.snapshot.status, "waiting");
+    assert.deepEqual(
+      waiting.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      ["checked"],
+    );
+    const direct = finish(plan, waiting.snapshot);
+    const restored = deserializeCheckpoint(
+      serializeCheckpoint(createCheckpoint(plan, waiting.snapshot)),
+    );
+    const resumed = finish(restored.plan, restored.snapshot);
+    assert.deepEqual(resumed.events, direct.events, String(hostValue));
+    assert.deepEqual(resumed.snapshot, direct.snapshot, String(hostValue));
+    assert.equal(resumed.snapshot.status, ending);
+    assert.deepEqual(
+      resumed.events.flatMap((event) =>
+        event.kind === "say"
+          ? [event.text]
+          : event.kind === "runtimeFailure"
+            ? [`${event.code}@${event.span.start.offset}:${event.span.end.offset}`]
+            : [],
+      ),
+      ending === "failed" ? [`TSR043@${count}:${count + "count".length}`] : ["turn", "turn"],
+      String(hostValue),
+    );
+  }
+});
+
+test("a program outside the slice throws at its first construct outside it", () => {
+  for (const [source, offset] of [
+    // a statement outside the slice
+    ["let total = 0\nwhile false {\n  total = 1\n}\nexit\n", 14],
+    // another consumer: a condition that is no boolean (C3)
+    ['if 1 {\n  say "never"\n}\nexit\n', 3],
+    // lists nested as deep as the facts' walk (256 levels), inferred or written
+    [
+      `let a = ${"[".repeat(256)}1${"]".repeat(256)}\na = ${"[".repeat(256)}"bad"${"]".repeat(256)}\nexit\n`,
+      4,
+    ],
+    [`let a: integer${"[]".repeat(256)} = []\nexit\n`, 7],
+  ] as const) {
+    assert.throws(
+      () => candidate(source),
+      (error) =>
+        error instanceof CandidateOutsideSlice &&
+        error.path === "main.tease" &&
+        error.site.file === 0 &&
+        error.site.start === offset,
+      source,
+    );
+  }
+});
+
+/**
+ * The owner's #1104 point 1: `min` and `max` compare the property `by:` names in one list of objects, and calendar
+ * durations of one family (months and years, or days and weeks), as the current checker does. The analysis gives them no
+ * diagnostic; the route leaves the list functions to S9b, which brings their results (F25) and argument checks (C13).
+ */
+test("min and max with by: and with calendar durations of one family have no diagnostic (#1104 point 1)", () => {
+  for (const source of [
+    'say min([{ count: 2 }, { count: 1 }], by: "count")\nexit\n',
+    'say max([{ count: 2 }, { count: 1 }], by: "count")\nexit\n',
+    "say min(1 calendar month, 2 calendar months)\nexit\n",
+    "say max(1 calendar day, 2 calendar weeks)\nexit\n",
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const answers = analyseCore(request);
+    assert.deepEqual([answers.outcome, answers.diagnostics], ["valid", []], source);
+  }
+});
+
+test("the candidate's side outputs follow the flow graph's literal facts and the kept checks", () => {
+  const source =
+    'if true {\n  say "a"\n} else {\n  say "b"\n}\nrepeat 0 {\n  say "c"\n}\nrepeat 1 {\n  exit\n}\nsay "d"\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const checked: TypeCheckResult = CORE_BACKEND.analyze(request).checked;
+  assert.deepEqual(
+    [...checked.ways.paths].map(([statement, ways]) => [statement.span.start.offset, ...ways]),
+    [
+      [0, true, false],
+      [41, false, true],
+      [64, true, false],
+    ],
+  );
+  assert.deepEqual(
+    [...checked.unreachable]
+      .map((statement) => `${statement.kind}@${statement.span.start.offset}`)
+      .sort(),
+    ["exitStatement@92", "sayStatement@31", "sayStatement@54", "sayStatement@84"],
+  );
+  // the checks after the plan read them as they read the production default's: the same warnings
+  assert.deepEqual(sited(candidate(source)), sited(compileSource(source, OPTIONS)));
+
+  // the kept checks the slice reaches: a known repeat count the runtime cannot count, a message's markup colour
+  const large = candidate("let n = 9007199254740992\nrepeat n {}\nexit\n");
+  assert.deepEqual(sited(large), ["error TSV011@32"]);
+  assert.match(large.diagnostics[0]!.message, /Use a smaller count\.$/);
+  assert.deepEqual(sited(candidate('say "[color=bad]x[/color]"\nexit\n')), ["error TSC008@4"]);
+});
+
+/**
+ * The lead's decision 3 on #1072 (Astra's G3): a check that owes the runtime nothing is a diagnostic of its own kind,
+ * published in the core's record with its site alone and no obligation, its sentence composed from its rule, and read
+ * alike by the record and the compiler: the record's every diagnostic is the compiler's, at the same span and severity,
+ * with the sentence `coreMessage` gives it; a warning with a runtime check beside it keeps its obligation and its check.
+ */
+test("a check that owes the runtime nothing is published in the record and by the compiler alike, with no obligation (decision 3 on #1072)", () => {
+  const source =
+    'let n = toInteger("-2", default: 0)\nlet m: integer = hostValue\nrepeat n {}\nsay toNumber("1,5", default: m)\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+  assert.ok(request !== null);
+  const { record, compiled } = inBothOrdersAs(
+    () => ({
+      record: coreRecord(checkedResult(analyseCore(request), request), ["main.tease"]),
+      compiled: candidate(source),
+    }),
+    ({ record, compiled }) => ({
+      record,
+      compiled: compiled.diagnostics.map((d) => [
+        d.severity,
+        d.code,
+        d.span.start.offset,
+        d.span.end.offset,
+      ]),
+    }),
+  )[1];
+  const at = (text: string, from = 0): readonly [number, number] => {
+    const start = source.indexOf(text, from);
+    return [start, start + text.length];
+  };
+  assert.equal(record.outcome, "compile-error");
+  assert.deepEqual(
+    record.diagnostics.map((d) => [d.class, d.kind, d.site.offset, d.site.end, "obligation" in d]),
+    [
+      // (the analysis's own diagnostics first, then the checks that owe nothing, each in its source order)
+      ["warning-runtime-check", "written-target", ...at("hostValue"), true],
+      ["compile-error", "static", ...at("n", source.indexOf("repeat")), false],
+      ["compile-error", "static", ...at('"1,5"'), false],
+    ],
+  );
+  // the warning's check and the boundary's, nothing for the checks that owe nothing
+  assert.deepEqual(
+    record.runtimeChecks.map((check) => [
+      check.kind,
+      check.target,
+      check.boundary === true,
+      check.site.offset,
+    ]),
+    [
+      ["copy-type", "m", false, source.indexOf("hostValue")],
+      ["copy-type", "m", true, source.indexOf("hostValue")],
+    ],
+  );
+  // the compiler reports each at the record's span and severity
+  assert.deepEqual(compiled, [
+    ["warning", "TSV041", ...at("hostValue")],
+    ["error", "TSV011", ...at("n", source.indexOf("repeat"))],
+    ["error", "TSV043", ...at('"1,5"')],
+  ]);
+  const messages = candidate(source).diagnostics.map((d) => d.message);
+  assert.equal(
+    messages[1],
+    "A repeat count must be a whole number (integer) of at least 0, but this is -2. Check that it is at least 0 first.",
+  );
+  assert.match(
+    messages[2]!,
+    /^toNumber\(\.\.\.\) cannot convert text \(string\) "1,5" to a number/,
+  );
+});
+
+/**
+ * The seam's ordinary warning (decision 3 on #1072): a check that owes the runtime nothing but warns, here V30 §6's
+ * written range that holds no number, is a warning in the record and the compiler alike, the outcome `warning` alone and
+ * a runtime check's warning beside it the worse; it owes no check, so the plan's checks are the other warning's, and the
+ * editor marks it a warning as any other.
+ */
+test("an ordinary warning owes no check: its record, its compile, its plan and its editor marker (decision 3 on #1072)", () => {
+  const alone = "for i in 3..1 {\n  say i\n}\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source: alone }]);
+  assert.ok(request !== null);
+  const record = coreRecord(checkedResult(analyseCore(request), request), ["main.tease"]);
+  assert.deepEqual(record, {
+    outcome: "warning",
+    diagnostics: [
+      { class: "warning", kind: "static", site: { file: "main.tease", offset: 9, end: 13 } },
+    ],
+    runtimeChecks: [],
+  });
+  const beside = `${alone.replace("exit\n", "")}let m: integer = hostValue\nsay "after"\nexit\n`;
+  const besideRequest = coreRequest([{ path: "main.tease", source: beside }]);
+  assert.ok(besideRequest !== null);
+  const both = coreRecord(checkedResult(analyseCore(besideRequest), besideRequest), ["main.tease"]);
+  assert.equal(both.outcome, "warning-runtime-check");
+  assert.deepEqual(
+    both.runtimeChecks.map((check) => `${check.kind} ${check.target}`),
+    ["copy-type m", "copy-type m"],
+  );
+  const compiled = inBothOrders(() => candidate(beside));
+  assert.deepEqual(sited(compiled), [
+    "warning TSV046@9",
+    `warning TSV041@${beside.indexOf("hostValue")}`,
+  ]);
+  assert.equal(
+    compiled.diagnostics[0]!.message,
+    "This range contains no numbers, so the loop never runs: a range never counts down. Write '1..3' to count up.",
+  );
+  assert.deepEqual(checksOf(compiled.plan!), [
+    `${beside.indexOf("let m")}:${beside.indexOf("\nsay")} integer`,
+  ]);
+  assert.deepEqual(runWith(compiled.plan!, 2), {
+    status: "halted",
+    says: ["after"],
+    failure: null,
+  });
+  assert.deepEqual(
+    toMonacoMarkers(compiled.diagnostics, { Error: 8, Warning: 4, Info: 2 }).map(
+      (marker) => `${marker.code} ${marker.severity}`,
+    ),
+    ["TSV046 4", "TSV041 4"],
+  );
+});
+
+/**
+ * C13's iterable: an operand of the loop at its iterable, against the domain it tests, a list, set,
+ * dict or range, a pair loop's a dict: an error where no run can go through it; else a warning whose operand check is
+ * the runtime's own check of the loop's source (TSR044), at the iterable before the body runs, so the plan holds none.
+ */
+test("a for loop's iterable is an operand of the loop: an error, or a warning the loop's own check discharges at the iterable (C13)", () => {
+  for (const [source, operand] of [
+    ["for n in 1 {}\nexit\n", "1"],
+    ["for k, v in [1] {}\nexit\n", "[1]"],
+    ['let xs = ["a"]\nfor k, v in xs {}\nexit\n', "xs"],
+  ] as const) {
+    const result = inBothOrders(() => candidate(source));
+    assert.equal(result.plan, null, source);
+    assert.deepEqual(sited(result), [`error TSV012@${source.indexOf(operand, 5)}`], source);
+  }
+  for (const [source, against] of [
+    ['for n in hostValue {\n  say "in"\n}\nsay "after"\nexit\n', ["list", "set", "dict", "range"]],
+    ['for k, v in hostValue {\n  say "in"\n}\nsay "after"\nexit\n', ["dict"]],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const record = inBothOrders(() => compactAnalysis(request));
+    const at = source.indexOf("hostValue");
+    assert.deepEqual(
+      record.diagnostics.map((d) => [d.kind, d.class, d.site.offset]),
+      [["operator", "warning-runtime-check", at]],
+    );
+    assert.deepEqual(
+      record.checks.filter((check) => !check.boundary).map((check) => [check.kind, check.against]),
+      [["operand", against]],
+    );
+    const result = inBothOrders(() => candidate(source));
+    assert.deepEqual(sited(result), [`warning TSV012@${at}`]);
+    // (the loop's own check: a value it cannot go through stops the run at the iterable, before the body)
+    assert.deepEqual(runWith(result.plan!, 1), {
+      status: "failed",
+      says: [],
+      failure: `TSR044@${at}:${at + "hostValue".length}`,
+    });
+  }
+  const list = createCapturedSerializableList([1, 2]);
+  const loop = inBothOrders(() =>
+    candidate('for n in hostValue {\n  say "in"\n}\nsay "after"\nexit\n'),
+  );
+  assert.deepEqual(runWith(loop.plan!, list), {
+    status: "halted",
+    says: ["in", "in", "after"],
+    failure: null,
+  });
+  // the controls: what a loop goes through is quiet
+  for (const source of [
+    'let xs = [1, 2]\nfor n in xs {\n  say "in"\n}\nexit\n',
+    "let xs: integer[] = [1]\nfor n in xs {}\nexit\n",
+  ])
+    assert.deepEqual(sited(inBothOrders(() => candidate(source))), [], source);
+});
+
+/**
+ * V30 §13 (#1105): a conversion the compiler can prove invalid is a compile error, also with a `default:`, which would
+ * hide the text. The check reads the argument's known value through its view, so a known text gets the written
+ * literal's error and sentence, as the production checker gives them for the literal.
+ */
+test("a conversion of known text that does not convert is the written literal's compile error, also with a default, in both orders (#1105, V30 §13)", () => {
+  const converted = (result: Pick<CompilationResult, "diagnostics">): string[] =>
+    result.diagnostics
+      .filter((diagnostic) => diagnostic.code === "TSV043")
+      .map((diagnostic) => `${diagnostic.span.start.offset} ${diagnostic.message}`);
+  // each conversion that reads text, through a copy of a copy, with a default the slice takes
+  for (const [name, text, fallback] of [
+    ["toNumber", "12a", "0.5"],
+    ["toInteger", "12a", "0"],
+    ["toBoolean", "True", "false"],
+    ["toDate", "2026-02-30", "hostValue"],
+    ["toTime", "25:61", "hostValue"],
+    ["toDateTime", "2026-02-30T12:30", "hostValue"],
+    ["toAbsoluteDateTime", "2026-02-30T12:30:00Z", "hostValue"],
+  ] as const) {
+    const call = (operand: string) =>
+      `let value = ${name}(${operand}, default: ${fallback})\nexit\n`;
+    const [literal] = converted(compileSource(call(JSON.stringify(text)), OPTIONS));
+    assert.ok(literal !== undefined, `${name}: the literal's error`);
+    const sentence = literal.slice(literal.indexOf(" ") + 1);
+    const source = `let seed = ${JSON.stringify(text)}\nlet text = seed\n${call("text")}`;
+    const result = inBothOrders(() => candidate(source));
+    assert.equal(result.plan, null, source);
+    assert.deepEqual(converted(result), [`${source.indexOf("text,")} ${sentence}`], source);
+  }
+  // the literal itself, a variable, a written type and parentheses
+  const sentence =
+    'toInteger(...) cannot convert text (string) "12a" to a whole number (integer). The text must be a number such as 2.5 or -3.';
+  for (const [source, operand] of [
+    ['say toInteger("12a", default: 0)\nexit\n', '"12a"'],
+    ['let text = "12a"\nsay toInteger(text, default: 0)\nexit\n', "text,"],
+    ['let text: string = "12a"\nsay toInteger(text, default: 0)\nexit\n', "text,"],
+    ['let text = "12a"\nsay toInteger((text), default: 0)\nexit\n', "(text)"],
+  ] as const)
+    assert.deepEqual(
+      converted(inBothOrders(() => candidate(source))),
+      [`${source.indexOf(operand, source.indexOf("toInteger("))} ${sentence}`],
+      source,
+    );
+  // the forms the route's slice does not take yet (S9b), through the bridge: a concatenation, a two-step constant and
+  // calls without a default
+  for (const [source, operand] of [
+    ['say toInteger("12" + "a", default: 0)\nexit\n', '"12" + "a"'],
+    ['let first = "12"\nlet text = first + "a"\nsay toInteger(text, default: 0)\nexit\n', "text,"],
+    ['let seed = "12a"\nlet text = seed\nsay toInteger(text)\nexit\n', "text)"],
+    ['say toInteger("12" + "a")\nexit\n', '"12" + "a"'],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const [, bridged] = inBothOrdersAs(
+      () =>
+        coreCheckResult(
+          analyseCore(request),
+          new SliceIndex(request.files.map((file) => file.program)),
+          request,
+        ),
+      (checked) => converted({ diagnostics: checked.diagnostics.flat() }),
+    );
+    assert.deepEqual(bridged, [`${source.lastIndexOf(operand)} ${sentence}`], source);
+  }
+});
+
+/**
+ * #1105's controls: a value merged across branches is not known, so its text gives the default when the script runs;
+ * a known text, number or true or false that converts converts; a parse keeps its fallback for text it cannot read.
+ */
+test("a conversion of a value that converts, that is unknown, or that a parse cannot read compiles and runs as before, in both orders (#1105)", () => {
+  for (const [source, says] of [
+    [
+      'let text = "12a"\nif load("flag", default: false) {\n  text = "12a"\n}\nsay toInteger(text, default: 0)\nexit\n',
+      ["0"],
+    ],
+    ['let seed = "12"\nlet text = seed\nsay toInteger(text, default: 0)\nexit\n', ["12"]],
+    ["let amount = 2.5\nlet copy = amount\nsay toInteger(copy, default: 0)\nexit\n", ["2"]],
+    ["let flag = true\nlet copy = flag\nsay toBoolean(copy, default: false)\nexit\n", ["true"]],
+    ['let text = "{"\nsay fromJson(text, default: null)\nexit\n', ["null"]],
+  ] as const) {
+    const result = inBothOrders(() => candidate(source));
+    assert.deepEqual(sited(result), [], source);
+    assert.deepEqual(runWith(result.plan!, null).says, says, source);
+  }
+});
+
+test("the known values the conversions' checks read are folded once, however many conversions read them, at one doubling, in both orders (#1105)", () => {
+  // a chain of `size` copies of one text and `size` conversions of its last copy: a fold per check grows with the
+  // square of the size
+  const folds = (size: number): number => {
+    const lines = ['let v0 = "12"'];
+    for (let at = 1; at <= size; at += 1) lines.push(`let v${at} = v${at - 1}`);
+    for (let at = 1; at <= size; at += 1)
+      lines.push(`let n${at} = toInteger(v${size}, default: 0)`);
+    const source = `${lines.join("\n")}\nexit\n`;
+    return inBothOrders(() =>
+      withValidationTestStatistics((finish) => {
+        assert.notEqual(candidate(source).plan, null, `${size}: a plan`);
+        return finish().counts.staticFolds ?? 0;
+      }),
+    );
+  };
+  const [small, large] = [folds(32), folds(64)];
+  assert.ok(large <= 2.15 * small, `folds at 32 and 64: ${small}, ${large}`);
+});
+
+test("the candidate's facts list every binding, read and value of the program with the core's types", () => {
+  const request = coreRequest([
+    {
+      path: "main.tease",
+      source: "let n: integer = 1\nlet xs = [1, 2.5]\nrepeat xs[0] {}\nexit\n",
+    },
+  ]);
+  assert.ok(request !== null);
+  const facts = CORE_BACKEND.analyze(request).facts();
+  const at = (start: number, end: number) => ({ file: 0, start, end });
+  assert.deepEqual(facts.bindings, [
+    { site: at(0, 18), kind: "letStatement", name: "n", type: "integer" },
+    // A3: the settled family of the elements
+    { site: at(19, 36), kind: "letStatement", name: "xs", type: "list<number>" },
+  ]);
+  assert.deepEqual(facts.reads, [{ site: at(44, 46), name: "xs", binding: at(19, 36) }]);
+  assert.deepEqual(
+    facts.values.map((value) => [value.site.start, value.kind, value.type]),
+    [
+      [17, "numberLiteral", "integer"],
+      [28, "listLiteral", "list<number>"],
+      [29, "numberLiteral", "integer"],
+      [32, "numberLiteral", "number"],
+      [44, "identifier", "list<number>"],
+      // F12: an element read takes the element's contract, the family of both
+      [44, "indexExpression", "number"],
+      [47, "numberLiteral", "integer"],
+    ],
+  );
+  assert.deepEqual(
+    [facts.functions, facts.speakers, facts.uncheckedProperties, facts.storage],
+    [[], [], [], []],
+  );
+
+  // one level less than the walk: complete to the element kind
+  const deep = coreRequest([
+    { path: "main.tease", source: `let a = ${"[".repeat(255)}1${"]".repeat(255)}\nexit\n` },
+  ]);
+  assert.ok(deep !== null);
+  assert.equal(
+    CORE_BACKEND.analyze(deep).facts().bindings[0]!.type,
+    `${"list<".repeat(255)}integer${">".repeat(255)}`,
+  );
+
+  // parentheses, nested element reads and a kind without parts keep their whole types
+  const shapes = coreRequest([
+    {
+      path: "main.tease",
+      source:
+        "let a = (1)\nlet b = [(2)]\nlet c = [[[[3]]]][0]\nlet r: range = hostValue\nlet q: range = r\nexit\n",
+    },
+  ]);
+  assert.ok(shapes !== null);
+  const shaped = CORE_BACKEND.analyze(shapes);
+  assert.deepEqual(sited({ diagnostics: shaped.checked.diagnostics.flat() }), [
+    "warning TSV041@62",
+  ]);
+  const typed = shaped.facts();
+  assert.deepEqual(
+    typed.bindings.map((binding) => `${binding.name}: ${binding.type}`),
+    ["a: integer", "b: list<integer>", "c: list<list<list<integer>>>", "r: range", "q: range"],
+  );
+  assert.deepEqual(
+    typed.values
+      .filter((value) =>
+        ["parenthesizedExpression", "indexExpression", "identifier"].includes(value.kind),
+      )
+      .map((value) => `${value.site.start} ${value.kind} ${value.type}`),
+    [
+      "8 parenthesizedExpression integer",
+      "21 parenthesizedExpression integer",
+      "34 indexExpression list<list<list<integer>>>",
+      "62 identifier unknown",
+      "87 identifier range",
+    ],
+  );
+});
+
+test("a program the work allowance stops, in its analysis or after it, compiles with the stop's warning and its checks (D4 a′)", () => {
+  const request = coreRequest([
+    {
+      path: "main.tease",
+      source: "let xs: integer?[] = [hostValue, null, 7]\nlet n = 1\nrepeat n {}\nexit\n",
+    },
+  ]);
+  assert.ok(request !== null);
+  const ends = new Set<string>();
+  for (let allowance = 20; allowance <= 4_000; allowance += 20) {
+    const outcome = insideSlice(() =>
+      withTestAllowance(allowance, () => CORE_BACKEND.analyze(request)),
+    );
+    assert.ok(outcome !== null, `${allowance}: never outside the slice for its size`);
+    assert.doesNotThrow(() => outcome.facts(), String(allowance));
+    const codes = outcome.checked.diagnostics.flat().map((d) => `${d.severity} ${d.code}`);
+    assert.ok(!codes.some((code) => code.startsWith("error")), `${allowance}: no compile error`);
+    ends.add(codes.includes("warning TSV076") ? "stopped" : "analysed");
+    // the written store's check, the warning's or the stop's
+    assert.ok(
+      [...outcome.checked.runtimeChecks.keys()].some(
+        (site) => site.kind === "letStatement" && site.name.name === "xs",
+      ),
+      `${allowance}: the check of 'xs'`,
+    );
+  }
+  assert.deepEqual([...ends].sort(), ["analysed", "stopped"]);
+});
+
+/** A type check result as JSON-safe data, its syntax keys by their spans. */
+function checkedData(checked: TypeCheckResult): string {
+  const span = (node: {
+    readonly span: { readonly start: { offset: number }; readonly end: { offset: number } };
+  }): string => `${node.span.start.offset}:${node.span.end.offset}`;
+  return JSON.stringify({
+    diagnostics: checked.diagnostics,
+    runtimeChecks: [...checked.runtimeChecks].map(([site, plan]) => [span(site), plan]),
+    formShapes: [...checked.formShapes].map(([site, shape]) => [span(site), shape]),
+    paths: [...checked.ways.paths].map(([site, ways]) => [span(site), ways]),
+    operands: [...checked.ways.operands],
+    unreachable: [...checked.unreachable].map(span),
+    speakerFlow: [[...checked.speakerFlow.reads], [...checked.speakerFlow.stores]],
+    storageTypes: checked.storageTypes,
+  });
+}
+
+test("the legacy analysis gives the same result with and without each file's source and picks", () => {
+  let compared = 0;
+  for (const [position, record] of readFixture().entries()) {
+    if (position % 4 !== 0) continue;
+    // separate parses, so that nothing one analysis keeps on the syntax reaches the other
+    const withInput = coreRequest(record.files);
+    const without = coreRequest(record.files);
+    if (withInput === null || without === null) continue;
+    const plain: TypeAnalysisRequest = {
+      ...without,
+      files: without.files.map(({ path, program }) => ({ path, program })),
+    };
+    const full = analyzeTypes(withInput);
+    const bare = analyzeTypes(plain);
+    assert.equal(checkedData(full.checked), checkedData(bare.checked), record.name);
+    assert.equal(JSON.stringify(full.facts()), JSON.stringify(bare.facts()), record.name);
+    compared += 1;
+  }
+  assert.ok(compared > 300, `${compared} records compared`);
+});
+
+/** The TypeScript, JavaScript and Vue sources under `directory`, without built or installed code. */
+function sourcesUnder(directory: string): string[] {
+  return readdirSync(directory).flatMap((name) => {
+    if (name === "node_modules" || name === "dist") return [];
+    const path = join(directory, name);
+    if (statSync(path).isDirectory()) return sourcesUnder(path);
+    return /\.(ts|mts|js|mjs|vue)$/.test(name) ? [path] : [];
+  });
+}
+
+test("a known value under a test reads the branch's narrowing, and a long copy chain's value is still found iteratively (#1073 PR 2 phase 2)", () => {
+  // (a dead branch is no static error: the narrowing admits no kind of the value there; a live one keeps it)
+  for (const [source, plans] of [
+    ["let n = 1.5\nif n is integer { repeat n {} }\nexit\n", true],
+    ["let n = 1\nif n == null { repeat n {} }\nexit\n", true],
+    ["let n = 1.5\nif n is number { repeat n {} }\nexit\n", false],
+    ["let n = 1.5\nlet m = n\nif m is integer { repeat m {} }\nexit\n", true],
+    // (an operand's read too, Codex r2 on #1884: the copy inside the fallback never runs with 1.5)
+    [
+      'let n = 1.5\nlet m = n\nif m is integer { repeat (m otherwise 0) { say "BODY" } }\nsay "AFTER"\nexit\n',
+      true,
+    ],
+  ] as const)
+    assert.equal(inBothOrders(() => candidate(source)).plan !== null, plans, source);
+  // (Codex r1 on #1884: the filter applies after the evaluator's own iterative walk, so 8,192 copies take no native frame
+  // each, and the known count still plans and runs)
+  const chain =
+    Array.from({ length: 8192 }, (_, i) => `let n${i} = ${i === 0 ? "1" : `n${i - 1}`}`).join(
+      "\n",
+    ) + '\nrepeat n8191 { say "AFTER" }\nexit\n';
+  // (a stopped read says nothing of its kinds, `unknown`: its known value stands, and so does its static error)
+  for (const allowance of [1, 4])
+    assert.ok(
+      withTestAllowance(allowance, () => candidate("let n = 1.5\nrepeat n {}\nexit\n"))
+        .diagnostics.map((diagnostic) => diagnostic.code)
+        .includes("TSV011"),
+      `stopped at ${allowance}`,
+    );
+  const compiled = inBothOrders(() => candidate(chain));
+  assert.notEqual(compiled.plan, null);
+  assert.deepEqual(
+    compiled.diagnostics.map((diagnostic) => diagnostic.code),
+    [],
+  );
+});
+
+test("the route ends at the refusal its capture establishes, at the store whose contract leaves the slice's depth, and a deep program still plans (#1073)", () => {
+  // (graph/251 of the corpus behind a store whose contract the capture finds first: the capture's second request leaves
+  // the slice's depth at the store `a=b`, where the route now refuses, about 28 million units in, before the walk; the
+  // lowering would have refused at `let b=foreign`'s read after the whole analysis, about 58 million. In the first mode
+  // alone in CI: every mode is the PR's queue evidence)
+  const source =
+    'let n:integer=1\nn=hostValue\nlet typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nif hostValue is integer {a=b}\nb=a\nb=a\nlet out={p:c}\nexit\n';
+  assert.throws(
+    () => candidate(source),
+    (error) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === "a value whose structure the slice does not follow" &&
+      error.site.start === source.indexOf("a=b}") + 2,
+  );
+  // (no refusal at a work count: Sol's deep control, 169 syntax nodes, plans at about 1.4 million units, far past any
+  // proportional cap of its size, in every mode: in reverse order with its stop's warning)
+  const deep = `if hostValue is integer {}\nlet typed:integer${"[]".repeat(128)}=hostValue\nlet out=typed\n${"out=typed\n".repeat(8)}out=hostValue\nexit\n`;
+  for (const mode of MODES)
+    assert.notEqual(inMode(mode, () => candidate(deep)).plan, null, JSON.stringify(mode));
+});
+
+test("the route rule's error stands where a run can bring the null unchecked, and a check the compiler cannot keep warns (AD-1, #1073 PR 4)", () => {
+  // (functions are outside the candidate's slice: the core's analysis answers)
+  const errs = (source: string): boolean => {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    return analyseCore(request).diagnostics.some((d) => d.class === "compile-error");
+  };
+  for (const [source, error] of [
+    // (a loop's exit tests out the null: a check the compiler cannot keep, the warning; the other polarity is the error,
+    // the fixture's `forms/while-false-exit`; Codex r1 F1 on #1937)
+    [
+      'let n = 1\nif askBoolean "Clear?" { n = null }\nwhile n == null { n = 1 }\nrepeat n {}\nexit\n',
+      false,
+    ],
+    // (a test of the producer in the use's own condition before it, of the needed form; another comparison checks
+    // nothing: Codex r1 F2, F5)
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null and f() > 0 { say "yes" }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != 2 { repeat f() {} }\nexit\n',
+      true,
+    ],
+    // (Codex r2 on #1937: a `not`, a later test of the same call, an `or`'s guard, a leaving guard, an optional type test
+    // of a union, and an `else` arm of a non-null test)
+    [
+      'let n = 1\nif askBoolean "Clear?" { n = null }\nwhile not (n != null) { n = 1 }\nrepeat n {}\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null and f() > 0 and f() != null { say "y" }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null or f() > 0 { say "y" }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null { exit }\nrepeat f() {}\nexit\n',
+      false,
+    ],
+    [
+      'function f: integer | string { return "s" }\nif f() is integer? { repeat f() {} }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null { say "y" } else { repeat f() {} }\nexit\n',
+      true,
+    ],
+    // (Codex r3 on #1937: a guard that leaves through its `else` arm or its `then` arm beside an `else`, or with
+    // `continue` in a loop, is a check on every route past it; one of the wrong form, one in a sibling block, or a
+    // `while` a `break` leaves is not)
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() != null { say "y" } else { exit }\nrepeat f() {}\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null { exit } else { say "y" }\nrepeat f() {}\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nrepeat 2 { if f() == null { continue }\nrepeat f() {} }\nexit\n',
+      false,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif f() == null { say "y" } else { exit }\nrepeat f() {}\nexit\n',
+      true,
+    ],
+    [
+      'function f { if askBoolean("f") { return null }\n return 1 }\nif askBoolean("b") { if f() == null { exit } }\nrepeat f() {}\nexit\n',
+      true,
+    ],
+    [
+      'let n = 1\nif askBoolean "Clear?" { n = null }\nwhile n == null { if askBoolean "b" { break }\nn = 1 }\nrepeat n {}\nexit\n',
+      true,
+    ],
+    // (a called function's written union proves itself: Codex r1 F4)
+    ['function f: integer | string { return "s" }\nrepeat f() {}\nexit\n', true],
+    // (a parameter's default is selected only where some call omits the argument)
+    ["function use(n = null) { repeat n {} }\nuse(2)\nexit\n", false],
+    ["function use(n = null) { repeat n {} }\nuse()\nuse(2)\nexit\n", true],
+    // (a call's result is its own producer; a test of the same call around it is a check the compiler cannot keep)
+    [
+      'function read { if askBoolean("v") { return null }\n return 2 }\nrepeat read() {}\nexit\n',
+      true,
+    ],
+    [
+      'function read { if askBoolean("v") { return null }\n return 2 }\nif read() != null { repeat read() {} }\nexit\n',
+      false,
+    ],
+  ] as const)
+    assert.equal(
+      inBothOrders(() => errs(source)),
+      error,
+      source,
+    );
+  // (a written union's other kind the use does not take, made by a non-literal producer, certifies the union's route as
+  // the member's does, #1073)
+  const union =
+    'let flagHost = askBoolean "f"\nlet d = dict{a: 1}\nlet value: boolean | string | null = d.get("x", default: null)\n' +
+    'if flagHost { value = "w" }\nsay d.get(value, default: 0)\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source: union }], ["hostValue"]);
+  assert.ok(request !== null);
+  assert.ok(
+    inBothOrders(() =>
+      analyseCore(request).diagnostics.some(
+        (d) =>
+          d.class === "compile-error" &&
+          d.kind !== "written-type" &&
+          d.requiredCheck?.missingTests[0] === "if value is string",
+      ),
+    ),
+  );
+  // (S7: a method call's receiver that may be null is the runtime's check at the call, where a run fails: Codex r3 F6)
+  for (const source of [
+    "let xs = [null, [1]]\nxs[0].sort()\nexit\n",
+    "let xs = [null, [1]]\n(xs[0]).sort()\nexit\n",
+    'let xs = [null, ["a"]]\nsay xs[0].join(",")\nexit\n',
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const syntax = syntaxOf(source);
+    const derived = derive(syntax, compactAnalysis(request));
+    const failure = evaluate(syntax, derived.stores, {}, false, derived.content).run.failure;
+    assert.ok(
+      derived.discharges.some(
+        (d) => d.by === "native" && d.what === "member" && `TSR016@${d.site}` === failure,
+      ),
+      `${source}: ${failure} ${JSON.stringify(derived.discharges)}`,
+    );
+  }
+  // (S7: C1's check of a copied integer that may be null is its store's, and the predicted run fails where the plan's
+  // does: Sol's classification F1 on #1937)
+  const copied =
+    "let t:integer=7\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:null,nest:{n:null,keep:1},spare:1}\n" +
+    "let a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n";
+  const copiedRequest = coreRequest([{ path: "main.tease", source: copied }]);
+  assert.ok(copiedRequest !== null);
+  const syntax = syntaxOf(copied);
+  const derived = derive(syntax, compactAnalysis(copiedRequest));
+  assert.ok(
+    derived.discharges.some((d) => d.by === "store"),
+    JSON.stringify(derived.discharges),
+  );
+  const compiled = candidate(copied);
+  assert.ok(compiled.plan !== null);
+  assert.deepEqual(
+    runGlobals(compiled.plan, {}),
+    evaluate(syntax, derived.stores, {}, false, derived.content).run,
+  );
+});
+
+test("the tested-producer rule admits its closed set of forms over every axis, and anything else is the route rule's error (AD-1, #1073 PR 4)", () => {
+  // (the open-set rule: the expected outcome comes from the rule's own table, never from the engine. A test removes the
+  // offending kind where it holds (H) or where it fails (F); `not` swaps the two; a position takes H, F or neither; an
+  // exit kind leaves for good. A use with a check on every route warns; any other is the error)
+  const KINDS = {
+    null: {
+      declare: 'function f { if askBoolean("f") { return null }\n return 1 }\n',
+      forms: [
+        ["f() != null", true, false],
+        ["f() == null", false, true],
+        ["f() is integer", true, false],
+        ["f() is integer?", false, true],
+        ["f() != 2", false, false],
+      ],
+    },
+    string: {
+      declare: 'function f: integer | string { if askBoolean("f") { return "s" }\n return 1 }\n',
+      forms: [
+        ["f() is integer", true, false],
+        ["f() is string", false, true],
+        ["f() is not string", true, false],
+        // (where `f() != null` fails, the value tested is null: not a string)
+        ["f() != null", false, true],
+        ["f() != 2", false, false],
+      ],
+    },
+  } as const;
+  type Proof = (holds: boolean, fails: boolean) => boolean;
+  const USE = "repeat f() {}";
+  const COMPARE = "f() > 0";
+  const H: Proof = (holds) => holds;
+  const F: Proof = (_, fails) => fails;
+  const NEVER: Proof = () => false;
+  // (each position: its source around a condition `C` and an exit `E`, what proves it, and the exit kinds it takes)
+  const ANY = ["exit", "end", "return", "goto", "continue", "break"] as const;
+  const TOP = ["exit", "end", "goto"] as const;
+  const POSITIONS: readonly (readonly [
+    string,
+    (c: string, e: string) => string,
+    Proof,
+    readonly string[],
+  ])[] = [
+    ["then arm", (c) => `if ${c} { ${USE} }`, H, ["none"]],
+    ["else arm", (c) => `if ${c} { say "n" } else { ${USE} }`, F, ["none"]],
+    ["else-if arm", (c) => `if ${c} { say "n" } else if askBoolean("e") { ${USE} }`, F, ["none"]],
+    ["nested in then arm", (c) => `if ${c} { if askBoolean("e") { ${USE} } }`, H, ["none"]],
+    ["loop body", (c) => `while ${c} { ${USE}\nbreak }`, H, ["none"]],
+    ["after an and", (c) => `if ${c} and ${COMPARE} { say "y" }`, H, ["none"]],
+    ["after an or", (c) => `if ${c} or ${COMPARE} { say "y" }`, F, ["none"]],
+    ["before an and", (c) => `if ${COMPARE} and ${c} { say "y" }`, NEVER, ["none"]],
+    ["past a while", (c) => `while ${c} { say "w" }\n${USE}`, F, ["none"]],
+    [
+      "past a while a break leaves",
+      (c) => `while ${c} { if askBoolean("b") { break } }\n${USE}`,
+      NEVER,
+      ["none"],
+    ],
+    ["past a leaving then arm", (c, e) => `if ${c} { ${e} }\n${USE}`, F, ANY],
+    [
+      "past a leaving then arm with an else",
+      (c, e) => `if ${c} { ${e} } else { say "y" }\n${USE}`,
+      F,
+      ANY,
+    ],
+    ["past a leaving else arm", (c, e) => `if ${c} { say "y" } else { ${e} }\n${USE}`, H, ANY],
+    [
+      "past a guard in both arms",
+      (c, e) => `if askBoolean("s") { if ${c} { ${e} } } else { if ${c} { ${e} } }\n${USE}`,
+      F,
+      ANY,
+    ],
+    [
+      "past a guard in one arm",
+      (c, e) => `if askBoolean("s") { if ${c} { ${e} } }\n${USE}`,
+      NEVER,
+      ANY,
+    ],
+    [
+      "past a guard a label follows",
+      (c, e) => `if askBoolean("g") { goto back }\nif ${c} { ${e} }\nlabel back\n${USE}`,
+      NEVER,
+      TOP,
+    ],
+    ["past a loop holding a guard", (c, e) => `repeat 2 { if ${c} { ${e} } }\n${USE}`, NEVER, ANY],
+  ];
+  // (an exit kind's frame: `return` in a function, `continue` and `break` in a loop, `goto` to a label after the use)
+  const framed = (exit: string, body: string): string =>
+    exit === "return"
+      ? `function h {\n${body}\n}\nh()\n`
+      : exit === "continue" || exit === "break"
+        ? `repeat 2 {\n${body}\n}\n`
+        : exit === "goto"
+          ? `${body}\nlabel done\n`
+          : `${body}\n`;
+  const statement = (exit: string): string => (exit === "goto" ? "goto done" : exit);
+  const covered = new Set<string>();
+  const wrong: string[] = [];
+  for (const [kind, { declare, forms }] of Object.entries(KINDS))
+    for (const [test, holds, fails] of forms)
+      for (const negated of [false, true])
+        for (const [position, make, proof, exits] of POSITIONS)
+          for (const exit of exits) {
+            const condition = negated ? `not (${test})` : test;
+            const source = declare + framed(exit, make(condition, statement(exit))) + "exit\n";
+            const checked = negated ? proof(fails, holds) : proof(holds, fails);
+            const request = coreRequest([{ path: "main.tease", source }]);
+            assert.ok(request !== null, source);
+            const error = inBothOrders(() =>
+              analyseCore(request).diagnostics.some((d) => d.class === "compile-error"),
+            );
+            if (error === checked)
+              wrong.push(`${checked ? "warning" : "error"} expected: ${source}`);
+            covered.add([kind, test, negated, position, exit].join(" | "));
+          }
+  assert.deepEqual(wrong, []);
+  // (the coverage check: every kind, form, polarity, position and exit kind it takes, each once)
+  const expected = Object.values(KINDS).reduce(
+    (sum, { forms }) =>
+      sum + forms.length * 2 * POSITIONS.reduce((count, [, , , exits]) => count + exits.length, 0),
+    0,
+  );
+  assert.equal(covered.size, expected);
+});
+
+test("in a program holding an arm its entry narrowing leaves no kind no route promotes, and the use keeps the warning (AD-1, #1938)", () => {
+  // (Sol's F2 on #1937 and the lead's default (Codex r6, r7): the expected outcome from the rule's own table, never the
+  // engine's. A writer of a possible null; an `if` whose one arm overwrites the key; its test of `other` gives an arm no
+  // run enters where `other` holds no kind that arm's entry narrowing keeps, and then the program keeps the warning,
+  // whichever arm the route takes. Unknown forms count as runs)
+  const FEASIBILITY = {
+    // (`other` may be an object, null or text: every arm of every form is entered on some run)
+    feasible:
+      'let other = {k: 1}\nif askBoolean("o") { other = null }\nif askBoolean("p") { other = "s" }\n',
+    // (`other` is an object on every run)
+    "infeasible by entry narrowing": "let other = {k: 1}\n",
+    // (a comparison, not N1's form: the guard proves nothing, and the arm counts as a run, #1938's residual)
+    unknown: "let other = {k: 1}\n",
+  } as const;
+  // (each form: whether its truth, and its falsity, leaves an object no kind)
+  const FORMS: readonly (readonly [string, boolean, boolean])[] = [
+    ["other != null", false, true],
+    ["other == null", true, false],
+    ["other is string", true, false],
+  ];
+  const covered = new Set<string>();
+  const wrong: string[] = [];
+  for (const [feasibility, declare] of Object.entries(FEASIBILITY))
+    for (const [test, holds, fails] of FORMS)
+      for (const negated of [false, true])
+        for (const killIn of ["then", "else"] as const) {
+          const plain = feasibility === "unknown" ? "other.k == 1" : test;
+          const condition = negated ? `not (${plain})` : plain;
+          const kill = "n = 1";
+          const statement =
+            killIn === "then"
+              ? `if ${condition} { ${kill} }`
+              : `if ${condition} { say "y" } else { ${kill} }`;
+          const source =
+            'let c = askBoolean "c"\nlet n = 1\nif c { n = null }\n' +
+            declare +
+            statement +
+            "\nrepeat n {}\nexit\n";
+          // (an object leaves one of the arms no kind where either side of the form removes it: `not` swaps the sides)
+          const routeArmDead = feasibility === "infeasible by entry narrowing" && (holds || fails);
+          const request = coreRequest([{ path: "main.tease", source }]);
+          assert.ok(request !== null, source);
+          const [error, warning] = inBothOrders(() => {
+            const diagnostics = analyseCore(request).diagnostics;
+            return [
+              diagnostics.some((d) => d.class === "compile-error"),
+              diagnostics.some((d) => d.class === "warning-runtime-check"),
+            ] as const;
+          });
+          if (error === routeArmDead || (routeArmDead && !warning))
+            wrong.push(`${routeArmDead ? "warning" : "error"} expected: ${source}`);
+          covered.add([feasibility, test, negated, killIn].join(" | "));
+        }
+  // (the default's siblings, each the warning: a whole copy, nesting, `else if`, a loop's body, a second callable, a
+  // callable reached through another; and a program whose arms are all entered keeps the error)
+  const writer = 'let c = askBoolean "c"\nlet n = 1\nif c { n = null }\nlet other = {k: 1}\n';
+  const SIBLINGS: readonly (readonly [string, string, boolean])[] = [
+    [
+      "a whole copy",
+      "let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:8,nest:{n:8,keep:1},spare:1}\n" +
+        "let a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n",
+      false,
+    ],
+    [
+      "a nested if",
+      `${writer}if other != null { if other != null { n = 1 } }\nrepeat n {}\nexit\n`,
+      false,
+    ],
+    [
+      "an else if",
+      `${writer}if askBoolean("e") { n = 1 } else if other != null { n = 1 }\nrepeat n {}\nexit\n`,
+      false,
+    ],
+    [
+      "a loop's body",
+      `${writer}repeat 2 { if other != null { n = 1 } }\nrepeat n {}\nexit\n`,
+      false,
+    ],
+    [
+      "a second callable",
+      "function g {\n  let o = {k: 1}\n  let r = null\n  if o != null { r = 1 }\n  return r\n}\nlet n = g()\nrepeat n {}\nexit\n",
+      false,
+    ],
+    // (Codex r7: a callable whose result or default reaches the use through another callable)
+    [
+      "two callees",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nrepeat h() {}\nexit\n",
+      false,
+    ],
+    [
+      "two callees through a store",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nlet n=h()\nrepeat n {}\nexit\n",
+      false,
+    ],
+    [
+      "two callees through a fallback",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return null otherwise g() }\nrepeat h() {}\nexit\n",
+      false,
+    ],
+    [
+      "a field copied from a callee",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nlet a={n:g()}\nlet b=a\nrepeat b.n {}\nexit\n",
+      false,
+    ],
+    [
+      "a default through two callees",
+      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nfunction f(n=h()) { repeat n {} }\nf()\nf(1)\nexit\n",
+      false,
+    ],
+    [
+      "a second callable whose arms are entered",
+      'function g {\n  if askBoolean("g") { return null }\n  return 1\n}\nlet n = g()\nrepeat n {}\nexit\n',
+      true,
+    ],
+  ];
+  for (const [name, source, expected] of SIBLINGS) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const [error, warning] = inBothOrders(() => {
+      const diagnostics = analyseCore(request).diagnostics;
+      return [
+        diagnostics.some((d) => d.class === "compile-error"),
+        diagnostics.some((d) => d.class === "warning-runtime-check"),
+      ] as const;
+    });
+    if (error !== expected || (!expected && !warning))
+      wrong.push(`${expected ? "error" : "warning"} expected (${name}): ${source}`);
+    covered.add(`sibling | ${name}`);
+  }
+  // (the unavailable axis, Sol's final F1 on #1937 and the lead's ruling: a tested read whose answer is missing blocks
+  // promotion, at a demand allowance that stops its decision and at the natural one; external data's answer does not)
+  const realRoute = "let n = 1\nif hostValue is boolean { n = null }\n";
+  const UNAVAILABLE: readonly (readonly [string, string, number | null, boolean])[] = [
+    [
+      "a stopped tested read",
+      "function g { let o = {k: 1}\nlet r = null\nif o != null { r = 1 }\nreturn r }\nfunction h { return g() }\nrepeat h() {}\nexit\n",
+      64,
+      false,
+    ],
+    [
+      "a stopped tested read, natural allowance",
+      "function g { let o = {k: 1}\nlet r = null\nif o != null { r = 1 }\nreturn r }\nfunction h { return g() }\nrepeat h() {}\nexit\n",
+      null,
+      false,
+    ],
+    [
+      "a tested read admission has no items for (#2009)",
+      `${realRoute}let box = {first: {k: 1}}\nif box.first != null { say "y" }\nrepeat n {}\nexit\n`,
+      null,
+      false,
+    ],
+    [
+      "a tested read with an empty answer (Codex r9)",
+      `${realRoute}let xs = []\nlet q = xs[0].k\nif q != null { say "y" }\nrepeat n {}\nexit\n`,
+      null,
+      false,
+    ],
+    [
+      "a tested read of external data, the control",
+      `${realRoute}if hostValue != null { say "y" }\nrepeat n {}\nexit\n`,
+      null,
+      true,
+    ],
+  ];
+  for (const [name, source, allowance, expected] of UNAVAILABLE) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const [error, warning] = inBothOrders(() => {
+      const run = () => analyseCore(request).diagnostics;
+      const diagnostics = allowance === null ? run() : withTestDemandAllowance(allowance, run);
+      return [
+        diagnostics.some((d) => d.class === "compile-error"),
+        diagnostics.some((d) => d.class === "warning-runtime-check"),
+      ] as const;
+    });
+    if (error !== expected || (!expected && !warning))
+      wrong.push(`${expected ? "error" : "warning"} expected (${name}): ${source}`);
+    covered.add(`unavailable | ${name}`);
+  }
+  assert.deepEqual(wrong, []);
+  // (the coverage check: every feasibility, form, polarity and position, every sibling and every unavailable cell)
+  assert.equal(
+    covered.size,
+    Object.keys(FEASIBILITY).length * FORMS.length * 2 * 2 + SIBLINGS.length + UNAVAILABLE.length,
+  );
+});
+
+test("no production code selects the core: only tests reach the candidate entry", () => {
+  const root = process.cwd();
+  for (const directory of ["src", "playground", "player", "tools"])
+    for (const file of sourcesUnder(join(root, directory))) {
+      const relative = file.slice(root.length + 1);
+      const text = readFileSync(file, "utf8");
+      if (relative !== "src/compiler.ts")
+        assert.ok(!/compile(Source|Project)WithBackend\s*\(/.test(text), relative);
+      if (!relative.startsWith("src/type-inference/core/"))
+        assert.ok(!/core\/backend\.js|CORE_BACKEND/.test(text), relative);
+    }
+  // the root compilers pass no backend: their result is the production default's
+  const project = [{ path: "main.tease", source: "let n: integer = hostValue\nexit\n" }];
+  assert.deepEqual(sited(compileProject(project, OPTIONS)), []);
+  assert.deepEqual(sited(compileProjectWithBackend(project, OPTIONS, CORE_BACKEND)), [
+    "warning TSV041@17",
+  ]);
+});
