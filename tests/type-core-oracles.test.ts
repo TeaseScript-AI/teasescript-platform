@@ -38,6 +38,7 @@ import {
   withQuestionBound,
   withQuestionMemory,
 } from "./helpers/type-core-oracles.js";
+import { hostValues, stopRuns } from "./helpers/type-core-stop-oracle.js";
 import { DOUBLING } from "./helpers/type-core-work.js";
 
 /*
@@ -621,4 +622,69 @@ test("a decision record is read by its place and its exact path, never by the fi
       .map((d) => d.units),
     [7, 9],
   );
+});
+
+test("a stop's runs take host data made from the source's own property names: one pool per global it reads, the same each time (#2080)", () => {
+  const files = [
+    { path: "main.tease", source: 'let a = {box: {f: hostValue}}\nsay "${a.box.f}"\nexit\n' },
+  ];
+  const values = hostValues(files, GLOBALS);
+  assert.deepEqual(hostValues(files, GLOBALS), values);
+  // (a global the source never reads stays 1)
+  assert.ok(values.every((each) => each.hostOther === 1 && each.hostInit === 1));
+  const shown = new Set(values.map((each) => JSON.stringify(each.hostValue)));
+  for (const value of [1, "s", null, { kind: "list", items: [] }])
+    assert.ok(shown.has(JSON.stringify(value)), JSON.stringify(value));
+  assert.ok(
+    shown.has(
+      JSON.stringify({
+        kind: "object",
+        properties: [
+          { name: "box", value: { kind: "object", properties: [{ name: "f", value: "s" }] } },
+        ],
+      }),
+    ),
+    "an object two properties deep, by the source's names",
+  );
+  // (two globals read: a smaller pool each, its product capped)
+  const two = [{ path: "main.tease", source: "let a = hostValue\nlet b = hostOther\nexit\n" }];
+  assert.ok(hostValues(two, GLOBALS, 50).length <= 50);
+});
+
+test("a stop's runs find a stopped plan that runs past a runtime failure the natural plan raises, and none in a sound one (#2080)", () => {
+  const files = [
+    { path: "main.tease", source: 'let n: integer = 1\nn = hostValue\nsay "after"\nexit\n' },
+  ];
+  for (const mode of MODES) {
+    const run = <T>(make: () => T): T => inMode(mode, make);
+    // (an allowance that stops nothing: the stopped plan is the natural one, every run alike)
+    assert.equal(
+      stopRuns(files, ["hostValue"], run, 1_000_000).kind,
+      "closed",
+      JSON.stringify(mode),
+    );
+    // (the same plan without its store's type check: the natural plan fails where it runs on)
+    const found = stopRuns(
+      files,
+      ["hostValue"],
+      run,
+      1_000_000,
+      (plan) =>
+        // EVIDENCE: invariant: a plan is JSON-safe data, so its text read back is the same plan less its type checks.
+        JSON.parse(
+          JSON.stringify(plan, (key, value: unknown) => (key === "typeCheck" ? undefined : value)),
+        ) as typeof plan,
+    );
+    assert.equal(found.kind, "open", JSON.stringify(mode));
+    assert.equal(found.first?.natural?.failure?.code, "TSR058");
+    assert.equal(found.first?.stopped.failure, null);
+    assert.deepEqual(found.first?.stopped.said, ["after"]);
+  }
+});
+
+test("a stop's runs of a program the natural compile rejects run nothing where the stop rejects it too (#2080)", () => {
+  const files = [{ path: "main.tease", source: 'let n: integer = 1\nn = "x"\nexit\n' }];
+  const found = stopRuns(files, ["hostValue"], (make) => make(), 16);
+  assert.equal(found.kind, "no plan");
+  assert.equal(found.runs, 0);
 });
