@@ -411,7 +411,7 @@ function heldList(
     step = { kind: "key", key };
   } else if (isList(object)) {
     const index = evaluator.evaluate(target.index);
-    if (!listHasPosition(object.items.length, index)) return null;
+    if (typeof index !== "number" || !listHasPosition(object.items.length, index)) return null;
     held = object.items[index];
     step = { kind: "index", index };
   } else return null;
