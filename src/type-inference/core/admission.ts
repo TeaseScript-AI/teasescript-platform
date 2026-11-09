@@ -578,7 +578,7 @@ export class Admission {
 
   /** `run` as a read (`Read`): run now outside a solver run, yielded inside an inherited proof (#1072 A2). */
   public *runRead<T>(work: () => Work<T>): Reads<T> {
-    this.certificateFacts?.unresolved();
+    this.certificateFacts?.unresolved("inherited read");
     return yield* read(() => this.run(work()), work);
   }
 

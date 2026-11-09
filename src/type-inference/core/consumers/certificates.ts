@@ -27,7 +27,7 @@ import { candidateVisitor } from "./stores.js";
 export interface CertificateFacts {
   read(value: PlaceId, node: FlowNode | null, rest: Rest): readonly Item[];
   run<T>(work: Work<T>): T;
-  unresolved(): never;
+  unresolved(reason: UnresolvedReason): never;
 }
 
 export type CertificateMode = "off" | "capped" | "reference";
@@ -54,6 +54,7 @@ export interface CertificateLedger extends CertificateOptions {
     readonly uid: number;
     readonly units: number;
     readonly outcome: CertificateOutcome;
+    readonly reason?: UnresolvedReason;
   }[];
 }
 export interface StopCertificate {
@@ -67,7 +68,31 @@ export interface StopCertificate {
   readonly required?: Extract<ContractResult, { state: "complete" }>;
   readonly extent: "complete";
 }
-class Unresolved extends Error {}
+/** Why a store's certificate is Unresolved: the shape the scratch derivation refuses (#2080's reach table). */
+export type UnresolvedReason =
+  | "prior rejection"
+  | "nested part"
+  | "transfer or other store form"
+  | "host destination"
+  | "stopped destination key"
+  | "projection"
+  | "narrowed read"
+  | "host the program writes"
+  | "copy of an inferred place"
+  | "copy of a written non-scalar place"
+  | "compound value"
+  | "solver demand"
+  | "contract of another place"
+  | "published domain"
+  | "non-scalar contract"
+  | "nested contract"
+  | "inherited proof"
+  | "inherited read";
+class Unresolved extends Error {
+  constructor(readonly reason: UnresolvedReason) {
+    super(reason);
+  }
+}
 class Rejected extends Error {}
 
 /** Read once per analysis; `none` removes that term of the aggregate bound. */
@@ -93,18 +118,18 @@ class ImmediateFacts implements CertificateFacts {
     readonly pass: CorePass,
     readonly place: PlaceId,
   ) {}
-  unresolved(): never {
-    throw new Unresolved();
+  unresolved(reason: UnresolvedReason): never {
+    throw new Unresolved(reason);
   }
   read(value: PlaceId, node: FlowNode | null, rest: Rest): readonly Item[] {
     const { program, contract, definitions } = this.pass;
     const work = program.work;
     work.charge("stopCertificates");
-    if (rest.length !== 0) return this.unresolved();
+    if (rest.length !== 0) return this.unresolved("projection");
     const binding = program.occurrenceOf.get(value);
     if (binding !== undefined) {
       if (node !== null && this.pass.guards.narrowed(keyOf(binding, []), node))
-        return this.unresolved();
+        return this.unresolved("narrowed read");
       if (program.isHost(binding)) {
         // A host that this program writes needs value/order inference, not its ingress alone.
         if (
@@ -113,11 +138,11 @@ class ImmediateFacts implements CertificateFacts {
             return d.place === binding;
           })
         )
-          return this.unresolved();
+          return this.unresolved("host the program writes");
         return contract.entered(value, hostAt([]));
       }
       const term = writtenOf(program.place(binding).kind);
-      if (term === null) return this.unresolved();
+      if (term === null) return this.unresolved("copy of an inferred place");
       const tags = scalarTags(work, term);
       work.charge("stopCertificates", tags.length + 1);
       return tags.map((tag) => makeItem(tag, null, { cert: "pos", ...spelledBy(tags) }));
@@ -130,9 +155,9 @@ class ImmediateFacts implements CertificateFacts {
       has?.length !== 1 ||
       has[0]!.type.kind !== "atom"
     )
-      return this.unresolved();
+      return this.unresolved("compound value");
     const tag = has[0]!.type.name;
-    if (!SCALAR.has(tag) && tag !== "null") return this.unresolved();
+    if (!SCALAR.has(tag) && tag !== "null") return this.unresolved("compound value");
     work.charge("stopCertificates");
     return [makeItem(tag, null, { cert: "def" })];
   }
@@ -144,10 +169,10 @@ class ImmediateFacts implements CertificateFacts {
         ledger.charge("stopCertificates");
         const demand = step.value;
         if (!("key" in demand) || demand.proves === true || !demand.key.startsWith("c|"))
-          return this.unresolved();
+          return this.unresolved("solver demand");
         const key = demand.key.slice(2);
         if (keyPlace(key) !== this.place || keyPath(key).length !== 0 || this.making)
-          return this.unresolved();
+          return this.unresolved("contract of another place");
         let items = this.contracts.get(key);
         if (items === undefined) {
           this.making = true;
@@ -182,7 +207,7 @@ function scalarTags(work: WorkLedger, term: TypeTerm): ItemTag[] {
         pending.push(member);
       }
     } else if (next.kind !== "atom" || (!SCALAR.has(next.name) && next.name !== "null"))
-      throw new Unresolved();
+      throw new Unresolved("copy of a written non-scalar place");
     else tags.add(next.name);
   }
   return [...tags];
@@ -236,6 +261,7 @@ export function deriveCertificates(
         : "unresolved-total"
       : "unresolved-semantic";
     let required: StopCertificate["required"];
+    let reason: UnresolvedReason | undefined;
     if (!cut) {
       try {
         const result = work.certificateWork(Math.max(0, cap - (before - start)), () => {
@@ -252,15 +278,13 @@ export function deriveCertificates(
             byPlace = index;
           }
           // The scratch slice deliberately refuses non-root, transfer and compound cases.
-          if (
-            rejected.size !== 0 ||
-            d.kind !== "whole" ||
-            d.path.length !== 0 ||
-            (d.how !== "initializer" && d.how !== "assignment") ||
-            program.isHost(d.place) ||
-            walk.pass.contract.keyStopped(keyOf(d.place, []))
-          )
-            throw new Unresolved();
+          if (rejected.size !== 0) throw new Unresolved("prior rejection");
+          if (d.kind !== "whole" || d.path.length !== 0) throw new Unresolved("nested part");
+          if (d.how !== "initializer" && d.how !== "assignment")
+            throw new Unresolved("transfer or other store form");
+          if (program.isHost(d.place)) throw new Unresolved("host destination");
+          if (walk.pass.contract.keyStopped(keyOf(d.place, [])))
+            throw new Unresolved("stopped destination key");
           if (!walk.pass.lists.live(d)) return { outcome: "nocheck" as const };
           work.charge("stopCertificates", program.constraints.length);
           // Discard all admission/contract state with this store; share only source indexes and facts.
@@ -294,14 +318,18 @@ export function deriveCertificates(
               candidate.value === undefined ||
               (candidate.how !== "initializer" && candidate.how !== "assignment")
             )
-              throw new Unresolved();
+              throw new Unresolved(
+                candidate.kind !== "whole" || candidate.path.length !== 0
+                  ? "nested part"
+                  : "transfer or other store form",
+              );
             facts.read(candidate.value, candidate.node, []);
           }
           const term = certificateRequirement(local.admission, d.place, []);
           if (term !== null) scalarTags(work, term);
           const decision = local.admission.decide({ root: d.place, path: [] });
           if (decision === null) return { outcome: "nocheck" as const };
-          if (decision.published) throw new Unresolved();
+          if (decision.published) throw new Unresolved("published domain");
           {
             let candidate = false;
             for (const entry of decision.candidates) {
@@ -337,20 +365,20 @@ export function deriveCertificates(
           const tags = local.admission.admitted(d.place, []);
           for (const tag of tags) {
             work.charge("stopCertificates");
-            if (!SCALAR.has(tag) && tag !== "null") throw new Unresolved();
+            if (!SCALAR.has(tag) && tag !== "null") throw new Unresolved("non-scalar contract");
           }
           work.charge("stopCertificates", 8 + tags.length * 4);
           const descriptors = new ContractDescriptors<null>(
             {
               level: () => {
-                throw new Unresolved();
+                throw new Unresolved("nested contract");
               },
               properties: () => {
-                throw new Unresolved();
+                throw new Unresolved("nested contract");
               },
             },
             () => {
-              throw new Unresolved();
+              throw new Unresolved("nested contract");
             },
             epoch,
             true,
@@ -360,7 +388,7 @@ export function deriveCertificates(
             d.place,
             [],
           );
-          if (resultContract.state !== "complete") throw new Unresolved();
+          if (resultContract.state !== "complete") throw new Unresolved("nested contract");
           // Publication is staged until every charged step of this store succeeds.
           work.charge("stopCertificates", warnings.length + 4);
           return { outcome: "required" as const, contract: resultContract, warnings };
@@ -386,7 +414,8 @@ export function deriveCertificates(
           cut = true;
           outcome = options.mode === "reference" ? "ceiling" : "unresolved-total";
         } else if (error instanceof Rejected) outcome = "rejected";
-        else if (!(error instanceof Unresolved)) throw error;
+        else if (error instanceof Unresolved) reason = error.reason;
+        else throw error;
       }
     }
     walk.certificates.push({
@@ -407,6 +436,7 @@ export function deriveCertificates(
       uid: d.uid,
       units: work.certificateUnits - before,
       outcome,
+      ...(reason === undefined ? {} : { reason }),
     });
   }
 }
