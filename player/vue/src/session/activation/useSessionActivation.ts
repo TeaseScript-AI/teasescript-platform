@@ -154,10 +154,15 @@ export function useSessionActivation({
    */
   function reportActivationError(origin: Origin, error: unknown) {
     if (!activationRun.admits(origin)) return;
-    const name = error instanceof Error ? error.name : "Error";
     console.error("[player] host error", error);
     const restoring = continuing;
     const starting = sessionBeginning;
+    // A stop still waiting for the same Start keeps its error: the first error is the one the stop shows and commits.
+    const waiting =
+      lateStop !== null && lateStop.starting === starting && lateStop.stop === activationToken
+        ? lateStop
+        : null;
+    const name = waiting?.name ?? (error instanceof Error ? error.name : "Error");
     continuing = null;
     activationToken += 1;
     beginning.value = false;
@@ -175,9 +180,16 @@ export function useSessionActivation({
       commitIncident(origin, name, stop, activationRun);
       return;
     }
+    // The late Start's session has one cleanup owner: the stop that waits for it last.
+    lateStop = { starting, stop, name };
     stopLateStart(starting, name, stop, origin, {
       ...stopPage,
       target: (begun) => stopTarget(sessionOfBegun(begun), origin, activationRun),
+      claimedLater: () =>
+        lateStop !== null &&
+        lateStop.starting === starting &&
+        lateStop.stop !== stop &&
+        lateStop.stop === activationToken,
       haltObsolete: (begun) => {
         const late = sessionOfBegun(begun);
         void bridgeOf(late).halt(late);
@@ -237,6 +249,12 @@ export function useSessionActivation({
   let begunInFlight: Promise<void> | null = null;
   // The session that Start or Continue is beginning, once the host names it; an error stop stops at it.
   let sessionBeginning: Promise<PlayerSession | SessionTarget> | null = null;
+  /** The last error stop that waits for a Start still beginning (`stopLateStart`), with its stop token and error. */
+  let lateStop: {
+    readonly starting: Promise<PlayerSession | SessionTarget>;
+    readonly stop: number;
+    readonly name: string;
+  } | null = null;
   /**
    * A new activation, preparation or end replaces the one under way: a Continue still beginning is halted in the host,
    * so its queued requests, such as starting the recording of an obsolete session, are refused without effect.

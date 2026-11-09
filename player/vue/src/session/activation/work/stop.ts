@@ -58,9 +58,9 @@ export function stopAt(
 
 /**
  * The stop of a Start still beginning when its Player error came: at its session once the host names it, or the
- * run's incident when it fails, while its activation lives and the stop is still current. A late session the stop no
- * longer claims (its activation retired, or a later activation, preparation or end replaced the stop) is only stopped,
- * with no incident and no capture.
+ * run's incident when it fails, while its activation lives and the stop is still current. A late session no stop
+ * claims (its activation retired, or a later activation, preparation or end replaced the stop) is only stopped, with
+ * no incident and no capture; a later error stop of the same Start claims it, with the first error.
  */
 export function stopLateStart<T>(
   starting: Promise<T>,
@@ -70,7 +70,9 @@ export function stopLateStart<T>(
   page: StopPage & {
     /** A target of the late session for `origin`. */
     readonly target: (begun: T) => StopTarget;
-    /** Plain-halts a late session the stop no longer claims: resource-bound cleanup, no incident or capture. */
+    /** Whether a later stop, still current, waits for the same Start: it claims the late session then. */
+    readonly claimedLater: () => boolean;
+    /** Plain-halts a late session no stop claims: resource-bound cleanup, no incident or capture. */
     readonly haltObsolete: (begun: T) => void;
     /** Shows the error `name` without a session (the first error stays), and commits the run's incident. */
     readonly incident: () => void;
@@ -79,8 +81,9 @@ export function stopLateStart<T>(
   page.haltUntil(stop);
   void starting.then(
     (begun) => {
-      // A late session the stop no longer claims is only stopped.
-      if (!stopAt(page.target(begun), name, stop, origin, page)) page.haltObsolete(begun);
+      // A late session no stop claims is only stopped; one a later stop claims is that stop's to stop.
+      if (!stopAt(page.target(begun), name, stop, origin, page) && !page.claimedLater())
+        page.haltObsolete(begun);
     },
     () => {
       page.endHalting(stop);
