@@ -1162,14 +1162,15 @@ test("an indexed run's warm query charges its counted steps alone, a few without
 
 /**
  * #1397: k/8 choices of k host reads each, read in k lists, each list the choices in a shuffled order of its own
- * (#1359's B1 family, `leaf-permuted` in `tests/families/joins/1359-peer-set-orders.mjs`). Each list's item unites its
+ * (#1359's B1 family, `leaf-permuted` in
+ * `tests/families/joins/peer-orders-and-leaves/peer-set-orders-and-subset-windows.mjs`). Each list's item unites its
  * elements in its own order, a node of its own, and C1's site walked each such node's leaves though no list's store
  * lands any or brings an ingress at a siting: k orders × k²/8 leaves. With the sharing off the total and each counter
  * grow with the program in either order; with it on only `checks` is gated, since the sharing's union nodes and the
  * contract's class parts grow faster than the program in the fixed order too (#1573). At 20 → 40, the smallest pair
- * that shows the walk (18 → 36 does not), the walk grew `checks` ×2.97 per doubling in every mode. The series to
- * k = 128, the four modes, the subsets and the other orders are the step's evidence, outside CI; a store that reads
- * the leaves it walks is #1579.
+ * that shows the walk (18 → 36 does not), the walk grew `checks` ×2.97 per doubling in every mode. The series to k =
+ * 128, the four modes, the subsets and the other orders are the step's evidence, outside CI; a store that reads the
+ * leaves it walks is #1579.
  */
 test("lists of one set of choices in many orders site their host data without walking each order (#1397)", () => {
   const shuffled = (m: number, seed: number): number[] => {
