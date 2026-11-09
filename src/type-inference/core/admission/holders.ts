@@ -14,9 +14,19 @@ import { stopsOf } from "./walk.js";
 
 // #2065 (#2059, #1585): a prefix's contributions by the first step of a decided path they can hold.
 
-/** A list's positions by the first step their contribution can hold there, and the positions of those unproved. */
+/**
+ * A part of what a contribution can hold below its prefix: a closed literal's names (one set per literal, shared by
+ * every contribution it reaches) or one first step.
+ */
+type Part = ReadonlySet<string> | string;
+
+/**
+ * A list's positions by the first step their contribution can hold there, and the positions of those unproved: per
+ * step, the positions of each part holding it, so a literal's names are indexed once however many contributions it
+ * reaches (each list in order; a contribution two of whose parts hold a step is in two).
+ */
 interface StepPositions {
-  readonly steps: ReadonlyMap<string, readonly number[]>;
+  readonly steps: ReadonlyMap<string, readonly (readonly number[])[]>;
   readonly any: readonly number[];
 }
 
@@ -24,24 +34,29 @@ interface StepPositions {
  * #2065: a prefix's contributions to the decisions of paths below it, once per admission's settled snapshot of them
  * (`ReceivingDomain.holders`, cleared by its `reset()`): its whole stores as A2's scan lists them (`wholeOf`) and its
  * settled stores as A5's offending scan reads them (`PrefixStores.list`), each indexed by the first steps it can hold
- * (`supportOf`), built only where the reads it saves pay for it (`holdersOf`).
+ * (`wholePositions`, `entrySupport`), built only where the reads it saves pay for it (`holdersOf`).
  */
 export interface PrefixHolders {
   list: readonly Definition[] | null;
   stores: PrefixStores | null;
   /** The reads the walks made that held nothing at their paths, until the holding count. */
   wasted: number;
-  /** Per name, the settled stores that may hold it, and the unproved ones; `null` before the holding count. */
+  /** Per settled store, its literal's names (`entrySupport`, `null` unproved); `null` before the holding count. */
+  supports: readonly (ReadonlySet<string> | null)[] | null;
+  /** Per name, the settled stores that may hold it, and the unproved ones. */
   holding: Map<string, number> | null;
   unproved: number;
+  /** The names of the settled stores' distinct literals, and the stores each store brought (`PrefixEntry.ds`). */
+  names: number;
+  brought: number;
   /** Twice the reads the walks since the holding count would have saved, against twice the index's construction. */
   saved: number;
   cost: number;
-  /** The settled stores' positions, the index made; and the whole stores', made once their list is known too. */
+  /** Whether the whole stores' construction is in `cost`, once their list is known. */
+  costsWhole: boolean;
+  /** The settled stores' positions and the whole stores', each made once paid for. */
   entries: StepPositions | null;
   whole: StepPositions | null;
-  /** Per settled store, the names it holds (`entrySupport`), kept for the whole stores' positions. */
-  supports: readonly (ReadonlySet<string> | null)[] | null;
 }
 
 /** A path's first step where the index can select by it: an ordinary property, its name holding no `.` (`null` else). */
@@ -56,10 +71,10 @@ function firstStep(rest: Rest): string | null {
  * step is no ordinary property, or a prefix of fewer than three contributions (a walk of two saves at most one read).
  * A state made for another snapshot of the whole stores or the settled stores is made again. The pay rule, as #1456's
  * builds the property index (#1948's form): once the walks' reads that held nothing at their paths reach twice the
- * contributions, each name's holders among the settled stores are counted (`entrySupport`, each charged); from then on
- * each walk adds the reads its path's first step would have saved, the stores without it: half of them for A2's scan,
- * which stops at its decider (in source order, at about half), all for A5's offending scan, which reads every store;
- * the index is made (`indexEntries`) once those reach its construction, the contributions and their names.
+ * contributions, each name's holders among the settled stores are counted (`countHolding`); from then on each walk
+ * adds the reads its path's first step would have saved, the stores without it: half of them for A2's scan, which
+ * stops at its decider (in source order, at about half), all for A5's offending scan, which reads every store. Each
+ * index is made once those reach the construction's charges (`entriesCost`, `wholeCost`).
  */
 function holdersOf(
   admission: Admission,
@@ -89,54 +104,92 @@ function holdersOf(
         list: null,
         stores: null,
         wasted: 0,
+        supports: null,
         holding: null,
         unproved: 0,
+        names: 0,
+        brought: 0,
         saved: 0,
         cost: 0,
+        costsWhole: false,
         entries: null,
         whole: null,
-        supports: null,
       }),
     );
   }
   state.list ??= list;
   state.stores ??= stores;
-  if (state.entries !== null) {
-    if (state.whole === null && state.list !== null) wholePositions(admission, state);
-    return state;
-  }
-  const count = (state.list?.length ?? 0) + (state.stores?.list.length ?? 0);
-  if (state.holding === null) {
+  if (state.entries !== null && (state.list === null || state.whole !== null)) return state;
+  if (state.supports === null) {
+    const count = (state.list?.length ?? 0) + (state.stores?.list.length ?? 0);
     if (state.wasted < 2 * count) return state;
-    const settled = (state.stores ??= contract.prefixStores(prefix));
-    const holding = new Map<string, number>();
-    let names = 0;
-    for (const entry of settled.list) {
-      work.charge("indexSteps");
-      const own = entrySupport(admission, entry);
-      if (own === null) {
-        state.unproved += 1;
-        continue;
-      }
-      for (const name of own) {
-        work.charge("indexSteps");
-        names += 1;
-        const known = holding.get(name);
-        if (known === undefined) keep(admission.work, 1);
-        holding.set(name, (known ?? 0) + 1);
-      }
-    }
-    state.holding = holding;
-    state.cost = 2 * ((state.list?.length ?? settled.list.length) + settled.list.length + names);
+    countHolding(admission, (state.stores ??= contract.prefixStores(prefix)), state);
+  }
+  if (state.list !== null && !state.costsWhole) {
+    state.costsWhole = true;
+    state.cost += 2 * wholeCost(admission, state);
   }
   const entries = state.stores!.list.length;
-  const lacking = entries - (state.holding.get(step) ?? 0) - state.unproved;
+  const lacking = entries - (state.holding!.get(step) ?? 0) - state.unproved;
   state.saved += list !== null ? lacking : 2 * lacking;
   if (state.saved >= state.cost) {
-    indexEntries(admission, prefix, state);
-    if (state.list !== null) wholePositions(admission, state);
+    state.entries ??= positions(
+      admission,
+      state.supports!.map((own) => (own === null ? null : [own])),
+    );
+    if (state.list !== null) state.whole = wholePositions(admission, state);
   }
   return state;
+}
+
+/**
+ * The holding count: per settled store, its literal's names (`entrySupport`), and per name of each distinct literal,
+ * the stores holding it (a literal several stores share counted once); then the settled stores' index's cost.
+ */
+function countHolding(admission: Admission, stores: PrefixStores, state: PrefixHolders): void {
+  const work = admission.pass.program.work;
+  const shared = new Map<ReadonlySet<string>, number>();
+  state.supports = stores.list.map((entry) => {
+    work.charge("indexSteps");
+    state.brought += entry.ds.size;
+    const own = entrySupport(admission, entry);
+    if (own === null) state.unproved += 1;
+    else shared.set(own, (shared.get(own) ?? 0) + 1);
+    return own;
+  });
+  keep(admission.work, stores.list.length);
+  const holding = new Map<string, number>();
+  for (const [names, count] of shared)
+    for (const name of names) {
+      work.charge("indexSteps");
+      state.names += 1;
+      const known = holding.get(name);
+      if (known === undefined) keep(admission.work, 1);
+      holding.set(name, (known ?? 0) + count);
+    }
+  state.holding = holding;
+  state.cost = 2 * entriesCost(stores.list.length, state.names);
+}
+
+/** The settled stores' index's charges (`positions`): each store, its literal's part, each distinct literal's name. */
+function entriesCost(entries: number, names: number): number {
+  return 2 * entries + names;
+}
+
+/**
+ * The whole stores' index's charges (`wholePositions`, `positions`), each charged once its list is known: the stores
+ * each settled store brought, read once to sort them and once by their stores, and once more as their classes' parts;
+ * each class, three times; each member; and each name of the distinct literals. Beyond this the construction reads each
+ * member's stops (`stopsOf`, once an admission, which A2's own walk shares) and indexes the steps they add.
+ */
+function wholeCost(admission: Admission, state: PrefixHolders): number {
+  const work = admission.pass.program.work;
+  let members = 0;
+  for (const representative of state.list!) {
+    work.charge("indexSteps");
+    members += admission.members.get(representative)?.length ?? 0;
+  }
+  return 3 * state.brought + 3 * state.list!.length + members + state.names;
 }
 
 /** Whether a contribution's items at a path hold nothing there: none, or F11's `missing` alone. */
@@ -171,72 +224,64 @@ export function entriesHolding(
   return selected(admission, state.entries, firstStep(rest)!, stores.list);
 }
 
-/** A list's items at the step's positions and the unproved ones, merged in the list's order, each charged. */
+/**
+ * A list's items at the positions of the parts holding the step and the unproved ones, each charged, in the list's
+ * order and each once (a sort where more than one part holds it: a contribution may be under two).
+ */
 function selected<T>(
   admission: Admission,
   index: StepPositions,
   step: string,
   list: readonly T[],
 ): T[] {
-  const along = index.steps.get(step) ?? [];
-  const any = index.any;
-  admission.pass.program.work.charge("checks", along.length + any.length);
-  keep(admission.work, along.length + any.length);
-  const out: T[] = [];
-  for (let i = 0, j = 0; i < along.length || j < any.length;)
-    out.push(
-      list[j >= any.length || (i < along.length && along[i]! < any[j]!) ? along[i++]! : any[j++]!]!,
-    );
-  return out;
+  const parts = index.steps.get(step) ?? [];
+  const all = index.any.length === 0 ? parts : [...parts, index.any];
+  let size = 0;
+  for (const at of all) size += at.length;
+  // (the merged list is the walk's own, kept by nothing)
+  admission.pass.program.work.charge("checks", size);
+  if (all.length === 1) return all[0]!.map((at) => list[at]!);
+  const merged = all.flat().sort((a, b) => a - b);
+  return merged.filter((at, i) => i === 0 || merged[i - 1] !== at).map((at) => list[at]!);
 }
 
 /**
- * The index of a prefix's settled stores (`PrefixHolders`), each charged as it is made: per store, the names its value
- * holds (`entrySupport`), each a position under each name.
+ * The index of a prefix's whole stores (`wholeOf`'s classes), each charged: each store's parts from the settled stores
+ * it brought (read once, by `PrefixEntry.ds`), then per class, its members' parts (`supportOf`), each class under each.
  */
-function indexEntries(admission: Admission, prefix: Key, state: PrefixHolders): void {
-  const work = admission.pass.program.work;
-  const stores = (state.stores ??= admission.pass.contract.prefixStores(prefix));
-  const supports = stores.list.map((entry) => {
-    work.charge("indexSteps");
-    return entrySupport(admission, entry);
-  });
-  state.supports = supports;
-  state.entries = positions(admission, supports);
-}
-
-/**
- * The index of a prefix's whole stores (`wholeOf`'s classes), once the settled stores' is made and the list is known,
- * each charged: per class, its members' names (`supportOf`), each a position under each name.
- */
-function wholePositions(admission: Admission, state: PrefixHolders): void {
+function wholePositions(admission: Admission, state: PrefixHolders): StepPositions {
   const work = admission.pass.program.work;
   const stores = state.stores!;
-  // (each whole store's settled stores, by the stores that brought them)
-  const brought = new Map<Definition, number[]>();
-  for (const [at, entry] of stores.list.entries())
+  // (each whole store's literals from the settled stores it brought; `null` where one is unproved)
+  const brought = new Map<Definition, Set<Part> | null>();
+  for (const [at, entry] of stores.list.entries()) {
+    const own = state.supports![at]!;
     for (const d of entry.ds) {
       work.charge("indexSteps");
       if (d === null) continue;
-      const list = brought.get(d);
-      if (list === undefined) {
+      const parts = brought.get(d);
+      if (parts === null) continue;
+      if (own === null) brought.set(d, null);
+      else if (parts === undefined) {
         keep(admission.work, 2);
-        brought.set(d, [at]);
-      } else list.push(at);
+        brought.set(d, new Set([own]));
+      } else if (!parts.has(own)) {
+        keep(admission.work, 1);
+        parts.add(own);
+      }
     }
+  }
   // (the stores that bring a layer of a source's own stores below its root, which adds what no entry shows)
   const layered = new Set<Definition | null>(stores.inheritedBy);
   for (const { defs } of stores.also) for (const d of defs) layered.add(d);
-  state.whole = positions(
+  return positions(
     admission,
     state.list!.map((representative) => {
-      const names = new Set<string>();
-      for (const d of [representative, ...(admission.members.get(representative) ?? [])]) {
-        const own = supportOf(admission, d, brought, state.supports!, layered);
-        if (own === null) return null;
-        for (const name of own) names.add(name);
-      }
-      return names;
+      work.charge("indexSteps");
+      const parts = new Set<Part>();
+      for (const d of [representative, ...(admission.members.get(representative) ?? [])])
+        if (!supportOf(admission, d, brought, layered, parts)) return null;
+      return parts;
     }),
   );
 }
@@ -253,65 +298,56 @@ function entrySupport(admission: Admission, entry: PrefixEntry): ReadonlySet<str
 }
 
 /**
- * #2065: the first steps a whole store can hold below its prefix, both parts proved: its value's, from the settled
- * stores it brought, each a closed object literal (`entrySupport`), with no layer of its source's own stores below
- * their root; and its written part's, from its own stops (`stopsOf`): a copy of a written binding or a value no
- * literal holds stands at its path's first step, and at the root it may answer every path. `null` (every step) for
- * any other store: not an initializer or an assignment, bringing no settled store or an unproved one, or with a
- * written or unproved value at its root.
+ * #2065: adds to `parts` what a whole store can hold below its prefix, both parts proved: its value's, the literals of
+ * the settled stores it brought, each closed (`entrySupport`), with no layer of its source's own stores below their
+ * root; and its written part's, from its own stops (`stopsOf`): a copy of a written binding or a value no literal holds
+ * stands at its path's first step, and at the root it may answer every path. `false` (every step) for any other store:
+ * not an initializer or an assignment, bringing no settled store or an unproved one, or with a written or unproved
+ * value at its root.
  */
 function supportOf(
   admission: Admission,
   d: Definition,
-  brought: ReadonlyMap<Definition, readonly number[]>,
-  entries: readonly (ReadonlySet<string> | null)[],
+  brought: ReadonlyMap<Definition, ReadonlySet<Part> | null>,
   layered: ReadonlySet<Definition | null>,
-): ReadonlySet<string> | null {
+  parts: Set<Part>,
+): boolean {
   const work = admission.pass.program.work;
   work.charge("indexSteps");
-  if (d.kind !== "whole" || (d.how !== "initializer" && d.how !== "assignment")) return null;
-  if (d.value === undefined || layered.has(d)) return null;
-  const at = brought.get(d);
-  if (at === undefined) return null;
-  const names = new Set<string>();
-  for (const position of at) {
-    const own = entries[position]!;
-    if (own === null) return null;
-    for (const name of own) {
-      work.charge("indexSteps");
-      names.add(name);
-    }
+  if (d.kind !== "whole" || (d.how !== "initializer" && d.how !== "assignment")) return false;
+  if (d.value === undefined || layered.has(d)) return false;
+  const own = brought.get(d);
+  if (own == null) return false;
+  for (const part of own) {
+    work.charge("indexSteps");
+    parts.add(part);
   }
   const stops = stopsOf(admission, d.value, d.node);
-  for (const [text, list] of stops.written) {
-    work.charge("indexSteps");
-    if (text !== "") names.add(text.split(".", 1)[0]!);
-    else
-      for (const stop of list) {
-        const source = copySupport(admission, stop, true);
-        if (source === null) return null;
-        for (const name of source) names.add(name);
-      }
-  }
-  for (const [text, list] of stops.values) {
-    work.charge("indexSteps");
-    if (text !== "") names.add(text.split(".", 1)[0]!);
-    else
-      for (const stop of list) {
-        const source = copySupport(admission, stop, false);
-        if (source === null) return null;
-        for (const name of source) names.add(name);
-      }
-  }
-  return names;
+  for (const [inherits, map] of [
+    [true, stops.written],
+    [false, stops.values],
+  ] as const)
+    for (const [text, list] of map) {
+      work.charge("indexSteps");
+      if (text !== "") parts.add(text.split(".", 1)[0]!);
+      else
+        for (const stop of list) {
+          const source = copySupport(admission, stop, inherits);
+          if (source === null) return false;
+          parts.add(source);
+        }
+    }
+  return true;
 }
 
 /**
  * The first steps a stop at a value's root can bring an answer to, where it is a whole copy of an unwritten place,
- * through no operation, the place's one settled store a closed object literal (`entrySupport`) with no layer below its
- * root: that literal's names. `inherits`: the copy's inherited written type (A4, `inheritedInto`), which the place's
- * stores decide, its literal's written parts standing below its own properties; else the copy's value (a read of the
- * place, `Contract.copiedKey`), the place's contract, its literal's. `null` for any other stop, unproved.
+ * through no operation, the place's one settled store a closed object literal (`entrySupport`) that only its own stores
+ * of that literal brought, with no layer below its root: that literal's names. These are `sourceSteps`' exclusions (no
+ * copy into the place, no cycle or forwarding, no deeper store). `inherits`: the copy's inherited written type (A4,
+ * `inheritedInto`), which the place's stores decide, its literal's written parts standing below its own properties;
+ * else the copy's value (a read of the place, `Contract.copiedKey`), the place's contract, its literal's. `null` for any
+ * other stop, unproved.
  */
 function copySupport(
   admission: Admission,
@@ -334,32 +370,52 @@ function copySupport(
   if (writtenOf(program.place(place).kind) !== null) return null;
   const source = contract.prefixStores(keyOf(place, []));
   if (source.list.length !== 1 || source.subs !== null || source.also.length > 0) return null;
-  return entrySupport(admission, source.list[0]!);
+  const entry = source.list[0]!;
+  // (no copy into the place, so no cycle or forwarding through it: each store that brought its literal stores it)
+  for (const d of entry.ds) {
+    program.work.charge("indexSteps");
+    if (d === null || d.value !== entry.value) return null;
+  }
+  return entrySupport(admission, entry);
 }
 
-/** A list's positions by the names each supports (`null`: every step), each posting charged. */
+/**
+ * A list's positions by the parts each holds (`null`: every step), then each part's positions under each step it
+ * holds, every position, posting and name charged and kept.
+ */
 function positions(
   admission: Admission,
-  supports: readonly (ReadonlySet<string> | null)[],
+  supports: readonly (Iterable<Part> | null)[],
 ): StepPositions {
   const work = admission.pass.program.work;
-  const steps = new Map<string, number[]>();
+  const byPart = new Map<Part, number[]>();
   const any: number[] = [];
-  for (const [at, names] of supports.entries()) {
+  let kept = 0;
+  for (const [at, parts] of supports.entries()) {
     work.charge("indexSteps");
-    if (names === null) {
+    if (parts === null) {
       any.push(at);
       continue;
     }
-    for (const name of names) {
+    for (const part of parts) {
       work.charge("indexSteps");
-      const list = steps.get(name);
-      if (list === undefined) {
-        keepText(admission.work, name.length);
-        steps.set(name, [at]);
-      } else list.push(at);
+      kept += 1;
+      const list = byPart.get(part);
+      if (list === undefined) byPart.set(part, [at]);
+      else list.push(at);
     }
   }
-  keep(admission.work, any.length + steps.size);
+  const steps = new Map<string, (readonly number[])[]>();
+  for (const [part, list] of byPart)
+    for (const name of typeof part === "string" ? [part] : part) {
+      work.charge("indexSteps");
+      kept += 1;
+      const known = steps.get(name);
+      if (known === undefined) {
+        keepText(admission.work, name.length);
+        steps.set(name, [list]);
+      } else known.push(list);
+    }
+  keep(admission.work, any.length + kept);
   return { steps, any };
 }
