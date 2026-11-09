@@ -315,7 +315,9 @@ export function runtimeChecks(
  * completion ran (#1526 phase C), its results; after a stop where none ran or it kept none, the registry's obligations
  * without results. Each obligation a store owes when the script runs, its C1 check (a warning the walk made) or its C9
  * boundary (external data entering), is Lost where the plan's check at its store does not carry its required contract
- * (`keeps`). The first Lost obligation, in the registry's source order, declines the program at its store
+ * (`keeps`), a stopped decision's own marks among them (#2080): a stopped mark whose completion result was lost, or
+ * that has none, is kept only by a complete store check. The first Lost obligation, in the registry's source order,
+ * declines the program at its store
  * (`OutsideContract`): the stopped plan would otherwise run past a check the natural plan makes (ADR 0021 §1.10
  * column (2)). A program the analysis rejects has no plan and is not asked. Where admission did not settle there is no
  * registry and nothing is declined here: an unsettled stop is #1767's and #1252's. One visit per obligation of the
@@ -342,9 +344,7 @@ export function lostCheck(
     );
   }
   for (const { obligation, result } of gated) {
-    // (a stopped decision's own marks stand at every store of it, external data or not: the store's own C1 check and
-    // its C9 boundary are the checks it owes when the script runs)
-    if (obligation.epoch !== answers.epoch || obligation.slot.role === "stopped") continue;
+    if (obligation.epoch !== answers.epoch) continue;
     const store = index.storeAt(obligation.slot.site);
     if (
       store === undefined ||
