@@ -3,6 +3,7 @@
 // from the package.json that PLAYWRIGHT_PACKAGE names (on the desktop worker ~/opt/browser-bench/package.json, on the
 // LXC ~/opt/phone-bench/package.json). Without it the kit cannot run, which is exit 2, never a skip.
 import { execFileSync } from "node:child_process";
+import { clearOriginsThrough } from "./cdp.mjs";
 import { createRequire } from "node:module";
 
 export const ENGINES = ["chromium", "firefox", "webkit", "pixel"];
@@ -81,10 +82,7 @@ export async function openEngine(engine) {
       async clearOrigins(origins) {
         const page = await context.newPage();
         try {
-          const cdp = await context.newCDPSession(page);
-          for (const origin of origins)
-            await cdp.send("Storage.clearDataForOrigin", { origin, storageTypes: "all" });
-          await cdp.send("Network.clearBrowserCache");
+          await clearOriginsThrough(await context.newCDPSession(page), origins);
         } finally {
           await page.close().catch(() => {});
         }

@@ -18,8 +18,10 @@ import {
 import {
   firstSave,
   playable,
+  requestsOf,
+  workerSideOf,
   publishesAfter,
-  SETTLING_ROW,
+  SETTLED,
   turnTimes,
   workerStart,
 } from "../lib/measure.mjs";
@@ -29,6 +31,9 @@ const TURN_MS = 60_000;
 const SAVE_MS = 15_000;
 /** Nothing to answer and no DOM change for this long cuts a turn: the path ended without an end dialog. */
 const IDLE_MS = 10_000;
+/** The idle cut as a page predicate over the latest state: nothing to answer and no DOM change for `ms`. */
+const IDLE = (ms) =>
+  `(state) => !(${ENABLED_CONTROL})(state) && (window.__gate.changes.at(-1)?.t ?? 0) < performance.now() - ${ms}`;
 /** The A/A run's arms each live this long after playable, then close. */
 const AA_LIFETIME_MS = 15_000;
 
@@ -41,42 +46,6 @@ async function afterFirstPublish(page, after) {
     if (Date.now() > by) return null;
     await page.waitForTimeout(100);
   }
-}
-
-/** Each request in `log` (the instrumented variant's) with its reply: op, ID, post and reply times, round trip. */
-function requestsOf(log) {
-  const replies = new Map(
-    log.filter((entry) => entry.dir === "reply").map((entry) => [entry.id, entry]),
-  );
-  return log
-    .filter((entry) => entry.dir === "post")
-    .map((post) => {
-      const reply = replies.get(post.id);
-      return {
-        op: post.op,
-        id: post.id,
-        postAt: post.at,
-        postMs: post.postMs,
-        replyAt: reply?.at ?? null,
-        rttMs: reply === undefined ? null : reply.at - post.at,
-        ...(reply?.size === undefined ? {} : { replySize: reply.size }),
-      };
-    });
-}
-
-/** The engine Worker's handling and the delivery latency per request, from its injected log and the page's posts. */
-function workerSideOf(workerLog, requests, timeOrigin) {
-  if (workerLog === null) return null;
-  return requests.map((request) => {
-    const receipt = workerLog.find((entry) => entry.dir === "request" && entry.id === request.id);
-    const reply = workerLog.find((entry) => entry.dir === "reply" && entry.id === request.id);
-    return {
-      op: request.op,
-      id: request.id,
-      deliveryMs: receipt === undefined ? null : receipt.at - (timeOrigin + request.postAt),
-      handlingMs: receipt === undefined || reply === undefined ? null : reply.at - receipt.at,
-    };
-  });
 }
 
 export async function session({
@@ -154,8 +123,8 @@ export async function session({
       repeat = { ok: false, reason: error.message };
     }
 
-    // The turns, on the continued session. A turn settles at a script row or an enabled control of another action;
-    // the script's end ends it, and nothing to answer and no change for 10 s cuts it.
+    // The turns, on the continued session. A turn settles as `turnSettlement` says, the same function the wait runs in
+    // the page; the script's end ends it, and nothing to answer and no DOM change for 10 s cuts it.
     const answered = [];
     for (let turn = 0; repeat.ok && turn < turns; turn += 1) {
       const before = (await readGate(page)).states.at(-1);
@@ -171,7 +140,7 @@ export async function session({
       try {
         await waitForState(
           page,
-          `(state) => state.ended || state.failed || ((${ENABLED_CONTROL})(state) && state.control !== ${JSON.stringify(before.control)}) || ${SETTLING_ROW(sentAt)} || (!(${ENABLED_CONTROL})(state) && (window.__gate.changes.at(-1)?.t ?? 0) < performance.now() - ${IDLE_MS})`,
+          `(state) => state.ended || state.failed || ${SETTLED(sentAt, before.control)} || (${IDLE(IDLE_MS)})(state)`,
           TURN_MS,
           `Turn ${turn} did not settle`,
         );
@@ -179,14 +148,11 @@ export async function session({
         answered.push({ turn, ok: false, reason: error.message, ...what });
         break;
       }
-      const last = (await readGate(page)).states.at(-1);
-      const end = last.ended
-        ? "ended"
-        : last.failed
-          ? null
-          : hasEnabledControl(last)
-            ? null
-            : "cut";
+      // How the wait ended, from the same conditions: settled, the script's end, or the idle cut, and only then.
+      const { settled, idle, last } = await page.evaluate(
+        `({ settled: ${SETTLED(sentAt, before.control)}, idle: (${IDLE(IDLE_MS)})(window.__gate.states.at(-1)), last: window.__gate.states.at(-1) })`,
+      );
+      const end = settled ? null : last.ended ? "ended" : idle ? "cut" : null;
       answered.push({ turn, sentAt, before, end, ...what });
       if (last.failed) break;
     }
@@ -200,6 +166,10 @@ export async function session({
             turn: entry.turn,
             kind: entry.kind,
             of: entry.of ?? null,
+            // What the report derives the turn from again: its send time, the state before it and how it ended.
+            sentAt: entry.sentAt,
+            before: entry.before,
+            end: entry.end,
             ...turnTimes(repeatGate, entry.sentAt, entry.before, entry.end),
           },
     );
@@ -211,6 +181,8 @@ export async function session({
       const coldRequests = requestsOf(coldLog);
       const repeatRequests = requestsOf(repeatLog);
       diagnostics = {
+        // The raw logs of the instrumented port, each page's, from which the report derives the requests again.
+        bridgeLogs: { cold: coldLog, repeat: repeatLog },
         cold: coldRequests,
         repeat: repeatRequests,
         // Each turn's requests, from its input event to its settlement, the clock's and keeps' labelled by op.

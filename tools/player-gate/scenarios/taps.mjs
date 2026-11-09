@@ -50,6 +50,47 @@ export async function calibrate(page) {
 }
 
 /**
+ * A taps sample's numbers from its records alone, as the sample and the report both read them: `ledger` (each send's
+ * ID, point and page time), `deliveries` (each decoded `touchstart`) and `window` (`fromMs`, `toMs`). A delivery off its
+ * send's grid point counts as outside; the taps counted are those sent inside the window, answered by their first
+ * delivery. `null` when a record is missing.
+ */
+export function tapCounts({ ledger, deliveries, window }) {
+  if (!Array.isArray(ledger) || !Array.isArray(deliveries) || !(window?.toMs >= window?.fromMs))
+    return null;
+  const answered = new Map();
+  let outside = 0;
+  for (const tap of deliveries) {
+    const sent = ledger[tap.id - 1];
+    if (
+      sent === undefined ||
+      Math.abs(tap.x - sent.x) > TAP_SPACING / 2 ||
+      Math.abs(tap.y - sent.y) > TAP_SPACING / 2
+    )
+      outside += 1;
+    else if (!answered.has(tap.id)) answered.set(tap.id, tap);
+  }
+  const inWindow = ledger.filter(
+    (send) => send.sentMs >= window.fromMs && send.sentMs <= window.toMs,
+  );
+  const delays = inWindow
+    .map((send) => answered.get(send.id))
+    .filter((tap) => tap !== undefined)
+    .map((tap) => tap.t - tap.ts);
+  const gaps = ledger.slice(1).map((send, index) => send.sentMs - ledger[index].sentMs);
+  return {
+    sent: inWindow.length,
+    sentInAll: ledger.length,
+    answered: delays.length,
+    unanswered: inWindow.length - delays.length,
+    outside,
+    delay: summarize(delays),
+    within16: delays.filter((delay) => delay <= 16).length,
+    cadence: summarize(gaps),
+  };
+}
+
+/**
  * The page's clock against this process's: `pageEpoch − nodeEpoch`, from one round trip, with its uncertainty (half
  * the round trip). The Pixel's clock is not the LXC's, so a send's page time needs it.
  */
@@ -127,41 +168,15 @@ export async function tapsSample({ opened, url, rectangle, until, before = async
       gate = await readGate(page);
     }
     const errors = (await Promise.all(pending)).filter(Boolean);
-    const answered = new Map();
-    let outside = 0;
-    for (const tap of gate.taps) {
-      const sent = sends[tap.id - 1];
-      if (
-        sent === undefined ||
-        Math.abs(tap.x - sent.x) > TAP_SPACING / 2 ||
-        Math.abs(tap.y - sent.y) > TAP_SPACING / 2
-      )
-        outside += 1;
-      else if (!answered.has(tap.id)) answered.set(tap.id, tap);
-    }
-    const inWindow = sends.filter(
-      (send) => send.sentMs >= window.fromMs && send.sentMs <= window.toMs,
-    );
-    const delays = inWindow
-      .map((send) => answered.get(send.id))
-      .filter((tap) => tap !== undefined)
-      .map((tap) => tap.t - tap.ts);
-    const gaps = sends.slice(1).map((send, index) => send.sentMs - sends[index].sentMs);
+    const counts = tapCounts({ ledger: sends, deliveries: gate.taps, window });
     return {
-      ok: !overflow && outside === 0 && errors.length === 0 && inWindow.length > 0,
+      ok: !overflow && counts.outside === 0 && errors.length === 0 && counts.sent > 0,
       rectangle,
       window,
       clock,
-      sent: inWindow.length,
-      sentInAll: sends.length,
-      answered: delays.length,
-      unanswered: inWindow.length - delays.length,
-      outside,
+      ...counts,
       overflow,
       cdpErrors: errors,
-      delay: summarize(delays),
-      within16: delays.filter((delay) => delay <= 16).length,
-      cadence: summarize(gaps),
       ledger: sends,
       deliveries: gate.taps,
     };

@@ -7,6 +7,7 @@ import { buildReport } from "./report.mjs";
 import { playable, turnTimes } from "./lib/measure.mjs";
 import { hiddenCapture } from "./scenarios/keep.mjs";
 import { releaser } from "./lib/release.mjs";
+import { clearOriginsThrough } from "./lib/cdp.mjs";
 
 test("every cell is decided in both phases, and every axis value is required somewhere", () => {
   for (const phase of ["r0", "r1"]) {
@@ -105,31 +106,73 @@ test("the report fails on a row for an excluded cell", () => {
   );
 });
 
-/** A page's raw probe records, as `readGate` returns them. */
-const GATE = { states: [], inputs: [], changes: [], rows: [], rowChanges: [] };
+/**
+ * A page's probe records, as `readGate` returns them, of a page whose `label` button is enabled at 500 ms and pressed at
+ * 555 ms, whose first control (serial 2) shows at 716 ms, and whose turn input at 899 ms is followed by a change and a
+ * control of another action (serial 3) at 960 ms; with the cold page's first save and, on a worker build, the engine
+ * Worker's start.
+ */
+function pageRecords(label, { worker = false, longTasks = [] } = {}) {
+  const state = (t, frame, extra) => ({
+    t,
+    frame,
+    start: null,
+    control: null,
+    buttons: [],
+    composer: null,
+    ended: false,
+    failed: false,
+    ...extra,
+  });
+  const button = (control) => ({ control, buttons: [{ label: "Go", enabled: true }] });
+  return {
+    states: [
+      state(500, 510, { start: { label, enabled: true } }),
+      state(700, 716, button(2)),
+      state(950, 960, button(3)),
+    ],
+    inputs: [
+      { type: "pointerdown", t: 560, ts: 555, trusted: true },
+      { type: "pointerdown", t: 900, ts: 899, trusted: true },
+    ],
+    changes: [{ t: 920, frame: 930 }],
+    rows: [],
+    rowChanges: [],
+    transactions: [
+      {
+        start: 600,
+        end: 630,
+        outcome: "complete",
+        puts: [
+          { store: "sessions", scope: "s", observedMs: 1, length: 5 },
+          { store: "plans", scope: "s", observedMs: null, length: 10 },
+        ],
+      },
+    ],
+    workers: worker
+      ? [{ url: "engine.worker.js", engine: true, constructed: 100, ready: 150 }]
+      : [],
+    gaps: [],
+    longTasks,
+    errors: [],
+  };
+}
 
-/** A complete headline session on `engine` and `backend`, built from the field list's own numbers. */
+/** A complete headline session on `engine` and `backend`, its records as a session row keeps them. */
 function sessionResult({ engine = "chromium", backend = "main" } = {}) {
   const cdp = engine === "chromium" || engine === "pixel";
   const worker = backend === "worker";
-  const play = {
-    playableMs: 900,
-    enabledFrameMs: 500,
-    inputToControlMs: 400,
-    enabledToInputMs: 20,
-  };
+  const longTasks = cdp ? [] : null;
   const heap = (at) => ({
     at,
     page: { usedBytes: 1 },
     workers: worker ? [{ url: "engine.worker.js", engine: true, usedBytes: 2 }] : [],
   });
+  const cold = pageRecords("Start", { worker, longTasks });
+  const repeat = pageRecords("Continue", { worker, longTasks });
   return {
-    cold: play,
-    repeat: play,
-    probe: { cold: GATE, repeat: GATE },
-    worker: worker ? { startMs: 50, readyMs: 60 } : null,
-    firstSave: { ok: true, startToCommitMs: 30, planJsonLength: 10, longTasksMs: cdp ? 0 : null },
-    turns: [{ ok: true, feedbackMs: 5, settledMs: 50 }],
+    probe: { cold, repeat },
+    turns: [{ turn: 0, ok: true, sentAt: 880, before: repeat.states[1], end: null }],
     ...(cdp
       ? {
           memory: ["startEnabled", "playable", "firstSave", "afterTurns", "end"].map(heap),
@@ -188,7 +231,7 @@ test("a sample counts only with every required field that applies; missing evide
     ARTIFACTS,
   );
   const line = empty.incomplete.find((text) => text.includes(name({})));
-  assert.match(line, /0 complete; missing: the probe.s raw records; .*cold: playable/u);
+  assert.match(line, /0 complete; missing: the probe's records of both pages; .*cold: playable/u);
   // A missing heap milestone or an unfinished request is missing evidence too.
   const noHeap = sessionResult();
   noHeap.memory = noHeap.memory.filter((reading) => reading.at !== "startEnabled");
@@ -207,24 +250,36 @@ test("a sample counts only with every required field that applies; missing evide
         ARTIFACTS,
       ).incomplete.some((text) => text.includes(name({}))),
     );
-  // A failed turn without its numbers, a failed first save, a missing byte length or no raw probe records: each one
-  // alone leaves the sample incomplete, whatever the medians say.
-  const failedTurn = sessionResult();
-  failedTurn.turns.push({ ok: false, reason: "Turn 1 did not settle" });
-  const failedSave = sessionResult();
-  failedSave.firstSave.ok = false;
-  const noLength = sessionResult();
-  delete noLength.bytes.requests[0].encodedBytes;
-  const noProbe = sessionResult();
-  delete noProbe.probe;
-  for (const result of [failedTurn, failedSave, noLength, noProbe])
+  // Each of these alone leaves the sample incomplete, since every field is derived again from the records (Sol code r2
+  // and r3's reproductions): a failed turn; a missing byte length; no probe records; emptied cold states; no
+  // transactions; only aborted ones; a change stamped before the turn's input; summaries that claim otherwise.
+  const variants = {
+    failedTurn: (r) => r.turns.push({ ok: false, reason: "Turn 1 did not settle" }),
+    noLength: (r) => delete r.bytes.requests[0].encodedBytes,
+    noProbe: (r) => delete r.probe,
+    emptiedStates: (r) => (r.probe.cold.states = []),
+    noTransactions: (r) => (r.probe.cold.transactions = []),
+    aborted: (r) =>
+      (r.probe.cold.transactions = r.probe.cold.transactions.map((t) => ({
+        ...t,
+        outcome: "abort",
+      }))),
+    feedbackBeforeInput: (r) => (r.probe.repeat.changes = [{ t: 920, frame: 800 }]),
+  };
+  for (const [what, change] of Object.entries(variants)) {
+    const result = sessionResult();
+    change(result);
+    // A summary the row carries is never read.
+    result.firstSave = { ok: true, startToCommitMs: 1 };
     assert.ok(
       buildReport(
         [row({ scenario: "session", engine: "chromium" }, true, result)],
         "r0",
         ARTIFACTS,
       ).incomplete.some((text) => text.includes(name({}))),
+      what,
     );
+  }
   // No artifact inventory: incomplete.
   assert.ok(buildReport([], "r0").incomplete.includes("- artifacts: no inventory given"));
 });
@@ -232,22 +287,103 @@ test("a sample counts only with every required field that applies; missing evide
 test("a worker build needs its engine Worker's start and heap; the A/A run needs both arms", () => {
   const cell = { scenario: "session", engine: "chromium", backend: "worker" };
   const withoutWorker = sessionResult({ backend: "worker" });
-  withoutWorker.worker = null;
+  withoutWorker.probe.cold.workers = [];
   const report = buildReport([row(cell, true, withoutWorker)], "r1", ARTIFACTS);
   assert.match(
     report.incomplete.find((text) => text.includes(name({ backend: "worker" }))),
     /Worker: construction → ready/u,
   );
   const aa = (arm) =>
-    row({ scenario: "aa", engine: "chromium" }, true, {
-      arm,
-      cold: sessionResult().cold,
-      probe: GATE,
-    });
+    row({ scenario: "aa", engine: "chromium" }, true, { arm, probe: pageRecords("Start") });
   const one = buildReport([aa("full"), aa("full")], "r0", ARTIFACTS);
   assert.ok(one.incomplete.some((text) => text.includes("no complete minimal arm")));
   const both = buildReport([aa("full"), aa("minimal")], "r0", ARTIFACTS);
   assert.ok(!both.incomplete.some((text) => text.includes(name({ scenario: "aa" }))));
+  // An A/A arm with emptied states has no playable time.
+  const emptied = aa("minimal");
+  emptied.result.probe.states = [];
+  assert.ok(
+    buildReport([aa("full"), emptied], "r0", ARTIFACTS).incomplete.some((text) =>
+      text.includes("no complete minimal arm"),
+    ),
+  );
+});
+
+test("the instrumented Worker cell needs its logs, not the headline's byte account; emptied records refuse it", () => {
+  const cell = { scenario: "sessionInstrumented", engine: "chromium", backend: "worker" };
+  const instrumented = () => {
+    const result = sessionResult({ backend: "worker" });
+    delete result.bytes;
+    const log = [
+      { dir: "post", at: 520, postMs: 1, id: 1, op: "prepare" },
+      { dir: "reply", at: 530, id: 1 },
+      { dir: "post", at: 540, postMs: 1, id: 2, op: "start" },
+      { dir: "reply", at: 545, id: 2 },
+      { dir: "post", at: 600, postMs: 1, id: 3, op: "continue" },
+      { dir: "reply", at: 602, id: 3 },
+    ];
+    const workerLog = [
+      { dir: "request", at: 10_521, id: 1, op: "prepare" },
+      { dir: "reply", at: 10_529, id: 1 },
+      { dir: "request", at: 10_541, id: 2, op: "start" },
+      { dir: "reply", at: 10_544, id: 2 },
+    ];
+    result.diagnostics = {
+      bridgeLogs: { cold: log, repeat: log },
+      workerLogs: { cold: workerLog, repeat: workerLog },
+      timeOrigins: { cold: 10_000, repeat: 10_000 },
+    };
+    return result;
+  };
+  const named = name({ scenario: "sessionInstrumented", backend: "worker" });
+  assert.ok(
+    !buildReport([row(cell, true, instrumented())], "r1", ARTIFACTS).incomplete.some((text) =>
+      text.includes(named),
+    ),
+  );
+  for (const change of [
+    (r) => (r.diagnostics.workerLogs.cold = []),
+    (r) => delete r.diagnostics.timeOrigins,
+    (r) => (r.diagnostics.bridgeLogs.cold = []),
+  ]) {
+    const result = instrumented();
+    change(result);
+    assert.ok(
+      buildReport([row(cell, true, result)], "r1", ARTIFACTS).incomplete.some((text) =>
+        text.includes(named),
+      ),
+    );
+  }
+});
+
+test("a keep trial's recorded outcome must be its records' own", () => {
+  const cell = { scenario: "keepHandler", engine: "chromium" };
+  const trial = (records) =>
+    row(cell, true, {
+      outcome: "completed",
+      hiddenAt: 100,
+      scope: "s",
+      baselineMs: 5,
+      lifecycle: [],
+      transactions: [
+        {
+          start: 200,
+          end: 300,
+          outcome: "complete",
+          puts: [{ store: "sessions", scope: "s", observedMs: 9 }],
+        },
+      ],
+      ...records,
+    });
+  const named = name({ scenario: "keepHandler" });
+  assert.ok(
+    !buildReport([trial({})], "r0", ARTIFACTS).incomplete.some((text) => text.includes(named)),
+  );
+  assert.ok(
+    buildReport([trial({ transactions: [] })], "r0", ARTIFACTS).incomplete.some((text) =>
+      text.includes(named),
+    ),
+  );
 });
 
 test("playable is the Player's own two intervals, and a timestamp outside its boundaries is refused", () => {
@@ -403,4 +539,30 @@ test("a turn settles at an update of a message shown before it, and a new row at
     before,
   );
   assert.equal(entering.settledMs, 400);
+  // An update of a row not yet shown at the input settles nothing; the row settles when it shows.
+  const unseen = turnTimes(
+    {
+      ...base,
+      rows: [{ id: "m3", speaker: "mistress", t: 50, frame: 60, shownFrame: 600 }],
+      rowChanges: [{ id: "m3", t: 250, frame: 262 }],
+    },
+    150,
+    before,
+  );
+  assert.equal(unseen.ok, false);
+});
+
+test("clearing the run's origins attempts each origin and the cache after an earlier failure", async () => {
+  const sent = [];
+  const cdp = {
+    send: async (method, params) => {
+      sent.push(params?.origin ?? method);
+      if (params?.origin === "http://localhost:1") throw new Error("gone");
+    },
+  };
+  await assert.rejects(
+    clearOriginsThrough(cdp, ["http://localhost:1", "http://localhost:2"]),
+    /localhost:1: gone/u,
+  );
+  assert.deepEqual(sent, ["http://localhost:1", "http://localhost:2", "Network.clearBrowserCache"]);
 });

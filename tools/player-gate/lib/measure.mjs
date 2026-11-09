@@ -50,69 +50,91 @@ export function playable(gate, label) {
 }
 
 /**
- * The script rows' events after the input at `after` that settle a turn, each with its frame: a new script row when it
- * is first drawn with a positive opacity (`shownFrame`), and a change of a script row already shown before the input
- * (an updated message), at the frame after the change. User echoes never settle a turn. The driver's settlement wait
- * uses the same events (`SETTLING_ROW`).
+ * When a turn settled, from the probe's records `gate`: its submission is the first trusted pointer, touch or Enter
+ * input at or after `sentAt`; it settles at the earliest of the frame after a state with an enabled control of another
+ * action than `beforeControl` (its serial), a new script row's first positive-opacity frame (`shownFrame`), and the
+ * frame after a change of a script row already shown before the submission (an updated message). User echoes never
+ * settle a turn. `settledAt` is `null` until one of them has its frame. The driver's wait runs this same function in the
+ * page (`SETTLED`), so it uses nothing outside its own body.
  */
-export function settlingRows(gate, after) {
-  const speakers = new Map(gate.rows.map((row) => [row.id, row]));
-  const shown = gate.rows
-    .filter((row) => row.speaker !== "user" && row.t > after && row.shownFrame !== undefined)
-    .map((row) => ({ kind: "row", frame: row.shownFrame }));
-  const updated = (gate.rowChanges ?? [])
-    .filter((change) => {
-      const row = speakers.get(change.id);
-      return row !== undefined && row.speaker !== "user" && row.t < after && change.t > after;
-    })
-    .filter((change) => change.frame !== undefined)
-    .map((change) => ({ kind: "row update", frame: change.frame }));
-  return [...shown, ...updated].sort((a, b) => a.frame - b.frame);
+export function turnSettlement(gate, sentAt, beforeControl) {
+  const submission =
+    gate.inputs.find(
+      (input) =>
+        input.t >= sentAt &&
+        input.trusted &&
+        (input.type === "pointerdown" || input.type === "touchstart" || input.type === "keydown"),
+    ) ?? null;
+  if (submission === null) return { submission: null, settledAt: null, by: null };
+  const after = submission.t;
+  // An answerable control, as `hasEnabledControl` reads a state.
+  const answerable = (state) =>
+    state.start === null &&
+    (state.buttons.some((button) => button.enabled) ||
+      (state.composer?.enabled === true && state.composer.asks));
+  const rows = new Map(gate.rows.map((row) => [row.id, row]));
+  const events = [
+    ...gate.states
+      .filter(
+        (state) =>
+          state.t > after &&
+          answerable(state) &&
+          state.control !== beforeControl &&
+          state.frame !== undefined,
+      )
+      .map((state) => ({ by: "control", at: state.frame })),
+    ...gate.rows
+      .filter((row) => row.speaker !== "user" && row.t > after && row.shownFrame !== undefined)
+      .map((row) => ({ by: "row", at: row.shownFrame })),
+    ...(gate.rowChanges ?? [])
+      .filter((change) => {
+        const row = rows.get(change.id);
+        return (
+          row !== undefined &&
+          row.speaker !== "user" &&
+          row.shownFrame !== undefined &&
+          row.shownFrame < after &&
+          change.t > after &&
+          change.frame !== undefined
+        );
+      })
+      .map((change) => ({ by: "row update", at: change.frame })),
+  ].sort((a, b) => a.at - b.at);
+  return { submission, settledAt: events[0]?.at ?? null, by: events[0]?.by ?? null };
 }
 
-/** The input types that submit a turn. */
-const SUBMISSION = ["pointerdown", "touchstart", "keydown"];
-
-/**
- * `settlingRows`' test as a page source over `window.__gate`, for the driver's wait: from the turn's submission, the
- * first trusted input at or after `sentAt`, a script row appeared or a script row shown before it changed.
- */
-export const SETTLING_ROW = (sentAt) =>
-  `((at) => window.__gate.rows.some((row) => row.speaker !== "user" && row.t > at) || window.__gate.rowChanges.some((change) => change.t > at && window.__gate.rows.some((row) => row.id === change.id && row.speaker !== "user" && row.t < at)))(window.__gate.inputs.find((input) => input.t >= ${sentAt} && input.trusted && ${JSON.stringify(SUBMISSION)}.includes(input.type))?.t ?? Infinity)`;
+/** `turnSettlement` as a page source over `window.__gate`: whether the turn sent at `sentAt` has settled. */
+export const SETTLED = (sentAt, beforeControl) =>
+  `(${turnSettlement})(window.__gate, ${sentAt}, ${JSON.stringify(beforeControl)}).settledAt !== null`;
 
 /**
  * One turn from the input event at or after `sentAt`, the state `before` it shown: feedback is the frame after the
- * first DOM change; settlement is the frame after the first state with an enabled control of another action (its
- * serial), or the first settling row event (`settlingRows`), whichever comes first. `end` is how the driver saw the turn end when it did not settle: `ended` (the script's
- * end), `cut` (nothing to answer for 10 s), or `null`; a turn that neither settled nor ended is not ok.
+ * first DOM change; settlement is `turnSettlement`'s. `end` is how the driver saw the turn end when it did not settle:
+ * `ended` (the script's end), `cut` (nothing to answer and no change for 10 s), or `null`; a turn that neither settled
+ * nor ended is not ok, and so is one whose times run backwards.
  */
 export function turnTimes(gate, sentAt, before, end = null) {
-  const submission = inputAfter(gate, sentAt, SUBMISSION);
+  const { submission, settledAt, by } = turnSettlement(gate, sentAt, before.control);
   if (submission === null) return { ok: false, reason: "no input recorded" };
   const change = gate.changes.find((record) => record.t > submission.t);
-  const control = gate.states.find(
-    (state) =>
-      state.t > submission.t && hasEnabledControl(state) && state.control !== before.control,
+  const row = gate.rows.find(
+    (record) =>
+      record.speaker !== "user" && record.t > submission.t && record.shownFrame !== undefined,
   );
-  const row = gate.rows.find((record) => record.speaker !== "user" && record.t > submission.t);
-  const settling = settlingRows(gate, submission.t)[0];
-  const settledAt = Math.min(control?.frame ?? Infinity, settling?.frame ?? Infinity);
   const feedbackMs = change?.frame === undefined ? null : change.frame - submission.ts;
   const times = {
     submissionMs: submission.ts,
     feedbackMs,
-    firstScriptRowMs: row?.shownFrame === undefined ? null : row.shownFrame - submission.ts,
+    firstScriptRowMs: row === undefined ? null : row.shownFrame - submission.ts,
   };
-  if (settledAt === Infinity)
+  if (!(feedbackMs >= 0)) return { ok: false, reason: "no feedback after the input", ...times };
+  if (settledAt === null)
     return end === null
       ? { ok: false, reason: "neither settled nor ended", ...times }
       : { ok: true, end, ...times, settledMs: null };
-  return {
-    ok: feedbackMs !== null,
-    ...times,
-    settledMs: settledAt - submission.ts,
-    settledBy: settledAt === settling?.frame ? settling.kind : "control",
-  };
+  const settledMs = settledAt - submission.ts;
+  if (!(settledMs >= 0)) return { ok: false, reason: "settled before its input", ...times };
+  return { ok: true, ...times, settledMs, settledBy: by };
 }
 
 /** The `sessions` publish transactions of scope `scope` (any scope when `null`) that committed after `after`. */
@@ -176,6 +198,42 @@ export function workerStart(gate) {
     readyMs: worker.ready,
     startMs: worker.ready === null ? null : worker.ready - worker.constructed,
   };
+}
+
+/** Each request in `log` (the instrumented variant's) with its reply: op, ID, post and reply times, round trip. */
+export function requestsOf(log) {
+  const replies = new Map(
+    log.filter((entry) => entry.dir === "reply").map((entry) => [entry.id, entry]),
+  );
+  return log
+    .filter((entry) => entry.dir === "post")
+    .map((post) => {
+      const reply = replies.get(post.id);
+      return {
+        op: post.op,
+        id: post.id,
+        postAt: post.at,
+        postMs: post.postMs,
+        replyAt: reply?.at ?? null,
+        rttMs: reply === undefined ? null : reply.at - post.at,
+        ...(reply?.size === undefined ? {} : { replySize: reply.size }),
+      };
+    });
+}
+
+/** The engine Worker's handling and the delivery latency per request, from its injected log and the page's posts. */
+export function workerSideOf(workerLog, requests, timeOrigin) {
+  if (workerLog === null) return null;
+  return requests.map((request) => {
+    const receipt = workerLog.find((entry) => entry.dir === "request" && entry.id === request.id);
+    const reply = workerLog.find((entry) => entry.dir === "reply" && entry.id === request.id);
+    return {
+      op: request.op,
+      id: request.id,
+      deliveryMs: receipt === undefined ? null : receipt.at - (timeOrigin + request.postAt),
+      handlingMs: receipt === undefined || reply === undefined ? null : reply.at - receipt.at,
+    };
+  });
 }
 
 /** The median and range of `values`, the report's form for each cell. */

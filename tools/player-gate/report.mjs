@@ -6,6 +6,7 @@
 //   node tools/player-gate/report.mjs --phase r0|r1 [--json FILE] [--artifacts FILE]... RESULTS.jsonl...
 import { readFileSync, writeFileSync } from "node:fs";
 import { allCells, cellName, classify } from "./cells.mjs";
+import { deriveSample } from "./derive.mjs";
 import { summarize } from "./lib/measure.mjs";
 
 const CDP_ENGINES = new Set(["chromium", "pixel"]);
@@ -56,6 +57,37 @@ const MILESTONES = [
   ["afterTurns", "repeat", "after the turns"],
   ["end", "repeat", "the end, after a forced GC"],
 ];
+/**
+ * The byte account's numbers, the headline session's only: the cold page's served bytes, cumulative, per target (the
+ * page; every Worker together) and phase, encoded and decoded; a worker build must also show its engine Worker's own
+ * requests. The instrumented cohort runs no byte account (`drive.mjs`).
+ */
+const BYTES = [
+  ...["page", "Workers"].flatMap((target) =>
+    [
+      ["beforeStartEnabled", "before Start enabled"],
+      ["beforePlayable", "before playable"],
+      [null, "the whole cold page"],
+    ].flatMap(([phase, label]) =>
+      ["encoded", "decoded"].map((size) => [
+        `served ${label}, ${target}, ${size}`,
+        "bytes",
+        (r) => bytesOf(r, target, phase, size),
+        onCdp,
+        true,
+      ]),
+    ),
+  ),
+  [
+    "requests of the engine Worker's target",
+    "",
+    (r) =>
+      (r.bytes?.requests ?? []).filter((q) => q.target !== "page" && /engine/u.test(q.target))
+        .length || null,
+    (cell) => onCdp(cell) && isWorker(cell),
+    true,
+  ],
+];
 const NUMBERS = {
   session: [
     ...PLAYABLE("cold", "Start"),
@@ -104,32 +136,6 @@ const NUMBERS = {
       always,
       false,
     ],
-    // The cold page's served bytes, cumulative, per target (the page; every Worker together) and phase, encoded and
-    // decoded; a worker build must also show its engine Worker's own requests.
-    ...["page", "Workers"].flatMap((target) =>
-      [
-        ["beforeStartEnabled", "before Start enabled"],
-        ["beforePlayable", "before playable"],
-        [null, "the whole cold page"],
-      ].flatMap(([phase, label]) =>
-        ["encoded", "decoded"].map((size) => [
-          `served ${label}, ${target}, ${size}`,
-          "bytes",
-          (r) => bytesOf(r, target, phase, size),
-          onCdp,
-          true,
-        ]),
-      ),
-    ),
-    [
-      "requests of the engine Worker's target",
-      "",
-      (r) =>
-        (r.bytes?.requests ?? []).filter((q) => q.target !== "page" && /engine/u.test(q.target))
-          .length || null,
-      (cell) => onCdp(cell) && isWorker(cell),
-      true,
-    ],
     ...MILESTONES.flatMap(([at, page, label]) => [
       [`heap, page (${page}), at ${label}`, "bytes", (r) => heapAt(r, at, "page"), onCdp, true],
       [
@@ -140,6 +146,7 @@ const NUMBERS = {
         true,
       ],
     ]),
+    ...BYTES,
   ],
   taps: [
     ["taps sent in the window", "", (r) => r.sent, always, true],
@@ -203,7 +210,7 @@ const NUMBERS = {
   delayedSmoke: [["passed", "", (r) => (r.ok ? 1 : 0), always, true]],
 };
 NUMBERS.sessionInstrumented = [
-  ...NUMBERS.session.filter(([label]) => !label.startsWith("served")),
+  ...NUMBERS.session.filter((field) => !BYTES.includes(field)),
   [
     "diagnostic: prepare request → reply",
     "ms",
@@ -323,79 +330,15 @@ const diagnosticRequest = (result, page, op) =>
 const diagnosticRtt = (result, page, op) => diagnosticRequest(result, page, op)?.rttMs;
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
-const list = (value) => Array.isArray(value);
-/** The probe's raw records of one page, as `readGate` returns them. */
-const probeRecords = (gate) =>
-  gate !== null &&
-  typeof gate === "object" &&
-  list(gate.states) &&
-  list(gate.inputs) &&
-  list(gate.changes);
-
-/**
- * The record-level checks per scenario, before any number counts (`reviews/l5-gate/field-inventory.md`): the raw
- * records a row must keep, and each turn, save and log valid on its own. Each gives what is missing or contradicted.
- */
-const EVIDENCE = {
-  session: (r, cell) => [
-    ...(probeRecords(r.probe?.cold) && probeRecords(r.probe?.repeat)
-      ? []
-      : ["the probe's raw records"]),
-    ...(r.firstSave?.ok === true ? [] : ["a committed first save"]),
-    ...(list(r.turns) && r.turns.length > 0 ? [] : ["a turn"]),
-    ...(r.turns ?? []).flatMap((turn, index) =>
-      turn.ok === true &&
-      finite(turn.feedbackMs) &&
-      (finite(turn.settledMs) || turn.end === "ended" || turn.end === "cut")
-        ? []
-        : [`turn ${index}: ${turn.reason ?? "no feedback, or neither settled nor ended"}`],
-    ),
-    ...(onCdp(cell) && !list(r.bytes?.requests) ? ["the cold page's request records"] : []),
-  ],
-  aa: (r) => (probeRecords(r.probe) ? [] : ["the probe's raw records"]),
-  bridge: (r, cell) => [
-    ...(list(r.requests) ? [] : ["the request records"]),
-    ...(isWorker(cell) && !(list(r.workerLog) && finite(r.timeOrigin))
-      ? ["the Worker's log with its clock origin"]
-      : []),
-  ],
-  taps: (r) =>
-    list(r.ledger) && list(r.deliveries) && list(r.cdpErrors)
-      ? []
-      : ["the send ledger and deliveries"],
-  keepHandler: (r) =>
-    list(r.lifecycle) && list(r.transactions) ? [] : ["the lifecycle and transaction records"],
-  keepCompletion: (r) =>
-    list(r.lifecycle) && list(r.transactions) ? [] : ["the lifecycle and transaction records"],
-};
-EVIDENCE.sessionInstrumented = (r, cell) => [
-  ...EVIDENCE.session(r, cell).filter((problem) => problem !== "the cold page's request records"),
-  ...(list(r.diagnostics?.cold) && list(r.diagnostics?.repeat)
-    ? []
-    : ["the bridge log's request records"]),
-  ...(onCdp(cell) &&
-  isWorker(cell) &&
-  !(list(r.diagnostics?.workerLogs?.cold) && list(r.diagnostics?.workerLogs?.repeat))
-    ? ["the engine Worker's injected logs"]
-    : []),
-];
-EVIDENCE.bridgeTaps = EVIDENCE.taps;
-
 /** The required fields of `cell` that `row` lacks: an empty list for a complete sample. */
 export function missingFields(cell, row) {
-  const records = EVIDENCE[cell.scenario]?.(row.result ?? {}, cell) ?? [];
+  const { sample, problems } = deriveSample(cell, row.result);
   // A keep trial's outcome is its measurement, whichever it is.
-  if (cell.scenario.startsWith("keep"))
-    return typeof row.result?.outcome === "string"
-      ? records
-      : ["the trial gave no outcome", ...records];
-  if (!row.ok) return ["the sample failed"];
+  if (!cell.scenario.startsWith("keep") && !row.ok) return ["the sample failed", ...problems];
   return [
-    ...records,
+    ...problems,
     ...NUMBERS[cell.scenario]
-      .filter(
-        ([, , read, applies, required]) => required && applies(cell) && !finite(read(row.result)),
-      )
+      .filter(([, , read, applies, required]) => required && applies(cell) && !finite(read(sample)))
       .map(([label, unit]) => (unit === "" ? label : `${label} (${unit})`)),
   ];
 }
@@ -503,7 +446,7 @@ export function buildReport(rows, phase, artifacts = []) {
         const value = summarize(
           complete
             .filter((row) => arm === null || row.result.arm === arm)
-            .map((row) => read(row.result)),
+            .map((row) => read(deriveSample(cell, row.result).sample)),
         );
         summary[name][named] = value;
         lines.push(`| ${named} | ${format(value)} | ${unit} |`);

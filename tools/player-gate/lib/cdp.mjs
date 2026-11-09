@@ -195,6 +195,27 @@ export async function cdpReads(
   };
 }
 
+/**
+ * Clears each of `origins`' site data and then the HTTP cache through `cdp`, each attempted after an earlier one failed;
+ * throws one error naming every failure once all were attempted.
+ */
+export async function clearOriginsThrough(cdp, origins) {
+  const failures = [];
+  const attempt = async (what, send) => {
+    try {
+      await send();
+    } catch (error) {
+      failures.push(`${what}: ${error?.message ?? error}`);
+    }
+  };
+  for (const origin of origins)
+    await attempt(origin, () =>
+      cdp.send("Storage.clearDataForOrigin", { origin, storageTypes: "all" }),
+    );
+  await attempt("the HTTP cache", () => cdp.send("Network.clearBrowserCache"));
+  if (failures.length > 0) throw new Error(`clearing failed for ${failures.join("; ")}`);
+}
+
 /** Removes every kind of site data of `origin` and the HTTP cache, through `cdp`, for a cold sample in a kept profile. */
 export async function clearOrigin(cdp, origin) {
   await cdp.send("Storage.clearDataForOrigin", { origin, storageTypes: "all" });

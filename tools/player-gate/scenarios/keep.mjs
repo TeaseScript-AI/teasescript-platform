@@ -132,6 +132,50 @@ export function hiddenCapture(gate, hiddenAt, scope, baselineMs) {
   return { kept, keptAfterResume, keptLate, failed, boundaryMs: boundary };
 }
 
+/**
+ * A trial's outcome from its kept records alone, as the trial and the report both read it: `record` holds the
+ * lifecycle and transaction records, the scope, the baseline scene time and, for `keepHandler`, the hiding time (the
+ * Pixel's comes from its own `visibilitychange`); for `keepDurable`, the stored and baseline scene times. `null` when a
+ * record it needs is missing.
+ */
+export function keepOutcome(trial, record) {
+  if (trial === "keepDurable") {
+    if (record.storedMs === undefined || record.baselineMs === undefined) return null;
+    const durable =
+      record.storedMs !== null && record.baselineMs !== null && record.storedMs > record.baselineMs;
+    return { outcome: durable ? "durable after 1 s" : "not durable after 1 s", completed: durable };
+  }
+  if (!Array.isArray(record.lifecycle) || !Array.isArray(record.transactions)) return null;
+  const hiddenAt =
+    trial === "keepHandler"
+      ? record.hiddenAt
+      : record.lifecycle.find(
+          (event) => event.type === "visibilitychange" && event.visibility === "hidden",
+        )?.t;
+  if (typeof hiddenAt !== "number")
+    return { outcome: "the page never reported hidden", completed: false };
+  const found = hiddenCapture(record, hiddenAt, record.scope, record.baselineMs);
+  const froze = record.lifecycle.some((event) => event.type === "freeze");
+  const outcome = found.kept
+    ? "completed"
+    : found.failed
+      ? "aborted"
+      : found.keptAfterResume
+        ? "completed after resume"
+        : found.keptLate
+          ? "completed after 30 s, still hidden"
+          : froze
+            ? "suspended"
+            : "not observed within 30 s";
+  return {
+    outcome,
+    completed: found.kept !== undefined,
+    froze,
+    boundaryMs: found.boundaryMs,
+    hiddenToCommitMs: found.kept ? found.kept.end - hiddenAt : null,
+  };
+}
+
 export async function keep({ opened, origin, script, trial, reopen }) {
   const session = await keptSession(opened, origin, script);
   try {
@@ -148,21 +192,16 @@ export async function keep({ opened, origin, script, trial, reopen }) {
           session.baselineMs,
         );
       }
-      const outcome = found.kept
-        ? "completed"
-        : found.failed
-          ? "aborted"
-          : "not observed within 30 s";
-      return {
-        ok: found.kept !== undefined,
-        outcome,
+      const gate = await readGate(session.page);
+      const record = {
+        hiddenAt,
+        scope: session.scope,
         baselineMs: session.baselineMs,
-        hiddenToCommitMs: found.kept ? found.kept.end - hiddenAt : null,
-        ...(await readGate(session.page).then((gate) => ({
-          lifecycle: gate.lifecycle,
-          transactions: gate.transactions,
-        }))),
+        lifecycle: gate.lifecycle,
+        transactions: gate.transactions,
       };
+      const derived = keepOutcome(trial, record);
+      return { ok: derived.completed, ...derived, ...record };
     }
     if (trial === "keepCompletion") {
       adb(opened.serial, "shell", "input", "keyevent", "KEYCODE_HOME");
@@ -170,38 +209,14 @@ export async function keep({ opened, origin, script, trial, reopen }) {
       adb(opened.serial, "shell", "am", "start", "-n", CHROME);
       await sleep(2000);
       const gate = await readGate(session.page);
-      const hidden = gate.lifecycle.find(
-        (event) => event.type === "visibilitychange" && event.visibility === "hidden",
-      );
-      if (hidden === undefined)
-        return {
-          ok: false,
-          outcome: "the page never reported hidden",
-          baselineMs: session.baselineMs,
-        };
-      const found = hiddenCapture(gate, hidden.t, session.scope, session.baselineMs);
-      const froze = gate.lifecycle.some((event) => event.type === "freeze");
-      const outcome = found.kept
-        ? "completed"
-        : found.failed
-          ? "aborted"
-          : found.keptAfterResume
-            ? "completed after resume"
-            : found.keptLate
-              ? "completed after 30 s, still hidden"
-              : froze
-                ? "suspended"
-                : "not observed within 30 s";
-      return {
-        ok: found.kept !== undefined,
-        outcome,
-        froze,
+      const record = {
+        scope: session.scope,
         baselineMs: session.baselineMs,
-        boundaryMs: found.boundaryMs,
-        hiddenToCommitMs: found.kept ? found.kept.end - hidden.t : null,
         lifecycle: gate.lifecycle,
         transactions: gate.transactions,
       };
+      const derived = keepOutcome(trial, record);
+      return { ok: derived.completed, ...derived, ...record };
     }
     if (trial === "keepDurable") {
       adb(opened.serial, "shell", "input", "keyevent", "KEYCODE_HOME");
@@ -215,14 +230,8 @@ export async function keep({ opened, origin, script, trial, reopen }) {
       try {
         await page.goto(`${origin}/gate-blank`);
         const storedMs = await storedObservedMs(page, session.scope);
-        const durable =
-          storedMs !== null && session.baselineMs !== null && storedMs > session.baselineMs;
-        return {
-          ok: durable,
-          outcome: durable ? "durable after 1 s" : "not durable after 1 s",
-          baselineMs: session.baselineMs,
-          storedMs,
-        };
+        const derived = keepOutcome(trial, { storedMs, baselineMs: session.baselineMs });
+        return { ok: derived.completed, ...derived, baselineMs: session.baselineMs, storedMs };
       } finally {
         await cdpSession(fresh, page)
           .then((cdp) => clearOrigin(cdp, new URL(origin).origin))
