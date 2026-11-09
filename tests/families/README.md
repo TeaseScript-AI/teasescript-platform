@@ -456,12 +456,16 @@ runner on `main`'s `src/` tree `a5af3a394`: a fill of every area at the runner's
 
 ## A generator
 
-A folder of `tests/families` that holds an `.mjs` file is an area: the check and the baselines find the areas by
-`sources.mjs`'s `generatorFolders`, the baselines adding the corpus fixture (`tools/corpus/fixture`), and the runner,
-the check and the baselines take every module in an area as a generator. A folder of data only is no area; a utility
-module stays outside the area folders, as `shadow-bind.mjs` does (#1786).
+A folder of `tests/families` that holds a generator is an area: the check and the baselines find the areas by
+`sources.mjs`'s `generatorFolders`, the baselines adding the corpus fixture (`tools/corpus/fixture`). An area's
+generators are its top-level `.mjs` files; an area with none there holds groups, one level of subfolders, whose top-level
+`.mjs` files are its generators (`generatorFiles`, which the runner, the check and the baselines share). A group's own
+subfolders are never read, nor an area's subfolders beside a top-level generator, so `property/`'s tool modules are no
+generators. A folder of data only is no area; a utility module stays outside the areas and their groups, as
+`shadow-bind.mjs` does (#1786).
 
-A generator's id is its `id` export, else its file name, `.mjs` included (`generatorsOf`). A source's place in a
+A generator's id is its `id` export, else its file name, `.mjs` included and its group left out (`generatorsOf`), so a
+generator moved into a group keeps its id. A source's place in a
 baseline, its area's PLAN, and the runner's records and stall index name the generator by its id, so a renamed generator that keeps its old file
 name as `export const id` and names it in its header line keeps every stored line and its area's PLAN; its `--work` and
 `--out` lines add `file`, the new name, which a stored line never holds. Two generators with one id are refused.
