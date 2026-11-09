@@ -6,12 +6,15 @@
 //   node tools/player-gate/report.mjs --phase r0|r1 [--json FILE] [--artifacts FILE]... RESULTS.jsonl...
 import { readFileSync, writeFileSync } from "node:fs";
 import { allCells, cellName, classify } from "./cells.mjs";
-import { deriveSample } from "./derive.mjs";
+import { deriveSample, UNVALIDATED } from "./derive.mjs";
 import { summarize } from "./lib/measure.mjs";
 
 const format = ({ n, median, min, max }) =>
   n === 0 ? "—" : `${round(median)} [${round(min)}–${round(max)}] (n=${n})`;
 const round = (value) => (Math.abs(value) >= 100 ? Math.round(value) : Math.round(value * 10) / 10);
+
+/** The issue that holds the declared gaps (`UNVALIDATED`) until they are validated. */
+const GAP_ISSUE = "#2122";
 
 /** What a reader needs beside a scenario's numbers. */
 const NOTES = {
@@ -64,6 +67,9 @@ export function buildReport(rows, phase, artifacts = []) {
   const incomplete = [];
   const excluded = [];
   const summary = {};
+  // Cells outside the invariant (`UNVALIDATED`): their numbers print apart, never in `summary` or the comparison.
+  const unvalidatedLines = [];
+  const unvalidated = {};
   for (const cell of allCells()) {
     const decision = classify(cell, phase);
     const name = cellName(cell);
@@ -100,15 +106,19 @@ export function buildReport(rows, phase, artifacts = []) {
         ),
       ),
     ];
-    lines.push(
-      `## ${name}`,
+    const gap = UNVALIDATED[cell.scenario] ?? null;
+    const out = gap === null ? lines : unvalidatedLines;
+    const table = {};
+    if (gap === null) summary[name] = table;
+    else unvalidated[name] = table;
+    out.push(
+      `## ${name}${gap === null ? "" : " (unvalidated)"}`,
       "",
-      `${data.length} samples, all validated. ${conditions.join(" | ")}`,
+      `${data.length} samples, ${gap === null ? "all validated" : `outside the invariant (${gap})`}. ${conditions.join(" | ")}`,
       "",
     );
-    if (NOTES[cell.scenario]) lines.push(NOTES[cell.scenario], "");
-    lines.push("| Number | Value | Unit |", "| --- | --- | --- |");
-    summary[name] = {};
+    if (NOTES[cell.scenario]) out.push(NOTES[cell.scenario], "");
+    out.push("| Number | Value | Unit |", "| --- | --- | --- |");
     for (const arm of arms)
       for (const [index, { label, unit }] of derived[0].values.entries()) {
         const named = arm === null ? label : `${arm} probe: ${label}`;
@@ -117,8 +127,8 @@ export function buildReport(rows, phase, artifacts = []) {
             .filter((sample) => arm === null || sample.row.result.arm === arm)
             .map((sample) => sample.values[index].value),
         );
-        summary[name][named] = value;
-        lines.push(`| ${named} | ${format(value)} | ${unit} |`);
+        table[named] = value;
+        out.push(`| ${named} | ${format(value)} | ${unit} |`);
       }
     // The byte page's retries, where the bytes are: how many attempts the cell discarded in all.
     const retry = derived[0].values.findIndex(({ label }) =>
@@ -126,14 +136,29 @@ export function buildReport(rows, phase, artifacts = []) {
     );
     if (retry !== -1) {
       const total = derived.reduce((sum, sample) => sum + (sample.values[retry].value ?? 0), 0);
-      summary[name]["byte pages discarded, in all"] = total;
-      lines.push(
+      table["byte pages discarded, in all"] = total;
+      out.push(
         "",
         `Byte pages discarded and loaded again: ${total} over ${derived.length} samples.`,
       );
     }
-    lines.push("");
+    out.push("");
   }
+  // The cells outside the invariant, apart from the headline, then the gaps they declare.
+  lines.push(
+    "## Unvalidated cells",
+    "",
+    "Outside the headline and the R0 comparison (the declared gaps below).",
+    "",
+    ...(unvalidatedLines.length === 0 ? ["None with samples.", ""] : unvalidatedLines),
+    "## Declared gaps",
+    "",
+    ...Object.entries(UNVALIDATED).map(
+      ([scenario, gap]) =>
+        `- \`${scenario}\` (every required cell): ${gap}. ${GAP_ISSUE}: the label is lifted (these derivations validated under the kit's invariant in docs/TESTING.md) before the activation PR's R1 run, since the gate's decision is R1's.`,
+    ),
+    "",
+  );
   const files = artifactLines(artifacts);
   lines.push(...files.lines);
   if (!files.complete) incomplete.push("- artifacts: no inventory given");
@@ -147,7 +172,13 @@ export function buildReport(rows, phase, artifacts = []) {
     ...excluded,
     "",
   );
-  return { text: lines.join("\n"), summary, complete: incomplete.length === 0, incomplete };
+  return {
+    text: lines.join("\n"),
+    summary,
+    unvalidated,
+    complete: incomplete.length === 0,
+    incomplete,
+  };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

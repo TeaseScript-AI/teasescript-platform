@@ -595,3 +595,34 @@ test("clearing the run's origins attempts each origin and the cache after an ear
   );
   assert.deepEqual(sent, ["http://localhost:1", "http://localhost:2", "Network.clearBrowserCache"]);
 });
+
+test("an unvalidated cell's numbers stay out of the headline summary, and its gap is declared with its issue", () => {
+  const cell = { scenario: "keepHandler", engine: "chromium" };
+  const report = buildReport(
+    [
+      row(cell, true, {
+        outcome: "completed",
+        scope: "s",
+        baselineMs: 5,
+        lifecycle: [{ type: "visibilitychange", t: 100, visibility: "hidden" }],
+        transactions: [
+          {
+            start: 200,
+            end: 300,
+            outcome: "complete",
+            puts: [{ store: "sessions", scope: "s", observedMs: 9 }],
+          },
+        ],
+      }),
+    ],
+    "r0",
+    ARTIFACTS,
+  );
+  const named = name({ scenario: "keepHandler" });
+  assert.ok(!(named in report.summary));
+  assert.ok(named in report.unvalidated);
+  assert.match(
+    report.text,
+    /## Declared gaps[\s\S]*`keepHandler` \(every required cell\): R5-02.*#2122.*before the activation PR's R1 run/u,
+  );
+});

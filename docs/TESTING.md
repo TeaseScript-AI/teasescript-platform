@@ -979,7 +979,9 @@ real engine Worker entry and the in-process backend below the Player. Playwright
   excluded with its reason. The kit's one completeness invariant (`derive.mjs`): every required field of a cell
   derives from records that passed the shared validation (each required interval present and in order, lifecycle
   evidence where a trial needs it, a counted turn's feedback present), and a sample that fails it makes its cell
-  incomplete, never a value in a median. The byte page may be loaded twice, cold, when CDP leaves a request open on the
+  incomplete, never a value in a median. It covers every scenario but those in `UNVALIDATED`: their cells are
+  labelled `unvalidated`, printed apart from the headline and the R0 comparison, and listed as declared gaps
+  (#2122), to be validated before the activation PR's R1 run. The byte page may be loaded twice, cold, when CDP leaves a request open on the
   first (each cell shows how many were discarded); the timing page never is. A required cell without samples (for `aa`, without both arms) or with a
   failing one, or no artifact inventory, makes the report incomplete (exit 1).
 - `artifacts.mjs` lists a build's files with raw, gzip and brotli sizes, eager, lazy or Worker; `inputs.mjs` writes the

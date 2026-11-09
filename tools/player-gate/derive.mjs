@@ -500,11 +500,27 @@ const diagnosticRtt = (result, page, op) => diagnosticRequest(result, page, op)?
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
 /**
+ * The scenarios whose cells the invariant does not cover (orchestrator 2's bound after Sol code r5): their intervals
+ * or lifecycle outcomes are derived without the endpoint or evidence validation the invariant requires. Their cells are
+ * `unvalidated`: reported apart, out of the headline and the R0 comparison, and listed as declared gaps.
+ */
+export const UNVALIDATED = {
+  bridge:
+    "R5-01: request round trips, the Worker's start, handling and delivery subtract unvalidated endpoints",
+  sessionInstrumented:
+    "R5-01: the diagnostic round trips and Worker side subtract unvalidated endpoints",
+  taps: "R5-01: tap delay and cadence subtract unvalidated endpoints",
+  bridgeTaps: "R5-01: tap delay and cadence subtract unvalidated endpoints",
+  keepHandler: "R5-02: an empty lifecycle yields an outcome instead of no evidence",
+  keepCompletion: "R5-02: an empty lifecycle yields an outcome instead of no evidence",
+};
+
+/**
  * The kit's one completeness invariant (`docs/TESTING.md` "The L5 activation gate kit"): every required field of a cell
  * derives from records that passed this shared validation, each required interval present and in order, the lifecycle
  * evidence there where a trial needs it, a counted turn's feedback present; a sample that fails it makes its cell
- * incomplete and is never a value in a median. Returns `row`'s values for `cell`, each applicable field with its label
- * and unit, and the problems that failed the invariant.
+ * incomplete and is never a value in a median. It holds for every scenario but those in `UNVALIDATED`. Returns `row`'s
+ * values for `cell`, each applicable field with its label and unit, and the problems that failed the validation.
  */
 export function deriveSample(cell, row) {
   const problems = [];
