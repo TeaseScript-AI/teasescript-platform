@@ -11,7 +11,10 @@ import {
 } from "../../src/runtime/values/serializable-values.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { narrower } from "../../src/type-inference/core/check-result/kept-checks.js";
-import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../../src/type-inference/core/budget.js";
 import { inMode, MODES } from "../helpers/type-core-oracles.js";
 import { runGlobals } from "../helpers/type-core-route.js";
 
@@ -238,7 +241,7 @@ test("a stopped program whose checks its complete store check or a typed reader 
       assert.ok(inMode(mode, () => compiled(source, demand)).plan !== null, JSON.stringify(mode));
 });
 
-test("a stopped mark whose completion result was lost is kept by a complete store check that carries it: the plan publishes and fails at the store (#2080)", () => {
+test("a stopped mark whose completion result was lost or is absent is kept by a complete store check that carries it: the plan publishes and fails at the store (#2080)", () => {
   // (in source order with sharing, demands 1 and 22: the completion's results are lost, and `t`'s complete store checks,
   // from the written type `t` copies, carry them; the plan publishes and rejects `[["bad"]]` at its store, Codex r2)
   const source =
@@ -251,6 +254,14 @@ test("a stopped mark whose completion result was lost is kept by a complete stor
     const at = source.indexOf('[["bad"]]');
     assert.equal(run.failure, `TSR058@${at}:${at + '[["bad"]]'.length}`, `demand ${demand}`);
   }
+  // (at a settled work stop no completion runs: the stopped marks have no result, and the same store checks carry them;
+  // Codex r3)
+  const stopped = inMode(MODES[0]!, () => withTestAllowance(1536, () => compiled(source, 1)));
+  assert.ok(stopped.plan !== null);
+  const run = runGlobals(stopped.plan, {});
+  assert.equal(said(run), false);
+  const at = source.indexOf('[["bad"]]');
+  assert.equal(run.failure, `TSR058@${at}:${at + '[["bad"]]'.length}`);
 });
 
 test("a stopped mark is kept by its part checks only where each carries the completed contract there: a weaker element declines (#2080)", () => {
