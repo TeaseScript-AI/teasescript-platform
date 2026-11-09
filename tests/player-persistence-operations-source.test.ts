@@ -22,19 +22,41 @@ import { OWNERSHIP_MODES, type Operated, type Ownership } from "./helpers/plan-j
  * lists is outside the check's reach, as is a binding it cannot resolve lexically.
  */
 
-/** The host's modules, under this folder: the composable and every module of its `session/` folder and subfolders. */
+/** The host's modules, under this folder: the composable and its `session/` folder's modules but `NOT_HOST`. */
 const HOST_ROOT = "player/vue/src";
 const MAIN = "session/usePlayerSession.ts";
 /** The rewind's owner, whose adoption replaces the saved values. */
 const REWIND = "session/useSessionRewind.ts";
-const HOST_MODULES = () => [
-  MAIN,
-  ...readdirSync(resolve(process.cwd(), HOST_ROOT, "session"), { recursive: true })
-    .map(String)
-    .filter((name) => name.endsWith(".ts"))
-    .sort()
-    .map((name) => `session/${name}`),
-];
+/** Modules in `session/` this check does not read: the scene clock, the wake lock, runtime input and the rewind owner. */
+const NOT_HOST = new Set([
+  "rewindOwner.ts",
+  "runtime-input.ts",
+  "useRuntimeSceneClock.ts",
+  "useScreenWakeLock.ts",
+]);
+const HOST_MODULES = () => {
+  const modules = [
+    MAIN,
+    ...readdirSync(resolve(process.cwd(), HOST_ROOT, "session"), { recursive: true })
+      .map(String)
+      .filter((name) => name.endsWith(".ts") && `session/${name}` !== MAIN && !NOT_HOST.has(name))
+      .sort()
+      .map((name) => `session/${name}`),
+  ];
+  // A move that takes a persistence host out of the scan fails here instead of checking less.
+  for (const host of [
+    "useKeptSession",
+    "useSavedDataTransfer",
+    "useSavedValues",
+    "useSessionTransfer",
+    "useStorageRoute",
+  ])
+    assert.ok(
+      modules.includes(`session/persistence/${host}.ts`),
+      `the scan reads session/persistence/${host}.ts`,
+    );
+  return modules;
+};
 
 /** The persistence operations, by name; any other function of the host that takes an ownership is checked too. */
 const OPERATIONS = [

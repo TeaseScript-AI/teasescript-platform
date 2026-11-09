@@ -123,7 +123,15 @@ test("every storage edit a held session takes passes the edit's mark: one adapte
 test("the main side writes no marks: the composable's views of them are computed from the shown session", () => {
   const folder = new URL("../../player/vue/src/", import.meta.url);
   const writers: string[] = [];
-  for (const file of readdirSync(folder).filter((name) => /\.(ts|vue)$/u.test(name)))
+  const files = readdirSync(folder, { recursive: true })
+    .map(String)
+    .filter((name) => /\.(ts|vue)$/u.test(name));
+  // A move that takes the composable out of the scan fails here instead of reading nothing.
+  assert.ok(
+    files.includes("session/usePlayerSession.ts"),
+    "the scan reads session/usePlayerSession.ts",
+  );
+  for (const file of files)
     for (const [index, line] of readFileSync(new URL(file, folder), "utf8").split("\n").entries())
       if (/\b(debugEdits|rewound)\.value\s*(=[^=]|\?\?=|\|\|=|&&=)/u.test(line))
         writers.push(`${file}:${index + 1}: ${line.trim()}`);
