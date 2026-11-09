@@ -11,8 +11,8 @@
 //    entries take and give hold no raw bridge, session, ref, callable or accessor in a data position (index-signature
 //    values included), and no carrier the declarations do not name.
 // 4. Discovery: each work entry's call sites, awaits, callbacks and hooks, by the symbol each call resolves to, and
-//    those of every work helper it calls or holds, followed by symbol once per entry; a call to anything but the
-//    work's own protocol, its own functions or a promise's reactions fails.
+//    those of every work helper it calls or holds (parameter defaults included), followed by symbol once per entry; a
+//    call to anything but the work's own protocol, its own functions or a promise's reactions fails.
 // 5. Callback boundaries: outside the adapter, a function value is a local `const`, or a reaction, handler or body passed
 //    to a promise or a protocol operation. (`no-floating-promises` with `ignoreVoid: false` owns the chains' ends.)
 //
@@ -455,7 +455,7 @@ function discover({ checker, rel, path, file, declared, refuse }, sites) {
         walked.add(helper);
         walk(helper, `${prefix}${label(node, fn)} > ${name}`);
       };
-      visit(fn.body, (node) => {
+      const inspect = (node) => {
         if (ts.isAwaitExpression(node))
           site(node, "await", node.expression.getText(file).split("(")[0]);
         if (isFunction(node)) site(node, "callback");
@@ -485,7 +485,11 @@ function discover({ checker, rel, path, file, declared, refuse }, sites) {
           return refuse("discovery", node, `unknown edge ${node.expression.getText(file)}`);
         site(node, kind.kind, kind.name);
         if (kind.kind === "work" || kind.kind === "local") follow(node, declaration, kind.name);
-      });
+      };
+      // A helper's parameter defaults run as it is called: they are its own, as its body is.
+      for (const parameter of fn.parameters)
+        if (parameter.initializer !== undefined) visit(parameter.initializer, inspect);
+      visit(fn.body, inspect);
     };
     walk(statement, "");
   }

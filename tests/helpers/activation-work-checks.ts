@@ -201,6 +201,7 @@ const SITES: readonly string[] = [
   `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt: page StopPage.isCurrent`,
   `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt: reaction then`,
   `${WORK}stop.ts stopLateStart > then:callback#1: callback`,
+  `${WORK}stop.ts stopLateStart > then:callback#1: page stopLateStart:page.claimedLater`,
   `${WORK}stop.ts stopLateStart > then:callback#1: page stopLateStart:page.haltObsolete`,
   `${WORK}stop.ts stopLateStart > then:callback#1: page stopLateStart:page.target`,
   `${WORK}stop.ts stopLateStart > then:callback#1: work stopAt`,
@@ -305,12 +306,14 @@ export function registerActivationWorkChecks(census: () => Shared): void {
           [
             STOP,
             `let calls = 0;\nvoid import("./target.js");\n` +
-              `function stamp(): number {\n  return Date.now();\n}\n${STOP}`,
+              `function stamp(): number {\n  return Date.now();\n}\n` +
+              `function later(value = performance.now()): number {\n  return value;\n}\n` +
+              `const soon = (value = Math.random()) => value;\n${STOP}`,
           ],
           [
             "  page.haltUntil(stop);\n  // The halt",
             "  calls += 1;\n  queueMicrotask(commit);\n  setTimeout(() => page.endHalting(stop));\n" +
-              "  void stamp();\n  page.haltUntil(stop);\n  // The halt",
+              "  void stamp();\n  void later();\n  void soon();\n  page.haltUntil(stop);\n  // The halt",
           ],
         ]),
         patched("target.ts", [
@@ -355,6 +358,9 @@ export function registerActivationWorkChecks(census: () => Shared): void {
       ["stop.ts", "callback boundary"],
       // A helper the entry calls is walked as the entry's own.
       ["stop.ts", "unknown edge Date.now"],
+      // So are its parameter defaults, of a function and of an arrow.
+      ["stop.ts", "unknown edge performance.now"],
+      ["stop.ts", "unknown edge Math.random"],
       ["target.ts", "value import PlayerBridge from player/runtime/player-bridge.ts"],
       ["target.ts", "module initialization"],
       ["target.ts", "callable in data: SessionSnapshot.stop"],
