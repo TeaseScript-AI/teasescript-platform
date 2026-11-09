@@ -69,8 +69,9 @@ fail when the script runs.
 
 **Changed by the owner** (2026-10-28) and built as [r4.154](#r4-154) and r4.167: a field that exists only through whole
 copies is checked where the copy meets the place. TSV044 comes at a list, set or dict literal of copies whose property
-types conflict, and the error at the store that brings the other kind into a place receiving whole copies. A conflict
-reached only through a projection or a step-adding cycle keeps the first-read answer.
+types conflict, and the error at the store that brings the other kind into a place receiving whole copies. An acyclic
+projection (`x.inner`) counts as a whole copy held by reference; only a conflict reached through a step-adding cycle
+(`a.inner = a`, `a = a.inner`) keeps the first-read answer.
 
 ## Revisions
 
@@ -228,11 +229,13 @@ not follow can only under-offer, never offer an invalid form.
 
 ### r4-164
 
-**Shared admission summaries wait for their lifecycle contract.**
+**Shared admission summaries wait for their query bound and their lifecycle contract.**
 
 **Rule.** Admission's shared path cursors may be built on their own. Its shared structure summaries (suffix folds,
-prefix continuations) are built only with their lifecycle contract: who owns a demand, how it is charged, provisional
-publication, the component restart and invalidation at a stop. Recursive G4 is a separately reviewed bounded prototype.
+prefix continuations) are built only with both of these:
+- a query bound proved by a count of the states over intermediate wrapper projections;
+- their lifecycle contract: who owns a demand, how it is charged, provisional publication, the component restart and
+  invalidation at a stop. Recursive G4 is a separately reviewed bounded prototype.
 Any change to the sharing-off mode's answers is a ruling with evidence, and the four modes stay equal in answers.
 
 **Reason.** The design review found that a summary shared across demands needs that contract to stay sound under the
@@ -302,7 +305,9 @@ pass: cursors or text. The choice comes from a frozen structural wrapper shape, 
 - Labels are a deferred recipe.
 
 The early selector's equality criterion is the build's acceptance:
-- publications, admitted types, deciders, plans, routes and provenance are exactly unchanged;
+- publications, admitted types, deciders, plans, routes and provenance are exactly unchanged where the work suffices;
+  a publication may change only through a budget stop, with its marks and runtime checks, never as a changed unstopped
+  answer, a lost unmarked check, a spurious error or a stale proof;
 - each family's choice is recorded once per pass, with its cost by producer and counter;
 - moved work is accounted beside added work;
 - every stop that moves at the default allowances is reported, with its cause.
@@ -377,6 +382,8 @@ Only the producers where a written type becomes items set it. Marks form a latti
 then one spelling, then mixed. One rule, `inItsOrder`, orders every list of kinds:
 - the written spelling, where exactly one spelling covers every concrete kind in the list;
 - the table order otherwise.
+
+One list is outside the rule: a warning's `fits` stays in fixed table order.
 
 The spelling survives every transport where items are compared, replayed or restored.
 
