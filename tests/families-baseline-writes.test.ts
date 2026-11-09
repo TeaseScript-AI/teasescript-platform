@@ -135,6 +135,7 @@ import { unlink } from "node:fs/promises";
 import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
 import { execSync, fork, spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { outside, pathOf } from "./baselines.mjs";
 const { appendFileSync } = everything;
 const renamed = promisify(fs.rename);
@@ -167,6 +168,11 @@ export function climb(root) {
   spawn("flock", [root, "-c", "true"]);
   spawn("bash", ["-c", 'touch "$0"', root], { stdio: "ignore" });
   fork("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" });
+  fork("bash", ["-c", 'exec 9< "$0" && flock 9 && echo held && exec cat > /dev/null', root], { stdio: "ignore" });
+  fork(process.execPath, ["-p", "Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 2 ** 20)"], {
+    encoding: "utf8",
+  });
+  spawn(fileURLToPath(import.meta.url), ["--child"], { stdio: "ignore" });
   execSync("touch notes");
   return [rm, Worker];
 }
@@ -228,8 +234,12 @@ if (process.env.NEVER) nodeFs.writeFileSync(process.env.NEVER, "");
           "eval",
           "spawn",
           "spawn",
-          // (a HEAD read's arguments to another child process: `fork` runs a module named git)
+          // (each allowed form's arguments with another function: `fork` runs a module named git or bash, or the Node
+          // binary as one; the runner's own module by `spawn`, not `fork`)
           "fork",
+          "fork",
+          "fork",
+          "spawn",
           "execSync",
           // (a creation that climbs out of its baseline)
           "rmSync",
