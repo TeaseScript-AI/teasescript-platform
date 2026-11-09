@@ -939,3 +939,87 @@ test(
     assert.match(unconfigured.out, /bindings differing 0; refused 0/u);
   },
 );
+
+test(
+  "every other module reference is refused by name, and a changed file the check does not parse is listed",
+  { timeout: 60_000 },
+  () => {
+    // each file moved unchanged into `src/nested/`, its family named: only the module references can fail
+    const run = (files) => {
+      const before = { "package.json": '{ "type": "module" }\n' };
+      const after = { ...before };
+      const map = {};
+      for (const [name, text] of Object.entries(files)) {
+        before[`src/${name}`] = text;
+        after[`src/${name}`] = null;
+        after[`src/nested/${name}`] = text;
+        map[`src/${name}`] = `src/nested/${name}`;
+      }
+      const move = moveOf(before, after);
+      try {
+        return move.run("--renames", move.renames(map));
+      } finally {
+        move.done();
+      }
+    };
+    const refusedAt = (out, file, line, what) =>
+      assert.match(
+        out,
+        new RegExp(
+          `refused: src/nested/${file.replaceAll(".", "\\.")}:${line} \\(added\\) ".*": ${what}, a module reference the binding rule does not compare`,
+          "u",
+        ),
+      );
+    // (a) an `import` keyword outside a compared statement: a type import and a dynamic one; `import.meta` is none
+    const imports = run({
+      "a.ts": [
+        'export type Result = import("./dep.js").RecordType;',
+        'export const load = async () => await import("./dep.js");',
+        "export const here = import.meta.url;",
+        "",
+      ].join("\n"),
+    });
+    assert.equal(imports.status, 1, imports.out);
+    refusedAt(imports.out, "a.ts", 1, "an `import`");
+    refusedAt(imports.out, "a.ts", 2, "an `import`");
+    assert.match(imports.out, /refused 4/u);
+    // (b) a `require` identifier
+    const required = run({
+      "a.cjs": 'const selected = require("./dep.cjs");\nmodule.exports = selected;\n',
+    });
+    assert.equal(required.status, 1, required.out);
+    refusedAt(required.out, "a.cjs", 1, "a `require`");
+    // (c) the parser's triple-slash reference directives
+    const directives = run({
+      "a.ts":
+        '/// <reference path="./dep.d.ts" />\n/// <reference types="./dep.d.ts" />\n/// <reference lib="es2024" />\nexport const value = 1;\n',
+    });
+    assert.equal(directives.status, 1, directives.out);
+    refusedAt(directives.out, "a.ts", 1, "a `/// <reference path>`");
+    refusedAt(directives.out, "a.ts", 2, "a `/// <reference types>`");
+    refusedAt(directives.out, "a.ts", 3, "a `/// <reference lib>`");
+    // (d) a comment, JSDoc included, holding `import(` or `@import`
+    const comments = run({
+      "a.js":
+        '/** @type {import("./dep.js").RecordType} */\nexport const value = null;\n/** @import { RecordType } from "./dep.js" */\n',
+    });
+    assert.equal(comments.status, 1, comments.out);
+    refusedAt(comments.out, "a.js", 1, "a comment's `import\\(`");
+    refusedAt(comments.out, "a.js", 3, "a comment's `@import`");
+    // a `.jsx` file is parsed
+    const jsx = run({
+      "a.jsx": 'export const element = <div>{await import("./dep.cjs")}</div>;\n',
+    });
+    assert.equal(jsx.status, 1, jsx.out);
+    refusedAt(jsx.out, "a.jsx", 1, "an `import`");
+    // a file the check does not parse is outside the rule, and listed
+    const unparsed = run({
+      "view.vue": '<script setup>\nimport Dep from "./dep.vue";\n</script>\n',
+    });
+    assert.equal(unparsed.status, 0, unparsed.out);
+    assert.match(
+      unparsed.out,
+      /not compared \(unparsed\): src\/view\.vue → src\/nested\/view\.vue/u,
+    );
+  },
+);

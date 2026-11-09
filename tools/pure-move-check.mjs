@@ -39,11 +39,19 @@
 // specifier; form 1 admits an import line's presence, this rule its content. A target the move relocates or adds
 // without a family in `--renames` fails, and the report names the flag. A relative specifier either side cannot
 // resolve, to no file or in a file whose configuration the tree does not establish (a config with an error, such as an
-// `extends` the tree does not hold, or a TypeScript file no config includes or none is above), is refused by name: reported unless a
-// declaration names its side and line, never passed; the move's compiler run is the witness for what the check
-// declines. A declared refusal, its line changed or not, is printed with the refusal reason it covers. One known class is
-// a config that `extends` an uncommitted package, which only an install supplies: `player/vue/tsconfig.json` extends
-// `@vue/tsconfig`, so every relative import in a file it owns is refused, and a move there declares those lines.
+// `extends` the tree does not hold, or a TypeScript file no config includes or none is above), is refused by name:
+// reported unless a declaration names its side and line, never passed; the move's compiler run is the witness for what
+// the check declines. A declared refusal, its line changed or not, is printed with the refusal reason it covers. One
+// known class is a config that `extends` an uncommitted package, which only an install supplies:
+// `player/vue/tsconfig.json` extends `@vue/tsconfig`, so every relative import in a file it owns is refused, and a move
+// there declares those lines.
+//
+// The bindings compared are those of import, re-export and import-equals statements. Every other module reference in a
+// changed file the check parses (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`) is refused by name the
+// same way, one per line: an `import` keyword outside those statements other than `import.meta` (a dynamic or type
+// import), a `require` identifier outside them, a triple-slash reference directive, or a comment (JSDoc included)
+// holding `import(` or `@import`. A changed file of any other type, `.vue` and `.html` among them, is outside the rule:
+// the report lists it as `not compared (unparsed)`, and `vue-tsc` and the move's compiler run are its witness.
 //
 // The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines, the
 // bindings differing and the refused specifiers.
@@ -61,7 +69,7 @@ import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
 import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
 
-const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/u;
+const PARSED = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
 // the resolver's root for a committed tree's paths
 const ROOT = "/tree/";
 export const RESIDUAL =
@@ -457,7 +465,9 @@ function treeResolver(ref, tree, folders, git) {
  * `{ type, path }`: `bare` with the specifier itself, compared by its spelling; `file`, a relative specifier resolved by
  * TypeScript's resolver over that side's committed tree (`resolver`: the file's configuration, its implied module format
  * and the specifier's own usage mode, `import` or `require`); `missing`, a relative one that resolves to no file; or
- * `refused`, a relative one in a file whose configuration the tree does not establish (`reason`).
+ * `refused`, a relative one in a file whose configuration the tree does not establish (`reason`). Every other module
+ * reference (outside the import, re-export and import-equals statements above) is a `reference` whose target is
+ * `refused`, one per line.
  */
 function bindingsOf(file, text, resolver) {
   if (!PARSED.test(file)) return [];
@@ -496,9 +506,11 @@ function bindingsOf(file, text, resolver) {
     };
   };
   const out = [];
+  const compared = new Set();
   for (const statement of source.statements) {
     const line = source.getLineAndCharacterOfPosition(statement.getStart(source)).line + 1;
     if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+      compared.add(statement);
       const specifier = statement.moduleSpecifier.text;
       const at = { kind: "import", target: resolve(statement.moduleSpecifier), line, specifier };
       const clause = statement.importClause;
@@ -530,6 +542,7 @@ function bindingsOf(file, text, resolver) {
       statement.moduleSpecifier &&
       ts.isStringLiteral(statement.moduleSpecifier)
     ) {
+      compared.add(statement);
       const specifier = statement.moduleSpecifier.text;
       const at = { kind: "re-export", target: resolve(statement.moduleSpecifier), line, specifier };
       const clause = statement.exportClause;
@@ -552,6 +565,7 @@ function bindingsOf(file, text, resolver) {
       ts.isExternalModuleReference(statement.moduleReference) &&
       ts.isStringLiteral(statement.moduleReference.expression)
     ) {
+      compared.add(statement);
       const specifier = statement.moduleReference.expression.text;
       out.push({
         kind: "import",
@@ -564,6 +578,70 @@ function bindingsOf(file, text, resolver) {
       });
     }
   }
+  // every other module reference is refused by name, one per line: an `import` keyword (not `import.meta`) or a
+  // `require` identifier outside a compared statement, a triple-slash reference directive, or a comment (JSDoc
+  // included) holding `import(` or `@import`
+  const lines = new Set();
+  const refuse = (at, shown, what) => {
+    const line = source.getLineAndCharacterOfPosition(at).line + 1;
+    if (lines.has(line)) return;
+    lines.add(line);
+    const specifier = shown.split("\n")[0].slice(0, 60);
+    out.push({
+      kind: "reference",
+      target: {
+        type: "refused",
+        path: specifier,
+        reason: `${what}, a module reference the binding rule does not compare`,
+      },
+      line,
+      specifier,
+      name: "",
+      as: "",
+      typeOnly: false,
+    });
+  };
+  for (const [list, what] of [
+    [source.referencedFiles, "a `/// <reference path>`"],
+    [source.typeReferenceDirectives, "a `/// <reference types>`"],
+    [source.libReferenceDirectives, "a `/// <reference lib>`"],
+  ])
+    for (const directive of list) refuse(directive.pos, directive.fileName, what);
+  const comments = new Set();
+  const visit = (node, inCompared) => {
+    // a JSDoc node's text is a comment's, read as one below
+    if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode)
+      return;
+    const within = inCompared || compared.has(node);
+    if (node.kind > ts.SyntaxKind.LastToken) {
+      for (const child of node.getChildren(source)) visit(child, within);
+      return;
+    }
+    for (const range of [
+      ...(ts.getLeadingCommentRanges(text, node.pos) ?? []),
+      ...(ts.getTrailingCommentRanges(text, node.end) ?? []),
+    ]) {
+      if (comments.has(range.pos)) continue;
+      comments.add(range.pos);
+      const found = /import\(|@import/u.exec(text.slice(range.pos, range.end));
+      if (found !== null)
+        refuse(
+          range.pos + found.index,
+          text.slice(range.pos + found.index, range.end),
+          `a comment's \`${found[0]}\``,
+        );
+    }
+    if (within) return;
+    if (node.kind === ts.SyntaxKind.ImportKeyword && !ts.isMetaProperty(node.parent))
+      refuse(node.getStart(source), node.parent.getText(source), "an `import`");
+    else if (ts.isIdentifier(node) && node.text === "require")
+      refuse(
+        node.getStart(source),
+        (ts.isCallExpression(node.parent) ? node.parent : node).getText(source),
+        "a `require`",
+      );
+  };
+  visit(source, false);
   return out;
 }
 
@@ -649,7 +727,7 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
 
 /**
  * The check of the change from the merge base of `base` and `HEAD`: `{ mergeBase, unadmitted, declared, stale, refused,
- * covered, bindings, renames, counts }`.
+ * covered, unparsed, bindings, renames, counts }`.
  */
 export function checkMove(
   base,
@@ -663,6 +741,13 @@ export function checkMove(
   if (binary.length > 0)
     throw new CannotRun(
       `pure-move-check: a binary change cannot be inspected: ${binary.map((change) => change.header).join("; ")}`,
+    );
+  const unparsed = files
+    .filter((change) => !PARSED.test(change.file ?? change.old))
+    .map((change) =>
+      change.old !== null && change.file !== null && change.old !== change.file
+        ? `${change.old} → ${change.file}`
+        : (change.file ?? change.old),
     );
   const declarations = declare === null ? [] : declarationsOf(declare);
   const used = new Set();
@@ -731,6 +816,7 @@ export function checkMove(
     stale,
     refused,
     covered,
+    unparsed,
     bindings,
     renames: renames !== null,
     counts,
@@ -739,8 +825,18 @@ export function checkMove(
 
 /** The report's lines and exit status for `result`. */
 export function reportOf(base, result) {
-  const { mergeBase, unadmitted, declared, stale, refused, covered, bindings, renames, counts } =
-    result;
+  const {
+    mergeBase,
+    unadmitted,
+    declared,
+    stale,
+    refused,
+    covered,
+    unparsed,
+    bindings,
+    renames,
+    counts,
+  } = result;
   const out = [`pure-move check of ${base}..HEAD (merge base ${mergeBase.slice(0, 12)}):`];
   for (const u of unadmitted) out.push(`  unadmitted: ${u.file}:${u.line} (${u.side}): ${u.text}`);
   for (const s of stale)
@@ -756,6 +852,7 @@ export function reportOf(base, result) {
     out.push(
       `  refused: ${r.file}:${r.line} (${r.side}) "${r.specifier}": ${r.reason}; declare it, the move's compiler run its witness`,
     );
+  for (const name of unparsed) out.push(`  not compared (unparsed): ${name}`);
   for (const b of bindings.differing)
     out.push(
       `  binding only ${b.side}: ${b.file}:${b.line} ${b.kind} from "${b.specifier}": ${b.typeOnly ? "type " : ""}${b.name || "(side effect)"}${b.as !== b.name ? ` as ${b.as}` : ""}`,
