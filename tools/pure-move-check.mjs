@@ -1,7 +1,7 @@
 // Whether a committed change is a pure move: every line it adds or removes is one Git marks as moved, or one of a closed
 // list of admitted forms, or a line the change declares with its reason.
 //
-//   node tools/pure-move-check.mjs BASE [--declare FILE] [PATH…]
+//   node tools/pure-move-check.mjs BASE [--declare FILE] [--renames FILE] [PATH…]
 //
 // The change is the one from `git merge-base BASE HEAD` to `HEAD`, both Git's committed trees (commit first); PATHs
 // limit it. Git's moved-line detection is read once over the whole change (`moved-lines.mjs`), so a block moved from
@@ -25,16 +25,27 @@
 // declaration must match one; each is printed with its reason. Declarations come from that file alone, and no flag
 // admits a line class.
 //
-// The report always ends with the change's shape: the moved lines, the admitted lines by form and the declared lines.
+// And a pure move keeps every import's binding: over the change's files, the set of bindings before equals the set
+// after, a binding being one imported or re-exported name with its target, its local or exported name and whether it is
+// type-only (a default import's name `default`, a namespace's `*`). A relative specifier's target is the file it resolves
+// to on that side; a target the move relocated is keyed by its family, from `--renames FILE`, the move sweep's map
+// (`{ "renames": { "old": "new" | ["new", …] } }`, old and new paths joined where they share one), and the bindings
+// within one family (a split's files importing each other) are left out. A binding on one side only fails, with its file,
+// line and specifier; form 1 admits an import line's presence, this rule its content. A target the move relocates or
+// adds without a family in `--renames` fails, and the report names the flag.
+//
+// The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines and
+// the bindings differing.
 //
 // The residual is Git's: its move detection is heuristic, and a moved block below its size threshold (20 alphanumeric
 // characters) reads as added and removed. A failure on such a block is read by a person, not overridden.
 //
-// Exit status: 0 when every line is moved, admitted or declared; 1 when one is not (each printed with its file and
-// line); 2 when Git's output or the declarations cannot be read, a file name Git quotes, or a binary change, whose
+// Exit status: 0 when every line is moved, admitted or declared and no binding differs; 1 otherwise (each printed with
+// its file and line); 2 when Git's output or the declarations cannot be read, a file name Git quotes, or a binary change, whose
 // content the check cannot inspect.
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
 import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
@@ -171,33 +182,35 @@ function declarationsOf(path) {
   return entries;
 }
 
-/** The check of the change from the merge base of `base` and `HEAD`: `{ unadmitted, declared, stale, counts }`. */
-export function checkMove(base, { declare = null, paths = [], cwd = process.cwd() } = {}) {
-  const git = (...args) =>
-    execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-  const mergeBase = git("merge-base", base, "HEAD").trim();
-  const files = movedLinesOf(mergeBase, "HEAD", paths, cwd);
-  const binary = files.filter((change) => change.binary);
-  if (binary.length > 0)
-    throw new CannotRun(
-      `pure-move-check: a binary change cannot be inspected: ${binary.map((change) => change.header).join("; ")}`,
-    );
-  const declarations = declare === null ? [] : declarationsOf(declare);
-  const used = new Set();
-  const counts = { movedAdded: 0, movedRemoved: 0, declared: 0, unadmitted: 0 };
-  for (const form of FORMS) counts[form] = 0;
-  const unadmitted = [];
-  const declared = [];
-  const blob = (ref, file) => git("cat-file", "blob", `${ref}:${file}`);
+/**
+ * Each added or removed line of `files` (the changes `movedLinesOf` reads for `mergeBase`..`head`) that Git does not
+ * mark moved, with the form that admits it or `null`: `[entry, form, reason]`, `entry` `{ side, file, row, shape,
+ * added }`. `declaredFor(entry)` gives a declared line's reason, which comes before the forms. Also the moved lines'
+ * counts. Shared with `structure-report.mjs --moved`, so the forms have one home.
+ */
+export function verdictsOf(
+  mergeBase,
+  head,
+  files,
+  { cwd = process.cwd(), declaredFor = () => null } = {},
+) {
+  const blob = (ref, file) =>
+    execFileSync("git", ["cat-file", "blob", `${ref}:${file}`], {
+      cwd,
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+    });
+  const moved = { added: 0, removed: 0 };
   // removed lines Git does not mark moved where a declaration starts without `export`, by their text without
   // indentation, for form 2's pairing
   const unpairedRemoved = new Map();
   const rows = [];
   for (const change of files) {
+    if (change.binary) continue;
     const before = change.old === null ? null : shapeOf(change.old, blob(mergeBase, change.old));
-    const after = change.file === null ? null : shapeOf(change.file, blob("HEAD", change.file));
+    const after = change.file === null ? null : shapeOf(change.file, blob(head, change.file));
     for (const row of change.removedLines) {
-      if (row.moved) counts.movedRemoved += 1;
+      if (row.moved) moved.removed += 1;
       else {
         rows.push({ side: "removed", file: change.old, row, shape: before, added: false });
         if (before?.declarationStarts.get(row.line)?.exported === false) {
@@ -207,7 +220,7 @@ export function checkMove(base, { declare = null, paths = [], cwd = process.cwd(
       }
     }
     for (const row of change.addedLines) {
-      if (row.moved) counts.movedAdded += 1;
+      if (row.moved) moved.added += 1;
       else rows.push({ side: "added", file: change.file, row, shape: after, added: change.added });
     }
   }
@@ -227,19 +240,9 @@ export function checkMove(base, { declare = null, paths = [], cwd = process.cwd(
   };
   const verdicts = [];
   for (const entry of rows) {
-    const index = declarations.findIndex(
-      (d, at) =>
-        !used.has(at) &&
-        d.file === entry.file &&
-        d.side === entry.side &&
-        d.line === entry.row.line,
-    );
-    if (index !== -1) {
-      used.add(index);
-      verdicts.push([entry, "declared", declarations[index].reason]);
-      continue;
-    }
-    if (entry.shape?.importLines.has(entry.row.line)) verdicts.push([entry, "import"]);
+    const reason = declaredFor(entry);
+    if (reason !== null) verdicts.push([entry, "declared", reason]);
+    else if (entry.shape?.importLines.has(entry.row.line)) verdicts.push([entry, "import"]);
     else if (entry.row.text.trim() === "") verdicts.push([entry, "whitespace"]);
     else if (
       entry.side === "added" &&
@@ -261,6 +264,212 @@ export function checkMove(base, { declare = null, paths = [], cwd = process.cwd(
       verdict[1] = "export";
     }
   }
+  return { verdicts, moved };
+}
+
+/** The renames of `path`, the move sweep's map: `{ "renames": { "old": "new" | ["new", …] } }`, checked. */
+function renamesOf(path) {
+  let map;
+  try {
+    map = JSON.parse(readFileSync(path, "utf8")).renames;
+  } catch (error) {
+    throw new CannotRun(`pure-move-check: the renames ${path} cannot be read: ${error.message}`);
+  }
+  const ok =
+    map !== null &&
+    typeof map === "object" &&
+    !Array.isArray(map) &&
+    Object.values(map).every(
+      (to) =>
+        typeof to === "string" ||
+        (Array.isArray(to) && to.length > 0 && to.every((one) => typeof one === "string")),
+    );
+  if (!ok)
+    throw new CannotRun(`pure-move-check: ${path} is not { "renames": { old: new | [new, …] } }`);
+  return map;
+}
+
+/**
+ * The families a move's renames make: each old path with its new paths, joined where they share one (a merge), each
+ * path mapped to its family's name, the family's first old path in order.
+ */
+function familiesOf(renames) {
+  const parent = new Map();
+  const find = (path) => {
+    while (parent.has(path) && parent.get(path) !== path) path = parent.get(path);
+    return path;
+  };
+  const join = (a, b) => {
+    for (const path of [a, b]) if (!parent.has(path)) parent.set(path, path);
+    const [x, y] = [find(a), find(b)];
+    if (x !== y) parent.set(x < y ? y : x, x < y ? x : y);
+  };
+  for (const [old, to] of Object.entries(renames)) for (const path of [to].flat()) join(old, path);
+  const family = new Map();
+  for (const path of parent.keys()) family.set(path, find(path));
+  return family;
+}
+
+/**
+ * A blob's bindings: `{ kind, target, name, as, typeOnly, line, specifier }`, one per imported or re-exported name (a
+ * default import's name is `default`, a namespace's `*`, a side-effect import's empty), the target the specifier
+ * resolved against `exists` (a relative one; a bare one is itself).
+ */
+function bindingsOf(file, text, exists) {
+  if (!PARSED.test(file)) return [];
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const resolve = (specifier) => {
+    if (!specifier.startsWith(".")) return specifier;
+    const at = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
+    const tries = [at];
+    for (const [js, own] of [
+      [".js", [".ts", ".tsx"]],
+      [".mjs", [".mts"]],
+      [".cjs", [".cts"]],
+      [".jsx", [".tsx"]],
+    ])
+      if (at.endsWith(js)) for (const ext of own) tries.push(at.slice(0, -js.length) + ext);
+    tries.push(`${at}.ts`, `${at}.tsx`, `${at}/index.ts`, `${at}/index.js`);
+    return tries.find(exists) ?? at;
+  };
+  const out = [];
+  for (const statement of source.statements) {
+    const line = source.getLineAndCharacterOfPosition(statement.getStart(source)).line + 1;
+    if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+      const specifier = statement.moduleSpecifier.text;
+      const at = { kind: "import", target: resolve(specifier), line, specifier };
+      const clause = statement.importClause;
+      if (clause === undefined) out.push({ ...at, name: "", as: "", typeOnly: false });
+      else {
+        if (clause.name)
+          out.push({ ...at, name: "default", as: clause.name.text, typeOnly: clause.isTypeOnly });
+        const bindings = clause.namedBindings;
+        if (bindings && ts.isNamespaceImport(bindings))
+          out.push({ ...at, name: "*", as: bindings.name.text, typeOnly: clause.isTypeOnly });
+        else if (bindings)
+          for (const element of bindings.elements)
+            out.push({
+              ...at,
+              name: (element.propertyName ?? element.name).text,
+              as: element.name.text,
+              typeOnly: clause.isTypeOnly || element.isTypeOnly,
+            });
+      }
+    } else if (
+      ts.isExportDeclaration(statement) &&
+      statement.moduleSpecifier &&
+      ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      const specifier = statement.moduleSpecifier.text;
+      const at = { kind: "re-export", target: resolve(specifier), line, specifier };
+      const clause = statement.exportClause;
+      if (clause === undefined)
+        out.push({ ...at, name: "*", as: "*", typeOnly: statement.isTypeOnly });
+      else if (ts.isNamespaceExport(clause))
+        out.push({ ...at, name: "*", as: clause.name.text, typeOnly: statement.isTypeOnly });
+      else
+        for (const element of clause.elements)
+          out.push({
+            ...at,
+            name: (element.propertyName ?? element.name).text,
+            as: element.name.text,
+            typeOnly: statement.isTypeOnly || element.isTypeOnly,
+          });
+    }
+  }
+  return out;
+}
+
+/**
+ * The bindings on one side only: over `files`, the set of `{ kind, target, name, as, typeOnly }` before and after, a
+ * target the move relocated keyed by its family (`renames`), bindings within one family left out.
+ */
+function bindingDifferences(mergeBase, head, files, renames, git) {
+  const family = familiesOf(renames ?? {});
+  const keyOf = (target) => family.get(target) ?? target;
+  const listed = (ref) =>
+    new Set(git("ls-tree", "-r", "--name-only", ref).split("\n").filter(Boolean));
+  const trees = { before: listed(mergeBase), after: listed(head) };
+  const sides = { before: new Map(), after: new Map() };
+  const relocated = new Set();
+  for (const change of files) {
+    if (change.binary) continue;
+    for (const [side, ref, file] of [
+      ["before", mergeBase, change.old],
+      ["after", head, change.file],
+    ]) {
+      if (file === null) continue;
+      const text = git("cat-file", "blob", `${ref}:${file}`);
+      for (const binding of bindingsOf(file, text, (one) => trees[side].has(one))) {
+        const target = keyOf(binding.target);
+        if (target === keyOf(file) && family.has(file)) continue;
+        // a target that is there on one side only, with no family: a relocation the renames do not name
+        const other = side === "before" ? trees.after : trees.before;
+        if (
+          trees[side].has(binding.target) &&
+          !other.has(binding.target) &&
+          !family.has(binding.target)
+        )
+          relocated.add(binding.target);
+        const key = JSON.stringify([
+          binding.kind,
+          target,
+          binding.name,
+          binding.as,
+          binding.typeOnly,
+        ]);
+        if (!sides[side].has(key)) sides[side].set(key, { ...binding, file, target });
+      }
+    }
+  }
+  const only = (side, other) =>
+    [...sides[side]]
+      .filter(([key]) => !sides[other].has(key))
+      .map(([, binding]) => ({ side, ...binding }));
+  return {
+    differing: [...only("before", "after"), ...only("after", "before")],
+    relocated: [...relocated],
+  };
+}
+
+/** The check of the change from the merge base of `base` and `HEAD`: `{ unadmitted, declared, stale, bindings, counts }`. */
+export function checkMove(
+  base,
+  { declare = null, renames = null, paths = [], cwd = process.cwd() } = {},
+) {
+  const git = (...args) =>
+    execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  const mergeBase = git("merge-base", base, "HEAD").trim();
+  const files = movedLinesOf(mergeBase, "HEAD", paths, cwd);
+  const binary = files.filter((change) => change.binary);
+  if (binary.length > 0)
+    throw new CannotRun(
+      `pure-move-check: a binary change cannot be inspected: ${binary.map((change) => change.header).join("; ")}`,
+    );
+  const declarations = declare === null ? [] : declarationsOf(declare);
+  const used = new Set();
+  const declaredFor = (entry) => {
+    const index = declarations.findIndex(
+      (d, at) =>
+        !used.has(at) &&
+        d.file === entry.file &&
+        d.side === entry.side &&
+        d.line === entry.row.line,
+    );
+    if (index === -1) return null;
+    used.add(index);
+    return declarations[index].reason;
+  };
+  const { verdicts, moved } = verdictsOf(mergeBase, "HEAD", files, { cwd, declaredFor });
+  const counts = {
+    movedAdded: moved.added,
+    movedRemoved: moved.removed,
+    declared: 0,
+    unadmitted: 0,
+  };
+  for (const form of FORMS) counts[form] = 0;
+  const unadmitted = [];
+  const declared = [];
   for (const [entry, form, reason] of verdicts) {
     const at = { file: entry.file, line: entry.row.line, side: entry.side, text: entry.row.text };
     if (form === "declared") {
@@ -272,12 +481,19 @@ export function checkMove(base, { declare = null, paths = [], cwd = process.cwd(
     } else counts[form] += 1;
   }
   const stale = declarations.filter((_, at) => !used.has(at));
-  return { mergeBase, unadmitted, declared, stale, counts };
+  const bindings = bindingDifferences(
+    mergeBase,
+    "HEAD",
+    files,
+    renames === null ? null : renamesOf(renames),
+    git,
+  );
+  return { mergeBase, unadmitted, declared, stale, bindings, renames: renames !== null, counts };
 }
 
 /** The report's lines and exit status for `result`. */
 export function reportOf(base, result) {
-  const { mergeBase, unadmitted, declared, stale, counts } = result;
+  const { mergeBase, unadmitted, declared, stale, bindings, renames, counts } = result;
   const out = [`pure-move check of ${base}..HEAD (merge base ${mergeBase.slice(0, 12)}):`];
   for (const u of unadmitted) out.push(`  unadmitted: ${u.file}:${u.line} (${u.side}): ${u.text}`);
   for (const s of stale)
@@ -285,10 +501,18 @@ export function reportOf(base, result) {
       `  declaration matching no unmoved line: ${s.file}:${s.line} (${s.side}): ${s.reason}`,
     );
   for (const d of declared) out.push(`  declared: ${d.file}:${d.line} (${d.side}): ${d.reason}`);
+  for (const b of bindings.differing)
+    out.push(
+      `  binding only ${b.side}: ${b.file}:${b.line} ${b.kind} from "${b.specifier}": ${b.typeOnly ? "type " : ""}${b.name || "(side effect)"}${b.as !== b.name ? ` as ${b.as}` : ""}`,
+    );
+  if (bindings.differing.length > 0 && !renames && bindings.relocated.length > 0)
+    out.push(
+      `  the move relocates or adds ${bindings.relocated.join(", ")}: name its family with --renames FILE (the move sweep's map)`,
+    );
   out.push(
-    `shape: moved +${counts.movedAdded} -${counts.movedRemoved}; admitted ${FORMS.map((form) => `${form} ${counts[form]}`).join(", ")}; declared ${counts.declared}; unadmitted ${counts.unadmitted}`,
+    `shape: moved +${counts.movedAdded} -${counts.movedRemoved}; admitted ${FORMS.map((form) => `${form} ${counts[form]}`).join(", ")}; declared ${counts.declared}; unadmitted ${counts.unadmitted}; bindings differing ${bindings.differing.length}`,
   );
-  const failed = unadmitted.length > 0 || stale.length > 0;
+  const failed = unadmitted.length > 0 || stale.length > 0 || bindings.differing.length > 0;
   if (unadmitted.length > 0) out.push(RESIDUAL);
   return { lines: out, status: failed ? 1 : 0 };
 }
@@ -305,14 +529,26 @@ function main() {
     }
     args.splice(at, 2);
   }
+  const renamesAt = args.indexOf("--renames");
+  let renames = null;
+  if (renamesAt !== -1) {
+    renames = args[renamesAt + 1];
+    if (renames === undefined) {
+      console.error("pure-move-check: --renames needs a file");
+      process.exit(2);
+    }
+    args.splice(renamesAt, 2);
+  }
   const [base, ...paths] = args;
   if (base === undefined || base.startsWith("--")) {
-    console.error("usage: node tools/pure-move-check.mjs BASE [--declare FILE] [PATH…]");
+    console.error(
+      "usage: node tools/pure-move-check.mjs BASE [--declare FILE] [--renames FILE] [PATH…]",
+    );
     process.exit(2);
   }
   let result;
   try {
-    result = checkMove(base, { declare, paths });
+    result = checkMove(base, { declare, renames, paths });
   } catch (error) {
     if (!(error instanceof CannotRun || error instanceof MovedLinesUnreadable)) throw error;
     console.error(error.message);
