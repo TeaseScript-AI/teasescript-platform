@@ -3,6 +3,7 @@ import type { SerializableRuntimeValue } from "../../../src/runtime/values/seria
 import type { TypeTerm } from "../../../src/type-inference/graph.js";
 import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { asked } from "../../../src/type-inference/core/check-result/check-result.js";
 import { withTestDemandAllowance } from "../../../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../../../src/type-inference/core/consumers.js";
 import {
@@ -1059,13 +1060,31 @@ export function enclosingProblems(
       compileSourceWithBackend(c.source, { globals: ["hostValue"] }, CORE_BACKEND),
     );
   } catch (error) {
-    // (#2080 part 1: a settled stop whose stopped mark's completion result was lost declines, publishing nothing)
+    // (#2080 part 1: a settled stop whose stopped mark's completion result was lost or is absent declines at that mark,
+    // publishing nothing; any other decline is a problem: the gate's registry, read where the gate reads it, must hold a
+    // stopped obligation at the decline's site with no result or a lost one)
     if (
       !(error instanceof CandidateOutsideSlice) ||
       error.what !== "a store whose check was lost at the budget" ||
       phase !== "settled"
     )
       throw error;
+    const site = error.site;
+    const unresolved = capped(() =>
+      asked(analyseCore(request), (read) =>
+        (read.gated() ?? []).some(
+          ({ obligation, result }) =>
+            obligation.epoch === read.epoch &&
+            obligation.slot.role === "stopped" &&
+            obligation.slot.site.file === site.file &&
+            obligation.slot.site.start === site.start &&
+            obligation.slot.site.end === site.end &&
+            (result === null || result.state === "lost"),
+        ),
+      ),
+    );
+    if (!unresolved)
+      problems.push(`declined at ${site.start}:${site.end} with no lost or absent result there`);
     return {
       allowance,
       stops: stopped.map((path) => path.join(".")),

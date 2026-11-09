@@ -173,7 +173,8 @@ the budget" (`lostCheck`); (c) after a settled stop, a store whose required chec
 store whose check was lost at the budget" (`lostCheck`), a stopped decision's own marks among them (#2080): one whose
 completion result is complete owes nothing where the completion owes no check at its store (a declared claim, #2184),
 else it is kept only by a check that carries its contract, and one whose result was lost or is absent only by a complete
-store check; (d) after a stop before admission settled, `lostCheck` declines nothing. Production compiles with the legacy type checker until the switch, which none of these bounds or declines
+store check (a proved-open result, and a shape result not lost, need no further check at their extent, as for every
+obligation); (d) after a stop before admission settled, `lostCheck` declines nothing. Production compiles with the legacy type checker until the switch, which none of these bounds or declines
 govern.
 
 The requirement is #1526's
