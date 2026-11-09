@@ -59,20 +59,22 @@ function shapeOf(file, text) {
   const declarationStarts = new Map();
   if (!PARSED.test(file)) return { importLines, headerComments, declarationStarts };
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-  // each character's kind: 0 code or a string's text, 1 a comment the parser finds, 2 an import or re-export statement
+  // each character's kind: 0 code or a token's text (a string's, a template's, JSX text), 1 a comment, 2 an import or
+  // re-export statement. A comment is one wholly inside a token's leading trivia, between the token's full start and its
+  // start: every comment is some token's (the end of the file's included), and no token's own text is trivia. JSDoc
+  // nodes are not descended: their text is the trivia of the token they precede.
   const kind = new Uint8Array(text.length);
-  const seen = new Set();
-  const comments = (ranges) => {
-    for (const range of ranges ?? []) {
-      if (seen.has(range.pos)) continue;
-      seen.add(range.pos);
-      kind.fill(1, range.pos, range.end);
-    }
-  };
   const visit = (node) => {
-    comments(ts.getLeadingCommentRanges(text, node.getFullStart()));
-    comments(ts.getTrailingCommentRanges(text, node.getEnd()));
-    for (const child of node.getChildren(source)) visit(child);
+    if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode)
+      return;
+    const children = node.getChildren(source);
+    if (children.length > 0) {
+      for (const child of children) visit(child);
+      return;
+    }
+    const [from, to] = [node.getFullStart(), node.getStart(source)];
+    for (const range of ts.getLeadingCommentRanges(text, from) ?? [])
+      if (range.pos >= from && range.end <= to) kind.fill(1, range.pos, range.end);
   };
   visit(source);
   const starts = [0];
@@ -98,21 +100,26 @@ function shapeOf(file, text) {
       modifiers.length > 0 &&
       modifiers[0].kind === ts.SyntaxKind.ExportKeyword &&
       modifiers[0].getStart(source) === start;
+    // a line's declaration start is the statement that starts the line (its first non-whitespace character), no later one
+    const startsLine = text.slice(starts[lineOf(start) - 1], start).trim() === "";
     if (
-      ts.isFunctionDeclaration(statement) ||
-      ts.isClassDeclaration(statement) ||
-      ts.isInterfaceDeclaration(statement) ||
-      ts.isTypeAliasDeclaration(statement) ||
-      ts.isEnumDeclaration(statement) ||
-      ts.isVariableStatement(statement) ||
-      ts.isModuleDeclaration(statement)
+      startsLine &&
+      !declarationStarts.has(lineOf(start)) &&
+      (ts.isFunctionDeclaration(statement) ||
+        ts.isClassDeclaration(statement) ||
+        ts.isInterfaceDeclaration(statement) ||
+        ts.isTypeAliasDeclaration(statement) ||
+        ts.isEnumDeclaration(statement) ||
+        ts.isVariableStatement(statement) ||
+        ts.isModuleDeclaration(statement))
     )
       declarationStarts.set(lineOf(start), { exported: exportFirst });
+    // the header's boundary: the first statement that imports or exports, a decorated export's decorators included
     const exported =
       isImport ||
       ts.isExportDeclaration(statement) ||
       ts.isExportAssignment(statement) ||
-      exportFirst;
+      modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
     if (first === null && exported) first = lineOf(start);
   }
   for (let line = 1; line <= starts.length; line += 1) {

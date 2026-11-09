@@ -345,3 +345,85 @@ test(
     }
   },
 );
+
+test(
+  "a comment is only trivia: JSX text that looks like one never admits code",
+  { timeout: 60_000 },
+  () => {
+    const view = (importLine) =>
+      [
+        "const renderedViewWithLongIdentifier = <section>",
+        "/*",
+        "</section>;",
+        importLine,
+        "const commentEndMarker = '*/';",
+        "export {renderedViewWithLongIdentifier};",
+        "",
+      ].join("\n");
+    const neighbor = moveOf(
+      { "a.tsx": view("import { a } from './old.js'; doSomething();") },
+      { "a.tsx": view("import { a } from './new.js'; doSomethingElse();") },
+    );
+    try {
+      const { status, out } = neighbor.run();
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /unadmitted: a\.tsx:4 \(added\): import \{ a \} from '\.\/new\.js'; doSomethingElse\(\);/u,
+      );
+    } finally {
+      neighbor.done();
+    }
+    const element = (inner) =>
+      `const sectionWithLongIdentifier = <section>\n${inner}first paragraph of the moved section text\n</section>;\nexport { sectionWithLongIdentifier };\n`;
+    const inserted = moveOf(
+      { "a.tsx": `${element("")}${helper("kept")}\n` },
+      { "a.tsx": `${helper("kept")}\n`, "b.tsx": element("/* visible text, not a comment */\n") },
+    );
+    try {
+      const { status, out } = inserted.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /unadmitted: b\.tsx:2 \(added\): \/\* visible text, not a comment \*\//u);
+    } finally {
+      inserted.done();
+    }
+  },
+);
+
+test(
+  "a decorated export bounds the header; a line's first declaration is its start",
+  { timeout: 60_000 },
+  () => {
+    const decorated = (between) =>
+      [
+        "function sealed(value: Function) { return value; }",
+        "@sealed",
+        "export class LongDecoratedClassIdentifier {",
+        "  answer() { return 12345678901234567890; }",
+        "}",
+        ...between,
+        "export const trailingLongIdentifier = 123456789;",
+        "",
+      ].join("\n");
+    const boundary = moveOf(
+      { "a.ts": `${decorated([])}${helper("kept")}\n` },
+      { "a.ts": `${helper("kept")}\n`, "b.ts": decorated(["// inserted below the first export"]) },
+    );
+    try {
+      const { status, out } = boundary.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /unadmitted: b\.ts:6 \(added\): \/\/ inserted below the first export/u);
+    } finally {
+      boundary.done();
+    }
+    const line = "const firstLongIdentifier = 123456789; const secondLongIdentifier = 987654321;";
+    const twoOnOne = moveOf({ "a.ts": `${line}\n` }, { "a.ts": `export ${line}\n` });
+    try {
+      const { status, out } = twoOnOne.run();
+      assert.equal(status, 0, out);
+      assert.match(out, /admitted import 0, export 2,/u);
+    } finally {
+      twoOnOne.done();
+    }
+  },
+);
