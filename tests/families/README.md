@@ -369,24 +369,31 @@ Exit statuses:
 
 ## Stop runs
 
-`stop-runs.mjs` (#2080) checks, on one built tree, that a stop never lets a value through that the natural plan
-rejects. For each item it compiles the unit unstopped and at the item's demand allowance, in its mode, and runs both
-plans over host data made from the unit's own property names: `stopRuns` and `hostValues` in
-`tests/helpers/type-core-stop-oracle.ts`, which also feed that data to `stopProblems` as its violating runs.
-- An item's kind:
-  - `open`: the natural plan fails at runtime and the stopped plan runs to its end, or the natural compile errs and the
-    stopped plan runs to its end;
-  - `later`: both fail at different sites, the stopped plan after saying more or in a later statement;
-  - `violating`: `stopProblems` reports a violating run the direct comparison did not class;
-  - `unwitnessed`: a place the plans differ that no run made either plan fail inside, listed in `untested`. The pool
-    did not exercise it, so nothing is decided; it is never `closed`;
-  - `stricter`, `closed` (the plans equal, or every place they differ exercised and every run alike), `declined`,
-    `natural declined` or `no plan`.
-- With no natural plan, each natural error's site lists what the stopped analysis checks there, in the error's file.
-- An item is a `plans.mjs` record's `{set, name, mode, demand}` or a records row's `{files, globals, label, demand}`.
-- It writes `rows.jsonl` and `summary.json` to `--out`, a missing unit's row marked `missing`.
-- It exits 1 on any `open`, `later` or `violating` item, missing unit or exception. It exits 2 on a usage error or a
-  bad `--shard`. `unwitnessed` is counted, not failed.
+`stop-runs.mjs` (#2080) looks, on one built tree, for a stop that lets a value through that the natural plan rejects.
+For each item it compiles the unit unstopped and at the item's demand allowance, in its mode, and runs both plans over
+host data: `stopRuns` and `hostValues` in `tests/helpers/type-core-stop-oracle.ts`, which also feed that data to
+`stopProblems` as its violating runs. The host data holds scalars and collections, objects by the unit's own property
+names and paths, and values made from every type either plan checks.
+
+It claims only what it demonstrates (#2142, under docs/DEVELOPMENT-WORKFLOW.md#review-convergence). As #2080's design
+round put it: positive escapes are the blockers; an unwitnessed cell is unresolved evidence.
+- `open`: a run where the natural plan fails at runtime and the stopped plan runs to its end. With no natural plan (a
+  compile error the stop turned into runtime checks): a run in a single-file unit that executes the error's own store
+  instruction, the innermost one holding the error's site, and passes it.
+- `later`: a run where both fail at different sites, and the stopped run executed the natural failure's exact
+  instruction and passed it, in a single-file unit with no loop round in its trace (`docs/RUNTIME.md#instruction-trace`).
+- `closed`: the two plans are equal. Nothing else is `closed`, and nothing without a natural plan ever is.
+- `unwitnessed`: every other difference, among them multi-file units, loops, an earlier failure, a failure of a sibling
+  or of another check, and a no-plan error not shown passed. It is unresolved evidence, never proof that no check is
+  owed. `untested` lists the places no run reached; those witnesses and the type-derived values find escapes and never
+  decide `closed`.
+- `declined`, `natural declined`, `no plan`: a refusal, or nothing to run.
+
+An item is a `plans.mjs` record's `{set, name, mode, demand}` or a records row's `{files, globals, label, demand}`.
+The tool writes `rows.jsonl` and `summary.json` to `--out`, a missing unit's row marked `missing`.
+- Exit 1: any `open` or `later` item, a missing unit, or an exception.
+- Exit 2: a usage error or a bad `--shard`.
+- `unwitnessed` is counted, not failed.
 
 ```sh
 sx-job submit --commit t=<tree> --shards 8 --mem 6G --campaign <T> --in <items.jsonl> \
