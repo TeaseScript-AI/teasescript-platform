@@ -87,8 +87,7 @@ export function useDebugModeAndTrace({
     const toggle = tracingToggles;
     issueTracing(host, debugTracing.value).then(
       (reply) => {
-        // EVIDENCE: validation: `debugTracing` replies from the same build with the trace it holds now.
-        const now = (reply.result as { readonly traceId: number | null }).traceId;
+        const now = reply.result.traceId;
         if (toggle === tracingToggles && !isDisposed()) traceId.value = now;
       },
       (error: unknown) => {

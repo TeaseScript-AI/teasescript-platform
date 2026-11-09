@@ -13,7 +13,7 @@ import {
   ownedRandom,
   type RandomIntent,
 } from "../connection-state.js";
-import type { BridgeOps } from "../worker-host.js";
+import type { BridgeOp, BridgeOps, OpOutcome } from "../worker-host.js";
 import { heldSession } from "./persistence.js";
 import { HeldSession, publishing, sessionOp } from "./session.js";
 
@@ -62,7 +62,7 @@ function isOutcomeShape(value: unknown): value is RandomOutcome {
 const isResolution = (value: unknown): value is DrawResolution =>
   value === "natural" || value === "untried" || isOutcomeShape(value);
 
-export function randomOps(context: PlayerOpsContext): BridgeOps {
+export function randomOps(context: PlayerOpsContext) {
   return {
     // The Player's random intent, on the Worker itself, sent `after` the shown session so it applies before that
     // session's next op: the host aligns to it. It gives no session to anyone (`adoptRandom` does).
@@ -71,11 +71,10 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
       checkArguments: (args): args is { readonly intent: RandomIntent } =>
         isRecord(args) && exactly(args, ["intent"]) && isRandomIntent(args.intent),
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted the intent.
-        alignRandom(context, (args as { readonly intent: RandomIntent }).intent);
+        alignRandom(context, args.intent);
         return { result: { revision: context.random.history.revision } };
       },
-    },
+    } satisfies BridgeOp<{ readonly intent: RandomIntent }, { readonly revision: number }, "none">,
     // Gives `session` the intent's owner's random control from its next op on, at one of the points that adopt a
     // session (a Start, input adopting an inspected state, Continue after its kept draw went on); the intent it carries
     // aligns first, so the session runs with the control it was adopted under.
@@ -87,17 +86,17 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
         typeof args.session === "string" &&
         isRandomIntent(args.intent),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted the session's ID and the intent.
-        const { session, intent } = args as {
-          readonly session: string;
-          readonly intent: RandomIntent;
-        };
+        const { session, intent } = args;
         alignRandom(context, intent);
         const held = sessions.get(session);
         if (held instanceof HeldSession) held.adopt(intent.owner);
         return { result: { revision: context.random.history.revision } };
       },
-    },
+    } satisfies BridgeOp<
+      { readonly session: string; readonly intent: RandomIntent },
+      { readonly revision: number },
+      "none"
+    >,
     // Takes any Player's random control from `session` from its next op on, as a Continue's restored session gives it
     // up until its kept draw went on naturally.
     releaseRandom: {
@@ -105,12 +104,11 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
       checkArguments: (args): args is { readonly session: string } =>
         isRecord(args) && exactly(args, ["session"]) && typeof args.session === "string",
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted the session's ID.
-        const held = sessions.get((args as { readonly session: string }).session);
+        const held = sessions.get(args.session);
         if (held instanceof HeldSession) held.adopt(null);
         return { result: null };
       },
-    },
+    } satisfies BridgeOp<{ readonly session: string }, null, "none">,
     // Resolves the draw the session is paused at. With `record`, its outcome goes into the history first, so the draws
     // the session meets next decide from it, and comes out again exactly if the engine refuses it; a record asked for
     // before a reset since enters nothing. Least tried and records need the session's Player to hold the random state.
@@ -130,13 +128,8 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
           (isRecord(args.record) &&
             exactly(args.record, ["resetAt"]) &&
             typeof args.record.resetAt === "number")),
-      (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments; the engine checks the outcome itself.
-        const { drawId, outcome, record } = args as {
-          readonly drawId: number;
-          readonly outcome: DrawResolution;
-          readonly record: { readonly resetAt: number } | null;
-        };
+      (held, args): OpOutcome<ResolveDrawResult> => {
+        const { drawId, outcome, record } = args;
         const owned = ownedRandom(context, held.owner);
         const revision = () => owned?.history.revision ?? context.random.history.revision;
         if ((record !== null || outcome === "untried") && owned === null)
@@ -188,8 +181,7 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
         typeof args.session === "string" &&
         typeof args.site === "string",
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted the session's ID and the site.
-        const { session, site } = args as { readonly session: string; readonly site: string };
+        const { session, site } = args;
         const owned = ownedRandom(context, heldSession(sessions, session).owner);
         const result: RandomTriedView =
           owned === null
@@ -197,6 +189,10 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
             : { ...owned.history.tried(site), revision: owned.history.revision };
         return { result };
       },
-    },
-  };
+    } satisfies BridgeOp<
+      { readonly session: string; readonly site: string },
+      RandomTriedView,
+      "none"
+    >,
+  } satisfies BridgeOps;
 }

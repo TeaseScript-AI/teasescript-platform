@@ -21,9 +21,7 @@ const JUMP_TASK_MS = 10;
  */
 async function stepTo(current: PlayerSession, targetMs: number): Promise<PlayerSession> {
   const bridge = bridgeOf(current);
-  const { moved } = await bridge.request<{ readonly moved: boolean }>(current, "stepTime", {
-    targetMs,
-  });
+  const { moved } = await bridge.request(current, "stepTime", { targetMs });
   return moved ? (bridge.latest(current) ?? current) : current;
 }
 

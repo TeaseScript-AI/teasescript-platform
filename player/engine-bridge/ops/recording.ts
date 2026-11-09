@@ -3,14 +3,19 @@ import { exactly, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
 import type { ExportCaptureReply, RecordingCaptureReply } from "../session-protocol.js";
 import { playerRuntimeSnapshotOrNull } from "../../runtime/runtime-adapter.js";
-import { prepareExport, type ExportFrozen } from "../recording/export-replay.js";
-import type { BridgeOps } from "../worker-host.js";
+import {
+  prepareExport,
+  type ExportFrozen,
+  type PreparedExport,
+} from "../recording/export-replay.js";
+import type { BridgeOp, BridgeOps } from "../worker-host.js";
 import { heldSession } from "./persistence.js";
 import {
   advanceExportObservation,
   ensureRun,
   RetiredRunError,
   isStopArguments,
+  type ExportIncident,
   type StopArguments,
 } from "../recording/export-observation.js";
 
@@ -41,6 +46,12 @@ export interface ExportTicket extends ExportFrozen {
 /** The connection's tickets (`PlayerOpsContext.recordings`), by kind. */
 export type HeldTicket = RecordingTicket | ExportTicket;
 
+/** What `captureExport`'s check admits: the session, or none, and the recording it selects. */
+export interface ExportCaptureArguments {
+  readonly session: string | null;
+  readonly recording: "current" | "none" | { readonly ticket: string };
+}
+
 const isRun = (value: unknown): value is number => Number.isSafeInteger(value);
 
 const isTicketArgs = (args: unknown): args is { readonly ticket: string } =>
@@ -58,12 +69,12 @@ function heldTicket<K extends HeldTicket["kind"]>(
   return held as Extract<HeldTicket, { readonly kind: K }>;
 }
 
-export function recordingOps(context: PlayerOpsContext): BridgeOps {
-  return { ...recordingRunOps(context), ...exportCaptureOps(context) };
+export function recordingOps(context: PlayerOpsContext) {
+  return { ...recordingRunOps(context), ...exportCaptureOps(context) } satisfies BridgeOps;
 }
 
 /** The run and its recordings: the run retired, an incident committed, a recording captured, a ticket released. */
-function recordingRunOps(context: PlayerOpsContext): BridgeOps {
+function recordingRunOps(context: PlayerOpsContext) {
   const owner = context.exportObservation;
   return {
     // The Player's disposal ends its run.
@@ -72,12 +83,11 @@ function recordingRunOps(context: PlayerOpsContext): BridgeOps {
       checkArguments: (args): args is { readonly run: number } =>
         isRecord(args) && exactly(args, ["run"]) && isRun(args.run),
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { run } = args as { readonly run: number };
+        const { run } = args;
         advanceExportObservation(owner, { kind: "retire", run });
         return { result: null };
       },
-    },
+    } satisfies BridgeOp<{ readonly run: number }, null, "none">,
     // A Player error with no session to stop: its run begins here when the host has not seen it, as when its
     // activation failed before its first host request, ending the run before it. An incident of a run that ended is
     // refused before any effect.
@@ -85,8 +95,7 @@ function recordingRunOps(context: PlayerOpsContext): BridgeOps {
       session: "none",
       checkArguments: isStopArguments,
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted stop arguments before run.
-        const stop = args as StopArguments;
+        const stop = args;
         if (!ensureRun(owner, stop)) throw new RetiredRunError(stop.run);
         advanceExportObservation(owner, { kind: "stopRequested", stop });
         const committed = advanceExportObservation(owner, {
@@ -96,15 +105,14 @@ function recordingRunOps(context: PlayerOpsContext): BridgeOps {
         });
         return { result: committed.kind === "incident" ? committed.incident : null };
       },
-    },
+    } satisfies BridgeOp<StopArguments, ExportIncident | null, "none">,
     // The named session's recording, kept under a new ticket when the recorder records that session's engine.
     captureRecording: {
       session: "none",
       checkArguments: (args): args is { readonly session: string } =>
         isRecord(args) && exactly(args, ["session"]) && typeof args.session === "string",
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const held = heldSession(sessions, (args as { readonly session: string }).session);
+        const held = heldSession(sessions, args.session);
         const capture = context.recorder.capture(held.sessionForOperation().engine);
         if (capture.kind !== "captured") return { result: capture satisfies RecordingCaptureReply };
         const ticket = context.nextTicket();
@@ -122,22 +130,21 @@ function recordingRunOps(context: PlayerOpsContext): BridgeOps {
         };
         return { result };
       },
-    },
+    } satisfies BridgeOp<{ readonly session: string }, RecordingCaptureReply, "none">,
     // Lets go of a ticket of any kind; releasing one already released, or unknown, changes nothing.
     releaseRecording: {
       session: "none",
       checkArguments: isTicketArgs,
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        context.recordings.delete((args as { readonly ticket: string }).ticket);
+        context.recordings.delete(args.ticket);
         return { result: null };
       },
-    },
-  };
+    } satisfies BridgeOp<{ readonly ticket: string }, null, "none">,
+  } satisfies BridgeOps;
 }
 
 /** A debug export: its capture, and what its file needs of the engine. */
-function exportCaptureOps(context: PlayerOpsContext): BridgeOps {
+function exportCaptureOps(context: PlayerOpsContext) {
   const owner = context.exportObservation;
   return {
     // A debug export's capture of the named session, or of none, with the recording `current` (the session's own, by its
@@ -146,12 +153,7 @@ function exportCaptureOps(context: PlayerOpsContext): BridgeOps {
     // is not proved; never with another recording or state in its place.
     captureExport: {
       session: "none",
-      checkArguments: (
-        args,
-      ): args is {
-        readonly session: string | null;
-        readonly recording: "current" | "none" | { readonly ticket: string };
-      } =>
+      checkArguments: (args): args is ExportCaptureArguments =>
         isRecord(args) &&
         exactly(args, ["session", "recording"]) &&
         (args.session === null || typeof args.session === "string") &&
@@ -161,11 +163,7 @@ function exportCaptureOps(context: PlayerOpsContext): BridgeOps {
             exactly(args.recording, ["ticket"]) &&
             typeof args.recording.ticket === "string")),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const selector = args as {
-          readonly session: string | null;
-          readonly recording: "current" | "none" | { readonly ticket: string };
-        };
+        const selector = args;
         const held = selector.session === null ? null : heldSession(sessions, selector.session);
         const run = held === null ? owner.current : held.run;
         const decided = advanceExportObservation(owner, { kind: "capture", run });
@@ -212,7 +210,7 @@ function exportCaptureOps(context: PlayerOpsContext): BridgeOps {
         };
         return { result };
       },
-    },
+    } satisfies BridgeOp<ExportCaptureArguments, ExportCaptureReply, "none">,
     // What an export ticket's file needs of the engine: its plan's hash and, with `replay`, its replay data.
     exportPrepare: {
       session: "none",
@@ -222,10 +220,13 @@ function exportCaptureOps(context: PlayerOpsContext): BridgeOps {
         typeof args.ticket === "string" &&
         typeof args.replay === "boolean",
       run: async (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { ticket, replay } = args as { readonly ticket: string; readonly replay: boolean };
+        const { ticket, replay } = args;
         return { result: await prepareExport(heldTicket(context, ticket, "export"), replay) };
       },
-    },
-  };
+    } satisfies BridgeOp<
+      { readonly ticket: string; readonly replay: boolean },
+      PreparedExport,
+      "none"
+    >,
+  } satisfies BridgeOps;
 }

@@ -12,6 +12,7 @@ import type {
 } from "../../player/runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
+import type { BridgeResult } from "../../player/engine-bridge/client.js";
 
 /*
  * L5d in the Player: its media load reports over the bridge, through the real composable on a host that replies late,
@@ -203,9 +204,10 @@ function preloadHost() {
   const replies: { readonly plan: string; readonly reply: (images: string[] | null) => void }[] =
     [];
   const connection = (name: string): PlanPhotoSource["connection"] => ({
+    // EVIDENCE: test: a fake of the transport, which answers any op, typed as the client.
     client: {
-      request: (_op, args) =>
-        new Promise((resolve) =>
+      request: (_op: string, args: unknown) =>
+        new Promise<BridgeResult>((resolve) =>
           replies.push({
             plan: `${name}:${typeof args === "object" && args !== null && "plan" in args ? String(args.plan) : ""}`,
             reply: (images) =>
@@ -218,7 +220,7 @@ function preloadHost() {
               }),
           }),
         ),
-    },
+    } as Pick<BridgeClient, "request">,
   });
   const log: string[] = [];
   const preload = (sources: readonly string[]) => {

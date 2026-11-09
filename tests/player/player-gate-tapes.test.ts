@@ -21,6 +21,7 @@ import { judgeTape } from "../gate/oracle.js";
 import { OUTCOMES } from "../gate/outcomes.js";
 import { TAPE_START } from "../gate/start.js";
 import { recordClient, replayTape, type TapeEntry } from "../gate/tape.js";
+import { asMalformed, untypedBridge } from "../helpers/bridge/untyped.js";
 
 /*
  * The K/F tape driver's claims (the L5 gate's tape plan §3, design round 1): the structural one, and bounded runtime
@@ -798,8 +799,10 @@ test("control action ID: a choice answered for another action fails the oracle",
 test("control outcomes: a thrown request that ended the session and a failed capture are incomplete", async () => {
   const source = 'showButton "Go"\nexit';
   const thrown = await record(source, {}, (bridge) => {
-    const request = bridge.request.bind(bridge);
-    bridge.request = async (session, op, args) => {
+    // The wrapper forwards each op as it is sent, whatever it is.
+    const untyped = untypedBridge(bridge);
+    const request = untyped.request.bind(bridge);
+    untyped.request = async (session, op, args) => {
       if (op === "activateButton")
         throw new BridgeRequestError({
           kind: "engine",
@@ -842,7 +845,7 @@ test("control refusal details: a refusal whose details differ fails the replay",
   };
   const [client, same, other] = [refusing(1), refusing(1), refusing(2)];
   const recorder = recordClient(client);
-  await assert.rejects(client.request("prepare", {}));
+  await assert.rejects(client.request("prepare", asMalformed({})));
   recorder.stop();
   assert.equal(await replayTape(same, recorder.entries), null);
   assert.notEqual(await replayTape(other, recorder.entries), null);

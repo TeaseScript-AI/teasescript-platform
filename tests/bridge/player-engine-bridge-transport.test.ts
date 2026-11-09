@@ -11,7 +11,6 @@ import {
   BridgeRequestError,
   connectBridge,
   openBridge,
-  type BridgeClient,
 } from "../../player/engine-bridge/client.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import { BRIDGE_VERSION, type BuildIdentity } from "../../player/engine-bridge/protocol.js";
@@ -27,6 +26,8 @@ import {
   KIND_OF_TYPE,
   type IntrinsicRead,
 } from "../helpers/clone-graph.js";
+import type { UntypedClient } from "../helpers/bridge/untyped.js";
+import { untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * The bridge's depth-safe transport (#1877): which path a message takes, that every path carries what native clone
@@ -669,8 +670,9 @@ test("a flat form is decoded only when it is whole; anything else passes as it c
   }
 });
 
-async function withClient<T>(body: (client: BridgeClient) => Promise<T>): Promise<T> {
-  const client = await connectBridge(nodeWorkerPort(FIXTURE_WORKER, BUILD), BUILD);
+/** A client of the fixture Worker, whose ops (`echo`, `deepClone`) are its own: untyped, as no catalogue names them. */
+async function withClient<T>(body: (client: UntypedClient) => Promise<T>): Promise<T> {
+  const client = untypedClient(await connectBridge(nodeWorkerPort(FIXTURE_WORKER, BUILD), BUILD));
   try {
     return await body(client);
   } finally {

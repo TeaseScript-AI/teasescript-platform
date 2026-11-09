@@ -1,4 +1,4 @@
-import type { ActionCompletionOutcome, RuntimeFileStoreActionSnapshot } from "../../src/index.js";
+import type { RuntimeFileStoreActionSnapshot } from "../../src/index.js";
 import { storedFileKind } from "../../src/runtime/host-data/stored-files.js";
 import { answerRecord, dropAnswer, sendAnswer, type AnswerRecord } from "./answer-media.js";
 import type { CapturedMediaStore } from "./captured-media.js";
@@ -182,7 +182,7 @@ export class FileStoreService {
     if (!observed || activePlayerRuntimeFileStore(observed.state)?.actionId !== actionId)
       return this.#settled(record.key);
     const outcome = await this.#send(record, () =>
-      section.send<ActionCompletionOutcome>(
+      section.send(
         "answerFileStore",
         { actionId, answer, held: heldMedia(this.#host.media, madeFiles(answer)) },
         observed.revision,
@@ -202,7 +202,7 @@ export class FileStoreService {
     );
     this.#replace(fallback);
     await this.#send(fallback, () =>
-      section.send<ActionCompletionOutcome>(
+      section.send(
         "answerFileStore",
         { actionId, answer: { kind: "failed" }, held: null },
         observed.revision,

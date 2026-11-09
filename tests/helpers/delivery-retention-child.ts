@@ -11,6 +11,7 @@ import {
 import { decodeMessage } from "../../player/engine-bridge/transport.js";
 import {
   type BridgeOp,
+  type BridgeOps,
   type HostPort,
   type HostSessions,
   type OpOutcome,
@@ -29,6 +30,7 @@ import { sessionTransferText } from "../../player/persistence/session-transfer.j
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
 import { childCases, markerOf, reach, snapshotForRetention } from "./retention-child.js";
 import { markedProject, planText } from "./bridge/source-ops-project.js";
+import { untypedClient } from "./bridge/untyped.js";
 
 /*
  * The retention child of the delivery invariant (`player-bridge-delivery-retention.test.ts`; see
@@ -124,7 +126,8 @@ function connection(): Connection {
       closeConnection(context, sessions!);
     },
   };
-  const ops = playerBridgeOps(context);
+  // The host's table, each op of its own arguments (`BridgeOps`), as the host holds it: wrapped and indexed by name.
+  const ops: BridgeOps = playerBridgeOps(context);
   const wrapped = Object.fromEntries(
     Object.entries(ops).map(([name, op]) => [
       name,
@@ -184,8 +187,9 @@ function connection(): Connection {
   const { client } = openBridge(clientPort, BUILD);
   sessions = startBridgeHost(hostPort, wrapped, BUILD, context.delivery);
   return {
+    // Any op the test names, as its transport carries it.
     request: (op, args, session) =>
-      client.request(op, args, session === undefined ? {} : { session }),
+      untypedClient(client).request(op, args, session === undefined ? {} : { session }),
     bridge: new PlayerBridge(client),
     context,
     failPost: (op) => void (failing = op),

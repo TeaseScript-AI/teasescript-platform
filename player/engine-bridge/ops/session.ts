@@ -1,4 +1,6 @@
 import type {
+  ActionCompletionOutcome,
+  ContinueCaptureOutcome,
   MediaProgressReport,
   RuntimeScriptStorageEntrySnapshot,
   TemporalContext,
@@ -50,6 +52,7 @@ import {
   isStopArguments,
   runIncident,
   type RunBegin,
+  type StopArguments,
   type ObservedSession,
   type SessionObservation,
 } from "../recording/export-observation.js";
@@ -284,7 +287,7 @@ export class HeldSession implements HostSession, ObservedSession {
   }
 
   /** Whether `args` are a Player error stop's (`StopArguments`); a plain halt, as of a superseded session, has none. */
-  checkStop(args: unknown): boolean {
+  checkStop(args: unknown): args is StopArguments {
     return isStopArguments(args);
   }
 
@@ -367,14 +370,14 @@ const START_OPTIONS = [
 /**
  * What `start`'s check admits (`isStartOptions`, `isStartRandom`, `isRunBegin`): the options' shape only, each optional
  * field also as `undefined`, and the storage entries, temporal context and profile as records, which the engine
- * validates as it starts the session.
+ * validates as it starts the session. The entries and temporal context are `object`, for `ContinueAdmitted`'s reason.
  */
-interface StartArguments {
+export interface StartArguments {
   readonly plan: string;
   readonly options: {
-    readonly scriptStorage?: readonly Record<string, unknown>[] | undefined;
+    readonly scriptStorage?: readonly object[] | undefined;
     readonly persistentScriptStorage?: boolean | undefined;
-    readonly temporalContext?: Record<string, unknown> | undefined;
+    readonly temporalContext?: object | undefined;
     readonly wallClockMs?: number | undefined;
     readonly debugMode?: boolean | undefined;
     readonly storedFiles?: readonly string[] | undefined;
@@ -384,6 +387,15 @@ interface StartArguments {
   readonly random?:
     { readonly owner: number; readonly intent?: RandomIntent | undefined } | undefined;
   readonly run?: RunBegin | undefined;
+}
+
+/**
+ * What `continue`'s check admits: the capture's temporal context as any record, which the engine validates. `object`,
+ * not `Record<string, unknown>`: an interface such as `TemporalContext` has no index signature and does not assign to
+ * one; the check still refuses arrays (`isRecord`).
+ */
+export interface ContinueAdmitted {
+  readonly capture: { readonly wallClockMs: number; readonly temporalContext: object };
 }
 
 /** A wall clock's moment: whole epoch milliseconds within the engine's years 0000–9999, also before 1970. */
@@ -427,22 +439,25 @@ const ended = (_error: unknown, session: HostSession | null): boolean =>
   session instanceof HeldSession && session.broken;
 
 /** A session op's outcome: `result`, with the publication of `next` when it is a new revision (`adoptResult`). */
-export function publishing(
+export function publishing<R>(
   held: HeldSession,
   next: PlayerRuntimeSession,
-  result: unknown,
-): OpOutcome {
+  result: R,
+): OpOutcome<R> {
   const adoption = held.adoptResult(next);
   if (adoption.kind !== "published") return { result, view: null };
   return { result, eventsThrough: adoption.view.eventsThrough, view: adoption.view };
 }
 
-/** An op of an existing session, which reads its basis unless `readsBasis` is false. */
-export function sessionOp<A>(
+/**
+ * An op of an existing session, which reads its basis unless `readsBasis` is false. `Sent`, what a caller sends, is the
+ * admitted `A` unless the op names a narrower one (`BridgeOp`).
+ */
+export function sessionOp<A, R, Sent extends A = A>(
   checkArguments: (args: unknown) => args is A,
-  run: (held: HeldSession, args: unknown) => OpOutcome,
+  run: (held: HeldSession, args: A) => OpOutcome<R>,
   readsBasis = true,
-): BridgeOp {
+): BridgeOp<A, R, "existing", Sent> {
   return {
     session: "existing",
     readsBasis,
@@ -464,23 +479,19 @@ const observeTime = sessionOp(
     isTime(args.atMs) &&
     everyItem(args.media, isMediaReport),
   (held, args) => {
-    // EVIDENCE: validation: checkArguments accepted these arguments before run.
-    const { atMs, media } = args as {
-      readonly atMs: number;
-      readonly media: readonly MediaProgressReport[];
-    };
+    const { atMs, media } = args;
     held.endCatchUp();
     const result = observePlayerRuntimeTime(held.sessionForOperation(), atMs, media);
     return publishing(held, result.session, result.outcome);
   },
 );
 
-export function sessionOps(context: PlayerOpsContext): BridgeOps {
-  return { ...sessionRunOps(context), ...sessionInputOps(), ...catchUpOps() };
+export function sessionOps(context: PlayerOpsContext) {
+  return { ...sessionRunOps(context), ...sessionInputOps(), ...catchUpOps() } satisfies BridgeOps;
 }
 
 /** The session's run: its start and continuation, its call view and its recording. */
-function sessionRunOps(context: PlayerOpsContext): BridgeOps {
+function sessionRunOps(context: PlayerOpsContext) {
   return {
     start: {
       session: "none",
@@ -493,23 +504,19 @@ function sessionRunOps(context: PlayerOpsContext): BridgeOps {
         (args.random === undefined || isStartRandom(args.random)) &&
         (args.run === undefined || isRunBegin(args.run)),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { plan, options, recording, random, run } = args as {
-          readonly plan: string;
-          readonly options: StartOptions;
-          readonly recording: boolean;
-          readonly random?: StartRandom;
-          readonly run?: RunBegin;
-        };
+        const { plan, options, recording, random, run } = args;
         // The Start's run begins before its session, which binds to it; a Start of a run that ended starts nothing.
         if (run !== undefined && !ensureRun(context.exportObservation, run))
           throw new RetiredRunError(run.run);
         const instructions = context.plans.get(plan);
         if (instructions === undefined) throw new Error(`No plan '${plan}' is held.`);
-        const control = startRandom(context, random);
+        // EVIDENCE: validation: `isStartRandom` declares `StartRandom` but admits `intent: undefined` too (#2211).
+        const control = startRandom(context, random as StartRandom | undefined);
+        // `isStartOptions` declares `StartOptions` but admits each field as `undefined` too, and the storage entries,
+        // temporal context and profile as any records (#2211). EVIDENCE: validation: the engine validates them.
         const held = new HeldSession(
           createPlayerRuntimeSession(instructions, {
-            ...options,
+            ...(options as StartOptions),
             ...(recording ? { recorder: context.recorder } : {}),
             ...(context.trace === null ? {} : { debugTrace: context.trace }),
             ...(control === null ? {} : { randomControl: control }),
@@ -524,16 +531,18 @@ function sessionRunOps(context: PlayerOpsContext): BridgeOps {
         const view = held.introduce(null);
         return { result: null, session: id, eventsThrough: view.eventsThrough, view };
       },
-    },
-    continue: sessionOp(
-      (
-        args,
-      ): args is {
+    } satisfies BridgeOp<StartArguments, null, "none">,
+    continue: sessionOp<
+      ContinueAdmitted,
+      ContinueCaptureOutcome,
+      {
         readonly capture: {
           readonly wallClockMs: number;
-          readonly temporalContext: Record<string, unknown>;
+          readonly temporalContext: TemporalContext;
         };
-      } =>
+      }
+    >(
+      (args): args is ContinueAdmitted =>
         isRecord(args) &&
         exactly(args, ["capture"]) &&
         isRecord(args.capture) &&
@@ -541,7 +550,7 @@ function sessionRunOps(context: PlayerOpsContext): BridgeOps {
         isEpochTime(args.capture.wallClockMs) &&
         isRecord(args.capture.temporalContext),
       (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
+        // EVIDENCE: validation: the engine validates the temporal context, which the check admits as any record.
         const { capture } = args as {
           readonly capture: {
             readonly wallClockMs: number;
@@ -558,8 +567,7 @@ function sessionRunOps(context: PlayerOpsContext): BridgeOps {
       (args): args is { readonly on: boolean } =>
         isRecord(args) && exactly(args, ["on"]) && typeof args.on === "boolean",
       (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted `on` as a boolean.
-        const { on } = args as { readonly on: boolean };
+        const { on } = args;
         held.viewingCalls = on;
         return { result: held.callView(on), view: null };
       },
@@ -569,8 +577,7 @@ function sessionRunOps(context: PlayerOpsContext): BridgeOps {
       (args): args is RunBegin | null => args === null || isRunBegin(args),
       (held, args) => {
         // Continue hands over a session the Player held already: it begins Continue's run, which the session joins.
-        // EVIDENCE: validation: the op's check admitted `null` or a run's begin.
-        const run = args as RunBegin | null;
+        const run = args;
         if (run !== null && !ensureRun(context.exportObservation, run))
           throw new RetiredRunError(run.run);
         held.bindRun();
@@ -582,7 +589,7 @@ function sessionRunOps(context: PlayerOpsContext): BridgeOps {
 }
 
 /** The session's inputs and time: an input's observation, a time step, a pacing skip. */
-function sessionInputOps(): BridgeOps {
+function sessionInputOps() {
   return {
     observeTime,
     // The input chain's observation (L5c), which reads no basis: an input's staleness is its action ID's.
@@ -591,8 +598,7 @@ function sessionInputOps(): BridgeOps {
       (args): args is { readonly targetMs: number } =>
         isRecord(args) && exactly(args, ["targetMs"]) && isTime(args.targetMs),
       (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { targetMs } = args as { readonly targetMs: number };
+        const { targetMs } = args;
         held.endCatchUp();
         const next = stepPlayerRuntimeTime(held.sessionForOperation(), targetMs);
         return publishing(held, next, { moved: next !== held.sessionForOperation() });
@@ -601,9 +607,8 @@ function sessionInputOps(): BridgeOps {
     skipPacing: sessionOp(
       (args): args is { readonly actionId: number } =>
         isRecord(args) && exactly(args, ["actionId"]) && typeof args.actionId === "number",
-      (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { actionId } = args as { readonly actionId: number };
+      (held, args): OpOutcome<ActionCompletionOutcome | null> => {
+        const { actionId } = args;
         // The gate the caller saw: input never targets another action.
         if (playerRuntimePacingGate(held.sessionForOperation())?.actionId !== actionId)
           return { result: null, view: null };
@@ -620,14 +625,13 @@ function sessionInputOps(): BridgeOps {
 }
 
 /** A catch-up begun, stepped, adopted or dropped. */
-function catchUpOps(): BridgeOps {
+function catchUpOps() {
   return {
     beginCatchUp: sessionOp(
       (args): args is { readonly targetMs: number } =>
         isRecord(args) && exactly(args, ["targetMs"]) && isTime(args.targetMs),
       (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { targetMs } = args as { readonly targetMs: number };
+        const { targetMs } = args;
         const replaced = held.endCatchUp();
         if (replaced !== null) dropPlayerRuntimeCatchUp(replaced);
         held.beginCatchUp(beginPlayerRuntimeCatchUp(held.sessionForOperation(), targetMs));
@@ -637,9 +641,8 @@ function catchUpOps(): BridgeOps {
     stepCatchUp: sessionOp(
       (args): args is { readonly budgetMs: number } =>
         isRecord(args) && exactly(args, ["budgetMs"]) && isTime(args.budgetMs),
-      (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { budgetMs } = args as { readonly budgetMs: number };
+      (held, args): OpOutcome<"more" | "done" | "dropped"> => {
+        const { budgetMs } = args;
         const catchUp = held.catchUp;
         if (catchUp === null) return { result: "dropped", view: null };
         // A duration on the host's own clock: after each step the catch-up goes on while it lasts.

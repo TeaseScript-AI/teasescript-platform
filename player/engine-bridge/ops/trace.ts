@@ -1,9 +1,14 @@
-import { debugViewOf, type DebugTreeState, type DebugViewRequest } from "../../debug/debug-view.js";
+import {
+  debugViewOf,
+  type DebugTreeState,
+  type DebugView,
+  type DebugViewRequest,
+} from "../../debug/debug-view.js";
 import { setPlayerRuntimeDebugMode } from "../../runtime/runtime-adapter.js";
 import { exactly, isRecord } from "../argument-checks.js";
 import { type PlayerOpsContext } from "../player-ops.js";
 import { alignTrace, isTracingIntent, type TracingIntent } from "../connection-state.js";
-import type { BridgeOps } from "../worker-host.js";
+import type { BridgeOp, BridgeOps } from "../worker-host.js";
 import { heldSession } from "./persistence.js";
 import { publishing, sessionOp } from "./session.js";
 
@@ -49,7 +54,7 @@ function isViewRequest(value: unknown): value is DebugViewRequest {
   );
 }
 
-export function traceOps(context: PlayerOpsContext): BridgeOps {
+export function traceOps(context: PlayerOpsContext) {
   return {
     // The Player's tracing intent through the connection's queue: on, as a new trace with no history, or off, dropping
     // it with its history, unless a newer intent arrived first (`alignTrace`). A session takes the trace at its next
@@ -58,11 +63,10 @@ export function traceOps(context: PlayerOpsContext): BridgeOps {
       session: "none",
       checkArguments: isTracingIntent,
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted a tracing intent.
-        const intent = args as TracingIntent;
+        const intent = args;
         return { result: { traceId: alignTrace(context, intent) } };
       },
-    },
+    } satisfies BridgeOp<TracingIntent, { readonly traceId: number | null }, "none">,
     // A new epoch of the connection's trace (`"restore"`), at a session whose recording began anew: Continue asks for it
     // once it owns the UI, so a Continue a Start replaced or a stop interrupted leaves the trace as it was. It carries
     // the Player's intent (`tracing`), which the trace follows first (`alignTrace`); one older than the newest applied
@@ -71,8 +75,7 @@ export function traceOps(context: PlayerOpsContext): BridgeOps {
       (args): args is { readonly tracing: TracingIntent } =>
         isRecord(args) && exactly(args, ["tracing"]) && isTracingIntent(args.tracing),
       (_held, args) => {
-        // EVIDENCE: validation: checkArguments accepted `tracing` as a tracing intent.
-        const { tracing } = args as { readonly tracing: TracingIntent };
+        const { tracing } = args;
         alignTrace(context, tracing);
         if (tracing.intent === context.traceIntent) context.trace?.reset("restore");
         return { result: null, view: null };
@@ -84,8 +87,7 @@ export function traceOps(context: PlayerOpsContext): BridgeOps {
       (args): args is { readonly on: boolean } =>
         isRecord(args) && exactly(args, ["on"]) && typeof args.on === "boolean",
       (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted `on` as a boolean.
-        const { on } = args as { readonly on: boolean };
+        const { on } = args;
         const result = setPlayerRuntimeDebugMode(held.sessionForOperation(), on);
         return publishing(held, result.session, result.outcome);
       },
@@ -104,16 +106,16 @@ export function traceOps(context: PlayerOpsContext): BridgeOps {
         typeof args.session === "string" &&
         isViewRequest(args.request),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted `session` as an ID and `request` as a view request.
-        const { session, request } = args as {
-          readonly session: string;
-          readonly request: DebugViewRequest;
-        };
+        const { session, request } = args;
         const held = heldSession(sessions, session);
         return {
           result: debugViewOf(held.sessionForOperation(), context.trace, context.traceId, request),
         };
       },
-    },
-  };
+    } satisfies BridgeOp<
+      { readonly session: string; readonly request: DebugViewRequest },
+      DebugView,
+      "none"
+    >,
+  } satisfies BridgeOps;
 }

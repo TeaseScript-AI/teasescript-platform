@@ -7,6 +7,7 @@ import {
   sameBuild,
 } from "./protocol.js";
 import type { ClockTicket } from "../runtime/clock-ticket.js";
+import type { HaltArgs, HaltResult, OpArgs, OpName, OpResult, RequestOp } from "./op-catalogue.js";
 import { decodeMessage, encodeMessage } from "./transport.js";
 
 /** How the Player side reaches its engine Worker, whatever runs it: a browser Worker, a Node worker or a test port. */
@@ -18,12 +19,12 @@ export interface ClientPort {
   terminate(): void;
 }
 
-/** A successful reply's data. */
-export interface BridgeResult {
+/** A successful reply's data: `R`, the result its op's definition gives (`OpResult`), the same build's, unchecked. */
+export interface BridgeResult<R = unknown> {
   readonly session: string | null;
   readonly revision: number | null;
   readonly eventsThrough: number | null;
-  readonly result: unknown;
+  readonly result: R;
   readonly view: unknown;
 }
 
@@ -59,15 +60,22 @@ export class BridgeLostError extends Error {
  * reply's publication in arrival order, also when a transport delivers replies early (`in-process.ts`). A throw rejects
  * the request instead.
  */
-export type ReplyHook = (result: BridgeResult) => void;
+export type ReplyHook<R = unknown> = (result: BridgeResult<R>) => void;
 
 /** What a client section sends: a request for the section's session, without waiting for other requests. */
-export type SectionSend = (
-  op: string,
-  args: unknown,
-  basis: number | null,
-  onReply?: ReplyHook,
-) => Promise<BridgeResult>;
+export type SectionSend = <O extends OpName>(
+  ...call: O extends unknown
+    ? [op: O, args: OpArgs<O>, basis: number | null, onReply?: ReplyHook<OpResult<O>>]
+    : never
+) => Promise<BridgeResult<OpResult<O>>>;
+
+/** A request's options (`BridgeClient.request`), its hook given its op's result. */
+export interface RequestOptions<R = unknown> {
+  readonly session?: string | null;
+  readonly basis?: number | null;
+  readonly onReply?: ReplyHook<R>;
+  readonly after?: string;
+}
 
 export interface BridgeClient {
   /**
@@ -75,16 +83,11 @@ export interface BridgeClient {
    * `after`, an op on the Worker itself waits instead for the earlier requests of session `after`, and holds that
    * session's turn: a read of the session that follows what was posted before it.
    */
-  request(
-    op: string,
-    args: unknown,
-    options?: {
-      readonly session?: string | null;
-      readonly basis?: number | null;
-      readonly onReply?: ReplyHook;
-      readonly after?: string;
-    },
-  ): Promise<BridgeResult>;
+  request<O extends RequestOp>(
+    ...call: O extends unknown
+      ? [op: O, args: OpArgs<O>, options?: RequestOptions<OpResult<O>>]
+      : never
+  ): Promise<BridgeResult<OpResult<O>>>;
   /**
    * Runs `body` as one exclusive section of `session`: other requests for that session wait until it ends, so a
    * dependent chain (observe, main-side checks and effects, then an op) sees what a synchronous chain would. `ticket`
@@ -107,7 +110,12 @@ export interface BridgeClient {
    * Sends one request at once, ahead of the requests waiting for its session, as `halt` must be: the host handles it on
    * receipt too.
    */
-  signal(op: string, args: unknown, session: string, onReply?: ReplyHook): Promise<BridgeResult>;
+  signal(
+    op: "halt",
+    args: HaltArgs,
+    session: string,
+    onReply?: ReplyHook<HaltResult>,
+  ): Promise<BridgeResult<HaltResult>>;
   /** Ends the Worker: pending requests fail with `BridgeLostError`. An intentional end is no loss: no `onLoss` call. */
   terminate(): void;
   /** Calls `listener` once if the Worker is lost: it failed or sent what no host sends, not `terminate()`. */
@@ -258,24 +266,38 @@ export function openBridge(
       return before === undefined ? run() : before.then(run);
     }
 
-    const client: BridgeClient = {
-      request: (op, args, options = {}) => {
+    // The transport carries any op with any arguments, and the host checks them; callers see `BridgeClient`'s pairs of
+    // each op with its arguments and result (`op-catalogue.ts`). EVIDENCE: invariant: the same functions under that type.
+    const client = {
+      request: (op: string, args: unknown, options: RequestOptions = {}) => {
         const session = options.session ?? null;
         return exclusive(session ?? options.after ?? "", () =>
           send(op, args, session, options.basis ?? null, options.onReply),
         );
       },
-      section: (session, _ticket, body) =>
+      section: <T>(
+        session: string,
+        _ticket: ClockTicket,
+        body: (
+          send: (
+            op: string,
+            args: unknown,
+            basis: number | null,
+            onReply?: ReplyHook,
+          ) => Promise<BridgeResult>,
+        ) => Promise<T>,
+      ) =>
         exclusive(session, () =>
           body((op, args, basis, onReply) => send(op, args, session, basis, onReply)),
         ),
-      signal: (op, args, session, onReply) => send(op, args, session, null, onReply),
+      signal: (op: string, args: unknown, session: string, onReply?: ReplyHook) =>
+        send(op, args, session, null, onReply),
       terminate: () => lose("The engine Worker was terminated.", true),
-      onLoss: (listener) => {
+      onLoss: (listener: (error: BridgeLostError) => void) => {
         if (lost === null) lossListeners.push(listener);
         else if (!terminated) listener(lost);
       },
-    };
+    } as BridgeClient;
     opened = client;
   });
   return { client: opened, ready };

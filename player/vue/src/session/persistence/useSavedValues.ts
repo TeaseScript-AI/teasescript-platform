@@ -294,10 +294,7 @@ export function useSavedValues({
           if (pendingPlayerRuntimeStorageWrite(section.session.state) !== null) return "wait";
           let outcome: { readonly kind: string } | typeof RETIRED;
           try {
-            outcome = await section.send<{ readonly kind: string }>("applyStorageEdit", {
-              key,
-              value,
-            });
+            outcome = await section.send("applyStorageEdit", { key, value });
           } catch (error) {
             // Stored, the edit settles also when the bridge failed to carry it: what the engine threw is reported.
             if (error instanceof BridgeRequestError && error.kind === "engine") throw error;

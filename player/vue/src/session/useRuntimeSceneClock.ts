@@ -201,12 +201,12 @@ export function useRuntimeSceneClock(
       outcome = await bridgeOf(shown).section(shown, mintClockTicket(), async (section) => {
         if (disposed || paused.value || owned(shown) === null) return "skipped";
         try {
-          return await section.send<TimeObservationOutcome>("observeTime", args);
+          return await section.send("observeTime", args);
         } catch (error) {
           if (refusalCode(error) !== "basis") throw error;
           // Another publication applied before this turn: once more, from the store's latest revision.
           try {
-            return await section.send<TimeObservationOutcome>("observeTime", args);
+            return await section.send("observeTime", args);
           } catch (again) {
             if (refusalCode(again) === "basis") return null;
             throw again;
@@ -264,10 +264,7 @@ export function useRuntimeSceneClock(
     const shown = opened.session;
     let outcome: TimeObservationOutcome;
     try {
-      outcome = await opened.send<TimeObservationOutcome>(op, {
-        atMs: sceneTimeMs(shown),
-        media: mediaReports(),
-      });
+      outcome = await opened.send(op, { atMs: sceneTimeMs(shown), media: mediaReports() });
     } catch (error) {
       // Refused as stopped, or lost with the Worker: the session no longer owns the UI.
       if (endsQuietly(error)) return null;
@@ -342,11 +339,7 @@ export function useRuntimeSceneClock(
     if (result === "dropped") return end(own, false);
     let adopted = false;
     try {
-      ({ adopted } = await bridgeOf(own.session).request<{ readonly adopted: boolean }>(
-        own.session,
-        "adoptCatchUp",
-        null,
-      ));
+      ({ adopted } = await bridgeOf(own.session).request(own.session, "adoptCatchUp", null));
     } catch {
       adopted = false;
     }

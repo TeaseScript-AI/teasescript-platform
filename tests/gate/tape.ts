@@ -3,6 +3,8 @@ import {
   type BridgeClient,
   type BridgeResult,
 } from "../../player/engine-bridge/client.js";
+import { untypedClient } from "../helpers/bridge/untyped.js";
+import type { UntypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * A K/F tape: every request a client sent and the reply it received, in order, as plain JSON. It is recorded on the
@@ -87,8 +89,9 @@ export function recordClient(client: BridgeClient): {
   stop(): void;
 } {
   const entries: TapeEntry[] = [];
-  const request = client.request.bind(client);
-  const recording: BridgeClient["request"] = async (op, args, options = {}) => {
+  // The recorder forwards each op as it is sent, whatever it is: the client as its transport carries requests.
+  const request = untypedClient(client).request.bind(client);
+  const recording: UntypedClient["request"] = async (op, args, options = {}) => {
     const index = entries.length;
     const base = {
       op,
@@ -168,8 +171,9 @@ export async function replayTape(
   for (const [index, entry] of entries.entries()) {
     let actual: TapeReply;
     try {
+      // A tape's op as it was recorded, whatever it is.
       actual = replyOf(
-        await client.request(entry.op, entry.args, {
+        await untypedClient(client).request(entry.op, entry.args, {
           session: entry.session,
           basis: entry.basis,
           ...(entry.after === null ? {} : { after: entry.after }),

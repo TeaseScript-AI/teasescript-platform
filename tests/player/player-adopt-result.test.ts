@@ -6,7 +6,7 @@ import { inputOps } from "../../player/engine-bridge/ops/input.js";
 import { HeldSession, publishing } from "../../player/engine-bridge/ops/session.js";
 import { playerOpsContext } from "../../player/engine-bridge/player-ops.js";
 import type { Publication } from "../../player/engine-bridge/session-protocol.js";
-import type { HostSessions } from "../../player/engine-bridge/worker-host.js";
+import type { BridgeOps, HostSessions } from "../../player/engine-bridge/worker-host.js";
 import {
   beginPlayerRuntimeCatchUp,
   observePlayerRuntimeTime,
@@ -96,7 +96,7 @@ test("a new revision is published once with its events; publishing leaves the ca
 });
 
 test("an answer adopts through the same decision: a new revision ends the catch-up, no answer adopts nothing", async (context) => {
-  const ops = inputOps(playerOpsContext());
+  const ops: BridgeOps = inputOps(playerOpsContext());
   // An input op reads only the session it is given, as the host gives it.
   const none: HostSessions = {
     get: () => undefined,

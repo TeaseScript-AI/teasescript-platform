@@ -200,7 +200,7 @@ export function useRandomControl({
           if (!activationRun.admits(origin)) return null;
           return body({
             drawId: current?.state.randomDraw?.drawId ?? null,
-            send: (resolution) => section.send<ResolveDrawResult>("resolveDraw", resolution),
+            send: (resolution) => section.send("resolveDraw", resolution),
             owned,
             publish: () => publishOwned(section.session) !== null,
           });

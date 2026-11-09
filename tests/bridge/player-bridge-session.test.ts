@@ -39,6 +39,7 @@ import { hatch, inProcessBridge, introduced } from "../helpers/in-process-bridge
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import type * as Clock from "../../player/vue/src/session/useRuntimeSceneClock.js";
+import { asMalformed, untypedBridge } from "../helpers/bridge/untyped.js";
 
 /*
  * L5b's bridge: the session ops (Start, Continue, time, catch-up, pacing), the reply contract (each publication's
@@ -94,7 +95,7 @@ async function playTape(bridge: PlayerBridge, calls = false): Promise<unknown[]>
   const seen = (current: PlayerSession) => ({ ...shown(current), viewed: viewed(current) });
   const steps: unknown[] = [seen(session)];
   const send = async (op: string, args: unknown) => {
-    const result = await bridge.request(session, op, args);
+    const result = await untypedBridge(bridge).request(session, op, args);
     session = bridge.latest(session)!;
     steps.push({ op, result, session: seen(session) });
   };
@@ -394,10 +395,7 @@ test("restore, beginRecording, Continue, a throw: the session recovers from the 
       error instanceof BridgeRequestError && error.kind === "engine" && error.ended,
   );
   // The host kept the session: its next use rebuilds the runner from the recorder, at the publication shown.
-  const later = await bridge.request<{ readonly kind: string }>(before, "observeTime", {
-    atMs: 500,
-    media: [],
-  });
+  const later = await bridge.request(before, "observeTime", { atMs: 500, media: [] });
   assert.equal(later.kind, "observed");
   // The recording began at the restored state, kept Continue, and froze at the call that threw.
   const recording = heldRecording(bridge)!;
@@ -507,7 +505,7 @@ test("Start and Continue take a wall clock's moment anywhere in years 0000–999
     const bridge = await inProcessBridge();
     const restored = introduced(bridge, createPlayerRuntimeSession('showButton "Next"\nexit'));
     await bridge.request(restored, "beginRecording", null);
-    const outcome = await bridge.request<{ readonly kind: string }>(restored, "continue", {
+    const outcome = await bridge.request(restored, "continue", {
       capture: { wallClockMs: -62_167_219_200_000, temporalContext: TEMPORAL },
     });
     assert.equal(outcome.kind, "recorded");
@@ -571,7 +569,7 @@ async function playDeepTape(bridge: PlayerBridge): Promise<unknown[]> {
   );
   const steps: unknown[] = [shown(session)];
   const send = async (op: string, args: unknown) => {
-    const result = await bridge.request(session, op, args);
+    const result = await untypedBridge(bridge).request(session, op, args);
     session = bridge.latest(session)!;
     steps.push({ op, result, session: shown(session) });
   };
@@ -732,8 +730,9 @@ test("start's options are a plain record: a Date or a Map is refused, in-process
   try {
     for (const bridge of [await inProcessBridge(), worker]) {
       const plan = await prepared(bridge, SCRIPT);
+      // Malformed options on purpose: the host refuses them.
       const start = (options: unknown) =>
-        bridge.client.request("start", { plan, options, recording: false });
+        bridge.client.request("start", asMalformed({ plan, options, recording: false }));
       // A Date or a Map has no option of its own, but it is no options record: before, each passed as empty options.
       for (const options of [new Date(0), new Map()])
         await assert.rejects(

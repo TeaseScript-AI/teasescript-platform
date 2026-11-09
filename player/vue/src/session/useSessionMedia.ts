@@ -28,7 +28,6 @@ import {
 import { bridgeOf, endsQuietly, type SessionSection } from "../../../runtime/player-bridge.js";
 import type { Origin } from "./activation/useActivationRun.js";
 import { BridgeRequestError } from "../../../engine-bridge/client.js";
-import type { MediaReportOutcome } from "../../../../src/index.js";
 import { silence } from "../generatedAudio";
 import type { SectionWork, useRuntimeSceneClock } from "./useRuntimeSceneClock";
 
@@ -142,10 +141,7 @@ export function useSessionMedia({
           if (observed === null) return;
           for (const [mediaId, report] of reports) {
             if (held.value || !owned()) return;
-            const outcome = await section.send<MediaReportOutcome>("reportMediaLoad", {
-              mediaId,
-              report,
-            });
+            const outcome = await section.send("reportMediaLoad", { mediaId, report });
             if (outcome.kind === "executionPending") continue;
             if (outcome.kind === "accepted") publishOwned(section.session);
             acknowledge(mediaId);

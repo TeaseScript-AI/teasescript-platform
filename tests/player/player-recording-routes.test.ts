@@ -104,12 +104,15 @@ test("the restart gate's hook is read only by the rewind owner, and the host res
   );
   assert.equal(owner.match(/host\.beforeRestart\(\)/gu)?.length, 1, "one gate reads the hook");
   // The history ops that restart the recorder in the host (`restartAt`), each sent only by the lifecycle's actions
-  // that follow its gate: the commit of Back or Forward, Return, and a reinstating close.
+  // that follow its gate: the commit of Back or Forward, Return, and a reinstating close. Each op's definition ends at
+  // its closing brace, which may name its contract (`} satisfies BridgeOp<...>,`).
   const history = readFileSync(
     resolve(process.cwd(), "player/engine-bridge/ops/history.ts"),
     "utf8",
   );
-  const restarting = [...history.matchAll(/^ {4}(\w+): \{[\s\S]*?^ {4}\},?$/gmu)]
+  const restarting = [
+    ...history.matchAll(/^ {4}(\w+): \{[\s\S]*?^ {4}\}(?: satisfies [^\n]*?)?,?$/gmu),
+  ]
     .filter(([body]) => body.includes("restartAt("))
     .map(([, op]) => op)
     .sort();

@@ -13,11 +13,11 @@ import type { CapturedMediaAdmission } from "../../../src/runtime/actions/captur
 import { exactly, isRecord } from "../argument-checks.js";
 import { admissionOf, isHeldMedia, type HeldMedia } from "../held-media.js";
 import type { PlayerOpsContext } from "../player-ops.js";
-import type { BridgeOp, BridgeOps } from "../worker-host.js";
+import type { BridgeOps } from "../worker-host.js";
 import { publishing, sessionOp } from "./session.js";
 
 /** What an answer op takes: the action it answers, the answer, and what the Player's store holds of its references. */
-interface AnswerArguments<A> {
+export interface AnswerArguments<A> {
   readonly actionId: number;
   readonly answer: A;
   /** `null` for an answer the Player gives without its store, as the fallback answers. */
@@ -45,7 +45,7 @@ const isCaptureAnswer = (answer: Record<string, unknown>): answer is CaptureAnsw
  * An op that answers a pending action with `answer` and continues on success; a refusal changes nothing and keeps the
  * earlier basis accepted. File store and lock answers reach the engine as their payload, which it validates.
  */
-function answerOp<A, C extends Record<string, unknown> = Record<string, unknown>>(
+function answerOp<A extends C, C extends Record<string, unknown> = Record<string, unknown>>(
   checkAnswer: ((answer: Record<string, unknown>) => answer is C) | (() => true),
   answer: (
     session: PlayerRuntimeSession,
@@ -53,11 +53,9 @@ function answerOp<A, C extends Record<string, unknown> = Record<string, unknown>
     answer: A,
     capturedMedia: CapturedMediaAdmission | undefined,
   ) => PlayerRuntimeControlResult<ActionCompletionOutcome>,
-): BridgeOp {
-  return sessionOp(
-    (
-      args,
-    ): args is { readonly actionId: number; readonly answer: C; readonly held: HeldMedia | null } =>
+) {
+  return sessionOp<AnswerArguments<C>, ActionCompletionOutcome, AnswerArguments<A>>(
+    (args): args is AnswerArguments<C> =>
       isRecord(args) &&
       exactly(args, ["actionId", "answer", "held"]) &&
       typeof args.actionId === "number" &&
@@ -67,7 +65,7 @@ function answerOp<A, C extends Record<string, unknown> = Record<string, unknown>
       checkAnswer(args.answer) &&
       (args.held === null || isHeldMedia(args.held)),
     (held, args) => {
-      // EVIDENCE: validation: checkArguments accepted these arguments before run.
+      // EVIDENCE: validation: the engine validates the answer, which the check admits in shape only.
       const { actionId, answer: given, held: media } = args as AnswerArguments<A>;
       held.endCatchUp();
       const result = answer(
@@ -82,7 +80,7 @@ function answerOp<A, C extends Record<string, unknown> = Record<string, unknown>
 }
 
 /** The ops of family L5e (the L5 series): capture, file store and lock answers. */
-export function resourceOps(_context: PlayerOpsContext): BridgeOps {
+export function resourceOps(_context: PlayerOpsContext) {
   return {
     answerCapture: answerOp<PlayerCaptureAnswer, CaptureAnswerShape>(
       isCaptureAnswer,
@@ -93,5 +91,5 @@ export function resourceOps(_context: PlayerOpsContext): BridgeOps {
       answerPlayerRuntimeFileStore,
     ),
     answerLock: answerOp<PlayerLockAnswer>((): true => true, answerPlayerRuntimeLock),
-  };
+  } satisfies BridgeOps;
 }

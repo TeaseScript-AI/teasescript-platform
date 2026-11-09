@@ -21,12 +21,13 @@ import {
   playerRuntimeMediaOrigin,
   type PlayerSession,
 } from "../../player/runtime/runtime-view.js";
-import type { MediaReportOutcome } from "../../src/index.js";
+import type { MediaLoadReport } from "../../src/index.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
 import { viewCalls, viewed, withoutViews } from "../helpers/debug-readers.js";
 import { hatch, inProcessBridge } from "../helpers/in-process-bridge.js";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
+import { asMalformed, untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * L5d's bridge (B-media): media load reports as an op, the media origin in the view's instruction facts, and the plan
@@ -128,11 +129,11 @@ async function play(
         medium.source,
       );
       if (medium.loaded) continue;
-      const report =
+      const report: MediaLoadReport =
         medium.source === "broken.mp3"
           ? { kind: "failed", message: "Not a sound." }
           : { kind: "loaded", durationMs: 3_000 };
-      const result = await bridge.request<MediaReportOutcome>(session, "reportMediaLoad", {
+      const result = await bridge.request(session, "reportMediaLoad", {
         mediaId: medium.mediaId,
         report,
       });
@@ -171,8 +172,12 @@ async function tape(
   // `planMetadata` gives what `prepare` gave; a token the host does not hold gives null.
   steps.push((await bridge.client.request("planMetadata", { plan: token })).result);
   assert.equal((await bridge.client.request("planMetadata", { plan: "p999" })).result, null);
-  await assert.rejects(bridge.client.request("planMetadata", { plan: 1 }), refusedAs("arguments"));
-  const loaded = { kind: "loaded", durationMs: 3_000 };
+  // Malformed on purpose, as the rows below: the host refuses them.
+  await assert.rejects(
+    bridge.client.request("planMetadata", asMalformed({ plan: 1 })),
+    refusedAs("arguments"),
+  );
+  const loaded: MediaLoadReport = { kind: "loaded", durationMs: 3_000 };
   for (const args of [
     { mediaId: -1, report: loaded },
     { mediaId: 1.5, report: loaded },
@@ -180,22 +185,23 @@ async function tape(
     { mediaId: 1, report: "loaded" },
     { mediaId: 1, report: loaded, more: 1 },
   ])
-    await assert.rejects(bridge.request(session, "reportMediaLoad", args), refusedAs("arguments"));
-  // A medium the session does not have, and a report the engine refuses: refusals, which change nothing.
+    await assert.rejects(
+      bridge.request(session, "reportMediaLoad", asMalformed(args)),
+      refusedAs("arguments"),
+    );
+  // A medium the session does not have, and a report the engine refuses: refusals, which change nothing. The bogus
+  // report is no `MediaLoadReport`, sent as it is on purpose.
   for (const args of [
     { mediaId: 99, report: loaded },
     { mediaId: playerRuntimeMedia(session.state).media[0]!.mediaId, report: { kind: "bogus" } },
   ]) {
-    const result = await bridge.request<MediaReportOutcome>(session, "reportMediaLoad", args);
+    const result = await bridge.request(session, "reportMediaLoad", asMalformed(args));
     session = bridge.latest(session)!;
     steps.push({ op: "reportMediaLoad", result, shown: shown(session) });
   }
   session = await play(bridge, session, steps);
   // A late report of a medium that stopped long ago changes nothing.
-  const result = await bridge.request<MediaReportOutcome>(session, "reportMediaLoad", {
-    mediaId: 1,
-    report: loaded,
-  });
+  const result = await bridge.request(session, "reportMediaLoad", { mediaId: 1, report: loaded });
   steps.push({ op: "reportMediaLoad", result, shown: shown(bridge.latest(session)!) });
   viewing = false;
   return { steps, last: bridge.latest(session)! };
@@ -281,7 +287,7 @@ for (const [when, playSteps] of [
     );
     try {
       const held = await prepared(worker);
-      const reply = await worker.client.request("restoreForTest", {
+      const reply = await untypedClient(worker.client).request("restoreForTest", {
         plan: held.token,
         snapshotJson: json,
       });

@@ -20,6 +20,7 @@ import {
 } from "../../player/runtime/runtime-view.js";
 import { hatch, introduced } from "../helpers/in-process-bridge.js";
 import type { PlayerTranscriptEntryPresentation } from "../../player/presentation/model.js";
+import type { OpCall } from "../../player/engine-bridge/op-catalogue.js";
 
 // Debug's rewind history keeps a point for each newly presented interaction and restores it exactly: its state, and its
 // transcript rebuilt from the events that led to it (DEBUGGER.md "Rewind"). The history is the engine's host's
@@ -62,10 +63,9 @@ function choose(session: PlayerSession, label: string): PlayerSession {
 /** A step through `bridge` as the page takes it: a prepared step is committed; the commit's result, and its candidate. */
 async function committed(
   bridge: PlayerBridge,
-  op: "rewindBack" | "rewindForward",
-  args: unknown,
+  ...call: OpCall<"rewindBack" | "rewindForward">
 ): Promise<Awaited<ReturnType<PlayerBridge["historyStep"]>>> {
-  const prepared = await bridge.historyStep(op, args);
+  const prepared = await bridge.historyStep(...call);
   if (prepared.result.kind !== "prepared") return prepared;
   const { history, step } = prepared.result;
   const { result } = await bridge.historyStep("rewindCommit", { history, step });

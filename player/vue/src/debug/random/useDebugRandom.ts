@@ -1,6 +1,5 @@
 import { computed, ref, shallowRef, watch } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
-import type { PlanMetadata } from "../../../../engine-bridge/player-ops.js";
 import type { RandomOutcome, RandomSite } from "../../../../../src/index.js";
 import type { CodeLine, DrawCode } from "./randomDrawPresentation";
 import {
@@ -50,8 +49,7 @@ export function useDebugRandom(player: PlayerSessionHost) {
         (reply) => {
           const shown = player.session.value;
           if (shown?.connection !== connection || shown.planToken !== plan) return;
-          // EVIDENCE: validation: `planMetadata` replies from the same build with the plan's metadata, or null.
-          const metadata = reply.result as PlanMetadata | null;
+          const metadata = reply.result;
           sites.value = new Map((metadata?.randomSites ?? []).map((site) => [site.id, site]));
         },
         // A lost Worker gives no sites.
@@ -76,8 +74,7 @@ export function useDebugRandom(player: PlayerSessionHost) {
       shown.connection.client.request("drawCode", { plan, path: site.path, site }).then(
         (reply) => {
           if (draw.value !== current || player.session.value?.planToken !== plan) return;
-          // EVIDENCE: validation: `drawCode` replies from the same build with the draw's code, or null.
-          code.value = reply.result as DrawCode | null;
+          code.value = reply.result;
         },
         () => {},
       );
@@ -128,8 +125,7 @@ export function useDebugRandom(player: PlayerSessionHost) {
         .then(
           (reply) => {
             if (tried.value !== known) return;
-            // EVIDENCE: validation: `codeLines` replies from the same build with the outcomes' code lines.
-            historyLines.value = reply.result as readonly CodeLine[];
+            historyLines.value = reply.result;
           },
           () => {},
         );

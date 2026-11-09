@@ -19,6 +19,7 @@ import { formObligations, malformedArguments } from "../helpers/bridge/argument-
 import { cloneGraphDifference } from "../helpers/clone-graph.js";
 import { inProcessBridge } from "../helpers/in-process-bridge.js";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
+import { asMalformed } from "../helpers/bridge/untyped.js";
 
 /*
  * L5h.1's ops: what the Player keeps and exports of a session, read in the host after the session's earlier requests,
@@ -334,7 +335,8 @@ test("captureStorage reads the shown state's saved values in the host, at its re
       formObligations(forms),
     );
     for (const { id, args } of malformed)
-      await bridge.client.request("captureStorage", args).then(
+      // Malformed on purpose: the host refuses them.
+      await bridge.client.request("captureStorage", asMalformed(args)).then(
         () => refused.push(`${id}: accepted`),
         (error: unknown) => {
           if (!(error instanceof BridgeRequestError) || error.code !== "arguments")
@@ -364,13 +366,16 @@ test("a kept session's events are checked at the op: an unknown kind, a malforme
       [...events].reverse(),
     ])
       await assert.rejects(
-        bridge.client.request("restoreKept", {
-          plan,
-          planJson: keep.planJson,
-          snapshotJson: keep.snapshotJson,
-          events: bad,
-          marks: NO_MARKS,
-        }),
+        bridge.client.request(
+          "restoreKept",
+          asMalformed({
+            plan,
+            planJson: keep.planJson,
+            snapshotJson: keep.snapshotJson,
+            events: bad,
+            marks: NO_MARKS,
+          }),
+        ),
         /Malformed arguments/u,
       );
   });

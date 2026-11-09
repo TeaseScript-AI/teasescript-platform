@@ -60,10 +60,7 @@ test("an applied storage edit publishes its mark in its own host step: the edit'
   const bridge = await inProcessBridge();
   const session = await bridge.start(await prepared(bridge), START, false);
   await bridge.request(session, "observeTime", { atMs: 1_500, media: [] });
-  const outcome = await bridge.request<{ readonly kind: string }>(session, "applyStorageEdit", {
-    key: "k",
-    value: 1,
-  });
+  const outcome = await bridge.request(session, "applyStorageEdit", { key: "k", value: 1 });
   assert.equal(outcome.kind, "applied");
   const edited = bridge.latest(session)!;
   assert.deepEqual(edited.marks.editedWhileDebugging, {
@@ -82,10 +79,7 @@ test("a stop after the host applied a storage edit still publishes that edit wit
   const bridge = await inProcessBridge();
   const session = await bridge.start(await prepared(bridge), START, false);
   await bridge.request(session, "observeTime", { atMs: 1_500, media: [] });
-  const edit = bridge.request<{ readonly kind: string }>(session, "applyStorageEdit", {
-    key: "k",
-    value: 1,
-  });
+  const edit = bridge.request(session, "applyStorageEdit", { key: "k", value: 1 });
   await bridge.halt(session);
   assert.equal((await edit).kind, "applied");
   assert.ok(bridge.frozen(session));

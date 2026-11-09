@@ -27,6 +27,7 @@ import { preparedPlan } from "../helpers/prepared-plan.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { serviceSection } from "../helpers/service-section.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
+import type { InputSection } from "../../player/vue/src/session/runtime-input.js";
 
 /*
  * When the engine's Worker is lost, every request still waiting for its reply ends its caller quietly: the loss is the
@@ -272,10 +273,7 @@ interface LossHost {
   demandCallView(): { release(): void };
   inputSection<T>(
     work: "inputAnswer" | "inputDraft",
-    body: (
-      section: { send<R>(op: string, args: unknown): Promise<R | symbol> },
-      observed: PlayerSession | null,
-    ) => Promise<T>,
+    body: (section: Pick<InputSection, "send">, observed: PlayerSession | null) => Promise<T>,
   ): Promise<T | null>;
 }
 let usePlayerSession: (options: {
@@ -400,15 +398,13 @@ for (const [consumer, run] of [
     "an input section's op",
     (player: LossHost) =>
       // A row that observes nothing, so the op is the section's first post.
-      player.inputSection("inputDraft", (s) =>
-        s.send<PlayerSession>("observeInput", { atMs: 0, media: [] }),
-      ),
+      player.inputSection("inputDraft", (s) => s.send("observeInput", { atMs: 0, media: [] })),
   ],
 ] as const)
   test(`${consumer} in flight when the Worker is lost ends quietly, and the loss is the error stop once`, async (context) => {
     covered.add(consumer);
     const { player, lose, hostErrors } = await mount(context, 50);
-    let result: PlayerSession | symbol | string | null = "pending";
+    let result: Awaited<ReturnType<typeof run>> | "pending" = "pending";
     const unhandled = await unhandledDuring(async () => {
       const release = holdReplies(context, 50);
       const pending = run(player);

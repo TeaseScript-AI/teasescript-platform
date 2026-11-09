@@ -1,4 +1,5 @@
 import type { PlayerBridge, ServiceSection } from "../../player/runtime/player-bridge.js";
+import type { SessionOp } from "../../player/engine-bridge/op-catalogue.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import { clockTicket } from "./clock-ticket.js";
 
@@ -30,12 +31,14 @@ export function serviceSection(
       await section.send("observeTime", args);
       show(section.session);
       return body(
+        // EVIDENCE: invariant: `ServiceSection` pairs each op with its arguments, which this forwards as they are.
         {
-          send: (op, args, basis) => {
+          send: (op: SessionOp, args: unknown, basis: number) => {
             onSend(op, args);
-            return section.send(op, args, { basis, publish: show });
+            // EVIDENCE: invariant: the pairs `ServiceSection` made, sent on as they are.
+            return section.send<SessionOp>(op as never, args as never, { basis, publish: show });
           },
-        },
+        } as ServiceSection,
         section.session,
       );
     });

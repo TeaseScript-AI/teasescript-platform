@@ -28,6 +28,7 @@ import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
 import { viewCalls, viewed, withoutViews } from "../helpers/debug-readers.js";
 import { hatch, inProcessBridge } from "../helpers/in-process-bridge.js";
 import { serviceSection } from "../helpers/service-section.js";
+import { asMalformed, untypedBridge } from "../helpers/bridge/untyped.js";
 
 /*
  * L5e's bridge (B-resource): the capture, file store and lock answers as ops, what the Player's store holds of their
@@ -137,7 +138,10 @@ async function playTape(
   const seen = (current: PlayerSession) => ({ ...shown(current), viewed: viewed(current) });
   const steps: unknown[] = [seen(session)];
   const capture = activePlayerRuntimeCapture(session.state)!;
-  const valid = { actionId: capture.actionId, answer: { kind: "unavailable", reason: "denied" } };
+  const valid = {
+    actionId: capture.actionId,
+    answer: { kind: "unavailable", reason: "denied" } as const,
+  };
   const holed: unknown[] = [];
   holed[1] = { reference: "x", kind: "image" };
   // Malformed arguments are refused before the engine sees them.
@@ -154,13 +158,17 @@ async function playTape(
     { ...valid, answer: { kind: "captured", reference: "photo-1", extra: 1 }, held: [] },
     { ...valid, held: [], more: 1 },
   ])
-    await assert.rejects(bridge.request(session, "answerCapture", args), refusedAs("arguments"));
-  // An answer of another action or of another kind is the engine's refusal, which changes nothing.
+    await assert.rejects(
+      bridge.request(session, "answerCapture", asMalformed(args)),
+      refusedAs("arguments"),
+    );
+  // An answer of another action or of another kind is the engine's refusal, which changes nothing. The file store's
+  // answer of a capture's kind is sent as it is on purpose.
   for (const [op, args] of [
     ["answerCapture", { ...valid, actionId: 999, held: [] }],
     ["answerFileStore", { ...valid, answer: { kind: "failed" }, held: [] }],
   ] as const) {
-    const result = await bridge.request<ActionCompletionOutcome>(session, op, args);
+    const result = await untypedBridge(bridge).request(session, op, args);
     session = bridge.latest(session)!;
     steps.push({ op, result, session: seen(session) });
   }
@@ -175,16 +183,17 @@ async function playTape(
     const photo = activePlayerRuntimeCapture(session.state) !== null;
     const next = answerFor(session.state, !photo || photos++ === 0);
     const held = heldMedia(store, next.refs);
-    const result = await bridge.request<ActionCompletionOutcome>(session, next.op, {
+    // EVIDENCE: test: `answerFor` picks at run time an answer op, which completes an action.
+    const result = (await untypedBridge(bridge).request(session, next.op, {
       actionId: next.actionId,
       answer: next.answer,
       held,
-    });
+    })) as ActionCompletionOutcome;
     session = bridge.latest(session)!;
     steps.push({ op: next.op, held, result, session: seen(session) });
     if (result.kind !== "invalidPayload") continue;
     // The capture service's fallback, which names no reference and has no admission.
-    const fallback = await bridge.request<ActionCompletionOutcome>(session, next.op, {
+    const fallback = await untypedBridge(bridge).request(session, next.op, {
       actionId: next.actionId,
       answer: { kind: "unavailable", reason: "failed" },
       held: null,
@@ -289,7 +298,7 @@ test("an answer without the store's table is not vouched for, with the recording
       recording,
     );
     const { actionId } = activePlayerRuntimeCapture(session.state)!;
-    const outcome = await bridge.request<ActionCompletionOutcome>(session, "answerCapture", {
+    const outcome = await bridge.request(session, "answerCapture", {
       actionId,
       answer: { kind: "captured", reference: "photo-1" },
       held: null,
@@ -332,7 +341,7 @@ test("a lock dialog that an expiry block interrupts refuses its answer, which ch
   assert.equal(ask.phase, "ask");
   await bridge.request(session, "observeTime", { atMs: 1_500, media: [] });
   session = bridge.latest(session)!;
-  const outcome = await bridge.request<ActionCompletionOutcome>(session, "answerLock", {
+  const outcome = await bridge.request(session, "answerLock", {
     actionId: ask.actionId,
     answer: { kind: "submitted" },
     held: [],

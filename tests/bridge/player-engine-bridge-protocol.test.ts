@@ -8,7 +8,6 @@ import {
   BridgeRequestError,
   BridgeStartupError,
   connectBridge,
-  type BridgeClient,
   type BridgeResult,
 } from "../../player/engine-bridge/client.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
@@ -17,6 +16,8 @@ import { BRIDGE_VERSION, type BuildIdentity } from "../../player/engine-bridge/p
 import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import { listRandomSites, validateInstructionPlan } from "../../src/index.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
+import { untypedClient } from "../helpers/bridge/untyped.js";
+import type { UntypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * The engine bridge over a real worker thread (a separate realm; messages are structured clones): the Worker's
@@ -28,8 +29,16 @@ const BUILD: BuildIdentity = { commit: "c0ffee", dirty: false, mode: "test", app
 const PLAYER_WORKER = new URL("../../player/engine-bridge/node-worker.js", import.meta.url);
 const FIXTURE_WORKER = new URL("../helpers/bridge-fixture-worker.js", import.meta.url);
 
-async function withClient<T>(entry: URL, body: (client: BridgeClient) => Promise<T>): Promise<T> {
-  const client = await connectBridge(nodeWorkerPort(entry, BUILD), BUILD);
+/**
+ * A client of `entry`, untyped: the fixture Worker serves ops of its own (`add`, `slow`, ...), and the Player Worker's
+ * tests send malformed arguments on purpose, neither of which the catalogue's types admit.
+ */
+async function connectUntyped(entry: URL): Promise<UntypedClient> {
+  return untypedClient(await connectBridge(nodeWorkerPort(entry, BUILD), BUILD));
+}
+
+async function withClient<T>(entry: URL, body: (client: UntypedClient) => Promise<T>): Promise<T> {
+  const client = await connectUntyped(entry);
   try {
     return await body(client);
   } finally {
@@ -57,7 +66,7 @@ function prepared(reply: BridgeResult): PrepareResult {
   return reply.result as PrepareResult;
 }
 
-const prepare = async (client: BridgeClient, args: unknown) =>
+const prepare = async (client: UntypedClient, args: unknown) =>
   prepared(await client.request("prepare", args));
 
 const SOURCE = [
@@ -285,7 +294,7 @@ test("the Worker refuses a wrong version, a malformed envelope and an old ID, an
 });
 
 test("a lost Worker fails its pending requests and every later one; nothing is retried", async () => {
-  const client = await connectBridge(nodeWorkerPort(FIXTURE_WORKER, BUILD), BUILD);
+  const client = await connectUntyped(FIXTURE_WORKER);
   const losses: BridgeLostError[] = [];
   client.onLoss((error) => losses.push(error));
   await assert.rejects(client.request("exit", null), BridgeLostError);
@@ -294,7 +303,7 @@ test("a lost Worker fails its pending requests and every later one; nothing is r
 });
 
 test("an intentional terminate fails pending and later requests but reports no loss", async () => {
-  const client = await connectBridge(nodeWorkerPort(FIXTURE_WORKER, BUILD), BUILD);
+  const client = await connectUntyped(FIXTURE_WORKER);
   const losses: BridgeLostError[] = [];
   client.onLoss((error) => losses.push(error));
   const pending = client.request("slow", 0);

@@ -32,6 +32,7 @@ import {
 import { coverageGaps, product } from "../helpers/family-coverage.js";
 import { inProcessBridge } from "../helpers/in-process-bridge.js";
 import { preparedPlan } from "../helpers/prepared-plan.js";
+import { asMalformed, untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * The recording and debug-export ops' surfaces (L5h.3b, `ops/recording.ts`): each op's argument forms, refused when
@@ -112,7 +113,7 @@ test("every recording op refuses each malformed argument its forms oblige, and a
     const answers: Record<string, Answer> = {};
     for (const op of OPS) {
       for (const { id, args } of malformedArguments(ARGUMENTS[op]))
-        answers[`${op} ${id}`] = await answerOf(bridge.client.request(op, args));
+        answers[`${op} ${id}`] = await answerOf(untypedClient(bridge.client).request(op, args));
       // Each valid value of each field, the other fields at their first: never refused as malformed.
       const [form] = ARGUMENTS[op];
       for (const [field, kind] of Object.entries(form.required))
@@ -123,7 +124,7 @@ test("every recording op refuses each malformed argument its forms oblige, and a
               name === field ? value : VALID_VALUES[of][0],
             ]),
           );
-          const answer = await answerOf(bridge.client.request(op, args));
+          const answer = await answerOf(untypedClient(bridge.client).request(op, args));
           answers[`${op} ${field} valid ${index + 1}`] = {
             answer:
               JSON.stringify(answer) === JSON.stringify(MALFORMED(op)) ? "malformed" : "admitted",
@@ -152,7 +153,8 @@ test("a halt refuses malformed stop arguments, and a valid stop or none halts", 
     const answers: Record<string, Answer> = {};
     for (const { id, args } of malformedArguments(HALT).filter(({ id }) => id !== "null")) {
       const session = await bridge.start(plan, { wallClockMs: 0 }, false);
-      answers[id] = await answerOf(bridge.client.signal("halt", args, session.id));
+      // Malformed on purpose: the host refuses them.
+      answers[id] = await answerOf(bridge.client.signal("halt", asMalformed(args), session.id));
     }
     const stopped = await bridge.start(plan, { wallClockMs: 0 }, false);
     answers["valid"] = await answerOf(
@@ -210,21 +212,24 @@ test("the recording ops' outcomes answer as written, in-process and in a Worker"
     outcomes["captureRecording unrecorded"] = await bridge.read(unrecorded, "captureRecording");
     const ticket = captured.kind === "captured" ? captured.ticket : "";
     const exported = (session: string | null, recording: unknown) =>
-      answerOf(bridge.client.request("captureExport", { session, recording }), (result) => {
-        // EVIDENCE: fixture: `captureExport` replies with `ExportCaptureReply`, read here only in these fields.
-        const reply = result as {
-          kind: string;
-          ticket?: string;
-          recording?: unknown;
-          identity?: unknown;
-        };
-        return {
-          kind: reply.kind,
-          recording:
-            reply.recording === undefined ? "absent" : reply.recording === null ? "none" : "held",
-          identity: reply.identity ?? null,
-        };
-      });
+      answerOf(
+        untypedClient(bridge.client).request("captureExport", { session, recording }),
+        (result) => {
+          // EVIDENCE: fixture: `captureExport` replies with `ExportCaptureReply`, read here only in these fields.
+          const reply = result as {
+            kind: string;
+            ticket?: string;
+            recording?: unknown;
+            identity?: unknown;
+          };
+          return {
+            kind: reply.kind,
+            recording:
+              reply.recording === undefined ? "absent" : reply.recording === null ? "none" : "held",
+            identity: reply.identity ?? null,
+          };
+        },
+      );
     outcomes["captureExport current"] = await exported(recorded.id, "current");
     outcomes["captureExport ticket"] = await exported(recorded.id, { ticket });
     outcomes["captureExport another session's recording"] = await exported(unrecorded.id, {
@@ -430,7 +435,9 @@ test("a run retired before the host saw it begins through no carrier, and a late
         run: run1,
       }),
     );
-    outcomes["beginRecording"] = await answerOf(bridge.request(outside, "beginRecording", run1));
+    outcomes["beginRecording"] = await answerOf(
+      bridge.request(outside, "beginRecording", run1).then((result) => ({ result })),
+    );
     outcomes["commitIncident"] = await answerOf(
       bridge.client.request("commitIncident", stopOf(1, 1)),
     );

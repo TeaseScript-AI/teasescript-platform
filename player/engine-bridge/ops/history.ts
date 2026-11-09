@@ -9,7 +9,6 @@ import {
 import type { Delivery } from "../delivery.js";
 import { exactly, isEventLog, isRecord } from "../argument-checks.js";
 import type {
-  CloseReason,
   HistoryDelta,
   HistoryOutcome,
   HistoryPosition,
@@ -17,7 +16,7 @@ import type {
 } from "../history/core.js";
 import type { PlayerOpsContext } from "../player-ops.js";
 import type { Introduction } from "../session-protocol.js";
-import type { BridgeOps, HostSessions, OpOutcome } from "../worker-host.js";
+import type { BridgeOp, BridgeOps, HostSessions, OpOutcome } from "../worker-host.js";
 import { heldSession } from "./persistence.js";
 import { HeldSession, beginRecordingAt, introduction } from "./session.js";
 
@@ -58,6 +57,27 @@ export type HistoryOpened =
 const CLOSE_REASONS: readonly string[] = ["debugOff", "replacement", "import", "clear", "disposal"];
 const isSerial = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+
+/** What `historyClose`'s check admits. */
+export interface HistoryCloseArguments {
+  readonly history: number;
+  readonly by: "debugOff" | "replacement" | "import" | "clear" | "disposal";
+  readonly adoptionSucceeded?: boolean | undefined;
+}
+
+/** What `rewindBack`'s check admits: the history, its point, the live session, and the point's events. */
+export interface RewindBackArguments {
+  readonly history: number;
+  readonly point: number;
+  readonly live: string;
+  readonly events: readonly InterpreterEvent[];
+}
+
+/** What `rewindAdopt`'s check admits: an adoption begun, or ended as it succeeded or failed. */
+type RewindAdoptArguments = { readonly history: number } & (
+  | { readonly phase: "begin"; readonly succeeded?: undefined }
+  | { readonly phase: "end"; readonly succeeded: boolean }
+);
 
 function releaseAll(sessions: HostSessions, ids: readonly string[]): void {
   for (const id of ids) sessions.delete(id);
@@ -101,7 +121,7 @@ function restored(
 function stepped(
   result: HistoryOpResult,
   made?: { readonly id: string; readonly view: Introduction },
-): OpOutcome {
+): OpOutcome<HistoryOpResult> {
   return made === undefined || result.kind === "refused"
     ? { result }
     : { result, session: made.id, eventsThrough: made.view.eventsThrough, view: made.view };
@@ -125,12 +145,16 @@ function restartAt(
  * Debug's rewind in the host (docs/DEBUGGER.md "Rewind"): the history's control and steps, each through its core
  * (`advanceHistory`), and the session-free reads of a held session that rewind and adoption take.
  */
-export function historyOps(context: PlayerOpsContext): BridgeOps {
-  return { ...historyControlOps(context), ...rewindStepOps(context), ...rewindSettleOps(context) };
+export function historyOps(context: PlayerOpsContext) {
+  return {
+    ...historyControlOps(context),
+    ...rewindStepOps(context),
+    ...rewindSettleOps(context),
+  } satisfies BridgeOps;
 }
 
 /** The history's control (open, enroll, close) and its session-free reads (the timeline, a state's saved values). */
-function historyControlOps(context: PlayerOpsContext): BridgeOps {
+function historyControlOps(context: PlayerOpsContext) {
   const { history } = context;
   return {
     // The session's saved values as its state holds them, for an adoption.
@@ -139,8 +163,7 @@ function historyControlOps(context: PlayerOpsContext): BridgeOps {
       checkArguments: (args): args is { readonly session: string } =>
         isRecord(args) && exactly(args, ["session"]) && typeof args.session === "string",
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted the session's ID.
-        const held = heldSession(sessions, (args as { readonly session: string }).session);
+        const held = heldSession(sessions, args.session);
         const current = held.sessionForOperation();
         const snapshot = playerRuntimeSnapshot(current);
         const result: StorageCapture = {
@@ -150,15 +173,14 @@ function historyControlOps(context: PlayerOpsContext): BridgeOps {
         };
         return { result };
       },
-    },
+    } satisfies BridgeOp<{ readonly session: string }, StorageCapture, "none">,
     // Opens a rewind history for the Player's newest control serial; an older serial changes nothing.
     historyOpen: {
       session: "none",
       checkArguments: (args): args is { readonly intent: number } =>
         isRecord(args) && exactly(args, ["intent"]) && isSerial(args.intent),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted the serial.
-        const { intent } = args as { readonly intent: number };
+        const { intent } = args;
         const opened = history.open(intent);
         if (opened === null) return { result: { kind: "stale" } satisfies HistoryOpened };
         releaseAll(sessions, opened.released);
@@ -169,7 +191,7 @@ function historyControlOps(context: PlayerOpsContext): BridgeOps {
         };
         return { result };
       },
-    },
+    } satisfies BridgeOp<{ readonly intent: number }, HistoryOpened, "none">,
     // Takes the history's session as it is now: the history follows it, with a point for an interaction it presents.
     historyEnroll: {
       session: "existing",
@@ -177,8 +199,7 @@ function historyControlOps(context: PlayerOpsContext): BridgeOps {
       checkArguments: (args): args is { readonly history: number } =>
         isRecord(args) && exactly(args, ["history"]) && isSerial(args.history),
       run: (args, sessions, session) => {
-        // EVIDENCE: validation: checkArguments accepted the history's serial.
-        const { history: id } = args as { readonly history: number };
+        const { history: id } = args;
         const held = heldSession(sessions, session!.id);
         if (!history.follow(id, held.historyKey, session!.id))
           return refused("the history is not open, or follows another session");
@@ -194,17 +215,11 @@ function historyControlOps(context: PlayerOpsContext): BridgeOps {
         });
         return { result: done(outcome, applied) };
       },
-    },
+    } satisfies BridgeOp<{ readonly history: number }, HistoryOpResult, "existing">,
     // Closes the history: Debug off reinstates a parked session; a replacement, an import and disposal retire them.
     historyClose: {
       session: "none",
-      checkArguments: (
-        args,
-      ): args is {
-        readonly history: number;
-        readonly by: "debugOff" | "replacement" | "import" | "clear" | "disposal";
-        readonly adoptionSucceeded?: boolean | undefined;
-      } =>
+      checkArguments: (args): args is HistoryCloseArguments =>
         isRecord(args) &&
         exactly(args, ["history", "by"], ["adoptionSucceeded"]) &&
         isSerial(args.history) &&
@@ -212,16 +227,7 @@ function historyControlOps(context: PlayerOpsContext): BridgeOps {
         CLOSE_REASONS.includes(args.by) &&
         (args.adoptionSucceeded === undefined || typeof args.adoptionSucceeded === "boolean"),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments.
-        const {
-          history: id,
-          by,
-          adoptionSucceeded,
-        } = args as {
-          readonly history: number;
-          readonly by: CloseReason;
-          readonly adoptionSucceeded?: boolean;
-        };
+        const { history: id, by, adoptionSucceeded } = args;
         const { outcome, applied } = history.advance(id, {
           kind: "close",
           by,
@@ -232,24 +238,23 @@ function historyControlOps(context: PlayerOpsContext): BridgeOps {
         restartAt(context, sessions, applied);
         return { result: done(outcome, applied) };
       },
-    },
+    } satisfies BridgeOp<HistoryCloseArguments, HistoryOpResult, "none">,
     // The history's whole timeline, for a main side whose deltas did not continue its revision.
     historyTimeline: {
       session: "none",
       checkArguments: (args): args is { readonly history: number } =>
         isRecord(args) && exactly(args, ["history"]) && isSerial(args.history),
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted the serial.
-        const { history: id } = args as { readonly history: number };
+        const { history: id } = args;
         const core = history.core(id);
         return { result: core === null ? null : core.timeline() };
       },
-    },
-  };
+    } satisfies BridgeOp<{ readonly history: number }, HistoryTimeline | null, "none">,
+  } satisfies BridgeOps;
 }
 
 /** A rewind step prepared and read: Back and Forward, through `prepareAt`. */
-function rewindStepOps(context: PlayerOpsContext): BridgeOps {
+function rewindStepOps(context: PlayerOpsContext) {
   const { history } = context;
   /**
    * The rest of a prepared step to `position`: reads its snapshot and restores the candidate, with the marks the
@@ -263,7 +268,7 @@ function rewindStepOps(context: PlayerOpsContext): BridgeOps {
     position: HistoryPosition,
     events: readonly InterpreterEvent[],
     planToken: string,
-  ): Promise<OpOutcome> => {
+  ): Promise<OpOutcome<HistoryOpResult>> => {
     if (prepared.kind === "refused") return { result: prepared };
     const step = prepared.step!;
     // The step's own delivery, taken before anything awaits: the candidate is that delivery's until its reply is
@@ -299,14 +304,7 @@ function rewindStepOps(context: PlayerOpsContext): BridgeOps {
     // Back to `point`, restored from its snapshot; the first Back parks the live session for Return.
     rewindBack: {
       session: "none",
-      checkArguments: (
-        args,
-      ): args is {
-        readonly history: number;
-        readonly point: number;
-        readonly live: string;
-        readonly events: readonly InterpreterEvent[];
-      } =>
+      checkArguments: (args): args is RewindBackArguments =>
         isRecord(args) &&
         exactly(args, ["history", "point", "live", "events"]) &&
         isSerial(args.history) &&
@@ -314,18 +312,7 @@ function rewindStepOps(context: PlayerOpsContext): BridgeOps {
         typeof args.live === "string" &&
         isEventLog(args.events),
       run: async (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted the shape and each event (`isEventLog`).
-        const {
-          history: id,
-          point: pointId,
-          live: liveId,
-          events,
-        } = args as {
-          readonly history: number;
-          readonly point: number;
-          readonly live: string;
-          readonly events: readonly InterpreterEvent[];
-        };
+        const { history: id, point: pointId, live: liveId, events } = args;
         const core = history.core(id);
         if (core === null) return refused("no such history");
         const point = core.pointBefore(pointId);
@@ -367,7 +354,7 @@ function rewindStepOps(context: PlayerOpsContext): BridgeOps {
         if (outcome.kind !== "refused" && first) history.name(id, owner.historyKey, liveId);
         return prepareAt(sessions, id, outcome, point, events, owner.planToken);
       },
-    },
+    } satisfies BridgeOp<RewindBackArguments, HistoryOpResult, "none">,
     // Forward to the state the last Back left, restored from its snapshot.
     rewindForward: {
       session: "none",
@@ -379,11 +366,7 @@ function rewindStepOps(context: PlayerOpsContext): BridgeOps {
         isSerial(args.history) &&
         isEventLog(args.events),
       run: async (args, sessions) => {
-        // EVIDENCE: validation: as rewindBack.
-        const { history: id, events } = args as {
-          readonly history: number;
-          readonly events: readonly InterpreterEvent[];
-        };
+        const { history: id, events } = args;
         const core = history.core(id);
         const target = core?.forwardTarget ?? null;
         if (core === null || target === null) return refused("Forward needs a state Back left");
@@ -394,12 +377,16 @@ function rewindStepOps(context: PlayerOpsContext): BridgeOps {
         const { outcome } = history.advance(id, { kind: "prepare", move: "forward" });
         return prepareAt(sessions, id, outcome, target, events, parked.planToken);
       },
-    },
-  };
+    } satisfies BridgeOp<
+      { readonly history: number; readonly events: readonly InterpreterEvent[] },
+      HistoryOpResult,
+      "none"
+    >,
+  } satisfies BridgeOps;
 }
 
 /** A prepared step settled: committed, dropped, returned from, or adopted. */
-function rewindSettleOps(context: PlayerOpsContext): BridgeOps {
+function rewindSettleOps(context: PlayerOpsContext) {
   const { history } = context;
   return {
     // The page shows the prepared step's candidate: the transfer applies, and the recording begins there.
@@ -411,15 +398,18 @@ function rewindSettleOps(context: PlayerOpsContext): BridgeOps {
         isSerial(args.history) &&
         isSerial(args.step),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted both serials.
-        const { history: id, step } = args as { readonly history: number; readonly step: number };
+        const { history: id, step } = args;
         const { outcome, applied } = history.commit(id, step);
         if (outcome.kind === "refused") return { result: outcome };
         releaseAll(sessions, applied.released);
         restartAt(context, sessions, applied);
         return { result: done(outcome, applied) };
       },
-    },
+    } satisfies BridgeOp<
+      { readonly history: number; readonly step: number },
+      HistoryOpResult,
+      "none"
+    >,
     // The page leaves the prepared step: only its candidate and reservation go; a repeated drop is harmless.
     rewindDrop: {
       session: "none",
@@ -429,37 +419,34 @@ function rewindSettleOps(context: PlayerOpsContext): BridgeOps {
         isSerial(args.history) &&
         isSerial(args.step),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted both serials.
-        const { history: id, step } = args as { readonly history: number; readonly step: number };
+        const { history: id, step } = args;
         const { outcome, applied } = history.drop(id, step);
         if (outcome.kind === "advanced") releaseAll(sessions, applied.released);
         return { result: done(outcome, applied) };
       },
-    },
+    } satisfies BridgeOp<
+      { readonly history: number; readonly step: number },
+      HistoryOpResult,
+      "none"
+    >,
     // Return to the parked session, as it was when Back first left it; the restored states go.
     rewindReturn: {
       session: "none",
       checkArguments: (args): args is { readonly history: number } =>
         isRecord(args) && exactly(args, ["history"]) && isSerial(args.history),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted the serial.
-        const { history: id } = args as { readonly history: number };
+        const { history: id } = args;
         const { outcome, applied } = history.advance(id, { kind: "return" });
         if (outcome.kind === "refused") return { result: outcome };
         releaseAll(sessions, applied.released);
         restartAt(context, sessions, applied);
         return { result: done(outcome, applied) };
       },
-    },
+    } satisfies BridgeOp<{ readonly history: number }, HistoryOpResult, "none">,
     // An adoption of the inspected state: begun, then ended as it succeeded or failed.
     rewindAdopt: {
       session: "none",
-      checkArguments: (
-        args,
-      ): args is { readonly history: number } & (
-        | { readonly phase: "begin"; readonly succeeded?: undefined }
-        | { readonly phase: "end"; readonly succeeded: boolean }
-      ) =>
+      checkArguments: (args): args is RewindAdoptArguments =>
         isRecord(args) &&
         exactly(args, ["history", "phase"], ["succeeded"]) &&
         isSerial(args.history) &&
@@ -467,16 +454,7 @@ function rewindSettleOps(context: PlayerOpsContext): BridgeOps {
           ? args.succeeded === undefined
           : args.phase === "end" && typeof args.succeeded === "boolean"),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments.
-        const {
-          history: id,
-          phase,
-          succeeded,
-        } = args as {
-          readonly history: number;
-          readonly phase: "begin" | "end";
-          readonly succeeded?: boolean;
-        };
+        const { history: id, phase, succeeded } = args;
         const { outcome, applied } = history.advance(
           id,
           phase === "begin"
@@ -486,6 +464,6 @@ function rewindSettleOps(context: PlayerOpsContext): BridgeOps {
         if (outcome.kind === "advanced") releaseAll(sessions, applied.released);
         return { result: done(outcome, applied) };
       },
-    },
-  };
+    } satisfies BridgeOp<RewindAdoptArguments, HistoryOpResult, "none">,
+  } satisfies BridgeOps;
 }

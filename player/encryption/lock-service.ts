@@ -1,5 +1,4 @@
 import type {
-  ActionCompletionOutcome,
   RuntimeLockActionSnapshot,
   RuntimeLockChoice,
   RuntimeLockNotice,
@@ -284,7 +283,7 @@ export class LockService {
     if (!observed || activePlayerRuntimeLock(observed.state)?.actionId !== action.actionId)
       return this.#settled(key);
     const outcome = await this.#send(record, () =>
-      section.send<ActionCompletionOutcome>(
+      section.send(
         "answerLock",
         {
           actionId: action.actionId,
@@ -311,7 +310,7 @@ export class LockService {
     const fallback = answerRecord(key, record.generation, Promise.resolve(failed));
     this.#replace(fallback);
     await this.#send(fallback, () =>
-      section.send<ActionCompletionOutcome>(
+      section.send(
         "answerLock",
         { actionId: action.actionId, answer: failed, held: null },
         observed.revision,

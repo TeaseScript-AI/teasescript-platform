@@ -1,6 +1,5 @@
 import { shallowRef, type ShallowRef } from "vue";
 import type { PlayerProject } from "../../runtime/runtime-adapter.js";
-import type { PrepareResult } from "../../engine-bridge/player-ops.js";
 import type { RuntimePlayerProfileInput } from "../../../src/runtime/host-data/player-profile.js";
 import type { ScriptFailure } from "./start-and-end/ScriptProblems.vue";
 import type { PlayerSessionHost } from "./session/usePlayerSession";
@@ -44,8 +43,7 @@ export function prepareHostedScript(
       const prepared = await bridge.client.request("prepare", {
         source: { kind: "source", script: project },
       });
-      // EVIDENCE: validation: `prepare` replies from the same build with its result.
-      const compilation = prepared.result as PrepareResult;
+      const compilation = prepared.result;
       if (compilation.kind !== "prepared" && compilation.kind !== "notCompiled")
         throw new Error("A source prepared as no compilation.");
       identity.value = compilation.identity ?? { title: null, author: null };

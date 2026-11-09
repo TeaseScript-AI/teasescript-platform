@@ -3,21 +3,21 @@ import {
   BridgeRequestError,
   type BridgeClient,
   type BridgeResult,
+  type ReplyHook,
   type SectionSend,
 } from "../engine-bridge/client.js";
+import type { OpArgs, OpResult, SessionOp } from "../engine-bridge/op-catalogue.js";
 import type { InterpreterEvent } from "../../src/runtime/events.js";
 import type { ClockTicket } from "./clock-ticket.js";
 import type { HistoryTimeline } from "../engine-bridge/history/core.js";
 import type { HistoryOpened, HistoryOpResult } from "../engine-bridge/ops/history.js";
-import type { KeptRestore } from "../engine-bridge/ops/persistence.js";
 import type { StartOptions, StartRandom } from "../engine-bridge/ops/session.js";
 import type {
-  CallViewReply,
   Introduction,
   Publication,
   ReadOp,
+  ReadCall,
   ReadOps,
-  StopReply,
   ExportCaptureReply,
   ExportIdentity,
 } from "../engine-bridge/session-protocol.js";
@@ -77,22 +77,26 @@ export interface ServiceSection {
   /**
    * One op of the section's session from `basis`; resolves with its result once its publication is applied to the
    * session's store. It shows only while this session owns the UI (`publishOwned`), so recheck that after the await.
-   * `R` is the caller's unchecked assertion of the op's result.
    */
-  send<R>(op: string, args: unknown, basis: number): Promise<R>;
+  send<O extends SessionOp>(
+    ...call: O extends unknown ? [op: O, args: OpArgs<O>, basis: number] : never
+  ): Promise<OpResult<O>>;
+}
+
+/** What a session op's request takes besides its op and arguments: its basis, and how its publication shows. */
+export interface SessionRequestOptions {
+  readonly basis?: number;
+  readonly publish?: PublishHook;
 }
 
 /** A section of one session: requests that other requests of the session wait behind (`BridgeClient.section`). */
 export interface SessionSection {
   /**
    * Sends `op` from `basis`, the store's revision by default; resolves with its result once its publication applied.
-   * `R` is the caller's unchecked assertion of the op's result.
    */
-  send<R = unknown>(
-    op: string,
-    args: unknown,
-    options?: { readonly basis?: number; readonly publish?: PublishHook },
-  ): Promise<R>;
+  send<O extends SessionOp>(
+    ...call: O extends unknown ? [op: O, args: OpArgs<O>, options?: SessionRequestOptions] : never
+  ): Promise<OpResult<O>>;
   /** The session's latest publication in its store. */
   readonly session: PlayerSession;
 }
@@ -242,15 +246,21 @@ export class PlayerBridge {
    * Reads `session` in the host with the op `op` on the Worker itself, which names the session in its arguments, after
    * the session's earlier requests (`ops/persistence.ts`). It changes no publication, so its reply applies nothing.
    */
+  read<O extends ReadOp>(
+    session: PlayerSession,
+    ...call: ReadCall<O>
+  ): Promise<ReadOps[O]["result"]>;
   async read<O extends ReadOp>(
     session: PlayerSession,
     op: O,
-    ...[args]: ReadOps[O]["args"] extends Record<string, never> ? [] : [ReadOps[O]["args"]]
+    ...[args]: [] | [ReadOps[O]["args"]]
   ): Promise<ReadOps[O]["result"]> {
     this.#own(session);
-    const reply = await this.#client.request(
-      op,
-      { ...args, session: session.id },
+    const reply = await this.#client.request<ReadOp>(
+      // EVIDENCE: invariant: an op of `ReadOps`, sent with its own arguments below.
+      op as never,
+      // EVIDENCE: invariant: `O`'s arguments, `args` with `session` inserted, which TypeScript does not pair with `O`.
+      { ...args, session: session.id } as never,
       { after: session.id },
     );
     // EVIDENCE: validation: the result comes from the same build, whose `ReadOps` names this op's result.
@@ -276,8 +286,7 @@ export class PlayerBridge {
       events,
       marks,
     });
-    // EVIDENCE: validation: `restoreKept` replies from the same build with its outcome and, restored, the new session.
-    const outcome = reply.result as KeptRestore;
+    const outcome = reply.result;
     if (outcome.kind !== "restored") return outcome.kind;
     // EVIDENCE: validation: a restored session's reply carries its id and introduction.
     return this.open(reply.session!, reply.view as Introduction);
@@ -320,8 +329,7 @@ export class PlayerBridge {
       {
         ...(session === null ? {} : { after: session.id }),
         onReply: (result) => {
-          // EVIDENCE: validation: `captureExport` replies from the same build with `ExportCaptureReply`.
-          const reply = result.result as ExportCaptureReply;
+          const reply = result.result;
           const view = session === null ? null : this.latest(session);
           if (session !== null && reply.kind === "captured" && !matches(view, reply.identity)) {
             void this.releaseRecording(reply.ticket).catch(() => {});
@@ -338,8 +346,7 @@ export class PlayerBridge {
   /** What export `ticket`'s file needs of the engine (`exportPrepare`): its plan's hash, and with `replay`, replay data. */
   async exportPrepare(ticket: string, replay: boolean): Promise<PreparedExport> {
     const reply = await this.#client.request("exportPrepare", { ticket, replay });
-    // EVIDENCE: validation: `exportPrepare` replies from the same build with `PreparedExport`.
-    return reply.result as PreparedExport;
+    return reply.result;
   }
 
   /** Lets go of the recording or export held under `ticket` (`releaseRecording`); an unknown one changes nothing. */
@@ -353,8 +360,7 @@ export class PlayerBridge {
    */
   async historyOpen(intent: number): Promise<HistoryOpened> {
     const reply = await this.#client.request("historyOpen", { intent });
-    // EVIDENCE: validation: `historyOpen` replies from the same build with `HistoryOpened`.
-    const opened = reply.result as HistoryOpened;
+    const opened = reply.result;
     if (opened.kind === "opened") this.#forget(opened.released);
     return opened;
   }
@@ -362,26 +368,22 @@ export class PlayerBridge {
   /** The whole timeline of history `history` (`historyTimeline`), or `null` once it closed. */
   async historyTimeline(history: number): Promise<HistoryTimeline | null> {
     const reply = await this.#client.request("historyTimeline", { history });
-    // EVIDENCE: validation: `historyTimeline` replies from the same build with a timeline or `null`.
-    return reply.result as HistoryTimeline | null;
+    return reply.result;
   }
 
   /**
    * Sends the rewind or history op `op` (`ops/history.ts`) of no session: the sessions it released are forgotten here,
    * and a session it restored is opened, with its introduction.
    */
+  historyStep<O extends HistoryStepOp>(
+    ...call: O extends unknown ? [op: O, args: OpArgs<O>] : never
+  ): Promise<{ readonly result: HistoryOpResult; readonly restored: PlayerSession | null }>;
   async historyStep(
-    op:
-      | "historyClose"
-      | "rewindBack"
-      | "rewindForward"
-      | "rewindCommit"
-      | "rewindDrop"
-      | "rewindReturn"
-      | "rewindAdopt",
+    op: HistoryStepOp,
     args: unknown,
   ): Promise<{ readonly result: HistoryOpResult; readonly restored: PlayerSession | null }> {
-    const reply = await this.#client.request(op, args);
+    // EVIDENCE: invariant: the erased overload's body; the overload above pairs `op` with its arguments.
+    const reply = await this.#client.request<HistoryStepOp>(op as never, args as never);
     // EVIDENCE: validation: the history ops reply from the same build with a `HistoryOpResult`.
     const result = reply.result as HistoryOpResult;
     if (result.kind === "done") this.#forget(result.released);
@@ -402,21 +404,23 @@ export class PlayerBridge {
     }
   }
 
-  /**
-   * Sends one op of `session` from its store's revision (or `basis`); resolves with its result once applied. `R` is the
-   * caller's unchecked assertion of the op's result: nothing binds it to `op` (unlike `read`'s `ReadOps`).
-   */
-  async request<R = unknown>(
+  /** Sends one op of `session` from its store's revision (or `basis`); resolves with its result once applied. */
+  request<O extends SessionOp>(
     session: PlayerSession,
-    op: string,
+    ...call: O extends unknown ? [op: O, args: OpArgs<O>, options?: SessionRequestOptions] : never
+  ): Promise<OpResult<O>>;
+  async request(
+    session: PlayerSession,
+    op: SessionOp,
     args: unknown,
-    options: { readonly basis?: number; readonly publish?: PublishHook } = {},
-  ): Promise<R> {
+    options: SessionRequestOptions = {},
+  ) {
     this.#own(session);
     return this.#send(
       session.id,
       (onReply) =>
-        this.#client.request(op, args, {
+        // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- EVIDENCE: invariant: the erased overload's body; the overload above pairs `op` with its arguments.
+        this.#client.request<SessionOp>(op as never, args as never, {
           session: session.id,
           basis: options.basis ?? this.latest(session)?.revision ?? session.revision,
           onReply,
@@ -444,9 +448,7 @@ export class PlayerBridge {
             basis: this.latest(session)?.revision ?? session.revision,
             onReply: (result) => {
               onReply(result);
-              // EVIDENCE: validation: `viewCalls` replies from the same build with a `CallViewReply`.
-              merged =
-                this.store(session.id)?.mergeCallView(result.result as CallViewReply) ?? null;
+              merged = this.store(session.id)?.mergeCallView(result.result) ?? null;
             },
           },
         ),
@@ -474,14 +476,17 @@ export class PlayerBridge {
     this.#own(session);
     return this.#client.section(session.id, ticket, (send: SectionSend) => {
       const shown = () => this.latest(session) ?? session;
+      // EVIDENCE: invariant: the section's send forwards each op with the arguments `SessionSection` paired with it.
       return body({
-        send: (op, args, options = {}) =>
+        send: (op: SessionOp, args: unknown, options: SessionRequestOptions = {}) =>
           this.#send(
             session.id,
             (onReply) =>
-              send(
-                op,
-                args,
+              send<SessionOp>(
+                // EVIDENCE: invariant: `SessionSection` pairs each op with its arguments, sent on as they are.
+                op as never,
+                // EVIDENCE: invariant: the arguments `SessionSection` paired with `op`.
+                args as never,
                 options.basis ?? this.latest(session)?.revision ?? session.revision,
                 onReply,
               ),
@@ -490,13 +495,14 @@ export class PlayerBridge {
         get session() {
           return shown();
         },
-      });
+      } as SessionSection);
     });
   }
 
+  /** Posts a session op by `post`, its reply's publication applied to the store on arrival; resolves with its result. */
   async #send<R>(
     id: string,
-    post: (onReply: (result: BridgeResult) => void) => Promise<BridgeResult>,
+    post: (onReply: ReplyHook) => Promise<BridgeResult<R>>,
     publish: PublishHook | undefined,
   ): Promise<R> {
     let fenced = false;
@@ -508,8 +514,7 @@ export class PlayerBridge {
       store?.apply(result.view as Publication | null, publish);
     });
     if (fenced) throw haltedError();
-    // EVIDENCE: validation: the op's result comes from the same build as its caller expects it.
-    return reply.result as R;
+    return reply.result;
   }
 
   /**
@@ -530,12 +535,7 @@ export class PlayerBridge {
     if (store === null || store.halted) return Promise.resolve();
     store.stopping();
     const acknowledged = this.#client
-      .signal("halt", stop, session.id, (result) =>
-        store.freeze(
-          // EVIDENCE: validation: a Player session's `halt` acknowledgement carries a call view, with a stop's identity.
-          result.result as CallViewReply | StopReply | null,
-        ),
-      )
+      .signal("halt", stop, session.id, (result) => store.freeze(result.result))
       .then(
         () => {},
         () => store.freeze(),
@@ -558,6 +558,16 @@ export class PlayerBridge {
     void this.#client.request("release", null, { session: session.id }).catch(() => {});
   }
 }
+
+/** The ops `historyStep` sends: the rewind and history ops of no session (`ops/history.ts`). */
+type HistoryStepOp =
+  | "historyClose"
+  | "rewindBack"
+  | "rewindForward"
+  | "rewindCommit"
+  | "rewindDrop"
+  | "rewindReturn"
+  | "rewindAdopt";
 
 /** The bridge a main-side session belongs to. */
 export function bridgeOf(session: PlayerSession): PlayerBridge {

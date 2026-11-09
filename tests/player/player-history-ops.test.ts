@@ -29,6 +29,8 @@ import {
   type HostSessions,
 } from "../../player/engine-bridge/worker-host.js";
 import { DebugHistoryView } from "../../player/debug/debug-history.js";
+import type { OpCall } from "../../player/engine-bridge/op-catalogue.js";
+import { asMalformed, untypedBridge, untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * L5i.6: Debug's rewind ops in the host (`player/engine-bridge/ops/history.ts`), over the in-process bridge: a history
@@ -53,9 +55,12 @@ async function started(bridge: PlayerBridge): Promise<PlayerSession> {
   return bridge.start(prepared.kind === "prepared" ? prepared.plan : "", START, false);
 }
 
-/** Sends history op `name`; a prepared step is committed, as the page does once it shows the candidate. */
+/**
+ * Sends history op `name`; a prepared step is committed, as the page does once it shows the candidate. Untyped: the
+ * tests send any history op and arguments through it.
+ */
 async function op(bridge: PlayerBridge, name: string, args: unknown) {
-  const reply = await bridge.client.request(name, args);
+  const reply = await untypedClient(bridge.client).request(name, args);
   // EVIDENCE: validation: the history ops reply from the same build with a `HistoryOpResult`.
   const result = reply.result as HistoryOpResult;
   if (result.kind !== "prepared") return { result, reply };
@@ -95,10 +100,9 @@ async function answer(
 /** A step through `bridge` as the page takes it: a prepared step is committed; the commit's result, and its candidate. */
 async function committed(
   bridge: PlayerBridge,
-  op: "rewindBack" | "rewindForward",
-  args: unknown,
+  ...call: OpCall<"rewindBack" | "rewindForward">
 ): Promise<Awaited<ReturnType<PlayerBridge["historyStep"]>>> {
-  const prepared = await bridge.historyStep(op, args);
+  const prepared = await bridge.historyStep(...call);
   if (prepared.result.kind !== "prepared") return prepared;
   const { history, step } = prepared.result;
   const { result } = await bridge.historyStep("rewindCommit", { history, step });
@@ -263,14 +267,11 @@ test("enrolling takes the session's current interaction as a point once, and ref
   const bridge = await inProcessBridge();
   const session = await started(bridge);
   await bridge.client.request("historyOpen", { intent: 1 });
-  const enrolled = await bridge.request<HistoryOpResult>(session, "historyEnroll", { history: 1 });
+  const enrolled = await bridge.request(session, "historyEnroll", { history: 1 });
   assert.equal(enrolled.kind, "done");
   assert.equal((await timeline(bridge, 1))!.points.length, 1);
   const other = await started(bridge);
-  assert.equal(
-    (await bridge.request<HistoryOpResult>(other, "historyEnroll", { history: 1 })).kind,
-    "refused",
-  );
+  assert.equal((await bridge.request(other, "historyEnroll", { history: 1 })).kind, "refused");
 });
 
 test("malformed history arguments are refused", async () => {
@@ -292,7 +293,11 @@ test("malformed history arguments are refused", async () => {
     ],
     ["rewindForward", { history: 1, events: [{ kind: "unrecognized-event", sequence: 1 }] }],
   ] as const)
-    await assert.rejects(bridge.client.request(name, args), /Malformed arguments/u, name);
+    await assert.rejects(
+      untypedClient(bridge.client).request(name, args),
+      /Malformed arguments/u,
+      name,
+    );
 });
 
 test("an interaction answered before the history enrolled has no point; the one shown then is the first (pre-arm)", async () => {
@@ -300,7 +305,7 @@ test("an interaction answered before the history enrolled has no point; the one 
   const session = await started(bridge);
   await answer(bridge, session, 1_000);
   await bridge.client.request("historyOpen", { intent: 1 });
-  await bridge.request<HistoryOpResult>(session, "historyEnroll", { history: 1 });
+  await bridge.request(session, "historyEnroll", { history: 1 });
   await answer(bridge, session, 2_000);
   const { points } = (await timeline(bridge, 1))!;
   assert.deepEqual(
@@ -451,7 +456,7 @@ test("over a Worker, the timeline the page builds from the publications' deltas 
         ],
         ["observeTime", { atMs, media: [] }],
       ] as const)
-        await bridge.request(session, name, args, {
+        await untypedBridge(bridge).request(session, name, args, {
           publish: (next) => view.applyAll(next.history),
         });
     }
@@ -463,14 +468,14 @@ test("over a Worker, the timeline the page builds from the publications' deltas 
       history: host.history,
       point: host.points[0]!.id,
       live: session.id,
-      events: view.eventsAt(host.points[0]!),
+      events: view.eventsAt(host.points[0]!)!,
     });
     assert.ok(back.result.kind === "done" && back.restored !== null);
     view.apply(back.result.delta!);
     assert.equal(back.restored.state.observedSessionTimeMs, 0);
     const forward = await committed(bridge, "rewindForward", {
       history: host.history,
-      events: view.eventsAt(view.timeline.inspection!.future!),
+      events: view.eventsAt(view.timeline.inspection!.future!)!,
     });
     assert.ok(forward.result.kind === "done" && forward.restored !== null);
     view.apply(forward.result.delta!);
@@ -510,12 +515,10 @@ test("Back and Forward refuse events that are no interpreter events, or out of o
     [...events].reverse(),
   ])
     await assert.rejects(
-      bridge.client.request("rewindBack", {
-        history: 1,
-        point: points[1]!.id,
-        live: session.id,
-        events: bad,
-      }),
+      bridge.client.request(
+        "rewindBack",
+        asMalformed({ history: 1, point: points[1]!.id, live: session.id, events: bad }),
+      ),
       /Malformed arguments/u,
     );
   assert.equal((await timeline(bridge, 1))!.inspection, null);

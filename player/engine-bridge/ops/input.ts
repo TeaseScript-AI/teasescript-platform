@@ -1,4 +1,5 @@
 import type { DebugAnswerInput } from "../../debug/debug-export.js";
+import type { ExternalStorageEditOutcome } from "../../../src/playback.js";
 import {
   activatePlayerRuntimeButton,
   answeredByPlayerInput,
@@ -25,7 +26,7 @@ import type { SerializableRuntimeValue } from "../../../src/runtime/values/seria
 import { exactly, isRecord } from "../argument-checks.js";
 import { admissionOf, isHeldMedia, type HeldMedia } from "../held-media.js";
 import type { PlayerOpsContext } from "../player-ops.js";
-import type { BridgeOps, OpOutcome } from "../worker-host.js";
+import type { OpOutcome } from "../worker-host.js";
 import { sessionOp, type HeldSession } from "./session.js";
 
 /*
@@ -46,13 +47,21 @@ const isDraft = (value: unknown): value is string | null =>
   value === null || typeof value === "string";
 
 /** What an adapter op returns: a session and its outcome, or `null` when it answers nothing there. */
-type Answer = { readonly session: PlayerRuntimeSession; readonly outcome: unknown } | null;
+type Answer<T> = { readonly session: PlayerRuntimeSession; readonly outcome: T } | null;
+
+/** An interaction op's result for another presented action than its own: it answered nothing. */
+export interface StaleAction {
+  readonly kind: "staleAction";
+  readonly actionId: number;
+}
 
 /**
  * Applies an adapter op's result (`HeldSession.adoptResult`): no answer adopts nothing, and a new revision also ends a
  * late observation's catch-up, as input moves the session on.
  */
-function answered(held: HeldSession, result: Answer): OpOutcome {
+function answered<T>(held: HeldSession, result: NonNullable<Answer<T>>): OpOutcome<T>;
+function answered<T>(held: HeldSession, result: Answer<T>): OpOutcome<T | null>;
+function answered<T>(held: HeldSession, result: Answer<T>): OpOutcome<T | null> {
   if (result === null) return { result: null, view: null };
   const adoption = held.adoptResult(result.session);
   if (adoption.kind !== "published") return { result: result.outcome, view: null };
@@ -69,12 +78,13 @@ function answered(held: HeldSession, result: Answer): OpOutcome {
  * action is refused as `staleAction` without effect; `input`, when given, is recorded as how the player answered.
  */
 function interactionOp<
-  F extends Record<string, unknown> = Record<string, unknown>,
+  T,
+  F extends Record<string, unknown> = Record<never, never>,
   Answers extends boolean = true,
 >(
   fields: readonly string[],
   checkFields: ((args: Record<string, unknown>) => args is F) | (() => true),
-  run: (session: PlayerRuntimeSession, args: Record<string, unknown>) => Answer,
+  run: (session: PlayerRuntimeSession, args: InteractionArguments<Answers> & F) => Answer<T>,
   answers: Answers | true = true,
 ) {
   const keys = ["actionId", ...fields, ...(answers ? ["input"] : [])];
@@ -85,12 +95,10 @@ function interactionOp<
       typeof args.actionId === "number" &&
       (!answers || isInput(args.input)) &&
       checkFields(args),
-    (held, args) => {
-      // EVIDENCE: validation: checkArguments accepted these arguments before run.
-      const checked = args as Record<string, unknown> & {
-        readonly actionId: number;
-        readonly input?: DebugAnswerInput | null;
-      };
+    (held, args): OpOutcome<T | null | StaleAction> => {
+      // The input, which an op that does not answer lacks.
+      const checked: InteractionArguments<Answers> &
+        F & { readonly input?: DebugAnswerInput | null } = args;
       const { actionId } = checked;
       if (activePlayerRuntimeInteraction(held.sessionForOperation().state)?.actionId !== actionId)
         return { result: { kind: "staleAction", actionId }, view: null };
@@ -118,14 +126,13 @@ type InteractionArguments<Answers extends boolean> = {
 /** The field check of an interaction op without fields: a constant `true`, the one non-predicate a builder accepts. */
 const none = (): true => true;
 
-export function inputOps(_context: PlayerOpsContext): BridgeOps {
+export function inputOps(_context: PlayerOpsContext) {
   return {
     submitComposer: interactionOp(
       ["text"],
       (args): args is { readonly text: string } => typeof args.text === "string",
       (session, args) => {
-        // EVIDENCE: validation: checkFields accepted `text` as a string.
-        const { text } = args as { readonly text: string };
+        const { text } = args;
         return submitPlayerRuntimeComposer(session, text);
       },
     ),
@@ -133,8 +140,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
       ["optionId"],
       (args): args is { readonly optionId: string } => typeof args.optionId === "string",
       (session, args) => {
-        // EVIDENCE: validation: checkFields accepted `optionId` as a string.
-        const { optionId } = args as { readonly optionId: string };
+        const { optionId } = args;
         return selectPlayerRuntimeChoice(session, optionId);
       },
     ),
@@ -144,11 +150,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
       (args): args is { readonly fieldId: string; readonly draft: string | null } =>
         typeof args.fieldId === "string" && isDraft(args.draft),
       (session, args) => {
-        // EVIDENCE: validation: checkFields accepted `fieldId` as a string and `draft` as a string or null.
-        const { fieldId, draft } = args as {
-          readonly fieldId: string;
-          readonly draft: string | null;
-        };
+        const { fieldId, draft } = args;
         return stepPlayerRuntimeFormField(session, fieldId, draft ?? undefined);
       },
       false,
@@ -160,12 +162,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
       (args): args is { readonly fieldId: string; readonly text: string } =>
         typeof args.fieldId === "string" && typeof args.text === "string",
       (session, args) => {
-        // EVIDENCE: validation: checkArguments accepted `actionId` as a number, `fieldId` and `text` as strings.
-        const { actionId, fieldId, text } = args as {
-          readonly actionId: number;
-          readonly fieldId: string;
-          readonly text: string;
-        };
+        const { actionId, fieldId, text } = args;
         return draftPlayerRuntimeForm(session, { actionId, fieldId }, text);
       },
       false,
@@ -174,8 +171,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
       ["draft"],
       (args): args is { readonly draft: string | null } => isDraft(args.draft),
       (session, args) => {
-        // EVIDENCE: validation: checkFields accepted `draft` as a string or null.
-        const { draft } = args as { readonly draft: string | null };
+        const { draft } = args;
         return submitPlayerRuntimeForm(session, draft ?? undefined);
       },
     ),
@@ -186,11 +182,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
       (args): args is { readonly reference: string; readonly held: HeldMedia } =>
         typeof args.reference === "string" && isHeldMedia(args.held),
       (session, args) => {
-        // EVIDENCE: validation: checkFields accepted `reference` as a string and `held` with `isHeldMedia`.
-        const { reference, held } = args as {
-          readonly reference: string;
-          readonly held: HeldMedia;
-        };
+        const { reference, held } = args;
         return answerPlayerRuntimeImage(session, reference, admissionOf(held));
       },
     ),
@@ -201,8 +193,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
       (args): args is { readonly buttonId: number } =>
         isRecord(args) && exactly(args, ["buttonId"]) && typeof args.buttonId === "number",
       (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted `buttonId` as a number.
-        const { buttonId } = args as { readonly buttonId: number };
+        const { buttonId } = args;
         return answered(
           held,
           pressPlayerRuntimePermanentButton(held.sessionForOperation(), buttonId),
@@ -217,11 +208,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
         typeof args.actionId === "number" &&
         typeof args.stored === "boolean",
       (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { actionId, stored } = args as {
-          readonly actionId: number;
-          readonly stored: boolean;
-        };
+        const { actionId, stored } = args;
         return answered(
           held,
           completePlayerRuntimeStorageWrite(held.sessionForOperation(), actionId, stored),
@@ -229,7 +216,11 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
       },
       false,
     ),
-    applyStorageEdit: sessionOp(
+    applyStorageEdit: sessionOp<
+      { readonly key: string; readonly value: unknown },
+      ExternalStorageEditOutcome,
+      { readonly key: string; readonly value: SerializableRuntimeValue }
+    >(
       // The engine validates the edit itself (`invalidEdit`), as it does today.
       (args): args is { readonly key: string; readonly value: unknown } =>
         isRecord(args) &&
@@ -237,7 +228,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
         typeof args.key === "string" &&
         "value" in args,
       (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted the shape; the engine validates the value.
+        // EVIDENCE: validation: the engine validates the value, which the check admits as anything.
         const edit = args as { readonly key: string; readonly value: SerializableRuntimeValue };
         const result = applyPlayerRuntimeStorageEdit(held.sessionForOperation(), edit);
         // The edit's mark, in the edit's own host step: the publication that shows the edit carries it.
