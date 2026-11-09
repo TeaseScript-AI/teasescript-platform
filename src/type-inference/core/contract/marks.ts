@@ -271,7 +271,7 @@ function groupHit(contract: Contract, group: ReadGroup, tested: Key): boolean {
 /**
  * A holder's own reads at path `rest` below it: per non-empty prefix q, the keys tested q below them and the reads of
  * such a key (the smaller side walked), each group of only the callables and files a test of the tested path stands
- * in (W40, r4.28, r4.33); the first hit ends the lookup; every visit charged.
+ * in (W40); the first hit ends the lookup; every visit charged.
  */
 function readsAt(contract: Contract, reads: Holder["reads"], rest: readonly string[]): boolean {
   const { program, guards } = contract.pass;
@@ -316,7 +316,7 @@ function readsAt(contract: Contract, reads: Holder["reads"], rest: readonly stri
  * it into its source's holder (stores, adds, arguments, returns, literal cells, alias bindings); each literal's reads
  * as references from the literal's holder under their path, and its guarded reads' paths. A literal another literal
  * holds is among that literal's: its reads stand in the outer literal's index at their paths below it, so its own
- * would repeat them, and its identity would walk its whole depth again at every level (TABLE r4.100 (2)).
+ * would repeat them, and its identity would walk its whole depth again at every level.
  */
 export function collectMarks(contract: Contract): void {
   if (contract.collected) return;

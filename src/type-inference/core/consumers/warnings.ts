@@ -723,7 +723,7 @@ export function shownProperty(walk: Consumers, value: PlaceId): string | null {
 
 /**
  * The steps of a store's path (`StoreStep`): an element step by the collection the contract holds above it, or, where
- * the root's written type reaches it (the finishing path's descent, TABLE r4.120), the collection written there,
+ * the root's written type reaches it (the finishing path's descent), the collection written there,
  * final at every stop and asking no solver.
  */
 export function storeSteps(

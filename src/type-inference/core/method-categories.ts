@@ -137,7 +137,7 @@ export function measuresLength(property: string): boolean {
 }
 
 /**
- * TABLE r4.46 (2): a dict's property that gives a new list each read, by what the list holds: the dict's values
+ * a dict's property that gives a new list each read, by what the list holds: the dict's values
  * (`values`) or its keys, text (`keys`); on an object, a property of that name is its own (F11).
  */
 export function dictList(property: string): "values" | "keys" | undefined {

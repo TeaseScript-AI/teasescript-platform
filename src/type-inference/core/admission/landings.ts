@@ -142,11 +142,11 @@ function cyclesOf(
 }
 
 /**
- * The place whose inherited type a place's is at a path (`inheritedAt`, r4.75 (1)): a place whose only store on the
+ * The place whose inherited type a place's is at a path (`inheritedAt`): a place whose only store on the
  * path is one whole copy of an unwritten inheriting place, outside every cycle of copies, inherits there what that
  * place does (its scan finds the copy, whose type is that place's, and nothing beside it); so a chain of such copies
  * answers as its nearest member with a store on the path, or its top. Each copy storing its own field asks that member
- * directly, never every copy above it (the reviewer's control of a copy's own contribution, TABLE r4.80).
+ * directly, never every copy above it (the reviewer's control of a copy's own contribution).
  */
 /** `passThrough` of a cursor: a place no copy forest holds answers itself; else its steps made (`stepsOfId`). */
 export function passThroughKey(admission: Admission, place: PlaceId, key: KeyId): PlaceId {

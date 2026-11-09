@@ -29,7 +29,7 @@ const UNPROVED: SiteExpectation = {
 const SAID: readonly ValueKind[] = [...SHOWN_KINDS, "list", "set", "dict", "object"];
 
 /**
- * TABLE r4.151: what the place the value at `site` lands in takes, read from what consumes it
+ * what the place the value at `site` lands in takes, read from what consumes it
  * (`CoreProgram.consumersOf`): a store's, an argument's or a result's place, its admitted type and its elements' (where
  * this value decides it, unwritten, what every read of it takes); a use, the kind it requires; nothing, where `say` shows
  * the value, what `say` shows (V30 §8: text, numbers and the other shown kinds, a list, set, dict or object in
@@ -118,7 +118,7 @@ function* readsTakeTask(walk: Consumers, place: PlaceId): CompileTask<SiteExpect
 
 /**
  * A place's admitted type, and its elements' where it holds a collection; where this value decides it, unwritten, what
- * its reads take (Codex r7, TABLE r4.160); beside values of other types, or below the place's root, nothing proved.
+ * its reads take (Codex r7); beside values of other types, or below the place's root, nothing proved.
  */
 function* placeTakesTask(
   walk: Consumers,
@@ -133,7 +133,7 @@ function* placeTakesTask(
     const outer = site === null ? UNPROVED : yield* compileChild(expectedTask(walk, site));
     return { ...UNPROVED, divides: outer.divides };
   }
-  // (a place's value is read by later statements, where a zero it holds is the script's own, TABLE r4.159)
+  // (a place's value is read by later statements, where a zero it holds is the script's own)
   const placed = (found: SiteExpectation): SiteExpectation => ({ ...found, divides: false });
   const admitted = (at: readonly string[]): ItemTag[] | null => {
     const tags = walk.admission.admitted(root, at).filter((tag) => tag !== "empty");
@@ -178,7 +178,7 @@ function* consumerTakesTask(walk: Consumers, consumer: Consumption): CompileTask
         typeof consumer.parameter === "number"
           ? fn.parameters[consumer.parameter]
           : program.parameterPlace(consumer.fn, consumer.parameter);
-      // (a function the value is passed to reads it in later statements, TABLE r4.159)
+      // (a function the value is passed to reads it in later statements)
       return parameter === undefined
         ? { ...UNPROVED, divides: false }
         : yield* compileChild(placeTakesTask(walk, parameter, []));
@@ -307,7 +307,7 @@ function* consumerTakesTask(walk: Consumers, consumer: Consumption): CompileTask
           : kindsOf(walk, owner, program.exprAt(consumer.span)).map((item) => item.tag);
       const only = (tag: ItemTag): boolean =>
         kinds.length > 0 && kinds.every((found) => found === tag);
-      // (it picks the script's own element, whose value is the script's, TABLE r4.160)
+      // (it picks the script's own element, whose value is the script's)
       return {
         takes: only("list") ? ["integer"] : only("dict") ? ["string"] : [],
         binds: "whole",

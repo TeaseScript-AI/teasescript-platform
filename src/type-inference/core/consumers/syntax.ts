@@ -100,7 +100,7 @@ export function placelessCells(walk: Consumers, value: PlaceId): readonly Defini
   const projection = program.projOf.get(value);
   let found: readonly Definition[] | null = null;
   // (a constant step inside the charged read or store that asks it; each literal's cells charged where they are found,
-  // `literalChildren`, and each cell stepped through, TABLE r4.261)
+  // `literalChildren`, and each cell stepped through)
   if (projection !== undefined && projection.step !== "iteration") {
     const literals = placelessLiterals(walk, projection.owner);
     if (literals !== null) {
@@ -159,7 +159,7 @@ export function syntaxRead(
 }
 
 /**
- * The syntax decision, source 4 (TABLE r4.89 (2), r4.100, r4.135): at a settled stop, where admission retained no
+ * The syntax decision, source 4: at a settled stop, where admission retained no
  * decision at `path`, the type a place has there where every store into the key or a key above it gives a value its
  * syntax tells there: a literal (its own types there, a `null` deciding nothing but admitting `null`), a copy of a place
  * with a written type (that type there), a typed parse or load by its default (F18), or a host value (external,
@@ -206,7 +206,7 @@ export function cheapDecided(
 
 /**
  * Whether the stores' syntax may decide (source 4): not in a finishing walk before admission settled, where admission's
- * decision rests on a contract a fresh pass has not solved (TABLE r4.135).
+ * decision rests on a contract a fresh pass has not solved.
  */
 function syntaxDecides(walk: Consumers): boolean {
   return !walk.finishing || walk.settled;

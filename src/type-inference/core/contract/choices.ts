@@ -60,14 +60,14 @@ export function* choiceItems(
   options: readonly ChoiceGroup[],
   part: ChoicePart = {},
 ): Work<Item[]> {
-  // r4.93: the answer is a scalar button (V30 §19, TSV029): an outer choice's selection of it is the button itself
+  // the answer is a scalar button (V30 §19, TSV029): an outer choice's selection of it is the button itself
   if (rest[0] === SELECTED_VALUE || rest[0] === SELECTED_TEXT)
     // #1668: a choice's reads: its includer records `opaque`
     return yield* choiceItems(c, rest.slice(1), read, stored, options, part);
   const out: Item[] = [];
   const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
   const labels = choiceLabels(c);
-  // a button's value is a choice value, a scalar (V30 §19, TSV029, TABLE r4.93): a value of another type is no answer,
+  // a button's value is a choice value, a scalar (V30 §19, TSV029): a value of another type is no answer,
   // as the run stops at it (`choiceValues`' error or check), and nothing stands below a scalar but an unknown's own
   // parts, so no record a button holds is ever composed into the answer
   const buttonValue = function* (
@@ -120,7 +120,7 @@ export function* choiceItems(
   ): Work<void> {
     const selected = object === null ? null : (object.value ?? object.text);
     if (object !== null && selected !== null) {
-      // an element of a written list or set reads as its literal analogue, below the list's element step (F12 r4.7)
+      // an element of a written list or set reads as its literal analogue, below the list's element step (F12)
       const key = object.value !== null ? "value" : "text";
       // #1668: a choice's reads: its includer records `opaque`
       out.push(...(yield* element ? buttonValue(place, [key], true) : buttonValue(selected, [])));

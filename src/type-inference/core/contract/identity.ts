@@ -461,7 +461,7 @@ export function* structureWork(contract: Contract, value: PlaceId): IdentityWork
 
 /**
  * The tested paths below a carrier's operand read that the read is guarded at (§3.2), as part of the carrier's
- * structure: no holder records a carrier operand's marks, as a literal's holder records its reads' (r4.15), so two
+ * structure: no holder records a carrier operand's marks, as a literal's holder records its reads', so two
  * carriers share a structure only where their operand reads are marked alike below them (Codex r20 B1). Each the
  * outermost of nested ones, the guard index's regions holding the read, never each tested path in turn (Codex r21 B1).
  */

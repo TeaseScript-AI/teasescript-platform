@@ -397,7 +397,7 @@ export function* earliestDecider(
     program.work.charge("checks", lists.length);
     positions[best]! += 1;
     // (a typed default's literal is the call's input, not the stored value's own element: where the default holds host
-    // data it leaves the path open, and the call decides nothing there beside it, F18, TABLE r4.66 (3))
+    // data it leaves the path open, and the call decides nothing there beside it, F18)
     if (next.via?.typed === true) continue;
     const items = withoutEmpty(
       yield* admission.runRead(() =>
@@ -460,7 +460,7 @@ function stopDepths(
  * A list of a walk's stops as the decider reads it, once per list: each snapshot once (TABLE §8: one key read here,
  * r4.68 (1)), so of the reads of one key through one chain of operations at one strip that read the same only the
  * first is read, the later ones holding what it holds (k reads of one host global, decided at k paths: Codex r23 F1);
- * so too k calls of one function (r4.15, Codex r24 F2's neighbours); `shallow` leaves out the values a projection
+ * so too k calls of one function (Codex r24 F2's neighbours); `shallow` leaves out the values a projection
  * selects, `classes` all but the first of a class (`classFirsts`).
  */
 function snapshots(
@@ -531,7 +531,7 @@ function classFirsts(admission: Admission, list: readonly Stop[]): readonly Stop
 
 /**
  * Stops with each snapshot once, in their order: of the reads of one key through one chain of operations at one strip
- * that read the same (`Contract.readSnapshot`), and of k calls of one function (as in the literal index, r4.15), the
+ * that read the same (`Contract.readSnapshot`), and of k calls of one function (as in the literal index), the
  * first; any other stop as itself.
  */
 export function distinctStops(admission: Admission, list: readonly Stop[]): Stop[] {

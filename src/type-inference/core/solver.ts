@@ -37,7 +37,7 @@ import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } 
  * That needs answers monotone in what they read. A choice that is not (a `Decision`: F18/F19's default without kinds
  * gives `unknown`; F19a's receiver that holds a reference kind has opaque members) is made on a completed input: at
  * once outside every component; inside one, the component is solved first with every choice open and, where a choice
- * then changes an answer, again from bottom with the choices held (r4.40, r4.44).
+ * then changes an answer, again from bottom with the choices held.
  *
  * A demand may prove more than its items (a `ProofDemand`, TABLE r4.164's proof payload): what a fold selected, where a
  * prefix's walk stands. Its proof is the solver's as its items are: provisional while its run or component is
@@ -847,7 +847,7 @@ export class Solver {
     }
     const node = this.#active.get(demand.key);
     if (node === undefined) {
-      // (a new demand keeps its key: its text charged first, TABLE r4.58)
+      // (a new demand keeps its key: its text charged first)
       keepText(this.#work, demand.key.length);
       const created: DemandNode = {
         demand,

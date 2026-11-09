@@ -160,7 +160,7 @@ function isRoot(program: CoreProgram, value: PlaceId): boolean {
 }
 
 /**
- * TABLE r4.87: whether a run is one class along its left operands down to its terms on one side, the sharing on
+ * whether a run is one class along its left operands down to its terms on one side, the sharing on
  * (`plusRepeatOf`, which that side's walk asks next): its root answers below its elements as its third, whose walk
  * reads three `+` and four terms, so each property its root is asked at costs a few steps, and an index would only add
  * its own work.

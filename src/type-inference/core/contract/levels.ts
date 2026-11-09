@@ -79,7 +79,7 @@ export function* entryAt(
       );
     return kept;
   }
-  // §3.2: a copy read under a guard; a tested child's mark by the entry's holder at the path (r4.15)
+  // §3.2: a copy read under a guard; a tested child's mark by the entry's holder at the path
   if (entry.key !== undefined) {
     // (#1668: the copied key below, the edge a copy makes, as its marks and writer annotate it)
     const below = flow?.child() ?? null;
@@ -332,7 +332,7 @@ function holderGroups(
  * a mark (a holder of no guarded path, read or reference); any other entry its own group. An entry's ingress stores
  * reach only its unknowns (C9), an operator's result its operand's identity, so where the group's first answers
  * without either, it answers for the group, the earliest writer for its kinds (F28); k adds of a typed `load` of one
- * default, or of literals of two, each its own source (r4.15), read at k fields, are one group read once per field
+ * default, or of literals of two, each its own source, read at k fields, are one group read once per field
  * (review r6 B2). In the entries' order.
  */
 export function entryGroups(contract: Contract, levels: PrefixLevels): readonly EntryGroup[] {

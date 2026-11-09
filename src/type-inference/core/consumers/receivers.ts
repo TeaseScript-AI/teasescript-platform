@@ -80,7 +80,7 @@ export function methodReceiver(
  * C5a–c, F19a, §4: a member access's receiver kinds at the whole access's span (§3.4). An error when every kind is
  * definite and null, or definite and without the member; else one warning and member obligation per offending kind:
  * a possible null, each kind without the member, each reference, an unknown receiver (its `on` names the kinds that
- * have the member, A7 r4.10), and the `extra` ones (an object without the property, an object's own selection). An
+ * have the member, A7), and the `extra` ones (an object without the property, an object's own selection). An
  * `extra` one is the property's own answer at the access and explains its unknown kind, which an unknown receiver is
  * too: that receiver owes no second warning there, and its own absence is its own access's (#1469). Gives which receiver
  * items a stop's discharge left out with their owners (`leftOutBy`, #1448): the receiver's unknown items are owned by

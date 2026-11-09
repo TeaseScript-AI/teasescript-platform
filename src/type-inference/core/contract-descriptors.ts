@@ -17,7 +17,7 @@ import type { AdmittedType, CorePass } from "./answers.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
 import { propertyStep, type CoreProgram } from "./program.js";
 
-// The contract proof/descriptor service (#1526 phase A, TABLE r4.278): a store's required contract, assembled level by
+// The contract proof/descriptor service (#1526 phase A): a store's required contract, assembled level by
 // level from the stable admission pass's proofs, as an immutable descriptor one per distinct contract, with whether its
 // proof is complete, proved open or lost.
 
@@ -62,7 +62,7 @@ export interface ContractLevel {
  * A store's required contract: complete (each level written, decided, or proved open), open (nothing constrains it), or
  * lost (a required level's proof is unfinished: the stop of the analysis or of a decision cut it; or, in a receiving
  * completion, a decision it read would reject a store or retarget a selecting store, #1526 phase C). A lost contract
- * keeps the part it holds (`partial`), which the plan carries until decision 2 (TABLE r4.269, r4.275); it is never
+ * keeps the part it holds (`partial`), which the plan carries until decision 2; it is never
  * complete.
  */
 export type ContractResult =
@@ -562,7 +562,7 @@ export function captureDescriptors(
 }
 
 /**
- * The capture of the contracts the stores owing a check require (#1526 phase B, TABLE r4.278): each request's contract
+ * The capture of the contracts the stores owing a check require (#1526 phase B): each request's contract
  * from `reader` over the settled admission pass, in order, kept in `into`, its levels decided and their contracts
  * solved while nothing stops the solver, so a later stop finds them retained. The first request deeper than the slice
  * follows ends the capture: the program has left the slice there, as the lowering's check of that store leaves it and

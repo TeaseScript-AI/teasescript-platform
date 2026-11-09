@@ -10,7 +10,7 @@ import type { CoreDiagnostic, DiagnosticKind, DiagnosticRule, Presence } from ".
 import { expected } from "./expected.js";
 import { anyRecorded, keptTypes } from "./kinds.js";
 
-// The consumers' diagnostics: an error at its site, and the facts a fix's code forms read (TABLE r4.151).
+// The consumers' diagnostics: an error at its site, and the facts a fix's code forms read.
 
 /**
  * The expression kinds whose presence the core proves (`present`): each reads nothing that may be absent
@@ -48,8 +48,7 @@ export function siteOf(site: SourceSite): SourceSite {
 
 /**
  * An error of `rule` at `site`, the offending value's kinds `kinds` (D1, D3: its sentence and code); a member's read or
- * call and an operation, whose fixes write code in place of the value at `site`, with what that value's place takes
- * (TABLE r4.151).
+ * call and an operation, whose fixes write code in place of the value at `site`, with what that value's place takes.
  */
 export function error(
   walk: Consumers,
@@ -58,7 +57,7 @@ export function error(
   rule: DiagnosticRule,
   kinds: readonly ItemTag[],
 ): void {
-  // (in the finishing path only what is settled errs: a literal's own kind, a settled read, TABLE r4.99)
+  // (in the finishing path only what is settled errs: a literal's own kind, a settled read)
   const diagnostic: CoreDiagnostic = {
     class: "compile-error",
     kind,
@@ -72,7 +71,7 @@ export function error(
 }
 
 /**
- * A published diagnostic with the facts its fix's code forms read (TABLE r4.151, r4.162): what the place its value
+ * A published diagnostic with the facts its fix's code forms read: what the place its value
  * lands in takes (`expects`: a member's read or call and an operation's error, a null value's warning) and whether the
  * values it names are there (`present`). Asked once the analysis ran to its end, its work counted apart from the
  * allowance (`WorkLedger.apart`), so the walk's charges and its stops are the analysis's own; after a stop no fact is

@@ -66,7 +66,7 @@ export function contractOfValueAt(
 /**
  * A value's kinds along a path through a member a built-in value answers by itself, from the step `from` on, where
  * the path ends: at a literal or an operation (a projection passes its step to its owner, and a variable or a call its
- * key to `keyThrough`). A dict's `values` is a new list of its values and its `keys` one of text (TABLE r4.46 (2)),
+ * key to `keyThrough`). A dict's `values` is a new list of its values and its `keys` one of text,
  * either may hold none (no count proof, no `null`); a temporal field or a calendar duration's part gives its declared
  * result (V30 §35); an object's own property of the name is read as any property (F11), and a receiver that may be a
  * reference has the runtime's members (F19a).
@@ -177,7 +177,7 @@ export function* members(
             flow!.attach(values, ...(after === 1 ? (["withoutEmpty"] as const) : []));
           out.push(...kept);
         } else if (after === 1)
-          // a key is text, possible: no literal holds a derived list's element (r4.47, P3)
+          // a key is text, possible: no literal holds a derived list's element (P3)
           out.push(carried(makeItem("string", item.writer, { cert: "pos" }), [item]));
         if (after === 1) out.push(EMPTY);
       }
@@ -258,7 +258,7 @@ function* valueAt(
         value,
         yield* contract.contractOf(keyAtRef(contract, binding, ref), read),
       );
-      // §3.2: the mark travels with the value (r4.6): none of a binding no test names
+      // §3.2: the mark travels with the value: none of a binding no test names
       const marks = !guards.untested(binding) && guards.guardedReadAt(value, ref.text(ref.length));
       if (read !== null) flow!.attach(read, "entered", ...(marks ? (["marked"] as const) : []));
       return marks ? marked(items) : items;
@@ -379,7 +379,7 @@ export function* contractOfValue(
     if (binding !== undefined) {
       const read = flow?.child() ?? null;
       const items = contract.entered(value, yield* contract.contractOf(keyOf(binding, []), read));
-      // §3.2: the mark travels with the value (r4.6)
+      // §3.2: the mark travels with the value
       const marks = guards.guardedRead(value);
       if (read !== null) flow!.attach(read, "entered", ...(marks ? (["marked"] as const) : []));
       return marks ? marked(items) : items;
@@ -392,7 +392,7 @@ export function* contractOfValue(
       if (measuresLength(projection.step))
         return yield* contractLength(contract, projection.owner, projection.step, [], flow);
       if (!selectsElement(projection.step)) {
-        // G3 (TABLE r4.164): a property or index read's contract once per occurrence, its owner's one step down,
+        // G3: a property or index read's contract once per occurrence, its owner's one step down,
         // whatever asks: a chain of k such reads of nested literals asks each link once, never once per read above
         // (and once per stop: `stop` forgets it)
         const demand = projected(contract, value, projection);
@@ -632,7 +632,7 @@ function belowObject(written: TypeTerm, rest: readonly string[]): boolean {
 
 /**
  * The kinds a `load` or `fromJson` takes from its default at `rest` (`typedDefault`): the default's value at its call's
- * snapshot (F18, TABLE r4.81 (1)), as the value side reads it there (`Values.defaultKinds`), never the settled type of
+ * snapshot (F18), as the value side reads it there (`Values.defaultKinds`), never the settled type of
  * a place it reads, so the call's contract and its answer agree.
  */
 export function* defaultKinds(
@@ -656,7 +656,7 @@ export function* defaultKinds(
 }
 
 /**
- * `defaultKinds`' run (F18, TABLE r4.81 (1)): literal data by its contract, as before; a default that reads a variable
+ * `defaultKinds`' run (F18): literal data by its contract, as before; a default that reads a variable
  * or computes as the value side reads it at its call's snapshot (`FlowGraph.snapshotOf`), its marks, narrowing, copies
  * and stops included, never the settled type of a place it reads, so the call's contract and its answer agree.
  */
@@ -678,7 +678,7 @@ function* snapshotKinds(
   return yield* values.valueItems(fallback, node, rest);
 }
 
-/** F19 (r4.1): whether a default holds only `null` (or nothing), by its contract (`ONLY_NULL`). */
+/** F19: whether a default holds only `null` (or nothing), by its contract (`ONLY_NULL`). */
 /** A default's run (`defaultKinds`): its fallback's kinds at the path, its run's flow taken as it starts. */
 /**
  * #1668: a flow given to the value side's walk: a caller's, none, or the running demand's own (`"run"`), taken as the
@@ -759,7 +759,7 @@ function keepsElements(owners: readonly Item[]): boolean {
 }
 
 /**
- * F11 (r4.4): the collector reads an object's own `first`, `last` or `random` as an element selection; the core makes it
+ * F11: the collector reads an object's own `first`, `last` or `random` as an element selection; the core makes it
  * opaque, beside the element where the owner may also be a collection.
  */
 export function withOwnSelection(

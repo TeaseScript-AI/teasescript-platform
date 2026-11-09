@@ -56,7 +56,7 @@ export interface MessageSource {
   /** The narrowest expression that owns the property `steps` lead to below the value at `site` (`ownerOf`, #1495). */
   readonly owner: (site: SourceSite, steps: readonly StoreStep[]) => SourceSite;
   /**
-   * Whether no diagnostic of the analysis but `self` lies in the author's text at `held` (TABLE r4.162): none at a
+   * Whether no diagnostic of the analysis but `self` lies in the author's text at `held`: none at a
    * site in it, nor a "not checked (budget)" mark whose region reaches into it, where the checks the stop moved to the
    * runtime stand unreported (Astra r3; a stop's own warning claims no region); apart from one at `self`'s site whose
    * every type `rulesOut` rules out (beside a null check a type test, beside a form's value the replaced value's own).

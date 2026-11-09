@@ -160,9 +160,9 @@ export interface EntryGroup {
 /**
  * The sources a prefix's reads take apart from its entries (§8 r4.15: a replaced alias source's own stores below its
  * root, kept apart by their first step), as a layer over the one its prefix inherits and the ones its source joins:
- * an alias shares its source's layers and adds only its own sources (r4.38), so k aliases each adding a field are k
- * small layers, never k maps of up to k fields, and a join of two copies references both, never a flattened list
- * (r4.46 (3)). A read below a layer is answered once per layer and path (`layerSupport`, `layerDemand`), from its own
+ * an alias shares its source's layers and adds only its own sources, so k aliases each adding a field are k
+ * small layers, never k maps of up to k fields, and a join of two copies references both, never a flattened list.
+ * A read below a layer is answered once per layer and path (`layerSupport`, `layerDemand`), from its own
  * sources and its parent's and joins' answers (#1466); where the read's layers are one layer whose summary would be one
  * source's answer alone, the read asks that source's own demand instead, a reference, never a summary made
  * (`singleSource`, TABLE r4.251).
@@ -257,7 +257,7 @@ export interface LayerFound {
 }
 
 /**
- * A layer's logical identity (#1466, TABLE r4.227): an alias's the original place whose root it replaces, a projected
+ * A layer's logical identity (#1466): an alias's the original place whose root it replaces, a projected
  * copy's the place and the path it is copied below, both as a cursor (`place#id`), so a summary's demand names its
  * layer by the program and the path, never by the order the analysis made layers in.
  */
@@ -354,7 +354,7 @@ export interface PrefixStores {
   readonly inheritedBy: ReadonlySet<Definition | null>;
   /**
    * The further layers its stores join it to (a copy of one source, then of another), each referenced with the stores
-   * that brought it, never flattened into a layer of its own (r4.46 (3)).
+   * that brought it, never flattened into a layer of its own.
    */
   readonly also: readonly {
     readonly layer: SubLayer;

@@ -26,7 +26,7 @@ export function typeTags(term: TypeTerm): ItemTag[] {
 
 /**
  * A written type annotation's kinds in their written order: those `typeTags` gives the term made of it (`T?` is
- * `T | null`), as a type test's narrowed kinds keep them (#1398, TABLE r4.277 (3)). One ordered worklist: each node of
+ * `T | null`), as a type test's narrowed kinds keep them (#1398). One ordered worklist: each node of
  * the annotation and each kind it gives handled once, however deeply its unions and optionals nest (Codex r7 on #1558).
  */
 export function annotationTags(annotation: TypeAnnotation): ItemTag[] {

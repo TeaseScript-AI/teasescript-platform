@@ -49,7 +49,7 @@ export function ingressNull(writer: Writer | null = null): Item {
 }
 
 /**
- * F18 (r4.5), F19 (r4.1): the kinds a `load` or `fromJson` takes from its default's (the input): the default's own;
+ * F18, F19: the kinds a `load` or `fromJson` takes from its default's (the input): the default's own;
  * `unknown` where it has none; `unknown` and, at the value itself, the ingress `null` (with the writer of the default's
  * `null` where `writer` asks) where it holds only `null` (a known `default: null` keeps null). A choice on the default's
  * completed kinds: a provisional default without kinds is not yet one without kinds.
@@ -84,7 +84,7 @@ export function typedDefault(rest: readonly string[], writer: boolean): Decision
   };
 }
 
-/** F19 (r4.1): a default holds only `null`, or nothing (`[ingressNull()]`, or none), on its completed kinds. */
+/** F19: a default holds only `null`, or nothing (`[ingressNull()]`, or none), on its completed kinds. */
 export const ONLY_NULL: Decision = {
   choose: (input) => (input.every((item) => item.tag === "null") ? "null" : "other"),
   answer: (choice) => (choice === "null" ? [ingressNull()] : []),
@@ -92,7 +92,7 @@ export const ONLY_NULL: Decision = {
   flow: () => [],
 };
 
-/** F11 (r4.4): an object's own `first`, `last` or `random`, which the core does not read. */
+/** F11: an object's own `first`, `last` or `random`, which the core does not read. */
 export const OWN_SELECTION: Item = Object.freeze(
   makeItem("unknown", null, { reasons: REASON.opaque, context: "unmodelled", cert: "pos" }),
 );
@@ -120,7 +120,7 @@ export function holdsBelow(item: Item): boolean {
   );
 }
 
-/** F19a (r4.44): whether a receiver's kinds, as a `RECEIVER` demand answers them, are a reference's. */
+/** F19a: whether a receiver's kinds, as a `RECEIVER` demand answers them, are a reference's. */
 export function heldReference(items: readonly Item[]): boolean {
   return items.includes(HELD_REFERENCE);
 }
@@ -131,7 +131,7 @@ export function heldReference(items: readonly Item[]): boolean {
  */
 export const ABSENT = "'absent";
 
-/** The kinds that may have a member an unknown receiver is asked for (A7 r4.10). */
+/** The kinds that may have a member an unknown receiver is asked for (A7). */
 export const MEMBER_KINDS: readonly ValueKind[] = [
   "string",
   "list",

@@ -28,7 +28,7 @@ import { readNow, type Reads } from "../inherited/reads.js";
 
 /**
  * A value's source key: the key a copy reads, a call's callee's result key (F20), a dict's `values` read as its
- * elements (r4.46 (2)); `null` for any other value and for a dict's `keys`, which hold text.
+ * elements; `null` for any other value and for a dict's `keys`, which hold text.
  */
 export function sourceOf(admission: Admission, value: PlaceId): CanonicalKey | null {
   return readNow(sourceOfRead(admission, value));
@@ -176,7 +176,7 @@ function collect(
 ): Structure {
   const paths = new Map<string, readonly string[]>();
   const sources = new Map<string, Source>();
-  // (each path's text charged by its size before it is made, TABLE r4.58)
+  // (each path's text charged by its size before it is made)
   for (const at of levels)
     for (let length = 1; length <= at.length; length += 1) {
       const path = keptSlice(admission.work, at, 0, length);
@@ -357,7 +357,7 @@ function composed(
       const source = sourceOf(admission, of);
       if (source !== null) {
         // (read past the longest key, it is cut there, never dropped: whether a literal holds a source, and so which
-        // obligations its paths owe, never depends on the keys elsewhere in the program, TABLE r4.67 (1))
+        // obligations its paths owe, never depends on the keys elsewhere in the program)
         const room = Math.max(
           0,
           longestKey(admission) - keyDepthIn(admission.pass.contract, source),

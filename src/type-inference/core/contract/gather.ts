@@ -38,7 +38,7 @@ import { selectedObject, selectionOf, selectionPieces } from "./selections.js";
 // The value side's wide gathers (S10 part 2b): a gather site's contributions, its groups, its selections' runs.
 
 /**
- * F12 (r4.7): below a read that stands below an element step, the read's contract answer at the rest of the path
+ * F12: below a read that stands below an element step, the read's contract answer at the rest of the path
  * (definite by P3, else possible; context `member`), with the read's ingress stores and guard mark.
  */
 function* belowRead(contract: Contract, read: PlaceId, below: Steps): Work<readonly Item[]> {

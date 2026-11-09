@@ -223,7 +223,7 @@ function eligibility(
 /**
  * A class index's prefixes of its demanded keys (`keptPrefixes`' list, nearest first), each prefix's text made and kept
  * once: a key's own prefixes once found, each a key one step shorter than the next, its text charged as it is first
- * made, so a prefix two demanded keys share is charged once (per-level interned keys, TABLE r4.83 (2), #1712). The
+ * made, so a prefix two demanded keys share is charged once (per-level interned keys, #1712). The
  * index's own, made and dropped with it: never across a class, a pass, a forget or a restart.
  */
 export function prefixChains(work: WorkLedger): (key: Key) => readonly Key[] {
@@ -367,7 +367,7 @@ function walkGuards(
 /**
  * The rests below a key of the paths the pass decides (`groups()`): every split of every decided path, once, each a
  * reference into its path (`Demand`), its rest kept where the index reads it. A text-keyed group's prefix keys are made
- * once each, through a trie of its root's decided steps (per-level interned keys, TABLE r4.83 (2), #1712): every group
+ * once each, through a trie of its root's decided steps (per-level interned keys, #1712): every group
  * below a prefix finds that prefix's key there, so a key's text is made and charged once, not once per group below
  * it. The trie is the build's own, made and dropped with it, never across a pass.
  */

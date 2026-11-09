@@ -55,7 +55,7 @@ export interface LandingQuestion {
 export type Offending = readonly [Item, string];
 
 /**
- * What the stores into one key give each path below it by their syntax alone (TABLE r4.89 (2)): the types literals
+ * What the stores into one key give each path below it by their syntax alone: the types literals
  * have there (`null` among them), the written types copies bring (each from its own path on), the
  * earliest store that gives a type there, and whether a store gives it a value its syntax does not tell (`opaque`).
  */
@@ -114,7 +114,7 @@ export interface CheapDecision {
 /**
  * How deep in copies (`FRONTIER_DEPTH`) and how many copies met (`FRONTIER_COPIES`: each copy standing at a frontier's
  * path, each time it is met, and each single copy a frontier is followed through, `sameOf`) a read's host data is followed
- * before the read answers its place's component's (TABLE r4.208): each read's walk is then bounded by a constant, so the finishing reads' work stays linear
+ * before the read answers its place's component's: each read's walk is then bounded by a constant, so the finishing reads' work stays linear
  * in the program by construction, whatever the copy graph's shape. Where the walk is cut, the read answers the host
  * data its place's component of the place-level copy graph reaches (`placeIngress`): every path, so a superset, never a
  * dropped check. Measured with this walk over the stop corpus (170 sources), the repository's scripts (19) and the held

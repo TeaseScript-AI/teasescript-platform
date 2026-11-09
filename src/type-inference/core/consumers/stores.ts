@@ -51,7 +51,7 @@ const writerRank = (writer: Writer | null): number =>
  * of the key answers `unknown` with the reason `budget`, so each owes its check, with its warning, as for external
  * data (C9). The pass is then not settled: the next starts with the key stopped and runs no decision at or below it
  * (TABLE r4.180); a decision stopping in that next pass stops the analysis there, as the work allowance does, so a
- * pass's work at most doubles (TABLE r4.183). A stopped decision stands for its stores' obligations
+ * pass's work at most doubles. A stopped decision stands for its stores' obligations
  * (`stoppedStores`), whichever pass stopped it.
  */
 /**
@@ -105,7 +105,7 @@ export function decide(walk: Consumers, group: DecidedAt, lazily = false): Decis
  * definition or a candidate: a store, add, argument or return, a multi-site or dead call's argument among them, which
  * decides nothing but C1 checks, ADR 0021 1.5), the written ones, each at every path of its written type, which is as
  * large as the source that writes it. The fresh pass's C1 decides these alone (`groups` would group every key and walk
- * every store's landings again, unbounded after a stop: TABLE r4.55, r4.126).
+ * every store's landings again, unbounded after a stop).
  */
 function writtenGroups(
   walk: Consumers,
@@ -145,13 +145,13 @@ function writtenGroups(
 /**
  * C1, C7 against a place's admitted type (A1–A9): every candidate store admission names is checked against the
  * decided type, the store's value at its node by §3. A definite contribution that does not fit, where no kind of the
- * value fits, is an error at the innermost offending expression and the store is rejected (A6, r4.35); a store of a
+ * value fits, is an error at the innermost offending expression and the store is rejected (A6); a store of a
  * rejection cycle a warning; a definite element of a collection literal none of whose kinds fits a written element
  * type an error at that element (A8); a value none of whose kinds fits a written type or one decided earlier in the
  * source an error even when every item is possible (ADR 1.7), never under a guard; otherwise one `copy-type` per
  * offending kind, whatever its certainty, a copy made before its decider with context `later` (A7), and a
  * `null-check` for a possible null. The store's external data brings its boundary checks (C9). `writtenOnly`: the
- * places whose written type reaches the path alone, the finishing path's C1 before admission settled (TABLE r4.126: one
+ * places whose written type reaches the path alone, the finishing path's C1 before admission settled (one
  * derivation, the written type final at every stop). `completed`: one decision a receiving completion made (#1526 phase
  * C), checked as admission makes it there, so its rejections are heard (`Admission.rejecting`).
  */
@@ -176,7 +176,7 @@ export function admittedStores(
     const path = (): readonly string[] =>
       (made ??= group.path ?? stepsArray(admission.stepsAt(group)));
     const { tags, nullable, decider } = decision;
-    // (the label's text made where a diagnostic or a check shows it, not for every decision, TABLE r4.196)
+    // (the label's text made where a diagnostic or a check shows it, not for every decision)
     const label = (): string => labelText(walk.pass.contract, decision.label);
     const written = decision.written;
     const nullableTags = written && nullable ? [...tags, "null" as const] : tags;
@@ -202,7 +202,7 @@ export function admittedStores(
       root: storeRoot(walk, root),
       steps: storeSteps(walk, root, path(), written ? writtenOf(program.place(root).kind) : null),
     });
-    // C9 r4.12, r4.50 (1): a place published with its contract's kinds owes the check of external data another store
+    // C9: a place published with its contract's kinds owes the check of external data another store
     // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
     // an opaque value C5's obligation at its access (A7)
     if (decision.published) {
@@ -312,8 +312,8 @@ export function admittedStores(
         admission.reject(d, root, path());
         return;
       }
-      // A6: a definite contribution that does not fit, where no kind of the value fits (r4.46: a fitting kind beside it
-      // makes it a warning), is rejected, its error at the innermost offending expression (r4.35)
+      // A6: a definite contribution that does not fit, where no kind of the value fits (a fitting kind beside it
+      // makes it a warning), is rejected, its error at the innermost offending expression
       if (bad.length > 0 && d !== decider && !items.some(fitting)) {
         const reach = !written && d.place === root ? storeReach(walk, d, path()) : null;
         const { site, brought } = deferred(
@@ -367,7 +367,7 @@ export function admittedStores(
       }
       // A7: a copy made before the decider is checked against it with context `later`
       const later = (item: Item): Item => (before ? { ...item, context: "later" } : item);
-      // A7's whole-store exception (r4.9): below a value the store holds whole from an external ingress, external data
+      // A7's whole-store exception: below a value the store holds whole from an external ingress, external data
       // is that record's, which its boundary check validates, so only an opaque value warns there; a whole copy of
       // internal data keeps A7 per descendant (an `addAll`'s first element step is its inserted value's own
       // destination, no descendant: C9)
@@ -377,7 +377,7 @@ export function admittedStores(
           ? null
           : admission.wholeBelow(d.value!, at);
       // (a `load` or `fromJson` typed by its default alone validates the loaded value by the default's own kinds: host
-      // data the default holds leaves the path's kind open, its contribution C1's, TABLE r4.66 (3))
+      // data the default holds leaves the path's kind open, its contribution C1's)
       const record =
         whole !== null && definitions.ingress.has(whole) && !admission.typedByDefault(whole);
       const wholeKinds =
@@ -387,7 +387,7 @@ export function admittedStores(
       const below =
         whole !== null &&
         (record || (wholeKinds.length > 0 && wholeKinds.every((item) => isExternal(item))));
-      // every concrete kind that does not fit, definite or possible, owes its check (TABLE §4, r4.46)
+      // every concrete kind that does not fit, definite or possible, owes its check
       const offending = items
         .filter(
           (item) =>
@@ -404,7 +404,7 @@ export function admittedStores(
         .sort((a, b) => writerRank(a.writer) - writerRank(b.writer));
       // (before admission settled, a part of the value the stop left undecided marks the written store at its value,
       // whatever external data beside it would site the unknown kind, as with no such data: the mark stands for the
-      // records within the value and does not move, TABLE r4.152 (1), #1611)
+      // records within the value and does not move, #1611)
       const undecided =
         writtenOnly &&
         offending.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0);
@@ -425,7 +425,7 @@ export function admittedStores(
           items.filter(fitting),
         );
       // C9: at the ingress store (an addAll's at its elements' destination); and each external item's, so named data
-      // a typed default holds keeps its own boundary (TABLE r4.66 (2))
+      // a typed default holds keeps its own boundary
       if (
         d.value !== undefined &&
         definitions.ingress.has(d.value) &&

@@ -33,7 +33,7 @@ import type { Holder, IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
  * a value the graph does not model, read natively where the path ends). `Sum(n, s)` is the nodes one step `s` below
  * `n` reaches (least solution, cycles closed by producer edges only, seedless ones empty); `Term(n)` the leaves at
  * `n`. The writing edge overwrites every writer but a pure `missing`'s, whose earliest token the join keeps, and every
- * other field the merge joins, so the join is the native nested answer there (HEAD 0, TABLE r4.385). A closure outside
+ * other field the merge joins, so the join is the native nested answer there (HEAD 0). A closure outside
  * the eligible grammar declines: the native reader answers.
  *
  * #1784: a route through a marking entry or literal read (its guard bit, or its holder's mark at the rest below it,

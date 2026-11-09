@@ -369,7 +369,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
   if (contract.literals.has(literal)) return;
   contract.indexing.add(literal);
   const { program, definitions } = contract.pass;
-  // (TABLE r4.58: each object, collection, array element and map entry it keeps charged one unit as it is made, each
+  // (each object, collection, array element and map entry it keeps charged one unit as it is made, each
   // kept text its `textUnits`; here the index's own ten)
   contract.keep(10);
   // (an entry in its node's list)
@@ -447,7 +447,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
           put(node.others, { g, value });
           continue;
         }
-        // one snapshot: one key read here, where nothing between the reads changes what they read (r4.68 (1))
+        // one snapshot: one key read here, where nothing between the reads changes what they read
         const snapshot = contract.readSnapshot(value)!;
         // (k reads of one host global, or of one projection of it, are one entry as well, by their snapshot, their
         // leaves unioned: an occurrence stays fresh as its own leaf, never as an entry each path reads again,
@@ -457,7 +457,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
           !sharing() ? `v${value}` : leaf === undefined ? source.id : snapshot,
         );
         // (the value side reads an exact entry by its first read alone, so an ingress occurrence keeps its own: its
-        // items carry its own leaf, which one shared entry would drop; the read entry above unions them, TABLE r4.72)
+        // items carry its own leaf, which one shared entry would drop; the read entry above unions them)
         const exactId = contract.kept(
           !sharing() || leaf !== undefined ? `xv${value}` : `x${snapshot}`,
         );

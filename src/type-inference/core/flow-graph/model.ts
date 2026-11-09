@@ -213,7 +213,7 @@ export interface FlowGraph {
   readonly labelled: ReadonlySet<FileRegion>;
   isDeadEdge(from: FlowNode, to: FlowNode): boolean;
   /**
-   * F18 (TABLE r4.81 (1)): the node whose state a node reads: for a node of a typed parse's or load's default, the node
+   * F18: the node whose state a node reads: for a node of a typed parse's or load's default, the node
    * of its call before the default runs (the call-site snapshot); else the node itself.
    */
   snapshotOf(node: FlowNode): FlowNode;

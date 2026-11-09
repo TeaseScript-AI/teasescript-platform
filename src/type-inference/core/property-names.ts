@@ -1013,7 +1013,7 @@ export function propertyNames(
       const { path } = task;
       const at = task.value;
       const source = contract.copiedKey(at) ?? contract.resultKey(at);
-      // r4.46 (2): through a dict's `values` the projections are followed (a dict's values are its elements)
+      // through a dict's `values` the projections are followed (a dict's values are its elements)
       // (a choice's selected value is read as its record's `value` or `text`, as the literal's records say: V30 §19)
       // (a cursor's path holds no dict's list where it holds no built-in member: the arena's, G3 stage 1)
       if (

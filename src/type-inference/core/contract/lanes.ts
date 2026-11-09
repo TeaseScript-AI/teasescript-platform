@@ -293,7 +293,7 @@ function shapeOf(contract: Contract, binding: PlaceId, step: string): WrapperHop
 
 /**
  * The lane of the keys of `place` (a binding, or a read of one: its binding's) whose first step is `firstStep`, frozen
- * at the family's first question for the pass (TABLE r4.196): cursors where the step passes the binding's wrapper
+ * at the family's first question for the pass: cursors where the step passes the binding's wrapper
  * (`wrapperShape`), text where it does not; text for the pass, too, where the question comes while the shape is being
  * found or the identity layer or the marks are being built (`building`), whose unfinished state a shape found then
  * would read, never promoted later. A key with no first step keeps its text, and the live conditions of `wrapperHop`

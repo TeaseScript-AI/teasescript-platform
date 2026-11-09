@@ -111,7 +111,7 @@ export function* contractOfOp(
   }
   if (c.kind !== "operation") return [unknownItem(REASON.external)];
   const { family, name } = c.contract;
-  // F19a: a reference's method is opaque, a decision of its component (r4.44)
+  // F19a: a reference's method is opaque, a decision of its component
   if (
     family === "method" &&
     c.receiver !== null &&
@@ -256,7 +256,7 @@ export function* contractOfOp(
   }
   const interaction = family === "interaction" ? interactionCategory(name) : undefined;
   if (interaction?.kind === "asks") return rest.length === 0 ? [makeItem(interaction.result)] : [];
-  // r4.47 (5): a clock read gives its declared kind, as an ask does
+  // a clock read gives its declared kind, as an ask does
   const clock = family === "clock" ? clockResult(name) : undefined;
   if (clock !== undefined) return rest.length === 0 ? [makeItem(clock)] : [];
   // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
@@ -296,7 +296,7 @@ export function* contractOfOp(
   if (shown !== undefined) return [makeItem(shown)];
   if (family === "range") return [makeItem("range")];
   // a method without a category, per receiver alternative: its declared result per receiver kind (F25), else the
-  // runtime's opaque answer on a known kind (r4.47 (1)); what the core cannot know keeps its own reasons. A receiver
+  // runtime's opaque answer on a known kind; what the core cannot know keeps its own reasons. A receiver
   // without items yet is a provisional bottom: the result stays the bottom (S3 §1, r4.44)
   if (family === "method" && c.receiver !== null) {
     // (#1668: a declared result per receiver kind is made anew; the receiver's unknowns the answer holds as they are)

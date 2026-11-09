@@ -85,7 +85,7 @@ export function keyLabel(walk: Consumers, value: PlaceId): Label {
       label = result !== undefined ? labelRoot(contract, result) : ownLabel(walk, site);
     }
     // §10.5: an anonymous target, a read below a value no place holds (a literal's, an operation's) or through a dict's
-    // `values` or `keys` (a new list each read, r4.46 (2)), is named by its own text
+    // `values` or `keys` (a new list each read), is named by its own text
     else if ((derived(walk, at) || anonymous(walk, at)) && site !== null)
       label = ownLabel(walk, site);
     else {

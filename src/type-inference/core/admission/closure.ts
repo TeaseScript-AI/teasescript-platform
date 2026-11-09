@@ -4,7 +4,7 @@ import type { WorkLedger } from "../budget.js";
  * The receiving closure's cells and frontier (#1526 phase C steps 2–4, TABLE r4.308; Sol's round 2 §1 and §5). The
  * completion pass (`Consumers.#completeFor`) is made from the settled pass's inputs without its frozen keys: a key an
  * obligation's proof reads is decided there, where it is first read, as a scoped decision from what is left of the
- * total (r4.269), in a fresh `Admission`, so nothing is unfrozen and no cache holds a frozen key's answer. What the
+ * total, in a fresh `Admission`, so nothing is unfrozen and no cache holds a frozen key's answer. What the
  * closure keeps is the cells outside the solver whose outputs another read takes (a decision, a property listing, an
  * assembled descriptor, a capture request), the reads between them (a cache hit too), and the frontier that schedules
  * them: a request or a listing that needs a listing not yet made is parked with its stamp (those listings) and runs
@@ -167,7 +167,7 @@ export class Closure {
 
   /**
    * The decisions the completion made (`decide`), in the order made: each key, its units and the allowance it had, what
-   * was left of the total (r4.269): recorded as the completion's, never among the settled pass's decisions.
+   * was left of the total: recorded as the completion's, never among the settled pass's decisions.
    */
   readonly decisions: {
     readonly key: string;

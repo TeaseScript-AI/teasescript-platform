@@ -51,7 +51,7 @@ export type { Landing, MessageSource } from "./messages/site.js";
 export { described, pathPhrase } from "./messages/words.js";
 
 /*
- * The sentences of the coarse core's diagnostics (the port plan's D1–D3, TABLE r4.53): each diagnostic's code is its
+ * The sentences of the coarse core's diagnostics (the port plan's D1–D3): each diagnostic's code is its
  * rule's (D3: one code, both severities where the rule warns), and its message is a first sentence per consumer and
  * obligation, in the source's own text (D2), and the fix the current checker gives (#1195). A warning says what may go
  * wrong, that the Tease then stops at its line, the fix, and a last sentence per context word (§3.4) that says in the
@@ -245,7 +245,7 @@ export function messageSource(
   // the values calls give their functions' parameters and storing methods their receivers, each file's gathered once,
   // by the functions the project declares once (#1763)
   // (the declarations, the arguments and `argumentsOf`'s sort and stack are shared setup work, made once per file
-  // whatever is asked and uncharged, as the statements' values above are (r4.349); each landing's search is charged)
+  // whatever is asked and uncharged, as the statements' values above are; each landing's search is charged)
   // (a call names its own file's function of that name, else the project's `global function`; a name declared twice
   // there names none, Codex r1 on #1817)
   let functions:
@@ -458,7 +458,7 @@ function staticMessage(rule: StaticRule): string {
   }
 }
 
-/** A diagnostic's message with every fix in words (`inWords`), as a stop's unchecked region gives a fix (TABLE r4.162). */
+/** A diagnostic's message with every fix in words (`inWords`), as a stop's unchecked region gives a fix. */
 export function coreMessageInWords(
   diagnostic: CheckedDiagnostic,
   source: MessageSource,
@@ -479,7 +479,7 @@ export function coreMessage(
 ): string {
   // (whether the values it names and its store's declaration reads are there when the script runs, unproved where it
   // does not say; whether its program runs at all; and whether an author's text a form holds lies clear of the other
-  // diagnostics: TABLE r4.162, r4.168)
+  // diagnostics)
   const alone = (held: SourceSite, rulesOut: ((kind: ItemTag) => boolean) | null): boolean =>
     source.alone(diagnostic, held, rulesOut);
   if (diagnostic.kind === "written-type")
@@ -607,7 +607,7 @@ const PROPERTY_NAMES: Readonly<Record<string, string>> = {
  * walk of every node, by an explicit worklist (no native call depth, Codex r1), and one selection. Each reserved name,
  * each syntax node (a file's root among them) and each name tried is charged one `indexSteps` unit to `work` where it
  * is given (Astra r1 and Codex r3 on #1715: the survey grows with the program and its host names). A node's spans and
- * field lists, a bounded constant per node, take no charge of their own (TABLE r4.261).
+ * field lists, a bounded constant per node, take no charge of their own.
  */
 export function keptVariableName(
   programs: readonly Program[],

@@ -21,7 +21,7 @@ import { storeWarning } from "./warnings.js";
  * `stoppedStores`, resolved alike), a sibling's path no store of the stop's. Found by one walk down each stopped path
  * that no other stop lies above (`outermost`), through the stored keys' trie (`Admission.stored`), each destination
  * resolved once a pass whatever number of stops lie below it. Run after the pass's decisions, in every pass that
- * carries a stop: a restarted pass rebuilds it from the stopped set (TABLE r4.180), the fresh pass from the written
+ * carries a stop: a restarted pass rebuilds it from the stopped set, the fresh pass from the written
  * types alone (`freshStores`).
  */
 export function enclosingStores(walk: Consumers): void {

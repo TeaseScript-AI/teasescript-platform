@@ -218,7 +218,7 @@ export function* keyContract(
   const receiver = yield* receiverWalk(contract, walk, flow);
   if (receiver.reference) return [unknownItem(REASON.opaque)];
   const written = writtenOf(found.kind);
-  // F2, F22: the written type is the contract; the stores keep M. §3.2 (r4.9): it fixes the kinds, never removes the
+  // F2, F22: the written type is the contract; the stores keep M. §3.2: it fixes the kinds, never removes the
   // mark of what is stored. An unrestricted written domain (`list`'s element) says what may be held, not what is: its
   // unknown is opaque, so every consumer owes its check (#1501, r4.215)
   if (written !== null) {
@@ -405,7 +405,7 @@ export function* contractRead(
     (item) => item.tag === "unknown" && (item.reasons & REASON.deferred) !== 0,
   );
   // §3.4: the word is the read's first failing condition; where `context` is a later condition's or the value's
-  // arrival (`later`), an element read the contract answers fails X3 before it (r4.48 (5))
+  // arrival (`later`), an element read the contract answers fails X3 before it
   const word: ContextWord = deferred
     ? "deferred-parameter"
     : // #1668: N, a count
@@ -441,7 +441,7 @@ export function* refReceiver(contract: Contract, asked: Key): Work<boolean> {
 
 /**
  * One walk of a key's receivers (its prefixes, each a `RECEIVER` demand): whether one is decided a reference's
- * (F19a, r4.44), and else the longest prefix whose kinds hold nothing a step below can be read from (none yet, or
+ * (F19a), and else the longest prefix whose kinds hold nothing a step below can be read from (none yet, or
  * only scalars, `null`, reference kinds and unknowns: no record or collection, `holdsBelow`), -1 for none, and what
  * a path below it holds instead (`below`: each unknown's own, `belowUnknown`, and a reference's member, the
  * runtime's). A path below such a value holds nothing else, so the contract asks no shorter prefix's stores: the
@@ -639,7 +639,7 @@ function* contractAlong(
 
 /**
  * A projected source's stores below its path start after the path: a demand, once per source and path, whatever
- * number of its copies read there (r4.46 (3)).
+ * number of its copies read there.
  */
 export function* subAt(
   contract: Contract,

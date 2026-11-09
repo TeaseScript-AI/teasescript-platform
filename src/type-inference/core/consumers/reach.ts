@@ -17,7 +17,7 @@ const LITERAL_NODES: ReadonlySet<string> = new Set([
 
 /**
  * The first direct read or store of a place's path in source order (ADR 0021 rule 1.1): where an error about a property
- * that reached the place only through copies of whole objects is reported, the copy its related site (A2, r4.75 (4)).
+ * that reached the place only through copies of whole objects is reported, the copy its related site (A2).
  */
 export function firstDirect(
   walk: Consumers,

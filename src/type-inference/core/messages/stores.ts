@@ -120,7 +120,7 @@ export function declaration(
             code: start === -1 ? declared : `${declared} ${text.slice(start)}`,
             takes: [],
             diagnosed,
-            // (it restates the author's own declaration, its start value as written, and adds no read: TABLE r4.160,
+            // (it restates the author's own declaration, its start value as written, and adds no read,
             // r4.168)
             reads: "none",
             holds: [root.site],

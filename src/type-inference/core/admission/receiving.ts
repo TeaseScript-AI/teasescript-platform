@@ -8,7 +8,7 @@ import { landingIndex } from "./landing-index.js";
 import { elementsBelow } from "./structure.js";
 
 /*
- * The receiving obligations of a settled pass (#1526 phase C step 1, Sol's round 1 D1, TABLE r4.308): every check a
+ * The receiving obligations of a settled pass (#1526 phase C step 1, Sol's round 1 D1): every check a
  * store owes its destination, found apart from the diagnostics the walk emitted, so a check whose warning a stop left
  * out (a stopped decision's own marks) or never made (a destination whose decision read a frozen key, the unmarked
  * function result `out = make(); out.nest.n = hostValue`) is still owed. A slot is stable across passes (its site, its

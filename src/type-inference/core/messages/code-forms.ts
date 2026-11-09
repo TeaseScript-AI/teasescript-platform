@@ -12,7 +12,7 @@ import { expressionKind, OPERANDS, ownText, POSTFIX } from "./words.js";
 /** Whether every code form is withheld (`inWords`). */
 let withheld = false;
 
-/** `render` with every code form withheld (`codeAt` gives none), so each fix gives its advice in words (TABLE r4.162). */
+/** `render` with every code form withheld (`codeAt` gives none), so each fix gives its advice in words. */
 export function inWords<T>(render: () => T): T {
   const was = withheld;
   withheld = true;
@@ -53,7 +53,7 @@ export interface Diagnosed {
 }
 
 /**
- * A code form a fix offers, every fact stated (TABLE r4.162): its code; what each of its operations takes (fact 1);
+ * A code form a fix offers, every fact stated: its code; what each of its operations takes (fact 1);
  * its diagnostic's facts (`diagnosed`), and whether the values it reads are the site's own, read once where they stand
  * (`own`), it reads them again or elsewhere (`added`), or it adds none (`none`: a type, a literal of its own, a
  * declaration restated with its start value as written); the author's texts it holds (`holds`: the diagnosed value, a
@@ -157,16 +157,16 @@ function standsAt(code: string, position: Position): boolean {
 }
 
 /**
- * TABLE r4.151: the one test of every code form a fix offers, pasted whole at the site its diagnostic sits on or the
+ * the one test of every code form a fix offers, pasted whole at the site its diagnostic sits on or the
  * position its sentence names. It holds where (1) each operation takes its subject: every value the form reads there
  * when the script runs, every kind of it known, and one the operation takes, a value it holds of a flat structure;
  * every author's text it holds clear of the analysis's other diagnostics, and of any region a stop left unchecked
- * (TABLE r4.162, Astra r3 on #1273); (2) its value fits what the site takes (`site`, read from what consumes the value
+ * (Astra r3 on #1273); (2) its value fits what the site takes (`site`, read from what consumes the value
  * there: any value where nothing restricts it), a structured value only there or as a collection of scalars against its
  * elements' kinds, and a value the fix writes itself only where the value is proved not to divide; and (3) it binds
  * there: as the site's whole value, or in parentheses where an operand or a receiver binds tighter than its code; at a
- * position as one statement, parameter or type (TABLE r4.171). A site fact no fact proves gives words, never a form
- * (TABLE r4.162). Its code, so grouped, where it holds; `null` where it does not, and the fix gives its advice in
+ * position as one statement, parameter or type. A site fact no fact proves gives words, never a form.
+ * Its code, so grouped, where it holds; `null` where it does not, and the fix gives its advice in
  * words.
  */
 export function codeAt(form: CodeForm, site: SiteExpectation | Position): string | null {
@@ -179,7 +179,7 @@ export function codeAt(form: CodeForm, site: SiteExpectation | Position): string
   // it only for a scalar, or a collection of scalars against its elements' kinds, Codex r6)
   const flat = (kinds: readonly ItemTag[]): boolean => !kinds.some((kind) => STRUCTURED.has(kind));
   // (the values it reads are there when the script runs: none read, proved, or a warning's own reads, which its program
-  // already performs where they stand, wrapped there in place, TABLE r4.168)
+  // already performs where they stand, wrapped there in place)
   const there =
     form.reads === "none" ||
     form.diagnosed.present === true ||
@@ -195,7 +195,7 @@ export function codeAt(form: CodeForm, site: SiteExpectation | Position): string
     return null;
   if (typeof site === "string") return standsAt(form.code, site) ? form.code : null;
   // (the predicate proves types, not values: a value the fix writes, such as a fallback's `0`, may stop the run where
-  // the value divides, Astra on #1273; offered only where a fact proves it does not, TABLE r4.162)
+  // the value divides, Astra on #1273; offered only where a fact proves it does not)
   if (form.writes && site.divides !== false) return null;
   if (site.takes !== null) {
     if (!fit(form.gives, site.takes) || form.gives.includes("object")) return null;

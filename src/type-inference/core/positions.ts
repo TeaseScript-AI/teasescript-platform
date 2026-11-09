@@ -5,7 +5,7 @@ import { writerKey, type ItemScope, type Writer } from "./items.js";
 import type { Proof } from "./solver.js";
 
 /*
- * G3 3a (TABLE r4.164, r4.178, r4.187): the positioned frontier. A read of a path through wrappers, local literals that
+ * G3 3a: the positioned frontier. A read of a path through wrappers, local literals that
  * each hold the next one's read at a property (`a2 = {q: a1}`, `a3.q.q`), is answered from the read one step up, its
  * position, advanced one step: never from its root and the whole path below it, which asks every wrapper again at every
  * suffix of the path. A position is where the answer stands: an original read occurrence (its read node on the value

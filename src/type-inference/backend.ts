@@ -48,7 +48,7 @@ export interface TypeAnalysisFile {
   readonly program: Program;
   /** The file's text, which names the operands an obligation checks (the coarse core: TABLE §10.5). */
   readonly source?: string;
-  /** The files each glob target may start, from name checking, as the lowering takes them (TABLE G1(f)). */
+  /** The files each glob target may start, from name checking, as the lowering takes them. */
   readonly picks?: ReadonlyMap<FileTarget, readonly string[]>;
 }
 

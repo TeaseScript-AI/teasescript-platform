@@ -88,7 +88,7 @@ export function* grouped(admission: Admission, list: readonly Definition[]): Rea
 /**
  * S6-CARRIERS §4.1: the class a whole store's value, or an add's added value (§4.5: its class by its mode, an element
  * or an `addAll`'s elements), is an alias in: where it is a stable source path (`stablePath`), or a literal whose one
- * read cell is one and whose other cells are terms, at that cell's path, the literal's identity beside it (r4.17: no
+ * read cell is one and whose other cells are terms, at that cell's path, the literal's identity beside it (no
  * guard in it). The path, with the read's exact-path signature (`aliasSignature`), the handlers' facts at its node and
  * the written type A4 decides the copy by: stores of one class bring equal answers below the path, their own guards
  * apart (a literal's only below its cell, `covers`); `null` for any other store (an own entry).
