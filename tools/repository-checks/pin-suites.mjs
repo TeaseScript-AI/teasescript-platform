@@ -3,16 +3,16 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// The suites that pin the type core's exact work, and the focused list a change needs:
+// The suites that pin the type core's exact work or its published answers, and the focused list a change needs:
 //
 //   node tools/repository-checks/pin-suites.mjs [--base <ref>] [--run]
 //
-// `PIN_SUITES` declares the suites: each one pins a whole-analysis count (a work total, a table of totals or of `main`'s
-// recorded work as bounds, a count of listed copy or construction sites), so any change under `src/type-inference/core/`
-// can move it, and the suite itself is listed when it or the file holding its pins changes. The changes are those since
-// the merge-base of HEAD and `--base` (default `origin/main`), committed or not, untracked files included, as
-// `check-changed.mjs` reads them. A change to a test helper lists only the suites whose pins it holds (`in`), not every
-// suite that imports it.
+// `PIN_SUITES` declares the suites, by hand: each one pins a whole-analysis count (a work total, a table of totals or
+// of `main`'s recorded work as bounds, a count of listed copy or construction sites) or a digest of what an analysis
+// publishes, so any change under `src/type-inference/core/` can move it, and the suite itself is listed when it or the
+// file holding its pins changes. The changes are those since the merge-base of HEAD and `--base` (default
+// `origin/main`), committed or not, untracked files included, as `check-changed.mjs` reads them. A change to a test
+// helper lists only the suites whose pins it holds (`in`), not every suite that imports it.
 //
 // Without options it prints the pinning suites the changes reach, one `dist/tests/…` line each, or `none`; exit 0.
 // `--run` runs them through `tools/test-output-filter.mjs` (built tests are needed: `npm run build:typescript`); exit 1
@@ -29,8 +29,8 @@ import { fileURLToPath } from "node:url";
 const CORE = "src/type-inference/core/";
 
 /**
- * Each suite that pins the core's exact work: its file, what it pins, a line its pins hold (`pin`), and, when its pins
- * are elsewhere, the file holding them (`in`).
+ * Each suite that pins the core's exact work or its published answers: its file, what it pins, a line its pins hold
+ * (`pin`), and, when its pins are elsewhere, the file holding them (`in`).
  */
 export const PIN_SUITES = [
   {
@@ -78,6 +78,11 @@ export const PIN_SUITES = [
     file: "tests/type-core-work-c.test.ts",
     pins: "main's work per shape, as bounds",
     pin: /^\s*(?:(?:shared|unshared): \{|setup: \[|"checks \d|\[\d{4,}(?:, \d{4,}){3}\])/u,
+  },
+  {
+    file: "tests/type-core-contract.test.ts",
+    pins: "the published answers' digests (TABLE r4.185)",
+    pin: /^\s*upToOrder: "[0-9a-f]{16}",/u,
   },
 ];
 

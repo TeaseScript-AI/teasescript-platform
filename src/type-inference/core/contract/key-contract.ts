@@ -556,7 +556,7 @@ function* contractAlong(
       // a prefix's whole stores, shared by every property below it; its literals by level (§4.6), each group of the
       // same structure below the path once (with a selection step, every entry by itself)
       const stores = contract.prefixStores(prefix);
-      // (a property of a prefix of closed objects from its holders alone, #1456)
+      // (a path below a property of a prefix of closed objects from its holders alone, #1456, #1948)
       const property = yield* propertyItems(contract, prefix, stores, rest, flow);
       if (property !== null) for (const item of property) out.push(item);
       else if (someStepOf(rest, (step) => step === SELECTED_VALUE || step === SELECTED_TEXT))

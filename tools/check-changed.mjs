@@ -1,7 +1,18 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { costlyTestSeconds } from "./costly-test-files.mjs";
 
 // Runs, before a push, the checks CI fails on for what changed since a base, in parallel, and prints one line per check
 // with its verdict and seconds, and the full output of a check that failed:
@@ -15,9 +26,11 @@ import { dirname, join, resolve } from "node:path";
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
 // project claims, other than documentation, runs every project's checks. It never builds the TypeScript or runs the
 // compiled test suite, which CI does: a change that shows only there, such as the root tsconfig's emit settings, passes
-// here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work, as
-// `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs before review
-// (`docs/TESTING.md`, "Pinned work"), which it does not run itself.
+// here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
+// its published answers, as `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs
+// before review (`docs/TESTING.md`, "Pinned work"), which it does not run itself. When a changed type-core test file has
+// no entry in `tools/costly-test-files.mjs`, it prints one line saying so: the file runs in full, as every file does,
+// and the entry lands from CI at merge.
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
 // detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
@@ -26,7 +39,12 @@ import { dirname, join, resolve } from "node:path";
 // prune` and the temporary folder's cleanup.
 //
 // Exit status: 0 when every check passed, 1 when one failed, 2 when the checks cannot run (no base, a merge conflict,
-// a leftover it may not remove, or no `node_modules`, which it never installs: it names the fix).
+// a leftover it may not remove, or no `node_modules`, which it never installs: it names the fix). The fix it names is
+// a command that links main's `node_modules` in the checkout `TEASESCRIPT_MAIN` names (by default
+// `/opt/teasescript-agents/teasescript-main/current`) when that folder has one, by the absolute path the system opens
+// for it (`mainLinkCommand`): run as printed, it links that very folder. Over a stale link (`staleLink`: one whose
+// target is confirmed gone, not one it may not read) it says so and names the command that replaces only that link.
+// Else it names the merge-base's tree from `sx-tree`, or `npm ci`.
 
 /** The projects a changed path can belong to, each with the npm scripts or commands that check it. */
 export const PROJECTS = {
@@ -100,6 +118,24 @@ export function checksOf(projects) {
 /** The core, a change to which prints the suites that pin its work. */
 const CORE = "src/type-inference/core/";
 
+/** The line a changed type-core test file that `tools/costly-test-files.mjs` does not list prints (#2088). */
+export const UNKNOWN_TO_COSTLY =
+  "unknown to costly-test-files: run in full; the entry lands from CI at merge";
+
+/**
+ * The type-core test files among `paths` that `tools/costly-test-files.mjs` does not list (#2088). The table lists every
+ * type-core test file, so a new one is the unknown kind, and its default is the conservative one: it runs in full, as
+ * every file does (`tools/test-shards.mjs` counts it at `otherTestSeconds`), and the coordinator lands its entry from
+ * the merge's CI runs. Another test file the table lacks is not unknown: the table lists only those of 10 s or more.
+ */
+export function unknownToCostly(paths) {
+  return paths.filter(
+    (path) =>
+      /^tests\/type-core-[^/]+\.test\.ts$/u.test(path) &&
+      costlyTestSeconds[path.slice("tests/".length).replace(/\.ts$/u, ".js")] === undefined,
+  );
+}
+
 /** The extensions `npm run format:check` covers. */
 const FORMATTED = /\.(?:ts|tsx|cts|mts|js|jsx|cjs|mjs)$/u;
 
@@ -131,6 +167,51 @@ function options(argv) {
 
 /** The prefix of every temporary worktree `--merged` makes. */
 const TEMPORARY_PREFIX = join(tmpdir(), "check-changed-merged-");
+
+/** The LXC's own checkout of main, which an unset or empty `TEASESCRIPT_MAIN` means. */
+export const MAIN_CHECKOUT = "/opt/teasescript-agents/teasescript-main/current";
+
+/**
+ * Whether `cwd`'s `node_modules` is a link whose target is confirmed gone: `lstat` finds a link, and opening it fails
+ * because a part of its target does not exist (`ENOENT`, `ENOTDIR`). A target it may not read (`EACCES`), a loop, or
+ * any other failure is not confirmed, so the link is not stale.
+ */
+export function staleLink(cwd) {
+  try {
+    if (!lstatSync(`${cwd}/node_modules`).isSymbolicLink()) return false;
+  } catch {
+    return false;
+  }
+  try {
+    statSync(`${cwd}/node_modules`);
+    return false;
+  } catch (error) {
+    return error.code === "ENOENT" || error.code === "ENOTDIR";
+  }
+}
+
+/**
+ * The command that links main's `node_modules` into `cwd`, or `null` when there is none: in the checkout
+ * `TEASESCRIPT_MAIN` names in `env` (relative to `cwd`), unset or empty `fallback`. The folder is named by the path the
+ * system opens for the configured one (`realpath`, which follows a link before a `..` after it), absolute, so `ln`
+ * reads it as its target and never as an option, and as one shell word. Over a stale link (`staleLink`) the command
+ * replaces that link (`ln -sfn`); it never replaces anything else.
+ */
+export function mainLinkCommand(env, cwd, fallback = MAIN_CHECKOUT) {
+  const main = env.TEASESCRIPT_MAIN || fallback;
+  let real;
+  try {
+    real = realpathSync.native(`${isAbsolute(main) ? "" : `${cwd}/`}${main}/node_modules`);
+  } catch {
+    return null;
+  }
+  return `ln ${staleLink(cwd) ? "-sfn" : "-s"} ${shellWord(real)} node_modules`;
+}
+
+/** `text` as one shell word: as it is when it holds only safe characters, else in single quotes. */
+export function shellWord(text) {
+  return /^[\w./@%+=:,-]+$/u.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`;
+}
 
 /**
  * Removes `directory`, a temporary worktree of the repository at `repository`, and returns `null`; or, when
@@ -253,11 +334,14 @@ function enterMerge(ref, cleanups) {
 async function check(cleanups) {
   const { merged, ref } = options(process.argv.slice(2));
   if (!existsSync("node_modules")) {
-    const lxc = "/opt/agent-stack/teasescript-main/current/node_modules";
+    const link = mainLinkCommand(process.env, process.cwd());
+    const stale = staleLink(process.cwd())
+      ? `node_modules is a stale link (to ${readlinkSync("node_modules")}): `
+      : "";
     cannotRun(
-      existsSync(lxc)
-        ? `no node_modules: link it with \`ln -s ${lxc} node_modules\``
-        : `no node_modules: link \`$(sx-tree ${spawnSync("git", ["merge-base", "HEAD", ref], { encoding: "utf8" }).stdout.trim() || "<merge-base SHA>"})/node_modules\`, or run \`npm ci\``,
+      link !== null
+        ? `no node_modules: ${stale}${stale === "" ? "link it" : "replace it"} with \`${link}\``
+        : `no node_modules: ${stale}${stale === "" ? "" : "remove it, then "}link \`$(sx-tree ${spawnSync("git", ["merge-base", "HEAD", ref], { encoding: "utf8" }).stdout.trim() || "<merge-base SHA>"})/node_modules\`, or run \`npm ci\``,
     );
   }
   let mergeBase;
@@ -287,6 +371,8 @@ async function check(cleanups) {
     `check-changed: ${changed.length} changed files since ${ref} (${mergeBase.slice(0, 9)}); ` +
       `projects: ${[...projects].join(", ") || "none"}\n`,
   );
+  const unknown = unknownToCostly(changed);
+  if (unknown.length > 0) process.stdout.write(`${unknown.join(", ")}: ${UNKNOWN_TO_COSTLY}\n`);
 
   // (a deleted core file counts too, which `changed`, holding the files that exist, leaves out, and a file moved out of
   // the core, whose old path only `--no-renames` lists)

@@ -115,8 +115,14 @@ checker, lowering, plan, runtime and editor cannot drift apart.
 
 ### Rules over an open set
 
-A rule that ranges over an open set, such as every option, every caller, every code form or every value that reaches a
-boundary, is built so that its completeness follows from the construction, before the first review:
+Which forms a rule must support is decided by the repository's documents (the language reference, the accepted record, a
+tool's contract page), not by which forms a builder has seen reached: a form they name is supported. A narrower claim
+takes one of three shapes: a declared bounded difference with its measured term and bound; a record held under a named
+issue; a refusal by name of forms outside the documents. A form silently handled for fewer cases is not a narrower
+claim, and a claim that would drop a documented form is not the builder's to make ([Who decides what](../../AGENTS.md)).
+For the forms that stay supported, a rule that ranges over an open set, such as every option, every caller, every code
+form or every value that reaches a boundary, is built so that its completeness follows from the construction, before the
+first review:
 
 - One function in one place decides the rule, and every caller uses it.
 - Anything that function has not proved gets a conservative default: an unknown kind fails or is treated as unsafe. It

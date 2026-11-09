@@ -61,6 +61,8 @@
     "knip": "6.34.0",
     "oxlint": "1.81.0",
     "oxlint-tsgolint": "7.0.2006",
+    "postcss": "8.5.26",
+    "postcss-selector-parser": "7.1.6",
     "prettier": "3.9.6",
     "remark": "15.0.1",
     "remark-gfm": "4.0.1",
