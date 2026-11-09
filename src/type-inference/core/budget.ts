@@ -108,7 +108,8 @@ export type WorkCounter =
   // the receiving closure of a pass that starts with frozen keys (#1526 phase C): each read it keeps (an edge), each
   // node a walk of it visits (taint, blockers, an invalidation transaction)
   | "closureEdges"
-  | "closureVisits";
+  | "closureVisits"
+  | "stopCertificates";
 
 /**
  * The units a kept text of `length` UTF-16 code units costs: about its size in 8-byte words, a header of
@@ -302,11 +303,38 @@ export class WorkLedger {
 
   public constructor(public readonly allowance: number) {}
 
+  #certificateScope: { remaining: number } | null = null;
+
+  /** Scratch-only: divert every charge before the stopped/apart branch, rejecting an excess charge. */
+  public certificateWork<T>(remaining: number, run: () => T): T {
+    if (this.#certificateScope !== null) throw new Error("Nested certificate work.");
+    this.#certificateScope = { remaining };
+    const spender = this.#spender;
+    try {
+      return run();
+    } finally {
+      this.#spender = spender;
+      this.#certificateScope = null;
+    }
+  }
+
+  public get certificateUnits(): number {
+    return this.#apartCounts.get("stopCertificates") ?? 0;
+  }
+
   /**
    * Charges `units` of work to `counter`; throws `BudgetExhausted` when the total then exceeds the allowance. After the
    * stop, counts them as finishing work.
    */
   public charge(counter: WorkCounter, units = 1): void {
+    const certificate = this.#certificateScope;
+    if (certificate !== null) {
+      if (units > certificate.remaining) throw new CapReached();
+      certificate.remaining -= units;
+      this.#finishing += units;
+      this.#apartCounts.set("stopCertificates", this.certificateUnits + units);
+      return;
+    }
     if (this.#stopped !== null || this.#apart) {
       this.#finishing += units;
       this.#apartCounts.set(counter, (this.#apartCounts.get(counter) ?? 0) + units);

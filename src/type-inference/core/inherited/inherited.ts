@@ -101,6 +101,7 @@ export function inheritedAt(
   path: readonly string[],
 ): TypeTerm | null {
   // (a wrapper's family's path is its cursor, G3 stage 1: `inheritedAtKey`)
+  admission.certificateFacts?.unresolved();
   const { contract } = admission.pass;
   if (path.length > 0 && keyLane(contract, place, path[0]!) === "cursor")
     return inheritedAtKey(admission, keyIdOf(contract, place, path));
@@ -464,7 +465,11 @@ export function drive<T>(admission: Admission, steps: Inheriting<T>): T {
   // (a read answered by its synchronous run: #1072 A2)
   while (step.done !== true)
     step = steps.next(
-      isRead(step.value) ? step.value.now() : inheritedAtKey(admission, step.value),
+      isRead(step.value)
+        ? step.value.now()
+        : admission.certificateFacts !== null
+          ? admission.certificateFacts.unresolved()
+          : inheritedAtKey(admission, step.value),
     );
   return step.value;
 }

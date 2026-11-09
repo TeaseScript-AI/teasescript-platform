@@ -249,6 +249,19 @@ export function* earliestDecider(
   readonly own?: boolean;
 } | null> {
   const { program, values, contract } = admission.pass;
+  // Scratch certificates answer only immediate facts, before any value-demand wrapper or A4 scan.
+  if (admission.certificateFacts !== null) {
+    const items = admission.certificateFacts.read(value, node, asked);
+    const binding = program.occurrenceOf.get(value);
+    const term = binding === undefined ? null : writtenOf(program.place(binding).kind);
+    if (term !== null) return { term, site: program.places[value]?.site ?? null, own: true };
+    const tags = items.some((item) => item.tag === "unknown")
+      ? []
+      : deciding(items).map((item) => item.tag);
+    return tags.length === 0
+      ? null
+      : { term: null, site: program.places[value]?.site ?? null, tags };
+  }
   // (a cursor's span read one step at a time and by its path's id, never made: G3 stage 1)
   const at = restRef(contract, asked);
   const task = yield* expandRead(admission, value, node, []);

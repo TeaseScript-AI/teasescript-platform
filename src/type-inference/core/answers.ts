@@ -1,3 +1,10 @@
+import {
+  certificateOptions,
+  deriveCertificates,
+  type CertificateOptions,
+  type CertificateLedger,
+  type StopCertificate,
+} from "./consumers/certificates.js";
 import type { Expression } from "../../ast.js";
 import type { KnownValue } from "../../static-evaluation.js";
 import type { StaticType } from "../../static-types.js";
@@ -392,6 +399,7 @@ export interface CoreView extends OperandView {
 }
 
 export interface BudgetAnswer {
+  readonly certificates?: CertificateLedger;
   readonly total: number;
   readonly allowance: number;
   readonly counts: ReadonlyMap<WorkCounter, number>;
@@ -505,6 +513,8 @@ export interface Answers {
    * `null` elsewhere (no completion ran, or each obligation there is lost, open or a shape).
    */
   received(id: PlaceId, path: readonly string[]): ContractResult | null;
+  /** Scratch certificates of this fresh pass, including refusals. */
+  stopCertificates(): readonly StopCertificate[];
   /** Whether the receiving completion's own store checks (C1) owe a runtime check at a site, as unstopped. */
   completedCheck(site: SourceSite): boolean;
   /**
@@ -608,6 +618,7 @@ export interface Answers {
  * its start, as a question after an analysis that crossed the allowance stops it (the candidate route).
  */
 export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit): Answers {
+  const certificates = certificateOptions();
   const program = new CoreProgram(request);
   let analysed: { readonly pass: CorePass; readonly consumers: Consumers } | null = null;
   let rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map();
@@ -715,7 +726,8 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
     }
   // the written types' own errors (V30 §13's union rule), from the declarations alone
   const written = writtenTypeErrors(request.files.map((file) => file.program));
-  if (program.work.stopped !== null) return finished(program, analysed, rejected, targets, written);
+  if (program.work.stopped !== null)
+    return finished(program, analysed, rejected, targets, written, certificates);
   // statements nested past the limit, the analysis run to its end: their checks run when the script runs
   const { pass, consumers } = analysed!;
   if (program.deep.length > 0) program.work.apart(() => consumers.finish(false));
@@ -747,6 +759,7 @@ function finished(
   rejected: ReadonlyMap<number, ReadonlySet<Key>>,
   targets: StoreTargets,
   written: readonly WrittenTypeError[],
+  certificates: CertificateOptions,
 ): Answers {
   const limit = program.work.stopped!;
   program.index();
@@ -759,6 +772,7 @@ function finished(
     })();
   const phase = analysed?.consumers.stopPhase() ?? "setup";
   consumers.finish(standing === null);
+  if (standing === null) deriveCertificates(consumers, certificates, rejected);
   return new CoreAnswers(pass, consumers, written, limit, phase);
 }
 
@@ -1343,6 +1357,9 @@ class CoreAnswers implements Answers {
         this.diagnostics.map((diagnostic) => consumers.withFacts(diagnostic)),
       );
     this.budget = {
+      ...(consumers.certificateLedger === undefined
+        ? {}
+        : { certificates: consumers.certificateLedger }),
       total: program.work.total,
       allowance: program.work.allowance,
       counts: program.work.counts(),
@@ -1732,6 +1749,10 @@ class CoreAnswers implements Answers {
 
   public requirement(id: PlaceId, path: readonly string[]): TypeTerm | null {
     return this.#consumers.requirements.get(keyOf(id, path)) ?? null;
+  }
+
+  public stopCertificates(): readonly StopCertificate[] {
+    return this.#consumers.certificates;
   }
 
   public completedCheck(site: SourceSite): boolean {

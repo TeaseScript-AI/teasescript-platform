@@ -37,6 +37,15 @@ export function storeRequirement(
   return copied ?? (written === null && standing ? initialCopy(admission, place, path) : null);
 }
 
+/** Scratch certificate access to the source-only initializer proof, without settling admission. */
+export function certificateRequirement(
+  admission: Admission,
+  place: PlaceId,
+  path: readonly string[],
+): TypeTerm | null {
+  return storeRequirement(admission, place, path, true, true);
+}
+
 /**
  * One step of a declaration's start value through its object literals (`initialCopy`): a direct read of a place with
  * its own written type (`term`, the landing), or an object literal (`value`), its properties' steps made as they are

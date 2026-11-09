@@ -779,11 +779,19 @@ export class Contract {
     return subAt(this, sub, rest, flow);
   }
 
+  /** Immediate source facts for the scratch certificate scope; never a demand producer. */
+  certificateValue: ((value: PlaceId, rest: Rest) => readonly Item[]) | null = null;
+
   public contractOfValueAt(
     value: PlaceId,
     rest: Rest,
     flow: FlowSink | null = null,
   ): Work<readonly Item[]> {
+    const facts = this.certificateValue;
+    if (facts !== null)
+      return (function* () {
+        return facts(value, rest);
+      })();
     return contractOfValueAt(this, value, rest, flow);
   }
 

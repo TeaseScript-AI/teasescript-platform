@@ -1,3 +1,4 @@
+import { keyOf } from "./definitions.js";
 import type {
   AssignmentStatement,
   BinaryExpression,
@@ -1385,6 +1386,37 @@ function lostCheck(
   checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
   core: CoreRuntimeChecks,
 ): void {
+  for (const certificate of answers.stopCertificates()) {
+    const store = index.storeAt(certificate.site);
+    const destination =
+      store === undefined ? null : answers.storedPlace(nodeOf(answers, index, store));
+    const identity =
+      certificate.epoch === answers.epoch &&
+      destination !== null &&
+      destination.id === certificate.place &&
+      destination.path.length === certificate.path.length &&
+      destination.path.every((step, at) => step === certificate.path[at]);
+    if (identity && certificate.outcome === "nocheck") continue;
+    if (
+      identity &&
+      certificate.outcome === "required" &&
+      certificate.required !== undefined &&
+      store !== undefined
+    ) {
+      const carried = checks.get(store)?.type;
+      if (carried !== undefined && narrower(carried, certificate.required.ref)) continue;
+    }
+    const expression =
+      store === undefined
+        ? index.expressionAt(certificate.site)
+        : store.kind === "letStatement"
+          ? store.initializer
+          : store.value;
+    throw new OutsideContract(
+      expression,
+      `an unresolved stop certificate for store ${certificate.uid} at ${certificate.site.file}:${certificate.site.start} into ${keyOf(certificate.place, certificate.path)} (${certificate.outcome})`,
+    );
+  }
   const gated = answers.gated();
   // (obligations a settled stop cannot establish: the program is declined at its first store, never read as owing none)
   if (gated === null) {

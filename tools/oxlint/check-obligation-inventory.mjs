@@ -78,6 +78,10 @@ export const consumersFiles = (root) => splitFiles(root, CONSUMERS);
 
 /** The `Admission` derivations those consumer derivations call that create no obligation, each with why. */
 export const READS = new Map([
+  [
+    "certificateRequirement",
+    "scratch #2080 source-only written/initializer proof; creates no check",
+  ],
   ["admitted", "the admitted type at a path: a decision's answer, recorded by `decide`"],
   ["atCopy", "whether A2 found copies meeting at a path: where the error goes, a test"],
   ["boundaryAt", "records a store whose boundary `publish` forms: the obligation is that entry's"],
@@ -159,6 +163,7 @@ export const READS = new Map([
 
 /** The `AdmissionHost` members, each with why it creates no obligation. */
 export const HOST_READS = new Map([
+  ["certificates", "scratch #2080 immediate fact adapter; creates no check"],
   ["run", "runs a solver demand: an answer"],
   ["read", "the finishing read after a stop: an answer"],
   ["domain", "a key's domain after a stop, the finishing path's (`keyDomain`): an answer"],
@@ -173,6 +178,11 @@ export const HOST_READS = new Map([
  * recording arrays are listed here too: any other form of them is unproved.
  */
 const LISTED_READS = [
+  ["diagnostics", "spread", "certificates.ts", "scratch #2080 staged C1 warnings"],
+  ["deferred", "spread", "certificates.ts", "scratch #2080 staged C1 warnings"],
+  ["diagnostics", "length", "certificates.ts", "scratch #2080 construction accounting"],
+  ["deferred", "length", "certificates.ts", "scratch #2080 construction accounting"],
+  ["rejections", "operand", "certificates.ts", "scratch #2080 rejection refuses the certificate"],
   [
     "readChecks",
     "length",
