@@ -382,6 +382,21 @@ test("a name that is not UTF-8 stops the report; a file whose hunks --numstat do
         "file gaining over 300 lines: +301 src/big.ts",
       ],
     );
+    // with --summary too: the file not measured is in the report only, and the summary still lists the one measured
+    const summary = join(counted.root, "summary.md");
+    const summarized = spawnSync(
+      process.execPath,
+      [tool, "--diff", counted.base, "--summary", summary],
+      {
+        cwd: counted.root,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      },
+    );
+    assert.equal(summarized.status, 0, summarized.stderr);
+    const block = readFileSync(summary, "utf8");
+    assert.match(block, /^src\/big\.ts \| 1 → \d+ \| gaining 301$/mu);
+    assert.doesNotMatch(block, /src\/a\.ts/u);
   } finally {
     rmSync(named.root, { recursive: true, force: true });
     rmSync(counted.root, { recursive: true, force: true });
@@ -770,7 +785,8 @@ test(
       );
       // every kind the report returns is one the summary has decided on
       assert.deepEqual(
-        [...new Set([...plain.kinds, ...moved.kinds])].sort(),
+        // (`unread`: the --numstat stand-in's test runs it with --summary)
+        [...new Set([...plain.kinds, ...moved.kinds, "unread"])].sort(),
         Object.keys(SUMMARY_KINDS).sort(),
       );
       const none = run(quiet);

@@ -591,6 +591,7 @@ export const SUMMARY_KINDS = {
   folder: null,
   "top level": null,
   names: null,
+  unread: null,
 };
 
 /** The summary's block: a heading, `command` and the merge base's short sha `base`, then `rows` in a text block. */
