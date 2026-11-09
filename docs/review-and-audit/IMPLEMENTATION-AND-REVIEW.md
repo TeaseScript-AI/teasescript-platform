@@ -189,13 +189,14 @@ These signals each ask, in the plan, for the seam or for the reason there is non
 answered them, for the files the change touches as well as for the code it adds. They are not limits:
 
 - a file over 1,000 lines;
-- a pull request adding over 300 lines to one file;
+- a pull request growing one file by over 300 lines (its added lines less its removed ones);
 - a function over 150 lines;
 - a folder over 20 files, or a component's top level over 12 (the components are `src/`, `player/`, `tests/`, `tools/`
   and `playground/`, and no other folder counts as a top level).
 
 `node tools/structure-report.mjs` lists them, with `--diff <base>` for the signals a committed change adds to, crossing a
-line or adding to one already over; CI prints that list on every pull request (`docs/TESTING.md`).
+line or adding to one already over, and a file's only when the change grows it; CI prints that list on every pull
+request (`docs/TESTING.md`).
 
 Moving or splitting files is its own pull request on the light route. It changes no behavior, and its build output
 is byte-identical where the build allows it. `node tools/pure-move-check.mjs <base>` checks that every line it adds or
