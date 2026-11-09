@@ -193,8 +193,9 @@ before it. An empty cell has no corpus yet.
 The compiler's shadow gate (`tests/families/shadow.mjs`) is a campaign run from the tree after merges and reported on
 the tracker issue; it is not a per-pull-request level.
 
-**Pinned work.** Some suites pin the core's exact work: totals, listed copy and construction sites, and work tables
-(`tools/repository-checks/pin-suites.mjs` lists them). A change under `src/type-inference/core/` runs all of them before
+**Pinned work.** Some suites pin the core's exact work or its published answers: totals, listed copy and construction
+sites, work tables, and the published answers' digests (TABLE r4.185) (`tools/repository-checks/pin-suites.mjs` lists
+them, by hand). A change under `src/type-inference/core/` runs all of them before
 it asks for review and before READY: `node tools/repository-checks/pin-suites.mjs --run`. A pin that moves is re-pinned
 only with its ground: a comment at the pin, or in its test's header, naming how many units more or fewer and the change
 that moved them ("18 units more at demand 64 since #1828: …" above the closure suite's list-join row; "6 fewer since
@@ -265,7 +266,9 @@ runtime oracle comparison after them. Every type-core test
 file and every other of 10 s or more is listed, costliest first, with its median seconds over three CI runs or more in
 `tools/costly-test-files.mjs`, beside the seconds of `check:pretest`: each test job keeps its files' seconds as an
 artifact for 7 days, and `node tools/measure-test-files.mjs --write --from-ci RUN ...` regenerates the module from them
-(its header names the runs; seconds measured on a worker do not predict CI's). The full suite starts the listed files
+(its header names the runs; seconds measured on a worker do not predict CI's). A new type-core test file runs in full
+before it has an entry, at the other files' seconds; `check-changed` and the shard test name it, and the coordinator
+lands its entry from the merge's CI runs in a light pull request. The full suite starts the listed files
 first, and `tools/test-shards.mjs` shares the files out so that the jobs end together, `check-3`'s after its checks
 before the tests. Their costliest sweeps
 that claim something at every member of a list of settled stops or allowances (`testedStops`, the stops before admission

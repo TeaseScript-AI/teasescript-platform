@@ -220,15 +220,17 @@ reviewer are responsible for recognizing and reporting the pattern without
 waiting to be asked: from the second review round on, every review report and
 every repair report states, for each substantive finding, whether it belongs to
 a problem family an earlier round already found, and if so whether the review
-is converging and why. Whoever coordinates the work compares those answers across rounds and decides how a
-non-converging review continues, taking these steps in order: one systematic structure, then an invariant, then a
-[design round](#design-rounds); a scope cut to an issue is possible at any step. The second sibling of one family
-starts the first step: the implementer stops repairing instances and reports one structure, and a third instance is
-not repaired on its own. When the family's mechanism is another tool's or the runtime's semantics, such as a linter's
-configuration, a renderer, or runtime provenance read by a static check, that structure narrows the claim to what the
-repository owns, names the residual, and makes the other tool's own run, or the runtime evidence, the oracle for it;
-that run is then part of the change's required evidence, not an option. A narrowed claim that gains a sibling of its
-own still takes the next steps. A rule over an open set is built as in
+is converging and why. Whoever coordinates the work compares those answers across rounds and decides how a non-converging review continues,
+choosing the cheapest candidate that makes the claim true: a narrower claim (one of the three shapes in [Rules over an
+open set](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#rules-over-an-open-set), with the fact that supports it shown in
+the pull request: the forms actually used, a log, a count), one systematic structure, an invariant, a design round; a
+scope cut to an issue is possible at any candidate. A later candidate is owed only when the earlier one leaves a sibling
+live. The second sibling of one family starts the choice: the implementer stops repairing instances and reports the
+narrower claim and the structure, each with its cost, and a third instance is not repaired on its own. When the family's
+mechanism is another tool's or the runtime's semantics (a linter's configuration, a renderer, runtime provenance read by
+a static check are illustrations, not the list), the narrower claim names what the repository owns and the residual, and
+makes the other tool's own run, or the runtime evidence, the oracle for it; that run is then part of the change's
+required evidence, not an option. A narrowed claim that gains a sibling of its own takes the next candidate. A rule over an open set is built as in
 [Rules over an open set](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#rules-over-an-open-set) from the start.
 The structure and the invariant are bounded models as described below, not a generalized framework, which still needs an owner decision
 ([Proportional repair](#proportional-repair-and-owner-escalation)). The owner decides only when the outcome changes

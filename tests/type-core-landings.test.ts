@@ -12,6 +12,8 @@ import {
 import { Admission } from "../src/type-inference/core/admission.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { WorkLedger } from "../src/type-inference/core/budget.js";
+import { ReceivingDomain } from "../src/type-inference/core/inherited/receiving-domain.js";
+import { CoreProgram } from "../src/type-inference/core/program.js";
 import type {
   LandingTask,
   Listing,
@@ -19,7 +21,7 @@ import type {
   TapePoint,
 } from "../src/type-inference/core/admission/model.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { MODES, inMode } from "./helpers/type-core-oracles.js";
+import { MODES, inMode, publishedAnswers } from "./helpers/type-core-oracles.js";
 
 // The landing reporter (#1428, #1547): a call's tape reports each path's first event in a range, and every
 // `landedBelow` call returns, in order, what the walk without listings returns.
@@ -296,4 +298,103 @@ test("the census is the state a pass's admissions retain: tapes, listings, their
     assert.equal(made, trie, name);
     assert.equal(reported, held, name);
   }
+});
+
+/**
+ * #1948: `r0` to `r3`, each `a` read at its own field, over four whole copies into `a` of objects whose one field is a
+ * list of a written integer: each one's element inherits that type through the copy of the object holding its field
+ * (`landed`), whose copies `landed` takes by the next step their sources land (`nextStepCopies`). `first` is `root0`'s
+ * definition.
+ */
+function listCopies(first: string): string {
+  const rows = (k: number, row: (i: number) => string) =>
+    Array.from({ length: k }, (_, i) => row(i)).join("\n");
+  return `${[
+    "let t:integer=1",
+    first,
+    rows(3, (i) => `let root${i + 1}={f${i + 1}:[t]}`),
+    "let a=root0",
+    rows(3, (i) => `a=root${i + 1}`),
+    rows(4, (i) => `let r${i}=a.f${i}`),
+    "exit",
+  ].join("\n")}\n`;
+}
+
+/**
+ * The bindings whose published element type (`publishedAnswers`: every binding's admitted types asked in turn, the
+ * root's before the element's) is not inherited through the copies, among `r0` to `r3`, in each of the four modes.
+ */
+function inheritedElements(source: string): readonly string[] {
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+  assert.ok(request !== null);
+  const bindings = new CoreProgram(request).places.filter(({ kind }) => kind.kind === "binding");
+  const reads = new Map(
+    bindings.flatMap((place) =>
+      place.kind.kind === "binding" && /^r\d$/.test(place.kind.name)
+        ? [[place.id, place.kind.name] as const]
+        : [],
+    ),
+  );
+  assert.equal(reads.size, 4);
+  const lost: string[] = [];
+  for (const [index, mode] of MODES.entries())
+    inMode(mode, () => {
+      const answers = analyseCore(request);
+      const { text } = publishedAnswers(
+        answers,
+        bindings.map(({ id }) => id),
+        request,
+      );
+      // EVIDENCE: the publication's `admitted` lists each binding's place and its admitted types at its root and element.
+      const { admitted } = JSON.parse(text) as {
+        readonly admitted: readonly (readonly [
+          number,
+          unknown,
+          { readonly inherited?: boolean },
+        ])[];
+      };
+      for (const [place, , element] of admitted)
+        if (reads.has(place) && element.inherited !== true)
+          lost.push(`mode ${index}: ${reads.get(place)}`);
+    });
+  return lost;
+}
+
+/**
+ * #1948: a copy whose source's landings are not its seeds alone is taken by `landed` whatever step follows: a source
+ * other copies land in, a copy forest's child (its one whole copy of another place), a member of a cycle of copies and
+ * a member of a cycle fed by one place's whole copies each land `f0` through the place copied into them, so `r0`'s
+ * element inherits the written integer as `r1` to `r3` do.
+ */
+test("a copy whose source lands through other copies is taken for every path: copies in it, a forest's child, a cycle, a fed cycle (#1948)", () => {
+  const lost = {
+    copies: inheritedElements(
+      listCopies("let w={f0:[t]}\nlet v={f0:[t]}\nlet root0=w\nif hostValue < 1 {root0=v}"),
+    ),
+    forest: inheritedElements(listCopies("let w={f0:[t]}\nlet root0=w")),
+    cycle: inheritedElements(listCopies("let p={f0:[t]}\nlet root0=p\np=root0")),
+    fed: inheritedElements(listCopies("let p0={f0:[t]}\nlet x=p0\nlet root0=x\nx=root0")),
+  };
+  assert.deepEqual(lost, { copies: [], forest: [], cycle: [], fed: [] });
+});
+
+/**
+ * #1948: the next-step index is its admission's alone (`ReceivingDomain`, cleared by `reset` for each admission made on
+ * a pass): a program whose objects hold the fields one place later, analysed after one that indexed the same places and
+ * paths, inherits every element as it does alone.
+ */
+test("the next-step index is its admission's: a later program's copies are taken by their own sources' steps (#1948)", () => {
+  const domain = new ReceivingDomain();
+  domain.nextSteps.set("0|", { scans: 2, size: 1, next: new Map(), any: [] });
+  domain.sourceSteps.set("0|", null);
+  domain.reset();
+  assert.deepEqual([domain.nextSteps.size, domain.sourceSteps.size], [0, 0]);
+  const first = listCopies("let root0={f0:[t]}");
+  // (the same places, each object holding the next one's field)
+  const shifted = first.replace(
+    /let root(\d)=\{f\d:/g,
+    (_, i: string) => `let root${i}={f${(Number(i) + 1) % 4}:`,
+  );
+  assert.deepEqual(inheritedElements(first), []);
+  assert.deepEqual(inheritedElements(shifted), []);
 });

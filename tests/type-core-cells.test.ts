@@ -61,14 +61,13 @@ test("the core gives the expected record for every record of the cells it comple
     "U4's consumer remainder (#2025)": 3,
     "a fixture expectation awaiting its ruling (#2025)": 3,
     "the numeric crossover (#1173, #2025)": 1,
-    "a context word under an unrelated test (#2024)": 1,
     "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
     "S9b's F18 copy of a written type as the receiving context (r4.77 (2))": 18,
     "fromJson with files: true outside the slice, and C13's text operand": 2,
     "a known-value error the record lacks (decision 3 on #1072)": 1,
     "C13's warning of a choice value from outside the script the record lacks (#1437)": 3,
   });
-  assert.equal(asserted.length, 1_951);
+  assert.equal(asserted.length, 1_952);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
@@ -123,8 +122,6 @@ test("each stage 3b record held by name exists, has an N cell, and differs in ev
       )
     )
       return "a static warning of S9b's otherwise (#1737)";
-    if (lines.length > 0 && lines.every((line) => line.startsWith("missing context ")))
-      return "a context word under an unrelated test (#2024)";
     return "no known cause";
   };
   // (the differences as a multiset: the comparison compares entries regardless of their order)
@@ -155,7 +152,7 @@ test("each stage 3b record held by name exists, has an N cell, and differs in ev
     }
   }
   assert.deepEqual(wrong, []);
-  assert.equal(HELD_S10_RECORDS.size, 34);
+  assert.equal(HELD_S10_RECORDS.size, 33);
 });
 
 /**
