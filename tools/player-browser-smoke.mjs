@@ -32,8 +32,8 @@ async function main() {
   const [handleRequest] = server.listeners("request");
   server.removeAllListeners("request");
   server.on("request", (request, response) => {
-    // The spill store's module and the compiled Player modules it imports.
-    const smokeModule = /^\/smoke\/([a-z-]+\.js)$/u.exec(request.url ?? "");
+    // The spill store's module and the compiled Player modules it imports, by their path under `dist/player/`.
+    const smokeModule = /^\/smoke\/((?:[a-z-]+\/)*[a-z-]+\.js)$/u.exec(request.url ?? "");
     if (smokeModule !== null) {
       void readFile(new URL(`../dist/player/${smokeModule[1]}`, import.meta.url)).then(
         (module) => {
