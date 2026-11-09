@@ -146,13 +146,11 @@ export class Contracts {
     if (result !== null) this.results.set(store, result);
     const checked = result === null ? null : checkedType(result);
     if (checked === null) return null;
-    // (the receiving completion's contract, and a complete type a stop left, list each object's properties as their
-    // listings found them, where the stop fell: the check lists them as the natural plan's does, by `fieldOrder` (#2215).
-    // The recorded result, which the lost-check gate reads, keeps its own order. A written type keeps its own.)
+    // (where a stop left the settled pass's contract incomplete, the receiving completion's lists each object's properties
+    // as its listings found them: the check lists them as the natural plan's does (#2215). The recorded result, which the
+    // lost-check gate reads, keeps the completion's order.)
     const type =
-      result === settled || place === null || (whole && declaration.typeAnnotation !== null)
-        ? checked
-        : this.#inNaturalOrder(checked, place.id, place.path, [value]);
+      settled !== null && result !== settled ? this.#inNaturalOrder(checked, [value]) : checked;
     const name = [
       declaration.name.name,
       ...(whole ? [] : (place?.path ?? []).map(propertyName)),
@@ -196,21 +194,15 @@ export class Contracts {
 
   /**
    * A completion's checked type with each object's properties in the order the natural plan's check lists them: by
-   * `fieldOrder` over the literal records below the store's value, level by level as `ContractDescriptors` fills a
-   * decided object (#2215). A written level, and one a copy of a written type decides, keeps its own order, as the natural
-   * plan's check does.
+   * `fieldOrder` over the literal records below the store's value, level by level, as `ContractDescriptors` fills a
+   * decided object (#2215). A contract lists properties only where it filled a decided object, so nothing more is asked.
    */
-  #inNaturalOrder(
-    type: TypePlan,
-    id: PlaceId,
-    path: readonly string[],
-    records: readonly Expression[],
-  ): TypePlan {
+  #inNaturalOrder(type: TypePlan, records: readonly Expression[]): TypePlan {
     switch (type.kind) {
       case "union":
         return {
           kind: "union",
-          members: type.members.map((member) => this.#inNaturalOrder(member, id, path, records)),
+          members: type.members.map((member) => this.#inNaturalOrder(member, records)),
         };
       case "list":
       case "set":
@@ -221,31 +213,16 @@ export class Contracts {
               kind: type.kind,
               element: this.#inNaturalOrder(
                 type.element,
-                id,
-                joinSteps(path, ["element"]),
                 recordsBelow(records, this.#literalOf).elements,
               ),
             };
       case "object": {
         const below = recordsBelow(records, this.#literalOf);
         const byName = new Map(type.properties.map((property) => [property.name, property]));
-        const { admitted } = this.answers.place(id, path);
-        const names =
-          admitted.by === "written" || (admitted.by === "decided" && admitted.inherited)
-            ? [...byName.keys()]
-            : fieldOrder(byName.keys(), below, this.index);
-        const properties = names.map((name) => {
-          // EVIDENCE: `names` are `byName`'s own keys, in another order.
+        const properties = fieldOrder(byName.keys(), below, this.index).map((name) => {
+          // EVIDENCE: `fieldOrder` returns `byName`'s own keys, in another order.
           const property = byName.get(name)!;
-          return {
-            name,
-            type: this.#inNaturalOrder(
-              property.type,
-              id,
-              joinSteps(path, [propertyStep(name)]),
-              below.fields.get(name) ?? [],
-            ),
-          };
+          return { name, type: this.#inNaturalOrder(property.type, below.fields.get(name) ?? []) };
         });
         return type.keepExtra === true
           ? { kind: "object", properties, keepExtra: true }
