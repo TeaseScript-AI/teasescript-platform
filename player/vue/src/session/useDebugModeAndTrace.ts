@@ -6,6 +6,8 @@ import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../runtime/playe
 import type { PlayerSession } from "../../../runtime/runtime-view.js";
 import type { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 import type { Origin, useActivationRun } from "./activation/useActivationRun.js";
+import { completeDebugMode } from "./activation/work/debugMode.js";
+import { sessionTarget } from "./activation/work/target.js";
 
 /*
  * Debug's two switches as the host holds them, moved from `usePlayerSession` unchanged: the value trace, with its
@@ -146,6 +148,7 @@ export function useDebugModeAndTrace({
   function applyDebugMode(origin: Origin) {
     const current = session.value;
     if (
+      !activationRun.admits(origin) ||
       current === null ||
       inspecting().value ||
       stopped.value ||
@@ -162,30 +165,21 @@ export function useDebugModeAndTrace({
     debugModeAsked = asked;
     // It acts for `origin`, the activation that shows the session, which its caller captured at its synchronous entry:
     // a Continue keeps the lineage, so the lineage alone does not say that its activation still lives.
-    // In the host (`setDebugMode`); the session shows the change while it still owns the UI.
-    void bridgeOf(current)
-      .request<{ readonly kind: string }>(
-        current,
-        "setDebugMode",
-        { on },
-        { publish: (next) => void publishOwned(next) },
-      )
-      .finally(() => {
+    // In the host (`setDebugMode`, `work/debugMode.ts`); the session shows the change while it still owns the UI and
+    // its activation lives.
+    completeDebugMode(sessionTarget(current, origin, activationRun), on, origin, {
+      admits: (each) => activationRun.admits(each),
+      publish: (next) => void publishOwned(next),
+      clearMarker: () => {
         if (debugModeAsked === asked) debugModeAsked = null;
-      })
-      .then(
-        (outcome) => {
-          if (!activationRun.admits(origin)) return;
-          if (outcome.kind === "set" && session.value?.lineage === current.lineage)
-            keepSessionLater();
-        },
-        (error: unknown) => {
-          if (endsQuietly(error)) return;
-          if (!activationRun.admits(origin)) return;
-          if (!isDisposed() && !stopped.value && session.value?.lineage === current.lineage)
-            reportActivationError(origin, error);
-        },
-      );
+      },
+      stillShown: () => session.value?.lineage === current.lineage,
+      keep: () => keepSessionLater(),
+      quiet: (error) => endsQuietly(error),
+      reportable: () =>
+        !isDisposed() && !stopped.value && session.value?.lineage === current.lineage,
+      report: (each, error) => reportActivationError(each, error),
+    });
   }
 
   /**

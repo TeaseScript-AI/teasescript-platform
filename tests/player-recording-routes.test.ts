@@ -267,7 +267,10 @@ const SESSION_FILES: readonly string[] = [
 const ACTIVATION_FILES = [
   ...SESSION_FILES,
   // The activation's work modules: activation work throughout, so every wait in them is in scope.
+  "player/vue/src/session/activation/work/adopt.ts",
   "player/vue/src/session/activation/work/continue.ts",
+  "player/vue/src/session/activation/work/debugMode.ts",
+  "player/vue/src/session/activation/work/draw.ts",
   "player/vue/src/session/activation/work/stop.ts",
   "player/vue/src/session/activation/work/target.ts",
   "player/vue/src/session/activation/useExportCandidate.ts",
@@ -353,15 +356,13 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "the section's observation, before the caller's body: the activation work's body re-admits as it begins (`resolveDraw`, checked below)",
   "useRuntimeSceneClock.ts: useRuntimeSceneClock > observeIn: await opened.send":
     "the section's observation, which shows only its own session's publication (`owned`); the body that acts for an activation re-admits first (`resolveDraw`)",
-  "useRandomControl.ts: useRandomControl > resolveDraw > ownedSection:callback: await section.send":
-    READMITS,
-  "useRandomControl.ts: useRandomControl > resolveDraw: catch ownedSection": READMITS,
+  "draw.ts: resolveDrawFor > page.section:callback: await section.send": READMITS,
+  "draw.ts: resolveDrawFor: catch resolved": READMITS,
   "useSessionActivation.ts: useSessionActivation > startFrom: finally settled":
     "clears the in-flight markers it set, only while they are still its own",
-  "useDebugModeAndTrace.ts: useDebugModeAndTrace > applyDebugMode: finally bridgeOf.request":
+  "debugMode.ts: completeDebugMode: finally target.setDebugModeShown":
     "clears the Debug mode asked, only while it is still this request's",
-  "useDebugModeAndTrace.ts: useDebugModeAndTrace > applyDebugMode: then bridgeOf.request.finally":
-    READMITS,
+  "debugMode.ts: completeDebugMode: then target.setDebugModeShown.finally": READMITS,
   "useSessionMedia.ts: useSessionMedia > primeAudio: catch element.play":
     "drops a blocked play; nothing follows",
   "useKeptSession.ts: useKeptSession > settlePlanJson: catch bridgeNow.client.request":

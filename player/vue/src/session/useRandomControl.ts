@@ -16,6 +16,9 @@ import {
 import type { PlayerSession } from "../../../runtime/runtime-view.js";
 import type { SectionWork, useRuntimeSceneClock } from "./useRuntimeSceneClock";
 import type { Origin, useActivationRun } from "./activation/useActivationRun.js";
+import { adopt } from "./activation/work/adopt.js";
+import { resolveDrawFor } from "./activation/work/draw.js";
+import { RetiredActivation, sessionTarget } from "./activation/work/target.js";
 
 /*
  * Debug's random control as the host holds it for this Player, moved from `usePlayerSession` unchanged: the intents it
@@ -115,21 +118,15 @@ export function useRandomControl({
   function adoptRandom(next: PlayerSession, origin: Origin) {
     if (lastRandom === undefined || isDisposed()) return;
     // The adoption acts for the activation that shows `next`, and only while that lives: once it retired, its reply
-    // writes nothing and its failure stops nothing.
-    const request = bridgeOf(next).client.request(
-      "adoptRandom",
-      { session: next.id, intent: lastRandom },
-      { after: next.id },
-    );
-    void activationRun.reply(origin, request, {
-      done: (reply) => {
+    // writes nothing and its failure stops nothing (`work/adopt.ts`).
+    adopt(sessionTarget(next, origin, activationRun), lastRandom, origin, {
+      admits: (each) => activationRun.admits(each),
+      reply: (each, pending, handlers) => activationRun.reply(each, pending, handlers),
+      adopted: (reply) => {
         if (!isDisposed()) adoptRevision(reply);
-        return undefined;
       },
-      failed: (error) => {
-        if (!endsQuietly(error) && !isDisposed()) reportActivationError(origin, error);
-        return undefined;
-      },
+      quiet: (error) => endsQuietly(error) || isDisposed(),
+      report: (each, error) => reportActivationError(each, error),
     });
   }
   /** What a Start carries: this Player, whose session it is, and its newest random intent. */
@@ -194,26 +191,29 @@ export function useRandomControl({
     if (inspecting.value) return Promise.resolve(null);
     // Which reset the record belongs to, as it was asked: one asked for since enters nothing.
     const recorded = record ? { resetAt: lastRandom?.resetAt ?? 0 } : null;
-    return ownedSection(session.value, "inputAnswer", async (section, owned, current) => {
-      // Paused at the draw, the session observes no time; a stopped session gives none.
-      if (!activationRun.admits(origin)) return null;
-      if (current === null || inspecting.value || current.state.randomDraw?.drawId !== drawId)
-        return null;
-      const result = await section.send<ResolveDrawResult>("resolveDraw", {
-        drawId,
-        outcome,
-        record: recorded,
-      });
-      if (isDisposed() || !activationRun.admits(origin)) return null;
-      randomRevision.value = result.revision;
-      if (!owned() || publishOwned(section.session) === null) return null;
-      clock().rebase();
-      return result.outcome;
-    }).catch((error: unknown) => {
-      if (endsQuietly(error) || refusalCode(error) !== null || isDisposed()) return null;
-      if (!activationRun.admits(origin)) return null;
-      reportActivationError(origin, error);
-      return null;
+    // In one section of the shown session (`work/draw.ts`); its facade admits the origin at its send and publication.
+    return resolveDrawFor(drawId, outcome, recorded, origin, {
+      admits: (each) => activationRun.admits(each),
+      section: (body) =>
+        ownedSection(session.value, "inputAnswer", async (section, owned, current) => {
+          if (!activationRun.admits(origin)) return null;
+          return body({
+            drawId: current?.state.randomDraw?.drawId ?? null,
+            send: (resolution) => {
+              if (!activationRun.admits(origin))
+                throw new RetiredActivation("The draw's activation retired.");
+              return section.send<ResolveDrawResult>("resolveDraw", resolution);
+            },
+            owned,
+            publish: () => activationRun.admits(origin) && publishOwned(section.session) !== null,
+          });
+        }),
+      inspecting: () => inspecting.value,
+      disposed: isDisposed,
+      revision: (revision) => (randomRevision.value = revision),
+      rebase: () => clock().rebase(),
+      quiet: (error) => endsQuietly(error) || refusalCode(error) !== null || isDisposed(),
+      report: (each, error) => reportActivationError(each, error),
     });
   }
   /** What `site` took, for the picker, from the host's history of the shown session's Player; `null` without one. */

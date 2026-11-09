@@ -370,10 +370,14 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "own observation",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > applyDebugMode > then:callback.1":
-    ["none", ["BridgeClient.request"]],
-  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > applyDebugMode > then:callback.2":
-    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
+  "player/vue/src/session/activation/work/debugMode.ts completeDebugMode > then:callback.1": [
+    "none",
+    ["BridgeClient.request"],
+  ],
+  "player/vue/src/session/activation/work/debugMode.ts completeDebugMode > then:callback.2": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > copyToDebugRoom > then:callback": [
     "creation",
     ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
@@ -445,7 +449,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/session/useRandomControl.ts useRandomControl > resolveDraw > catch:callback": [
+  "player/vue/src/session/activation/work/draw.ts resolveDrawFor > catch:callback": [
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
@@ -731,8 +735,8 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > lose {lose}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {lose}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > failed {failed}",
-  "player/vue/src/session/useRandomControl.ts useRandomControl > adoptRandom > done {done}",
-  "player/vue/src/session/useRandomControl.ts useRandomControl > adoptRandom > failed {failed}",
+  "player/vue/src/session/activation/work/adopt.ts adopt > done {done}",
+  "player/vue/src/session/activation/work/adopt.ts adopt > failed {failed}",
 ];
 
 /**

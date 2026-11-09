@@ -132,11 +132,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   },
   "session/activation/useActivationRun.ts": { "useActivationRun.retire": READ },
   "session/useCallView.ts": { viewCalls: SESSION },
-  "session/useDebugModeAndTrace.ts": {
-    issueTracing: SESSION,
-    applyDebugMode: SESSION,
-    debugView: SESSION,
-  },
+  "session/useDebugModeAndTrace.ts": { issueTracing: SESSION, debugView: SESSION },
   "session/persistence/useSessionTransfer.ts": {
     useSessionTransfer: READ,
     reviewedImport: READ,
@@ -159,9 +155,12 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "reportActivationError.haltObsolete": SESSION,
     supersede: SESSION,
   },
+  "session/activation/work/draw.ts": { resolveDrawFor: SESSION },
   "session/activation/work/stop.ts": { stopAt: SESSION },
   "session/activation/work/target.ts": {
     "target.halt": SESSION,
+    "target.adoptRandom": SESSION,
+    "target.setDebugModeShown": SESSION,
     commitIncident: SESSION,
     "target.releaseRandom": SESSION,
     "target.beginRecording": SESSION,
@@ -204,7 +203,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "session/useRandomControl.ts": {
     useRandomControl: SETUP,
     flushRandom: SESSION,
-    adoptRandom: SESSION,
     randomTried: SESSION,
     "useRandomControl.dispose": SETUP,
   },

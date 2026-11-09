@@ -559,7 +559,10 @@ const COMPOSABLE_FILES = [
   "player/vue/src/session/persistence/useSavedDataTransfer.ts",
   "player/vue/src/session/persistence/useSessionTransfer.ts",
   "player/vue/src/session/activation/useSessionActivation.ts",
+  "player/vue/src/session/activation/work/adopt.ts",
   "player/vue/src/session/activation/work/continue.ts",
+  "player/vue/src/session/activation/work/debugMode.ts",
+  "player/vue/src/session/activation/work/draw.ts",
   "player/vue/src/session/activation/work/stop.ts",
   "player/vue/src/session/activation/work/target.ts",
 ] as const;
@@ -612,6 +615,10 @@ test("every random-op sender in the composable is classified as adopting or not"
       "if (!paused) adoptRandom(next, origin);",
       "if (session.value !== null) adoptRandom(session.value);",
       "adopt: (target, run) => adoptRandom(sessionOf(target), run),",
+      // The adoption's work and its target's operation (`work/`), which sends it.
+      "void page.reply(origin, target.adoptRandom(intent), {",
+      "adoptRandom(intent: RandomIntent): Promise<BridgeResult>;",
+      "adoptRandom(intent) {",
     ],
   );
 });

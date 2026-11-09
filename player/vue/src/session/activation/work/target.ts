@@ -1,14 +1,10 @@
 import type { StopArguments } from "../../../../../engine-bridge/recording/export-observation.js";
-import type { TracingIntent } from "../../../../../engine-bridge/player-ops.js";
+import type { BridgeResult } from "../../../../../engine-bridge/client.js";
+import type { RandomIntent, TracingIntent } from "../../../../../engine-bridge/player-ops.js";
 import { bridgeOf } from "../../../../../player-bridge.js";
 import type { PlayerSession } from "../../../../../runtime-view.js";
 import type { TemporalCapture } from "../useSessionActivation.js";
-import {
-  stopArguments,
-  type Origin,
-  type RunOrigin,
-  type useActivationRun,
-} from "../useActivationRun.js";
+import { stopArguments, type Origin, type useActivationRun } from "../useActivationRun.js";
 
 /** The activations' record owner, whose admission each operation asks at its action. */
 type Runs = Pick<ReturnType<typeof useActivationRun>, "admits">;
@@ -51,17 +47,23 @@ export interface SessionTarget {
   setDebugMode(on: boolean): Promise<void>;
   /** Continues the session with the click's `capture`. */
   continueWith(capture: TemporalCapture): Promise<void>;
+  /** Gives the session this Player's random control from its next op on: the host's reply, with the revision. */
+  adoptRandom(intent: RandomIntent): Promise<BridgeResult>;
+  /**
+   * Tells the script whether Debug is on, its publications shown through `publish` while the origin lives: whether the
+   * host set it (`set`) or found it so.
+   */
+  setDebugModeShown(
+    on: boolean,
+    publish: (next: PlayerSession) => void,
+  ): Promise<{ readonly kind: string }>;
 }
 
 // Each target's session, which only the scheduler reads back (`sessionOf`), to install it.
 const sessions = new WeakMap<object, PlayerSession>();
 
 /** A target for `session`, acting for `origin` while `runs` admits it. */
-export function sessionTarget(
-  session: PlayerSession,
-  origin: RunOrigin,
-  runs: Runs,
-): SessionTarget {
+export function sessionTarget(session: PlayerSession, origin: Origin, runs: Runs): SessionTarget {
   const host = bridgeOf(session);
   const admit = () => {
     if (!runs.admits(origin))
@@ -83,6 +85,7 @@ export function sessionTarget(
     },
     beginRecording() {
       admit();
+      if (origin.kind !== "run") throw new TypeError("The initial record has no run to record.");
       return host.request<void>(session, "beginRecording", origin.begin);
     },
     restartTrace(tracing) {
@@ -104,6 +107,24 @@ export function sessionTarget(
     continueWith(capture) {
       admit();
       return host.request<void>(session, "continue", { capture });
+    },
+    adoptRandom(intent) {
+      admit();
+      return host.client.request(
+        "adoptRandom",
+        { session: session.id, intent },
+        { after: session.id },
+      );
+    },
+    setDebugModeShown(on, publish) {
+      admit();
+      return host.request<{ readonly kind: string }>(
+        session,
+        "setDebugMode",
+        { on },
+        // The publication shows only while the origin lives: a retired activation's reply shows nothing.
+        { publish: (next) => void (runs.admits(origin) && publish(next)) },
+      );
     },
   };
   sessions.set(target, session);
