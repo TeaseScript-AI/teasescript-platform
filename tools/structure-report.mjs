@@ -37,8 +37,10 @@
 //
 // With --moved, the lines Git's moved-line detection marks as moved (`moved-lines.mjs`, read once over the whole change)
 // are left out of the lines behind two signals, a file gaining over 300 lines and a function over 150 lines that the
-// change writes into, and each signal this suppresses is printed with the moved lines it discounted; every other
-// signal is as without it. Git's detection is heuristic (a moved block below its threshold reads as added).
+// change writes into, and each signal this suppresses is printed with the moved lines it discounted; a file over 1,000
+// lines whose added lines are all moved or admitted by `pure-move-check.mjs`'s forms 1-3 (an import or re-export line, a
+// bare `export` on a moved declaration, whitespace: its classification, imported) is printed as suppressed with its
+// admitted lines; every other signal is as without it. Git's detection is heuristic (a moved block below its threshold reads as added).
 //
 // With --summary FILE, the files behind two signals, a file over 1000 lines that the change adds to and a file gaining
 // over 300 lines, are appended to FILE (CI passes its job summary file) and printed after the report: a heading, the
@@ -55,6 +57,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
 import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
+import { verdictsOf } from "./pure-move-check.mjs";
 
 const SIGNALS = {
   fileLines: 1000,
@@ -344,6 +347,28 @@ function addedLinesSignals(file, text, added, moved) {
 }
 
 /**
+ * With --moved, each file's added lines Git marks as moved (`moved`), and those the pure-move check admits by its forms
+ * 1-3 (an import or re-export line, a bare `export` on a moved declaration, whitespace: `admitted`), by their line in
+ * `HEAD`'s blob.
+ */
+function movedAndAdmitted(mergeBase) {
+  const [moved, admitted] = [new Map(), new Map()];
+  const moves = movedLinesOf(mergeBase, "HEAD");
+  for (const change of moves)
+    if (change.file !== null)
+      moved.set(
+        change.file,
+        new Set(change.addedLines.filter((row) => row.moved).map((row) => row.line)),
+      );
+  for (const [entry, form] of verdictsOf(mergeBase, "HEAD", moves).verdicts)
+    if (entry.side === "added" && ["import", "export", "whitespace"].includes(form)) {
+      if (!admitted.has(entry.file)) admitted.set(entry.file, new Set());
+      admitted.get(entry.file).add(entry.row.line);
+    }
+  return { moved, admitted };
+}
+
+/**
  * The merge base and the signals the change from it to `HEAD` adds to, each `{ signal, line }` with the line it
  * prints; a `file` and an `added` signal also carry `file`, `before` and `after` (its lines at the merge base and at
  * `HEAD`), an `added` one also its `counted` and `moved` added lines.
@@ -414,15 +439,9 @@ function changeSignals(base) {
   };
   const blob = (ref, file) => git("cat-file", "blob", `${ref}:${file}`);
 
-  // with --moved, each file's added lines Git marks as moved, by their line in `HEAD`'s blob
-  const movedAdded = new Map();
-  if (discountMoved)
-    for (const moved of movedLinesOf(mergeBase, "HEAD"))
-      if (moved.file !== null)
-        movedAdded.set(
-          moved.file,
-          new Set(moved.addedLines.filter((row) => row.moved).map((row) => row.line)),
-        );
+  const { moved: movedAdded, admitted: admittedAdded } = discountMoved
+    ? movedAndAdmitted(mergeBase)
+    : { moved: new Map(), admitted: new Map() };
 
   const found = [];
   const relevant = changes
@@ -440,14 +459,18 @@ function changeSignals(base) {
         change.old === null || !REGULAR.has(change.oldMode)
           ? 0
           : lineCount(blob(mergeBase, change.old)));
-    if (lines > SIGNALS.fileLines)
-      found.push({
-        signal: "file",
-        file,
-        before: before(),
-        after: lines,
-        line: `file over ${SIGNALS.fileLines} lines that the change adds to: ${shown(file)} (${lines}, was ${before()})`,
-      });
+    if (lines > SIGNALS.fileLines) {
+      const what = `file over ${SIGNALS.fileLines} lines that the change adds to: ${shown(file)} (${lines}, was ${before()})`;
+      // with --moved, a file whose added lines are all moved or admitted by the pure-move check's forms 1-3
+      const [moved, admitted] = [movedAdded.get(file), admittedAdded.get(file)];
+      const discounted = added.filter((line) => moved?.has(line) || admitted?.has(line)).length;
+      if (discountMoved && discounted === added.length)
+        found.push({
+          signal: "suppressed",
+          line: `suppressed (moved): ${what}, ${added.filter((line) => admitted?.has(line)).length} admitted lines`,
+        });
+      else found.push({ signal: "file", file, before: before(), after: lines, line: what });
+    }
     for (const signal of addedLinesSignals(file, text, added, movedAdded.get(file) ?? new Set()))
       found.push(
         signal.signal === "added" ? { ...signal, before: before(), after: lines } : signal,
