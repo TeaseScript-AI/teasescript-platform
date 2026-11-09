@@ -1001,11 +1001,30 @@ test(
     // (d) a comment, JSDoc included, holding `import(` or `@import`
     const comments = run({
       "a.js":
-        '/** @type {import("./dep.js").RecordType} */\nexport const value = null;\n/** @import { RecordType } from "./dep.js" */\n',
+        '// loaded later through import("./dep.js")\nexport const value = null;\n/** @import { RecordType } from "./dep.js" */\n',
     });
     assert.equal(comments.status, 1, comments.out);
     refusedAt(comments.out, "a.js", 1, "a comment's `import\\(`");
     refusedAt(comments.out, "a.js", 3, "a comment's `@import`");
+    // a JSDoc type's `import` keyword is (a)'s, however it is spaced, and on a compared statement too
+    const spaced = run({
+      "a.js": [
+        '/** @type {import ("./dep.js").RecordType} */',
+        "export const value = null;",
+        "/**",
+        " * @returns {typeof import",
+        ' *   ("./dep.js")}',
+        " */",
+        "export const load = () => null;",
+        '/** @type {import\t("./dep.js").RecordType} */',
+        'export { other } from "./other.js";',
+        "",
+      ].join("\n"),
+    });
+    assert.equal(spaced.status, 1, spaced.out);
+    refusedAt(spaced.out, "a.js", 1, "an `import`");
+    refusedAt(spaced.out, "a.js", 4, "an `import`");
+    refusedAt(spaced.out, "a.js", 8, "an `import`");
     // a `.jsx` file is parsed
     const jsx = run({
       "a.jsx": 'export const element = <div>{await import("./dep.cjs")}</div>;\n',
