@@ -18,7 +18,7 @@ import {
 import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } from "./items.js";
 
 /*
- * The demand solver of the coarse core (checkpoint 9, TABLE §8; the port plan's S3 note §1). A demand is one answer the
+ * The demand solver of the coarse core (checkpoint 9; the port plan's S3 note §1). A demand is one answer the
  * analysis needs (a key's contract, the value at a definition, a value at a node); what it reads is discovered while
  * it runs, as other demands it yields. Demands run on an explicit frame stack, never the native one, and Tarjan's
  * algorithm finds the strongly connected components among them as they run: a demand that reads an unfinished one
@@ -37,9 +37,9 @@ import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } 
  * That needs answers monotone in what they read. A choice that is not (a `Decision`: F18/F19's default without kinds
  * gives `unknown`; F19a's receiver that holds a reference kind has opaque members) is made on a completed input: at
  * once outside every component; inside one, the component is solved first with every choice open and, where a choice
- * then changes an answer, again from bottom with the choices held (r4.40, r4.44).
+ * then changes an answer, again from bottom with the choices held.
  *
- * A demand may prove more than its items (a `ProofDemand`, TABLE r4.164's proof payload): what a fold selected, where a
+ * A demand may prove more than its items (a `ProofDemand`): what a fold selected, where a
  * prefix's walk stands. Its proof is the solver's as its items are: provisional while its run or component is
  * unfinished, reset with them to none (`null`) at each start from bottom, compared by its semantic signature where its
  * items are (a changed proof under unchanged items reruns its readers; a new object or run with the same signature does
@@ -81,7 +81,7 @@ export interface Demand {
   readonly proves?: undefined;
 }
 
-/** What a proof demand proves beside its items (TABLE r4.164's proof payload). */
+/** What a proof demand proves beside its items. */
 export interface Proof {
   /**
    * Its semantic signature: equal for two proofs no reader can tell apart (the same chosen sources, roles, absences and
@@ -116,8 +116,9 @@ export interface ProofDecision<P extends Proof> {
 }
 
 /**
- * A demand that proves a proof beside its items: one demand, one lifecycle (TABLE r4.164's ruling (1)). Its proof holds
- * no ingress of its own: external data it carries is in its items, which a component's cells anchor (C9).
+ * A demand that proves a proof beside its items: one demand, one lifecycle
+ * (docs/specifications/type-inference-accepted-record.md#r4-164). Its proof holds no ingress of its own: external data
+ * it carries is in its items, which a component's cells anchor (C9).
  */
 export interface ProofDemand<P extends Proof> {
   readonly key: string;
@@ -847,7 +848,7 @@ export class Solver {
     }
     const node = this.#active.get(demand.key);
     if (node === undefined) {
-      // (a new demand keeps its key: its text charged first, TABLE r4.58)
+      // (a new demand keeps its key: its text charged first)
       keepText(this.#work, demand.key.length);
       const created: DemandNode = {
         demand,

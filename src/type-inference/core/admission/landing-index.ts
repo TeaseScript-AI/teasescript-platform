@@ -56,7 +56,7 @@ export function landingIndex(
   // row of a walk (its carrier and operand) whether it or a row outside it is an own row, and the innermost typed
   // default's call at or outside it: each row once, so a stop costs only the rows no stop before it went through
   // (each value has one syntactic parent, so a row's outer rows are the same in every stop through it; Codex r21 B2)
-  // r4.63 (3), r4.66 (2): host data in the default of a `load` or `fromJson` of an inferred place typed by that
+  // host data in the default of a `load` or `fromJson` of an inferred place typed by that
   // default (its kinds definite) is the call's: the boundary at the call validates the loaded value, so the default
   // owes no own read; a default without definite kinds types nothing, its read an own read as any; the innermost
   // such call
@@ -137,7 +137,7 @@ export function landingIndex(
         site,
         reads: program.places[stop.value]?.site ?? site,
         contribution: contributionSite(admission, stop, d),
-        // (a loop variable's place takes its domain from the iterable, never inline: C1 beside the boundary, r4.63 (4))
+        // (a loop variable's place takes its domain from the iterable, never inline: C1 beside the boundary)
         whole:
           d.how !== "loop variable" &&
           ingress === stop.value &&
@@ -265,7 +265,7 @@ export function f18Kinds(
   let found: { readonly label: string; readonly tags: readonly ItemTag[] } | null = null;
   const node = c.kind === "load" || parses ? program.exprAt(c.site) : null;
   if (node !== null && program.live(node)) {
-    // (after a stop, as the finishing read answers it: a typed call's expected type by its syntax, F18, r4.138)
+    // (after a stop, as the finishing read answers it: a typed call's expected type by its syntax, F18)
     const items = withoutEmpty(
       admission.host.read?.(c.result, node, []) ??
         admission.run(values.valueItems(c.result, node, [])),
@@ -283,7 +283,7 @@ export function f18Kinds(
     )
       tags.push("null");
     if (tags.length > 0) found = { label: `${parses ? "fromJson" : "load"}.result`, tags };
-    // (after a stop, a type the finishing read leaves open is no absent one: its boundary is marked, r4.144)
+    // (after a stop, a type the finishing read leaves open is no absent one: its boundary is marked)
     else if (
       admission.pass.program.work.stopped !== null &&
       items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0)

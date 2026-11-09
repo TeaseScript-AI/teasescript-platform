@@ -45,7 +45,7 @@ import { selectsElement } from "./method-categories.js";
 import { propertyName } from "./program.js";
 
 /*
- * N3's route query of stage 3b (checkpoint 9, TABLE §13 N3, N3a, §13.3): a consumer of key k at node n that needs a
+ * N3's route query of stage 3b (checkpoint 9): a consumer of key k at node n that needs a
  * kind k's contract does not guarantee (`null`, or a member of a written union) has a route without a check when an
  * exact definition D′ of k certifies the offending item and reaches n through an open corridor. Per key and offending
  * kind, built once on the key's first question:

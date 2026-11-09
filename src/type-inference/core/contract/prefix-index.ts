@@ -275,7 +275,7 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
     add(f, e);
   };
   // an inherited layer is shared, never copied; a further one, a join of two copies, is referenced beside it with the
-  // stores that brought it, never flattened per destination (r4.46 (3))
+  // stores that brought it, never flattened per destination
   const addSubs = (f: PrefixFrame, layer: SubLayer | null): void => {
     if (layer === null) return;
     work.charge("invSteps");
@@ -327,7 +327,7 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
           ingress: e.ingress,
         });
         // a source's own stores below the path, listed once per source and path and shared by every prefix that
-        // copies it there (§8 r4.15, r4.38)
+        // copies it there (§8)
         addSubs(f, projectedLayer(contract, copiedPlace, projection));
       }
       continue;
@@ -345,7 +345,7 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
           yield* adding(contract, f, { ...e, w: f.w, guarded: e.guarded, ingress: e.ingress });
         }
         // the source's own stores below its root over the layers it inherits and joins, one layer per source shared
-        // by its copies (r4.38: k copies of a source edited at k fields are k inheritances, not k × k listings)
+        // by its copies (k copies of a source edited at k fields are k inheritances, not k × k listings)
         addSubs(f, aliasLayer(contract, inner, keyPlace(f.ck!)));
       }
     }
@@ -392,18 +392,18 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
       }
       const copied = contract.copiedKey(d.value!);
       if (copied === null) {
-        // a call's result is its callee's result key (F20, §8 r4.13): k stores of one function's result, one entry
+        // a call's result is its callee's result key (F20, §8): k stores of one function's result, one entry
         const result = contract.resultKey(d.value!);
         yield* adding(contract, f, result !== null ? { key: result } : { value: d.value! });
         continue;
       }
-      // §3.2: a copy read under a guard is one marked entry of its source, its aliases followed (r4.6)
+      // §3.2: a copy read under a guard is one marked entry of its source, its aliases followed
       if (guards.guardedRead(d.value!)) {
         const source = yield* contract.needValue(d.value!);
         yield* adding(contract, f, { key: source.key!, guarded: true });
         continue;
       }
-      // §3.2 (r4.15, r4.23): a copy of a record with a tested key below it is a mark of its source's holder
+      // §3.2: a copy of a record with a tested key below it is a mark of its source's holder
       // (collected once), looked up at the read of each path; the entry stays its source's
       const path = keyStepsIn(contract, copied);
       if (path.length > 0) {
@@ -498,7 +498,7 @@ function aliasLayer(contract: Contract, inner: PrefixStores, place: PlaceId): Su
 
 /**
  * The layer a projected copy of `place` at `projection` takes: the place's own live stores below the path, once, from
- * the keys below the path alone (r4.46 (3): never the place's whole key set per copy).
+ * the keys below the path alone (never the place's whole key set per copy).
  */
 function projectedLayer(contract: Contract, place: PlaceId, projection: Steps): SubLayer | null {
   // (a record's steps spelled by their record)
@@ -630,7 +630,7 @@ function below(layer: SubLayer): readonly SubLayer[] {
   return layer.parent === null ? layer.joins : [layer.parent, ...layer.joins];
 }
 
-/** The relative paths of a source's live keys below it, once per source, from the keys below it alone (r4.46 (3)). */
+/** The relative paths of a source's live keys below it, once per source, from the keys below it alone. */
 function ownPaths(contract: Contract, sub: Key): ReadonlySet<string> {
   const known = contract.subPaths.get(sub);
   if (known !== undefined) return known;
@@ -1399,7 +1399,7 @@ function setFound(contract: Contract, set: SupportNode): () => LayerFound[] {
  * source with a store at a prefix of the path; and below any that holds nothing there, which a read passes through, the
  * holders in the set below it (`SubLayer.under`), in turn. On an explicit stack, each set below answered first and once.
  * By the path's id (`Contract.holdersBelow`); a read's path without one yet (`madePathId`) by the read's own answers
- * (`ReadPath.holders`), kept under its id when one is made, so a read's selection makes no id (r4.262).
+ * (`ReadPath.holders`), kept under its id when one is made, so a read's selection makes no id.
  */
 function holdersIn(
   contract: Contract,
@@ -1837,7 +1837,7 @@ export function subSources(stores: PrefixStores): Key[] {
 // components, stops and `forget`), and a layer's summary reads the summaries of the layers below it. A layer's demand
 // is named by its origin and the path (`LayerOrigin`), so another pass finds it (`replayLayer`, #1422). A read whose
 // layers are one layer with one source to answer it makes no summary: it asks that source's demand by reference
-// (`singleSource`, TABLE r4.251), which owns the read's dependencies and stops as any source read does; a summary's
+// (`singleSource`), which owns the read's dependencies and stops as any source read does; a summary's
 // name asked in another pass is still found and made there (`replayLayer`).
 
 /** A summary that declined: a source the old per-source reading treats apart, or a layer below that declined. */
@@ -1935,7 +1935,7 @@ interface LayersAt {
  * a demand: none where no layer may hold a source there; `undefined` where the prefix's stores are cut at an open copy
  * cycle or a layer has no origin, so the consumer reads each source by itself (`relevantSubs`).
  *
- * No path or span id is made while a read's selection runs (TABLE r4.262), here and in `singleSource`'s choice: the
+ * No path or span id is made while a read's selection runs, here and in `singleSource`'s choice: the
  * read's steps are read through `PathRef.read`, its id looked up where made (`madePathId`), and the holders below the
  * layers it passes kept per made id or, without one, in the read's own map (`ReadPath.holders`); an id is made only for
  * a summary's demand (`pathIdAt`). The holder mark check reads the source's own identity (`keyIdentity`), as every
@@ -1998,7 +1998,7 @@ function summarised(items: readonly Item[]): boolean {
 }
 
 /**
- * The one source a read of a prefix's layers at `rest` asks directly (TABLE r4.251, Sol's singleton reference), or
+ * The one source a read of a prefix's layers at `rest` asks directly (Sol's singleton reference), or
  * `null`: where `layersAt` found one layer, with one own source under the path's first step and no listing layer below
  * that step (`listingBelow`), whose holder marks nothing at the path, that layer's summary is the source's answer
  * alone, so the read asks the source's own demand (`subAt`) at the caller's path as given, an array or a cursor, never

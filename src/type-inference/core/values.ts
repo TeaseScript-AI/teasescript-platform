@@ -96,7 +96,7 @@ import { Position, positions, UNPOSITIONED } from "./positions.js";
 import type { Proof, ProofDemand, Proven, Work } from "./solver.js";
 
 /*
- * The value side of the coarse core (checkpoint 9, TABLE §3): a read of a key at a node takes, in this order, the host
+ * The value side of the coarse core (checkpoint 9): a read of a key at a node takes, in this order, the host
  * or reference answer (§3 step 1), the exact path's value at D (§3.1), or the contract (§3.2), and under a guard of
  * its key its kinds are possible and marked (§3.2). A read inside a stored value takes its narrowing definition G
  * where G holds (§13 N2, S10 part 2b): so a copy, an operation or a store check sees the tested kinds, and N5's
@@ -170,7 +170,7 @@ export class Values {
 
   /**
    * A type test's spelling (`NarrowingForm`'s `test`): its kinds in their written order, which the kinds it narrows to
-   * keep (#1398, TABLE r4.277 (3)); none for any other form. Read where the narrowing is answered, outside the narrowing
+   * keep (#1398); none for any other form. Read where the narrowing is answered, outside the narrowing
    * modules' charged walks: one walk of the written type per form and pass, shared by every read the form narrows, so
    * the walks grow with the tests' sizes alone (Codex r6 on #1558).
    */
@@ -209,7 +209,7 @@ export class Values {
     const { program, exact, contract, lists } = this.pass;
     const route = (taken: ReadRoute): void => {
       const at = joinParts(key, node?.id ?? "-", before ? 1 : 0);
-      // (a route's text charged where it is kept first, TABLE r4.58)
+      // (a route's text charged where it is kept first)
       if (!this.#routes.has(at)) keepText(program.work, at.length);
       this.#routes.set(at, taken);
     };
@@ -496,7 +496,7 @@ export class Values {
    * What a read's answer takes from its narrowing, for the value classes that share answers (S10 part 2b): nothing for
    * a read that takes none; else its G's environment (`NarrowingEvents.environment`: two reads with one answer it
    * alike) and its type test's spelling (`spellingIdentity`, read once per form: two tests of one kinds in two written
-   * orders give two answers, TABLE r4.277 (2), Codex r7 on #1558). The value classes' `readSnapshot` and
+   * orders give two answers, Codex r7 on #1558). The value classes' `readSnapshot` and
    * `readClass(…, true)` take it from here.
    */
   public narrowingMark(value: PlaceId): string {
@@ -856,7 +856,7 @@ export class Values {
    * A value read along a path through a member a built-in value answers by itself, from the step `from` on, where the
    * path ends: at a literal or an operation (a projection passes its step to its owner, and a variable or a call its key
    * to the key's reads, which the contract answers the same way). A dict's `values` is a new list of its values and its
-   * `keys` one of text (TABLE r4.46 (2)), as certain as the dict, either may hold none (no count proof, no `null`); a
+   * `keys` one of text, as certain as the dict, either may hold none (no count proof, no `null`); a
    * temporal field or a calendar duration's part gives its declared result (V30 §35); an object's own property of the
    * name is read as any property (F11), and a receiver that may be a reference has the runtime's members (F19a).
    */
@@ -892,7 +892,7 @@ export class Values {
     // (a record's steps before and after the member their views)
     const before = stepsTo(rest, at);
     const after = stepsFrom(rest, at + 1);
-    // F19a, r4.44: a receiver that may be a reference, by its completed contract, has the runtime's members
+    // F19a: a receiver that may be a reference, by its completed contract, has the runtime's members
     const contract = this.pass.contract;
     const decided =
       before.length === 0
@@ -913,7 +913,7 @@ export class Values {
       if (item.tag === "dict" && dictList(step) !== undefined) {
         if (after.length === 0) out.push(of("list"));
         else if (after.at(0) === "element") {
-          // a key is text from the list's contract, possible: no literal holds a derived list's element (r4.47, P3)
+          // a key is text from the list's contract, possible: no literal holds a derived list's element (P3)
           const below =
             dictList(step) === "keys"
               ? after.length === 1
@@ -1189,7 +1189,8 @@ export class Values {
   *#copyValue(c: CopyOperation, node: FlowNode | null, rest: Steps): Work<readonly Item[]> {
     const { program, contract } = this.pass;
     const at = program.exprAt(c.site) ?? node;
-    // F19a: a reference's method is opaque, by the receiver's contract before its exact value (r4.44), as `#operation`
+    // F19a: a reference's method is opaque, by the receiver's contract before its exact value
+    // (docs/specifications/type-inference-accepted-record.md#r4-44), as `#operation`
     if (heldReference(yield* contract.valueReceiver(c.receiver)))
       return alternatives([OPAQUE_MEMBER], program.scope);
     const gives = methodCategory(c.contract.name)?.gives;
@@ -1323,7 +1324,7 @@ export class Values {
   }
 
   /**
-   * F18 (r4.5): the kinds a `load` or `fromJson` takes from its default's value at `at` (`typedDefault`): definite,
+   * F18: the kinds a `load` or `fromJson` takes from its default's value at `at` (`typedDefault`): definite,
    * the runtime checks the value against the default's type.
    */
   /**
@@ -1464,7 +1465,7 @@ export class Values {
     };
   }
 
-  /** F19 (r4.1): whether a default's value at `at` holds only `null` (or nothing) (`ONLY_NULL`). */
+  /** F19: whether a default's value at `at` holds only `null` (or nothing) (`ONLY_NULL`). */
   public *onlyNull(fallback: PlaceId, at: FlowNode | null): Work<readonly Item[]> {
     const site = this.pass.program.places[fallback]?.site ?? null;
     return yield {
@@ -1485,7 +1486,8 @@ export class Values {
     const { program, contract } = this.pass;
     const { family, name } = c.contract;
     const out: Item[] = [];
-    // F19a: a reference's method is opaque, by the receiver's contract before its exact value (r4.44)
+    // F19a: a reference's method is opaque, by the receiver's contract before its exact value
+    // (docs/specifications/type-inference-accepted-record.md#r4-44)
     if (
       family === "method" &&
       c.receiver !== null &&
@@ -1563,7 +1565,8 @@ export class Values {
         this.valueItems(term, at, rest),
       );
       if (indexed !== null) return indexed;
-      // TABLE r4.87: a `+` fourth or later in a run of terms answers below its root as the run's third
+      // (docs/specifications/type-inference-accepted-record.md#r4-87): a `+` fourth or later in a run of terms answers
+      // below its root as the run's third
       const repeated = contract.plusRepeatOf(c.result, true);
       if (repeated !== c.result) return [...(yield* this.valueItems(repeated, at, rest))];
       const operands: (readonly Item[])[] = [];
@@ -1609,7 +1612,7 @@ export class Values {
     const interaction = family === "interaction" ? interactionCategory(name) : undefined;
     if (interaction?.kind === "asks")
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
-    // r4.47 (5): a clock read gives its declared kind, as an ask does
+    // a clock read gives its declared kind, as an ask does
     const clock = family === "clock" ? clockResult(name) : undefined;
     if (clock !== undefined) return rest.length === 0 ? [makeItem(clock)] : [];
     // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
@@ -1639,9 +1642,10 @@ export class Values {
     // a range: its elements are its kind's (`kindElement`), nothing stands below it by path
     if (family === "range") return rest.length === 0 ? [makeItem("range")] : [];
     // a method without a category, per receiver alternative: its declared result per receiver kind (F25), else the
-    // runtime's opaque answer on a known kind (C2: its consumers keep their checks, r4.47 (1)); what the core cannot know
-    // keeps its own reasons. A receiver without items yet is a provisional bottom, no answer: the method's result stays
-    // the bottom, which the solver completes (S3 §1, r4.44), never an `unknown` with a reason of its own
+    // runtime's opaque answer on a known kind (C2: its consumers keep their checks); what the core cannot know keeps
+    // its own reasons. A receiver without items yet is a provisional bottom, no answer: the method's result stays the
+    // bottom, which the solver completes (S3 §1, docs/specifications/type-inference-accepted-record.md#r4-44), never an
+    // `unknown` with a reason of its own
     if (family === "method" && c.receiver !== null) {
       const receiver = withoutEmpty(yield* this.valueItems(c.receiver, at, []));
       return receiver.flatMap((item) => {

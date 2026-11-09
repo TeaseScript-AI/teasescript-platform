@@ -27,7 +27,7 @@ import { selectsElement } from "./method-categories.js";
 /**
  * The input of the coarse core's analysis (checkpoint 9): the request's files with both fields the core reads beside
  * their programs. The name pass's picks are the files each glob target may start, which the flow graph takes as the
- * lowering does (TABLE G1(f)); the source text names the operands an obligation checks (§10.5: `x` in `x / 4`).
+ * lowering does; the source text names the operands an obligation checks (§10.5: `x` in `x / 4`).
  */
 export interface CoreFile extends TypeAnalysisFile {
   readonly source: string;
@@ -68,13 +68,13 @@ export type ValueConstraint = Extract<
 >;
 
 /**
- * What consumes a value place (TABLE r4.151), as its constraint or use is registered: a store into `into`; an operand
+ * What consumes a value place, as its constraint or use is registered: a store into `into`; an operand
  * (`index`) or the receiver of an operation; the receiver of a member or element access; an argument of a function, by
  * position or name; a function's returned value; a use of the flow graph (C2, C3, C12); or another constraint, whose
  * demand on the value a fix does not read (a save, a speaker's store). A side of `otherwise`, a `get`'s or a `load`'s
  * parts and an operation's named argument are part of its `result` (`part`), with a type of their own to fit.
  * A variable's or a parameter's place is consumed by each read of it, a function's result by each call (`read`, the
- * value read there; TABLE r4.160).
+ * value read there).
  */
 export type Consumption =
   | { readonly kind: "store"; readonly into: PlaceId }
@@ -114,10 +114,10 @@ export function propertyName(step: string): string {
   return step.startsWith("'") ? step.slice(1) : step;
 }
 
-/** The steps of an index or an entry; with the selections, `xs.element` in the contract's vocabulary (TABLE §10.5 r4.10). */
+/** The steps of an index or an entry; with the selections, `xs.element` in the contract's vocabulary. */
 const ELEMENT_STEPS: ReadonlySet<string> = new Set(["index", "entry"]);
 
-/** A projection's step as a key's step: every selection and index is `element` (TABLE §1, F12). */
+/** A projection's step as a key's step: every selection and index is `element` (F12). */
 export function stepName(step: string): string {
   return ELEMENT_STEPS.has(step) || selectsElement(step) ? "element" : step;
 }
@@ -128,7 +128,7 @@ export function siteKey(site: SourceSite): string {
 }
 
 /**
- * The parsed nodes of the programs, every node with a kind, so formatting and comments do not count (TABLE §8); the
+ * The parsed nodes of the programs, every node with a kind, so formatting and comments do not count; the
  * deepest nesting of their blocks: a function's body, a block's, a branch's or a loop's body and an `else if`, each
  * one level; and the outermost blocks nested past the nesting limit, whose code is checked when the script runs.
  */
@@ -224,7 +224,7 @@ export class CoreProgram {
   /** A function call's result place, by its node. */
   readonly callOutOf = new Map<PlaceId, FlowNode | null>();
   readonly resultPlaces = new Set<PlaceId>();
-  /** What consumes each value place, one entry per consuming constraint or use (TABLE r4.151): the place a fix lands in. */
+  /** What consumes each value place, one entry per consuming constraint or use: the place a fix lands in. */
   readonly consumersOf = new Map<PlaceId, Consumption[]>();
   readonly #functions = new Map<number, FunctionSignature>();
   readonly #functionRegions = new Map<number, FunctionRegion>();
@@ -252,7 +252,7 @@ export class CoreProgram {
   }
 
   /**
-   * The setup work of the analysis (TABLE §8), charged, and the indexes: once, before anything reads them. A stop in it
+   * The setup work of the analysis, charged, and the indexes: once, before anything reads them. A stop in it
    * leaves it to run again to its end, uncharged, for the finishing path (D4 a′).
    */
   public index(): void {
@@ -492,7 +492,7 @@ export class CoreProgram {
     return this.flow.expressionAt(site) ?? null;
   }
 
-  /** The node a read at `site` reads its variable's state at: its own, or its typed call's snapshot (F18, r4.81 (1)). */
+  /** The node a read at `site` reads its variable's state at: its own, or its typed call's snapshot (F18). */
   public readAt(site: SourceSite): FlowNode | null {
     const node = this.exprAt(site);
     return node === null ? null : this.flow.snapshotOf(node);

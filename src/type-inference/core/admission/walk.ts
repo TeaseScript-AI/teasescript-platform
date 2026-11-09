@@ -71,14 +71,14 @@ export const TYPED_ROLES: ReadonlySet<CarrierRole> = new Set([
   "parse default/default",
 ]);
 
-/** The roles whose operation reads a member of its receiver, the member read C1 sits at (TABLE r4.60). */
+/** The roles whose operation reads a member of its receiver, the member read C1 sits at. */
 export const RECEIVER_ROLES: ReadonlySet<CarrierRole> = new Set([
   "get/receiver",
   "copy/receiver",
   "removal/receiver",
 ]);
 
-/** The roles of operations that combine or remove, whose operand brought the kind (TABLE r4.63 (2)). */
+/** The roles of operations that combine or remove, whose operand brought the kind. */
 const COMBINING_ROLES: ReadonlySet<CarrierRole> = new Set([
   "concatenation/operand",
   "removal/receiver",
@@ -114,7 +114,7 @@ function viaLink(program: CoreProgram, outer: ViaChain | null, level: Via): ViaC
  * through the literals that hold them, or through the values that carry them (a projection, an operation: the path
  * read into it), in element order; once per value. A path below the value is a chain of steps, one per field, made
  * into an array once and only where a binding lands at it, so a literal nested k deep costs k steps, not k paths of
- * up to k steps each (TABLE r4.100 (2)).
+ * up to k steps each.
  */
 export function copySources(
   admission: Admission,
@@ -486,8 +486,7 @@ export function* partOfRead(admission: Admission, part: Part): Reads<Expansion> 
  * (A4), the other values no literal of it holds (a read, a call, external data), and its literals, whose fields and
  * elements stand below them; once per value, from its tasks' recipes (`expand`). `once`: later copies or calls of one
  * source identity at a path are one stop (F2), as every walk made before a stop has them; a walk made after one keeps
- * every stop instead, the same boundaries and sites without asking identities nothing else after the stop asks (TABLE
- * r4.55, r4.126).
+ * every stop instead, the same boundaries and sites without asking identities nothing else after the stop asks.
  */
 export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, once = true): Stops {
   return readNow(stopsOfRead(admission, value, node, once));
@@ -542,7 +541,7 @@ export function* stopsOfRead(
     }
     const own = task.stop;
     // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2; a copy only
-    // where it reads the same snapshot, r4.68 (1); and only through the same operations, selected alike: an operand
+    // where it reads the same snapshot; and only through the same operations, selected alike: an operand
     // a `get` never gives is no copy of the store's own element beside it, Astra r5 D1; never a read of an ingress,
     // itself or through projections (`Contract.ingressOf`), which lands by its own leaf, S6-CARRIERS §3.1, #1210)
     const map = own === null ? null : own.list === "written" ? stops.written : stops[own.list];
@@ -646,7 +645,7 @@ export function viaSignature(admission: Admission, via: ViaChain | null): string
 
 /**
  * A contribution's own expression, C1's site for it (§3.4): a member a receiver's operation reads of it (a `get`, a
- * copy, a removal of the data: TABLE r4.60), else the contribution itself, an ingress, a member read of one or a named
+ * copy, a removal of the data), else the contribution itself, an ingress, a member read of one or a named
  * read.
  */
 export function contributionSite(admission: Admission, stop: Stop, d: Definition): SourceSite {

@@ -551,7 +551,7 @@ let messagesInWords = false;
 
 /**
  * Test-only: runs `callback` with each core diagnostic a compile inside it reports carrying `words`, its message with every
- * fix in words (`coreMessageInWords`), which the stop oracle compares with a stop's (TABLE r4.162, #1449).
+ * fix in words (`coreMessageInWords`), which the stop oracle compares with a stop's (#1449).
  */
 export function withMessagesInWords<T>(callback: () => T): T {
   if (messagesInWords) throw new Error("Messages in words are already on.");
@@ -565,7 +565,7 @@ export function withMessagesInWords<T>(callback: () => T): T {
 
 /**
  * A diagnostic of the core as the compiler reports it: its rule's code (D3 (a)), the severity of its class ("not
- * checked (budget)" at the editor's information level, TABLE r4.54), its sentences (`messages.ts`, D1) and its site's
+ * checked (budget)" at the editor's information level), its sentences (`messages.ts`, D1) and its site's
  * span (D2); under `withMessagesInWords` also its message in words. `moved` is the plan's checks a stop moved to the
  * runtime (`movedChecks`), which the stop's warning counts.
  */
@@ -657,7 +657,7 @@ export function coreCheckResult(
 
 /**
  * The known values of a program (S3 §2, group V): the one constant service, handed to the answers so that a view's
- * known value is the consumer's (TABLE r4.81 (3)); a `fromJson` reads its JSON as `expected` gives its type, so its known
+ * known value is the consumer's; a `fromJson` reads its JSON as `expected` gives its type, so its known
  * value is the one the run gets.
  */
 function knownValues(
@@ -714,7 +714,7 @@ function checkedOf(
   fallbacks: FallbackUses,
 ): CoreResult {
   // (each in the analysis's site order, before the first diagnostic of a later site: a record's lists are in source
-  // order, r4.86 (1))
+  // order)
   const found = staticDiagnostics(answers, index, known, fallbacks).sort((a, b) =>
     siteOrder(a.site, b.site),
   );
@@ -780,7 +780,7 @@ function siteOrder(a: SourceSite, b: SourceSite): number {
 }
 
 /**
- * What `ask` makes of a finished analysis's answers, its questions spending the analysis's allowance (TABLE §8): one past
+ * What `ask` makes of a finished analysis's answers, its questions spending the analysis's allowance: one past
  * it stops there, the finished analysis's findings and decisions standing, and what is asked from then on answers
  * `STOPPED` (D4 a′). Where nothing stopped, the receiving completion runs then, after everything that can stop, and
  * asks again with its completed contracts within its own allowance (`Answers.completed`, #1526 phase C); where it keeps
@@ -1145,7 +1145,7 @@ function warningChecks(
       const expression = index.expressionAt(diagnostic.site);
       switch (diagnostic.kind) {
         case "written-target": {
-          // C10's obligation names the fallback as every obligation names its value (§10.5 r4.10: `xs.element` for
+          // C10's obligation names the fallback as every obligation names its value (§10.5: `xs.element` for
           // `xs[0]`, `d.entry` for a dict's, its text where no place holds it), with the element steps of a nested
           // literal's depth; C1's a place (S6's departure 6)
           const held = index.fallbackOf(expression);
@@ -1265,7 +1265,7 @@ function runtimeChecks(
     if (type !== null)
       core.fallbackChecks.set(owner, { type, place: `the value of '${textOf(owner)}'` });
   }
-  // (a boundary carries the kinds it was retained with through the discharge, never derived again: TABLE r4.138)
+  // (a boundary carries the kinds it was retained with through the discharge, never derived again)
   for (const check of answers.checks)
     if (check.boundary && !leftOutCheck(check))
       owed.push({
@@ -1366,17 +1366,17 @@ function runtimeChecks(
 }
 
 /**
- * #1526 decision 2, condition 1 (TABLE r4.390): while a required check is missing, the candidate publishes no plan that
+ * #1526 decision 2, condition 1: while a required check is missing, the candidate publishes no plan that
  * lets the invalid value through unchecked. Every plan published after a stop is gated here, at the one seam `asked`
  * publishes through, against the capture its path has (`Answers.gated`): the receiving registry where a receiving
  * completion ran (#1526 phase C), its results; after a stop where none ran or it kept none, the registry's obligations
  * without results. Each obligation a store owes when the script runs, its C1 check (a warning the walk made) or its C9
  * boundary (external data entering), is Lost where the plan's check at its store does not carry its required contract
  * (`keeps`). The first Lost obligation, in the registry's source order, declines the program at its store
- * (`OutsideContract`): the stopped plan would otherwise run past a check the natural plan makes (ADR 0021 §1.10, r4.295
+ * (`OutsideContract`): the stopped plan would otherwise run past a check the natural plan makes (ADR 0021 §1.10
  * column (2)). A program the analysis rejects has no plan and is not asked. Where admission did not settle there is no
  * registry and nothing is declined here: an unsettled stop is #1767's and #1252's. One visit per obligation of the
- * registry, whose making charged each one (r4.261).
+ * registry, whose making charged each one.
  */
 function lostCheck(
   answers: Answers,
@@ -1978,7 +1978,7 @@ class Contracts {
   /**
    * The check of a store: the destination's written type, else the complete type a stop below its path left it to check
    * whole (`Answers.requirement`, #1416), else its contract at the stored path (A1–A9): a complete one's, a lost one's
-   * part (decision 2 pending, TABLE r4.269), none for an open one.
+   * part (decision 2 pending), none for an open one.
    */
   public stored(store: Store): TypeCheckPlan | null {
     const declaration = declarationOf(this.answers, this.index, this.lets, store);
@@ -2086,7 +2086,7 @@ class Contracts {
         [call],
       ),
     );
-    // a copy of a written type is F18's receiving context (A4, TABLE r4.75 (1), (1a)), at every level the call's value
+    // a copy of a written type is F18's receiving context (A4, (1a)), at every level the call's value
     // reaches, but the core answers the call by its default there while its later facts follow that answer: the
     // lowering cannot widen it alone
     if (

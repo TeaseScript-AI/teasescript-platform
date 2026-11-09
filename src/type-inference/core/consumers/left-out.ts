@@ -17,7 +17,7 @@ let leftOut: Omission | null = null;
 /**
  * Test-only: runs `callback` with what `omit` names left out: the marks a stop makes, with what their consumer forms only
  * with them, and the warnings and checks every discharge inside it plans (`consumer.ts`). The stop oracle's measure of a
- * record's content (`tests/helpers/type-core-stop-oracle.ts`, TABLE r4.108, r4.110).
+ * record's content (`tests/helpers/type-core-stop-oracle.ts`).
  */
 export function withoutRecords<T>(omit: Omission, callback: () => T): T {
   if (leftOut !== null) throw new Error("Records are already left out.");

@@ -6,7 +6,7 @@ import { each, some, sorted, steps } from "./narrowing-iteration.js";
 import type { CoreProgram } from "./program.js";
 
 /*
- * The statements of a program as N3's corridor composes them (checkpoint 9, TABLE §13 N3, §13.3): per callable body (a
+ * The statements of a program as N3's corridor composes them (checkpoint 9): per callable body (a
  * file's top level, a function's body, a block's body) its statements in order, each with the blocks of its live
  * alternatives (an `if`'s arms or the way past it, a `switch`'s cases and its `default` or the way past them, a loop's
  * body beside its skip edge where the graph keeps one), and the **shared, key-independent layer** of closed

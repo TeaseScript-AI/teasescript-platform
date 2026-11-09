@@ -50,7 +50,7 @@ export interface MonacoSeverities {
 
 /**
  * The markers of diagnostics: an error at Monaco's error level, an information (the new checker's "not checked
- * (budget)", TABLE r4.54) at its information level, in the default theme's colour, every other at its warning level.
+ * (budget)") at its information level, in the default theme's colour, every other at its warning level.
  */
 export function toMonacoMarkers(
   diagnostics: readonly LanguageDiagnostic[],

@@ -28,7 +28,7 @@ import { readNow, type Reads } from "../inherited/reads.js";
 
 /**
  * A value's source key: the key a copy reads, a call's callee's result key (F20), a dict's `values` read as its
- * elements (r4.46 (2)); `null` for any other value and for a dict's `keys`, which hold text.
+ * elements; `null` for any other value and for a dict's `keys`, which hold text.
  */
 export function sourceOf(admission: Admission, value: PlaceId): CanonicalKey | null {
   return readNow(sourceOfRead(admission, value));
@@ -99,7 +99,8 @@ export function expectStructures(admission: Admission, values: Iterable<PlaceId>
 /**
  * A source key's own structure (F2): the elements, at every depth, of the values stored at it or at a prefix of it (an
  * add's below its element), cut to the key's path, and of the keys below it with stores. A copied record's fields are
- * none of it: they are admitted at their first read (A2, TABLE q12).
+ * none of it: they are admitted at their first read (A2,
+ * docs/specifications/type-inference-accepted-record.md#section-5-a2).
  */
 function keyStructure(admission: Admission, key: Key): Structure {
   const id = `k${key}`;
@@ -176,7 +177,7 @@ function collect(
 ): Structure {
   const paths = new Map<string, readonly string[]>();
   const sources = new Map<string, Source>();
-  // (each path's text charged by its size before it is made, TABLE r4.58)
+  // (each path's text charged by its size before it is made)
   for (const at of levels)
     for (let length = 1; length <= at.length; length += 1) {
       const path = keptSlice(admission.work, at, 0, length);
@@ -357,7 +358,7 @@ function composed(
       const source = sourceOf(admission, of);
       if (source !== null) {
         // (read past the longest key, it is cut there, never dropped: whether a literal holds a source, and so which
-        // obligations its paths owe, never depends on the keys elsewhere in the program, TABLE r4.67 (1))
+        // obligations its paths owe, never depends on the keys elsewhere in the program)
         const room = Math.max(
           0,
           longestKey(admission) - keyDepthIn(admission.pass.contract, source),
@@ -568,9 +569,9 @@ export function pathsBelow(
 
 /**
  * The paths below a collection literal's elements that its own literals give or admission decides where the literal
- * lands (a read's path, A2): there a named element's fields are compared too (TABLE q12: a field is copy-only until
- * a literal or a read reaches it); beside them, where copies land there and two elements may hold something
- * (`touchElements`).
+ * lands (a read's path, A2): there a named element's fields are compared too
+ * (docs/specifications/type-inference-accepted-record.md#section-5-a2: a field is copy-only until a literal or a read
+ * reaches it); beside them, where copies land there and two elements may hold something (`touchElements`).
  */
 export function sharedPaths(
   admission: Admission,

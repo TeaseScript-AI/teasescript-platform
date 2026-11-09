@@ -131,7 +131,7 @@ export interface CorePass {
   readonly contract: Contract;
   readonly values: Values;
   readonly solver: Solver;
-  /** A4's receiving domain state (`ReceivingDomain`, TABLE r4.375): one per pass, made empty with its parts. */
+  /** A4's receiving domain state (`ReceivingDomain`): one per pass, made empty with its parts. */
   readonly receivingDomain: ReceivingDomain;
   /** The receiving closure of a completion pass (#1526 phase C, `Consumers.#completeFor`), absent in any other pass. */
   readonly closure?: Closure | null;
@@ -142,7 +142,7 @@ type StoreTargets = ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]>>;
 
 /**
  * One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6), the keys of
- * `stopped` stopped from its start (TABLE r4.180), a store below an object's own `first`, `last` or `random` at its
+ * `stopped` stopped from its start, a store below an object's own `first`, `last` or `random` at its
  * target in `targets` (#1275).
  */
 function createPass(
@@ -349,7 +349,7 @@ export interface OccurrenceAnswer {
  * A place's admitted type (A1–A9): its written type; else the kinds admission decided it by, or its contract's kinds
  * where admission found nothing to check (one family, A3), with the site of the contribution that decided (S3 §1: A2's
  * earliest definite one, A4's copy; `null` where no store decides), `null` among the kinds where a `null` contribution
- * is admitted (C9 r4.12): the type its boundary checks are against; `undecided` where it has no kind (an unknown only,
+ * is admitted (C9): the type its boundary checks are against; `undecided` where it has no kind (an unknown only,
  * or no store).
  */
 export type AdmittedType =
@@ -358,7 +358,7 @@ export type AdmittedType =
       readonly by: "decided";
       readonly kinds: readonly ItemTag[];
       readonly decider: SourceSite | null;
-      /** Whether a copy of a written type decides it (A4 through copies, r4.75 (1)): a written domain, not its own. */
+      /** Whether a copy of a written type decides it (A4 through copies): a written domain, not its own. */
       readonly inherited: boolean;
     }
   | { readonly by: "undecided" };
@@ -404,7 +404,7 @@ export interface BudgetAnswer {
   /** `finishing` by counter, with what was counted apart without a stop (`WorkLedger.apart`). */
   readonly apart: ReadonlyMap<WorkCounter, number>;
   /**
-   * The phase the stop came in (TABLE r4.90's lifecycle): the setup (a pass's own included), admission's walk, the
+   * The phase the stop came in: the setup (a pass's own included), admission's walk, the
    * capture of the stores' contracts after admission settled (`extraction`, #1526), the consumers' walk, the publication
    * of boundaries, or the questions after a finished analysis; `null` without a stop.
    */
@@ -457,7 +457,7 @@ export interface DecisionWork {
   readonly stopped: boolean;
   /**
    * A decision of the receiving closure's completion pass (#1526 phase C): its own allowance, the one a decision of the
-   * settled pass has (`allowance` is what was left of the total, r4.269).
+   * settled pass has (`allowance` is what was left of the total).
    */
   readonly completion?: { readonly local: number };
 }
@@ -588,13 +588,13 @@ export interface Answers {
    */
   valueAt(node: FlowNode, path: readonly string[]): ValueAnswer;
   /**
-   * The name an obligation gives the value at a node (§10.5 r4.10, `keyLabel`): its key path, else its text; `null`
+   * The name an obligation gives the value at a node (§10.5, `keyLabel`): its key path, else its text; `null`
    * where the node holds no value. The plan side reads an obligation's target by it, never by a name of its own.
    */
   targetName(node: FlowNode): string | null;
   view(node: FlowNode): CoreView;
   /**
-   * Gives `view` its known values: the one constant service the consumer owns (S3 §1, TABLE r4.81 (3)), so the known
+   * Gives `view` its known values: the one constant service the consumer owns (S3 §1), so the known
    * value a view reads and the consumer's own are one; until then a view knows none.
    */
   shareKnown(known: (expression: Expression) => KnownValue | undefined): void;
@@ -602,7 +602,7 @@ export interface Answers {
 
 /**
  * The analysis of a project by the coarse core: its answers, published after its last pass. A stop is no compile
- * error (the owner's D4, option a′, TABLE r4.54, r4.55): past the work allowance or a read chain's depth the analysis
+ * error (the owner's D4, option a′): past the work allowance or a read chain's depth the analysis
  * stops proving, and statements nested past the nesting limit are not proved at all; what it found stays, every check it
  * did not decide runs when the script runs, and one warning says so (`finished`). `stopped`: the analysis stops at
  * its start, as a question after an analysis that crossed the allowance stops it (the candidate route).
@@ -620,9 +620,10 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
     try {
       program.index();
       // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
-      // whose changing stores stay possibilities. A pass in which a decision stops is not settled either (TABLE r4.180):
-      // the next, from the same rejected set, starts with every stopped key stopped, once per rejected set; a decision
-      // stopping in that pass again stops the analysis, as the work allowance does (TABLE r4.183)
+      // whose changing stores stay possibilities. A pass in which a decision stops is not settled either
+      // (docs/specifications/type-inference-accepted-record.md#r4-180): the next, from the same rejected set, starts
+      // with every stopped key stopped, once per rejected set; a decision stopping in that pass again stops the
+      // analysis, as the work allowance does (docs/specifications/type-inference-accepted-record.md#r4-183)
       let cycling: ReadonlySet<number> = new Set();
       const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
       const selecting = selectingStores(program);
@@ -1019,7 +1020,7 @@ function workPlaces(program: CoreProgram): {
 }
 
 /**
- * The stop's diagnostics (D4 a′, TABLE r4.54): one warning at the heaviest place, the function or top level whose work
+ * The stop's diagnostics (D4 a′): one warning at the heaviest place, the function or top level whose work
  * was the most before the stop (the deepest nesting's for `nesting`), with the number of warnings it deferred; and
  * "not checked (budget)", once per function or top level one of those checks stands in, at its name or at its first.
  */
@@ -1131,7 +1132,7 @@ function withBesides(diagnostics: readonly CoreDiagnostic[]): CoreDiagnostic[] {
 /**
  * A published list in source order of its items' sites (file, start, end): at one site in the order the consumers run
  * (`rule`), and one consumer's by their own text, so the order is the same whichever order a consumer visits in and with
- * the sharing on or off (TABLE r4.86 (1)). An item's text (its JSON) is made only where its site and rule tie with
+ * the sharing on or off. An item's text (its JSON) is made only where its site and rule tie with
  * another's, once per item: serializing flattens the operand text its records share, which a stopped analysis's many
  * records would then each keep (#1734).
  */
@@ -1279,7 +1280,8 @@ class CoreAnswers implements Answers {
     this.dominators = program.dom;
     this.initializers = initializersOf(program);
     // published in source order of their sites, at one site the written types' errors first, then each consumer's in
-    // the order they run (TABLE r4.86 (1)), the finishing path's as the walk's, then a stop's own warning and marks
+    // the order they run (docs/specifications/type-inference-accepted-record.md#r4-86), the finishing path's as the
+    // walk's, then a stop's own warning and marks
     const ranked = (
       item: CoreDiagnostic,
     ): { readonly item: CoreDiagnostic; readonly rule: number } => ({
@@ -1335,7 +1337,7 @@ class CoreAnswers implements Answers {
     }
     this.deferred = { parameters: deferredParameters, results: deferredResults };
     // (the facts the fixes' code forms read, once the analysis ran to its end, counted apart from the allowance, so the
-    // walk's charges and stops stay the analysis's own; after a stop none, which reads as unproved: TABLE r4.162)
+    // walk's charges and stops stay the analysis's own; after a stop none, which reads as unproved)
     if (!this.#stopped)
       this.diagnostics = program.work.apart(() =>
         this.diagnostics.map((diagnostic) => consumers.withFacts(diagnostic)),
@@ -1368,15 +1370,15 @@ class CoreAnswers implements Answers {
 
   /**
    * A value's items at a node and a path, for every question, direct or composed: a literal's child's items are its own
-   * question's (`#stoppedShape`), and the last two sources are read here alone (TABLE r4.158; the lint check
-   * `check-question-sources.mjs`). After a stop, the finishing read's sources in their order (TABLE r4.138): the
+   * question's (`#stoppedShape`), and the last two sources are read here alone (the lint check
+   * `check-question-sources.mjs`). After a stop, the finishing read's sources in their order: the
    * solver's finished answer where admission had settled; else what the value's own syntax gives (`#stoppedShape`: a
    * literal's own kinds, a typed call's expected type at every depth); else the domains the consumers' finishing read
    * holds, the key's finished contract and its written or retained admitted type (`Consumers.finishedItems`); where none
    * of them retains anything after a stop where admission had settled, the type admission gives the read's place there,
    * as `place` answers it (`#lazilyDecided`). Every list passes the one rule where it is composed (`inItsOrder`, #1398)
    * and once more here, where it is published: idempotent on items that carry their spelling, so no source publishes
-   * out of the rule even where its producer missed it (TABLE r4.277).
+   * out of the rule even where its producer missed it.
    */
   #items(value: PlaceId, node: FlowNode | null, path: readonly string[]): readonly Item[] {
     const answered = this.#run(this.#pass.values.valueItems(value, node, path));
@@ -1392,7 +1394,7 @@ class CoreAnswers implements Answers {
   /**
    * After a stop where admission had settled, the type admission gives a read's place at a path, as `place` answers it:
    * its written type, its decision, or its key's finished contract where admission decides a path lazily (S3 §5: a
-   * lazily decided path is a source; TABLE r4.152 (2)). A domain, as the finishing read reads one (a collection's element
+   * lazily decided path is a source). A domain, as the finishing read reads one (a collection's element
    * possibly absent, C6); `null` where the read has no place or nothing decides it. One check unit, no new walk: after a
    * stop admission decides nothing more, it reads what had finished.
    */
@@ -1544,8 +1546,8 @@ class CoreAnswers implements Answers {
       return { items: [makeItem(own, null, { cert: "def" })], names };
     }
     // each child at the path's own step (`literalChildren` keys a collection's elements and a dict's values alike): its
-    // items as its own question answers them, through every ordered source (`#items`: one endpoint for every question,
-    // TABLE r4.158), beside its known siblings, the composition in its one order (#1398); its names its own
+    // items as its own question answers them, through every ordered source (`#items`: one endpoint for every question),
+    // beside its known siblings, the composition in its one order (#1398); its names its own
     // syntax's alone; no item at all is an answer where every child's own syntax proves its own (`absentAt`)
     const items: Item[] = [];
     const names = new Set<string>();

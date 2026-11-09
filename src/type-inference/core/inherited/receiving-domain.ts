@@ -16,12 +16,12 @@ import type { Definition, Key } from "../definitions.js";
 import type { Proof, ProofDemand } from "../solver.js";
 
 /**
- * A4, the written type a copy of a written binding brings into an unwritten place (r4.75 (1), TABLE r4.375): its state, one
- * per pass (`CorePass.receivingDomain`), made with the pass's parts and asking nothing when made. Admission builds it
- * (`copyGraph`) and reads it (`inheritedAt`) as its client; F18 does not read it (#1072 A2). Each key's inherited type
- * is a proof of the pass's solver (`inheritedProof`); what its runs found, the keys that wait on each other and the
- * own-level bits, is the pass's too. An admission made on the pass starts the rest afresh (`reset`), as each
- * admission's own state was.
+ * A4, the written type a copy of a written binding brings into an unwritten place
+ * (docs/specifications/type-inference-accepted-record.md#r4-375): its state, one per pass (`CorePass.receivingDomain`),
+ * made with the pass's parts and asking nothing when made. Admission builds it (`copyGraph`) and reads it
+ * (`inheritedAt`) as its client; F18 does not read it (#1072 A2). Each key's inherited type is a proof of the pass's
+ * solver (`inheritedProof`); what its runs found, the keys that wait on each other and the own-level bits, is the
+ * pass's too. An admission made on the pass starts the rest afresh (`reset`), as each admission's own state was.
  */
 export class ReceivingDomain {
   /**

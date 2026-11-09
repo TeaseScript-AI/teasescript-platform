@@ -137,7 +137,7 @@ export function measuresLength(property: string): boolean {
 }
 
 /**
- * TABLE r4.46 (2): a dict's property that gives a new list each read, by what the list holds: the dict's values
+ * a dict's property that gives a new list each read, by what the list holds: the dict's values
  * (`values`) or its keys, text (`keys`); on an object, a property of that name is its own (F11).
  */
 export function dictList(property: string): "values" | "keys" | undefined {
@@ -157,7 +157,7 @@ export function declaredProperty(kind: string, name: string): ValueKind | undefi
     : undefined;
 }
 
-/** r4.47 (5): a clock read's declared kind (V30 §35), as an ask's declared answer, with no external data in it. */
+/** A clock read's declared kind (V30 §35), as an ask's declared answer, with no external data in it. */
 export function clockResult(name: string): ValueKind | undefined {
   return isClockFunction(name) ? CLOCK_CONTRACTS[name].result : undefined;
 }
@@ -220,7 +220,7 @@ export function memberResult(name: string): readonly ValueKind[] | undefined {
 /**
  * What an interaction gives: F25's declared answer, or one of its options' values (`askChoice`): authored options give
  * their authored kinds, and only an option from external data (a host read, a load, `fromJson`) brings it in, at that
- * option (C9, TABLE r4.42–r4.43). Any other interaction's answer is the runtime's.
+ * option (C9). Any other interaction's answer is the runtime's.
  */
 export type InteractionCategory =
   { readonly kind: "asks"; readonly result: ValueKind } | { readonly kind: "options" };

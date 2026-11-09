@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { citationCounts, FORECASTS, forecastsIn } from "./check-comment-forecasts.mjs";
+import {
+  citationCounts,
+  FORECASTS,
+  forecastsIn,
+  unresolvedPointers,
+} from "./check-comment-forecasts.mjs";
 
 // A forecast of each form; the citations #1977 allows; and prose and counted references, which are no forecasts.
 const FORECAST_TEXTS = {
@@ -84,5 +89,28 @@ test("the counted citations are counted in comments only", () => {
       `// TABLE r4.1 and TABLE r4.2, TABLE § 3\nconst s = "TABLE r4.9";\n/* TABLE § 4 */\n`,
     ),
     { "TABLE r4": 2, "TABLE §": 2 },
+  );
+});
+
+test("a bare revision and TABLE with another id are counted too, a TABLE revision once", () => {
+  assert.deepEqual(
+    citationCounts(
+      "a.ts",
+      `// TABLE r4.1, r4.2 and F19 (r4.3), TABLE B1\nconst s = "r4.9, TABLE q1";\n`,
+    ),
+    { "TABLE r4": 1, "bare r4.N": 2, "other TABLE": 1 },
+  );
+});
+
+test("a comment's pointer at the accepted record names one of its headings", () => {
+  const page = "# The accepted record\n\n### r4-15\n\n### section-2-f12\n";
+  const record = "docs/specifications/type-inference-accepted-record.md";
+  assert.deepEqual(
+    unresolvedPointers(
+      "a.ts",
+      `// as ruled (${record}#r4-15)\n/* see ${record}#r4-16 */\nconst s = "${record}#r4-17";\n`,
+      page,
+    ),
+    [{ line: 2, anchor: "r4-16" }],
   );
 });

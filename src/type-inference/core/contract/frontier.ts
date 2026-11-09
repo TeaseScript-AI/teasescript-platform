@@ -33,7 +33,7 @@ import type { Holder, IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
  * a value the graph does not model, read natively where the path ends). `Sum(n, s)` is the nodes one step `s` below
  * `n` reaches (least solution, cycles closed by producer edges only, seedless ones empty); `Term(n)` the leaves at
  * `n`. The writing edge overwrites every writer but a pure `missing`'s, whose earliest token the join keeps, and every
- * other field the merge joins, so the join is the native nested answer there (HEAD 0, TABLE r4.385). A closure outside
+ * other field the merge joins, so the join is the native nested answer there (HEAD 0). A closure outside
  * the eligible grammar declines: the native reader answers.
  *
  * #1784: a route through a marking entry or literal read (its guard bit, or its holder's mark at the rest below it,
@@ -204,7 +204,10 @@ function frontierOf(contract: Contract): Frontier {
   return frontier;
 }
 
-/** One unit of structure work, shared (r4.349): counted to the analysis's total, never the asker's. */
+/**
+ * One unit of structure work, shared (docs/specifications/type-inference-accepted-record.md#r4-349): counted to the
+ * analysis's total, never the asker's.
+ */
 function step(frontier: Frontier, units = 1): void {
   frontier.contract.pass.program.work.charge("structureSteps", units);
 }
@@ -1407,8 +1410,8 @@ export function pushedValueSlot(contract: Contract, value: PlaceId): string | nu
 
 /**
  * A pushed read's slot where `place` is in a copy cycle through a projection and the nodes `start` finds the graph
- * models, with their leaves; built once per slot and pass as shared work (r4.349), a build that declines or stops
- * keeping nothing.
+ * models, with their leaves; built once per slot and pass as shared work
+ * (docs/specifications/type-inference-accepted-record.md#r4-349), a build that declines or stops keeping nothing.
  */
 function reachSlot(
   contract: Contract,

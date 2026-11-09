@@ -65,7 +65,7 @@ export type CarrierRole = (typeof CARRIER_ROLES)[number];
  * One operand of a carrier: its role, and its evaluation position among the carrier's operands (a `get`'s default is
  * 2, its key 1); the carrier's value stands at `below` inside it; `own` where it is the carrier's own read (C10: a
  * fallback or a default names its own read, an ingress there checked at it); `when`, the decision of the value side it
- * needs (`carried`): the operand a list or a set (F27), an object or a dict (r4.46 (2)), read at its elements only (a
+ * needs (`carried`): the operand a list or a set (F27), an object or a dict, read at its elements only (a
  * copy of the elements, a list's `+`: F10), or a dict where a removal gives a list's possible element (F7).
  */
 export interface Operand {
@@ -104,7 +104,7 @@ export function operandsOf(program: CoreProgram, value: PlaceId): readonly Opera
       return [operand("iteration/collection", 0, owner, ["element"], false, "list or set")];
     const list = dictList(step);
     if (list === undefined) return [operand("projection/owner", 0, owner, [stepName(step)])];
-    // r4.46 (2): an object's own property of the name, or a dict's values (its keys hold text)
+    // an object's own property of the name, or a dict's values (its keys hold text)
     return [
       operand("projection/record field", 0, owner, [step], false, "object"),
       ...(list === "values"
@@ -311,7 +311,7 @@ export function* carriedByRead<S extends Strip<S>>(
 ): Reads<readonly (readonly [PlaceId, S, CarrierRole, number])[]> {
   if (yield* keepsOwnRead(program, value, (receiver) => dispatch.reference(receiver))) return [];
   if (isChoice(program, value)) {
-    // r4.93: a choice's answer is a scalar button (V30 §19, TSV029), so an outer choice's rows reach it once: its
+    // a choice's answer is a scalar button (V30 §19, TSV029), so an outer choice's rows reach it once: its
     // `#value` row as the button itself, its `#text` row the same button again, its element rows nothing
     const selection = (step: string | undefined): boolean =>
       step === SELECTED_VALUE || step === SELECTED_TEXT;

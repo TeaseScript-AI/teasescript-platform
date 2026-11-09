@@ -207,7 +207,7 @@ function shownOf(
 /**
  * A literal value's stores at one step, in evaluation order: a property's one store, a collection's every element, a
  * dict's values among them (its `element`, as its type has them). Every walk of a literal's children asks here with its
- * path's own step, so the step that reaches a child is read in this one place (TABLE r4.122).
+ * path's own step, so the step that reaches a child is read in this one place.
  */
 export function literalChildren(admission: Admission, value: PlaceId, step: string): Definition[] {
   const { program, definitions } = admission.pass;
@@ -225,7 +225,7 @@ export function literalChildren(admission: Admission, value: PlaceId, step: stri
 }
 
 /**
- * r4.35: an error for a contribution inside literals sits at the innermost offending expression: the stored value
+ * an error for a contribution inside literals sits at the innermost offending expression: the stored value
  * walked along the path through record fields, collection elements and dict values, in evaluation order, to the first
  * value at the path's end whose own items offend.
  */
@@ -281,11 +281,11 @@ export function storesAt(
  * one type at every path their known structure gives, a copy's or a call's its source's (F2): the earliest element's,
  * or a copy of a written binding's written type (A4), unless the literal lands directly in a written place, whose
  * type then checks them (A1). A definite element of another type is an error at the innermost offending expression
- * (r4.35) and is rejected: later uses see the earliest element's type (A6). `error` hears of each with the element's
+ * and is rejected: later uses see the earliest element's type (A6). `error` hears of each with the element's
  * store, the literal's cell, the path, the earliest element's kinds there (by family, and its own, which a sentence
  * names) and the offending element's (D1). `undecided`, after a stop before admission settled: a literal whose element
  * needs a decision admission did not make (a named element, or one the finishing read leaves `STOPPED`) is not
- * compared; it is reported there instead, so its store marks (TABLE r4.126).
+ * compared; it is reported there instead, so its store marks.
  */
 export function literalElements(
   admission: Admission,
@@ -395,7 +395,7 @@ export function literalElements(
         if (landing !== null)
           for (const met of touchElements(admission, landing, representatives)) keep(met.path);
         // (and where what they definitely hold meets: a property only copies of whole objects bring, checked where
-        // the copy meets the literal, A2, TABLE r4.131)
+        // the copy meets the literal, A2)
         const base = landing === null ? [] : keptPath(admission.work, landing);
         const met = new Set<string>();
         for (const path of heldMeetings(
@@ -438,7 +438,7 @@ export function literalElements(
         )
       );
     };
-    // the error at the innermost offending expression (r4.35), the element rejected (A6)
+    // the error at the innermost offending expression, the element rejected (A6)
     const offended = (d: Definition, path: readonly string[]): void => {
       const at = pathText(path);
       const inner =
@@ -978,7 +978,7 @@ export function joinElements(
         (items.some((item) => item.tag === "unknown")
           ? []
           : [...new Set(items.filter(concrete).map((item) => item.tag))]);
-      // (whole numbers beside numbers are numbers, ADR 0021 1.3, as a place's decision has them: r4.28)
+      // (whole numbers beside numbers are numbers, ADR 0021 1.3, as a place's decision has them)
       const own =
         kinds.includes("integer") && items.some(admitsNumber)
           ? [...new Set(kinds.map(family))]
@@ -1021,7 +1021,7 @@ export function joinElements(
             const read = placeOf(operand);
             if (read !== null && admitted(read.place, read.path)) continue;
             // (a value's own elements; external data is checked where it comes in: its kinds are no part of the
-            // type, but a number it may give makes whole numbers numbers, as an operation on it may: r4.36)
+            // type, but a number it may give makes whole numbers numbers, as an operation on it may)
             for (const item of admission.items(operand, node, steps))
               if (item.tag === "unknown" || item.extOnly === true)
                 external ||= item.tag === "number";
@@ -1375,7 +1375,7 @@ export function joinElements(
 /**
  * The class of a literal element's contracts, for the conflict paths of `literalElements` (§8): a `load` or a parse is
  * typed by its expected type, else by its default (F18), so the k ingresses of one typed default have one class and
- * share one discovery, while each keeps its own identity and its boundary check (C9, §8 r4.15), and a default reading
+ * share one discovery, while each keeps its own identity and its boundary check (C9, §8), and a default reading
  * host data counts by the contract's class of its global and guards (`classOf`, #1196); a read, a literal or an
  * `otherwise` whose class is mixed by its leaves alone that class (`Contract.boundClass`: k reads of one global,
  * #1207, k `load(…) otherwise {…}` of one default and one fallback or objects holding them, #1304, k bindings of loads

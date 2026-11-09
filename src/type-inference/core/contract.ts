@@ -207,13 +207,13 @@ export { presenceSteps } from "./contract/prefix-index.js";
 export { withOwnSelection } from "./contract/value-kinds.js";
 
 /*
- * The contract of the coarse core (checkpoint 9, TABLE §1, §3.2, §8): the kinds a key can hold on any run, flow-
+ * The contract of the coarse core (checkpoint 9, §3.2, §8): the kinds a key can hold on any run, flow-
  * insensitively: every live definition's value kinds, a written type's tags, `unknown` with its reasons for what the
  * core does not model. An element key's contract is the elements' kinds (E), with the emptiness mark where a source may
  * leave the collection empty (M open). The contract reads its sources through two indexes that share every source by
- * one identity (§8 r4.15): a prefix's whole stores (`prefixStores`, one entry per source identity, with the stores
+ * one identity (§8): a prefix's whole stores (`prefixStores`, one entry per source identity, with the stores
  * that brought it as A5's provenance) and a literal's structure (`literalIndex`). The marks of §3.2 live beside
- * identity, in one holder per source and projection, whose references compose and are never copied (r4.23).
+ * identity, in one holder per source and projection, whose references compose and are never copied.
  */
 
 /**
@@ -301,7 +301,7 @@ export class Contract {
   ];
   readonly storedNames = new Map<string, string>();
   /**
-   * The paths of the literal indexes, each made once per pass (TABLE r4.58) as it is first asked: a path is its parent's
+   * The paths of the literal indexes, each made once per pass as it is first asked: a path is its parent's
    * and one step, keeping that step alone, never its whole text; its id orders and names it in a literal's signature
    * and structure. The empty path is id 0.
    */
@@ -490,14 +490,14 @@ export class Contract {
   public constructor(readonly pass: CorePass) {}
 
   /**
-   * TABLE B1, S3 §5: an admission decision that stopped at its demand allowance leaves its key's contract `unknown` with
+   * S3 §5: an admission decision that stopped at its demand allowance leaves its key's contract `unknown` with
    * the reason `budget` for every read, and every key's below it: `contractOf` and every value read of such a key
    * (`Values.keyItems`) answer `STOPPED` before their memo, so whatever reads it, directly or composed, carries it. The
-   * pass in which a decision stops is not settled (TABLE r4.180): the next starts with the key stopped (`analyseCore`),
+   * pass in which a decision stops is not settled: the next starts with the key stopped (`analyseCore`),
    * so no result read the key before its stop, in any order. An answer the solver kept before the stop read the key if
    * its run asked whether the key, or one below it, stopped (`stopped`, `keyStopped`): the solver forgets those answers
-   * and every answer that read one of them (`Solver.forget`), so each next read of them reaches the stop (TABLE r4.186,
-   * #1403); an answer that never asked is kept. A property or index read's occurrence answer and every position
+   * and every answer that read one of them (`Solver.forget`), so each next read of them reaches the stop (#1403);
+   * an answer that never asked is kept. A property or index read's occurrence answer and every position
    * (`positions.ts`) made since the last stop are forgotten too, and no position stands past a wrapper of a stopped place
    * (`wrapperHop`).
    */
@@ -736,7 +736,7 @@ export class Contract {
 
   /**
    * A key's contract along a path through a member a built-in value answers by itself from the step `from` on, its
-   * receiver decided as a reference's or not once (F19a, r4.44): a reference's member is the runtime's.
+   * receiver decided as a reference's or not once (F19a): a reference's member is the runtime's.
    */
   public keyThrough(asked: Key, from: number, flow: FlowSink | null = null): Work<readonly Item[]> {
     const key = this.canonicalKey(asked);
@@ -798,7 +798,8 @@ export class Contract {
 
   /**
    * A chain of property reads' root (`positions.ts`'s `chainOf`), from the pass's memoised index: its making is shared
-   * work (r4.349), counted to the total and to no demand's allowance, whichever reader asks first.
+   * work (docs/specifications/type-inference-accepted-record.md#r4-349), counted to the total and to no demand's
+   * allowance, whichever reader asks first.
    */
   public chainOf(value: PlaceId): ChainRoot | null {
     return this.work.shared(() => chainOf(this, value));
@@ -820,7 +821,7 @@ export class Contract {
   }
 
   /**
-   * A key as the definition indexes and the exact path read it, its text (TABLE §2, X2): a cursor's made once through the
+   * A key as the definition indexes and the exact path read it, its text (X2): a cursor's made once through the
    * charged boundary (`keyOfId`); those indexes hold no key of a cursor's family below its root (its shape requires it).
    */
   public keyText(key: Key): Key {
@@ -1139,7 +1140,7 @@ export class Contract {
   }
 
   /**
-   * Charges what the literal work keeps before it keeps it (TABLE r4.58): `units` entries, scheduled tasks or elements
+   * Charges what the literal work keeps before it keeps it: `units` entries, scheduled tasks or elements
    * of a sorted copy, or a text's `textUnits`; so the allowance stops a deep literal's indexes before the heap does.
    */
   public keep(units: number): void {

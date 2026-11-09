@@ -19,7 +19,7 @@ import { countIn, lowerBound } from "./narrowing-statements.js";
 import type { Work } from "./solver.js";
 
 /*
- * N2 and N5 of stage 3b (checkpoint 9, TABLE §13 N2, N5, §13.3): whether a narrowing definition G still answers a read
+ * N2 and N5 of stage 3b (checkpoint 9): whether a narrowing definition G still answers a read
  * at n. X1, X4, X5 and X6 as §3 writes them, X7 as its flat veto, taken over G's dependency keys with N2's events: each
  * dependency key's own events (the location's key with the keys below it, each prefix's own definitions, each index or
  * key variable's), the call sites where an owner of one of them, or a callable holding an invalidation of a collection

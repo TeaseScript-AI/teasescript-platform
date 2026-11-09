@@ -13,7 +13,7 @@ import { inheritance, landed } from "./landings.js";
 import { permittedAt, unrestricted } from "./permitted.js";
 import { inputsAt, scanAt } from "./scan.js";
 
-// The admitted type at a path (C9 r4.12), the decision retained after a stop, and the deciding contribution's site; each
+// The admitted type at a path (C9), the decision retained after a stop, and the deciding contribution's site; each
 // path's key in its identity (`keyAt`: a wrapper family's its cursor, as `decide` records it, G3 stage 1).
 
 /**
@@ -38,7 +38,7 @@ function lazily(admission: Admission, place: PlaceId, path: readonly string[]): 
  * #1526 phase C: a read of the decision at a path in a completion pass (`Consumers.#completeFor`, the receiving
  * closure's, which carries no frozen key): no admission walk runs there, so a decision admission makes at all (one of
  * its groups; a landed copy path is `lazily`'s) is made, as a lazily decided path, where a level first asks for it, a
- * scoped decision from what is left of the total (r4.269, `Closure.decide`); then the reader reads its cell.
+ * scoped decision from what is left of the total (`Closure.decide`); then the reader reads its cell.
  */
 function pull(
   admission: Admission,
@@ -65,7 +65,7 @@ function groupKeys(admission: Admission): ReadonlySet<CanonicalKey> {
 }
 
 /**
- * C9 r4.12 (A1–A7): a destination's admitted type: the written type (its null included), else the decided kinds (an
+ * C9 (A1–A7): a destination's admitted type: the written type (its null included), else the decided kinds (an
  * integer decider already widened by an admitted number, a copy of a written integer never: A4), else, where
  * admission decided nothing, the contract's kinds, one family, an integer widened by an admitted number; with `null`
  * where a null contribution is admitted and the decision admits one (a copy of a written type without it does not),
@@ -111,7 +111,7 @@ function admitsNull(admission: Admission, key: CanonicalKey, kinds: readonly Ite
 }
 
 /**
- * After a stop, a path's admitted type as admission retained it, without new solving (S3 §5 revision 14, TABLE r4.102):
+ * After a stop, a path's admitted type as admission retained it, without new solving (S3 §5 revision 14):
  * its written type (A1), its decision (A2), else a copied written type landing there (A4's seeds), else, where a copy
  * of another place lands at or above it (a lazily decided copy path among them), that source's at the same path below
  * the copy, through the copy forest's edges; with `null` where the decision admits one, at a binding's root only where
@@ -218,7 +218,7 @@ function undecidedCopy(admission: Admission, place: PlaceId, path: readonly stri
   );
 }
 
-/** Whether a copy of a written type decides a place's path, not the place's own written type (A4, r4.75 (1)). */
+/** Whether a copy of a written type decides a place's path, not the place's own written type (A4). */
 export function inheritsWritten(
   admission: Admission,
   place: PlaceId,
@@ -283,7 +283,7 @@ export function deciderAt(
  * A path's admitted type as every answer reads a level (A1–A9): its written type (`term`), else what admission decided
  * (`admitted`), with the decider found where it is read and whether a copy of a written type decides it; after a stop
  * before admission settled nothing but the written type; after one where it had settled, a path admission retained
- * nothing for answered by what the stores' syntax decides (`cheap`, the finishing read's source 4, TABLE r4.122). The one
+ * nothing for answered by what the stores' syntax decides (`cheap`, the finishing read's source 4). The one
  * level reader of the answers (`CoreAnswers.place`) and of the contract capture (`Consumers`), so both read a level alike.
  */
 export function admittedLevel(
@@ -303,7 +303,7 @@ export function admittedLevel(
   if (after.stopped && !after.settled) return { by: "undecided" };
   const kinds = admission.admitted(place, path);
   // (after a stop admission decides nothing more: where what it retained leaves the path undecided, what every
-  // store's syntax decides answers, as the finishing read's source 4, TABLE r4.122)
+  // store's syntax decides answers, as the finishing read's source 4)
   if (kinds.length === 0 && after.stopped) {
     const decided = after.cheap(place, path);
     if (decided !== null)

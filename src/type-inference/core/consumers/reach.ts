@@ -17,7 +17,7 @@ const LITERAL_NODES: ReadonlySet<string> = new Set([
 
 /**
  * The first direct read or store of a place's path in source order (ADR 0021 rule 1.1): where an error about a property
- * that reached the place only through copies of whole objects is reported, the copy its related site (A2, r4.75 (4)).
+ * that reached the place only through copies of whole objects is reported, the copy its related site (A2).
  */
 export function firstDirect(
   walk: Consumers,
@@ -58,9 +58,10 @@ export function firstDirect(
 
 /**
  * A2, ADR 0021 rule 1.1: a property that reaches a place only through copies of whole objects, where they were not
- * found to meet at the copy (a cycle of copies that adds or takes steps, TABLE r4.154), is checked at its first direct
- * read or store, the copy that brought the other type its related site (`copy`, else `site`); any other error stays
- * at `site`. `eligible`: the error is that property's, its offending contribution through whole copies.
+ * found to meet at the copy (a cycle of copies that adds or takes steps,
+ * docs/specifications/type-inference-accepted-record.md#r4-154), is checked at its first direct read or store, the copy
+ * that brought the other type its related site (`copy`, else `site`); any other error stays at `site`. `eligible`: the
+ * error is that property's, its offending contribution through whole copies.
  */
 export function deferred(
   walk: Consumers,

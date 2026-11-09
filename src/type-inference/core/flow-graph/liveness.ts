@@ -45,13 +45,13 @@ export function decideDefaults(builder: FlowGraphBuilder): void {
  * closing `end` reaches) and every `end` in a function or block have the second. A call has a fact of the node after
  * it once a callee returns, and the second fact also once a function it calls may end the running file; a `goto` of
  * files has the second once one of them returns, since a started file's `end` returns to the running file's caller; a
- * `goto` from a function or block to a label has it once the label's own continuation has it (r4.25). A function
+ * `goto` from a function or block to a label has it once the label's own continuation has it. A function
  * returns when its entry has the first fact and may end the running file when its entry has the second; a file
  * returns when its entry has the second.
  *
  * The third fact is carried forward from the session's start: the node is reached, crossing a call's summary edge
  * only once a callee is known to return. A block that may end a running file makes every file return (it may run
- * while any file runs), but only once its entry has the second fact and its registration is reached (r4.26): so a
+ * while any file runs), but only once its entry has the second fact and its registration is reached: so a
  * block registered after a call that cannot return never justifies that call's return. Each dependency waits in one
  * list, registered once and woken once. A summary edge whose callees cannot return is dead.
  */

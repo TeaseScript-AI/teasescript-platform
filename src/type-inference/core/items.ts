@@ -3,23 +3,23 @@ import type { SourceSite } from "../graph.js";
 import type { WorkLedger } from "./budget.js";
 
 /**
- * The items of the coarse core (checkpoint 9, TABLE §1): what the analysis knows of a value at a read. A value is a
+ * The items of the coarse core (checkpoint 9): what the analysis knows of a value at a read. A value is a
  * list of items, one per kind. An item is one kind with a certainty (`def`: every run that reaches the read has a value
  * of this kind; `pos`: some run may), the reasons of an `unknown`, one writer that explains it (F28) and one context
  * word (§3.4). Some items also carry the ingress stores of external data (C9), the guard mark (§3.2) or the identity of
- * the one unknown operand whose operator rows they stand for (§4 r4.14).
+ * the one unknown operand whose operator rows they stand for (§4).
  */
 
 /**
  * A kind an item can have: a value kind, `unknown` (a value the core does not model, with its reasons), or `empty`, the
- * mark that an element read may find no element on some run (TABLE §1, M `open`).
+ * mark that an element read may find no element on some run (M `open`).
  */
 export type ItemTag = ValueKind | "unknown" | "empty";
 
 export type Certainty = "def" | "pos";
 
 /**
- * Why a value is `unknown` (TABLE §1): host data, a typeless load or `fromJson` (`external`); a reference's member or an
+ * Why a value is `unknown`: host data, a typeless load or `fromJson` (`external`); a reference's member or an
  * operation the core does not model (`opaque`); a parameter with several call sites (`deferred`); a source of a record
  * without the property (`missing`); a demand over its allowance (`budget`, B1). An item holds a set of them as bits.
  */
@@ -76,7 +76,7 @@ export interface Item {
   readonly reasons: number;
   readonly writer: Writer | null;
   readonly context: ContextWord | null;
-  /** The word of a `null` that stands beside external data (a typeless load's `default: null`, §3.4 r4.11). */
+  /** The word of a `null` that stands beside external data (a typeless load's `default: null`, §3.4). */
   readonly word?: ContextWord;
   readonly ingress?: IngressNode;
   /** External data that no ingress store brought, merged beside some that one did (C9). */
@@ -103,16 +103,16 @@ export interface Item {
    * on every route that the compiler cannot keep, which warns, never the route rule's error (V30 §13).
    */
   readonly tested?: true;
-  /** The unknown operand, by `fanIdentity`, whose operator rows this item is one of (§4 r4.14). */
+  /** The unknown operand, by `fanIdentity`, whose operator rows this item is one of (§4). */
   readonly fan?: string;
   /**
    * An operation's result kind that every combination giving it holds external data in: possible solely through
-   * external data, so no internal contribution admits it (A2, A3 r4.36, r4.37).
+   * external data, so no internal contribution admits it (A2, A3).
    */
   readonly extOnly?: true;
   /**
    * The written type the item was made from, as its kinds in their written order (`Spelling`): a list of a value's
-   * kinds keeps that order where it alone covers the list (`inItsOrder`, #1398, TABLE r4.277).
+   * kinds keeps that order where it alone covers the list (`inItsOrder`, #1398).
    */
   readonly spelling?: Spelling;
 }
@@ -128,7 +128,7 @@ export type Spelling = readonly ItemTag[];
 const MIXED: Spelling = Object.freeze([]);
 
 /**
- * The join of two items' spellings: none below one spelling below `MIXED` (TABLE r4.277 (1)). Commutative and
+ * The join of two items' spellings: none below one spelling below `MIXED`. Commutative and
  * associative, `MIXED` absorbing, so a merge's spelling is the same in whatever order its items come.
  */
 export function joinSpelling(
@@ -143,9 +143,9 @@ export function joinSpelling(
 }
 
 /**
- * A spelling's part of an identity (TABLE r4.277 (2)): empty for none, `*` for `MIXED`, else its kinds by value. Every
- * key or snapshot that identifies items or a type test's form includes it (`itemsSignature`, `Values.narrowingMark`), so
- * differently marked lists are different values.
+ * A spelling's part of an identity (docs/specifications/type-inference-accepted-record.md#r4-277): empty for none, `*`
+ * for `MIXED`, else its kinds by value. Every key or snapshot that identifies items or a type test's form includes it
+ * (`itemsSignature`, `Values.narrowingMark`), so differently marked lists are different values.
  */
 export function spellingIdentity(spelling: Spelling | undefined): string {
   return spelling === undefined ? "" : spelling.length === 0 ? "*" : spelling.join("+");
@@ -212,7 +212,7 @@ export function computedMarks(from: readonly Item[]): {
   };
 }
 
-/** The mark of an element read that may find no element (TABLE §1 M): not a value, so no consumer checks it. */
+/** The mark of an element read that may find no element: not a value, so no consumer checks it. */
 export const EMPTY: Item = Object.freeze(makeItem("empty"));
 
 /**
@@ -228,7 +228,7 @@ export function writerKey(writer: Writer): string {
   return `${writer.kind}@${writer.file}:${writer.start}`;
 }
 
-/** The identity of an unknown operand in an operation (§4 r4.14): its writer's, or else the operation's site. */
+/** The identity of an unknown operand in an operation (§4): its writer's, or else the operation's site. */
 export function fanIdentity(writer: Writer | null, operation: SourceSite): string {
   return writer === null ? `op@${operation.file}:${operation.start}` : writerKey(writer);
 }
@@ -243,7 +243,7 @@ export function firstContext(a: ContextWord | null, b: ContextWord | null): Cont
 }
 
 /**
- * The word of one unknown's reasons (TABLE §1 r4.23): the first present in the rank `external` (`unknown`), `opaque`
+ * The word of one unknown's reasons: the first present in the rank `external` (`unknown`), `opaque`
  * (`unmodelled`), `deferred` (`deferred-parameter`), `missing` (`missing`), `budget` (`budget`); an unknown without
  * reasons says `unknown`.
  */
@@ -258,7 +258,7 @@ export function reasonContext(reasons: number): ContextWord {
 
 /**
  * The word an item brings where words meet: an unknown its reasons' word, whatever word it carries, since its reasons
- * name it (TABLE §1) and come before any condition's word (§3.4); any other item its own word.
+ * name it and come before any condition's word (§3.4); any other item its own word.
  */
 export function ownContext(item: Item): ContextWord | null {
   return item.tag === "unknown" ? reasonContext(item.reasons) : item.context;
@@ -431,7 +431,7 @@ const TAG_RANK: ReadonlyMap<ItemTag, number> = new Map(
 );
 
 /**
- * The one order of a list of a value's kinds (#1398, TABLE r4.277): a written spelling's where exactly one spelling
+ * The one order of a list of a value's kinds (#1398): a written spelling's where exactly one spelling
  * covers every kind of the list but `null`, `unknown` and `empty` (an inferred kind it spells adds nothing to it, as
  * G5 rules), then the others in the table's; else the table's (`TAG_RANK`), never the order the analysis met them,
  * which the consumers' and the solver's orders and the sharing change. It reads the kinds and the spellings alone, so it
@@ -439,7 +439,7 @@ const TAG_RANK: ReadonlyMap<ItemTag, number> = new Map(
  * stopped answer, a finishing read) and reaches its publication through steps that keep it, and a list composed with
  * another passes here again where it is completed. A fixed table's order and a tuple by position keep their own. One
  * pass over the entries and one over the ranks, so it costs no more than the entries it is given, each already charged
- * where it was made, and it charges nothing of its own (TABLE r4.261). The result is made at its length: a flattened
+ * where it was made, and it charges nothing of its own. The result is made at its length: a flattened
  * one keeps spare capacity, which the many answers kept multiply (#1625).
  */
 function inOrderOf<T>(
@@ -527,7 +527,7 @@ export function mergeItems(items: readonly Item[], scope: ItemScope): Item[] {
 /**
  * The alternatives of one read (a list's elements, an element added beside earlier ones, a value or its default),
  * merged: of two definite families neither stays definite, since a run has one of them (integers and numbers are one
- * family, ADR 0021 1.2). A `null` is no family and never decides (A8 r4.13): beside one family it is a possibility.
+ * family, ADR 0021 1.2). A `null` is no family and never decides (A8): beside one family it is a possibility.
  */
 export function alternatives(items: readonly Item[], scope: ItemScope): Item[] {
   const merged = mergeItems(items, scope);
@@ -563,7 +563,7 @@ export function weaken(items: readonly Item[], context: ContextWord | null = nul
  * The items as one comparable text, independent of their order, for a fixpoint's test whether a value changed. The
  * ingress stores are left out: a fixpoint member's stores grow in its cell, which every value holding it shares. An
  * item's spelling is part of it (`spellingIdentity`): differently marked items order a later list differently, so they
- * are different values (TABLE r4.277 (2), #1398).
+ * are different values (#1398).
  */
 export function itemsSignature(items: readonly Item[], scope: ItemScope): string {
   scope.work.charge("sigItems", items.length + 1);

@@ -23,7 +23,7 @@ import type { WrittenTypeError } from "./result.js";
  * its optional form (`integer[] | null` is `integer[]?`) and stays allowed. The collector reads the same types into kinds
  * (`typeTerm`) and reports nothing; this check reads the written types alone, independent of the flow, so a written
  * type in code that never runs or in a function no call reaches errs too. A place keeps its written type as the collector
- * reads it, which decides the place as any written type does (TABLE A1, A4): its stores and reads are checked against it
+ * reads it, which decides the place as any written type does (A4): its stores and reads are checked against it
  * as before, and the error adds nothing there.
  */
 

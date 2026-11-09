@@ -3,7 +3,7 @@ import { keptText, pathText, type WorkCounter, type WorkLedger } from "../budget
 import type { Contract } from "../contract.js";
 import { convert } from "./key-ids.js";
 
-// G3 stage 1 (TABLE r4.196): a path's label as a recipe, made one step from its parent's, and its text made only where
+// G3 stage 1: a path's label as a recipe, made one step from its parent's, and its text made only where
 // a diagnostic or a check shows it (`labelText`). A label no one shows costs its recipe and no text.
 
 /**
@@ -83,7 +83,7 @@ function shown(contract: Contract, label: Label): string {
 
 /**
  * A label's text made plain and not kept here, charging nothing (`labelText`'s twin, as `pathText` is `keptText`'s):
- * for a caller that charges the text it keeps itself, the boundary check's (`publish`, TABLE r4.196: its legacy
+ * for a caller that charges the text it keeps itself, the boundary check's (`publish`: its legacy
  * billing stays).
  */
 export function labelPlainText(label: Label): string {

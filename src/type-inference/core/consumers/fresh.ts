@@ -12,27 +12,27 @@ import { mixed, mixedJoin } from "./mixed.js";
 import { admittedStores } from "./stores.js";
 import { placeText, storeRoot, storeSteps, storeWarning } from "./warnings.js";
 
-// The fresh pass (TABLE r4.138): the stores' obligations where admission had not settled, and the marks it leaves.
+// The fresh pass: the stores' obligations where admission had not settled, and the marks it leaves.
 
 /**
- * The stores' obligations in the finishing path where admission had not settled (TABLE r4.110 (3)), reading no
+ * The stores' obligations in the finishing path where admission had not settled, reading no
  * decision (A6: a later pass may admit a store this one rejected, so its decisions may be narrower than the settled
  * ones). It runs every derivation of admission's that creates an obligation (`OBLIGATION_SITES`, with each one's
- * exits: TABLE r4.126, r4.138), as admission runs it, reading what the stop retained as every consumer does (one
+ * exits), as admission runs it, reading what the stop retained as every consumer does (one
  * derivation): C1 against a written type at a store's path (`admittedStores`); ADR 0021 1.3's mixed literal elements
  * (`literalElements`), a literal whose element needs a decision marked through its holders or itself (`markHolder`);
  * F18's typed calls no store takes in (`ingressStores`); the ingress stores' boundaries against written types
  * (`publish`); the walk, which finishes every unit, the read boundaries. Every store and transfer into an inferred
- * place is marked at its site, its type undecided (r4.100); a mark stands for its records within its value (r4.111).
+ * place is marked at its site, its type undecided; a mark stands for its records within its value.
  * A list join's mixed operands (`joinElements`, #1272) where its operands' own kinds decide them, a join with an
- * operand read through a decision marked as a literal is (`markValue`). No syntax decision is made here (TABLE
- * r4.135): admission decides an inferred place from its contract, which a fresh pass has not solved, so only a settled
+ * operand read through a decision marked as a literal is (`markValue`). No syntax decision is made here:
+ * admission decides an inferred place from its contract, which a fresh pass has not solved, so only a settled
  * stop's finishing read asks the stores' syntax, after the decision admission retained.
  */
 export function freshStores(walk: Consumers): void {
   const { program, definitions } = walk.pass;
   // (every store and transfer, an argument to a parameter several calls reach and one beside a default among them,
-  // which `Admission.stores` leaves out of its decisions but whose obligations it owes: r4.138)
+  // which `Admission.stores` leaves out of its decisions but whose obligations it owes)
   for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
     program.work.charge("checks");
     if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) continue;
@@ -102,7 +102,7 @@ export function markNames(
 }
 
 /**
- * A store into a place the fresh pass leaves undecided: marked at its site, its type undecided (r4.100), once; `names`
+ * A store into a place the fresh pass leaves undecided: marked at its site, its type undecided, once; `names`
  * where the caller made them once for every store into the destination.
  */
 export function storeMark(
@@ -170,8 +170,8 @@ function inMarkedValue(walk: Consumers, site: SourceSite): boolean {
  * A literal whose element needs a decision admission did not make (`Admission.literalElements`, before admission
  * settled): each definition of the outermost literal holding it marked (`storeMark`: a store, an add, an argument
  * whether one call or several reaches its parameter, a return), standing for its records within its value, the mixed
- * elements' among them (TABLE r4.126); a literal no definition holds (a consumer's own, `say [count, "bad"]`, or a
- * receiver's) marked itself, standing for its records within it (r4.138).
+ * elements' among them; a literal no definition holds (a consumer's own, `say [count, "bad"]`, or a
+ * receiver's) marked itself, standing for its records within it.
  */
 function markHolder(walk: Consumers, cell: PlaceId): void {
   const owner = walk.pass.program.cellOwner.get(cell)?.owner;
@@ -214,7 +214,7 @@ function markValue(walk: Consumers, value: PlaceId): void {
   if (holders.length === 0) literalMark(walk, outer);
 }
 
-/** A value no definition holds, a literal or a join, marked at its own site, its type undecided (r4.100, r4.138), once. */
+/** A value no definition holds, a literal or a join, marked at its own site, its type undecided, once. */
 function literalMark(walk: Consumers, literal: PlaceId): void {
   const { program } = walk.pass;
   const site = program.places[literal]?.site ?? null;
@@ -242,7 +242,7 @@ function literalMark(walk: Consumers, literal: PlaceId): void {
 
 /**
  * A typed call no store takes in whose expected type the finishing read leaves open after a stop (`Admission.ingressStores`
- * returns it): marked at its site, its type undecided, standing for its boundary (r4.100, r4.144), once.
+ * returns it): marked at its site, its type undecided, standing for its boundary, once.
  */
 export function ingressMark(walk: Consumers, site: SourceSite, label: string): void {
   const key = siteKey(site);

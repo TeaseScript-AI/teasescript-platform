@@ -43,7 +43,7 @@ export function live(admission: Admission, value: PlaceId): boolean {
   return node === null || program.live(node);
 }
 
-/** The snapshot a value reads (`Contract.readSnapshot`), or a call's by its identity (r4.15); `null` for any other. */
+/** The snapshot a value reads (`Contract.readSnapshot`), or a call's by its identity; `null` for any other. */
 export function snapshotOf(admission: Admission, value: PlaceId): string | null {
   const { contract } = admission.pass;
   return (

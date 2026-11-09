@@ -45,7 +45,7 @@ import type { Work } from "./solver.js";
 import type { ReadRoute } from "./values.js";
 
 /*
- * The exact path of the coarse core (checkpoint 9, TABLE §3.1): a read of key k at node n is answered from one
+ * The exact path of the coarse core (checkpoint 9): a read of key k at node n is answered from one
  * definition D when X1–X7 and the receiver rule R hold: n and D are live (X1), D is the nearest dominating definition
  * over k and its prefixes (X2), D is an exact definition (X3), D and n share their nearest boundary (X4) and their
  * loops (X5), no own event of k lies strictly after D and not after n (X6), and no block can have interfered (X7).
@@ -57,7 +57,7 @@ import type { ReadRoute } from "./values.js";
 /**
  * A read's exact path: its definition and the rest of the path, or the word of its first failing condition; `later`
  * where that word is a condition's after X3 (X4–X7) or the value's arrival (F20), which an element read the contract
- * answers comes before (X3's `member`, TABLE §3.4).
+ * answers comes before (X3's `member`).
  */
 export type ExactAnswer =
   | { readonly def: Definition; readonly rest: readonly string[] }
@@ -67,7 +67,7 @@ export type ExactAnswer =
 const ANY_PATH = "*";
 
 /*
- * Three tuning constants (TABLE r4.41): each picks which of two indexes answers a read, never the answer. Four keeps the
+ * Three tuning constants: each picks which of two indexes answers a read, never the answer. Four keeps the
  * common shapes on the per-source path; W34's two known products stand where more than four sources, anchors or trees
  * meet at one path (PLAN §6b).
  */
@@ -346,7 +346,7 @@ export class ExactPath {
             : !lists.certain(d))
     )
       return { fail: "member" };
-    // §3.4 (r4.11): D's value projected past an element step over a copy stops there (F12), X3's `member`, which
+    // §3.4: D's value projected past an element step over a copy stops there (F12), X3's `member`, which
     // comes before any later condition's word
     const word = (found: ContextWord): ExactAnswer => ({
       fail: this.#overCopy(d, reaching.rest) ? "member" : found,
@@ -389,7 +389,7 @@ export class ExactPath {
   }
 
   /**
-   * W34 (r4.33, r4.36–r4.38): the forest of whole copies of places, built once. A copy's source answers at the record
+   * W34: the forest of whole copies of places, built once. A copy's source answers at the record
    * level for every path no key below the source overlaps (the exact path of a path no definition names), so a chain
    * is resolved once per copy and projected per field. A test on a source never splits it: the copies a test of their
    * source at a path guards are spans of the forest's walk, indexed per path, so a read finds its chain's marks by one
@@ -810,7 +810,7 @@ export class ExactPath {
   }
 
   /**
-   * Where a copy's chain stops at the path `rest` (r4.38): the nearest copy at or above it whose source has a key at
+   * Where a copy's chain stops at the path `rest`: the nearest copy at or above it whose source has a key at
    * the path, above it or below it, whose own read answers there; a chain without a record-level answer stops at its
    * root; `null` where the chain's origin answers.
    */
@@ -1154,7 +1154,7 @@ export class ExactPath {
       return yield* this.defVal(repeated, rest);
     const before = yield* values.keyItems(keyOf(d.place, joinSteps(d.path, rest)), d.node, true);
     // F5–F7: the collection's kind is unchanged, and a dict's `values` or `keys` still a list of what it holds, whose
-    // element is the dict's (r4.46 (2))
+    // element is the dict's
     const listed = rest.length > 0 && dictList(rest[0]!) !== undefined ? 1 : 0;
     if (rest.length === listed) return before;
     const element = rest.length === listed + 1 && rest[listed] === "element";
@@ -1267,7 +1267,7 @@ export class ExactPath {
     );
   }
 
-  /** Charges `units` of what the exact path keeps (TABLE r4.58). */
+  /** Charges `units` of what the exact path keeps. */
   #keep(units: number): void {
     this.pass.program.work.charge("literalUnits", units);
   }

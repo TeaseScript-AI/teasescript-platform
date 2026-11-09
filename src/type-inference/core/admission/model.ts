@@ -139,9 +139,9 @@ export interface LiveGroup {
 }
 
 /**
- * A4 through copies' landings (`groups`, r4.75 (1)): where copies of written types land in each place, and the copies of
+ * A4 through copies' landings (`groups`): where copies of written types land in each place, and the copies of
  * inheriting places each place takes; a place's landed paths are its own, its copies' own paths and below them its
- * copies' sources' landed paths below their strips, asked of those sources, never made per copy (TABLE r4.80). A cycle
+ * copies' sources' landed paths below their strips, asked of those sources, never made per copy. A cycle
  * of copies has its members' landed paths made once, as the landing within it brings them.
  */
 export interface Inheritance {
@@ -282,7 +282,10 @@ export interface Alias {
   readonly source: Key;
   readonly read: FlowNode;
   readonly at: readonly string[];
-  /** The read itself: the copy whose binding's written type, A4's, its class keeps (TABLE r4.72, Astra r5 B1). */
+  /**
+   * The read itself: the copy whose binding's written type, A4's, its class keeps
+   * (docs/specifications/type-inference-accepted-record.md#r4-72, Astra r5 B1).
+   */
   readonly value: PlaceId;
   /** Whether its class is its read's chain's end (§4.1's chains): its items keep their own link's writer. */
   chained?: true;
@@ -306,7 +309,7 @@ export interface IngressStop {
   readonly path: readonly string[];
   readonly recordPath: readonly string[];
   readonly key: EvaluationKey;
-  /** The ingress's own expression, C9's site (r4.29). */
+  /** The ingress's own expression, C9's site. */
   readonly site: SourceSite;
   /** The stop's own expression (§3.4): the ingress itself where it is whole, a member read of it else. */
   readonly reads: SourceSite;
@@ -328,7 +331,7 @@ export interface LandingIndex {
 export interface Landing {
   readonly stores: Set<Definition>;
   own: boolean;
-  /** A typed `load` or `fromJson` of an inferred place whose default holds the ingress (TABLE r4.63 (3)). */
+  /** A typed `load` or `fromJson` of an inferred place whose default holds the ingress. */
   call?: PlaceId;
 }
 
@@ -469,7 +472,7 @@ export interface StoreIngresses {
 export interface Siting {
   readonly stop: Stop;
   readonly ingress: PlaceId | null;
-  /** A member of host data the store reads (r4.60): its own place's C1, no named data's. */
+  /** A member of host data the store reads: its own place's C1, no named data's. */
   readonly host?: true;
 }
 
@@ -515,8 +518,8 @@ export interface Decision {
   /** The candidates in source order (A5). */
   readonly candidates: readonly Candidate[];
   /**
-   * Decided by no contribution, the contract's kinds it is published with (C9 r4.12) beside external data: only the
-   * external data another store brought owes its check at each candidate (r4.50 (1)); data a store brings inline has
+   * Decided by no contribution, the contract's kinds it is published with (C9) beside external data: only the
+   * external data another store brought owes its check at each candidate; data a store brings inline has
    * its boundary, an opaque value C5's obligation at its access (A7).
    */
   readonly published: boolean;

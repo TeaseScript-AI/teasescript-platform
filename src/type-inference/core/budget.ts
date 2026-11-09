@@ -1,26 +1,26 @@
 /**
- * The work budget of the coarse core (checkpoint 9, TABLE §8): every unit of work the analysis does is charged to one
+ * The work budget of the coarse core (checkpoint 9): every unit of work the analysis does is charged to one
  * counter as it runs, and the charged total is checked against the program's allowance at each charge, so an analysis
  * stops proving at the unit that crosses it. The allowance is the larger of a fixed floor and a coefficient per syntax
  * node; statement nesting and a read chain's depth have their own limits. A stop is no compile error (the owner's D4,
- * option a′, TABLE r4.54): the ledger then only finishes, every later charge counted apart and none stopping it, and
+ * option a′): the ledger then only finishes, every later charge counted apart and none stopping it, and
  * each unit before the stop is counted to the place that spent it, so one warning can name the heaviest. The fallback
- * of a demand over its own allowance (TABLE B1) is not part of this module.
+ * of a demand over its own allowance is not part of this module.
  */
 
-/** The allowance every program has, however small (TABLE §8). */
+/** The allowance every program has, however small. */
 export const WORK_FLOOR = 30_000_000;
 
-/** The allowance per syntax node of a larger program (TABLE §8). */
+/** The allowance per syntax node of a larger program. */
 export const WORK_PER_NODE = 256;
 
 /**
- * The statement nesting the analysis proves (TABLE §8); realistic scripts nest about ten deep. A statement nested deeper
- * is checked when the script runs (TABLE r4.55): the pipeline itself handles depth 10,000.
+ * The statement nesting the analysis proves; realistic scripts nest about ten deep. A statement nested deeper
+ * is checked when the script runs: the pipeline itself handles depth 10,000.
  */
 export const NESTING_LIMIT = 256;
 
-/** The work allowance of a program with `syntaxNodes` parsed nodes: max(30,000,000, 256 × nodes) (TABLE §8). */
+/** The work allowance of a program with `syntaxNodes` parsed nodes: max(30,000,000, 256 × nodes). */
 export function allowanceFor(syntaxNodes: number): number {
   return Math.max(WORK_FLOOR, WORK_PER_NODE * syntaxNodes);
 }
@@ -85,7 +85,7 @@ export type WorkCounter =
   | "sigItems"
   | "operatorSteps"
   // the checks of consumers and admission, evaluated and skipped by the quiet path; admission's passes after the first (A6,
-  // and #1275's store targets), and those after a pass in which a decision stopped (TABLE r4.180)
+  // and #1275's store targets), and those after a pass in which a decision stopped
   | "checks"
   | "checksSkipped"
   | "rejectPasses"
@@ -111,7 +111,7 @@ export type WorkCounter =
   | "closureVisits";
 
 /**
- * The units a kept text of `length` UTF-16 code units costs (TABLE r4.58): about its size in 8-byte words, a header of
+ * The units a kept text of `length` UTF-16 code units costs: about its size in 8-byte words, a header of
  * two and one per eight code units, so a short key costs about what an entry does and a long path or signature its
  * length.
  */
@@ -130,7 +130,7 @@ export function pathTextLength(path: readonly string[]): number {
  * The paths and keys the core makes, each through one of these helpers or the key helpers of `definitions.ts`
  * (`tests/type-core-kept.test.ts` fails on one made past them). A text or array a structure keeps (a map's key, a set's
  * member, an entry's path or key) is made by a kept helper (`keptText`, `keptKey`, …), which charges its size to
- * `literalUnits` before it makes it (TABLE r4.58), so a literal's depth, breadth or names reach the allowance before
+ * `literalUnits` before it makes it, so a literal's depth, breadth or names reach the allowance before
  * the heap; one a step only looks up or passes on is made by its plain twin (`pathText`, `keyOf`, …), which charges
  * nothing: its making is the step's own work. Up to `SHORT` code units or elements ride on the unit of the step that
  * makes them, so an ordinary path costs nothing more; beyond it a text costs a unit per eight code units and an array a
@@ -138,7 +138,7 @@ export function pathTextLength(path: readonly string[]): number {
  */
 const SHORT = 32;
 
-/** Charges `units` of what the core keeps (`literalUnits`): the one charge of the literal work, TABLE r4.58. */
+/** Charges `units` of what the core keeps (`literalUnits`): the one charge of the literal work. */
 export function keep(work: WorkLedger, units: number): void {
   if (units > 0) work.charge("literalUnits", units);
 }
@@ -247,7 +247,7 @@ const LIMIT_NAMES: Readonly<Record<BudgetLimit, string>> = {
  * the script runs (`nesting`).
  */
 /**
- * A demand that crossed its allowance (S3 §5, TABLE B1): the solver gives it up between two steps of its computations,
+ * A demand that crossed its allowance (S3 §5): the solver gives it up between two steps of its computations,
  * so no computation is cut midway; its reader answers with its key's contract and the reason `budget`.
  */
 export class DemandExhausted extends Error {
@@ -379,8 +379,9 @@ export class WorkLedger {
 
   /**
    * #1323: `shared` for a generator, the demands it yields and what they run included: a read made for a group's
-   * provenance counts to the total and never to the decision that asked (r4.349). While it runs the asker's `own`
-   * stands where it began, so no allowance is spent or checked by it; inside another shared build it is that build's.
+   * provenance counts to the total and never to the decision that asked
+   * (docs/specifications/type-inference-accepted-record.md#r4-349). While it runs the asker's `own` stands where it
+   * began, so no allowance is spent or checked by it; inside another shared build it is that build's.
    */
   public *sharedSteps<Y, R, N>(steps: Generator<Y, R, N>): Generator<Y, R, N> {
     if (this.#sharing) return yield* steps;
@@ -503,7 +504,7 @@ let testAllowance: number | null = null;
 let testDemandAllowance: number | null = null;
 
 /**
- * A demand's allowance (S3 §5, TABLE B1): 256 × the nodes of the reading site's callable, or a test's
+ * A demand's allowance (S3 §5): 256 × the nodes of the reading site's callable, or a test's
  * (`withTestDemandAllowance`).
  */
 export function demandAllowanceFor(callableNodes: number): number {

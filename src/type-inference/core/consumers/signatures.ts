@@ -24,7 +24,7 @@ import { domainItems, keyLabel, ownSpan, quietKinds, receiverKinds, shownLabel }
 import { consume, writtenNumberUse } from "./operands.js";
 import { obligation, warning } from "./warnings.js";
 
-// C13 (TABLE C13, S3 §1): a built-in method's arguments and the elements it reads, against what its contract takes.
+// C13 (S3 §1): a built-in method's arguments and the elements it reads, against what its contract takes.
 
 type Takes = Extract<DiagnosticRule, { rule: "argument" }>["takes"];
 

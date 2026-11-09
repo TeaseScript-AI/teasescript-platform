@@ -274,7 +274,7 @@ export class FlowGraphBuilder {
   }
 
   /**
-   * F18 (TABLE r4.81 (1)): the nodes made from `first` on, a typed parse's or load's default, read the state at `call`,
+   * F18: the nodes made from `first` on, a typed parse's or load's default, read the state at `call`,
    * the node before its default runs.
    */
   public snapshotFrom(first: number, call: FlowNode): void {
