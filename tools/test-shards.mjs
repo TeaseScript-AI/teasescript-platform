@@ -8,20 +8,30 @@ import {
   testFilesAtOnce,
 } from "./costly-test-files.mjs";
 
-const seconds = (file) => costlyTestSeconds[file] ?? otherTestSeconds;
-const byCost = (a, b) => seconds(b) - seconds(a) || (a < b ? -1 : a > b ? 1 : 0);
+/** The measured weights `tools/costly-test-files.mjs` holds; a test passes fixed ones to pin the rule apart from them. */
+const MEASURED = {
+  costlyTestFiles,
+  costlyTestSeconds,
+  otherTestSeconds,
+  pretestSeconds,
+  testFilesAtOnce,
+};
+
+const secondsOf = (weights) => (file) =>
+  weights.costlyTestSeconds[file] ?? weights.otherTestSeconds;
 
 /** The seconds shard `index` of `count` spends before its tests: CI's last test job runs the pre-test checks first. */
-const startSeconds = (index, count) => (count > 1 && index === count ? pretestSeconds : 0);
+const startSeconds = (index, count, weights) =>
+  count > 1 && index === count ? weights.pretestSeconds : 0;
 
 /**
  * The compiled test files of shard `index` (1-based) of `count`, in the order the full suite runs them (the costly files
  * first, `costlyTestFiles`). Each shard runs `testFilesAtOnce` files at once, so the files go longest first, ties by
  * name, to the shard that has a file slot free soonest, the last shard's slots starting after the pre-test checks: the
  * shards then end close together (#1638: CI's test phase as parallel jobs). A file not in `costlyTestSeconds` counts
- * `otherTestSeconds`. Every file is in exactly one shard.
+ * `otherTestSeconds`. Every file is in exactly one shard. `weights` defaults to the measured ones (`MEASURED`).
  */
-export function shardFiles(files, index, count) {
+export function shardFiles(files, index, count, weights = MEASURED) {
   if (
     !Number.isInteger(count) ||
     count < 1 ||
@@ -30,8 +40,10 @@ export function shardFiles(files, index, count) {
     index > count
   )
     throw new Error(`no shard ${index} of ${count}`);
+  const seconds = secondsOf(weights);
+  const byCost = (a, b) => seconds(b) - seconds(a) || (a < b ? -1 : a > b ? 1 : 0);
   const slots = Array.from({ length: count }, (_, shard) =>
-    Array(testFilesAtOnce).fill(startSeconds(shard + 1, count)),
+    Array(weights.testFilesAtOnce).fill(startSeconds(shard + 1, count, weights)),
   );
   const mine = new Set();
   for (const file of [...files].sort(byCost)) {
@@ -43,8 +55,10 @@ export function shardFiles(files, index, count) {
     if (shard === index - 1) mine.add(file);
   }
   return [
-    ...costlyTestFiles.filter((file) => mine.has(file)),
-    ...[...files].sort().filter((file) => mine.has(file) && !costlyTestFiles.includes(file)),
+    ...weights.costlyTestFiles.filter((file) => mine.has(file)),
+    ...[...files]
+      .sort()
+      .filter((file) => mine.has(file) && !weights.costlyTestFiles.includes(file)),
   ];
 }
 
@@ -52,8 +66,9 @@ export function shardFiles(files, index, count) {
  * The estimated seconds until shard `index` of `count` ends, given its files: the pre-test checks it runs first, then
  * its files `testFilesAtOnce` at once in the order given, each starting when a slot frees.
  */
-export function shardSeconds(files, index, count) {
-  const slots = Array(testFilesAtOnce).fill(startSeconds(index, count));
+export function shardSeconds(files, index, count, weights = MEASURED) {
+  const seconds = secondsOf(weights);
+  const slots = Array(weights.testFilesAtOnce).fill(startSeconds(index, count, weights));
   for (const file of files) slots[slots.indexOf(Math.min(...slots))] += seconds(file);
   return Math.max(...slots);
 }

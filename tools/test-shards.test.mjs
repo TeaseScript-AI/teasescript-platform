@@ -121,15 +121,28 @@ test("the shards' estimated ends, the last after the pre-test checks, differ by 
 });
 
 test("the costliest files fill shard 1's slots, and the next starts in shard 2 after the pre-test checks", () => {
-  const costliest = costlyTestFiles.slice(0, testFilesAtOnce + 1);
-  assert.ok(pretestSeconds < costlyTestSeconds[costliest[testFilesAtOnce - 1]]);
-  assert.deepEqual(shardFiles(costliest, 1, 2), costliest.slice(0, testFilesAtOnce));
-  assert.deepEqual(shardFiles(costliest, 2, 2), costliest.slice(testFilesAtOnce));
+  // (fixed seconds, so the rule holds apart from the measured weights: a regeneration moves those, #2010)
+  const costliest = ["a.test.js", "b.test.js", "c.test.js", "d.test.js"];
+  const weights = {
+    costlyTestFiles: costliest,
+    costlyTestSeconds: { "a.test.js": 400, "b.test.js": 300, "c.test.js": 200, "d.test.js": 150 },
+    otherTestSeconds: 5,
+    pretestSeconds: 100,
+    testFilesAtOnce: 3,
+  };
+  assert.deepEqual(shardFiles(costliest, 1, 2, weights), costliest.slice(0, 3));
+  assert.deepEqual(shardFiles(costliest, 2, 2, weights), costliest.slice(3));
+  // (pre-test checks that outlast the third file's slot send the next file to shard 1)
+  const longPretest = { ...weights, pretestSeconds: 250 };
+  assert.deepEqual(shardFiles(costliest, 1, 2, longPretest), costliest);
+  assert.deepEqual(shardFiles(costliest, 2, 2, longPretest), []);
   // (small files take shard 1's free slots while shard 2 runs its pre-test checks: one more than its free slots, so that
   // the last would start in shard 2 without them)
-  const small = Array.from({ length: testFilesAtOnce }, (_, i) => `small-${i}.test.js`);
-  assert.ok(otherTestSeconds < pretestSeconds);
-  assert.deepEqual(shardFiles([costliest[0], ...small], 2, 2), []);
+  const small = Array.from({ length: 3 }, (_, i) => `small-${i}.test.js`);
+  assert.deepEqual(shardFiles([costliest[0], ...small], 2, 2, weights), []);
+  assert.deepEqual(shardFiles([costliest[0], ...small], 2, 2, { ...weights, pretestSeconds: 0 }), [
+    "small-2.test.js",
+  ]);
 });
 
 test("every file with seconds exists, costliest first; a type-core test file without them is named, not refused (#2088)", (t) => {
