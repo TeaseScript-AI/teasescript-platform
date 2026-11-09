@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { InstructionPlan } from "../../src/plan/model.js";
+import type { InstructionPlan } from "../../../src/plan/model.js";
 
 // The digests `tests/type-core/type-core-declared-escapes.test.ts` compares the head with main's recorded values by
 // (#2116's declared difference under #2080): pure, so the same functions read main's tree when the values are recorded.
