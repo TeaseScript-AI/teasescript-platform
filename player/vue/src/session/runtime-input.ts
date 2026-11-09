@@ -1,6 +1,5 @@
 import type { DebugAnswerInput } from "../../../debug/debug-export.js";
 import type { OpArgs, OpResult, SessionOp } from "../../../engine-bridge/op-catalogue.js";
-import type { PlayerRuntimeControlResult } from "../../../runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../../runtime/runtime-view.js";
 import type { SectionWork } from "./useRuntimeSceneClock.js";
 
@@ -12,8 +11,8 @@ import type { SectionWork } from "./useRuntimeSceneClock.js";
  * replaced, stopped or unmounted session never opens its tab or receives its answer.
  */
 
-/** What an input op replies: the engine's outcome of the answer. */
-export type InputOutcome = PlayerRuntimeControlResult["outcome"];
+/** What an input op replies (the catalogue's result): the engine's outcome, or `staleAction` for another action. */
+export type InputOutcome = NonNullable<OpResult<InputOp>>;
 
 /** What `send` resolves with when the section's session no longer owns the UI, or the host refused it as stopped. */
 export const RETIRED: unique symbol = Symbol("retired");
@@ -82,18 +81,22 @@ export type InputResult =
   | { readonly kind: "unanswered" }
   | { readonly kind: "answered"; readonly session: PlayerSession; readonly outcome: InputOutcome };
 
+/** `answer`'s arguments after `op`: `args` for an op with arguments besides `actionId` and `input`, else none. */
+type AnswerRest<O extends InputOp> =
+  Record<never, never> extends Omit<InputArgs<O>, "input">
+    ? [args?: undefined, input?: DebugAnswerInput | null]
+    : [args: () => Omit<InputArgs<O>, "input">, input?: DebugAnswerInput | null];
+
 /**
  * The op `op`, with `args` read when the intent runs, after the observation, as today's operation read them; `input`
- * added when given. No `args` for an op whose arguments are only `actionId` and `input`.
+ * added when given. An op with arguments besides `actionId` and `input` requires `args`; one without takes none.
  */
-const answer = <O extends InputOp>(
-  op: O,
-  // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- EVIDENCE: invariant: the default is for an op whose arguments are only `actionId` and `input`, as each call without `args` is.
-  args: () => Omit<InputArgs<O>, "input"> = () => ({}) as Omit<InputArgs<O>, "input">,
-  input?: DebugAnswerInput | null,
-): InputIntent => {
-  // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- EVIDENCE: invariant: `op`'s arguments, which TypeScript does not see in `args()` and `input` for a generic `O`.
-  return () => ({ op, args: input === undefined ? args() : { ...args(), input } }) as InputAnswer;
+const answer = <O extends InputOp>(op: O, ...[args, input]: AnswerRest<O>): InputIntent => {
+  return () => {
+    const fields = args === undefined ? {} : args();
+    // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- EVIDENCE: invariant: `op`'s arguments, which TypeScript does not see in `args()` and `input` for a generic `O`.
+    return { op, args: input === undefined ? fields : { ...fields, input } } as InputAnswer;
+  };
 };
 
 /** The op each of the Player's controls answers with; `input` is how the player answered, which the recording keeps. */
@@ -167,9 +170,10 @@ export async function runInput(
       return { kind: "unanswered" } as const;
     }
     // `chosen` pairs its op with its arguments but `actionId` (`InputAnswer`), which TypeScript does not see once
-    // inserted. EVIDENCE: invariant: the pair `chosen` holds, with the presented action's ID.
+    // inserted; the assertion drops only that pairing, and the result stays the input ops' own (`OpResult<InputOp>`).
+    // EVIDENCE: invariant: the pair `chosen` holds, with the presented action's ID.
     const outcome = await (
-      input as { send(op: InputOp, args: unknown): Promise<InputOutcome | null | typeof RETIRED> }
+      input as { send(op: InputOp, args: unknown): Promise<OpResult<InputOp> | typeof RETIRED> }
     ).send(chosen.op, { ...chosen.args, actionId: presented });
     chosen.settle?.(outcome === RETIRED ? null : outcome);
     if (outcome === RETIRED || !input.owned()) return { kind: "retired" } as const;
