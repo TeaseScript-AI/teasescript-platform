@@ -578,9 +578,17 @@ function bindingsOf(file, text, resolver) {
       });
     }
   }
-  // every other module reference is refused by name, one per line: an `import` keyword (not `import.meta`) or a
-  // `require` identifier outside a compared statement, a triple-slash reference directive, or a comment (JSDoc
-  // included) holding `import(` or `@import`
+  out.push(...otherReferencesOf(source, text, compared));
+  return out;
+}
+
+/**
+ * Every other module reference of `source` (its `text`), refused by name, one per line, as a `reference` whose target
+ * is `refused`: an `import` keyword (not `import.meta`) or a `require` identifier outside the `compared` statements, a
+ * triple-slash reference directive, or a comment (JSDoc included) holding `import(` or `@import`.
+ */
+function otherReferencesOf(source, text, compared) {
+  const out = [];
   const lines = new Set();
   const refuse = (at, shown, what) => {
     const line = source.getLineAndCharacterOfPosition(at).line + 1;
