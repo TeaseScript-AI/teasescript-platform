@@ -343,11 +343,12 @@ for (const retiring of ["the initial record", "an activation's run"] as const)
       transcriptEntries: [],
     } as unknown as PlayerSession;
     const { bridge, released } = fakeBridge(view);
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner calls only `captureExport`, `releaseRecording` and `exportPrepare` of a bridge, which this fake has.
+    const typed = bridge as unknown as PlayerBridge;
     let reading = false;
     const owner = useExportCandidate({
       session: shallowRef(view),
-      // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner calls only `captureExport`, `releaseRecording` and `exportPrepare` of a bridge, which this fake has.
-      bridge: () => bridge as unknown as PlayerBridge,
+      bridge: () => typed,
       activation: run,
       halting: ref(false),
       build: { commit: null, dirty: null, mode: "development", appVersion: "0" },
@@ -397,11 +398,12 @@ test("an export waiting for its activation's stop to show settles when the activ
     releaseRecording: async () => {},
     exportPrepare: async () => ({}),
   };
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner calls only `captureExport`, `releaseRecording` and `exportPrepare` of a bridge, which this fake has.
+  const typed = bridge as unknown as PlayerBridge;
   const halting = ref(true);
   const owner = useExportCandidate({
     session: shallowRef(view),
-    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner calls only `captureExport`, `releaseRecording` and `exportPrepare` of a bridge, which this fake has.
-    bridge: () => bridge as unknown as PlayerBridge,
+    bridge: () => typed,
     activation: run,
     halting,
     build: { commit: null, dirty: null, mode: "development", appVersion: "0" },
