@@ -915,8 +915,8 @@ export interface StopRunSide {
  * unwitnessed cell is unresolved evidence):
  * - `open`: a run where the natural plan fails at runtime and the stopped plan runs to its end; with no natural plan (a
  *   compile error the stop turned into runtime checks), a run in a single-file unit that executes the error's own store
- *   instruction (the innermost holding the error's site) and passes it: it ends, or it fails elsewhere with no loop round
- *   in its trace;
+ *   instruction (the innermost holding the error's site; a store's absent property, C5c, at the store, not the object the
+ *   diagnostic names) and passes it: it ends, or it fails elsewhere with no loop round in its trace;
  * - `later`: a run where both fail at different sites and the stopped run executed the natural failure's exact
  *   instruction and passed it, in a single-file unit with no loop round in its trace (the instruction trace,
  *   `docs/RUNTIME.md#instruction-trace`);
@@ -950,8 +950,8 @@ export interface StopRuns {
    */
   readonly untested?: readonly string[];
   /**
-   * With no natural plan: each error of the natural compile, by its code and site, and what the stopped analysis checks
-   * there (`typed`, `unknown`, or `none`): the site rule of #2098's ledger.
+   * With no natural plan: each error of the natural compile, by its code and site (a store's absent property at the
+   * store), and what the stopped analysis checks there (`typed`, `unknown`, or `none`): the site rule of #2098's ledger.
    */
   readonly sites: readonly {
     readonly code: string;
@@ -1038,26 +1038,35 @@ export function stopRuns(
   if (want === null) {
     // (a compile error the stop turned into runtime checks: open only where a run executed the error's own store
     // instruction and passed it)
-    const errors = natural.result.diagnostics
-      .filter((d) => d.severity === "error")
-      .map((d) => {
-        // (a check of the error's own file whose site holds the error's: offsets are each file's own)
-        const site = compiledSite(d, stopped.answers);
-        const at = stopped.answers.checks.filter((c) => inSite(site, c.site));
-        const checks =
-          at.length === 0
-            ? "none"
-            : at.some((c) => !c.against.includes("unknown"))
-              ? "typed"
-              : "unknown";
-        return {
-          code: d.code,
-          site,
-          key: siteKey(site),
-          checks,
-          own: instructionHolding(got, site),
-        };
-      });
+    // (C5c reports a store's absent property at the object that lacks it, an explanation: the error is the store's,
+    // `rule.store`, the instruction a run must pass; several stores lacking properties of one object share its site, each
+    // its own error; another error of the same code at that site is read at it too)
+    const operations = new Map<string, SourceSite[]>();
+    for (const d of natural.answers.diagnostics) {
+      if (d.class !== "compile-error") continue;
+      const key = `${d.code} ${siteKey(d.site)}`;
+      const at =
+        "rule" in d && d.rule.rule === "absent" && d.rule.store !== null ? d.rule.store : d.site;
+      operations.set(key, [...(operations.get(key) ?? []), at]);
+    }
+    // (each error once, by its code and the site it is read at: two stores of one object are two errors)
+    const unique = new Map<string, { readonly code: string; readonly site: SourceSite }>();
+    for (const d of natural.result.diagnostics.filter((each) => each.severity === "error")) {
+      // (a check of the error's own file whose site holds the error's: offsets are each file's own)
+      const shown = compiledSite(d, stopped.answers);
+      for (const site of operations.get(`${d.code} ${siteKey(shown)}`) ?? [shown])
+        unique.set(`${d.code} ${siteKey(site)}`, { code: d.code, site });
+    }
+    const errors = [...unique.values()].map(({ code, site }) => {
+      const at = stopped.answers.checks.filter((c) => inSite(site, c.site));
+      const checks =
+        at.length === 0
+          ? "none"
+          : at.some((c) => !c.against.includes("unknown"))
+            ? "typed"
+            : "unknown";
+      return { code, site, key: siteKey(site), checks, own: instructionHolding(got, site) };
+    });
     const sites = errors.map(({ code, key, checks }) => ({ code, site: key, checks }));
     if (single)
       for (const each of pool) {

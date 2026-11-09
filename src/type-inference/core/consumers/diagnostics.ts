@@ -16,7 +16,7 @@ import { anyRecorded, keptTypes } from "./kinds.js";
  * The expression kinds whose presence the core proves (`present`): each reads nothing that may be absent itself, and
  * `expressionParts` gives every operand it evaluates; a property's read is proved by its own facts. An index or a key
  * read, a call, and every kind not listed are unproved, so a fix there gives words
- * (docs/specifications/type-inference-accepted-record.md#r4-162).
+ * (docs/specifications/type-inference-accepted-record/contract.md#r4-162).
  */
 const PRESENT_KINDS: ReadonlySet<Expression["kind"]> = new Set<Expression["kind"]>([
   "booleanLiteral",
@@ -158,13 +158,13 @@ function keptChoice(
 
 /**
  * Whether every value a fix's form reads where the diagnostic at `site` sits is there when the script runs (`Presence`,
- * docs/specifications/type-inference-accepted-record.md#r4-162): its subject's, a member's receiver's, an operation's
- * operands', by a walk of their whole syntax, an ask's, a `say`'s and a button's operands too (`expressionParts`, Codex
- * r12, r13), one part at a time on its own stack, however wide: proved only through the kinds `PRESENT_KINDS` lists, so
- * not where any of them reads an element by its index or a dict's value by its key, calls a function or a method (whose
- * own reads are not followed), is of a kind not listed, or reads a property or a selection the core finds may be
- * absent; and every value it evaluates, at every depth, a subject, a receiver or an operand, proved non-null (Astra r2,
- * r3 on #1296); unproved where a site has no expression.
+ * docs/specifications/type-inference-accepted-record/contract.md#r4-162): its subject's, a member's receiver's, an
+ * operation's operands', by a walk of their whole syntax, an ask's, a `say`'s and a button's operands too
+ * (`expressionParts`, Codex r12, r13), one part at a time on its own stack, however wide: proved only through the kinds
+ * `PRESENT_KINDS` lists, so not where any of them reads an element by its index or a dict's value by its key, calls a
+ * function or a method (whose own reads are not followed), is of a kind not listed, or reads a property or a selection
+ * the core finds may be absent; and every value it evaluates, at every depth, a subject, a receiver or an operand,
+ * proved non-null (Astra r2, r3 on #1296); unproved where a site has no expression.
  */
 function present(walk: Consumers, site: SourceSite, rule: DiagnosticRule): Presence {
   const { program } = walk.pass;
@@ -229,9 +229,9 @@ function readsAbsent(walk: Consumers, root: Expression, site: SourceSite): boole
     }
     program.work.charge("checks");
     // (only a kind whose every operand `expressionParts` gives, and which reads nothing absent itself, proves presence;
-    // any other kind, a new one too, is unproved: docs/specifications/type-inference-accepted-record.md#r4-162, the
-    // lead after Codex r13; and every value the walk evaluates, at every depth, proved non-null, the lead after Astra
-    // r2 and r3)
+    // any other kind, a new one too, is unproved:
+    // docs/specifications/type-inference-accepted-record/contract.md#r4-162, the lead after Codex r13; and every value
+    // the walk evaluates, at every depth, proved non-null, the lead after Astra r2 and r3)
     if (
       !PRESENT_KINDS.has(expression.kind) ||
       mayBeNull(walk, expression, site) ||

@@ -132,7 +132,8 @@ function landingPath(walk: Consumers, node: Landing): readonly string[] {
  * ADR 0021 1.3, A8: a literal's element of another type than the earliest element's (`Admission.literalElements`): an
  * error at the offending element, also where a copy brought it into a property and the copies meet there (A2); where
  * they were not found to meet (a cycle of copies that adds or takes steps,
- * docs/specifications/type-inference-accepted-record.md#r4-154), at the property's first direct read or store.
+ * docs/specifications/type-inference-accepted-record/admission.md#r4-154), at the property's first direct read or
+ * store.
  */
 export function mixed(
   walk: Consumers,

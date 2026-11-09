@@ -380,8 +380,8 @@ export class WorkLedger {
   /**
    * #1323: `shared` for a generator, the demands it yields and what they run included: a read made for a group's
    * provenance counts to the total and never to the decision that asked
-   * (docs/specifications/type-inference-accepted-record.md#r4-349). While it runs the asker's `own` stands where it
-   * began, so no allowance is spent or checked by it; inside another shared build it is that build's.
+   * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-349). While it runs the asker's `own`
+   * stands where it began, so no allowance is spent or checked by it; inside another shared build it is that build's.
    */
   public *sharedSteps<Y, R, N>(steps: Generator<Y, R, N>): Generator<Y, R, N> {
     if (this.#sharing) return yield* steps;

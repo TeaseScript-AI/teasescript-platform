@@ -8,7 +8,7 @@ import type {
   BinaryExpression,
 } from "../../../ast.js";
 import { type TypePlan, type TypeCheckPlan, type TypePropertyPlan } from "../../../plan/model.js";
-import { runCompileTask, type CompileTask, compileChild } from "../../../compiler/continuation.js";
+import { runCompileTask, type CompileTask, compileChild } from "../../../compile-continuation.js";
 import { type StaticType, UNKNOWN_TYPE, union } from "../../../static-types.js";
 import { typeFromAnnotation } from "../../../static-types/annotations.js";
 import { typePlan } from "../../../type-plans.js";

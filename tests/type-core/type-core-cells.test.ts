@@ -2787,7 +2787,8 @@ test("admission decides from the start value, keeps written copies, rejects ever
       () => ["valid"],
       // (reversed, its deepest paths' decisions cost depth × copies past their allowance, G6 in #1319's design-round
       // list: one restart, then a stop in it stops the analysis,
-      // docs/specifications/type-inference-accepted-record.md#r4-183; the G6 repair returns it to `valid`)
+      // docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183; the G6 repair returns it to
+      // `valid`)
       (at) => [
         "warning-runtime-check",
         `budget not-checked-budget @${at("[")}`,
@@ -3714,13 +3715,13 @@ function a2Record(source: string, reversed: boolean): string[] {
 }
 
 /**
- * A2's witnesses (docs/specifications/type-inference-accepted-record.md#r4-154), their exact records in both orders of
- * the copy and the object and in both analysis orders: per form, a place copied with its setup and an object holding
- * another type at one property, stored into one place and as a list's elements, unread. Through whole copies (Codex
- * r1's cycle of whole copies, a cycle fed from outside, a copy into a property, a projection, nested objects, a written
- * property beside an inferred one, a property that may be null) the second errs where it meets the place or the list.
- * Through a cycle of copies that adds or takes steps (Codex r2's and r3's projections and composed projections, r2's
- * and r5's self-grafts) their meeting is beyond the bound (design §2.1.2): valid unread; read, the error is at the
+ * A2's witnesses (docs/specifications/type-inference-accepted-record/admission.md#r4-154), their exact records in both
+ * orders of the copy and the object and in both analysis orders: per form, a place copied with its setup and an object
+ * holding another type at one property, stored into one place and as a list's elements, unread. Through whole copies
+ * (Codex r1's cycle of whole copies, a cycle fed from outside, a copy into a property, a projection, nested objects, a
+ * written property beside an inferred one, a property that may be null) the second errs where it meets the place or the
+ * list. Through a cycle of copies that adds or takes steps (Codex r2's and r3's projections and composed projections,
+ * r2's and r5's self-grafts) their meeting is beyond the bound (design §2.1.2): valid unread; read, the error is at the
  * first read and names the second.
  */
 test("A2's witnesses: whole copies err where they meet the place or the list, read or not; a cycle that adds or takes steps errs where it is read, in both orders", () => {

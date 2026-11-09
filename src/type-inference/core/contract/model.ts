@@ -20,7 +20,7 @@ export interface HolderReference {
 
 /**
  * A source of a mark: one holder per source identity and projection (§8,
- * docs/specifications/type-inference-accepted-record.md#r4-23).
+ * docs/specifications/type-inference-accepted-record/sharing.md#r4-23).
  */
 export interface Holder {
   readonly id: string;
@@ -48,7 +48,7 @@ export interface ReferencesByStep {
 
 /**
  * A source's identity, with the guard bit and the mark holder beside it, never in it (§8,
- * docs/specifications/type-inference-accepted-record.md#r4-15).
+ * docs/specifications/type-inference-accepted-record/sharing.md#r4-15).
  */
 export interface Identity {
   readonly id: string;
@@ -171,7 +171,7 @@ export interface EntryGroup {
  * A read below a layer is answered once per layer and path (`layerSupport`, `layerDemand`), from its own
  * sources and its parent's and joins' answers (#1466); where the read's layers are one layer whose summary would be one
  * source's answer alone, the read asks that source's own demand instead, a reference, never a summary made
- * (`singleSource`, docs/specifications/type-inference-accepted-record.md#r4-251).
+ * (`singleSource`, docs/specifications/type-inference-accepted-record/sharing.md#r4-251).
  */
 export interface SubLayer {
   /** Its own sources by their first step. */

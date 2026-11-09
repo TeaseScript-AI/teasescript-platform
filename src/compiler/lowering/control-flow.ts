@@ -8,7 +8,7 @@ import type {
   LoopStartInstruction,
   TemporaryExpressionPlan,
 } from "../../plan/model.js";
-import { compileChild, type CompileTask } from "../continuation.js";
+import { compileChild, type CompileTask } from "../../compile-continuation.js";
 import type { InstructionCompiler, LoopStatement, LoweredExpression } from "./compiler.js";
 import {
   unwrapParentheses,

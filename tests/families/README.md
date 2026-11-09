@@ -394,7 +394,8 @@ It claims only what it demonstrates (#2142, under docs/DEVELOPMENT-WORKFLOW.md#r
 round put it: positive escapes are the blockers; an unwitnessed cell is unresolved evidence.
 - `open`: a run where the natural plan fails at runtime and the stopped plan runs to its end. With no natural plan (a
   compile error the stop turned into runtime checks): a run in a single-file unit that executes the error's own store
-  instruction, the innermost one holding the error's site, and passes it.
+  instruction, the innermost one holding the error's site, and passes it. A store's absent property (C5c) is read at the
+  store, not at the object the diagnostic names.
 - `later`: a run where both fail at different sites, and the stopped run executed the natural failure's exact
   instruction and passed it, in a single-file unit with no loop round in its trace (`docs/RUNTIME.md#instruction-trace`).
 - `closed`: the two plans are equal. Nothing else is `closed`, and nothing without a natural plan ever is.

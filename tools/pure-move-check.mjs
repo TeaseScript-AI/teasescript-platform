@@ -21,8 +21,8 @@
 // or as a declared line: an entry of the `--declare` file, a JSON array of `{ "file", "side": "added" | "removed",
 // "line", "reason" }` (the reason one clause; the file named as it is on that side), for a path-keyed entry (a test
 // table's key, an allowance, a comment citing a moved file's path) or a line no form admits (a signature the formatter
-// rewrapped after `export` was added). A declared line must be in the change and not marked moved, and every
-// declaration must match one; each is printed with its reason. Declarations come from that file alone, and no flag
+// rewrapped after `export` was added). A declared line must be in the change and not marked moved (a line of a side
+// that is no regular file, below, counts as unmoved), and every declaration must match one; each is printed with its reason. Declarations come from that file alone, and no flag
 // admits a line class.
 //
 // And a pure move keeps every import's binding: over the change's files, the set of bindings before equals the set
@@ -51,7 +51,11 @@
 // same way, one per line: an `import` keyword outside those statements other than `import.meta` (a dynamic or type
 // import), a `require` identifier outside them, a triple-slash reference directive, or a comment (JSDoc included)
 // holding `import(` or `@import`. A changed file of any other type, `.vue` and `.html` among them, is outside the rule:
-// the report lists it as `not compared (unparsed)`, and `vue-tsc` and the move's compiler run are its witness.
+// the report lists it as `not compared (unparsed)`, and `vue-tsc` and the move's compiler run are its witness. A side
+// that is no regular file (a gitlink, mode 160000, or a symbolic link, 120000), whose content is no file's text, is
+// never read: it gives no bindings, the resolver sees no such file (a linked `tsconfig.json` or `package.json` is
+// none), each of its added or removed lines is unadmitted unless declared, whether Git marks it moved or it is
+// whitespace (a submodule's new commit is no move), and the report lists it as `not compared (not a regular file)`.
 //
 // The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines, the
 // bindings differing and the refused specifiers.
@@ -75,6 +79,9 @@ const ROOT = "/tree/";
 export const RESIDUAL =
   "Git's move detection is heuristic: a moved block below its size threshold (20 alphanumeric characters) reads as added and removed. Read such a failure; it is not overridden.";
 const FORMS = ["import", "export", "whitespace", "header comment"];
+
+/** Whether a change's side is a regular file (mode 100644 or 100755), whose blob is a file's text. */
+const regular = (file, mode) => file !== null && (mode === "100644" || mode === "100755");
 
 /** Why the check cannot be trusted: exit 2. */
 class CannotRun extends Error {}
@@ -207,8 +214,9 @@ function declarationsOf(path) {
 
 /**
  * Each added or removed line of `files` (the changes `movedLinesOf` reads for `mergeBase`..`head`) that Git does not
- * mark moved, with the form that admits it or `null`: `[entry, form, reason]`, `entry` `{ side, file, row, shape,
- * added }`. `declaredFor(entry)` gives a declared line's reason, which comes before the forms. Also the moved lines'
+ * mark moved, and each line of a side that is no regular file whether Git marks it moved or not, with the form that
+ * admits it or `null` (only a declaration admits the latter): `[entry, form, reason]`, `entry` `{ side, file, row,
+ * shape, added, irregular }`. `declaredFor(entry)` gives a declared line's reason, which comes before the forms. Also the moved lines'
  * counts. Shared with `structure-report.mjs --moved`, so the forms have one home.
  */
 export function verdictsOf(
@@ -230,10 +238,21 @@ export function verdictsOf(
   const rows = [];
   for (const change of files) {
     if (change.binary) continue;
-    const before = change.old === null ? null : shapeOf(change.old, blob(mergeBase, change.old));
-    const after = change.file === null ? null : shapeOf(change.file, blob(head, change.file));
+    const before = regular(change.old, change.oldMode)
+      ? shapeOf(change.old, blob(mergeBase, change.old))
+      : null;
+    const after = regular(change.file, change.newMode)
+      ? shapeOf(change.file, blob(head, change.file))
+      : null;
+    // a side that is no regular file: each of its lines is judged, moved or not, and only a declaration admits it
+    const irregular = {
+      removed: change.old !== null && !regular(change.old, change.oldMode),
+      added: change.file !== null && !regular(change.file, change.newMode),
+    };
     for (const row of change.removedLines) {
-      if (row.moved) moved.removed += 1;
+      if (irregular.removed)
+        rows.push({ side: "removed", file: change.old, row, shape: null, irregular: true });
+      else if (row.moved) moved.removed += 1;
       else {
         rows.push({ side: "removed", file: change.old, row, shape: before, added: false });
         if (before?.declarationStarts.get(row.line)?.exported === false) {
@@ -243,7 +262,9 @@ export function verdictsOf(
       }
     }
     for (const row of change.addedLines) {
-      if (row.moved) moved.added += 1;
+      if (irregular.added)
+        rows.push({ side: "added", file: change.file, row, shape: null, irregular: true });
+      else if (row.moved) moved.added += 1;
       else rows.push({ side: "added", file: change.file, row, shape: after, added: change.added });
     }
   }
@@ -265,6 +286,7 @@ export function verdictsOf(
   for (const entry of rows) {
     const reason = declaredFor(entry);
     if (reason !== null) verdicts.push([entry, "declared", reason]);
+    else if (entry.irregular) verdicts.push([entry, null]);
     else if (entry.shape?.importLines.has(entry.row.line)) verdicts.push([entry, "import"]);
     else if (entry.row.text.trim() === "") verdicts.push([entry, "whitespace"]);
     else if (
@@ -670,8 +692,15 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
     target.type === "file"
       ? `file:${family.get(target.path) ?? target.path}`
       : `${target.type}:${target.path}`;
+  // a side's files: its tree's regular files, the only ones the resolver reads (a symbolic link's blob is a path, a
+  // gitlink names a commit)
   const listed = (ref) =>
-    new Set(git("ls-tree", "-r", "--name-only", ref).split("\n").filter(Boolean));
+    new Set(
+      git("ls-tree", "-r", "-z", "--full-tree", ref)
+        .split("\0")
+        .filter((entry) => regular(entry, entry.slice(0, entry.indexOf(" "))))
+        .map((entry) => entry.slice(entry.indexOf("\t") + 1)),
+    );
   const trees = { before: listed(mergeBase), after: listed(head) };
   // each side's folders, for the resolver's `directoryExists`
   const foldersOf = (paths) => {
@@ -691,11 +720,11 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
   const refusals = new Map();
   for (const change of files) {
     if (change.binary) continue;
-    for (const [side, ref, file] of [
-      ["before", mergeBase, change.old],
-      ["after", head, change.file],
+    for (const [side, ref, file, mode] of [
+      ["before", mergeBase, change.old, change.oldMode],
+      ["after", head, change.file, change.newMode],
     ]) {
-      if (file === null) continue;
+      if (!regular(file, mode)) continue;
       const text = git("cat-file", "blob", `${ref}:${file}`);
       for (const binding of bindingsOf(file, text, resolvers[side])) {
         if (binding.target.type === "missing" || binding.target.type === "refused") {
@@ -739,7 +768,7 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
 
 /**
  * The check of the change from the merge base of `base` and `HEAD`: `{ mergeBase, unadmitted, declared, stale, refused,
- * covered, unparsed, bindings, renames, counts }`.
+ * covered, unparsed, irregular, bindings, renames, counts }`.
  */
 export function checkMove(
   base,
@@ -761,6 +790,15 @@ export function checkMove(
         ? `${change.old} → ${change.file}`
         : (change.file ?? change.old),
     );
+  // each side that is no regular file, never read
+  const irregular = files.flatMap((change) =>
+    [
+      [change.old, change.oldMode],
+      [change.file, change.newMode],
+    ]
+      .filter(([file, mode]) => file !== null && !regular(file, mode))
+      .map(([file, mode]) => `${file} (${mode})`),
+  );
   const declarations = declare === null ? [] : declarationsOf(declare);
   const used = new Set();
   const declaredFor = (entry) => {
@@ -829,6 +867,7 @@ export function checkMove(
     refused,
     covered,
     unparsed,
+    irregular,
     bindings,
     renames: renames !== null,
     counts,
@@ -845,6 +884,7 @@ export function reportOf(base, result) {
     refused,
     covered,
     unparsed,
+    irregular,
     bindings,
     renames,
     counts,
@@ -864,7 +904,8 @@ export function reportOf(base, result) {
     out.push(
       `  refused: ${r.file}:${r.line} (${r.side}) "${r.specifier}": ${r.reason}; declare it, the move's compiler run its witness`,
     );
-  for (const name of unparsed) out.push(`  not compared (unparsed): ${name}`);
+  for (const name of new Set(unparsed)) out.push(`  not compared (unparsed): ${name}`);
+  for (const side of new Set(irregular)) out.push(`  not compared (not a regular file): ${side}`);
   for (const b of bindings.differing)
     out.push(
       `  binding only ${b.side}: ${b.file}:${b.line} ${b.kind} from "${b.specifier}": ${b.typeOnly ? "type " : ""}${b.name || "(side effect)"}${b.as !== b.name ? ` as ${b.as}` : ""}`,

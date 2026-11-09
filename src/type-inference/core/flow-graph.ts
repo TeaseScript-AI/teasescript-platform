@@ -1,5 +1,5 @@
 import type { BinaryExpression, Block, CallExpression, Expression, Statement } from "../../ast.js";
-import { compileChild, runCompileTask, type CompileTask } from "../../compiler/continuation.js";
+import { compileChild, runCompileTask, type CompileTask } from "../../compile-continuation.js";
 import { sessionDeclarations } from "../../project-globals.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { blockReach, recursion } from "./flow-graph/callables.js";

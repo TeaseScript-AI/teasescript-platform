@@ -69,8 +69,8 @@ export function elementOf(
 }
 
 /**
- * A written type a fix names (docs/specifications/type-inference-accepted-record.md#r4-171): a form at a type's
- * position, which reads nothing and holds no author's text; `null` where it is none.
+ * A written type a fix names (docs/specifications/type-inference-accepted-record/contract.md#r4-171): a form at a
+ * type's position, which reads nothing and holds no author's text; `null` where it is none.
  */
 export function typeAt(type: string, diagnosed: Diagnosed): string | null {
   return codeAt(

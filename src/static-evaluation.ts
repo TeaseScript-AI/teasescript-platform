@@ -7,7 +7,7 @@ import {
 } from "./angle.js";
 import type { CallExpression, Expression, Identifier, Program } from "./ast.js";
 import type { TypePlan } from "./plan/model.js";
-import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
+import { runCompileTask, compileChild, type CompileTask } from "./compile-continuation.js";
 import { CONVERSIONS, fitsDefault, isConversion } from "./conversions.js";
 import {
   addDurations,

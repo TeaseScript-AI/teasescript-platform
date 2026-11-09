@@ -907,7 +907,7 @@ test("a stop's runs read #2116's final witness closed on main at demand 64, and 
   }
 });
 
-test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, part, cap, ancestor, file and loop cases stay unwitnessed, two genuine escapes stay open (#2080, Codex r3 on #2142)", () => {
+test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, part, cap, ancestor, file and loop cases stay unwitnessed, a store's absent property is read at the store, and a genuine escape stays open (#2080, Codex r3 on #2142)", () => {
   const unit = (source: string) => [{ path: "main.tease", source }];
   const loosened = (type: TypeCheckPlan["type"]): TypeCheckPlan["type"] =>
     type.kind === "list" && type.element?.kind === "list"
@@ -1030,7 +1030,8 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
         "unwitnessed",
         `${name} (${mode.name})`,
       );
-  // (the two campaign items Codex r3 confirmed as genuine escapes: a store the natural compile rejects, reached and passed)
+  // (the two campaign items Codex r3 took for genuine escapes: C5c reports a store's absent property at the object that
+  // lacks it, which every run passes, while every run fails at the store itself, TSR017; read at the store, unwitnessed)
   const controls = [
     {
       mode: HELD_MODES[3]!,
@@ -1048,7 +1049,60 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
   for (const { mode, source, globals } of controls) {
     const found = stopRuns(unit(source), globals, (make) => mode.run(make), 16);
     assert.equal(found.natural.plan, false, source);
-    assert.equal(found.kind, "open", source);
+    assert.equal(found.kind, "unwitnessed", source);
+  }
+  // (a campaign item with both: an absent property's store and a store the stop moved to a check against `unknown`,
+  // neither passed; `all:new-cases-3::graph/899`)
+  const both = stopRuns(
+    unit(
+      'let typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nc=c\nc=b\nb=b\nlet out=c\nexit\n',
+    ),
+    ["hostValue", "hostOther", "hostInit"],
+    (make) => HELD_MODES[2]!.run(make),
+    64,
+  );
+  assert.deepEqual(
+    both.sites.map(({ code, site }) => `${code} ${site}`),
+    ["TSV043 0:155:158", "TSV041 0:167:168"],
+  );
+  assert.equal(both.kind, "unwitnessed");
+  // (two stores lacking properties of one object share its site, each its own error: with the first store's
+  // `requireExisting` dropped, a run passes it and fails at the second, so the first's escape is open; Codex r1 on #2185)
+  for (const mode of HELD_MODES) {
+    let dropped = false;
+    const found = stopRuns(
+      unit("let root={x:1}\nroot.q=2\nroot.z=3\nexit\n"),
+      ["hostValue"],
+      (make) => mode.run(make),
+      16,
+      (plan) => ({
+        ...plan,
+        instructions: plan.instructions.map((instruction) => {
+          if (dropped || instruction.kind !== "assign" || instruction.requireExisting !== true)
+            return instruction;
+          dropped = true;
+          const { requireExisting: _, ...kept } = instruction;
+          return kept;
+        }),
+      }),
+    );
+    assert.deepEqual(
+      found.sites.map(({ code, site }) => `${code} ${site}`),
+      ["TSV043 0:15:21", "TSV043 0:24:30"],
+      mode.name,
+    );
+    assert.equal(found.kind, "open", mode.name);
+  }
+  // (a genuine escape: the stop's plan stores a text the natural compile rejects, under a guard the pool's boolean takes)
+  for (const mode of HELD_MODES) {
+    const found = stopRuns(
+      unit('let n = 1\nif hostValue is boolean { n = "bad" }\nexit\n'),
+      ["hostValue"],
+      (make) => mode.run(make),
+      16,
+    );
+    assert.equal(found.natural.plan, false, mode.name);
+    assert.equal(found.kind, "open", mode.name);
   }
   // (one of the nine `later` campaign items: the stopped run passes the store the natural plan rejects and fails at the
   // loop's own start, which takes no round)

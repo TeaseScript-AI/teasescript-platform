@@ -927,8 +927,8 @@ function marksAt(answers: Answers, site: EnclosingCase["site"], target: string):
 /**
  * #1440: a store at or below a stop the source leaves unproved (`EnclosingCase.certified`) keeps its mark, its type
  * undecided, beside no requirement; so does every store into an inferred place before admission settled (#1252,
- * docs/specifications/type-inference-accepted-record.md#r4-135: the fresh pass decides no inferred place). Nothing such
- * a store owes is invented.
+ * docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-135: the fresh pass decides no inferred
+ * place). Nothing such a store owes is invented.
  */
 function unprovedProblems(
   answers: Answers,

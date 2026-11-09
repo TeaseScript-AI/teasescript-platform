@@ -166,10 +166,11 @@ test("every component is solved alike from each member as the entry and in eithe
 });
 
 /**
- * #1466 (docs/specifications/type-inference-accepted-record.md#r4-227): a layer's summary is a demand named by its
- * layer's origin and the path (`protoLayer|alias|<place>||<path>`, `protoLayer|projected|<place>|<projection>|<path>`
- * as their texts), never by a number its pass allocated: Astra's B1 witness and sibling, and Sol's copy cycles through
- * a list element, of nested copies and below a projected prefix, each a component holding one.
+ * #1466 (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-227): a layer's summary is a demand
+ * named by its layer's origin and the path (`protoLayer|alias|<place>||<path>`,
+ * `protoLayer|projected|<place>|<projection>|<path>` as their texts), never by a number its pass allocated: Astra's B1
+ * witness and sibling, and Sol's copy cycles through a list element, of nested copies and below a projected prefix,
+ * each a component holding one.
  */
 const LAYER_CYCLES: readonly string[] = [
   "let a = {g: hostValue}\nlet b = a\nb.g = a.g\na = b\nrepeat a.g {}\nexit",
@@ -909,15 +910,15 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
 ];
 
 /**
- * (docs/specifications/type-inference-accepted-record.md#r4-44): F19a's test of a receiver is a decision of its
- * component, made once on the completed open solve (every receiver read as a record) and held for the second, so a
- * reference that reaches its receiver only round its own cycle makes the access opaque: a warning with its runtime
- * obligations; a reference from outside the cycle keeps its ordinary answer. B2, B2-r2: the stores through a receiver
- * are followed only for its records and collections, its unknowns projected with their own reasons and ingress and its
- * references the runtime's, so the open solve is finite whatever the leaf. On `2941d76d8` the first three stopped with
- * `budget-error` (4 to 20 s at the real allowance); on `30477f011` the fourth; on `5a10f3a27` the loaded and host
- * leaves. Here, in the two orders: 1,498 and 1,518; 1,498 and 1,502; 1,412 and 1,319; 1,871 and 1,568; 669 and 643;
- * 3,078 and 2,575; 1,987 and 1,681; 1,877 and 1,576; the record-only control 1,288 and 1,255 units.
+ * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44): F19a's test of a receiver is a
+ * decision of its component, made once on the completed open solve (every receiver read as a record) and held for the
+ * second, so a reference that reaches its receiver only round its own cycle makes the access opaque: a warning with its
+ * runtime obligations; a reference from outside the cycle keeps its ordinary answer. B2, B2-r2: the stores through a
+ * receiver are followed only for its records and collections, its unknowns projected with their own reasons and ingress
+ * and its references the runtime's, so the open solve is finite whatever the leaf. On `2941d76d8` the first three
+ * stopped with `budget-error` (4 to 20 s at the real allowance); on `30477f011` the fourth; on `5a10f3a27` the loaded
+ * and host leaves. Here, in the two orders: 1,498 and 1,518; 1,498 and 1,502; 1,412 and 1,319; 1,871 and 1,568; 669 and
+ * 643; 3,078 and 2,575; 1,987 and 1,681; 1,877 and 1,576; the record-only control 1,288 and 1,255 units.
  */
 test("a reference that reaches its receiver only round its own cycle is decided once, its access opaque", () => {
   const got: string[] = [];
@@ -984,9 +985,9 @@ test("an external value read below its record without a cycle keeps its reasons 
 });
 
 /**
- * Proof payloads (docs/specifications/type-inference-accepted-record.md#r4-164; `ProofDemand`): a proof is the solver's
- * as a demand's items are. The tests' proofs hold what was chosen (`null` for an absence), the kinds seen and a round
- * counter; their signature is all three.
+ * Proof payloads (docs/specifications/type-inference-accepted-record/sharing.md#r4-164; `ProofDemand`): a proof is the
+ * solver's as a demand's items are. The tests' proofs hold what was chosen (`null` for an absence), the kinds seen and
+ * a round counter; their signature is all three.
  */
 interface Chosen extends Proof {
   readonly chosen: string | null;

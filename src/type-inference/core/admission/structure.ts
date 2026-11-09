@@ -100,7 +100,7 @@ export function expectStructures(admission: Admission, values: Iterable<PlaceId>
  * A source key's own structure (F2): the elements, at every depth, of the values stored at it or at a prefix of it (an
  * add's below its element), cut to the key's path, and of the keys below it with stores. A copied record's fields are
  * none of it: they are admitted at their first read (A2,
- * docs/specifications/type-inference-accepted-record.md#section-5-a2).
+ * docs/specifications/type-inference-accepted-record/admission.md#section-5-a2).
  */
 function keyStructure(admission: Admission, key: Key): Structure {
   const id = `k${key}`;
@@ -570,8 +570,8 @@ export function pathsBelow(
 /**
  * The paths below a collection literal's elements that its own literals give or admission decides where the literal
  * lands (a read's path, A2): there a named element's fields are compared too
- * (docs/specifications/type-inference-accepted-record.md#section-5-a2: a field is copy-only until a literal or a read
- * reaches it); beside them, where copies land there and two elements may hold something (`touchElements`).
+ * (docs/specifications/type-inference-accepted-record/admission.md#section-5-a2: a field is copy-only until a literal
+ * or a read reaches it); beside them, where copies land there and two elements may hold something (`touchElements`).
  */
 export function sharedPaths(
   admission: Admission,

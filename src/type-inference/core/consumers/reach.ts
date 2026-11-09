@@ -59,9 +59,9 @@ export function firstDirect(
 /**
  * A2, ADR 0021 rule 1.1: a property that reaches a place only through copies of whole objects, where they were not
  * found to meet at the copy (a cycle of copies that adds or takes steps,
- * docs/specifications/type-inference-accepted-record.md#r4-154), is checked at its first direct read or store, the copy
- * that brought the other type its related site (`copy`, else `site`); any other error stays at `site`. `eligible`: the
- * error is that property's, its offending contribution through whole copies.
+ * docs/specifications/type-inference-accepted-record/admission.md#r4-154), is checked at its first direct read or
+ * store, the copy that brought the other type its related site (`copy`, else `site`); any other error stays at `site`.
+ * `eligible`: the error is that property's, its offending contribution through whole copies.
  */
 export function deferred(
   walk: Consumers,

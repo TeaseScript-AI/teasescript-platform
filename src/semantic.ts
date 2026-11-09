@@ -22,7 +22,7 @@ import type {
   TimerParts,
 } from "./ast.js";
 import { isAskImageCall, isLockCall, isTakePhotoCall } from "./capture-call.js";
-import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
+import { compileChild, runCompileTask, type CompileTask } from "./compile-continuation.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { changesEntries } from "./dict-operations.js";
 import {

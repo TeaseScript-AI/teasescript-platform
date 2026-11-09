@@ -3,7 +3,7 @@ import type { ExpressionPlan, LockInstruction } from "../../plan/model.js";
 import { directPasswordField } from "../../capture-call.js";
 import { isConversion, takesDefault, takesFiles } from "../../conversions.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
-import { compileChild, type CompileTask } from "../continuation.js";
+import { compileChild, type CompileTask } from "../../compile-continuation.js";
 import type { InstructionCompiler, LoweredExpression } from "./compiler.js";
 import { prepareInteractionSpeaker } from "./interactions.js";
 import { lowerAskQuestionTask } from "./asks.js";
