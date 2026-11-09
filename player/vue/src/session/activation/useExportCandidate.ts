@@ -32,7 +32,11 @@ export function useExportCandidate(options: {
    * The activations' runs (`useActivationRun`): the export is of the live one, with the recording its failure
    * recording selects, and only while it lives.
    */
-  readonly activation: { current(): Origin; admits(origin: Origin): boolean };
+  readonly activation: {
+    current(): Origin;
+    admits(origin: Origin): boolean;
+    own(origin: Origin, cleanup: () => void): () => void;
+  };
   /** Whether a Player error stop is under way here, until the host acknowledged it. */
   readonly halting: Readonly<Ref<boolean>>;
   readonly build: DebugExportCandidate["build"];
@@ -60,7 +64,16 @@ export function useExportCandidate(options: {
   ): Omit<DebugExportCandidate, "photos"> | typeof PENDING_CAPTURE | null {
     if (reply.kind === "pending") return PENDING_CAPTURE;
     if (reply.kind !== "captured") return null;
-    const release = () => void host.releaseRecording(reply.ticket).catch(() => {});
+    // The lease is the activation's from here until the dialog holds it: released once, at a refusal, a failed
+    // construction or the activation's retirement, whichever comes first.
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      unown();
+      void host.releaseRecording(reply.ticket).catch(() => {});
+    };
+    const unown = options.activation.own(origin, release);
     const matches =
       current === null
         ? session.value === null &&
@@ -78,7 +91,7 @@ export function useExportCandidate(options: {
       release();
       throw error;
     }
-    return {
+    const candidate: Omit<DebugExportCandidate, "photos"> = {
       build: options.build,
       package: options.package,
       session:
@@ -98,20 +111,32 @@ export function useExportCandidate(options: {
       rewoundWhileDebugging: reply.marks?.rewoundWhileDebugging ?? null,
       ...shown,
     };
+    leases.set(candidate, unown);
+    return candidate;
   }
+  /** The lease of each candidate under construction: handing the candidate over keeps its ticket from the retirement. */
+  const leases = new WeakMap<object, () => void>();
 
   /** Whether `origin` still lives: an activation's run, or the initial record until the first activation. */
   const lives = (origin: Origin) => options.activation.admits(origin);
 
-  /** Resolves once no Player error stop is under way here (`halting`). */
-  function stopShown(): Promise<void> {
-    if (!halting.value) return Promise.resolve();
+  /**
+   * Resolves once no Player error stop is under way here (`halting`), or once `origin` retired: its watch stops then
+   * too. None is made for a retired `origin`.
+   */
+  function stopShown(origin: Origin): Promise<void> {
+    if (!halting.value || !lives(origin)) return Promise.resolve();
     return new Promise((resolve) => {
-      const stop = watch(halting, (now) => {
-        if (now) return;
+      let unown = () => {};
+      const settle = () => {
         stop();
+        unown();
         resolve();
+      };
+      const stop = watch(halting, (now) => {
+        if (!now) settle();
       });
+      unown = options.activation.own(origin, settle);
     });
   }
 
@@ -150,7 +175,7 @@ export function useExportCandidate(options: {
     let frozen = await capture();
     // A stop of the run was still committing: once it shows, the capture is tried once more, while its activation lives.
     if (frozen === PENDING_CAPTURE && lives(origin)) {
-      await stopShown();
+      await stopShown(origin);
       frozen = live() && lives(origin) ? await capture() : null;
     }
     if (frozen === PENDING_CAPTURE || frozen === null) return null;
@@ -187,8 +212,9 @@ export function useExportCandidate(options: {
       frozen.release();
       return null;
     }
-    // Once more at the handoff: the dialog takes only a live activation's candidate.
+    // Once more at the handoff: the dialog takes only a live activation's candidate, and holds its lease from now on.
     if (!goesOn()) return null;
+    leases.get(frozen)?.();
     return { ...frozen, photos };
   }
 

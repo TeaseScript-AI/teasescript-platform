@@ -94,7 +94,11 @@ function ownerOver(readPhoto: (reference: string) => Promise<CapturedMediaRecord
     session: shallowRef(view),
     bridge: () => typed,
     // No activation: the initial record, whose recording is the current one, and nothing retires the export.
-    activation: { current: () => INITIAL, admits: (origin) => origin === INITIAL },
+    activation: {
+      current: () => INITIAL,
+      admits: (origin) => origin === INITIAL,
+      own: () => () => {},
+    },
     halting: ref(false),
     build: { commit: null, dirty: null, mode: "development", appVersion: "0" },
     package: { id: null, version: null },
@@ -214,7 +218,13 @@ test("a candidate whose activation retires while it is built hands nothing over,
     // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads an activation's failure selection, and compares activations by identity.
     const [origin, successor] = [activation(), activation()] as unknown as [RunOrigin, RunOrigin];
     let live: RunOrigin = origin;
-    const retire = () => void (live = successor);
+    // What the live activation owns, released at its retirement (`useActivationRun`'s `own`).
+    const owned = new Set<() => void>();
+    const retire = () => {
+      live = successor;
+      for (const cleanup of owned) cleanup();
+      owned.clear();
+    };
     let resolveCapture!: () => void;
     const captured = new Promise<void>((resolve) => (resolveCapture = resolve));
     // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads a session's `connection` and `lineage`, which this literal has.
@@ -243,7 +253,18 @@ test("a candidate whose activation retires while it is built hands nothing over,
     const owner = useExportCandidate({
       session: shown,
       bridge: () => typed,
-      activation: { current: () => live, admits: (each) => each === live },
+      activation: {
+        current: () => live,
+        admits: (each) => each === live,
+        own: (each, cleanup) => {
+          if (each !== live) {
+            cleanup();
+            return () => {};
+          }
+          owned.add(cleanup);
+          return () => void owned.delete(cleanup);
+        },
+      },
       halting: ref(false),
       build: { commit: null, dirty: null, mode: "development", appVersion: "0" },
       package: { id: null, version: null },

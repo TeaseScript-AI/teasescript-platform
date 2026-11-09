@@ -542,6 +542,9 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
   "player/vue/src/session/useCallView.ts useCallView {followCallView}": "lifecycle",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > then:callback {bridgeLost}":
     "lifecycle",
+  // The export lease's release, which the activation's retirement runs (`own`).
+  "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > deliver {release}":
+    "lifecycle",
   "player/vue/src/session/useSessionMedia.ts useSessionMedia > watchMedia {catchUp}":
     "clock scheduling",
   "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > scheduleWakeUp {catchUp}":

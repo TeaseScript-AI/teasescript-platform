@@ -57,11 +57,18 @@ export function useActivationRun({
   // What `current()` gives after disposal: a record no completion is admitted for.
   const disposed: InitialOrigin = Object.freeze({ kind: "initial" });
 
-  /** Retires the live record (a run's failure recording with it); it admits nothing from now on. */
+  // What each live record owns until it retires: cleanups that release its resources (`own`).
+  const owned = new Map<Origin, Set<() => void>>();
+
+  /** Retires the live record (its owned resources and a run's failure recording with it); it admits nothing more. */
   function end(): RunOrigin | null {
     const ended = live;
     live = null;
-    if (ended?.kind !== "run") return null;
+    if (ended === null) return null;
+    const cleanups = owned.get(ended);
+    owned.delete(ended);
+    for (const cleanup of cleanups ?? []) cleanup();
+    if (ended.kind !== "run") return null;
     ended.failure.retire();
     return ended;
   }
@@ -85,6 +92,22 @@ export function useActivationRun({
       };
       live = next;
       return next;
+    },
+    /**
+     * Makes `cleanup` run when `origin` retires (the next activation, the connection's loss, the Player's disposal),
+     * or at once when it already has: what `origin` holds is released then, without waiting for its work to come back.
+     * The returned function hands the resource on (to the dialog, say), so the retirement no longer releases it.
+     */
+    own(origin: Origin, cleanup: () => void): () => void {
+      if (origin !== live) {
+        cleanup();
+        return () => {};
+      }
+      let cleanups = owned.get(origin);
+      if (cleanups === undefined) owned.set(origin, (cleanups = new Set()));
+      cleanups.add(cleanup);
+      const held = cleanups;
+      return () => void held.delete(cleanup);
     },
     /**
      * Settles `pending` for `origin`, in the one reaction attached to it: its `done` or `failed` while `origin` lives,
