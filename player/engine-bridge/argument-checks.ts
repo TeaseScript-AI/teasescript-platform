@@ -28,6 +28,16 @@ export const exactly = (
   Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 /**
+ * Whether `value` has no own `key`, or one whose value passes `test`: an optional field. A clone keeps an own `undefined`,
+ * which this refuses unless `test` admits it, as the field's type does under `exactOptionalPropertyTypes`.
+ */
+export const absentOr = (
+  value: Record<string, unknown>,
+  key: string,
+  test: (field: unknown) => boolean,
+): boolean => !Object.hasOwn(value, key) || test(value[key]);
+
+/**
  * Whether `value` is a plain array of elements that pass `test`, read by index: a cloned array keeps its own
  * properties, such as an `every` or `map` of its own, so one with keys besides its indices is malformed, as is a hole.
  */

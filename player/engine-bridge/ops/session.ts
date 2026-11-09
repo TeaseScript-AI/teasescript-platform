@@ -25,6 +25,7 @@ import {
 import { playerRuntimePacingGate } from "../../runtime/runtime-view.js";
 import { isValidEpochMilliseconds } from "../../../src/temporal.js";
 import {
+  absentOr,
   everyItem,
   exactly,
   isPlainRecord,
@@ -368,25 +369,24 @@ const START_OPTIONS = [
 ];
 
 /**
- * What `start`'s check admits (`isStartOptions`, `isStartRandom`, `isRunBegin`): the options' shape only, each optional
- * field also as `undefined`, and the storage entries, temporal context and profile as records, which the engine
- * validates as it starts the session. The entries and temporal context are `object`, for `ContinueAdmitted`'s reason.
+ * What `start`'s check admits (`isStartOptions`, `isStartRandom`, `isRunBegin`): the options' shape only, with the
+ * storage entries, temporal context and profile as records, which the engine validates as it starts the session. The
+ * entries and temporal context are `object`, for `ContinueAdmitted`'s reason.
  */
 export interface StartArguments {
   readonly plan: string;
   readonly options: {
-    readonly scriptStorage?: readonly object[] | undefined;
-    readonly persistentScriptStorage?: boolean | undefined;
-    readonly temporalContext?: object | undefined;
-    readonly wallClockMs?: number | undefined;
-    readonly debugMode?: boolean | undefined;
-    readonly storedFiles?: readonly string[] | undefined;
-    readonly playerProfile?: Record<string, unknown> | undefined;
+    readonly scriptStorage?: readonly object[];
+    readonly persistentScriptStorage?: boolean;
+    readonly temporalContext?: object;
+    readonly wallClockMs?: number;
+    readonly debugMode?: boolean;
+    readonly storedFiles?: readonly string[];
+    readonly playerProfile?: Record<string, unknown>;
   };
   readonly recording: boolean;
-  readonly random?:
-    { readonly owner: number; readonly intent?: RandomIntent | undefined } | undefined;
-  readonly run?: RunBegin | undefined;
+  readonly random?: StartRandom;
+  readonly run?: RunBegin;
 }
 
 /**
@@ -406,18 +406,17 @@ const isEpochTime = (value: unknown): value is number =>
  * The shape of `start`'s options, a plain record (a `Date` or a `Map` is none); the engine validates their content as it
  * starts the session.
  */
-function isStartOptions(value: unknown): value is StartOptions {
+function isStartOptions(value: unknown): value is StartArguments["options"] {
   return (
     isPlainRecord(value) &&
     exactly(value, [], START_OPTIONS) &&
-    (value.scriptStorage === undefined || everyItem(value.scriptStorage, isRecord)) &&
-    (value.persistentScriptStorage === undefined ||
-      typeof value.persistentScriptStorage === "boolean") &&
-    (value.temporalContext === undefined || isRecord(value.temporalContext)) &&
-    (value.wallClockMs === undefined || isEpochTime(value.wallClockMs)) &&
-    (value.debugMode === undefined || typeof value.debugMode === "boolean") &&
-    (value.storedFiles === undefined || isStringArray(value.storedFiles)) &&
-    (value.playerProfile === undefined || isRecord(value.playerProfile))
+    absentOr(value, "scriptStorage", (entries) => everyItem(entries, isRecord)) &&
+    absentOr(value, "persistentScriptStorage", (on) => typeof on === "boolean") &&
+    absentOr(value, "temporalContext", isRecord) &&
+    absentOr(value, "wallClockMs", isEpochTime) &&
+    absentOr(value, "debugMode", (on) => typeof on === "boolean") &&
+    absentOr(value, "storedFiles", isStringArray) &&
+    absentOr(value, "playerProfile", isRecord)
   );
 }
 
@@ -501,8 +500,8 @@ function sessionRunOps(context: PlayerOpsContext) {
         typeof args.plan === "string" &&
         isStartOptions(args.options) &&
         typeof args.recording === "boolean" &&
-        (args.random === undefined || isStartRandom(args.random)) &&
-        (args.run === undefined || isRunBegin(args.run)),
+        absentOr(args, "random", isStartRandom) &&
+        absentOr(args, "run", isRunBegin),
       run: (args, sessions) => {
         const { plan, options, recording, random, run } = args;
         // The Start's run begins before its session, which binds to it; a Start of a run that ended starts nothing.
@@ -510,10 +509,9 @@ function sessionRunOps(context: PlayerOpsContext) {
           throw new RetiredRunError(run.run);
         const instructions = context.plans.get(plan);
         if (instructions === undefined) throw new Error(`No plan '${plan}' is held.`);
-        // EVIDENCE: validation: `isStartRandom` declares `StartRandom` but admits `intent: undefined` too (#2211).
-        const control = startRandom(context, random as StartRandom | undefined);
-        // `isStartOptions` declares `StartOptions` but admits each field as `undefined` too, and the storage entries,
-        // temporal context and profile as any records (#2211). EVIDENCE: validation: the engine validates them.
+        const control = startRandom(context, random);
+        // The check admits the storage entries, temporal context and profile as any records.
+        // EVIDENCE: validation: the engine validates them.
         const held = new HeldSession(
           createPlayerRuntimeSession(instructions, {
             ...(options as StartOptions),
@@ -694,8 +692,7 @@ const isStartRandom = (value: unknown): value is StartRandom =>
   typeof value.owner === "number" &&
   Number.isSafeInteger(value.owner) &&
   value.owner >= 1 &&
-  (value.intent === undefined ||
-    (isRandomIntent(value.intent) && value.intent.owner === value.owner));
+  absentOr(value, "intent", (intent) => isRandomIntent(intent) && intent.owner === value.owner);
 
 /** Aligns to a Start's random intent; the control its owner's session starts with, or `null`. */
 export function startRandom(

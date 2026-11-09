@@ -1,4 +1,3 @@
-import type { RandomSite } from "../../../src/playback.js";
 import {
   loadSourceDebugSidecar,
   type SourceDebugFile,
@@ -113,8 +112,7 @@ export function sourceViewOps(context: PlayerOpsContext) {
         // A teardown during the import leaves nothing to keep.
         if (context.plans.get(plan) !== held) return { result: null };
         if (caches.latestFile.value?.file !== file) caches.latestFile.set(fileCode(file));
-        // EVIDENCE: validation: `isSite` checks the place only, not a `RandomSite`'s `id`, `path` and `kinds` (#2211).
-        const code: DrawCode | null = drawCode(caches.latestFile.value!, site as RandomSite);
+        const code: DrawCode | null = drawCode(caches.latestFile.value!, site);
         return { result: code };
       },
     } satisfies BridgeOp<DrawCodeArguments, DrawCode | null, "none">,
