@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -20,7 +20,10 @@ const helper = (name, change = "") =>
     "}",
   ].join("\n");
 
-/** A repository at `before`, then committed at `after`; `run(args)` runs the check there. */
+/**
+ * A repository at `before`, then committed at `after` (a file's text, `null` to remove it, or `{ executable: text }`);
+ * `run(args)` runs the check there.
+ */
 function moveOf(before, after) {
   const root = mkdtempSync(join(tmpdir(), "pure-move-check-"));
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
@@ -28,7 +31,10 @@ function moveOf(before, after) {
     for (const [path, text] of Object.entries(files)) {
       mkdirSync(dirname(join(root, path)), { recursive: true });
       if (text === null) rmSync(join(root, path));
-      else writeFileSync(join(root, path), text);
+      else if (text.executable !== undefined) {
+        writeFileSync(join(root, path), text.executable);
+        chmodSync(join(root, path), 0o755);
+      } else writeFileSync(join(root, path), text);
     }
   };
   git("init", "-q");
@@ -633,6 +639,19 @@ test(
     assert.match(
       empty.out,
       /binding only after: a\.mjs:1 import from "\.\/second\.mjs": \(side effect\) as \{\}/u,
+    );
+    // a changed file with no changed line (its mode) keeps its bindings in the comparison
+    const loader =
+      'import { marker as selectedMarkerWithLongIdentifier } from "./dep.mjs";\nconsole.log(selectedMarkerWithLongIdentifier);\n';
+    const modeOnly = run(
+      { "src/loader.mjs": loader, "src/dep.mjs": exporter },
+      { "src/loader.mjs": { executable: loader }, "src/dep.mjs": null, "src/moved.mjs": exporter },
+      { "src/dep.mjs": "src/moved.mjs" },
+    );
+    assert.equal(modeOnly.status, 1, modeOnly.out);
+    assert.match(
+      modeOnly.out,
+      /refused: src\/loader\.mjs:1 \(added\) "\.\/dep\.mjs": resolves to no file/u,
     );
     // a declaration file renamed with its map is a pure rename
     const declarations = "export interface SomeType {\n  readonly value: number;\n}\n";
