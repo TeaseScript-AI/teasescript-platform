@@ -1,3 +1,5 @@
+// Its id is its file name before it was renamed, which keeps its sources' places in a stored baseline.
+export const id = "1293-sol-r2-permutations.mjs";
 // r2 repeated/('good', 'bad', 'bad')/[2, 0, 1]/True, r2 repeated/('good', 'flag', 'flag')/[2, 0, 1]/True and related
 // fixed cases; #1293 A2 / G5 Sol reconstruction, r1 (R/sol-m4-admission-design-g5-r1-evidence/r2-permutations.json).
 const archivedCases = [

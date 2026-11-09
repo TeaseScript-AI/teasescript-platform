@@ -1,3 +1,5 @@
+// Its id is its file name before it was renamed, which keeps its sources' places in a stored baseline.
+export const id = "g5-5a-astra-r2-ring-stops.mjs";
 // i1339-many-fed/conflict-read-4, i1339-chord/quiet-read-4 and related fixed cases; #1394 G5 5a Astra review / builder
 // corpus, r2 (R/astra-m4-g5-5a-review-r2-evidence/builder-tools/ring-stop.mjs).
 export const cases = (() => {

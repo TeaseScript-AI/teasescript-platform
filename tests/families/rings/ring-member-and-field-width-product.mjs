@@ -1,3 +1,5 @@
+// Its id is its file name before it was renamed, which keeps its sources' places in a stored baseline.
+export const id = "1293-r3-products.mjs";
 // #1293's review r3: its product probes, a ring of k copies of a record with k or k² fields, every member but the first
 // replaced by an empty record and the first fed a conflicting record, read at each member or not, at the k each probe
 // ran (desktop:~/work/evidence/1293/7d6c5fb2f/review-r3/product.mjs, product-modes.mjs, product-source.mjs,
