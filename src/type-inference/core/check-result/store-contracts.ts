@@ -123,6 +123,10 @@ export class Contracts {
     const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
     const required = place === null ? null : this.answers.requirement(place.id, place.path);
     this.destination(store);
+    const settled =
+      place === null || (whole && declaration.typeAnnotation !== null) || required !== null
+        ? null
+        : this.#descriptors.result(place.id, place.path, [value], () => outsideStructure(value));
     const result =
       whole && declaration.typeAnnotation !== null
         ? this.#descriptors.written(
@@ -136,18 +140,19 @@ export class Contracts {
               place!.id,
               place!.path,
             )
-          : place === null
+          : place === null || settled === null
             ? null
-            : this.#completed(
-                place.id,
-                place.path,
-                this.#descriptors.result(place.id, place.path, [value], () =>
-                  outsideStructure(value),
-                ),
-              );
+            : this.#completed(place.id, place.path, settled);
     if (result !== null) this.results.set(store, result);
-    const type = result === null ? null : checkedType(result);
-    if (type === null) return null;
+    const checked = result === null ? null : checkedType(result);
+    if (checked === null) return null;
+    // (the receiving completion's contract lists each object's properties as its listings found them, where the stop
+    // fell: the check lists them as the natural plan's does, by `fieldOrder` (#2215). The recorded result, which the
+    // lost-check gate reads, keeps its own order.)
+    const type =
+      result === settled || place === null
+        ? checked
+        : this.#inNaturalOrder(checked, place.id, place.path, [value]);
     const name = [
       declaration.name.name,
       ...(whole ? [] : (place?.path ?? []).map(propertyName)),
@@ -187,6 +192,68 @@ export class Contracts {
   #completed(id: PlaceId, path: readonly string[], settled: ContractResult): ContractResult {
     if (settled.state === "complete" || leftOutCompletion()) return settled;
     return this.answers.received(id, path) ?? settled;
+  }
+
+  /**
+   * A completion's checked type with each object's properties in the order the natural plan's check lists them: by
+   * `fieldOrder` over the literal records below the store's value, level by level as `ContractDescriptors` fills a
+   * decided object (#2215). A written level, and one a copy of a written type decides, keeps its own order, as the natural
+   * plan's check does.
+   */
+  #inNaturalOrder(
+    type: TypePlan,
+    id: PlaceId,
+    path: readonly string[],
+    records: readonly Expression[],
+  ): TypePlan {
+    switch (type.kind) {
+      case "union":
+        return {
+          kind: "union",
+          members: type.members.map((member) => this.#inNaturalOrder(member, id, path, records)),
+        };
+      case "list":
+      case "set":
+      case "dict":
+        return type.element === null
+          ? type
+          : {
+              kind: type.kind,
+              element: this.#inNaturalOrder(
+                type.element,
+                id,
+                [...path, "element"],
+                recordsBelow(records, this.#literalOf).elements,
+              ),
+            };
+      case "object": {
+        const below = recordsBelow(records, this.#literalOf);
+        const byName = new Map(type.properties.map((property) => [property.name, property]));
+        const { admitted } = this.answers.place(id, path);
+        const names =
+          admitted.by === "written" || (admitted.by === "decided" && admitted.inherited)
+            ? [...byName.keys()]
+            : fieldOrder(byName.keys(), below, this.index);
+        const properties = names.map((name) => {
+          // EVIDENCE: `names` are `byName`'s own keys, in another order.
+          const property = byName.get(name)!;
+          return {
+            name,
+            type: this.#inNaturalOrder(
+              property.type,
+              id,
+              [...path, propertyStep(name)],
+              below.fields.get(name) ?? [],
+            ),
+          };
+        });
+        return type.keepExtra === true
+          ? { kind: "object", properties, keepExtra: true }
+          : { kind: "object", properties };
+      }
+      default:
+        return type;
+    }
   }
 
   /**
