@@ -1,3 +1,4 @@
+import type { CertificateFacts } from "./consumers/certificates.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { admitted, deciderAt, inheritsWritten, retained } from "./admission/admitted.js";
 import {
@@ -141,6 +142,7 @@ export interface Demand {
 
 /** What admission asks of the consumers it runs beside: their solver runs, with each read's accounting. */
 export interface AdmissionHost {
+  certificates?(): CertificateFacts | null;
   run<T>(work: Work<T>): T;
   /**
    * After a stop, a value's items at a node and a path as the finishing read answers them (the leaf's own kind, the
@@ -558,6 +560,10 @@ export class Admission {
     return this.pass.program.work;
   }
 
+  public get certificateFacts(): CertificateFacts | null {
+    return this.host.certificates?.() ?? null;
+  }
+
   public run<T>(work: Work<T>): T {
     // (a run inside a solver run is a read an inherited proof's run did not yield: refused, and counted for the tests'
     // corpora, #1072 A2)
@@ -572,6 +578,7 @@ export class Admission {
 
   /** `run` as a read (`Read`): run now outside a solver run, yielded inside an inherited proof (#1072 A2). */
   public *runRead<T>(work: () => Work<T>): Reads<T> {
+    this.certificateFacts?.unresolved();
     return yield* read(() => this.run(work()), work);
   }
 

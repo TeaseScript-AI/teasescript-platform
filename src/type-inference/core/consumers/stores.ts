@@ -161,7 +161,7 @@ export function admittedStores(
   writtenOnly = false,
   completed: DecidedAt | null = null,
 ): void {
-  const { program, definitions } = walk.pass;
+  const { program } = walk.pass;
   const admission = walk.admission;
   for (const group of completed !== null
     ? [completed]
@@ -181,9 +181,6 @@ export function admittedStores(
     const label = (): string => labelText(walk.pass.contract, decision.label);
     const written = decision.written;
     const nullableTags = written && nullable ? [...tags, "null" as const] : tags;
-    const fitsAny = (item: Item): boolean =>
-      item.tag === "unknown" ||
-      (item.tag === "null" ? nullable : tags.some((tag) => fits(item.tag, tag, written)));
     const fitting = (item: Item): boolean =>
       item.tag === "unknown" ||
       (concrete(item) && tags.some((tag) => fits(item.tag, tag, written)));
@@ -241,246 +238,7 @@ export function admittedStores(
         }
       continue;
     }
-    // C1 per candidate; an equivalent copy (`Candidate.members`) only where its representative leaves an obligation
-    const visit = (d: Definition, at: Steps): void => {
-      if (d === decider && at.length === 0) return;
-      walk.reading = d.node;
-      // §3.3: a candidate the admitted type accepts whatever its value
-      if (at.length === 0) {
-        const quiet = quietKinds(walk, d.value);
-        if (
-          quiet !== null &&
-          quiet.every((tag) =>
-            tag === "null" ? nullable : tags.some((ref) => fits(tag, ref, written)),
-          )
-        ) {
-          walk.skip(d.value);
-          return;
-        }
-      }
-      const items = admission.valueAt(d, stepsRest(at));
-      // a dead call's argument holding a kind that came through a call may lack the marks that call's binding would
-      // give (F21, `called`): it stays unchecked, as every dead call's argument was before AD-3
-      if (
-        d.how === "argument" &&
-        !program.live(d.node) &&
-        items.some((item) => item.called === true)
-      )
-        return;
-      const before = decider !== null && admission.sourceOrder(d) < admission.sourceOrder(decider);
-      const bad = deciding(items).filter(
-        (item) => !tags.some((tag) => fits(item.tag, tag, written)),
-      );
-      const nulls = items.filter((item) => item.tag === "null");
-      // A6: a store of a rejection cycle is a possibility
-      if (bad.length > 0 && d !== decider && admission.cycling.has(d.uid)) {
-        storeWarning(
-          walk,
-          d.site,
-          label(),
-          { ...bad[0]!, cert: "pos" },
-          tags,
-          rule(),
-          items.filter(fitting),
-        );
-        return;
-      }
-      // A8: a collection literal stored into a written element type admits each element by the scalar rule: a
-      // definite element none of whose kinds fits is A6's error at that element, the store rejected
-      const wrong =
-        written &&
-        stepIndex(at, "element") >= 0 &&
-        d.kind === "whole" &&
-        d !== decider &&
-        !admission.cycling.has(d.uid)
-          ? admission.offendingAt(
-              d,
-              at,
-              (elements) =>
-                elements.length > 0 &&
-                elements.every((item) => item.cert === "def" && concrete(item)) &&
-                !elements.some((item) => tags.some((tag) => fits(item.tag, tag, written))),
-            )
-          : null;
-      if (wrong !== null) {
-        error(
-          walk,
-          "written-target",
-          program.place(wrong.value!).site ?? d.site,
-          rule(),
-          kindsOf(walk, wrong.value!, d.node).map((item) => item.tag),
-        );
-        admission.reject(d, root, path());
-        return;
-      }
-      // A6: a definite contribution that does not fit, where no kind of the value fits (a fitting kind beside it
-      // makes it a warning), is rejected, its error at the innermost offending expression
-      if (bad.length > 0 && d !== decider && !items.some(fitting)) {
-        const reach = !written && d.place === root ? storeReach(walk, d, path()) : null;
-        const { site, brought } = deferred(
-          walk,
-          admission.siteAt(d, at, (elements) =>
-            deciding(elements).some((item) => !tags.some((tag) => fits(item.tag, tag, written))),
-          ),
-          root,
-          path(),
-          reach !== null &&
-            reach.brought &&
-            !admission.atCopy(root, path()) &&
-            copiesOnly(walk, root, path()),
-          () => reach?.copy ?? null,
-        );
-        error(
-          walk,
-          "written-target",
-          site,
-          rule(brought),
-          bad.map((item) => item.tag),
-        );
-        admission.reject(d, root, path());
-        return;
-      }
-      // C1, ADR 1.7: a value none of whose kinds fits errs, against a written type at any path or a type decided
-      // earlier in the source for a store into the place itself; never against a later decider (A7), never under a
-      // guard (§3.2), and not where the collection may be empty (no element: the empty list fits); the store is
-      // rejected (A6), whether its kinds are definite or possible: none of them fits
-      if (
-        !before &&
-        items.length > 0 &&
-        (written || at.length === 0) &&
-        !(
-          at.length > 0 &&
-          d.kind !== "const" &&
-          walk.valueRun(d.value!, d.node, stepsRest(at)).some((item) => item.tag === "empty")
-        ) &&
-        !items.some((item) => item.guarded === true) &&
-        !items.some(fitsAny)
-      ) {
-        error(
-          walk,
-          "written-target",
-          admission.siteAt(d, at, (elements) => elements.length > 0 && !elements.some(fitsAny)),
-          rule(),
-          items.map((item) => item.tag),
-        );
-        admission.reject(d, root, path());
-        return;
-      }
-      // A7: a copy made before the decider is checked against it with context `later`
-      const later = (item: Item): Item => (before ? { ...item, context: "later" } : item);
-      // A7's whole-store exception: below a value the store holds whole from an external ingress, external data
-      // is that record's, which its boundary check validates, so only an opaque value warns there; a whole copy of
-      // internal data keeps A7 per descendant (an `addAll`'s first element step is its inserted value's own
-      // destination, no descendant: C9)
-      const inserted = d.kind === "add" && d.how === "elements" ? 1 : 0;
-      const whole =
-        written || at.length <= inserted || d.kind === "const"
-          ? null
-          : admission.wholeBelow(d.value!, at);
-      // (a `load` or `fromJson` typed by its default alone validates the loaded value by the default's own kinds: host
-      // data the default holds leaves the path's kind open, its contribution C1's)
-      const record =
-        whole !== null && definitions.ingress.has(whole) && !admission.typedByDefault(whole);
-      const wholeKinds =
-        whole === null || definitions.ingress.has(whole)
-          ? []
-          : withoutEmpty(walk.valueRun(whole, d.node, []));
-      const below =
-        whole !== null &&
-        (record || (wholeKinds.length > 0 && wholeKinds.every((item) => isExternal(item))));
-      // every concrete kind that does not fit, definite or possible, owes its check
-      const offending = items
-        .filter(
-          (item) =>
-            (concrete(item) && !tags.some((tag) => fits(item.tag, tag, written))) ||
-            (item.tag === "unknown" &&
-              (at.length === 0
-                ? isOpaque(item) || isExternal(item)
-                : // (an own read's data is no record's: its boundary checks nothing against the destination)
-                  below && !admission.ownReadItem(item, d)
-                  ? isOpaque(item) && item.reasons !== REASON.missing
-                  : contributes(item))),
-        )
-        .sort((a, b) => writerRank(a.writer) - writerRank(b.writer));
-      // (before admission settled, a part of the value the stop left undecided marks the written store at its value,
-      // whatever external data beside it would site the unknown kind, as with no such data: the mark stands for the
-      // records within the value and does not move, #1611)
-      const undecided =
-        writtenOnly &&
-        offending.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0);
-      // one copy-type diagnostic per offending kind, its earliest writer (§4, F28); against the destination's required
-      // kinds, a written optional type's null among them (a decided type's admitted null is C9's)
-      for (const { item } of offendingKinds(offending))
-        storeWarning(
-          walk,
-          !isExternal(item) || (undecided && item.tag === "unknown")
-            ? d.site
-            : d.kind === "whole"
-              ? admission.ingressSiteOf(d, at, item)
-              : admission.contributionSited(d.site, item, d),
-          label(),
-          later(item),
-          nullableTags,
-          rule(),
-          items.filter(fitting),
-        );
-      // C9: at the ingress store (an addAll's at its elements' destination); and each external item's, so named data
-      // a typed default holds keeps its own boundary
-      if (
-        d.value !== undefined &&
-        definitions.ingress.has(d.value) &&
-        (at.length === 0 || (d.kind === "add" && at.length === 1 && at.at(0) === "element"))
-      )
-        admission.boundaryAt(d);
-      // (only external data owes it, `boundaryFor`: the label shown only where the check is owed, #1483)
-      for (const item of items)
-        if (boundaryData(item)) {
-          const cell = admission.cellSited(d.site, item, d);
-          admission.boundaryFor(item, () => {
-            const text = label();
-            return obligation(
-              "copy-type",
-              cell,
-              text,
-              tags.map(requiredKind),
-              `validate ${text} against ${tags.join("|")}`,
-            );
-          });
-        }
-      // a null beside external data owes its null-check, unless the destination's admitted type holds null; a possible
-      // null into a non-nullable type a null-check, a definite one an error
-      const external = items.some(isExternal);
-      if (
-        (!nullable && (at.length === 0 || written) && !before) ||
-        (external && !admission.admitted(root, path()).includes("null"))
-      )
-        for (const item of nulls)
-          if (item.cert === "def" && !external) {
-            error(
-              walk,
-              "written-target",
-              admission.siteAt(d, at, (elements) =>
-                elements.some((element) => element.tag === "null" && element.cert === "def"),
-              ),
-              rule(),
-              ["null"],
-            );
-            admission.reject(d, root, path());
-          } else {
-            const text = label();
-            nullWarning(
-              walk,
-              "written-target",
-              d.site,
-              later(item),
-              `check that the value is not null before ${text} holds it`,
-              text,
-              rule(),
-              items.filter(fitting),
-              tags.map(requiredKind),
-            );
-          }
-    };
+    const visit = candidateVisitor(walk, group, decision, writtenOnly);
     // S6-CARRIERS §4.4: a class's quiet proofs, one per side of the decider, each its side's first member but the
     // decider's own store; a proof that emits nothing (no diagnostic, rejection or check) proves its side quiet, else
     // each member of the side is visited. The class in source order (its representative, then its members by
@@ -542,4 +300,280 @@ export function admittedStores(
   if (completed === null) walk.enclosingStores();
   // (the member-answer oracle's paths the copies land and no decision took)
   admission.compareLanded();
+}
+
+/** C1 for one candidate, shared by admission and the scratch stop certificates. */
+export function candidateVisitor(
+  walk: Consumers,
+  group: DecidedAt,
+  decision: Decision,
+  writtenOnly = false,
+): (d: Definition, at: Steps) => void {
+  const { program, definitions } = walk.pass;
+  const admission = walk.admission;
+  // (a cursor's group's steps made only where a diagnostic or a check names its path: G3 stage 1)
+  const { root } = group;
+  // (the sentences and checks keep arrays: a cursor's steps copied out once, `stepsArray`)
+  let made: readonly string[] | undefined;
+  const path = (): readonly string[] =>
+    (made ??= group.path ?? stepsArray(admission.stepsAt(group)));
+  const { tags, nullable, decider } = decision;
+  // (the label's text made where a diagnostic or a check shows it, not for every decision)
+  const label = (): string => labelText(walk.pass.contract, decision.label);
+  const written = decision.written;
+  const nullableTags = written && nullable ? [...tags, "null" as const] : tags;
+  const fitsAny = (item: Item): boolean =>
+    item.tag === "unknown" ||
+    (item.tag === "null" ? nullable : tags.some((tag) => fits(item.tag, tag, written)));
+  const fitting = (item: Item): boolean =>
+    item.tag === "unknown" || (concrete(item) && tags.some((tag) => fits(item.tag, tag, written)));
+  // D1: the sentence's rule, the place in its own text, its type (optional where it holds null too, ADR 0021 rule
+  // 1.2) and the store that decided it
+  const named = (): readonly ItemTag[] =>
+    written || !admission.admitted(root, path()).includes("null")
+      ? nullableTags
+      : [...tags, "null"];
+  const rule = (brought: SourceSite | null = null): DiagnosticRule => ({
+    rule: "store",
+    into: placeText(walk, root, path()),
+    type: named(),
+    written,
+    decider: decider?.site ?? null,
+    brought,
+    root: storeRoot(walk, root),
+    steps: storeSteps(walk, root, path(), written ? writtenOf(program.place(root).kind) : null),
+  });
+  return (d: Definition, at: Steps): void => {
+    if (d === decider && at.length === 0) return;
+    walk.reading = d.node;
+    // §3.3: a candidate the admitted type accepts whatever its value
+    if (at.length === 0) {
+      const quiet = quietKinds(walk, d.value);
+      if (
+        quiet !== null &&
+        quiet.every((tag) =>
+          tag === "null" ? nullable : tags.some((ref) => fits(tag, ref, written)),
+        )
+      ) {
+        walk.skip(d.value);
+        return;
+      }
+    }
+    const items = admission.valueAt(d, stepsRest(at));
+    // a dead call's argument holding a kind that came through a call may lack the marks that call's binding would
+    // give (F21, `called`): it stays unchecked, as every dead call's argument was before AD-3
+    if (d.how === "argument" && !program.live(d.node) && items.some((item) => item.called === true))
+      return;
+    const before = decider !== null && admission.sourceOrder(d) < admission.sourceOrder(decider);
+    const bad = deciding(items).filter((item) => !tags.some((tag) => fits(item.tag, tag, written)));
+    const nulls = items.filter((item) => item.tag === "null");
+    // A6: a store of a rejection cycle is a possibility
+    if (bad.length > 0 && d !== decider && admission.cycling.has(d.uid)) {
+      storeWarning(
+        walk,
+        d.site,
+        label(),
+        { ...bad[0]!, cert: "pos" },
+        tags,
+        rule(),
+        items.filter(fitting),
+      );
+      return;
+    }
+    // A8: a collection literal stored into a written element type admits each element by the scalar rule: a
+    // definite element none of whose kinds fits is A6's error at that element, the store rejected
+    const wrong =
+      written &&
+      stepIndex(at, "element") >= 0 &&
+      d.kind === "whole" &&
+      d !== decider &&
+      !admission.cycling.has(d.uid)
+        ? admission.offendingAt(
+            d,
+            at,
+            (elements) =>
+              elements.length > 0 &&
+              elements.every((item) => item.cert === "def" && concrete(item)) &&
+              !elements.some((item) => tags.some((tag) => fits(item.tag, tag, written))),
+          )
+        : null;
+    if (wrong !== null) {
+      error(
+        walk,
+        "written-target",
+        program.place(wrong.value!).site ?? d.site,
+        rule(),
+        kindsOf(walk, wrong.value!, d.node).map((item) => item.tag),
+      );
+      admission.reject(d, root, path());
+      return;
+    }
+    // A6: a definite contribution that does not fit, where no kind of the value fits (a fitting kind beside it
+    // makes it a warning), is rejected, its error at the innermost offending expression
+    if (bad.length > 0 && d !== decider && !items.some(fitting)) {
+      const reach = !written && d.place === root ? storeReach(walk, d, path()) : null;
+      const { site, brought } = deferred(
+        walk,
+        admission.siteAt(d, at, (elements) =>
+          deciding(elements).some((item) => !tags.some((tag) => fits(item.tag, tag, written))),
+        ),
+        root,
+        path(),
+        reach !== null &&
+          reach.brought &&
+          !admission.atCopy(root, path()) &&
+          copiesOnly(walk, root, path()),
+        () => reach?.copy ?? null,
+      );
+      error(
+        walk,
+        "written-target",
+        site,
+        rule(brought),
+        bad.map((item) => item.tag),
+      );
+      admission.reject(d, root, path());
+      return;
+    }
+    // C1, ADR 1.7: a value none of whose kinds fits errs, against a written type at any path or a type decided
+    // earlier in the source for a store into the place itself; never against a later decider (A7), never under a
+    // guard (§3.2), and not where the collection may be empty (no element: the empty list fits); the store is
+    // rejected (A6), whether its kinds are definite or possible: none of them fits
+    if (
+      !before &&
+      items.length > 0 &&
+      (written || at.length === 0) &&
+      !(
+        at.length > 0 &&
+        d.kind !== "const" &&
+        walk.valueRun(d.value!, d.node, stepsRest(at)).some((item) => item.tag === "empty")
+      ) &&
+      !items.some((item) => item.guarded === true) &&
+      !items.some(fitsAny)
+    ) {
+      error(
+        walk,
+        "written-target",
+        admission.siteAt(d, at, (elements) => elements.length > 0 && !elements.some(fitsAny)),
+        rule(),
+        items.map((item) => item.tag),
+      );
+      admission.reject(d, root, path());
+      return;
+    }
+    // A7: a copy made before the decider is checked against it with context `later`
+    const later = (item: Item): Item => (before ? { ...item, context: "later" } : item);
+    // A7's whole-store exception: below a value the store holds whole from an external ingress, external data
+    // is that record's, which its boundary check validates, so only an opaque value warns there; a whole copy of
+    // internal data keeps A7 per descendant (an `addAll`'s first element step is its inserted value's own
+    // destination, no descendant: C9)
+    const inserted = d.kind === "add" && d.how === "elements" ? 1 : 0;
+    const whole =
+      written || at.length <= inserted || d.kind === "const"
+        ? null
+        : admission.wholeBelow(d.value!, at);
+    // (a `load` or `fromJson` typed by its default alone validates the loaded value by the default's own kinds: host
+    // data the default holds leaves the path's kind open, its contribution C1's)
+    const record =
+      whole !== null && definitions.ingress.has(whole) && !admission.typedByDefault(whole);
+    const wholeKinds =
+      whole === null || definitions.ingress.has(whole)
+        ? []
+        : withoutEmpty(walk.valueRun(whole, d.node, []));
+    const below =
+      whole !== null &&
+      (record || (wholeKinds.length > 0 && wholeKinds.every((item) => isExternal(item))));
+    // every concrete kind that does not fit, definite or possible, owes its check
+    const offending = items
+      .filter(
+        (item) =>
+          (concrete(item) && !tags.some((tag) => fits(item.tag, tag, written))) ||
+          (item.tag === "unknown" &&
+            (at.length === 0
+              ? isOpaque(item) || isExternal(item)
+              : // (an own read's data is no record's: its boundary checks nothing against the destination)
+                below && !admission.ownReadItem(item, d)
+                ? isOpaque(item) && item.reasons !== REASON.missing
+                : contributes(item))),
+      )
+      .sort((a, b) => writerRank(a.writer) - writerRank(b.writer));
+    // (before admission settled, a part of the value the stop left undecided marks the written store at its value,
+    // whatever external data beside it would site the unknown kind, as with no such data: the mark stands for the
+    // records within the value and does not move, #1611)
+    const undecided =
+      writtenOnly &&
+      offending.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0);
+    // one copy-type diagnostic per offending kind, its earliest writer (§4, F28); against the destination's required
+    // kinds, a written optional type's null among them (a decided type's admitted null is C9's)
+    for (const { item } of offendingKinds(offending))
+      storeWarning(
+        walk,
+        !isExternal(item) || (undecided && item.tag === "unknown")
+          ? d.site
+          : d.kind === "whole"
+            ? admission.ingressSiteOf(d, at, item)
+            : admission.contributionSited(d.site, item, d),
+        label(),
+        later(item),
+        nullableTags,
+        rule(),
+        items.filter(fitting),
+      );
+    // C9: at the ingress store (an addAll's at its elements' destination); and each external item's, so named data
+    // a typed default holds keeps its own boundary
+    if (
+      d.value !== undefined &&
+      definitions.ingress.has(d.value) &&
+      (at.length === 0 || (d.kind === "add" && at.length === 1 && at.at(0) === "element"))
+    )
+      admission.boundaryAt(d);
+    // (only external data owes it, `boundaryFor`: the label shown only where the check is owed, #1483)
+    for (const item of items)
+      if (boundaryData(item)) {
+        const cell = admission.cellSited(d.site, item, d);
+        admission.boundaryFor(item, () => {
+          const text = label();
+          return obligation(
+            "copy-type",
+            cell,
+            text,
+            tags.map(requiredKind),
+            `validate ${text} against ${tags.join("|")}`,
+          );
+        });
+      }
+    // a null beside external data owes its null-check, unless the destination's admitted type holds null; a possible
+    // null into a non-nullable type a null-check, a definite one an error
+    const external = items.some(isExternal);
+    if (
+      (!nullable && (at.length === 0 || written) && !before) ||
+      (external && !admission.admitted(root, path()).includes("null"))
+    )
+      for (const item of nulls)
+        if (item.cert === "def" && !external) {
+          error(
+            walk,
+            "written-target",
+            admission.siteAt(d, at, (elements) =>
+              elements.some((element) => element.tag === "null" && element.cert === "def"),
+            ),
+            rule(),
+            ["null"],
+          );
+          admission.reject(d, root, path());
+        } else {
+          const text = label();
+          nullWarning(
+            walk,
+            "written-target",
+            d.site,
+            later(item),
+            `check that the value is not null before ${text} holds it`,
+            text,
+            rule(),
+            items.filter(fitting),
+            tags.map(requiredKind),
+          );
+        }
+  };
 }

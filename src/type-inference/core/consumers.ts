@@ -1,3 +1,8 @@
+import type {
+  CertificateFacts,
+  StopCertificate,
+  CertificateLedger,
+} from "./consumers/certificates.js";
 import type { Expression } from "../../ast.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { Admission } from "./admission.js";
@@ -195,6 +200,9 @@ export const STOP_RULE = 5 + STAGES;
  * public for them, and internal to the consumers.
  */
 export class Consumers {
+  certificateFacts: CertificateFacts | null = null;
+  certificates: StopCertificate[] = [];
+  certificateLedger: CertificateLedger | undefined;
   readonly diagnostics: CoreDiagnostic[] = [];
   /**
    * The finishing path's warnings (D4 a′): the checks the stop or the nesting limit moved to the runtime, never shown
@@ -313,7 +321,9 @@ export class Consumers {
       decide: (root: PlaceId, path: readonly string[]) => void,
     ) => boolean = () => true,
     completion: (() => CompletionPass) | null = null,
+    certificateFacts: CertificateFacts | null = null,
   ) {
+    this.certificateFacts = certificateFacts;
     this.#completion = completion;
     this.#rejected = rejected;
     this.#cycling = cycling;
@@ -327,9 +337,14 @@ export class Consumers {
       pass,
       {
         run: (work) => this.solve(work),
+        certificates: () => this.certificateFacts,
         // (after a stop admission reads as every consumer does: the finishing read)
         read: (value, node, at) =>
-          this.finishing ? finishingRead(this, value, node, stepsArray(restSteps(at))) : null,
+          this.certificateFacts !== null
+            ? this.certificateFacts.read(value, node, at)
+            : this.finishing
+              ? finishingRead(this, value, node, stepsArray(restSteps(at)))
+              : null,
         domain: (key) => this.stoppedDomain(key),
       },
       rejected,
@@ -458,6 +473,7 @@ export class Consumers {
 
   /** A value's items at a node and a path, as a consumer's demand: past its allowance, its own key's contract. */
   public valueRun(value: PlaceId, node: FlowNode | null, rest: Rest): readonly Item[] {
+    if (this.certificateFacts !== null) return this.certificateFacts.read(value, node, rest);
     const items = this.run(this.pass.values.consumerItems(value, node, rest), () =>
       this.pass.contract.contractOfValueAt(value, rest),
     );
@@ -502,6 +518,7 @@ export class Consumers {
    * questions, `CoreAnswers.#run`).
    */
   public run(work: Work<readonly Item[]>, contract?: () => Work<readonly Item[]>): readonly Item[] {
+    if (this.certificateFacts !== null) return this.certificateFacts.run(work);
     if (this.finishing) return this.asksNothing() ? STOPPED : this.solve(work);
     const allowance = this.reading === null ? null : this.#demandAllowance(this.reading);
     try {
@@ -533,6 +550,7 @@ export class Consumers {
    * (a consumer's read; admission's decisions take the program's allowance alone).
    */
   public solve<T>(work: Work<T>, allowance: number | null = null): T {
+    if (this.certificateFacts !== null) return this.certificateFacts.run(work);
     const ledger = this.pass.program.work;
     const before = ledger.own;
     let stopped = false;

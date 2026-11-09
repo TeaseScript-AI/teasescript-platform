@@ -33,7 +33,8 @@ import {
   unwrap,
 } from "./slice-index.js";
 import { Contracts, isCollection, kindsPlan, membersOf, unionOf } from "./store-contracts.js";
-import { keeps } from "./kept-checks.js";
+import { keeps, narrower } from "./kept-checks.js";
+import { keyOf } from "../definitions.js";
 
 /** A site of the plan's checks: a store or load, a list `get` call, or the owner of a selected fallback. */
 type CheckSite = RuntimeCheckSite | BinaryExpression;
@@ -330,6 +331,39 @@ export function lostCheck(
   checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
   core: CoreRuntimeChecks,
 ): void {
+  // (#2080 prototype, scratch: an unsettled stop's certificates, NoCheck kept, Required kept by a carrying check,
+  // anything else declined)
+  for (const certificate of answers.stopCertificates()) {
+    const store = index.storeAt(certificate.site);
+    const destination =
+      store === undefined ? null : answers.storedPlace(nodeOf(answers, index, store));
+    const identity =
+      certificate.epoch === answers.epoch &&
+      destination !== null &&
+      destination.id === certificate.place &&
+      destination.path.length === certificate.path.length &&
+      destination.path.every((step, at) => step === certificate.path[at]);
+    if (identity && certificate.outcome === "nocheck") continue;
+    if (
+      identity &&
+      certificate.outcome === "required" &&
+      certificate.required !== undefined &&
+      store !== undefined
+    ) {
+      const carried = checks.get(store)?.type;
+      if (carried !== undefined && narrower(carried, certificate.required.ref)) continue;
+    }
+    const expression =
+      store === undefined
+        ? index.expressionAt(certificate.site)
+        : store.kind === "letStatement"
+          ? store.initializer
+          : store.value;
+    throw new OutsideContract(
+      expression,
+      `an unresolved stop certificate for store ${certificate.uid} at ${certificate.site.file}:${certificate.site.start} into ${keyOf(certificate.place, certificate.path)} (${certificate.outcome})`,
+    );
+  }
   const gated = answers.gated();
   // (obligations a settled stop cannot establish: the program is declined at its first store, never read as owing none)
   if (gated === null) {
