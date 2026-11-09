@@ -58,10 +58,10 @@ const LABEL =
  * F1", "the merged S6's B1"), not a label; an id further on ("#1027's B1, F12") or a decision ("the owner's D4") is one.
  */
 const REVIEWED =
-  /(?:\b(?:Codex|Astra|Sol|Fable|Opus)(?:'s)?(?:\s+(?:r\d+(?:[–-]r\d+)?|round \d+|review))?(?:'s)?|\br\d+(?:'s)?|\bround \d+|#\d+(?:'s)?|\bowner's (?:reviewer's|review)|\bS\d{1,2}[a-z]?'s)\s+(?:[A-Z]{1,2}\d{1,3}[a-z]?(?:\/| and ))*$/u;
+  /(?:(?:\b(?:Codex|Astra|Sol|Fable|Opus)(?:'s)?(?:\s+(?:recheck\s+)?(?:r\d+(?:[–-]r\d+)?|round \d+|reviews?|final))?(?:'s)?|\br\d+(?:'s)?|\bround \d+)\s+(?:[A-Z]{1,2}\d{1,3}[a-z]?(?:\/|, | and ))*|(?:#\d+(?:'s)?|\bowner's (?:reviewer's|review)|\bS\d{1,2}[a-z]?'s)\s+(?:[A-Z]{1,2}\d{1,3}[a-z]?(?:\/| and ))*|\b[A-Z]{1,2}\d{1,3}[a-z]?-)$/u;
 
 /** A reviewer's review just after an id ("B1 of Astra's review") makes it a review reference too. */
-const REVIEWED_AFTER = /^ of (?:Codex|Astra|Sol|Fable|Opus)'s review/u;
+const REVIEWED_AFTER = /^(?: of (?:Codex|Astra|Sol|Fable|Opus)'s review|-r\d)/u;
 
 /** Labels that name a repository document, not the plan or the research. */
 const DOCUMENTS = new Set(["V30"]);
@@ -71,7 +71,10 @@ export function labelsIn(fileName, text) {
   const found = [];
   for (const comment of fileComments(fileName, text))
     for (const match of comment.text.matchAll(LABEL)) {
-      const before = comment.text.slice(Math.max(0, match.index - 40), match.index);
+      // a block comment's line breaks and leading `*` or `//` read as one space
+      const before = comment.text
+        .slice(Math.max(0, match.index - 60), match.index)
+        .replace(/\s*\n\s*(?:\*(?!\/)|\/\/)?\s*/gu, " ");
       const after = comment.text.slice(
         match.index + match[0].length,
         match.index + match[0].length + 30,
