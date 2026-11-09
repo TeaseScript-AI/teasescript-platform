@@ -16,7 +16,7 @@ const TARGET = `${WORK}target.ts`;
 const RECORD = "player/vue/src/session/activation/useActivationRun.ts";
 
 /** What the checks admit. */
-export const DECLARED = {
+const DECLARED = {
   /** The trusted adapter: it holds the session and reads the record; review and the runtime family decide it. */
   adapters: [TARGET],
   /** Per work module, the value symbols it may import from each module. */
@@ -108,7 +108,7 @@ function operations(...names: readonly string[]): Record<string, "operation"> {
 }
 
 /** What the checks find in each work entry: its callbacks, awaits and calls, each by what it resolves to. */
-export const SITES: readonly string[] = [
+const SITES: readonly string[] = [
   `${WORK}adopt.ts adopt > done: callback`,
   `${WORK}adopt.ts adopt > done: page AdoptPage.adopted`,
   `${WORK}adopt.ts adopt > failed: callback`,
