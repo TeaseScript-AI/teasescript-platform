@@ -205,8 +205,8 @@ it end to end; text crosses only [r4.204](#r4-204) and labels use recipes, with 
 every entry: only canonical functions produce `CanonicalKey`, cursor-owned maps use that brand, and `definitions.ts`
 enforces `TextKey`. A record owns opaque `PathSteps`, read by position and spelled by the record, with `toArray()` as
 the one charged escape. Every per-path memo and converter belongs to one lazily accessed `Contract.pathFacts` record,
-including `keyAtWith`, `keyBelowWith`, `text` and the amortized `prefixId` climb. The year and mixed chain family
-retains its one-doubling cost gate of ×1.005 in all four modes.
+including `keyAtWith`, `keyBelowWith`, `text` and the amortized `prefixId` climb. For the year and mixed chains in all
+four modes, the cursor/text work ratio at 16 levels must be at most the ratio at 8 levels times 1.005.
 
 **Reason.** Conversions, climbs, member scans, suffix arrays and array-born cursors were siblings of the same path-cost
 family, so per-path ownership and type fences close their entry paths together.
@@ -232,11 +232,11 @@ growing tasks, arrays and key text without charge.
 **Admission growth repairs separate structure, support, deciders and sparse properties.**
 
 **Rule.** Structure listing is independent of asking order: retain one relative listing per composed node, finalized in
-postorder on first need. Layer folding retains local contributions and parent/join references with charged recipe
-vertices and edges; short answers do not make quadratic internal support output-bound. Written-decider transfer work
-reports the accepted A6 pass multiplier explicitly, rather than claiming overall linearity; sparse properties have their
-own present/missing/provenance proof. These repairs leave syntax, allowances, ledger rules, rejection scheduling,
-packets, wording and key comparison order unchanged.
+postorder on first need. Layer folding retains local contributions and parent/join references with O(k) or O(k log k)
+recipe vertices and edges, charged at creation; short answers do not make quadratic internal support output-bound.
+Written-decider transfer work reports the accepted A6 pass multiplier explicitly, rather than claiming overall
+linearity; sparse properties have their own present/missing/provenance proof. These repairs leave syntax, allowances,
+ledger rules, rejection scheduling, packets, wording and key comparison order unchanged.
 
 **Reason.** Asking order multiplied structure listing, layer support grew faster than public records, and role minima
 were not the cause.
@@ -251,18 +251,21 @@ bridge still exceeds the largest-size cost gate.
 
 **Operation/path proofs belong to the solver, with replayable pass-local descriptors.**
 
-**Rule.** For #1479's operation/path demand construction, use one constructor for root and non-root reads, identified by
-the operation's `PlaceId` and logical path, with `contractOfOp` only inside its `make`. Answers stay solver-owned, with
-component, dependency, disposal, stop and forget lifecycles; a pass-local map interns immutable descriptors by operation
-and arena path id, charging retained entries and long names once and reusing names on hits. Preserve `landsIn` cleanup
-and the `PathSteps` fence, with path-aware `cop` replay through `compareDemandNames` and the existing packet; rejection
-passes get fresh descriptors and stops invalidate through recorded reads and `Solver.forget`. C10 consumers are callers,
-with no consumer-side cache.
+**Rule.** For #1479's original universal operation/path demand construction, use one constructor for root and non-root
+reads, identified by the operation's `PlaceId` and logical path, with `contractOfOp` only inside its `make`. Answers
+stay solver-owned, with component, dependency, disposal, stop and forget lifecycles; a pass-local map interns immutable
+descriptors by operation and arena path id, charging retained entries and long names once and reusing names on hits.
+Preserve `landsIn` cleanup and the `PathSteps` fence, with path-aware `cop` replay through `compareDemandNames` and the
+existing packet; rejection passes get fresh descriptors and stops invalidate through recorded reads and `Solver.forget`.
+C10 consumers are callers, with no consumer-side cache.
 
 **Reason.** Inline default questions repeated operation/path work quadratically, while root-only replay could not
 reconstruct a non-root `cop` demand; geometric path facts cannot hold a value-specific proof.
 
 **Source.** The lead's #1479 ruling after Sol's design round 1, 2026-10-31.
+
+**Superseded by:** [r4.283](#r4-283) replaces the universal operation/path demand scope with inline operation reads and
+demands for the specified branches.
 
 ### r4-227
 
@@ -431,13 +434,15 @@ interning routes.
 **Rule.** `yield* inline(work)` runs a child on its frame's explicit stack with that frame's identity: never memoised,
 never a component member and never a demand, with its read chain starting at zero. Push and pop add no charge or
 allowance check, preserving generator steps, charges and stops; throw exceptions into parents, and between steps report
-combined root and suspended-child read depth, maintained as a prefix per child. `valueAt` reads the operation branch
-inline while the choice branch remains a demand.
+combined root and suspended-child read depth, maintained as a prefix per child. `valueAt` replaces [r4.221](#r4-221)'s
+universal demand scope: at non-empty paths, the choice branch and fallback or `get` results use memoised `cop` demands;
+every other operation reads inline, with root reads unchanged.
 
 **Reason.** Native delegation overflowed on long operation chains; making every operation/path pair a demand changed
 joined self-store components and introduced quadratic reruns.
 
-**Source.** Merged PR #1584 for #1572, with Codex and Astra depth repairs, 2026-11-02.
+**Source.** Merged PR #1584 for #1572, with Codex and Astra depth repairs, 2026-11-02. Merged PR #1824 (2026-11-06) adds
+the non-empty-path demands for fallback and `get` results.
 
 ### r4-288
 
@@ -511,12 +516,8 @@ needs a separate gate for changed total stops and check contents plus the caller
 **Published records serialize only on a complete site-and-rule sort tie.**
 
 **Rule.** `answers.ts` sorts records by file, start, end and rule, making JSON only for a complete tie, memoised once
-per item and compared lexically in the existing order. Key/path record reuse proceeds independently of the
-global-charging owner decision; share ordered landing recipes and shallow completion preparation while keeping the cap,
-and share syntax content with iterative cycle traversal. #1655's raw solver/projection work and #1418/#1420/#1421's
-role-selection and demand-debit proofs stay in design; #1646/#1665 stay parked until the depth-bound and C5 proofs
-exist. Compiler-growth coverage is added for each construction's own family; an existing exponent gate does not cover
-families it never runs.
+per item and compared lexically in the existing order. Compiler-growth coverage is added for each construction's own
+family; an existing exponent gate does not cover families it never runs.
 
 **Reason.** Eager JSON sort keys flattened otherwise shared operand text after a stop, making retained heap quadratic
 even while charged capture work was linear.

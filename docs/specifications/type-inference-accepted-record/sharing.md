@@ -85,8 +85,10 @@ proofs that did not depend on it.
 
 **Whole-copy mark realisation covers fan-out and interleaved stores.**
 
-**Rule.** The whole-copy mark realisation covers fan-out and interleaved-store variants, including the `ownMarksOf`
-per-copy tested-path scan, `plainCopySource` refusing descendant stores and order-dependent mark-set materialisation.
+**Rule.** Query the source's shared per-path mark index by the copy's own path and guard scope, never scan tested paths
+per copy or chain step. Memoise the shared set per source and scope, not per first asker, so asking order cannot
+rematerialise it. A descendant store excludes only the stored path from sharing, never the whole copy. These rules cover
+sibling guarded copies and copies interleaved with stores to different fields.
 
 **Reason.** A source's tested paths scanned per copy recreated a k × k product.
 
@@ -218,10 +220,10 @@ identify semantic leaf sets, so operation-specific transfers and certificate equ
 
 **Bounded by:** [r4.191](solver-and-work.md#r4-191) keeps semantic migration on hold after the second design round: the
 joint path/support construction and exact-equality cost remain unproved, with no growth waiver. Merged PR #1417
-(2026-10-29) applies only the interim cut: interned class ids, a class's own writer and role parts, and writer lookup
-only when a second class member arrives; residual growth remains recorded as bugs. In that cut, `KeptClass.roleParts`
-forwards a writer-less unary part to its sole child, while `classWriters` reads writers once per value and side in a
-pre-order walk bounded by returned roles.
+(2026-10-29) applies only the interim cut: interned class ids, a class's own writer and role parts, and `roleMinima`
+reading a class's writers only when a second member arrives; residual growth remains recorded as bugs. In that cut,
+`KeptClass.roleParts` forwards a writer-less unary part to its sole child, while `classWriters` reads writers once per
+value and side in a pre-order walk bounded by returned roles.
 
 ### r4-251
 
@@ -319,10 +321,12 @@ and hold a reached base node once per goal with the union of all sets that reach
 and compile one guard answer per holder/base group so tested-prefix visits equal distinct prefixes. For every admitted
 finite holder H, history p and suffix t, some pending state after p accepts t exactly when `marksAt(H, p·t)`; keep one
 pending set per base node per goal and holds/marks nesting at depth one. Exactness at a marking entry is tested over
-every item pair of the condition. The receiver floor remains a recorded follow-up: the native `receiverWalk` reads no
-shorter prefix's stores below a receiver whose kinds have no structure.
+every item pair of the condition. Respect the native `receiverWalk` floor: no shorter prefix's stores are read below a
+receiver whose kinds have no structure. Pair pending mark states with receiver shapes and stop at that floor, carrying
+its unknowns and accepted marks.
 
 **Reason.** Declining marking routes fell back to a native read that grew a longer key at every read; histories and
 repeated holder compilation introduced further growth.
 
-**Source.** Merged PR #1859 for #1784, following Sol design D, Astra rounds 1–2 and Codex repairs, 2026-11-07.
+**Source.** Merged PR #1859 for #1784, following Sol design D, Astra rounds 1–2 and Codex repairs, 2026-11-07. Merged PR
+#2022 for #2005 adds the receiver floor, 2026-11-08.

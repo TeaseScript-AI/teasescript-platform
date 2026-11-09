@@ -40,11 +40,11 @@ and at an unsettled stop the consumer's obligation is marked at the read's own s
 
 ### r4-117
 
-**Read-check rollback clears structural ingress resolution; the guard index is lazy.**
+**Rollback drops ingress memo; NarrowingIndex is lazy.**
 
 **Rule.** When `takeBackReadChecks` rolls back a check and its key, it also clears cached ingress resolution. Build
-`GuardIndex` lazily at its first read and charge the work when it runs. Written-store parts at a stop use admission's
-own C1 under [r4.125](#r4-125).
+`NarrowingIndex` lazily at the first read of `GuardIndex.narrowing` and charge the work when it runs. Written-store
+parts at a stop use admission's own C1 under [r4.125](#r4-125).
 
 **Reason.** Keeping the ingress cache after rollback lost an own-read boundary, while eager narrowing setup built an
 unused index in the fresh finishing pass.
@@ -234,23 +234,23 @@ nested placeless values and copied roots introduced quadratic work.
 
 **Rule.** Keep scoped completion in the existing solver and admission, retaining an immutable `ContractRef` per
 canonical key and admission epoch with path-sensitive dependency closure for each destination key, receiving site and
-required extent. Shape and complete-contract extents are distinct: an ancestor shape query proves no wildcard subtree,
-and retries of newly required stopped keys use the existing forget/restart mechanism with one coordinator and cache per
-epoch. Publication uses the existing requirement map, `TypeCheckPlan` and `assertValueType`; share completed
-admitted-domain proofs and qualified copy origins rather than computing a second type. The descriptor service prefers
-written and independently retained copy terms, otherwise the existing admission/solver proof per needed level, interning
-immutable contract references with labels and receiving sites outside identity and iterative depth construction shared
-with facts. Closure and assembly must establish the proposed O(K + E + T + H) per-epoch bound over solver work; it is a
-construction to prove and gate, not a measured property of the prototype.
+required extent. Shape and complete-contract extents are distinct: an ancestor shape query proves no wildcard subtree.
+Publication uses the existing requirement map, `TypeCheckPlan` and `assertValueType`; share completed admitted-domain
+proofs and qualified copy origins rather than computing a second type. The descriptor service prefers written and
+independently retained copy terms, otherwise the existing admission/solver proof per needed level, interning immutable
+contract references with labels and receiving sites outside identity and iterative depth construction shared with facts.
+Closure and assembly must establish the proposed O(K + E + T + H) per-epoch bound over solver work; it is a construction
+to prove and gate, not a measured property of the prototype.
 
 **Reason.** Lost destinations came from bookkeeping, and a depth cut was an implementation limit rather than a language
 rule; one shared proof/descriptor builder avoids a second computation and duplicate extraction.
 
 **Source.** The lead's reading of Sol's #1526 production-structure design and merged phase-A PR #1593, 2026-11-02.
 
-**Bounded by:** the owner's #1526 decision 2 remains deferred, so measured headroom does not decide publication of an
-unfinished required check; PR #1652 (2026-11-04) turns `SliceDepth` into the existing slice exit and removes the unsound
-cycle certificate, leaving admitted-level inclusion to be proved.
+**Bounded by:** [r4.312](#r4-312) replaces stopped-key retries through forget/restart with a fresh completion pass
+without frozen keys. PR #1652 (2026-11-04) turns `SliceDepth` into the existing slice exit and removes the unsound cycle
+certificate, leaving admitted-level inclusion to be proved. Publication after a stop follows the [resource-limit
+contract](../../RESOURCE-LIMITS.md#coarse-type-core-bounds).
 
 ### r4-303
 
@@ -272,21 +272,23 @@ supporting further invalidation.
 
 **Completion has one fresh admission pass over settled inputs, charged to the total.**
 
-**Rule.** After capture, construct one fresh `Admission` from the settled pass's rejections and store targets without
-its frozen keys; decide a proof-read key where a level first reads it from the remaining total, recording
-`budget.closure.decisions`. Leave the settled pass unchanged and publish completion results only as the
-`Answers.receiving` inventory, charging closure work to the total and its own pass records, never a settled-pass demand
-allowance or apart work. Share descriptor listings and assembly cells; the retained cell graph, counted transaction
-guard, progress-stamped frontier and `close()` remain. A completion decision that would reject or retarget a selecting
-store makes its obligation `Lost` with that cause, never a refusal, widening or altered settled answer.
+**Rule.** Replace [r4.278](#r4-278)'s forget/restart retries: after capture, construct one fresh `Admission` from the
+settled pass's rejections and store targets without its frozen keys; decide a proof-read key where a level first reads
+it from the remaining total, recording `budget.closure.decisions`. Leave the settled pass unchanged and publish
+completion results only as the `Answers.receiving` inventory, charging closure work to the total and its own pass
+records, never a settled-pass demand allowance or apart work. Share descriptor listings and assembly cells; the retained
+cell graph, counted transaction guard, progress-stamped frontier and `close()` remain. A completion decision that would
+reject or retarget a selecting store makes its obligation `Lost` with that cause, never a refusal, widening or altered
+settled answer.
 
 **Reason.** A separate mask-free pass avoids caches of frozen answers and the extra invalidation protocol; sharing
 listing work removes the destination-by-listing product that remained despite a linear frontier.
 
 **Source.** The lead's phase-C construction readings on PR #1637 for #1526, 2026-11-02.
 
-**Bounded by:** the deep-wrapper family owes quadratic real holder-paths with path-sized reads; copied-key listing
-reuse remains a separate #1615-class repair, and the owner's #1526 decision 2 still controls publication.
+**Bounded by:** the deep-wrapper family owes quadratic real holder-paths with path-sized reads; copied-key listing reuse
+remains a separate #1615-class repair. Publication after a stop follows the [resource-limit
+contract](../../RESOURCE-LIMITS.md#coarse-type-core-bounds).
 
 ### r4-332
 
@@ -305,10 +307,7 @@ demand-only obligations removes over-checks while preserving domains.
 
 **Source.** Merged PR #1653 for #1604, 2026-11-04.
 
-**Bounded by:** the owner's #1708 decision A′ (2026-11-05) permits differing type-reading sentence parts only from a
-declaration followed to the leaf through the recorded place/path or a settled proof of that same read, with identical
-actual check, location and expected types and no other ignored difference; names or nearby sites prove nothing, and
-changed operand or fallback domains remain refused.
+**Bounded by:** [r4.363](oracles.md#r4-363), the owner's #1708 decision A′ on type-reading sentence parts after a stop.
 
 ### r4-339
 
@@ -334,8 +333,8 @@ reuses the existing derivation rather than checking again.
 bound: a stop may defer a check to runtime, never drop it. After A2, build retained C10 proofs, then operand-domain
 proofs, then grounded C1 obligations on the registry sharing A4's register; fresh unsettled solving stays at #1252's
 boundary, and #1642's remaining cases are verified before repair. Check equivalences need explicit proofs rather than
-relabels; unproved external-check publication stays with the owner's #1526 decision 2, whose options are PRESERVE /
-STRUCTURAL FIRST, REFUSE and STOP AT STORE.
+relabels; publication after a stop follows the [resource-limit
+contract](../../RESOURCE-LIMITS.md#coarse-type-core-bounds).
 
 **Reason.** Standing-copy coverage did not prove the remaining receiver, C10/store and advice equivalences, which need
 explicit proofs.
@@ -357,8 +356,8 @@ a whole contract, `Lost` never becomes `Open`, and complete obligations are disc
 immutable proof to every actual solver/value read and stable rejection/target input, including cache hits, copies,
 projections and wrappers; follow a mark's reverse reach once, keeping only proofs proved outside it and conservatively
 losing unknown support. Settled capture admissions and targets stay unchanged, with [r4.183](#r4-183)'s one restart per
-A6 pass and completion cap `min(2W, A−W)`; provenance uses shared accounting. Neither construction publishes a
-still-`Lost` required external check; that remains the owner's #1526 decision 2. Before building, establish binding and
+A6 pass and completion cap `min(2W, A−W)`; provenance uses shared accounting. Publication after a stop follows the
+[resource-limit contract](../../RESOURCE-LIMITS.md#coarse-type-core-bounds). Before building, establish binding and
 property-order representation, discharge, Lost/Open and stale-epoch controls, and the dependency contract on retargeted,
 wrapped, independent and copied-independent cases.
 

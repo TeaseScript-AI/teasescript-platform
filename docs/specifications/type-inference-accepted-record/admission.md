@@ -78,7 +78,7 @@ held by reference, so `let ys = [x.inner, y.inner]` is TSV044 at `y.inner`. Only
 **Rule.** A8 conflict discovery asks one representative per proven kind class through `Contract.classOf`,
 `#conflictClass` and `#conflictGroups`. The groups union identity and class edges that preserve kinds at every path, use
 their least tag as name and keep class, identity and F18 namespaces separate; finishing named literals bypass grouping
-after a stop. `termAt` caches a written type's element-depth walk by `TypeTerm` identity and advances one element at a
+after a stop. `levelsOf` caches a written type's element-depth walk by `TypeTerm` identity and advances one element at a
 time. `Contract.relevantSubs` indexes full paths so a preset read does not visit unrelated siblings.
 
 **Reason.** These mechanisms remove repeated conflict-class discovery, repeated written-type walks and nonrecursive
@@ -141,6 +141,9 @@ nested-selection and nested-choice decision products.
 
 **Source.** Merged PR #1423, G3 part 2, 2026-10-29.
 
+**Bounded by:** [r4.336](#r4-336) replaces the written-copy fallback outside decisions with group summaries, keeping
+decision scans unchanged.
+
 ### r4-202
 
 **A decider region holds paths as parent-linked step nodes.**
@@ -160,11 +163,11 @@ allowances, so it was restored.
 
 **A preparation generator owns its dependency frame while it advances.**
 
-**Rule.** Each preparation generator owns an explicit frame active only while it advances, with suspension, resumption
-and abandonment on a cycle restart. Attribute reads to the active frame and cached link answers to the frame that first
-produced them or reread them; retain the stack-mismatch assertion as an invariant that never fires. For typed parameter
-defaults mixing host, null and literal elements, with loop items copied to typed bindings, retain the reference scan's
-decider and inherited provenance.
+**Rule.** In a written-decider proof bridge, each preparation generator owns an explicit frame active only while it
+advances, with suspension, resumption and abandonment on a cycle restart. Attribute reads to the active frame and cached
+link answers to the frame that first produced them or reread them; retain the stack-mismatch assertion as an invariant
+that never fires. For typed parameter defaults mixing host, null and literal elements, with loop items copied to typed
+bindings, retain the reference scan's decider and inherited provenance.
 
 **Reason.** The waiting driver can suspend or abandon a preparation generator out of stack order when a cycle grows, so
 an admission-wide lifetime stack attributes dependencies to the wrong owner. An unchanged admitted type alone is
@@ -172,14 +175,18 @@ insufficient: the typed-set case kept its kinds but changed its decider and inhe
 
 **Source.** The lead's decision after Sol prototype round 6 for #1444(b,c), directing round 7, 2026-10-31.
 
+**Bounded by:** The lead held #1444(b,c)'s proof bridge for its cost (2026-10-31); [r4.336](#r4-336) replaces its frame
+machinery with a decomposition needing no proof bridge. The decider and inherited-provenance requirement remains.
+
 ### r4-336
 
 **Summarise written deciders only outside decisions, with forget epochs.**
 
 **Rule.** Answer `earliestDecider` questions outside decisions from a rank-ordered fold of group regions, one summary
 per group, rest and masks, using written-copy representatives and a lazy first value. An open list join takes its
-operand first; otherwise take the earlier of the earliest written copy and earliest deciding value. Keep a decision's
-own scan unchanged, so its debits remain identical by construction and no proof bridge is needed. Use `Solver.forget`'s
+operand first; otherwise take the earlier of the earliest written copy and earliest deciding value. This replaces
+[r4.197](#r4-197)'s written-copy fallback outside decisions and [r4.234](#r4-234)'s proof bridge. Keep a decision's own
+scan unchanged, so its debits remain identical by construction and no proof bridge is needed. Use `Solver.forget`'s
 count as the summary epoch, replace summary maps whole when it changes and never write the ordinary caches after a
 forget. A routed question reaches no decision: `into === null`, with a depth flag enforcing that boundary.
 

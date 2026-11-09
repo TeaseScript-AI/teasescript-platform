@@ -223,7 +223,8 @@ parse, void exit or written type; a never-selected fallback certifies nothing. N
 store and a use tested against the same producer stay warning cases. Answer whole-copy descendants by value rather than
 one route per field; a called function's written union proves itself at its use, with C1's copy rule applied at a store.
 `NarrowingRoutes.#checked` alone decides the closed tested-producer set: N1 tests under and/or/not, uses in guarded
-arms, later conjuncts and uses after passed statements with no intervening label; loops and switches never pass. An
+arms, later conjuncts and uses after passed statements with no intervening label. A guard held inside a loop or switch
+does not propagate past it; a `while` whose false condition proves the test and that no `break` leaves can pass. An
 unproved exit kind or arm shape counts as not tested, including the under-offers of a loop holding a guard and a guard
 followed by a label. Promote through the certificate only where no live arm of an admitted callable is infeasible by
 entry narrowing; a stopped decision, nonexternal `unknown` or empty answer is unavailable and blocks promotion, while
@@ -240,7 +241,8 @@ repair, 2026-11-07.
 
 **Read closed-object property descendants from holders and pay for indexing by saved folds.**
 
-**Rule.** `propertyItems` accepts any rest starting with a property and folds only that property's holders at any depth;
+**Rule.** `propertyItems` accepts a rest starting with a property unless any step is `SELECTED_VALUE` or
+`SELECTED_TEXT`; selection paths read every entry separately. Otherwise fold only that property's holders at any depth;
 keep the fold once per path below a deeper read inside the property index, never in `Contract.levelGroups`. Below a
 property every source holds, and wherever holders cover every source the levels path answers; the equivalence lasts for
 the pass's property index. For `landed`, index each copy path's copies by the first step past their strips taken by

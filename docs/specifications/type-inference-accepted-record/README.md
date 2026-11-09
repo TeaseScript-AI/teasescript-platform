@@ -55,7 +55,7 @@ and, where it applies, what superseded or bounded it.
 | [r4-87](sharing.md#r4-87) | sharing | Every operation family the value side composes has a class rule. |
 | [r4-106](stops-and-finishing.md#r4-106) | stops-and-finishing | A finished contract is a domain, not the read's own kinds. |
 | [r4-113](stops-and-finishing.md#r4-113) | stops-and-finishing | A host read keeps its structural ingress even when the script writes into that global. |
-| [r4-117](stops-and-finishing.md#r4-117) | stops-and-finishing | Read-check rollback clears structural ingress resolution; the guard index is lazy. |
+| [r4-117](stops-and-finishing.md#r4-117) | stops-and-finishing | Rollback drops ingress memo; NarrowingIndex is lazy. |
 | [r4-125](stops-and-finishing.md#r4-125) | stops-and-finishing | The fresh pass checks written stores through admission's own C1. |
 | [r4-126](stops-and-finishing.md#r4-126) | stops-and-finishing | A boundary's expected domain uses the ordered finishing read. |
 | [r4-129](contract.md#r4-129) | contract | A stored stable-path read takes its narrowing where it holds. |
