@@ -1077,7 +1077,8 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
     ["TSV043 0:155:158", "TSV041 0:167:168"],
   );
   assert.equal(both.kind, "unwitnessed");
-  // (two stores lacking properties of one object share its site, each its own error: with the first store's
+  // (two stores lacking properties of one object share its site, each its own error, at a stop before admission settles
+  // as #2080 part 1 declines it at a settled one: with the first store's
   // `requireExisting` dropped, a run passes it and fails at the second, so the first's escape is open; Codex r1 on #2185)
   for (const mode of HELD_MODES) {
     let dropped = false;
@@ -1085,7 +1086,7 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
       unit("let root={x:1}\nroot.q=2\nroot.z=3\nexit\n"),
       ["hostValue"],
       (make) => mode.run(make),
-      16,
+      1,
       (plan) => ({
         ...plan,
         instructions: plan.instructions.map((instruction) => {
@@ -1096,6 +1097,7 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
           return kept;
         }),
       }),
+      "work",
     );
     assert.deepEqual(
       found.sites.map(({ code, site }) => `${code} ${site}`),
@@ -1104,13 +1106,16 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
     );
     assert.equal(found.kind, "open", mode.name);
   }
-  // (a genuine escape: the stop's plan stores a text the natural compile rejects, under a guard the pool's boolean takes)
+  // (a genuine escape: the stop's plan stores a text the natural compile rejects, under a guard the pool's boolean takes;
+  // #2080 part 1 declines it at a settled stop, so the work allowance stops before admission settles)
   for (const mode of HELD_MODES) {
     const found = stopRuns(
       unit('let n = 1\nif hostValue is boolean { n = "bad" }\nexit\n'),
       ["hostValue"],
       (make) => mode.run(make),
-      16,
+      1,
+      undefined,
+      "work",
     );
     assert.equal(found.natural.plan, false, mode.name);
     assert.equal(found.kind, "open", mode.name);
