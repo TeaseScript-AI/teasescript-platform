@@ -60,9 +60,9 @@ function shapeOf(file, text) {
   if (!PARSED.test(file)) return { importLines, headerComments, declarationStarts };
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   // each character's kind: 0 code or a token's text (a string's, a template's, JSX text), 1 a comment, 2 an import or
-  // re-export statement. A comment is one wholly inside a token's leading trivia, between the token's full start and its
-  // start: every comment is some token's (the end of the file's included), and no token's own text is trivia. JSDoc
-  // nodes are not descended: their text is the trivia of the token they precede.
+  // re-export statement. A comment is one wholly inside a token's trivia, between the token's full start and its start:
+  // every comment is some token's (the end of the file's included), and no token's own text is trivia. JSDoc nodes are
+  // not descended: their text is the trivia of the token they precede.
   const kind = new Uint8Array(text.length);
   const visit = (node) => {
     if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode)
@@ -72,8 +72,12 @@ function shapeOf(file, text) {
       for (const child of children) visit(child);
       return;
     }
+    // both scans at the token's full start: a comment before the next newline is a trailing one to the scanner
     const [from, to] = [node.getFullStart(), node.getStart(source)];
-    for (const range of ts.getLeadingCommentRanges(text, from) ?? [])
+    for (const range of [
+      ...(ts.getLeadingCommentRanges(text, from) ?? []),
+      ...(ts.getTrailingCommentRanges(text, from) ?? []),
+    ])
       if (range.pos >= from && range.end <= to) kind.fill(1, range.pos, range.end);
   };
   visit(source);

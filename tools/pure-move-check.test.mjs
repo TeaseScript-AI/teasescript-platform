@@ -427,3 +427,39 @@ test(
     }
   },
 );
+
+test(
+  "a real comment beside code is a comment: a side comment on an import, a block continued below",
+  { timeout: 60_000 },
+  () => {
+    const side = moveOf(
+      { "a.ts": "import { a } from './old.js'; /* side comment */\nexport const result = a;\n" },
+      { "a.ts": "import { a } from './new.js'; /* side comment */\nexport const result = a;\n" },
+    );
+    try {
+      const { status, out } = side.run();
+      assert.equal(status, 0, out);
+      assert.match(out, /admitted import 2,/u);
+    } finally {
+      side.done();
+    }
+    // in an added file, above its first export: the comment's own lines are header comments; the line with code is not
+    const continued = moveOf(
+      { "a.ts": `${helper("kept")}\n` },
+      {
+        "a.ts": `${helper("kept")}\n`,
+        "b.ts":
+          "const answer = 42; /* begins beside the code\ncontinues on its own line\nends here */\nexport { answer };\n",
+      },
+    );
+    try {
+      const { status, out } = continued.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /unadmitted: b\.ts:1 \(added\): const answer = 42;/u);
+      assert.doesNotMatch(out, /unadmitted: b\.ts:[23] /u);
+      assert.match(out, /header comment 2;/u);
+    } finally {
+      continued.done();
+    }
+  },
+);
