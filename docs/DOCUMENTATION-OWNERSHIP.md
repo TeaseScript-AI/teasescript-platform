@@ -69,7 +69,9 @@ name marker such as `SUPERSEDED-`, and identify the current replacement inside t
 - **Accepted syntax and semantics:**
   [`docs/specifications/accepted-syntaxes-v30.md`](specifications/accepted-syntaxes-v30.md), overridden only within
   the exact scope of a later accepted ADR or an accepted update to that specification.
-- **Accepted rules of the type inference whose reasons the code cites:** [`docs/specifications/type-inference-accepted-record.md`](specifications/type-inference-accepted-record.md), overridden only within the exact scope of a later accepted ADR, V30 or a later entry that names it.
+- **Accepted rules of the type inference whose reasons the code cites:**
+  [`docs/specifications/type-inference-accepted-record.md`](specifications/type-inference-accepted-record.md),
+  overridden only within the exact scope of V30, a later accepted ADR, or a later entry of this record that names it.
 - **Current architecture map and component boundaries:** [`CURRENT-DESIGN.md`](../CURRENT-DESIGN.md) and
   [`docs/ARCHITECTURE.md`](ARCHITECTURE.md); accepted ADRs are canonical for the decisions and rationale.
 - **Exact current implementation:** repository code and executable configuration. Current topic documents are canonical
