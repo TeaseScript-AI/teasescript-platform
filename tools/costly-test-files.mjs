@@ -22,6 +22,7 @@ export const costlyTestSeconds = {
   "type-core-native.test.js": 55,
   "deep-literal-scale.test.js": 52,
   "type-core-cells.test.js": 52,
+  "player-keep-ownership.test.js": 51,
   "type-core-budget.test.js": 42,
   "type-core-mixed-family.test.js": 26,
   "type-core-solver.test.js": 25,
