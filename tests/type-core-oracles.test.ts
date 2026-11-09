@@ -803,3 +803,75 @@ test("a stop's runs decide each place the plans differ by a run failing inside i
   );
   assert.equal(stricter.kind, "stricter");
 });
+
+test("a stop's runs catch the design round's controls: a false branch, a nested element, a later failure with no output, and an error site no run reaches (#2080, the design round on #2142)", () => {
+  const run = <T>(make: () => T): T => make();
+  const unit = (source: string) => [{ path: "main.tease", source }];
+  // (the false branch's store check removed: the pool's false reaches it)
+  assert.equal(
+    stopRuns(
+      unit(
+        "let flag: boolean = hostValue\nlet n: integer = 1\nif flag {} else { n = hostOther }\nexit\n",
+      ),
+      ["hostValue", "hostOther"],
+      run,
+      1_000_000,
+      (plan) =>
+        editedTypeChecks(plan, (check) => (check.place.includes("'n'") ? undefined : check)),
+    ).kind,
+    "open",
+  );
+  // (the inner element of `integer[][]` opened: values made from the checked type reach it)
+  assert.equal(
+    stopRuns(
+      unit("let n: integer[][] = hostValue\nexit\n"),
+      ["hostValue"],
+      run,
+      1_000_000,
+      (plan) =>
+        editedTypeChecks(plan, (check) => ({
+          ...check,
+          type: { kind: "list", element: { kind: "list", element: null } },
+        })),
+    ).kind,
+    "open",
+  );
+  // (the first of two stores' checks removed, nothing said on either side: the stopped plan ran past the first check)
+  assert.equal(
+    stopRuns(
+      unit("let n: integer = hostValue\nlet m: integer = hostValue\nexit\n"),
+      ["hostValue"],
+      run,
+      1_000_000,
+      (plan) => withoutTypeChecks(plan, true),
+    ).kind,
+    "later",
+  );
+  // (no natural plan; the stop's plan checked at the erring store: the false run fails there, the true run never reaches
+  // it, so no run passes it)
+  const planted = stopRuns(
+    unit('let flag: boolean = hostValue\nlet n = 1\nif flag {} else { n = "bad" }\nexit\n'),
+    ["hostValue"],
+    run,
+    16,
+    (plan) => ({
+      ...plan,
+      instructions: plan.instructions.map((instruction) =>
+        JSON.stringify(instruction).includes('"bad"')
+          ? { ...instruction, typeCheck: { type: { kind: "integer" }, place: "'n'" } }
+          : instruction,
+      ),
+    }),
+  );
+  assert.equal(planted.natural.plan, false);
+  assert.equal(planted.kind, "closed");
+  // (no natural plan; the erring store under a guard no pool value takes: untested, never open)
+  const unreached = stopRuns(
+    unit('let n = 1\nif hostValue is duration { n = "bad" }\nexit\n'),
+    ["hostValue"],
+    run,
+    16,
+  );
+  assert.equal(unreached.natural.plan, false);
+  assert.equal(unreached.kind, "unwitnessed");
+});

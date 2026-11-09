@@ -3,7 +3,7 @@
 // node tests/families/plans.mjs summary <records>... [--list 40]
 // The plans comparison (#1526 phase A's kit, landed from #1678's copy): the plan each source compiles to through the core
 // backend, in the four modes (`HELD_MODES`), on two built trees in one worker, compared as the exact serialized JSON
-// (sha256 of `JSON.stringify(plan)` and of the diagnostics) together with the trace of every work unit the compile
+// (sha256 of `JSON.stringify(plan)`, none where the compile has no plan, and of the diagnostics) together with the trace of every work unit the compile
 // charges (each `WorkLedger.charge` call's counter and units folded into a 64-bit hash, with their count and sum) and the
 // sequence of questions the compile asks its answers (each call of an `Answers` method, with its place, path or node, in
 // order, folded likewise), so a lowering that asks the analysis anything more, less or in another order shows.
@@ -465,7 +465,8 @@ if (isMainThread && process.argv[2] === "summary") {
     tree.trace = null;
     tree.questions = null;
     return {
-      plan: result === null ? null : sha(JSON.stringify(result.plan)),
+      // (a compile with no plan, an error or a decline, records none: never a digest of `null`, #2080)
+      plan: result?.plan == null ? null : sha(JSON.stringify(result.plan)),
       diagnostics: result === null ? null : sha(JSON.stringify(result.diagnostics)),
       checks: result?.plan
         ? result.plan.instructions.filter((i) => i.typeCheck !== undefined).length

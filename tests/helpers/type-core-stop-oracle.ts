@@ -1,6 +1,7 @@
 import { compileProjectWithBackend, type CompilationResult } from "../../src/compiler.js";
-import type { InstructionPlan } from "../../src/plan/model.js";
+import type { InstructionPlan, TypePlan } from "../../src/plan/model.js";
 import { run } from "../../src/runtime/engine.js";
+import { assertValueType } from "../../src/runtime/values/value-types.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import { CORE_BACKEND, CandidateOutsideSlice } from "../../src/type-inference/core/backend.js";
@@ -136,6 +137,47 @@ function ranWith(
         ? { code: failure.code, start: failure.span.start.offset, end: failure.span.end.offset }
         : null,
   };
+}
+
+/** A run of a plan as `ranWith` gives it, with the plan indices of the instructions it executed (`instructionTrace`). */
+function tracedRun(
+  plan: InstructionPlan,
+  globals: Globals,
+): ReturnType<typeof ranWith> & { readonly executed: ReadonlySet<number> } {
+  const result = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { globals }),
+    {},
+    { instructionTrace: true },
+  );
+  const failure = result.events.find((event) => event.kind === "runtimeFailure");
+  return {
+    said: result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    failure:
+      failure?.kind === "runtimeFailure"
+        ? { code: failure.code, start: failure.span.start.offset, end: failure.span.end.offset }
+        : null,
+    executed: new Set(result.instructionTrace?.instructions ?? []),
+  };
+}
+
+/** The span of the innermost instruction of `plan` whose span holds `site`, or `null`. */
+function instructionHolding(plan: InstructionPlan, site: Span): Span | null {
+  let best: Span | null = null;
+  for (const instruction of plan.instructions) {
+    const span = spanOf(instruction);
+    if (span !== null && within(site, span) && (best === null || within(span, best))) best = span;
+  }
+  return best;
+}
+
+/** Whether a run executed an instruction of `plan` whose span is `span`, and did not fail inside it. */
+function passed(plan: InstructionPlan, ran: ReturnType<typeof tracedRun>, span: Span): boolean {
+  if (ran.failure !== null && within(ran.failure, span)) return false;
+  return plan.instructions.some((instruction, index) => {
+    const at = spanOf(instruction);
+    return at !== null && at.start === span.start && at.end === span.end && ran.executed.has(index);
+  });
 }
 
 /** A record's code and site, `code file:start:end` (`siteKey`: a site's offsets are its file's, #1700). */
@@ -666,10 +708,119 @@ function propertyChains(files: readonly SourceFile[], limit: number): string[][]
   return [...found.values()].slice(0, limit);
 }
 
+/** Whether `value` fits `type`, by the runtime's own check (`assertValueType`) at a plan's location `at`. */
+function fits(value: SerializableRuntimeValue, type: TypePlan, at: PlanLocation): boolean {
+  try {
+    assertValueType(value, { type, place: "a value" }, at);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A plan's own source location, as an instruction carries it. */
+type PlanLocation = Parameters<typeof assertValueType>[2];
+
+/**
+ * Values made from a checked type (#2080, the design round on #2142): one that fits it, and for each part of it (the
+ * root, a collection's element, an object's property) the same value with that part replaced by a value of another kind,
+ * kept where the whole then fails the type. So a pool exercises each path of a changed check, a nested element included.
+ */
+function typeValues(type: TypePlan, at: PlanLocation, depth = 0): SerializableRuntimeValue[] {
+  const others: SerializableRuntimeValue[] = [
+    1,
+    2.5,
+    "s",
+    false,
+    null,
+    { kind: "list", items: [] },
+  ];
+  const fitting = (t: TypePlan): SerializableRuntimeValue => {
+    if (t.kind === "union") return fitting(t.members[0] ?? { kind: "null" });
+    if (t.kind === "list" || t.kind === "set")
+      return { kind: t.kind, items: t.element === null ? [] : [fitting(t.element)] };
+    if (t.kind === "dict")
+      return {
+        kind: "dict",
+        entries: t.element === null ? [] : [{ key: "k", value: fitting(t.element) }],
+      };
+    if (t.kind === "object")
+      return {
+        kind: "object",
+        properties: t.properties.map((p) => ({ name: p.name, value: fitting(p.type) })),
+      };
+    return others.find((value) => fits(value, t, at)) ?? null;
+  };
+  const whole = fitting(type);
+  const out: SerializableRuntimeValue[] = [
+    whole,
+    ...others.filter((value) => !fits(value, type, at)),
+  ];
+  if (depth < 4) {
+    const inner = (
+      t: TypePlan,
+      wrap: (part: SerializableRuntimeValue) => SerializableRuntimeValue,
+    ): void => {
+      for (const part of typeValues(t, at, depth + 1)) {
+        const value = wrap(part);
+        if (!fits(value, type, at)) out.push(value);
+      }
+    };
+    if (type.kind === "list" && type.element !== null)
+      inner(type.element, (part) => ({ kind: "list", items: [part] }));
+    if (type.kind === "set" && type.element !== null)
+      inner(type.element, (part) => ({ kind: "set", items: [part] }));
+    if (type.kind === "dict" && type.element !== null)
+      inner(type.element, (part) => ({ kind: "dict", entries: [{ key: "k", value: part }] }));
+    if (type.kind === "object")
+      for (const property of type.properties)
+        inner(property.type, (part) => ({
+          kind: "object",
+          properties: type.properties.map((p) => ({
+            name: p.name,
+            value: p.name === property.name ? part : fitting(p.type),
+          })),
+        }));
+  }
+  const seen = new Set<string>();
+  return out
+    .filter((value) => {
+      const text = JSON.stringify(value);
+      return !seen.has(text) && seen.add(text) !== undefined;
+    })
+    .slice(0, 24);
+}
+
+/** Each type a plan checks a store or a part against, with an instruction's location for the runtime's check. */
+function checkedTypes(plan: InstructionPlan): {
+  readonly types: TypePlan[];
+  readonly at: PlanLocation | null;
+} {
+  const types: TypePlan[] = [];
+  JSON.stringify(plan, (key, value: unknown) => {
+    if (
+      (key === "typeCheck" || key === "partChecks") &&
+      value !== null &&
+      typeof value === "object"
+    ) {
+      // EVIDENCE: invariant: a plan's `typeCheck` and each of its `partChecks` hold the checked type as `type`.
+      const checks = (Array.isArray(value) ? value : [value]) as readonly {
+        readonly type?: TypePlan;
+      }[];
+      for (const each of checks) if (each.type !== undefined) types.push(each.type);
+    }
+    return value;
+  });
+  // EVIDENCE: invariant: every planned instruction carries its source location as `span`.
+  const at = (plan.instructions[0] as { readonly span?: PlanLocation } | undefined)?.span ?? null;
+  return { types, at };
+}
+
 /**
  * Host data for a stop's runs (#2080): each global the files name takes in turn every value of a pool, every other global
  * 1. The pool:
- * - scalars, among them 0, -1, a number with a fraction and the empty text;
+ * - scalars, among them 0, -1, a number with a fraction, the empty text and both booleans;
+ * - `typed`: values made from the types the plans check (`typeValues`), fitting and failing at each part;
  * - a list of each scalar kind and an empty list, a set, a dict and a range;
  * - objects one and two properties deep by the files' own property names, and a list of an object;
  * - an object along each property path the files read below a value (`x.a.b.c`), with a scalar or a list at its end.
@@ -681,6 +832,7 @@ export function hostValues(
   files: readonly SourceFile[],
   globals: readonly string[],
   cap = 4000,
+  typed: readonly SerializableRuntimeValue[] = [],
 ): Globals[] {
   const text = files.map((file) => file.source).join("\n");
   const used = globals.filter((name) => new RegExp(`\\b${name}\\b`).test(text));
@@ -695,7 +847,7 @@ export function hostValues(
     kind: "list",
     items,
   });
-  const leaves: SerializableRuntimeValue[] = [0, 1, -1, 2.5, "s", "", true, null];
+  const leaves: SerializableRuntimeValue[] = [0, 1, -1, 2.5, "s", "", true, false, null, ...typed];
   const collections: SerializableRuntimeValue[] = [
     list([1]),
     list([2.5]),
@@ -751,15 +903,19 @@ export interface StopRunSide {
 /**
  * What a stop's runs found (`stopRuns`):
  * - `open`: the natural plan fails at runtime where the stopped plan runs to its end, or, with no natural plan (a compile
- *   error the stop turned into runtime checks), the stopped plan runs to its end;
- * - `later`: both fail at different sites, the stopped plan after saying more or in a later top-level statement (or
- *   where neither tells which came first);
+ *   error the stop turned into runtime checks), a run of the stopped plan executes the instruction holding an error's
+ *   site and passes it;
+ * - `later`: both fail at different sites, the stopped plan having executed the natural failure's instruction and passed
+ *   it (the instruction trace, `docs/RUNTIME.md#instruction-trace`), or where the natural failure's instruction is not
+ *   found;
  * - `violating`: `stopProblems` reports a violating run the direct comparison classed as none of the above;
  * - `unwitnessed`: a place the two plans differ that no run made either plan fail inside (`untested`), every run
  *   otherwise alike or stricter: the pool did not exercise that place, so nothing is decided;
- * - `stricter`: the stopped plan fails where the natural plan does not, or before it in an earlier statement, every
- *   place the plans differ exercised;
- * - `closed`: the plans equal, or every run alike with every place they differ exercised;
+ * - `stricter`: the stopped plan fails where the natural plan does not, or before reaching the natural failure's
+ *   instruction, every place the plans differ exercised;
+ * - `closed`: the plans equal, or every run alike with every place they differ exercised; with no natural plan, every
+ *   error site reached and every run reaching one failing there. A finite pool proves no universal closure: `closed`
+ *   says every changed place was exercised by values made from its own checked types, nothing more;
  * - `declined`: the stop's compile declined (a refusal, never a missing check);
  * - `natural declined`, `no plan`: nothing to run.
  */
@@ -787,7 +943,10 @@ export interface StopRuns {
   } | null;
   /** `stopProblems`' violating lines, where both compiles have a plan. */
   readonly violating: readonly string[];
-  /** Where `unwitnessed`: each place the plans differ that no run failed either plan inside, by its plan path. */
+  /**
+   * Where `unwitnessed`: each place the plans differ that no run failed either plan inside, by its plan path; with no
+   * natural plan, each natural error site no run reached, by its site.
+   */
   readonly untested?: readonly string[];
   /**
    * With no natural plan: each error of the natural compile, by its code and site, and what the stopped analysis checks
@@ -855,10 +1014,22 @@ export function stopRuns(
   if (stopped.declined !== null) return { ...none, kind: "declined" };
   const [want, got] = [natural.result.plan, stopped.result.plan];
   if (got === null) return { ...none, kind: "no plan" };
-  const pool = hostValues(files, globals);
+  // (values made from every type either plan checks join the pool, so each part of a changed check is exercised)
+  const typed: SerializableRuntimeValue[] = [];
+  for (const plan of want === null ? [got] : [want, got]) {
+    const { types, at } = checkedTypes(plan);
+    if (at !== null) for (const type of types) typed.push(...typeValues(type, at));
+  }
+  const pool = hostValues(
+    files,
+    globals,
+    4000,
+    [...new Map(typed.map((v) => [JSON.stringify(v), v])).values()].slice(0, 48),
+  );
   if (want === null) {
-    // (a compile error the stop turned into runtime checks: open where some run of the stopped plan ends)
-    const sites = natural.result.diagnostics
+    // (a compile error the stop turned into runtime checks: open where a run executes the instruction holding the error
+    // and passes it; a site no run reaches is untested, never closed)
+    const errors = natural.result.diagnostics
       .filter((d) => d.severity === "error")
       .map((d) => {
         // (a check of the error's own file whose site holds the error's: offsets are each file's own)
@@ -870,20 +1041,39 @@ export function stopRuns(
             : at.some((c) => !c.against.includes("unknown"))
               ? "typed"
               : "unknown";
-        return { code: d.code, site: siteKey(site), checks };
-      });
-    for (const each of pool) {
-      const ran = ranWith(got, each);
-      if (ran.failure === null)
         return {
-          ...none,
-          kind: "open",
-          runs: pool.length,
-          first: { globals: each, natural: null, stopped: ran },
-          sites,
+          code: d.code,
+          site,
+          key: siteKey(site),
+          checks,
+          holding: instructionHolding(got, site),
         };
+      });
+    const sites = errors.map(({ code, key, checks }) => ({ code, site: key, checks }));
+    const visited = new Set<string>();
+    for (const each of pool) {
+      const ran = tracedRun(got, each);
+      for (const error of errors) {
+        if (error.holding === null) continue;
+        const reached = got.instructions.some((instruction, index) => {
+          const span = spanOf(instruction);
+          return span !== null && within(error.site, span) && ran.executed.has(index);
+        });
+        if (reached) visited.add(error.key);
+        if (reached && passed(got, ran, error.holding))
+          return {
+            ...none,
+            kind: "open",
+            runs: pool.length,
+            first: { globals: each, natural: null, stopped: ran },
+            sites,
+          };
+      }
     }
-    return { ...none, kind: "closed", runs: pool.length, sites };
+    const untested = errors.filter((error) => !visited.has(error.key)).map((error) => error.key);
+    return untested.length > 0
+      ? { ...none, kind: "unwitnessed", runs: pool.length, sites, untested }
+      : { ...none, kind: "closed", runs: pool.length, sites };
   }
   const violating = stopProblems({
     unstopped: natural,
@@ -891,28 +1081,16 @@ export function stopRuns(
     fitting: [],
     violating: pool,
   }).filter((problem) => problem.startsWith("violating "));
-  // (the source span of the top-level statement a failure lies in, by the plan's own top-level instructions)
-  const statementOf = (plan: InstructionPlan, failure: Span): Span | null => {
-    for (const instruction of plan.instructions) {
-      const span = spanOf(instruction);
-      if (span !== null && within(failure, span)) return span;
-    }
-    return null;
-  };
-  // (both fail at different sites: later where the stopped plan says more or fails in a later statement, the natural
-  // plan's having failed before it; stricter where it fails in an earlier statement; later where neither tells)
+  // (both fail at different sites: later where the stopped plan executed the natural failure's instruction and passed
+  // it, having run past that check; stricter where it failed before reaching it)
   const apart = (
-    a: ReturnType<typeof ranWith>,
-    b: ReturnType<typeof ranWith>,
+    a: ReturnType<typeof tracedRun>,
+    b: ReturnType<typeof tracedRun>,
   ): StopRunKind | null => {
     if (a.failure === null || b.failure === null) return null;
-    if (b.said.length !== a.said.length)
-      return b.said.length > a.said.length ? "later" : "stricter";
     if (b.failure.start === a.failure.start && b.failure.end === a.failure.end) return null;
-    const [mine, theirs] = [statementOf(want, a.failure), statementOf(got, b.failure)];
-    if (mine !== null && theirs !== null && (theirs.end <= mine.start || theirs.start >= mine.end))
-      return theirs.start >= mine.end ? "later" : "stricter";
-    return "later";
+    const holding = instructionHolding(want, a.failure);
+    return holding === null || passed(got, b, holding) ? "later" : "stricter";
   };
   // (the first run of the most severe kind: open, then later, then stricter)
   const order: readonly StopRunKind[] = ["open", "later", "stricter"];
@@ -921,7 +1099,7 @@ export function stopRuns(
   const differences = planDifferences(want, got);
   const failures: Span[] = [];
   for (const each of pool) {
-    const [a, b] = [ranWith(want, each), ranWith(got, each)];
+    const [a, b] = [tracedRun(want, each), tracedRun(got, each)];
     if (a.failure !== null) failures.push(a.failure);
     if (b.failure !== null) failures.push(b.failure);
     const kind: StopRunKind | null =
