@@ -66,7 +66,7 @@ import { entryGroups, groupRead, groupsAt, prefixLevels, propertyItems } from ".
 import { marksAt } from "./marks.js";
 import type { PrefixEntry } from "./model.js";
 import { positionable, positioned, positionOf } from "./positions.js";
-import { summaryCount, summaryItems } from "./prefix-index.js";
+import { summaryCount, summaryItems } from "./prefix-index/summaries.js";
 import { termAt, typeAtPath, typeKinds, writtenOf } from "./terms.js";
 import { members } from "./value-kinds.js";
 

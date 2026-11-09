@@ -181,7 +181,7 @@
   "src/type-inference/core/contract/others.ts": {
     "TABLE r4": 2
   },
-  "src/type-inference/core/contract/prefix-index.ts": {
+  "src/type-inference/core/contract/prefix-index/summaries.ts": {
     "TABLE r4": 3
   },
   "src/type-inference/core/contract/terms.ts": {
