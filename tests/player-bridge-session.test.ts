@@ -31,7 +31,7 @@ import { viewCalls, viewed, withoutViews } from "./helpers/debug-readers.js";
 import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
 import { NO_MARKS } from "../player/debug-history-marks.js";
 import { clockTicket } from "./helpers/clock-ticket.js";
-import type * as Clock from "../player/vue/src/useRuntimeSceneClock.js";
+import type * as Clock from "../player/vue/src/session/useRuntimeSceneClock.js";
 
 /*
  * L5b's bridge: the session ops (Start, Continue, time, catch-up, pacing), the reply contract (each publication's

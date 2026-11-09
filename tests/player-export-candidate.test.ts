@@ -141,7 +141,7 @@ test("a candidate whose construction fails releases its ticket, whether its deta
 
 test("the Stage adapter reports the described session's image, not the Player's shown one", async () => {
   // The adapter is a Vue module, loaded as the composables are.
-  const { debugStageImage } = await loadPlayerModule("player/vue/src/debugStageImage.ts");
+  const { debugStageImage } = await loadPlayerModule("player/vue/src/debug/debugStageImage.ts");
   assert.equal(typeof debugStageImage, "function");
   // EVIDENCE: fixture: the module's export, checked callable above, with the signature `debugStageImage.ts` declares.
   const stageOf = debugStageImage as (

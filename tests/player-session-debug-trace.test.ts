@@ -62,12 +62,12 @@ before(async () => {
   await loadHostFacade();
   // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
-  const views = await loadPlayerModule("player/vue/src/useDebugView.ts");
+  const views = await loadPlayerModule("player/vue/src/debug/useDebugView.ts");
   // EVIDENCE: validation: Vite loaded the real source module; this is its composable.
   useDebugView = views.useDebugView as typeof useDebugView;
   const facade = await loadPlayerModule("player/engine-bridge/in-process.ts");

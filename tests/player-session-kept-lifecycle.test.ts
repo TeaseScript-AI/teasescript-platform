@@ -94,7 +94,7 @@ let browserSavedData: (
 before(async () => {
   await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const saved: Record<string, unknown> = await loadPlayerModule("player/saved-data.ts");
   assert.equal(typeof session.usePlayerSession, "function");

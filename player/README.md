@@ -26,7 +26,7 @@ This is a local inspection route, not the production cross-origin Player/host pr
   requests; it serves one live Player at a time (`claim`), and a later Player may reuse it. Until the Worker is
   activated, the host runs in the page (`engine-bridge/in-process.ts`), whose transition facade the families not yet
   converted use; `engine-bridge/inventory.ts` lists what still moves.
-  The player's input reaches the host from one section of the shown session (`vue/src/runtime-input.ts`): it observes,
+  The player's input reaches the host from one section of the shown session (`vue/src/session/runtime-input.ts`): it observes,
   checks that the session still owns the UI and that the action the player acted on is still presented, then posts the
   control's op. Input's ops read no basis; an answer to another action is refused by its action ID.
 - `notices.ts` contains the Player notice channel and its fixed wording per condition; see
@@ -84,7 +84,7 @@ Photo colours ([Stage and media presentation](../docs/ui/PLAYER-UI.md#stage-and-
 `theme/node-vibrant/swatches.ts` measures a photo's six swatches as node-vibrant 4.0.4 does, without the library; it is
 derived from node-vibrant, whose MIT notice is kept in `theme/node-vibrant/LICENSE`. `theme/photo-theme.ts` maps the
 swatches, of the family the photo colour family A/B test chooses, to surfaces and an accent seed for the generator,
-and `vue/src/stagePhotos.ts` measures the Stage image.
+and `vue/src/stage/stagePhotos.ts` measures the Stage image.
 
 Surface roles drive canvas ambience, containers and neutral interaction states; accent drives primary actions,
 focus and progress. Nested surfaces use less tint. Translucent media controls and Timer materials account for

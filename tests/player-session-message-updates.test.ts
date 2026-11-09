@@ -34,10 +34,10 @@ before(async () => {
   await loadHostFacade();
   // Load the real Vue composables through the existing build tool: their browser-source imports use Vite resolution.
   const host: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const announcements: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useMessageUpdateAnnouncements.ts",
+    "player/vue/src/transcript/useMessageUpdateAnnouncements.ts",
   );
   const loaded = {
     ...(await loadPlayerModule("player/runtime-adapter.ts")),

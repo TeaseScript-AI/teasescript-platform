@@ -165,7 +165,7 @@ const NESTED_SESSION_OPTIONS = {
  * failure: its members could not be classified here.
  */
 function declaredSessionOptions(): string[] {
-  const file = `${checkout}/player/vue/src/usePlayerSession.ts`;
+  const file = `${checkout}/player/vue/src/session/usePlayerSession.ts`;
   const source = ts.createSourceFile(
     file,
     fs.readFileSync(file, "utf8"),

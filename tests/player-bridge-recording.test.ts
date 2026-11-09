@@ -898,7 +898,7 @@ interface RecordingComposable extends LiveComposable {
 }
 const bundle = () =>
   (bundled ??= (async () => {
-    const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
+    const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
     // EVIDENCE: validation: Vite loaded the real source module; this is its host API.
     const usePlayerSession = module.usePlayerSession as LiveHostModules["usePlayerSession"];
     const captured = await loadPlayerModule("player/captured-media.ts");

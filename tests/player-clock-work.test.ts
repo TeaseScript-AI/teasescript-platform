@@ -50,7 +50,7 @@ let refusal: (code: string) => Error;
 before(async () => {
   await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
@@ -124,7 +124,7 @@ const CASES = WORK.flatMap((work) =>
 
 /** The kinds of work the clock's own type declares (`ClockWork` in `useRuntimeSceneClock.ts`). */
 function declaredWork(): string[] {
-  const path = new URL("../../player/vue/src/useRuntimeSceneClock.ts", import.meta.url);
+  const path = new URL("../../player/vue/src/session/useRuntimeSceneClock.ts", import.meta.url);
   const file = ts.createSourceFile(
     "clock.ts",
     readFileSync(path, "utf8"),
@@ -572,7 +572,7 @@ test("an unmount or a replacement with an observation in flight publishes nothin
 test("a kind of work the clock's table does not hold throws, whatever the clock's state", async (context) => {
   const player = await mount(context, false);
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useRuntimeSceneClock.ts",
+    "player/vue/src/session/useRuntimeSceneClock.ts",
   );
   assert.equal(typeof module.useRuntimeSceneClock, "function");
   // EVIDENCE: validation: the bundle's clock, checked callable above; `before` is its policy entry.
@@ -651,7 +651,7 @@ function sectionExpected(row: SectionRow, state: SectionState) {
 
 /** The keys of the clock's `SECTION_WORK` table, read from its source. */
 function declaredSectionWork(): string[] {
-  const path = new URL("../../player/vue/src/useRuntimeSceneClock.ts", import.meta.url);
+  const path = new URL("../../player/vue/src/session/useRuntimeSceneClock.ts", import.meta.url);
   const file = ts.createSourceFile(
     "clock.ts",
     readFileSync(path, "utf8"),
@@ -686,7 +686,7 @@ interface SectionClock {
 /** A clock of the bundle over `shown`, with its media samples counted and its hold in the test's hand. */
 async function sectionClock(context: TestContext, shown: PlayerRuntimeSession) {
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useRuntimeSceneClock.ts",
+    "player/vue/src/session/useRuntimeSceneClock.ts",
   );
   assert.equal(typeof module.useRuntimeSceneClock, "function");
   // EVIDENCE: validation: the bundle's clock, checked callable above; `section` is its section entry.
@@ -880,7 +880,7 @@ test("an old observation's rejection after a replacement arms no timer", async (
 });
 
 test("every completion effect of an observation goes through its one lifetime decision", () => {
-  const path = new URL("../../player/vue/src/useRuntimeSceneClock.ts", import.meta.url);
+  const path = new URL("../../player/vue/src/session/useRuntimeSceneClock.ts", import.meta.url);
   const text = readFileSync(path, "utf8");
   const file = ts.createSourceFile("clock.ts", text, ts.ScriptTarget.Latest, true);
   let observing: ts.FunctionDeclaration | undefined;

@@ -173,7 +173,7 @@ let usePlayerSession: (options: {
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 before(async () => {
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.

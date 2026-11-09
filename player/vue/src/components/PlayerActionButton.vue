@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, onUpdated, ref } from "vue";
 import { Button } from "@/components/ui/button";
 import { authoredColorToOklch } from "../../../theme/color.js";
 import { storyChoiceVariables } from "../../../theme/story-choice.js";
-import { playerKeys } from "../playerKeys";
+import { playerKeys } from "../interaction/playerKeys";
 
 const props = defineProps<{
   authoredFill?: string | undefined;

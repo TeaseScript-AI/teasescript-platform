@@ -9,7 +9,7 @@ import { StaleOperation, type PersistenceOwnership } from "../../../../persisten
 import { BridgeRequestError } from "../../../../engine-bridge/client.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotices } from "../../../../notices.js";
 import type { ScriptStorageProvider } from "../../../../script-storage.js";
-import { RETIRED, type InputSectionHost } from "../../runtime-input";
+import { RETIRED, type InputSectionHost } from "../runtime-input";
 import { validateScriptStorageEntries } from "../../../../../src/runtime/host-data/script-storage.js";
 import { serializableEquals } from "../../../../../src/runtime/values/serializable-values.js";
 import type {

@@ -1569,7 +1569,7 @@ test("a removed message keeps its row, marked removed, also through a restore an
 
 test("the conversation leaves removed messages out of its positions and groups the messages around them", async () => {
   const presentation: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/transcriptPresentation.ts",
+    "player/vue/src/transcript/transcriptPresentation.ts",
   );
   for (const name of ["adjoins", "shownEntryIndex", "shownPosition"])
     assert.equal(typeof presentation[name], "function", name);

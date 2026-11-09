@@ -140,7 +140,7 @@ debug room while it starts with the Debug menu on, and with `room=debug`.
 
 In the debug room, the Debug panel's **Random draws** section, above the tabs, lets a developer choose the outcomes of
 the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug features run
-(`player/vue/src/useDebugRandom.ts`). Normal play never pauses at a draw.
+(`player/vue/src/debug/random/useDebugRandom.ts`). Normal play never pauses at a draw.
 
 - **Choose outcomes**, off on every load, pauses the session at every random draw and asks for its outcome, unless that
   draw's site is set to go on by itself; its collapsed explanation reads "The script pauses at every random draw so you
@@ -184,7 +184,7 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
   was made for, such as the same plan restored. A plan the Worker has no sources for, as in playback of a published
   plan, shows no code.
 - **Not modal**: while the picker asks, the page stays visible, and only an explicit allowlist takes input
-  (`player/vue/src/useRandomDrawGuard.ts`): the picker and its large view, the theme, fullscreen, and notification
+  (`player/vue/src/debug/random/useRandomDrawGuard.ts`): the picker and its large view, the theme, fullscreen, and notification
   controls without a notice's action, panel resizing, and the Debug panel's tabs with Now, Variables, and Log. The tools
   menu, the sidebar's `Ctrl/Meta+B`, Settings, the panel's switches and buttons, the Storage tab's controls, and the
   chat wait for the outcome.

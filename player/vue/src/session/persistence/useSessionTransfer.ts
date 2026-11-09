@@ -19,7 +19,7 @@ import type {
   InterpreterEvent,
   RuntimeScriptStorageEntrySnapshot,
 } from "../../../../../src/index.js";
-import type { PlayerSessionOptions } from "../../usePlayerSession.js";
+import type { PlayerSessionOptions } from "../usePlayerSession.js";
 import type { useKeptSession } from "./useKeptSession.js";
 import { storedValueReferences, type useSavedValues } from "./useSavedValues.js";
 

@@ -165,16 +165,16 @@ async function hostRestored(
 before(async () => {
   await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const random: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDebugRandom.ts",
+    "player/vue/src/debug/random/useDebugRandom.ts",
   );
   const shown: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/randomDrawPresentation.ts",
+    "player/vue/src/debug/random/randomDrawPresentation.ts",
   );
   const rewinding: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDebugRewind.ts",
+    "player/vue/src/debug/history/useDebugRewind.ts",
   );
   assert.equal(typeof rewinding.useDebugRewind, "function");
   // EVIDENCE: validation: Vite loaded the real source module and its export is callable; this is its tested API.

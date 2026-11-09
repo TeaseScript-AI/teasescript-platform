@@ -140,7 +140,7 @@ before(async () => {
       }),
     },
   });
-  const module = await loadPlayerModule("player/vue/src/stagePhotos.ts");
+  const module = await loadPlayerModule("player/vue/src/stage/stagePhotos.ts");
   assert.equal(typeof module.prepareStagePhoto, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export was checked callable just above.
   prepareStagePhoto = module.prepareStagePhoto as typeof prepareStagePhoto;

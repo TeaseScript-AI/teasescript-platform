@@ -3,7 +3,7 @@ import type { KeptRoomStore, KeptSessionStore } from "./kept-sessions.js";
 import type { ScriptStorageProvider } from "./script-storage.js";
 
 /*
- * The ownership of one persistence operation of the Player's session host (`vue/src/usePlayerSession.ts`): a keep, the
+ * The ownership of one persistence operation of the Player's session host (`vue/src/session/usePlayerSession.ts`): a keep, the
  * kept session's restore for Continue, a session import (L5h.1), a saved-data import (L5h.2). The host makes one when an
  * operation begins; `current` is the one rule that says whether the operation still owns its room, store, plan tenure
  * and preparation, and once it is false it stays false (`retireIfStale`).

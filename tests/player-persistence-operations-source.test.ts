@@ -24,7 +24,7 @@ import { OWNERSHIP_MODES, type Operated, type Ownership } from "./helpers/plan-j
 
 /** The host's modules, under this folder: the composable and every module of its `session/` folder and subfolders. */
 const HOST_ROOT = "player/vue/src";
-const MAIN = "usePlayerSession.ts";
+const MAIN = "session/usePlayerSession.ts";
 /** The rewind's owner, whose adoption replaces the saved values. */
 const REWIND = "session/useSessionRewind.ts";
 const HOST_MODULES = () => [

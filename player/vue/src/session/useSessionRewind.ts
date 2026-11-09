@@ -6,8 +6,8 @@ import { bridgeOf, type PlayerBridge } from "../../../player-bridge.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotices } from "../../../notices.js";
 import { pendingPlayerRuntimeStorageWrite, type PlayerSession } from "../../../runtime-view.js";
 import type { ScriptStorageProvider } from "../../../script-storage.js";
-import { createRewindOwner } from "../rewindOwner";
-import type { useRuntimeSceneClock } from "../useRuntimeSceneClock";
+import { createRewindOwner } from "./rewindOwner";
+import type { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 
 /*
  * Debug's rewind as the session composable shows it, moved from `usePlayerSession` unchanged: its owner

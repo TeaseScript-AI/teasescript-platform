@@ -6,7 +6,7 @@ import { judge, loadTailwind } from "./oracle.mjs";
 import { ADMITTED_VARIANTS, classifyOpacityToken } from "./plugin.mjs";
 
 const eslint = new ESLint({ overrideConfigFile: "eslint.design.config.mjs" });
-const vueFile = "player/vue/src/PlayerApp.vue";
+const vueFile = "player/vue/src/shell/PlayerApp.vue";
 const tsFile = "player/vue/src/components/ui/button/index.ts";
 const vue = (body) =>
   `<script setup lang="ts">import { Button } from '@/components/ui/button';</script><template>${body}</template>`;
@@ -55,13 +55,13 @@ test("local material contracts cannot be reused at arbitrary call sites", async 
   await rejects(
     vue('<Button class="composer-send p-4" />'),
     "shadcn/no-restyle",
-    "player/vue/src/Composer.vue",
+    "player/vue/src/interaction/Composer.vue",
   );
   assert.deepEqual(
     await messages(
       vue('<Button class="composer-send" />') +
         "<style scoped>.composer-send { font-weight: 700; }</style>",
-      "player/vue/src/Composer.vue",
+      "player/vue/src/interaction/Composer.vue",
     ),
     [],
   );

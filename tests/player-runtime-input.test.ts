@@ -30,7 +30,7 @@ import {
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import type { ClockTicket } from "../player/clock-ticket.js";
 import { clockTicket } from "./helpers/clock-ticket.js";
-import type { InputSectionHost } from "../player/vue/src/runtime-input.js";
+import type { InputSectionHost } from "../player/vue/src/session/runtime-input.js";
 
 /*
  * The Player's input over the engine's bridge (L5c), through the production intents, the input chain
@@ -84,7 +84,7 @@ let adapter: typeof RuntimeAdapter;
 let input: RuntimeInput;
 
 before(async () => {
-  const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
+  const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
@@ -832,11 +832,11 @@ test("only the composer takes the composer's writable model", () => {
   const takers = files.filter((file) => {
     const source = readFileSync(join(sources, file), "utf8");
     return (
-      file !== "useComposerFields.ts" &&
+      file !== "interaction/useComposerFields.ts" &&
       (/\buseComposerModel\b/.test(source) ||
         /import\s*\*\s*as\s+\w+\s+from\s*["'][^"']*useComposerFields["']/.test(source))
     );
   });
-  assert.ok(files.includes("Composer.vue") && files.includes("RuntimeInteraction.vue"));
-  assert.deepEqual(takers, ["Composer.vue"]);
+  assert.ok(files.includes("interaction/Composer.vue") && files.includes("interaction/RuntimeInteraction.vue"));
+  assert.deepEqual(takers, ["interaction/Composer.vue"]);
 });

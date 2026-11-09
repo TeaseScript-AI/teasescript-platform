@@ -44,10 +44,10 @@ let facade: typeof InProcess;
 let compiler: typeof CompileProject;
 
 before(async () => {
-  const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
+  const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   // EVIDENCE: validation: Vite loaded the real source module; this is its host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
-  const photos = await loadPlayerModule("player/vue/src/stagePhotos.ts");
+  const photos = await loadPlayerModule("player/vue/src/stage/stagePhotos.ts");
   assert.equal(typeof photos.usePlanPhotoPreload, "function");
   // EVIDENCE: validation: the real module's export, checked callable just above.
   usePlanPhotoPreload = photos.usePlanPhotoPreload as typeof usePlanPhotoPreload;

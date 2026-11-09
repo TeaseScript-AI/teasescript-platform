@@ -19,8 +19,8 @@ import {
   type StorageBundleScript,
 } from "../../../../storage-transfer.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../../../../../src/index.js";
-import type { Problem } from "../../ProblemCard.vue";
-import type { PlayerSessionOptions, PlayerSessionStart } from "../../usePlayerSession.js";
+import type { Problem } from "../../start-and-end/ProblemCard.vue";
+import type { PlayerSessionOptions, PlayerSessionStart } from "../usePlayerSession.js";
 import type { useKeptSession } from "./useKeptSession.js";
 import type { useSavedValues } from "./useSavedValues.js";
 

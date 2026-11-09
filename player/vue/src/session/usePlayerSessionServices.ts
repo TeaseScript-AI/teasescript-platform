@@ -9,7 +9,7 @@ import {
 import type { CapturedMediaStore } from "../../../captured-media.js";
 import type { PlayerSession } from "../../../runtime-view.js";
 import type { ServiceSection } from "../../../player-bridge.js";
-import type { PlayerSessionOptions } from "../usePlayerSession.js";
+import type { PlayerSessionOptions } from "./usePlayerSession.js";
 
 /*
  * The services that answer a script's requests in service sections, moved from `usePlayerSession` unchanged: photo

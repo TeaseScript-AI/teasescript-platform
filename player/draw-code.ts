@@ -2,7 +2,7 @@ import type { LanguageTokenClass } from "../src/index.js";
 
 /*
  * The code Debug's random-draw picker shows of a draw's file, as plain data: the engine host makes it
- * (`random-draw-code.ts`), and the Player's page shows it (`vue/src/randomDrawPresentation.ts`).
+ * (`random-draw-code.ts`), and the Player's page shows it (`vue/src/debug/random/randomDrawPresentation.ts`).
  */
 
 /** What a stretch of code is, for its colour: the compiler's class of its token or comment (`classifyTokens`). */

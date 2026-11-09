@@ -93,12 +93,12 @@ test("the restart gate's hook is read only by the rewind owner, and the host res
       "player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > beforeRestart <- player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart",
       // The activation owner's seam: its returned member, and the composable's destructuring of it.
       "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart",
-      "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/usePlayerSession.ts usePlayerSession",
+      "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/session/usePlayerSession.ts usePlayerSession",
       // The rewind API's `beforeRestart`, which the rewind owner's gate reads before each host restart.
-      "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/usePlayerSession.ts usePlayerSession > beforeRestart",
+      "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/session/usePlayerSession.ts usePlayerSession > beforeRestart",
     ],
   );
-  const owner = readFileSync(resolve(process.cwd(), "player/vue/src/rewindOwner.ts"), "utf8");
+  const owner = readFileSync(resolve(process.cwd(), "player/vue/src/session/rewindOwner.ts"), "utf8");
   assert.equal(owner.match(/host\.beforeRestart\(\)/gu)?.length, 1, "one gate reads the hook");
   // The history ops that restart the recorder in the host (`restartAt`), each sent only by the lifecycle's actions
   // that follow its gate: the commit of Back or Forward, Return, and a reinstating close.
@@ -149,7 +149,7 @@ test("the failure capture's and the export capture's replies each reach one sett
 // only an activation's begin and the Player's disposal begin or retire a record. Wiring only: that a retired
 // activation sends nothing is the completion-lifetime family's runtime claim (`player-session-rewind.test.ts`).
 test("the page's diagnostic senders each check their activation's admission, and only Start and disposal change it", () => {
-  const SESSION = "player/vue/src/usePlayerSession.ts usePlayerSession";
+  const SESSION = "player/vue/src/session/usePlayerSession.ts usePlayerSession";
   const ACTIVATION =
     "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation";
   const OWNER = "player/vue/src/session/activation/useActivationRun.ts";
@@ -247,7 +247,7 @@ test("every publication, stop and binding route of the export observation is cla
  */
 /** The Player's session composable and the owner modules it is composed of, which `reachable` follows as one. */
 const SESSION_FILES: readonly string[] = [
-  "player/vue/src/usePlayerSession.ts",
+  "player/vue/src/session/usePlayerSession.ts",
   "player/vue/src/session/useRandomControl.ts",
   "player/vue/src/session/useDebugModeAndTrace.ts",
   "player/vue/src/session/useSessionMedia.ts",
@@ -264,9 +264,9 @@ const ACTIVATION_FILES = [
   "player/vue/src/session/activation/useExportCandidate.ts",
   "player/vue/src/session/activation/useFailureRecording.ts",
   "player/vue/src/session/activation/useActivationRun.ts",
-  "player/vue/src/useDebugExport.ts",
+  "player/vue/src/debug/history/useDebugExport.ts",
   // `ownedSection`'s member call `clock.section`, followed into the clock's section and its observation (#1983).
-  "player/vue/src/useRuntimeSceneClock.ts",
+  "player/vue/src/session/useRuntimeSceneClock.ts",
 ] as const;
 /** In the clock, the section that `ownedSection` opens and its observation; the clock's own scheduling acts for none. */
 const CLOCK_SECTION = ["useRuntimeSceneClock > section", "useRuntimeSceneClock > observeIn"];

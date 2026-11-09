@@ -52,7 +52,7 @@ let rollSite = "";
 
 const restore: (() => void)[] = [];
 before(async () => {
-  const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
+  const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
