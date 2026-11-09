@@ -120,6 +120,7 @@ and, where it applies, what superseded or bounded it.
 | [r4-349](solver-and-work.md#r4-349) | solver-and-work | A structure built only for sharing is charged as shared work. |
 | [r4-358](solver-and-work.md#r4-358) | solver-and-work | Contribution provenance is opt-in and filtered by the consumers' own predicates. |
 | [r4-360](admission.md#r4-360) | admission | An admitted-structure certificate waits for its depth and noninterference proofs. |
+| [r4-363](oracles.md#r4-363) | oracles | After a stop, a diagnostic's type-reading sentence parts may follow a proven type (the owner's decision). |
 | [r4-370](solver-and-work.md#r4-370) | solver-and-work | Published records serialize only on a complete site-and-rule sort tie. |
 | [r4-371](sharing.md#r4-371) | sharing | A group's fold is declined through a member's non-own read. |
 | [r4-375](admission.md#r4-375) | admission | One solver-facing A4 service, shared by the solver and admission. |
