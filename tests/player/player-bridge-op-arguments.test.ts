@@ -9,6 +9,9 @@
  * Payloads the host admits as any record and the engine validates (an edit's value, file store and lock answers, a
  * media load report, a Start's storage entries, temporal context and profile) are rows of their shape only: their
  * rejection is the engine's, tested at its boundary.
+ *
+ * Each row's admitted samples are typed by what its op's check declares it admits (`OpAdmitted`, `Samples`): a sample
+ * the declaration excludes does not compile, so declaration, sample and body agree on the cases listed.
  */
 
 import assert from "node:assert/strict";
@@ -16,8 +19,14 @@ import test from "node:test";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
 import { deliveryOwner } from "../../player/engine-bridge/delivery.js";
 import { BRIDGE_VERSION } from "../../player/engine-bridge/protocol.js";
+import { createSourcePosition, createSourceSpan } from "../../src/source.js";
+import type { OpAdmitted, OpName } from "../../player/engine-bridge/op-catalogue.js";
 import { playerBridgeOps, playerOpsContext } from "../../player/engine-bridge/player-ops.js";
-import { startBridgeHost, type HostSession } from "../../player/engine-bridge/worker-host.js";
+import {
+  startBridgeHost,
+  type BridgeOps,
+  type HostSession,
+} from "../../player/engine-bridge/worker-host.js";
 
 /** The kinds of argument values: JSON's, and the bytes of a file. */
 type Kind = "string" | "number" | "boolean" | "null" | "object" | "array" | "bytes";
@@ -33,8 +42,8 @@ const OTHER_KIND: readonly (readonly [Kind, unknown])[] = [
 ];
 
 /** One record form of an op's arguments: an argument it admits, and each field's kinds; required unless `optional`. */
-interface Form {
-  readonly sample: Readonly<Record<string, unknown>>;
+interface Form<T extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>> {
+  readonly sample: T;
   readonly fields: Readonly<Record<string, readonly Kind[]>>;
   readonly optional?: readonly string[];
 }
@@ -50,6 +59,11 @@ interface Row {
   readonly rejected?: Readonly<Record<string, unknown>>;
 }
 
+/** Type only, never set: a row's admitted samples, which `ROWS` checks against its op's admitted arguments. */
+interface Samples<T> {
+  readonly samples?: T;
+}
+
 const S: readonly Kind[] = ["string"];
 const N: readonly Kind[] = ["number"];
 const B: readonly Kind[] = ["boolean"];
@@ -59,22 +73,34 @@ const NS: readonly Kind[] = ["string", "null"];
 const ANY: readonly Kind[] = ["string", "number", "boolean", "null", "object", "array"];
 
 /** An op of one record form, with its fields' kinds; every field of `sample` is required unless `optional`. */
-const record = (
-  sample: Readonly<Record<string, unknown>>,
+const record = <const T extends Readonly<Record<string, unknown>>, const U = never>(
+  sample: T,
   fields: Readonly<Record<string, readonly Kind[]>>,
-  rest: Omit<Row, "forms"> & { readonly optional?: readonly string[] } = {},
-): Row => {
+  rest: Omit<Row, "forms" | "also"> & {
+    readonly also?: readonly U[];
+    readonly optional?: readonly string[];
+  } = {},
+): Row & Samples<T | U> => {
   const { optional, ...row } = rest;
   return { forms: [{ sample, fields, ...(optional === undefined ? {} : { optional }) }], ...row };
 };
-const NULL_ONLY: Row = { top: ["null"], also: [null] };
+/** A row of several forms, or of a record and other kinds, with its samples typed (`Samples`). */
+const row = <const T extends Readonly<Record<string, unknown>>, const U = never>(
+  value: Omit<Row, "forms" | "also"> & {
+    readonly forms: readonly Form<T>[];
+    readonly also?: readonly U[];
+  },
+): Row & Samples<T | U> => value;
+const NULL_ONLY: Row & Samples<null> = { top: ["null"], also: [null] };
+/** The samples a row's type carries (`Samples`). */
+type SamplesOf<R> = R extends Samples<infer T> ? T : never;
 
 /** Every answering input op's arguments: the action, its fields, and how the player answered. */
-const answering = (
-  sample: Readonly<Record<string, unknown>>,
+const answering = <const T extends Readonly<Record<string, unknown>>, const U = never>(
+  sample: T,
   fields: Readonly<Record<string, readonly Kind[]>>,
-  rest: Omit<Row, "forms"> = {},
-): Row =>
+  rest: Omit<Row, "forms" | "also"> & { readonly also?: readonly U[] } = {},
+) =>
   record(
     { actionId: 1, ...sample, input: null },
     { actionId: N, ...fields, input: NS },
@@ -88,8 +114,8 @@ const answering = (
     },
   );
 
-const SPAN = { start: { offset: 0, line: 1, column: 1 }, end: { offset: 0, line: 1, column: 1 } };
-const exitEvent = (sequence: number) => ({ kind: "exit", sequence, span: SPAN });
+const SPAN = createSourceSpan(createSourcePosition(0, 1, 1), createSourcePosition(0, 1, 1));
+const exitEvent = (sequence: number) => ({ kind: "exit" as const, sequence, span: SPAN });
 const INTENT = { owner: 1, control: null, resetAt: 0, intent: 1 };
 const TRACING = { on: true, intent: 1 };
 const STOP = { error: "Error", run: 1, stop: 1, retires: null };
@@ -113,9 +139,10 @@ const OBSERVATION = record(
     },
   },
 );
-const TIME = (field: string): Row =>
+const TIME = <const F extends string>(field: F) =>
   record(
-    { [field]: 0 },
+    // EVIDENCE: invariant: the computed key is `field`, which TypeScript types as any string.
+    { [field]: 0 } as { readonly [K in F]: number },
     { [field]: N },
     { rejected: { "a negative time": { [field]: -1 }, "no time": { [field]: Number.NaN } } },
   );
@@ -148,7 +175,7 @@ const EVENT_LOG_REJECTED = (rest: Readonly<Record<string, unknown>>) => ({
   "events whose sequence does not increase": { ...rest, events: [exitEvent(1), exitEvent(1)] },
   "an event of sequence 0": { ...rest, events: [exitEvent(0)] },
 });
-const ANSWER = (answer: Readonly<Record<string, unknown>>): Row =>
+const ANSWER = <const T extends Readonly<Record<string, unknown>>>(answer: T) =>
   record(
     { actionId: 0, answer, held: null },
     { actionId: N, answer: O, held: ["array", "null"] },
@@ -171,7 +198,7 @@ const ANSWER = (answer: Readonly<Record<string, unknown>>): Row =>
     },
   );
 
-const ROWS: Readonly<Record<string, Row>> = {
+const ROWS = {
   prepare: record(
     { source: { kind: "plan", text: "{}" } },
     { source: O },
@@ -309,12 +336,12 @@ const ROWS: Readonly<Record<string, Row>> = {
     },
   ),
   viewCalls: record({ on: true }, { on: B }, { also: [{ on: false }] }),
-  beginRecording: {
+  beginRecording: row({
     forms: [{ sample: { run: 1, retires: null }, fields: { run: N, retires: ["number", "null"] } }],
     top: ["null"],
     also: [null, { run: 2, retires: 1 }],
     rejected: { "a fractional run": { run: 1.5, retires: null } },
-  },
+  }),
   observeTime: OBSERVATION,
   observeInput: OBSERVATION,
   stepTime: TIME("targetMs"),
@@ -419,13 +446,18 @@ const ROWS: Readonly<Record<string, Row>> = {
     },
   ),
   answerCapture: (() => {
-    const row = ANSWER({ kind: "unavailable", reason: "denied" });
+    const unavailable = ANSWER({ kind: "unavailable", reason: "denied" });
+    const captured = {
+      actionId: 0,
+      answer: { kind: "captured", reference: "photo-1" },
+      held: null,
+    } as const;
     const answer = (value: unknown) => ({ actionId: 0, answer: value, held: null });
-    return {
-      ...row,
-      also: [...row.also!, answer({ kind: "captured", reference: "photo-1" })],
+    const typed: Row & Samples<SamplesOf<typeof unavailable> | typeof captured> = {
+      ...unavailable,
+      also: [...unavailable.also!, captured],
       rejected: {
-        ...row.rejected,
+        ...unavailable.rejected,
         "an answer of no kind": answer({ kind: "bogus", reason: "failed" }),
         "a captured answer with an unknown key": answer({
           kind: "captured",
@@ -437,6 +469,7 @@ const ROWS: Readonly<Record<string, Row>> = {
         "an unavailable answer without its reason": answer({ kind: "unavailable" }),
       },
     };
+    return typed;
   })(),
   // The engine validates file store and lock answers (`invalidPayload`): the host admits any record.
   answerFileStore: ANSWER({ kind: "failed" }),
@@ -479,13 +512,13 @@ const ROWS: Readonly<Record<string, Row>> = {
       },
     );
   })(),
-  readTransfer: {
+  readTransfer: row({
     forms: [
       { sample: { bytes: new Uint8Array([1]) }, fields: { bytes: ["bytes"] } },
       { sample: { text: "t" }, fields: { text: S } },
     ],
     rejected: { "bytes and a text": { bytes: new Uint8Array([1]), text: "t" } },
-  },
+  }),
   reviewTransfer: record(
     { ticket: "t1", scope: "s", plan: "p1" },
     { ticket: S, scope: S, plan: S },
@@ -539,7 +572,10 @@ const ROWS: Readonly<Record<string, Row>> = {
     {
       optional: ["adoptionSucceeded"],
       also: [
-        ...["replacement", "import", "clear", "disposal"].map((by) => ({ history: 1, by })),
+        ...(["replacement", "import", "clear", "disposal"] as const).map((by) => ({
+          history: 1,
+          by,
+        })),
         { history: 1, by: "import", adoptionSucceeded: true },
         { history: 1, by: "import", adoptionSucceeded: false },
       ],
@@ -578,7 +614,7 @@ const ROWS: Readonly<Record<string, Row>> = {
   rewindCommit: STEP,
   rewindDrop: STEP,
   rewindReturn: HISTORY,
-  rewindAdopt: {
+  rewindAdopt: row({
     forms: [
       { sample: { history: 1, phase: "begin" }, fields: { history: N, phase: S } },
       {
@@ -592,7 +628,7 @@ const ROWS: Readonly<Record<string, Row>> = {
       "a phase of no kind": { history: 1, phase: "middle" },
       "a begin that succeeded": { history: 1, phase: "begin", succeeded: true },
     },
-  },
+  }),
   debugTracing: record(
     TRACING,
     { on: B, intent: N },
@@ -691,15 +727,15 @@ const ROWS: Readonly<Record<string, Row>> = {
   resolveDraw: (() => {
     const draw = (outcome: unknown, record: unknown = null) => ({ drawId: 1, outcome, record });
     return record(
-      draw("natural"),
+      { drawId: 1, outcome: "natural", record: null },
       { drawId: N, outcome: ["string", "object"], record: ["object", "null"] },
       {
         also: [
-          draw("untried", { resetAt: 0 }),
-          draw({ kind: "number", value: 0.5 }),
-          draw({ kind: "boolean", value: false }),
-          draw({ kind: "index", index: 2 }),
-          draw({ kind: "order", order: [1, 0] }),
+          { drawId: 1, outcome: "untried", record: { resetAt: 0 } },
+          { drawId: 1, outcome: { kind: "number", value: 0.5 }, record: null },
+          { drawId: 1, outcome: { kind: "boolean", value: false }, record: null },
+          { drawId: 1, outcome: { kind: "index", index: 2 }, record: null },
+          { drawId: 1, outcome: { kind: "order", order: [1, 0] }, record: null },
         ],
         rejected: {
           "an outcome of no kind": draw("other"),
@@ -716,7 +752,7 @@ const ROWS: Readonly<Record<string, Row>> = {
     );
   })(),
   randomTried: record({ session: "s1", site: "main.tease:1:1" }, { session: S, site: S }),
-};
+} satisfies { readonly [O in OpName]: Samples<OpAdmitted<O>> };
 
 /** A case: an argument and whether its op admits it. */
 interface Case {
@@ -754,7 +790,7 @@ function casesOf(row: Row): Case[] {
   return cases;
 }
 
-const ops = playerBridgeOps(playerOpsContext({ historySpill: async () => null }));
+const ops: BridgeOps = playerBridgeOps(playerOpsContext({ historySpill: async () => null }));
 
 test("the rows are the catalogue's ops, each named once", () => {
   const names = Object.keys(ops);
