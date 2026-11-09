@@ -9,7 +9,6 @@
 export const costlyTestSeconds = {
   "type-core-stop.test.js": 159,
   "type-core-written.test.js": 132,
-  "families-runner.test.js": 132,
   "type-core-lost-check-matrix.test.js": 131,
   "type-core-work-c.test.js": 116,
   "type-core-work-b.test.js": 114,

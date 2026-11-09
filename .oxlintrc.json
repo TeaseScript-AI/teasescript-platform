@@ -73,7 +73,8 @@
         "src/type-inference/core/contract/levels.ts",
         "src/validation-testing.ts",
         "src/xmp-keywords.ts",
-        "tests/families-runner.test.ts",
+        "tests/families-baseline-store.test.ts",
+        "tests/families-runner-compare.test.ts",
         "tests/type-core-closure.test.ts",
         "tests/type-core-mixed-family.test.ts",
         "tests/type-core-stop.test.ts"
