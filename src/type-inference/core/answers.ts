@@ -23,6 +23,7 @@ import {
 } from "./consumers.js";
 import { keyLabel } from "./consumers/names.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
+import { Admission } from "./admission.js";
 import { Closure, type ClosureCounts } from "./admission/closure.js";
 import type { ReceivingObligation, ReceivingResult } from "./admission/receiving.js";
 import { ReceivingDomain } from "./inherited/receiving-domain.js";
@@ -789,6 +790,9 @@ export function solveDemands(
   const pass = createPass(program);
   // (names holding cursors came with their packet, made here and asked in this pass's identity: #1422 B1)
   const keys = packet === undefined ? asked : importNames(pass.contract, asked, packet);
+  // (an inherited proof is made by an admission on the pass, as the replayed pass's was: `replayProof`)
+  if (keys.some((key) => key.startsWith("a4|")))
+    new Admission(pass, { run: (work) => pass.solver.run(work) }, new Map(), new Set());
   return keys.map((key) => {
     pass.solver.run(demandWork(pass, key));
     // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store); a key's
@@ -799,7 +803,7 @@ export function solveDemands(
     const byId = (path: string): string => `.${pass.contract.pathIdOf(splitPath(path))}`;
     const answer =
       pass.solver.answer(key) ??
-      (kind === "c" || kind === "rc"
+      (kind === "c" || kind === "rc" || kind === "a4"
         ? pass.solver.answer(joinParts(kind, pass.contract.canonicalKey(parts.join("|"))))
         : kind === "op" && parts[1] && !parts[1].startsWith(".")
           ? pass.solver.answer(joinParts("op", parts[0]!, byId(parts[1])))
@@ -817,7 +821,7 @@ function* asked(demand: ProofDemand<Proof>): Work<readonly Item[]> {
 }
 
 /**
- * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`,
+ * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `a4|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`,
  * `lit|`, `op|`, `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write
  * them).
  */
@@ -835,6 +839,9 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
       return asked(objectsAt(contract, Number(parts[0]), splitPath(parts[1] ?? "")));
     case "obk":
       return asked(keyObjects(contract, parts.join("|")));
+    // (#1072 A2's inherited proofs, by their key, as the admission made on the pass makes them)
+    case "a4":
+      return asked(pass.receivingDomain.replayProof!(parts.join("|")));
     case "s": {
       const rest = splitPath(parts[2] ?? "");
       return contract.subAt(joinParts(parts[0]!, parts[1] ?? ""), rest);

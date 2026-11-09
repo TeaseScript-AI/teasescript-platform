@@ -10,6 +10,7 @@ import {
   methodCategory,
 } from "./method-categories.js";
 import { stepName, type CoreProgram } from "./program.js";
+import { readNow, type Reads } from "./inherited/reads.js";
 
 /*
  * The carriers (S6): the values that are, or hold, another value, their operand. One table, read by every walk over
@@ -188,17 +189,30 @@ export interface Dispatch {
  * runtime's member, opaque), a `load` of a computed key (external data, whatever its default).
  */
 export function keepsOwn(program: CoreProgram, value: PlaceId, dispatch: Dispatch): boolean {
+  return readNow(
+    keepsOwnRead(program, value, function* (receiver) {
+      return dispatch.reference(receiver);
+    }),
+  );
+}
+
+/** `keepsOwn` of a receiver decision that is a read (`Read`, #1072 A2). */
+export function* keepsOwnRead(
+  program: CoreProgram,
+  value: PlaceId,
+  reference: (receiver: PlaceId) => Reads<boolean>,
+): Reads<boolean> {
   const projection = program.projOf.get(value);
   if (projection !== undefined)
-    return projection.step !== "iteration" && dispatch.reference(projection.owner);
+    return projection.step !== "iteration" && (yield* reference(projection.owner));
   const c = program.opOf.get(value);
-  if (c?.kind === "get") return dispatch.reference(c.receiver);
+  if (c?.kind === "get") return yield* reference(c.receiver);
   if (c?.kind === "load") return c.key === null;
   return (
     c?.kind === "operation" &&
     c.contract.family === "method" &&
     c.receiver !== null &&
-    dispatch.reference(c.receiver)
+    (yield* reference(c.receiver))
   );
 }
 
@@ -268,7 +282,34 @@ export function carriedBy<S extends Strip<S>>(
   strip: S,
   dispatch: Dispatch,
 ): readonly (readonly [PlaceId, S, CarrierRole, number])[] {
-  if (keepsOwn(program, value, dispatch)) return [];
+  return readNow(
+    carriedByRead(program, value, strip, {
+      *kinds(of) {
+        return dispatch.kinds(of);
+      },
+      *reference(receiver) {
+        return dispatch.reference(receiver);
+      },
+      joined: (operand) => dispatch.joined(operand),
+    }),
+  );
+}
+
+/** `Dispatch` with the value side's decisions reads (`Read`, #1072 A2). */
+export interface DispatchReads {
+  kinds(of: PlaceId): Reads<ReadonlySet<ItemTag>>;
+  reference(receiver: PlaceId): Reads<boolean>;
+  joined(operand: PlaceId): boolean;
+}
+
+/** `carriedBy` with the value side's decisions reads (`Read`, #1072 A2). */
+export function* carriedByRead<S extends Strip<S>>(
+  program: CoreProgram,
+  value: PlaceId,
+  strip: S,
+  dispatch: DispatchReads,
+): Reads<readonly (readonly [PlaceId, S, CarrierRole, number])[]> {
+  if (yield* keepsOwnRead(program, value, (receiver) => dispatch.reference(receiver))) return [];
   if (isChoice(program, value)) {
     // r4.93: a choice's answer is a scalar button (V30 §19, TSV029), so an outer choice's rows reach it once: its
     // `#value` row as the button itself, its `#text` row the same button again, its element rows nothing
@@ -276,7 +317,8 @@ export function carriedBy<S extends Strip<S>>(
       step === SELECTED_VALUE || step === SELECTED_TEXT;
     if (strip.at(0) === SELECTED_TEXT || (strip.at(0) === "element" && selection(strip.at(1))))
       return [];
-    if (strip.at(0) === SELECTED_VALUE) return carriedBy(program, value, strip.rest(), dispatch);
+    if (strip.at(0) === SELECTED_VALUE)
+      return yield* carriedByRead(program, value, strip.rest(), dispatch);
   }
   const elements = strip.length === 0 || strip.at(0) === "element";
   const out: (readonly [PlaceId, S, CarrierRole, number])[] = [];
@@ -285,7 +327,7 @@ export function carriedBy<S extends Strip<S>>(
     if (when === "elements" && !elements) continue;
     if (role === "concatenation/operand" && !dispatch.joined(operand)) continue;
     if (when === "list or set" || when === "object" || when === "dict") {
-      kinds ??= dispatch.kinds(operand);
+      kinds ??= yield* dispatch.kinds(operand);
       if (when === "list or set" && !kinds.has("list") && !kinds.has("set")) continue;
       // (a receiver that may be a reference has the runtime's members, none known: F19a)
       if (when !== "list or set" && [...kinds].some((tag) => REFERENCE.has(tag))) continue;

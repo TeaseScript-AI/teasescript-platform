@@ -39,7 +39,8 @@ import type {
 import { joinedDomain, permittedAt } from "./permitted.js";
 import { transferredDecider, writtenDecider } from "./transfers.js";
 import { inheritedInto } from "../inherited/waiting.js";
-import { compareKeys, expand, stopsOf, viaSignature } from "./walk.js";
+import { readNow, type Reads } from "../inherited/reads.js";
+import { compareKeys, expandRead, stopsOfRead, viaSignature } from "./walk.js";
 
 // A2's scan: the stores a path is decided from, and the earliest contribution in evaluation order that decides it.
 
@@ -120,15 +121,15 @@ export function* scanAt(
   const work = program.work;
   const seen = new Map<string, Item[]>();
   // (a span's memo by its path's id, `(uid, span)`, never its text: G3 stage 1)
-  const evaluate = (d: Definition, at: Rest): Item[] => {
+  function* evaluate(d: Definition, at: Rest): Reads<Item[]> {
     const memoKey = joinParts(d.uid, restPart(at));
     let items = seen.get(memoKey);
     if (items === undefined) {
       keepText(admission.work, memoKey.length);
-      seen.set(memoKey, (items = admission.valueAt(d, at)));
+      seen.set(memoKey, (items = yield* admission.valueAtRead(d, at)));
     }
     return items;
-  };
+  }
   // A2: the earliest definite contribution in source order decides, a lazy merge of the direct stores and the
   // prefixes' whole stores and adds; A4: a copy of a written binding is decided by its type
   // (each list is in source order and read only as far as the scan goes: a prefix's stores are listed once per pass)
@@ -146,10 +147,10 @@ export function* scanAt(
   // (a prefix's rest as its prefix reads it: an array where the path was one, a record's steps, a cursor's span else)
   const restOf = (rest: PathRef): Rest => (rest.kind === "span" ? rest : stepsRest(rest.steps()));
   for (const { key: prefix, rest } of prefixes)
-    scans.push({ ds: eligibleOf(admission, prefix, restOf(rest)), at: () => restOf(rest) });
+    scans.push({ ds: yield* eligibleOf(admission, prefix, restOf(rest)), at: () => restOf(rest) });
   for (const { key: prefix, rest } of prefixes)
     if (rest.length > 0 && rest.at(0) === "element") {
-      const adds = eligibleOf(admission, prefix, restOf(rest), true);
+      const adds = yield* eligibleOf(admission, prefix, restOf(rest), true);
       scans.push({ ds: adds, at: (index) => addRest(adds[index]!, restOf(rest)) });
     }
   const positions = scans.map(() => 0);
@@ -179,7 +180,7 @@ export function* scanAt(
       const copiedTags = typeTags(copied);
       const joinedNull =
         first!.joinedNull === true ||
-        (first!.joined === true && evaluate(d, at).some((item) => item.tag === "null"));
+        (first!.joined === true && (yield* evaluate(d, at)).some((item) => item.tag === "null"));
       return {
         tags: copiedTags.filter((tag) => tag !== "null"),
         nullable:
@@ -187,7 +188,7 @@ export function* scanAt(
           copiedTags.includes("null") ||
           joinedNull ||
           (admission.pass.program.hasOf.has(d.value!) &&
-            evaluate(d, at).some((item) => item.tag === "null")),
+            (yield* evaluate(d, at)).some((item) => item.tag === "null")),
         byWritten: true,
         permitsNull: copiedTags.includes("null") || joinedNull,
         copied,
@@ -198,7 +199,7 @@ export function* scanAt(
     }
     // an unknown beside a kind does not decide, unless a literal's own element decides beside it; a null beside one
     // does (A8)
-    const items = evaluate(d, at);
+    const items = yield* evaluate(d, at);
     const definite =
       first === null && items.some((item) => item.tag === "unknown") ? [] : deciding(items);
     sawNull ||= items.some((item) => item.tag === "null");
@@ -250,9 +251,9 @@ export function* earliestDecider(
   const { program, values, contract } = admission.pass;
   // (a cursor's span read one step at a time and by its path's id, never made: G3 stage 1)
   const at = restRef(contract, asked);
-  const task = expand(admission, value, node, []);
+  const task = yield* expandRead(admission, value, node, []);
   const written = { root: null, ids: null };
-  const transferred = transferredDecider(admission, task, asked, written);
+  const transferred = yield* transferredDecider(admission, task, asked, written);
   // #1444(b,c): outside every decision and into no decision's place, the groups' written-decider summary answers; a
   // decision's scan stays its stops', so each decision charges what it charged before
   if (transferred === undefined && into === null && admission.deciding === 0)
@@ -265,7 +266,7 @@ export function* earliestDecider(
           site: program.places[transferred.value]?.site ?? null,
           tags: transferred.tags,
         };
-  const stops = stopsOf(admission, value, node);
+  const stops = yield* stopsOfRead(admission, value, node);
   const siteOf = (stop: Stop): SourceSite | null => program.places[stop.value]?.site ?? null;
   // the earliest copy whose written type reaches the rest of the path
   let copy: {
@@ -285,7 +286,11 @@ export function* earliestDecider(
   function* termOf(stop: Stop, length: number): Inheriting<TypeTerm | null> {
     // (at the path's end itself a carried copy decides only where it surely is the value there: each literal it was
     // read out of has it alone, and each operation surely gives it)
-    if (stop.deep && length === at.length && !(stop.single && selects(self, stop, true)))
+    if (
+      stop.deep &&
+      length === at.length &&
+      !(stop.single && (yield* selectsRead(self, stop, true)))
+    )
       return null;
     const rest: Rest =
       at.kind === "span"
@@ -299,7 +304,7 @@ export function* earliestDecider(
     ownLevel = stop.from === null ? rest.length === 0 : inherited.value;
     // (a written copy an operation carries decides only where the operation selects it: an operand it never gives is
     // no copy of the place, while a selected copy keeps its whole written type, A4)
-    return term !== null && (stop.via === null || selects(self, stop)) ? term : null;
+    return term !== null && (stop.via === null || (yield* selectsRead(self, stop))) ? term : null;
   }
   // (G3 3b: no stop stands deeper than its value's own paths, `stopDepths`; a join's written calls stand among the
   // values)
@@ -321,7 +326,7 @@ export function* earliestDecider(
         const key = contract.resultKey(stop.value);
         const result = key === null ? null : writtenOf(program.place(keyPlace(key)).kind);
         term =
-          result === null || !selects(admission, stop)
+          result === null || !(yield* selectsRead(admission, stop))
             ? null
             : permittedAt(
                 result,
@@ -395,7 +400,7 @@ export function* earliestDecider(
     // data it leaves the path open, and the call decides nothing there beside it, F18, TABLE r4.66 (3))
     if (next.via?.typed === true) continue;
     const items = withoutEmpty(
-      admission.run(
+      yield* admission.runRead(() =>
         values.valueItems(
           next.value,
           next.node,
@@ -407,13 +412,13 @@ export function* earliestDecider(
     );
     const definite = items.some((item) => item.tag === "unknown") ? [] : deciding(items);
     // (an operand its operation does not give decides nothing, F17a, F17b)
-    if (definite.length === 0 || !chosen(admission, next.via)) continue;
+    if (definite.length === 0 || !(yield* chosen(admission, next.via))) continue;
     // (each chain's operations asked once per set of kinds at the path, whatever stops share them)
     const tags = definite.map((item) => item.tag);
     const kinds = [...tags].sort().join(",");
     let holds = throughs.get(kinds);
     if (holds === undefined) throughs.set(kinds, (holds = new WeakMap()));
-    if (through(admission, next.via, asked, tags, holds))
+    if (yield* through(admission, next.via, asked, tags, holds))
       return { term: null, site: siteOf(next), tags };
   }
 }
@@ -592,17 +597,17 @@ function viaClasses(admission: Admission, via: ViaChain | null): string {
  * Whether a decider reached through operations decides at `at`: each of them, outermost to innermost, holds its kinds
  * definitely in its own value there; per link in `holds` (one decision's, for these kinds).
  */
-function through(
+function* through(
   admission: Admission,
   via: ViaChain | null,
   at: Rest,
   definite: readonly ItemTag[],
   holds: WeakMap<ViaChain, boolean>,
-): boolean {
+): Reads<boolean> {
   const ref = restRef(admission.pass.contract, at);
-  return perLink(admission, holds, via, true, (level) => {
+  return yield* perLinkRead(admission, holds, via, true, function* (level) {
     const carried = withoutEmpty(
-      admission.run(
+      yield* admission.runRead(() =>
         admission.pass.values.valueItems(
           level.value,
           level.node,
@@ -629,13 +634,28 @@ export function perLink(
   every: boolean,
   test: (level: Via) => boolean,
 ): boolean {
+  return readNow(
+    perLinkRead(admission, memo, via, every, function* (level) {
+      return test(level);
+    }),
+  );
+}
+
+/** `perLink` of a test that makes reads (`Read`), each link's test asked as `perLink` asks it (#1072 A2). */
+function* perLinkRead(
+  admission: Admission,
+  memo: WeakMap<ViaChain, boolean>,
+  via: ViaChain | null,
+  every: boolean,
+  test: (level: Via) => Reads<boolean>,
+): Reads<boolean> {
   const open: ViaChain[] = [];
   let at = via;
   for (; at !== null && !memo.has(at); at = at.outer) open.push(at);
   let answer = at === null ? every : memo.get(at)!;
   for (let index = open.length - 1; index >= 0; index -= 1) {
     admission.pass.program.work.charge("checks");
-    if (answer === every) answer = test(open[index]!.level);
+    if (answer === every) answer = yield* test(open[index]!.level);
     memo.set(open[index]!, answer);
   }
   return answer;
@@ -649,7 +669,12 @@ export function perLink(
  * fallback only where the operand may be null (F17a); the other carriers give every operand that runs.
  */
 export function selects(admission: Admission, stop: Stop, surely = false): boolean {
-  return live(admission, stop.value) && chosen(admission, stop.via, surely);
+  return readNow(selectsRead(admission, stop, surely));
+}
+
+/** `selects` as reads (#1072 A2). */
+function* selectsRead(admission: Admission, stop: Stop, surely = false): Reads<boolean> {
+  return live(admission, stop.value) && (yield* chosen(admission, stop.via, surely));
 }
 
 /**
@@ -657,8 +682,8 @@ export function selects(admission: Admission, stop: Stop, surely = false): boole
  * its receiver's element where its default is dead and its default where that is the only value, `otherwise` its
  * operand where that is never null and its fallback where the operand is only null; no other carrier surely.
  */
-function chosen(admission: Admission, via: ViaChain | null, surely = false): boolean {
-  return perLink(admission, admission.chosenLinks[surely ? 1 : 0]!, via, true, (level) =>
+function* chosen(admission: Admission, via: ViaChain | null, surely = false): Reads<boolean> {
+  return yield* perLinkRead(admission, admission.chosenLinks[surely ? 1 : 0]!, via, true, (level) =>
     chooses(admission, level, surely),
   );
 }

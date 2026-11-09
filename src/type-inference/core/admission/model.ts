@@ -9,6 +9,7 @@ import type { LandingTape } from "./landings.js";
 import type { CoreProgram } from "../program.js";
 import type { Touch, TouchRef } from "../touch.js";
 import { type CanonicalKey } from "../contract/key-ids.js";
+import type { Read, ReadAnswer } from "../inherited/reads.js";
 
 // The shapes admission's state and walks are made of.
 
@@ -226,9 +227,9 @@ export interface Storing {
 /**
  * A computation that may need an unwritten place's inherited type at a path first (`inheritedAt`): it yields that place
  * and path's key and is resumed with the type, so a scan that waits on another stops where it stands and goes on from
- * there, never taken again from its start.
+ * there, never taken again from its start. It yields its semantic reads too (`Read`), each resumed with its answer.
  */
-export type Inheriting<T> = Generator<CanonicalKey, T, TypeTerm | null>;
+export type Inheriting<T> = Generator<CanonicalKey | Read, T, ReadAnswer>;
 
 /** `inheritedAt`'s scan of one place and path, suspended while the key it waits on resolves. */
 /**
@@ -241,17 +242,13 @@ export interface Frontier {
   readonly rest: number;
 }
 
-export interface Waiting {
-  readonly key: CanonicalKey;
-  readonly steps: Inheriting<{
-    readonly copied: TypeTerm | null;
-    readonly nullable: boolean;
-    /** Whether the deciding copy reads its written type at its own root (`Admission.inheritedOwn`, #1901). */
-    readonly own?: boolean;
-  } | null> | null;
-  /** Its cycle of decisions when it stopped (`cycleOf`): a scan whose cycle grew meanwhile is taken again. */
-  cycle: string;
-}
+/** A key's scan's answer (`scanOf`): the copied written type and whether it holds `null`, or none. */
+export type WaitingAnswer = {
+  readonly copied: TypeTerm | null;
+  readonly nullable: boolean;
+  /** Whether the deciding copy reads its written type at its own root (`Admission.inheritedOwn`, #1901). */
+  readonly own?: boolean;
+} | null;
 
 /**
  * A path of a place in `openAbove`'s walk: the written types copies landed above it carry down to it (`permittedAt`,

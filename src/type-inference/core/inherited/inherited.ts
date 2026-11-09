@@ -20,11 +20,14 @@ import {
 } from "../contract/key-ids.js";
 import { keyLane } from "../contract/lanes.js";
 import { landed, landedKey, passThrough, passThroughKey } from "../admission/landings.js";
-import type { Frontier, Inheriting, Stop, Stops, Waiting } from "../admission/model.js";
+import type { Frontier, Inheriting, Stop, Stops, WaitingAnswer } from "../admission/model.js";
 import { permittedAt, unrestricted } from "../admission/permitted.js";
 import { inputsAt, inputsOf, scanAt } from "../admission/scan.js";
-import { cycleOf, inheritedInto, join } from "./waiting.js";
-import { copySources, stopsOf } from "../admission/walk.js";
+import { inheritedInto, join, settleCycles, settledCycles } from "./waiting.js";
+import { isRead, read, type Read, type Reads } from "./reads.js";
+import type { Proof, ProofDemand, Proven, Work } from "../solver.js";
+import type { WorkLedger } from "../budget.js";
+import { copySources, stopsOfRead } from "../admission/walk.js";
 import { wholeOf } from "../admission/eligibility.js";
 import { positions } from "../positions.js";
 
@@ -127,166 +130,155 @@ function inheritedAtKey(admission: Admission, key: Key): TypeTerm | null {
   return resolveInherited(admission, key);
 }
 
-/** `inheritedAt`'s resolution of a key within the deepest path a written type reaches. */
-function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
-  const { contract } = admission.pass;
-  // (a key in its identity, as the inherited types hold it: G3 stage 1)
-  const key = canonicalKey(contract, asked);
-  const known = admission.inherited.get(key);
-  if (known !== undefined) return known;
-  // (a resolution resolves every key its scans wait on itself, so none starts inside another)
-  if (admission.resolving)
-    throw new Error(`The inherited type of '${key}' was asked while resolving.`);
-  admission.resolving = true;
-  try {
-    // (a cursor's path never made: its id, its first step from the arena, G3 stage 1)
-    const scan = (next: CanonicalKey): Waiting => {
-      const place = keyPlace(next);
-      const cursor = isKeyId(next) ? next : null;
-      const path = isKeyId(next) ? null : keyPath(next);
-      // (a text path's id made only past its first step's wrapper check, as before G3 stage 1)
-      const id = (): number => (cursor !== null ? keyIdPath(cursor) : contract.pathIdOf(path!));
-      const first = cursor !== null ? keyIdFirst(contract, cursor) : (path![0] ?? null);
-      // (G3 3a: a key past a wrapper inherits what the wrapper's read does below it, from its frontier, `wrapped`)
-      const frontier = positions() ? wrappedFrontier(admission, place, id, first) : null;
-      if (frontier !== null)
-        return {
-          key: next,
-          steps: wrapped(admission, next, place, path ?? id(), first!, frontier, () =>
-            ownScan(next),
-          ),
-          cycle: "",
-        };
-      return ownScan(next);
-    };
-    const ownScan = (next: CanonicalKey): Waiting => {
-      const place = keyPlace(next);
-      if (isKeyId(next)) {
-        // (a cursor's place answers through no copy above it unless its forest says so: then its steps made)
-        const through = passThroughKey(admission, place, next);
-        if (through !== place)
-          return {
-            key: next,
-            steps: answerOf(
-              admission,
-              keptKeyAtRef(contract, through, spanRef(contract, keyIdPath(next))),
-            ),
-            cycle: "",
-          };
-        const inputs = inputsAt(admission, { root: place, key: next });
-        return {
-          key: next,
-          steps: inputs === null ? null : scanAt(admission, inputs.direct, inputs.prefixes, next),
-          cycle: "",
-        };
-      }
-      const path = keyPath(next);
-      // (a place that answers through a copy above it asks that copy's place, nothing scanned)
-      const through = passThrough(admission, place, path);
-      if (through !== place)
-        return {
-          key: next,
-          steps: answerOf(admission, keptKeyAt(contract, through, path)),
-          cycle: "",
-        };
-      const inputs = inputsOf(admission, place, path);
-      return {
-        key: next,
-        steps: inputs === null ? null : scanAt(admission, inputs.direct, inputs.prefixes, next),
-        cycle: "",
-      };
-    };
-    const pending: Waiting[] = [scan(key)];
-    // (the positions of the waiting scans, and the last cycle closed)
-    const waiting = new Map<CanonicalKey, number>([[key, 0]]);
-    let closed = "";
-    // (the type the top scan waited on, given to it as it goes on)
-    let given: TypeTerm | null = null;
-    // (#1931: the finished scans of a cycle still waiting below them, in the order they finished, kept only once the
-    // cycle closes: a scan that reads one waits on the cycle, as on a waiting scan, whichever key was asked first)
-    const deferred: { readonly key: CanonicalKey; readonly term: TypeTerm | null }[] = [];
-    const deferredKeys = new Set<CanonicalKey>();
-    // the top scan's type is taken (deferred while its cycle waits below it), the scan below it goes on, or is taken
-    // again where its cycle grew meanwhile
-    const resolved = (term: TypeTerm | null, own = false): void => {
-      const done = pending.pop()!;
-      keepText(admission.work, done.key.length);
-      // (#1901's record is the finished scan's at once: a pass-through scan below reads it with the type it is given)
-      admission.inheritedOwn.set(done.key, term !== null && own);
-      waiting.delete(done.key);
-      const below = pending.at(-1);
-      // (a cycle's waiting scans are one run of the stack, as `join` makes it, so it waits on exactly where the scan
-      // below is in it; its deferred scans finished last, so each is kept once, from the end)
-      const cycle = cycleOf(admission, done.key);
-      if (cycle !== "" && below !== undefined && cycleOf(admission, below.key) === cycle) {
-        deferred.push({ key: done.key, term });
-        deferredKeys.add(done.key);
-      } else {
-        admission.inherited.set(done.key, term);
-        while (
-          cycle !== "" &&
-          deferred.length > 0 &&
-          cycleOf(admission, deferred.at(-1)!.key) === cycle
-        ) {
-          const kept = deferred.pop()!;
-          deferredKeys.delete(kept.key);
-          admission.inherited.set(kept.key, kept.term);
-        }
-      }
-      if (below !== undefined && below.cycle !== cycleOf(admission, below.key))
-        pending[pending.length - 1] = scan(below.key);
-      given = term;
-    };
-    // (the position of the lowest waiting scan in a deferred key's cycle: the stack walked down its run)
-    const lowest = (member: CanonicalKey): number => {
-      const cycle = cycleOf(admission, member);
-      let at = pending.length - 1;
-      for (; at >= 0 && cycleOf(admission, pending[at]!.key) !== cycle; at -= 1)
-        admission.pass.program.work.charge("checks");
-      for (; at > 0 && cycleOf(admission, pending[at - 1]!.key) === cycle; at -= 1)
-        admission.pass.program.work.charge("checks");
-      return at;
-    };
-    while (pending.length > 0) {
-      const top = pending.at(-1)!;
-      // (a key no store reaches finds nothing)
-      const step =
-        top.steps === null ? { done: true as const, value: null } : top.steps.next(given);
-      given = null;
-      if (step.done === true) {
-        resolved(
-          step.value === null ? null : optionalOf(step.value.copied, step.value.nullable),
-          step.value?.own === true,
-        );
-        continue;
-      }
-      const needed = step.value;
-      const from = waiting.get(needed) ?? (deferredKeys.has(needed) ? lowest(needed) : undefined);
-      if (from !== undefined) {
-        const cycle = joinParts(top.key, needed);
-        // (a scan that asks again across the cycle just closed inherits nothing: it never waits on itself twice)
-        if (cycle === closed) {
-          resolved(null);
-          continue;
-        }
-        closed = cycle;
-        for (let index = from; index < pending.length; index += 1)
-          join(admission, pending[index]!.key, needed);
-        // (its cycle grew: taken again, as every scan it joined is when it goes on)
-        pending[pending.length - 1] = scan(top.key);
-        continue;
-      }
-      top.cycle = cycleOf(admission, top.key);
-      waiting.set(needed, pending.length);
-      pending.push(scan(needed));
-    }
-    // (the asked key is the stack's bottom, so its cycle, the last one open, closed as it was taken)
-    if (deferred.length > 0)
-      throw new Error(`The inherited type of '${deferred[0]!.key}' was never kept.`);
-  } finally {
-    admission.resolving = false;
+/**
+ * #1072 A2: a key's inherited written type (A4, ADR 0021 1.3) as a solver proof: its term, optional where its decision
+ * is nullable beside the copy (`optionalOf`), or none; and whether the deciding copy reads its written type at its own
+ * root (#1901). Its signature spells both, so a changed type or level reruns its readers whatever its items.
+ */
+export class InheritedProof implements Proof {
+  public constructor(
+    readonly term: TypeTerm | null,
+    readonly own: boolean,
+    readonly work: WorkLedger,
+  ) {}
+
+  public signature(): string {
+    const text = JSON.stringify([this.term, this.own]);
+    keepText(this.work, text.length);
+    return text;
   }
-  return admission.inherited.get(key)!;
+}
+
+/**
+ * A key's inherited proof (#1072 A2): one demand per canonical key, made when asked and asking nothing until it runs.
+ * Its run is the key's own scan (`scanOf`), each semantic read it makes yielded (`Read`), each key it waits on read
+ * through that key's proof; a key that is a member of a component still being solved, its own included, is a copy
+ * the scan's cycle cuts: joined to it (`join`) and read as none, as A4's cycle rule reads a copy between two places
+ * that wait on each other (`waiting.ts`).
+ */
+function inheritedProof(admission: Admission, key: CanonicalKey): ProofDemand<InheritedProof> {
+  const site = admission.pass.program.places[keyPlace(key)]?.site ?? null;
+  return {
+    key: proofKey(key),
+    kind: "contract",
+    file: site?.file ?? -1,
+    offset: site?.start ?? -1,
+    proves: true,
+    make: () => inheritedRun(admission, key),
+  };
+}
+
+/**
+ * A key's inherited proof's demand key: `a4|` and the key, a cursor as its token, so a replay's names carry it as they
+ * carry every cursor (`importNames`).
+ */
+function proofKey(key: CanonicalKey): string {
+  return joinParts("a4", key);
+}
+
+/** A key's proof by its demand's key (`proofKey`, after its `a4|`), for a replay of the demands a pass settled. */
+export function inheritedProofOf(admission: Admission, key: Key): ProofDemand<InheritedProof> {
+  return inheritedProof(admission, canonicalKey(admission.pass.contract, key));
+}
+
+function* inheritedRun(admission: Admission, key: CanonicalKey): Work<Proven<InheritedProof>> {
+  const steps = scanOf(admission, key);
+  let step = steps.next();
+  while (step.done !== true) {
+    const yielded = step.value;
+    step = steps.next(
+      isRead(yielded) ? yield* yielded.work() : yield* waitOn(admission, key, yielded),
+    );
+  }
+  const answer: WaitingAnswer = step.value;
+  keepText(admission.work, String(key).length);
+  const term = answer === null ? null : optionalOf(answer.copied, answer.nullable);
+  return {
+    items: [],
+    proof: new InheritedProof(term, term !== null && answer?.own === true, admission.work),
+  };
+}
+
+/** The term a scan of `reader` waits on: `key`'s proof's, none where the two wait on each other (`join`). */
+function* waitOn(
+  admission: Admission,
+  reader: CanonicalKey,
+  key: CanonicalKey,
+): Work<TypeTerm | null> {
+  const { proof, open } = yield* admission.pass.solver.proven(inheritedProof(admission, key));
+  if (open) {
+    join(admission, proofKey(reader), reader, key);
+    return null;
+  }
+  if (proof !== null) admission.inheritedOwn.set(key, proof.own);
+  return proof?.term ?? null;
+}
+
+/**
+ * `inheritedAt`'s resolution of a key within the deepest path a written type reaches: its inherited proof's term, read
+ * as one top-level run (#1072 A2), and the proof's own-level bit recorded for the scans that read it (#1901).
+ */
+function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
+  // (a key in its identity, as the proofs hold it: G3 stage 1)
+  const key = canonicalKey(admission.pass.contract, asked);
+  settledCycles(admission);
+  let proof: InheritedProof | null;
+  try {
+    ({ proof } = admission.run(admission.pass.solver.proven(inheritedProof(admission, key))));
+  } catch (error) {
+    // (a run that stopped leaves its unfinished proofs forgotten: their joins with them)
+    settleCycles(admission);
+    throw error;
+  }
+  if (proof !== null) admission.inheritedOwn.set(key, proof.own);
+  return proof?.term ?? null;
+}
+
+/**
+ * A key's own scan, an inherited proof's run (`inheritedProof`): past a wrapper what the wrapper's read does below it
+ * (`wrapped`), through a copy above it that copy's place's answer (`answerOf`), else its inputs' scan (`scanAt`);
+ * `null` where no store reaches it.
+ */
+function* scanOf(admission: Admission, next: CanonicalKey): Inheriting<WaitingAnswer> {
+  const { contract } = admission.pass;
+  const place = keyPlace(next);
+  const cursor = isKeyId(next) ? next : null;
+  const path = isKeyId(next) ? null : keyPath(next);
+  // (a text path's id made only past its first step's wrapper check, as before G3 stage 1)
+  const id = (): number => (cursor !== null ? keyIdPath(cursor) : contract.pathIdOf(path!));
+  const first = cursor !== null ? keyIdFirst(contract, cursor) : (path![0] ?? null);
+  // (G3 3a: a key past a wrapper inherits what the wrapper's read does below it, from its frontier, `wrapped`)
+  const frontier = positions() ? yield* wrappedFrontier(admission, place, id, first) : null;
+  const scan =
+    frontier !== null
+      ? wrapped(admission, next, place, path ?? id(), first!, frontier, () =>
+          ownScanOf(admission, next),
+        )
+      : ownScanOf(admission, next);
+  return scan === null ? null : yield* scan;
+}
+
+/** `scanOf` past every wrapper: a copy above it, else its inputs' scan (`scanAt`). */
+function ownScanOf(admission: Admission, next: CanonicalKey): Inheriting<WaitingAnswer> | null {
+  const { contract } = admission.pass;
+  const place = keyPlace(next);
+  if (isKeyId(next)) {
+    // (a cursor's place answers through no copy above it unless its forest says so: then its steps made)
+    const through = passThroughKey(admission, place, next);
+    if (through !== place)
+      return answerOf(
+        admission,
+        keptKeyAtRef(contract, through, spanRef(contract, keyIdPath(next))),
+      );
+    const inputs = inputsAt(admission, { root: place, key: next });
+    return inputs === null ? null : scanAt(admission, inputs.direct, inputs.prefixes, next);
+  }
+  const path = keyPath(next);
+  // (a place that answers through a copy above it asks that copy's place, nothing scanned)
+  const through = passThrough(admission, place, path);
+  if (through !== place) return answerOf(admission, keptKeyAt(contract, through, path));
+  const inputs = inputsOf(admission, place, path);
+  return inputs === null ? null : scanAt(admission, inputs.direct, inputs.prefixes, next);
 }
 
 /**
@@ -294,13 +286,13 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
  * holds, with the path below it, when its first step passes one and each wrapper on the way is one for A2's scan too
  * (`scanHop`); `null` where the first step passes none. Once per place and path (by its id), from its parent's.
  */
-function wrappedFrontier(
+function* wrappedFrontier(
   admission: Admission,
   place: PlaceId,
   path: () => number,
   first: string | null,
-): Frontier | null {
-  if (first === null || scanHop(admission, place, first) === null) return null;
+): Reads<Frontier | null> {
+  if (first === null || (yield* scanHop(admission, place, first)) === null) return null;
   const { contract } = admission.pass;
   const ids: number[] = [path()];
   // (up to the nearest path known, then each one step below its parent's)
@@ -319,7 +311,7 @@ function wrappedFrontier(
     }
     const above = admission.frontiers.get(joinParts(place, contract.pathParent(id)))!;
     const step = contract.pathLast(id);
-    const hop = above.rest === 0 ? scanHop(admission, above.place, step) : null;
+    const hop = above.rest === 0 ? yield* scanHop(admission, above.place, step) : null;
     admission.frontiers.set(
       memoKey,
       hop === null
@@ -339,11 +331,11 @@ function wrappedFrontier(
  * binding's at the rest (`inheritedInto`), optional where the declaration's value there holds `null`. Once per place and
  * step.
  */
-function scanHop(
+function* scanHop(
   admission: Admission,
   place: PlaceId,
   step: string,
-): { readonly binding: PlaceId; readonly read: PlaceId; readonly decl: Definition } | null {
+): Reads<{ readonly binding: PlaceId; readonly read: PlaceId; readonly decl: Definition } | null> {
   const memoKey = joinParts(place, step);
   const known = admission.scanHops.get(memoKey);
   if (known !== undefined) return known;
@@ -360,7 +352,7 @@ function scanHop(
   if (hop !== null && binding !== undefined) {
     const root = keyOf(place, []);
     const eligible = wholeOf(admission, root, false);
-    const stops = stopsOf(admission, hop.literal, hop.decl.node);
+    const stops = yield* stopsOfRead(admission, hop.literal, hop.decl.node);
     const own = (list: readonly Stop[] | undefined): boolean =>
       list === undefined ||
       list.every(
@@ -423,20 +415,21 @@ function* wrapped(
   path: readonly string[] | number,
   first: string,
   frontier: Frontier,
-  own: () => Waiting,
+  own: () => Inheriting<WaitingAnswer> | null,
 ): Inheriting<{
   readonly copied: TypeTerm | null;
   readonly nullable: boolean;
   readonly own?: boolean;
 } | null> {
   const { program, values, contract } = admission.pass;
-  const decl = scanHop(admission, place, first)!.decl;
+  // (the hop the frontier found, known by then)
+  const decl = admission.scanHops.get(joinParts(place, first))!.decl;
   // (a cursor's path read by its id: G3 stage 1)
-  const value = admission.run(
+  const position = () =>
     typeof path === "number"
       ? values.valuePositionAt(decl.value!, decl.node, path)
-      : values.valuePosition(decl.value!, decl.node, path),
-  );
+      : values.valuePosition(decl.value!, decl.node, path);
+  const value = yield* read(() => admission.run(position()), position);
   const at = value.proof;
   if (
     at === null ||
@@ -445,7 +438,7 @@ function* wrapped(
     at.rest !== frontier.rest ||
     frontier.read === null
   ) {
-    const steps = own().steps;
+    const steps = own();
     return steps === null ? null : yield* steps;
   }
   const rest = contract.pathSteps(frontier.rest);
@@ -467,15 +460,16 @@ function* wrapped(
 
 /** A computation run outside a resolution: each inherited type it waits on resolved by `inheritedAt` first. */
 export function drive<T>(admission: Admission, steps: Inheriting<T>): T {
-  let given: TypeTerm | null = null;
-  for (;;) {
-    const step = steps.next(given);
-    if (step.done === true) return step.value;
-    given = inheritedAtKey(admission, step.value);
-  }
+  let step: IteratorResult<CanonicalKey | Read, T> = steps.next();
+  // (a read answered by its synchronous run: #1072 A2)
+  while (step.done !== true)
+    step = steps.next(
+      isRead(step.value) ? step.value.now() : inheritedAtKey(admission, step.value),
+    );
+  return step.value;
 }
 
-/** Another key's inherited type as a scan's answer (`inheritedAt`'s `passThrough`): known, or waited on. */
+/** Another key's inherited type as a scan's answer (`inheritedAt`'s `passThrough`), waited on. */
 function* answerOf(
   admission: Admission,
   key: CanonicalKey,
@@ -484,8 +478,8 @@ function* answerOf(
   readonly nullable: boolean;
   readonly own?: boolean;
 } | null> {
-  const known = admission.inherited.get(key);
-  const term = known !== undefined ? known : yield key;
+  // EVIDENCE: invariant: a key yielded is resumed with its inherited type.
+  const term = (yield key) as TypeTerm | null;
   return term === null
     ? null
     : { copied: term, nullable: false, own: admission.inheritedOwn.get(key) === true };

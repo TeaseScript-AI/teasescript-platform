@@ -27,7 +27,7 @@ import {
   ownReadItem,
   wholeBelow,
 } from "./admission/ingress.js";
-import { copyGraph } from "./inherited/inherited.js";
+import { copyGraph, inheritedProofOf } from "./inherited/inherited.js";
 import { typedByDefault } from "./admission/landing-index.js";
 import {
   joinElements,
@@ -70,11 +70,15 @@ import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
 import { joinSteps, keptSteps, type WorkLedger } from "./budget.js";
 import type { ReceivingDomain } from "./inherited/receiving-domain.js";
+import { read, readNow, type Reads } from "./inherited/reads.js";
 import {
   arrayStrip,
   carried,
   carriedBy,
+  carriedByRead,
   keepsOwn,
+  keepsOwnRead,
+  type DispatchReads,
   type CarrierRole,
   type Dispatch,
   type StepsStrip,
@@ -162,6 +166,14 @@ function packetPath(packet: KeyPacketMaking, index: number): readonly string[] {
   return steps.reverse();
 }
 
+/** The runs `Admission.run` refused inside a solver run (#1072 A2): none over the corpora. */
+let runsInsideSolverRuns = 0;
+
+/** `runsInsideSolverRuns`, for the tests that count them over a corpus. */
+export function admissionRunsInsideSolverRuns(): number {
+  return runsInsideSolverRuns;
+}
+
 /**
  * A public method whose body lives in `admission/` delegates to the function of its name there; the members those
  * functions read are public for them, and internal to admission.
@@ -219,9 +231,6 @@ export class Admission {
   get inheriting(): ReceivingDomain["inheriting"] {
     return this.pass.receivingDomain.inheriting;
   }
-  get inherited(): ReceivingDomain["inherited"] {
-    return this.pass.receivingDomain.inherited;
-  }
   get inheritedOwn(): ReceivingDomain["inheritedOwn"] {
     return this.pass.receivingDomain.inheritedOwn;
   }
@@ -239,12 +248,6 @@ export class Admission {
   }
   get termLevels(): ReceivingDomain["termLevels"] {
     return this.pass.receivingDomain.termLevels;
-  }
-  get resolving(): boolean {
-    return this.pass.receivingDomain.resolving;
-  }
-  set resolving(value: boolean) {
-    this.pass.receivingDomain.resolving = value;
   }
   readonly whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
@@ -462,6 +465,7 @@ export class Admission {
   ) {
     // (A4's state is the pass's, made afresh for this admission: TABLE r4.375)
     pass.receivingDomain.reset();
+    pass.receivingDomain.replayProof = (key) => inheritedProofOf(this, key);
     const { definitions, program } = pass;
     this.deciderCaches = {
       deciders: this.deciders,
@@ -560,7 +564,20 @@ export class Admission {
   }
 
   public run<T>(work: Work<T>): T {
+    // (a run inside a solver run is a read an inherited proof's run did not yield: refused, and counted for the tests'
+    // corpora, #1072 A2)
+    if (this.pass.solver.running) {
+      runsInsideSolverRuns += 1;
+      throw new Error(
+        "Admission ran a computation inside a solver run (#1072 A2): yield it as a read.",
+      );
+    }
     return this.host.run(work);
+  }
+
+  /** `run` as a read (`Read`): run now outside a solver run, yielded inside an inherited proof (#1072 A2). */
+  public *runRead<T>(work: () => Work<T>): Reads<T> {
+    return yield* read(() => this.run(work()), work);
   }
 
   /**
@@ -625,10 +642,26 @@ export class Admission {
 
   /** A store's value at the path below its destination, by §3 at its node. */
   public valueAt(d: Definition, at: Rest): Item[] {
+    return readNow(this.valueAtRead(d, at));
+  }
+
+  /** `valueAt` as a read (`Read`): run now outside a solver run, yielded inside an inherited proof (#1072 A2). */
+  public *valueAtRead(d: Definition, at: Rest): Reads<Item[]> {
     this.pass.program.work.charge("checks");
     if (d.kind === "const")
       return restRef(this.pass.contract, at).length === 0 ? [...(d.items ?? [])] : [];
-    return this.items(d.value!, d.node, at);
+    return yield* this.itemsRead(d.value!, d.node, at);
+  }
+
+  /** `items` as a read: inside an inherited proof the solver's, the finishing read being after a stop only. */
+  public *itemsRead(value: PlaceId, node: FlowNode, at: Rest): Reads<Item[]> {
+    const values = this.pass.values;
+    return yield* read(
+      () => this.items(value, node, at),
+      function* () {
+        return withoutEmpty(yield* values.valueItems(value, node, at));
+      },
+    );
   }
 
   /** A value's items at a node and a path: the finishing read's after a stop (`AdmissionHost.read`), else the solver's. */
@@ -854,6 +887,42 @@ export class Admission {
   public keepsOwn(value: PlaceId): boolean {
     return keepsOwn(this.pass.program, value, this.#dispatch);
   }
+
+  /** `keepsOwn` with the receiver's decision a read (`Read`, #1072 A2). */
+  public keepsOwnRead(value: PlaceId): Reads<boolean> {
+    return keepsOwnRead(this.pass.program, value, (receiver) =>
+      this.#dispatchReads.reference(receiver),
+    );
+  }
+
+  /** `carriersOf` with the value side's decisions reads (`Read`, #1072 A2). */
+  public *carriersOfRead(
+    value: PlaceId,
+    strip: readonly string[],
+  ): Reads<readonly (readonly [PlaceId, readonly string[], CarrierRole, number])[]> {
+    const { program } = this.pass;
+    return (yield* carriedByRead(
+      program,
+      value,
+      arrayStrip(program, strip),
+      this.#dispatchReads,
+    )).map(([operand, below, role, position]) => [operand, below.steps, role, position] as const);
+  }
+
+  /** `#dispatch` with its decisions reads (`Read`, #1072 A2): run now outside a solver run, yielded inside one. */
+  readonly #dispatchReads: DispatchReads = ((admission) => ({
+    *kinds(of) {
+      const items = yield* admission.runRead(() => admission.pass.contract.contractOfValue(of));
+      return new Set(items.map((item) => item.tag));
+    },
+    *reference(receiver) {
+      const decided = yield* admission.runRead(() =>
+        admission.pass.contract.valueReceiver(receiver),
+      );
+      return heldReference(decided);
+    },
+    joined: (operand) => admission.pass.lists.joined(operand),
+  }))(this);
 
   /** A literal's term at one step: an object's property by its step, a collection's element; built once per literal. */
   public termAt(term: TypeTerm, step: string): TypeTerm | undefined {

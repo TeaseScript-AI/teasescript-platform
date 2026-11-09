@@ -23,7 +23,8 @@ import { stepName, type CoreProgram } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { EvaluationKey, Expansion, Part, Stop, Stops, Via, ViaChain } from "./model.js";
 import { permittedAt } from "./permitted.js";
-import { fieldsOf, sourceOf } from "./structure.js";
+import { fieldsOf, sourceOfRead } from "./structure.js";
+import { readNow, type Reads } from "../inherited/reads.js";
 
 // The store walk: a stored value's contributions by the path they stand at, the bindings it copies, their order.
 
@@ -284,11 +285,23 @@ export function writtenSource(
   admission: Admission,
   value: PlaceId,
   strip: readonly string[],
-): {
+): WrittenSource | null {
+  return readNow(writtenSourceRead(admission, value, strip));
+}
+
+/** A written copy's source (`writtenSource`). */
+interface WrittenSource {
   readonly term: TypeTerm | null;
   readonly from: PlaceId | null;
   readonly strip: readonly string[];
-} | null {
+}
+
+/** `writtenSource` with the receivers' decisions reads (`Read`, #1072 A2). */
+export function* writtenSourceRead(
+  admission: Admission,
+  value: PlaceId,
+  strip: readonly string[],
+): Reads<WrittenSource | null> {
   const { program, contract } = admission.pass;
   const binding = program.occurrenceOf.get(value);
   if (binding !== undefined) {
@@ -303,7 +316,7 @@ export function writtenSource(
   if (term === null && !admission.inheriting.has(place)) return null;
   // (a projection of a receiver that may be a reference is the runtime's member, no copy: F19a)
   for (let at = value; program.projOf.has(at); at = program.projOf.get(at)!.owner)
-    if (admission.keepsOwn(at)) return null;
+    if (yield* admission.keepsOwnRead(at)) return null;
   const steps = keyStepsIn(contract, key);
   if (someStep(steps, (step) => dictList(step) !== undefined)) return null;
   // (a copy's strip keeps an array: a cursor's steps copied out, `stepsArray`, for a source it keeps)
@@ -329,6 +342,17 @@ export function expand(
   strip: readonly string[],
   after = false,
 ): Expansion {
+  return readNow(expandRead(admission, value, node, strip, after));
+}
+
+/** `expand` with the value side's decisions reads (`Read`, #1072 A2). */
+export function* expandRead(
+  admission: Admission,
+  value: PlaceId,
+  node: FlowNode,
+  strip: readonly string[],
+  after = false,
+): Reads<Expansion> {
   const memoKey = keptParts(admission.work, value, node.id, after, strip);
   const known = admission.expansions.get(memoKey);
   if (known !== undefined) return known;
@@ -358,7 +382,7 @@ export function expand(
     at: FlowNode,
     fields: Pick<Part, "step" | "strip" | "deep" | "single" | "position" | "after" | "role">,
   ): Part => ({ value: of, node: at, ...fields, expansion: null });
-  const written = writtenSource(admission, value, strip);
+  const written = yield* writtenSourceRead(admission, value, strip);
   const term = written?.term ?? null;
   const inherits =
     !after && written !== null && written.from !== null
@@ -368,9 +392,9 @@ export function expand(
   let stop: Expansion["stop"] = null;
   const parts: Part[] = [];
   const carried =
-    literal || after || term !== null || sourceOf(admission, value) !== null
+    literal || after || term !== null || (yield* sourceOfRead(admission, value)) !== null
       ? []
-      : admission.carriersOf(value, strip);
+      : yield* admission.carriersOfRead(value, strip);
   if (literal && strip.length > 0) {
     const next = cells(strip[0]!);
     // (its cells' tasks share one rest of the strip, charged as kept)
@@ -448,7 +472,12 @@ export function expand(
 
 /** A part's own task (`expand`), made once and kept on the part. */
 export function partOf(admission: Admission, part: Part): Expansion {
-  part.expansion ??= expand(admission, part.value, part.node, part.strip, part.after);
+  return readNow(partOfRead(admission, part));
+}
+
+/** `partOf` with its task's reads (`Read`, #1072 A2). */
+export function* partOfRead(admission: Admission, part: Part): Reads<Expansion> {
+  part.expansion ??= yield* expandRead(admission, part.value, part.node, part.strip, part.after);
   return part.expansion;
 }
 
@@ -461,6 +490,16 @@ export function partOf(admission: Admission, part: Part): Expansion {
  * r4.55, r4.126).
  */
 export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, once = true): Stops {
+  return readNow(stopsOfRead(admission, value, node, once));
+}
+
+/** `stopsOf` with its tasks' reads (`Read`, #1072 A2). */
+export function* stopsOfRead(
+  admission: Admission,
+  value: PlaceId,
+  node: FlowNode,
+  once = true,
+): Reads<Stops> {
   const memo = once ? admission.stops : admission.everyStop;
   const known = memo.get(value);
   if (known !== undefined) return known;
@@ -478,7 +517,7 @@ export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, on
     ViaChain | null,
     boolean,
     EvaluationKey,
-  ])[] = [[expand(admission, value, node, []), [], false, null, true, root]];
+  ])[] = [[yield* expandRead(admission, value, node, []), [], false, null, true, root]];
   while (pending.length > 0) {
     const [task, path, deep, via, single, key] = pending.pop()!;
     program.work.charge("indexSteps");
@@ -515,7 +554,7 @@ export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, on
       sharing() &&
       path.length > 0 &&
       own.list === "values" &&
-      sourceOf(admission, current) !== null &&
+      (yield* sourceOfRead(admission, current)) !== null &&
       contract.ingressOf(current) === null
     ) {
       const identity = keptParts(
@@ -551,7 +590,7 @@ export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, on
     for (let index = task.parts.length - 1; index >= 0; index -= 1) {
       const part = task.parts[index]!;
       pending.push([
-        partOf(admission, part),
+        yield* partOfRead(admission, part),
         part.step === null ? path : keptSteps(admission.work, path, [part.step]),
         part.deep ?? deep,
         part.role === null
