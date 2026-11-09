@@ -523,7 +523,6 @@ function sessionRunOps(context: PlayerOpsContext): BridgeOps {
         return publishing(held, result.session, result.outcome);
       },
     ),
-    observeTime,
     // Starts or ends the call view of the session's publications (L5f). Its reply is the latest publication's call view,
     // which the main side merges into the publication of the same revision; it publishes nothing.
     viewCalls: sessionOp(
@@ -555,6 +554,7 @@ function sessionRunOps(context: PlayerOpsContext): BridgeOps {
 /** The session's inputs and time: an input's observation, a time step, a pacing skip. */
 function sessionInputOps(): BridgeOps {
   return {
+    observeTime,
     // The input chain's observation (L5c), which reads no basis: an input's staleness is its action ID's.
     observeInput: { ...observeTime, readsBasis: false },
     stepTime: sessionOp(
