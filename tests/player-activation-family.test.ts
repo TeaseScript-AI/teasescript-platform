@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, watch, type Ref } from "vue";
 
-import type * as CompileProject from "../player/compile-project.js";
+import type * as CompileProject from "../player/runtime/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
 import type * as ClientModule from "../player/engine-bridge/client.js";
 import type { BridgeResult, ReplyHook, SectionSend } from "../player/engine-bridge/client.js";
-import type { DebugViewRequest } from "../player/debug-view.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
+import type { DebugViewRequest } from "../player/debug/debug-view.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import type {
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import type { PlayerSession } from "../player/runtime-view.js";
+} from "../player/runtime/runtime-adapter.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
 import type { StartOptions } from "../player/engine-bridge/ops/session.js";
 import type { InstructionPlan } from "../src/index.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
@@ -174,7 +174,7 @@ before(async () => {
   // EVIDENCE: validation: the bundle the composable runs in, whose facade reaches its sessions.
   facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof facade;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
-  compiler = (await loadPlayerModule("player/compile-project.ts")) as typeof compiler;
+  compiler = (await loadPlayerModule("player/runtime/compile-project.ts")) as typeof compiler;
   // EVIDENCE: validation: the bundle's client module, whose loss error the composable recognizes.
   client = (await loadPlayerModule("player/engine-bridge/client.ts")) as typeof client;
 });

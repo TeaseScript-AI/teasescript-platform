@@ -21,7 +21,7 @@ const DECLARED = {
   adapters: [TARGET],
   /** Per work module, the value symbols it may import from each module. */
   valueImports: {
-    [TARGET]: { "player/player-bridge.ts": ["bridgeOf"], [RECORD]: ["stopArguments"] },
+    [TARGET]: { "player/runtime/player-bridge.ts": ["bridgeOf"], [RECORD]: ["stopArguments"] },
   },
   /** Per work module, its module state: the adapter's maps from its targets to their sessions. */
   moduleState: { [TARGET]: ["sessions", "stopped"] },
@@ -297,8 +297,8 @@ export function registerActivationWorkChecks(census: () => Shared): void {
         ]),
         patched("target.ts", [
           [
-            'import { bridgeOf } from "../../../../../player-bridge.js";',
-            'import { bridgeOf, PlayerBridge } from "../../../../../player-bridge.js";\nvoid PlayerBridge;',
+            'import { bridgeOf } from "../../../../../runtime/player-bridge.js";',
+            'import { bridgeOf, PlayerBridge } from "../../../../../runtime/player-bridge.js";\nvoid PlayerBridge;',
           ],
           [
             SNAPSHOT,
@@ -310,7 +310,7 @@ export function registerActivationWorkChecks(census: () => Shared): void {
           [
             'import type { SessionTarget } from "./target.js";',
             'import type { SessionTarget } from "./target.js";\n' +
-              'import type { PlayerSession } from "../../../../../runtime-view.js";',
+              'import type { PlayerSession } from "../../../../../runtime/runtime-view.js";',
           ],
         ]),
       ]),
@@ -334,7 +334,7 @@ export function registerActivationWorkChecks(census: () => Shared): void {
       ["stop.ts", "unknown edge queueMicrotask"],
       ["stop.ts", "unknown edge setTimeout"],
       ["stop.ts", "callback boundary"],
-      ["target.ts", "value import PlayerBridge from player/player-bridge.ts"],
+      ["target.ts", "value import PlayerBridge from player/runtime/player-bridge.ts"],
       ["target.ts", "module initialization"],
       ["target.ts", "callable in data: SessionSnapshot.stop"],
       ["target.ts", "accessor"],

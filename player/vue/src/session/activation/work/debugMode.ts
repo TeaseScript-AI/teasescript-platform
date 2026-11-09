@@ -1,4 +1,4 @@
-import type { PlayerSession } from "../../../../../runtime-view.js";
+import type { PlayerSession } from "../../../../../runtime/runtime-view.js";
 import type { Origin } from "../useActivationRun.js";
 import type { SessionTarget } from "./target.js";
 

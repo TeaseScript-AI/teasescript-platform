@@ -1,8 +1,8 @@
 import type { StopArguments } from "../../../../../engine-bridge/recording/export-observation.js";
 import type { BridgeResult } from "../../../../../engine-bridge/client.js";
 import type { RandomIntent, TracingIntent } from "../../../../../engine-bridge/player-ops.js";
-import { bridgeOf } from "../../../../../player-bridge.js";
-import type { PlayerSession } from "../../../../../runtime-view.js";
+import { bridgeOf } from "../../../../../runtime/player-bridge.js";
+import type { PlayerSession } from "../../../../../runtime/runtime-view.js";
 import type { TemporalCapture } from "../useSessionActivation.js";
 import { stopArguments, type Origin, type useActivationRun } from "../useActivationRun.js";
 
