@@ -343,12 +343,19 @@ export function lostCheck(
       "a store whose required checks could not be established at the budget",
     );
   }
+  // (the stores the completion's own C1 owes a check at, each once: a stopped mark there is never NoCheck, `keeps`)
+  const warned = new Set<Store>();
+  for (const warning of answers.completedWarnings()) {
+    if (leftOutWarning(warning)) continue;
+    const store = index.storeOf(index.expressionAt(warning.obligation.site));
+    if (store !== undefined) warned.add(store);
+  }
   for (const { obligation, result } of gated) {
     if (obligation.epoch !== answers.epoch) continue;
     const store = index.storeAt(obligation.slot.site);
     if (
       store === undefined ||
-      keeps(answers, index, store, obligation, result, published, checks, core)
+      keeps(answers, index, store, obligation, result, published, checks, core, warned)
     )
       continue;
     throw new OutsideContract(
