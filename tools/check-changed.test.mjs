@@ -402,6 +402,53 @@ test(
   },
 );
 
+test(
+  "the node_modules link it makes is no change: under the tracked ignore rules alone, a docs change selects no project",
+  { timeout: 60_000 },
+  () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "check-changed-ignored-")));
+    const repo = join(root, "repo");
+    try {
+      mkdirSync(join(root, "main", "node_modules"), { recursive: true });
+      mkdirSync(repo);
+      const git = (...args) =>
+        spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+          cwd: repo,
+          encoding: "utf8",
+        });
+      git("init", "-q");
+      // the repository's own ignore rules, and no local exclude
+      writeFileSync(
+        join(repo, ".gitignore"),
+        readFileSync(new URL("../.gitignore", import.meta.url)),
+      );
+      writeFileSync(join(repo, ".git", "info", "exclude"), "");
+      git("add", ".gitignore");
+      git("commit", "-q", "-m", "base");
+      writeFileSync(join(repo, "README.md"), "docs\n");
+      const tool = fileURLToPath(new URL("./check-changed.mjs", import.meta.url));
+      const result = spawnSync(process.execPath, [tool, "--base", "HEAD"], {
+        cwd: repo,
+        encoding: "utf8",
+        env: { ...process.env, TEASESCRIPT_MAIN: join(root, "main") },
+      });
+      const [linked, changed] = result.stdout.split("\n");
+      assert.equal(
+        linked,
+        `check-changed: linked node_modules from ${join(root, "main", "node_modules")}`,
+      );
+      assert.match(
+        changed,
+        /^check-changed: 1 changed files since HEAD \([0-9a-f]{9}\); projects: none$/u,
+        result.stdout,
+      );
+      assert.equal(git("status", "--porcelain").stdout, "?? README.md\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
 test("it links the node_modules main's checkout has, replaces only a stale link, and refuses anything else", () => {
   assert.equal(MAIN_CHECKOUT, "/opt/teasescript-agents/teasescript-main/current");
   const root = realpathSync(mkdtempSync(join(tmpdir(), "check-changed-link-")));
