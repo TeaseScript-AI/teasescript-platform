@@ -3,7 +3,7 @@
 // "Code structure"). Signals, not limits: each line it prints asks for a seam or a reason.
 //
 //   node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]
-//   node tools/structure-report.mjs [ROOT…] --diff BASE [--moved] [--json FILE]
+//   node tools/structure-report.mjs [ROOT…] --diff BASE [--moved] [--json FILE] [--summary FILE]
 //
 // ROOT selects what is read, by default the five components: src, player, tests, tools and playground. A component's
 // top level is the code files directly in it; no other folder counts as a top level, whichever ROOT selects it. Only
@@ -40,9 +40,17 @@
 // change writes into, and each signal this suppresses is printed with the moved lines it discounted; every other
 // signal is as without it. Git's detection is heuristic (a moved block below its threshold reads as added).
 //
-// Exit status: 0 when the report is printed, 2 when --diff cannot read the change as Git wrote it.
+// With --summary FILE, the files behind two signals, a file over 1000 lines that the change adds to and a file gaining
+// over 300 lines, are appended to FILE (CI passes its job summary file) and printed after the report: a heading, the
+// command and the merge base's short sha, then a `text` block of one row per file, sorted by name,
+// `<file> | <lines at the merge base> → <lines at HEAD> | <signals>`, the signals `over 1000` and `gaining N` (with
+// `, M moved discounted` under --moved); `no file signalled` when there is none, and `structure report could not run:
+// <reason>` on exit 2. The rows are read from the report's own signals; every other signal is in the report only.
+//
+// Exit status: 0 when the report is printed, 2 when --diff cannot read the change as Git wrote it or --summary has no
+// --diff.
 import { execFileSync } from "node:child_process";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
@@ -60,6 +68,7 @@ const CODE = /\.(ts|tsx|mts|cts|js|mjs|cjs|vue)$/;
 const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/;
 
 const args = process.argv.slice(2);
+const given = [...args];
 const option = (name) => {
   const i = args.indexOf(name);
   if (i < 0) return undefined;
@@ -71,6 +80,7 @@ const top = Number(option("--top") ?? 10);
 const jsonOut = option("--json");
 const compareWith = option("--compare");
 const diffBase = option("--diff");
+const summaryOut = option("--summary");
 const movedAt = args.indexOf("--moved");
 const discountMoved = movedAt !== -1;
 if (discountMoved) args.splice(movedAt, 1);
@@ -319,6 +329,9 @@ function addedLinesSignals(file, text, added, moved) {
   if (counted.length > SIGNALS.addedLines)
     found.push({
       signal: "added",
+      file,
+      counted: counted.length,
+      moved: movedCount,
       line: `file gaining over ${SIGNALS.addedLines} lines: +${counted.length} ${shown(file)}${movedCount > 0 ? `, ${movedCount} moved discounted` : ""}`,
     });
   else if (added.length > SIGNALS.addedLines)
@@ -329,7 +342,11 @@ function addedLinesSignals(file, text, added, moved) {
   return found;
 }
 
-/** The signals the change from the merge base to `HEAD` adds to, each `{ signal, line }` with the line it prints. */
+/**
+ * The merge base and the signals the change from it to `HEAD` adds to, each `{ signal, line }` with the line it
+ * prints; a `file` and an `added` signal also carry `file`, `before` and `after` (its lines at the merge base and at
+ * `HEAD`), an `added` one also its `counted` and `moved` added lines.
+ */
 function changeSignals(base) {
   const mergeBase = git("merge-base", base, "HEAD").trim();
   const [headFiles, baseFiles] = [regularFilesAt("HEAD"), regularFilesAt(mergeBase)];
@@ -416,17 +433,24 @@ function changeSignals(base) {
     if (added.length === 0) continue;
     const text = blob("HEAD", file);
     const lines = lineCount(text);
-    if (lines > SIGNALS.fileLines) {
-      const was =
+    let was;
+    const before = () =>
+      (was ??=
         change.old === null || !REGULAR.has(change.oldMode)
           ? 0
-          : lineCount(blob(mergeBase, change.old));
+          : lineCount(blob(mergeBase, change.old)));
+    if (lines > SIGNALS.fileLines)
       found.push({
         signal: "file",
-        line: `file over ${SIGNALS.fileLines} lines that the change adds to: ${shown(file)} (${lines}, was ${was})`,
+        file,
+        before: before(),
+        after: lines,
+        line: `file over ${SIGNALS.fileLines} lines that the change adds to: ${shown(file)} (${lines}, was ${before()})`,
       });
-    }
-    found.push(...addedLinesSignals(file, text, added, movedAdded.get(file) ?? new Set()));
+    for (const signal of addedLinesSignals(file, text, added, movedAdded.get(file) ?? new Set()))
+      found.push(
+        signal.signal === "added" ? { ...signal, before: before(), after: lines } : signal,
+      );
   }
   // a file Git lists as added adds to its folder; a moved one, and an entry whose type changed, do not
   const [headFolders, baseFolders] = [
@@ -461,18 +485,87 @@ function changeSignals(base) {
         signal: "names",
         line: `names a letter apart: ${shown(pair.dir)}/: ${pair.names.map(shown).join("  ")}`,
       });
-  return found;
+  return { mergeBase, found };
+}
+
+/**
+ * What each kind of signal `changeSignals` returns writes in its file's summary row: its words, or `null` for a kind
+ * the summary leaves to the report. A kind not listed stops the summary.
+ */
+export const SUMMARY_KINDS = {
+  file: () => `over ${SIGNALS.fileLines}`,
+  added: ({ counted, moved }) =>
+    `gaining ${counted}${moved > 0 ? `, ${moved} moved discounted` : ""}`,
+  function: null,
+  suppressed: null,
+  folder: null,
+  "top level": null,
+  names: null,
+};
+
+/** The summary's block: a heading, `command` and the merge base's short sha `base`, then `rows` in a text block. */
+const summaryBlock = (command, base, rows) =>
+  [
+    "### Structure signals: files",
+    "",
+    `\`${command}\`${base === undefined ? "" : `, merge base ${base}`}`,
+    "",
+    "```text",
+    ...rows,
+    "```",
+    "",
+  ].join("\n");
+
+/** The summary's rows for `found`: one per file with a `file` or `added` signal, sorted by name. */
+function summaryRows(found) {
+  const files = new Map();
+  for (const signal of found) {
+    if (!Object.hasOwn(SUMMARY_KINDS, signal.signal))
+      throw new Error(
+        `structure-report: the summary does not know the signal kind ${signal.signal}`,
+      );
+    const words = SUMMARY_KINDS[signal.signal];
+    if (words === null) continue;
+    const row = files.get(signal.file) ?? { ...signal, words: [] };
+    row.words.push(words(signal));
+    files.set(signal.file, row);
+  }
+  const rows = [...files.values()]
+    .sort((one, other) => (one.file < other.file ? -1 : one.file > other.file ? 1 : 0))
+    .map(
+      ({ file, before, after, words }) =>
+        `${shown(file)} | ${before} → ${after} | ${words.join(", ")}`,
+    );
+  return rows.length > 0 ? rows : ["no file signalled"];
+}
+
+/** Appends the summary `block` to the --summary file and prints it after the report. */
+function writeSummary(block) {
+  appendFileSync(summaryOut, block);
+  process.stdout.write(`\n${block}`);
 }
 
 /** The report the command line asks for. */
 function main() {
+  if (summaryOut !== undefined && !diffBase) {
+    console.error("structure-report: --summary needs --diff");
+    process.exit(2);
+  }
   if (diffBase) {
-    let found;
+    const command = [
+      "node tools/structure-report.mjs",
+      ...given.filter((_, i) => given[i] !== "--summary" && given[i - 1] !== "--summary"),
+    ].join(" ");
+    let mergeBase, found;
     try {
-      found = changeSignals(diffBase);
+      ({ mergeBase, found } = changeSignals(diffBase));
     } catch (error) {
       if (!(error instanceof CannotRun || error instanceof MovedLinesUnreadable)) throw error;
       console.error(error.message);
+      if (summaryOut !== undefined)
+        writeSummary(
+          summaryBlock(command, undefined, [`structure report could not run: ${error.message}`]),
+        );
       process.exit(2);
     }
     const header = `structure signals this change adds to against ${diffBase}`;
@@ -485,6 +578,10 @@ function main() {
       writeFileSync(
         jsonOut,
         `${JSON.stringify({ signals: SIGNALS, base: diffBase, change: found }, null, 2)}\n`,
+      );
+    if (summaryOut !== undefined)
+      writeSummary(
+        summaryBlock(command, git("rev-parse", "--short", mergeBase).trim(), summaryRows(found)),
       );
   } else {
     const files = listedAt();
