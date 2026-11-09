@@ -5,10 +5,9 @@
 // in. A source repeated (a shape whose text does not depend on its size, as in the recorded run) is counted, not a
 // difference. Prints one JSON line per generator that differs (`--list`: per generator, with its commands and the count
 // and set key of its sources, which a new generator's record takes from its run) and a total; exits 1 when any differs.
-import { readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { generatorFolders, setKey, sourceKey, sourcesOf } from "./sources.mjs";
+import { generatorFiles, generatorFolders, setKey, sourceKey, sourcesOf } from "./sources.mjs";
 
 const args = process.argv.slice(2);
 const list = args.includes("--list");
@@ -21,9 +20,7 @@ const AREAS = generatorFolders(root)
 const total = { generators: 0, sources: 0, repeated: 0, dropped: 0, differ: 0 };
 for (const area of areas.length > 0 ? areas : AREAS) {
   const folder = path.join(root, area);
-  for (const name of readdirSync(folder)
-    .filter((file) => file.endsWith(".mjs"))
-    .sort()) {
+  for (const name of generatorFiles(folder).sort()) {
     const generator = await import(pathToFileURL(path.join(folder, name)).href);
     const recorded = generator.recorded;
     const problems = [];

@@ -186,8 +186,9 @@ const placeOf = ({ area, generator, source, key }) =>
   JSON.stringify([nameOf(area), generator, source, key]);
 
 /**
- * The area of a generator's file (file names are unique across the areas), for a record that does not say it: a renamed
- * generator's record names its file beside its id (`file`), any other's file is its id.
+ * The area of a generator's file, its path in its area (`group/name.mjs` in an area of groups; file names are unique
+ * across the areas), for a record that does not say it: a renamed or grouped generator's record names its file beside its
+ * id (`file`), any other's file is its id.
  */
 function areaOf(file) {
   for (const entry of readdirSync(here, { withFileTypes: true }))
