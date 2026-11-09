@@ -1012,7 +1012,9 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
         },
       ],
       globals: ["hostValue"],
-      demand: 16,
+      // (#2080 part 1 declines it at a settled stop: the work allowance stops before admission settles)
+      demand: 1,
+      stop: "work",
     },
     // (a stricter check in a loop: the stopped plan fails in the second round, before the natural failure)
     {

@@ -83,7 +83,12 @@ const DECLINED: readonly Witness[] = [
     undefined,
     "{first: {n: [[1]]}}\nbox = {first: {n: [[0]]}}",
   ),
-  witness("1648-retarget-whole", retarget(16)),
+  witness(
+    "1648-retarget-whole",
+    retarget(16),
+    undefined,
+    "{first: {n: [[1]]}}\nbox = {first: {n: [[0]]}}",
+  ),
   // (a rejection's lost obligation: the stopped plan fails at an earlier store, but its check at the host store is lost)
   witness("1648-rejection", reject(16), { hostValue: "x" }),
   witness("1648-rejection-projection", copied('b.f = "s"', "let c = b.f\nc = hostValue")),
