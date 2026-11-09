@@ -27,12 +27,15 @@
 //
 // And a pure move keeps every import's binding: over the change's files, the set of bindings before equals the set
 // after, a binding being one imported or re-exported name with its target, its local or exported name and whether it is
-// type-only (a default import's name `default`, a namespace's `*`). A relative specifier's target is the file it resolves
-// to on that side; a target the move relocated is keyed by its family, from `--renames FILE`, the move sweep's map
-// (`{ "renames": { "old": "new" | ["new", …] } }`, old and new paths joined where they share one), and the bindings
-// within one family (a split's files importing each other) are left out. A binding on one side only fails, with its file,
-// line and specifier; form 1 admits an import line's presence, this rule its content. A target the move relocates or
-// adds without a family in `--renames` fails, and the report names the flag.
+// type-only (a default import's name `default`, a namespace's `*`). A relative specifier's target is the file
+// TypeScript resolves it to on that side, from that side's committed tree alone: the importer's nearest `tsconfig.json`
+// (else NodeNext), its module format (`package.json`'s `type`, its extension), the specifier's own `import` or
+// `require` mode, and a folder's `package.json` as the compiler reads it. A target the move relocated is keyed by its
+// family, from `--renames FILE`, the move sweep's map (`{ "renames": { "old": "new" | ["new", …] } }`, old and new
+// paths joined where they share one), and the bindings within one family (a split's files importing each other) are
+// left out. A binding on one side only fails, with its file, line and specifier; form 1 admits an import line's
+// presence, this rule its content. A target the move relocates or adds without a family in `--renames` fails, and the
+// report names the flag.
 //
 // The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines and
 // the bindings differing.
@@ -51,14 +54,8 @@ import { ts } from "ts-morph";
 import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
 
 const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/u;
-// the resolver's root for a committed tree's paths, and its options: TypeScript's bundler resolution, JavaScript allowed
+// the resolver's root for a committed tree's paths
 const ROOT = "/tree/";
-const RESOLUTION = {
-  moduleResolution: ts.ModuleResolutionKind.Bundler,
-  module: ts.ModuleKind.ESNext,
-  allowJs: true,
-  resolveJsonModule: true,
-};
 export const RESIDUAL =
   "Git's move detection is heuristic: a moved block below its size threshold (20 alphanumeric characters) reads as added and removed. Read such a failure; it is not overridden.";
 const FORMS = ["import", "export", "whitespace", "header comment"];
@@ -322,29 +319,107 @@ function familiesOf(renames) {
 }
 
 /**
+ * TypeScript's resolution over one side's committed tree (`ref`, its files `tree`, its folders `folders`): a host that
+ * reads only that tree's blobs (cached), the compiler options for a file (`optionsFor`: its nearest committed
+ * `tsconfig.json`, `extends` followed, or NodeNext where none is; JavaScript and JSON files resolvable, as they load at
+ * runtime), and the implied module format of a file (`formatOf`: `package.json`'s `type` and the file's extension).
+ */
+function treeResolver(ref, tree, folders, git) {
+  // a resolver path's tree path: the root as `/tree` or `/tree/`, a path below it, or `null` outside the tree
+  const inTree = (name) =>
+    name === ROOT.slice(0, -1)
+      ? ""
+      : name.startsWith(ROOT)
+        ? name.slice(ROOT.length).replace(/\/$/u, "")
+        : null;
+  const blobs = new Map();
+  const readFile = (name) => {
+    const file = inTree(name);
+    if (file === null || !tree.has(file)) return undefined;
+    if (!blobs.has(file)) blobs.set(file, git("cat-file", "blob", `${ref}:${file}`));
+    return blobs.get(file);
+  };
+  const host = {
+    fileExists: (name) => {
+      const file = inTree(name);
+      return file !== null && tree.has(file);
+    },
+    directoryExists: (name) => {
+      const folder = inTree(name);
+      return folder !== null && folders.has(folder);
+    },
+    readFile,
+    realpath: (name) => name,
+    getCurrentDirectory: () => ROOT,
+    useCaseSensitiveFileNames: true,
+  };
+  const configs = new Map();
+  const optionsFor = (file) => {
+    let dir = path.posix.dirname(file);
+    for (;;) {
+      const config = dir === "." ? "tsconfig.json" : `${dir}/tsconfig.json`;
+      if (tree.has(config)) {
+        if (!configs.has(config)) {
+          const json = ts.readConfigFile(ROOT + config, readFile).config ?? {};
+          const parsed = ts.parseJsonConfigFileContent(
+            json,
+            { ...host, readDirectory: () => [] },
+            ROOT + path.posix.dirname(config),
+            undefined,
+            ROOT + config,
+          );
+          configs.set(config, { ...parsed.options, allowJs: true, resolveJsonModule: true });
+        }
+        return configs.get(config);
+      }
+      if (dir === "." || dir === "") break;
+      dir = path.posix.dirname(dir);
+    }
+    return {
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      allowJs: true,
+      resolveJsonModule: true,
+    };
+  };
+  const formatOf = (file, options) =>
+    ts.getImpliedNodeFormatForFile(ROOT + file, undefined, host, options);
+  return { host, optionsFor, formatOf };
+}
+
+/**
  * A blob's bindings: `{ kind, target, name, as, typeOnly, line, specifier }`, one per imported or re-exported name (a
  * default import's name is `default`, a namespace's `*`, `import x = require()`'s `=`; a side-effect import's, and an
  * empty clause's (`import {} from`, `export {} from`), empty, its local name `{}` for the clause). Its target is
- * `{ type, path }`: `bare` with the specifier itself; `file`, a relative specifier resolved by TypeScript's resolver
- * (bundler resolution, JavaScript files allowed) against that side's tree (`exists`, `existsBelow` for a folder); or
- * `missing`, a relative one that resolves to no file, its path.
+ * `{ type, path }`: `bare` with the specifier itself; `file`, a relative specifier resolved by TypeScript's resolver over
+ * that side's committed tree (`resolver`: the file's compiler options, its implied module format and the specifier's own
+ * usage mode, `import` or `require`); or `missing`, a relative one that resolves to no file, its path.
  */
-function bindingsOf(file, text, exists, existsBelow) {
+function bindingsOf(file, text, resolver) {
   if (!PARSED.test(file)) return [];
-  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-  // a relative specifier resolved by TypeScript's own resolver against that side's committed tree (`exists`), so its
-  // extension precedence is TypeScript's: `./x.js` is `x.ts`, `x.tsx` or `x.d.ts` before `x.js`; `./x` the same, then
-  // `x.js`, then its `/index`
-  const host = {
-    fileExists: (name) => exists(name.slice(ROOT.length)),
-    directoryExists: (name) => existsBelow(name.slice(ROOT.length)),
-    readFile: () => undefined,
-    realpath: (name) => name,
-    getCurrentDirectory: () => ROOT,
-  };
-  const resolve = (specifier) => {
+  const options = resolver.optionsFor(file);
+  const source = ts.createSourceFile(
+    file,
+    text,
+    {
+      languageVersion: ts.ScriptTarget.Latest,
+      impliedNodeFormat: resolver.formatOf(file, options),
+    },
+    true,
+  );
+  const resolve = (node) => {
+    const specifier = node.text;
     if (!specifier.startsWith(".")) return { type: "bare", path: specifier };
-    const found = ts.resolveModuleName(specifier, ROOT + file, RESOLUTION, host).resolvedModule;
+    const mode = ts.getModeForUsageLocation(source, node, options);
+    const found = ts.resolveModuleName(
+      specifier,
+      ROOT + file,
+      options,
+      resolver.host,
+      undefined,
+      undefined,
+      mode,
+    ).resolvedModule;
     if (found !== undefined && found.resolvedFileName.startsWith(ROOT))
       return { type: "file", path: found.resolvedFileName.slice(ROOT.length) };
     return {
@@ -357,7 +432,7 @@ function bindingsOf(file, text, exists, existsBelow) {
     const line = source.getLineAndCharacterOfPosition(statement.getStart(source)).line + 1;
     if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
       const specifier = statement.moduleSpecifier.text;
-      const at = { kind: "import", target: resolve(specifier), line, specifier };
+      const at = { kind: "import", target: resolve(statement.moduleSpecifier), line, specifier };
       const clause = statement.importClause;
       if (clause === undefined) out.push({ ...at, name: "", as: "", typeOnly: false });
       else {
@@ -388,7 +463,7 @@ function bindingsOf(file, text, exists, existsBelow) {
       ts.isStringLiteral(statement.moduleSpecifier)
     ) {
       const specifier = statement.moduleSpecifier.text;
-      const at = { kind: "re-export", target: resolve(specifier), line, specifier };
+      const at = { kind: "re-export", target: resolve(statement.moduleSpecifier), line, specifier };
       const clause = statement.exportClause;
       if (clause === undefined)
         out.push({ ...at, name: "*", as: "*", typeOnly: statement.isTypeOnly });
@@ -412,7 +487,7 @@ function bindingsOf(file, text, exists, existsBelow) {
       const specifier = statement.moduleReference.expression.text;
       out.push({
         kind: "import",
-        target: resolve(specifier),
+        target: resolve(statement.moduleReference.expression),
         line,
         specifier,
         name: "=",
@@ -447,6 +522,10 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
     return out;
   };
   const folders = { before: foldersOf(trees.before), after: foldersOf(trees.after) };
+  const resolvers = {
+    before: treeResolver(mergeBase, trees.before, folders.before, git),
+    after: treeResolver(head, trees.after, folders.after, git),
+  };
   const sides = { before: new Map(), after: new Map() };
   const relocated = new Set();
   for (const change of files) {
@@ -457,12 +536,7 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
     ]) {
       if (file === null) continue;
       const text = git("cat-file", "blob", `${ref}:${file}`);
-      for (const binding of bindingsOf(
-        file,
-        text,
-        (one) => trees[side].has(one),
-        (folder) => folders[side].has(folder.replace(/\/$/u, "")),
-      )) {
+      for (const binding of bindingsOf(file, text, resolvers[side])) {
         const target = keyOf(binding.target);
         if (family.has(file) && target === keyOf({ type: "file", path: file })) continue;
         // a resolved file that is there on one side only, with no family: a relocation the renames do not name
