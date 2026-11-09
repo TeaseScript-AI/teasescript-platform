@@ -184,55 +184,8 @@ at the time of writing (2026-11-06) are #1832, #1845 (with #1846), the unsettled
 closed), #1838 and #1836, #1772, and #1781's conservative natural-outside declines (128 rows in 8 sources, as reported
 in PR #1781's work-stop set sweep).
 
-### Growth gates
-
-The growth gate for the core's structural repairs requires per-doubling growth no greater than `main`'s at every
-measured doubling, total work no greater than `main`'s at each family's largest measured size, and work spent on
-checks no greater than `main`'s at every size (#1444, 2026-10-31). Report any small-size excess with its work-ledger
-attribution. Apply this gate rather than requiring cost at or below `main` before taking other measurements
-(#1547, 2026-11-01).
-
-The scoped largest-size exception allows an excess of at most 10 %, attributed to the extra representation retained
-by the repair, when both versions' work is linear (#1547, 2026-11-01). For landing families whose output grows
-superlinearly, both versions' landing work must instead be bounded by a constant multiple of the paths returned
-(#1428 and #1547, 2026-11-04). Their excess must lie within named work outside the reporter that is linear in input
-size; it need not equal that work, and the 10 % ceiling is relative to `main`'s landing work at the largest completed
-size. Per-doubling growth and work spent on checks still meet the gate in every mode. A size where both runs stop
-establishes nothing about this gate.
-
-The gate's count term is read across the measured doublings (#1466, 2026-10-31). A site whose count is exactly
-linear with a fixed intercept passes when, at each doubling after the smallest, its doubling ratio exceeds total
-charged work's by no more than that fixed intercept accounts for; its excess at the smallest doubling is the
-intercept, not growth. A site that exceeds at the largest doubling fails.
-
-A candidate at or below `main` at every measured size passes the growth clause when the saving comes from the
-accepted representation change and does not shrink in absolute terms over the last doubling, whatever its shape
-(#1466, 2026-11-01). Report this as `under main at every size`, with the saving's sequence. For a linear saving,
-report the common remainder as `main`'s work (#1444, 2026-10-31).
-
-For an excess whose slope per input size rises and converges, make any bounded repair identified by the ledger
-before extending the measurements by one or two doublings where cost allows (#1466, 2026-11-01). The later two
-slopes within 3 % tolerance pass the growth clause; the smaller sizes' deviation from the linear fit is the fixed
-intercept. The largest-size total still needs the scoped exception's conditions. If slopes still diverge at the
-extended sizes, repair the cost before READY.
-
-Where `main` is cheaper because it drops an obligation that a correctness repair restores, its cost is not the
-reference for the largest-size total or work spent on checks on that family (#1491 and #1502, 2026-11-01). The
-repaired family's growth is linear, or of `main`'s order where `main` is superlinear, its work is bounded per read,
-and the ledger attributes the entire excess to the restored obligation. Every untouched family stays at or below
-`main` as a control. The gate report identifies this reading, and the PR names each repaired family with its ratio
-and attribution.
-
-Where the candidate charges inside the analysis work `main` does uncounted after it, compare the candidate's
-charged total against `main`'s charged total plus its uncounted work for the same obligations (#1526, 2026-11-02).
-Judge an output-bound term by the candidate's work per output node.
-
-A lazily activated index has one named largest-size exception (#1384, 2026-11-01): a run asked at exactly the
-activation count, whose walk costs less than the index, may pay at most one construction per run per pass above
-`main`. The excess is linear, grows no faster than `main`'s, and is entirely construction in the ledger. The gate
-report names this reading, and the PR lists each such sibling with its excess. Amortised activation, indexing a
-root only once its walks have paid the index's cost, is a separate mechanism to propose if a real source shows
-this boundary cost matters.
+How a repair of the type core's work is accepted against `main` (its growth gate) is a testing rule:
+[Scaling diagnostics](TESTING.md#scaling-diagnostics).
 
 ### Accepted work products under the allowance
 
