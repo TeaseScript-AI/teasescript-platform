@@ -9,7 +9,9 @@ import { checkedFiles, fileComments } from "./comments.mjs";
 // (#1977), so they are no citations: each file's exact count of them in comments is in `comment-citations.json`, which
 // may only fall. A comment that points at the accepted record
 // (`docs/specifications/type-inference-accepted-record/<page>.md#<anchor>`, #2089) names a heading of that page; the
-// doc-links check reads Markdown only and never sees a comment.
+// doc-links check reads Markdown only and never sees a comment. A label of the port plan or the research design (`S8c`,
+// `C9`, `AD-1`) in a comment of the type core's modules has a row in the record's glossary, and every row is still
+// carried by such a comment; an id after a reviewer's round ("Codex r2's B1") is a review reference, not a label.
 // `comment-forecasts-allowed.json` lists the forecasts this check accepts, and every entry must still be found.
 
 /** The forms of a forecast, #1977's list, each one pattern over a comment's text. */
@@ -39,6 +41,91 @@ const COUNTED_CITATIONS = {
 
 /** The accepted record's folder of pages, which a comment may point at by a page and a heading's anchor. */
 const RECORD = "docs/specifications/type-inference-accepted-record";
+
+/** The type core's modules, whose comments' labels the record's glossary defines. */
+const CORE = "src/type-inference/core/";
+
+/**
+ * A port-plan or research label: a step, an id, a checkpoint, the plan or a plan document. A section number (`§3.2`,
+ * `S3 §5`) is not a label; the glossary's one row for a bare `§N` is not checked against comments.
+ */
+const LABEL =
+  /\b(?:S\d-[A-Z]+(?:-[A-Z]+)*|S\d{1,2}[a-z]?|[A-Z]{1,2}\d{1,3}[a-z]?|AD-\d|PLAN|checkpoint \d+)\b/gu;
+
+/**
+ * A reviewer, a round (`r2's`, `round 10`), a pull request (`#1422`), the owner's review or a step's review right
+ * before an id makes it a review reference ("Codex r2's B1", "r1's and r2's B1", "#1027's B1", "the owner's reviewer's
+ * F1", "the merged S6's B1"), not a label; an id further on ("#1027's B1, F12") or a decision ("the owner's D4") is one.
+ */
+const REVIEWED =
+  /(?:(?:\b(?:Codex|Astra|Sol|Fable|Opus)(?:'s)?(?:\s+(?:recheck\s+)?(?:r\d+(?:[–-]r\d+)?|round \d+|reviews?|final))?(?:'s)?|\br\d+(?:'s)?|\bround \d+)\s+(?:[A-Z]{1,2}\d{1,3}[a-z]?(?:\/|, | and ))*|(?:#\d+(?:'s)?|\bowner's (?:reviewer's|review)|\bS\d{1,2}[a-z]?'s)\s+(?:[A-Z]{1,2}\d{1,3}[a-z]?(?:\/| and ))*|\b[A-Z]{1,2}\d{1,3}[a-z]?-)$/u;
+
+/** A reviewer's review just after an id ("B1 of Astra's review") makes it a review reference too. */
+const REVIEWED_AFTER = /^(?: of (?:Codex|Astra|Sol|Fable|Opus)'s review|-r\d)/u;
+
+/** Labels that name a repository document, not the plan or the research. */
+const DOCUMENTS = new Set(["V30"]);
+
+/** Each label in `text`'s comments, with its line; review references and document names are not labels. */
+export function labelsIn(fileName, text) {
+  const found = [];
+  for (const comment of fileComments(fileName, text))
+    for (const match of comment.text.matchAll(LABEL)) {
+      // a block comment's line breaks and leading `*` or `//` read as one space
+      const before = comment.text
+        .slice(Math.max(0, match.index - 60), match.index)
+        .replace(/\s*\n\s*(?:\*(?!\/)|\/\/)?\s*/gu, " ");
+      const after = comment.text.slice(
+        match.index + match[0].length,
+        match.index + match[0].length + 30,
+      );
+      if (REVIEWED.test(before) || REVIEWED_AFTER.test(after) || DOCUMENTS.has(match[0])) continue;
+      found.push({
+        line: comment.line + comment.text.slice(0, match.index).split("\n").length - 1,
+        label: match[0],
+      });
+    }
+  return found;
+}
+
+/** The glossary's rows in the record's `README.md`: each label of its `## Labels` table, with its line. */
+export function glossaryRows(readme) {
+  const lines = readme.split("\n");
+  const start = lines.findIndex((line) => line === "## Labels");
+  const rows = new Map();
+  if (start === -1) return rows;
+  for (let index = start + 1; index < lines.length && !lines[index].startsWith("## "); index++) {
+    const row = /^\| `([^`]+)` \|/u.exec(lines[index]);
+    if (row) rows.set(row[1], index + 1);
+  }
+  return rows;
+}
+
+/**
+ * Each label the core's comments carry (`carried`, with its file and line) that the glossary has no row for, and each
+ * row whose label no comment carries; the bare `§N` row is not checked against comments.
+ */
+export function glossaryFindings(carried, glossary) {
+  const findings = [];
+  for (const { fileName, line, label } of carried)
+    if (!glossary.has(label))
+      findings.push({
+        fileName,
+        line,
+        column: 1,
+        message: `a comment carries the label ${label}, which the accepted record's glossary does not define (${RECORD}/README.md, Labels)`,
+      });
+  const labels = new Set(carried.map(({ label }) => label));
+  for (const [label, line] of glossary)
+    if (!labels.has(label) && !label.startsWith("§"))
+      findings.push({
+        fileName: `${RECORD}/README.md`,
+        line,
+        column: 1,
+        message: `the glossary defines ${label}, which no comment of the type core carries any more; remove its row`,
+      });
+  return findings;
+}
 
 /** The forecasts in `text`'s comments: each comment line's form and text. */
 export function forecastsIn(fileName, text) {
@@ -114,6 +201,8 @@ export function checkCommentForecasts(root) {
       .filter((name) => name.endsWith(".md"))
       .map((name) => [name.slice(0, -3), readFileSync(resolve(root, RECORD, name), "utf8")]),
   );
+  const glossary = glossaryRows(pages.get("README") ?? "");
+  const carried = [];
   const diagnostics = [];
   const used = new Set();
   const counted = {};
@@ -143,9 +232,12 @@ export function checkCommentForecasts(root) {
         column: 1,
         message: `a comment points at ${RECORD}${page ? `/${page}` : ""}.md#${anchor}, which is no heading of that accepted-record page`,
       });
+    if (file.startsWith(CORE))
+      for (const found of labelsIn(file, text)) carried.push({ fileName: file, ...found });
     const counts = citationCounts(file, text);
     if (Object.keys(counts).length > 0) counted[file] = counts;
   }
+  diagnostics.push(...glossaryFindings(carried, glossary));
   for (const [index, item] of allowed.entries())
     if (!used.has(index))
       diagnostics.push({
