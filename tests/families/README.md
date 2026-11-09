@@ -470,7 +470,7 @@ baseline, its area's PLAN, and the runner's records and stall index name the gen
 name as `export const id` and names it in its header line keeps every stored line and its area's PLAN; its `--work` and
 `--out` lines add `file`, the new name, which a stored line never holds. Two generators with one id are refused.
 
-A module `tests/families/<area>/<name>.mjs` with no imports beyond `node:` built-ins and no side effects:
+A module `tests/families/<area>/<name>.mjs` (`<area>/<group>/<name>.mjs` in an area of groups) with no imports beyond `node:` built-ins and no side effects:
 
 ```js
 // <what it generates> (<its origin>)
