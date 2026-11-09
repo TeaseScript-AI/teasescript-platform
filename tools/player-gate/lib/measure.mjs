@@ -1,11 +1,29 @@
 // The report's fields, derived from the probe's records (`probe.mjs`). Every time is on the page clock, in ms from the
 // page's time origin; a "frame" is the `requestAnimationFrame` callback after an event, a frame-callback bound, not a
-// display time.
-import { hasEnabledControl } from "./player.mjs";
+// display time. The derivations read records through the strict reader (`evidence.mjs`): a missing required value
+// throws, a value that may truly be absent is read with `nullable`, and every interval is a `span`.
+import { crossClock, nullable, span } from "./evidence.mjs";
+
+/** Whether `state` shows a control the player can answer now, as `hasEnabledControl` (`player.mjs`) reads it. */
+function answerable(state) {
+  const composer = nullable(state, "composer");
+  return (
+    nullable(state, "start") === null &&
+    (state.buttons.some((button) => button.enabled) ||
+      (composer !== null && composer.enabled === true && composer.asks === true))
+  );
+}
+
+/** A record's frame after its event: `null` until its frame ran, else the frame, which must not precede the event. */
+function frameOf(record, what) {
+  const frame = nullable(record, "frame");
+  if (frame !== null) span(record.t, frame, `${what}: its event → its frame`);
+  return frame;
+}
 
 /** The first probe state after `after` that shows an enabled control, or `null`. */
 export function firstControlAfter(gate, after) {
-  return gate.states.find((state) => state.t > after && hasEnabledControl(state)) ?? null;
+  return gate.states.find((state) => state.t > after && answerable(state)) ?? null;
 }
 
 /** The first trusted input event of `types` at or after `after`. */
@@ -25,37 +43,33 @@ const PRESS = ["pointerdown", "touchstart", "click"];
  * first enabled script control; the enabled → input delay between them is the driver's, reported apart.
  */
 export function playable(gate, label) {
-  const enabled = gate.states.find(
-    (state) => state.start?.enabled === true && state.start.label === label,
-  );
-  if (enabled?.frame === undefined)
-    return { ok: false, reason: `${label} was never shown enabled` };
+  const enabled = gate.states.find((state) => {
+    const start = nullable(state, "start");
+    return start !== null && start.enabled === true && start.label === label;
+  });
+  if (enabled === undefined) return { ok: false, reason: `${label} was never shown enabled` };
+  const enabledFrame = frameOf(enabled, `${label} enabled`);
+  if (enabledFrame === null) return { ok: false, reason: `${label} enabled has no frame` };
   const press = inputAfter(gate, enabled.t, PRESS);
   if (press === null) return { ok: false, reason: `no trusted input after ${label} was enabled` };
   const control = firstControlAfter(gate, press.t);
-  if (control?.frame === undefined)
-    return { ok: false, reason: `no enabled control after ${label}'s input` };
-  const inputToControlMs = control.frame - press.ts;
-  // Every endpoint finite and in order: enabled, its frame; the input after enabled; the control's frame after it.
-  const ordered = [enabled.t, enabled.frame, press.ts, control.t, control.frame].every(
-    Number.isFinite,
+  if (control === null) return { ok: false, reason: `no enabled control after ${label}'s input` };
+  const controlFrame = frameOf(control, "the first control");
+  if (controlFrame === null) return { ok: false, reason: "the first control has no frame" };
+  span(enabled.t, press.ts, `${label} enabled → its input`);
+  const inputToControlMs = span(
+    press.ts,
+    controlFrame,
+    `${label}'s input → the first control's frame`,
   );
-  if (
-    !ordered ||
-    enabled.frame < enabled.t ||
-    press.ts < enabled.t ||
-    control.frame < control.t ||
-    inputToControlMs < 0
-  )
-    return { ok: false, reason: "the input's timestamp is outside its boundaries" };
   return {
     ok: true,
     enabledMs: enabled.t,
-    enabledFrameMs: enabled.frame,
+    enabledFrameMs: enabledFrame,
     inputMs: press.ts,
-    enabledToInputMs: press.ts - enabled.frame,
+    enabledToInputMs: span(enabledFrame, press.ts, `${label}'s frame → its input`),
     inputToControlMs,
-    playableMs: enabled.frame + inputToControlMs,
+    playableMs: enabledFrame + inputToControlMs,
   };
 }
 
@@ -65,9 +79,15 @@ export function playable(gate, label) {
  * action than `beforeControl` (its serial), a new script row's first positive-opacity frame (`shownFrame`), and the
  * frame after a change of a script row already shown before the submission (an updated message). User echoes never
  * settle a turn. `settledAt` is `null` until one of them has its frame. The driver's wait runs this same function in the
- * page (`SETTLED`), so it uses nothing outside its own body.
+ * page (`SETTLED`), so it uses nothing outside its own body; `read` reads a value that may be absent (`nullable` in the
+ * derivations, a plain read in the page).
  */
-export function turnSettlement(gate, sentAt, beforeControl) {
+export function turnSettlement(
+  gate,
+  sentAt,
+  beforeControl,
+  read = (record, key) => record[key] ?? null,
+) {
   const submission =
     gate.inputs.find(
       (input) =>
@@ -75,13 +95,17 @@ export function turnSettlement(gate, sentAt, beforeControl) {
         input.trusted &&
         (input.type === "pointerdown" || input.type === "touchstart" || input.type === "keydown"),
     ) ?? null;
-  if (submission === null) return { submission: null, settledAt: null, by: null };
+  if (submission === null) return { submission: null, settledAt: null, by: null, event: null };
   const after = submission.t;
   // An answerable control, as `hasEnabledControl` reads a state.
-  const answerable = (state) =>
-    state.start === null &&
-    (state.buttons.some((button) => button.enabled) ||
-      (state.composer?.enabled === true && state.composer.asks));
+  const answerable = (state) => {
+    const composer = read(state, "composer");
+    return (
+      read(state, "start") === null &&
+      (state.buttons.some((button) => button.enabled) ||
+        (composer !== null && composer.enabled === true && composer.asks === true))
+    );
+  };
   const rows = new Map(gate.rows.map((row) => [row.id, row]));
   const events = [
     ...gate.states
@@ -89,28 +113,30 @@ export function turnSettlement(gate, sentAt, beforeControl) {
         (state) =>
           state.t > after &&
           answerable(state) &&
-          state.control !== beforeControl &&
-          state.frame !== undefined,
+          read(state, "control") !== beforeControl &&
+          read(state, "frame") !== null,
       )
-      .map((state) => ({ by: "control", at: state.frame })),
+      .map((state) => ({ by: "control", t: state.t, at: read(state, "frame") })),
     ...gate.rows
-      .filter((row) => row.speaker !== "user" && row.t > after && row.shownFrame !== undefined)
-      .map((row) => ({ by: "row", at: row.shownFrame })),
-    ...(gate.rowChanges ?? [])
+      .filter((row) => row.speaker !== "user" && row.t > after && read(row, "shownFrame") !== null)
+      .map((row) => ({ by: "row", t: row.t, at: read(row, "shownFrame") })),
+    ...(read(gate, "rowChanges") ?? [])
       .filter((change) => {
         const row = rows.get(change.id);
+        const shown = row === undefined ? null : read(row, "shownFrame");
         return (
           row !== undefined &&
           row.speaker !== "user" &&
-          row.shownFrame !== undefined &&
-          row.shownFrame < after &&
+          shown !== null &&
+          shown < after &&
           change.t > after &&
-          change.frame !== undefined
+          read(change, "frame") !== null
         );
       })
-      .map((change) => ({ by: "row update", at: change.frame })),
+      .map((change) => ({ by: "row update", t: change.t, at: read(change, "frame") })),
   ].sort((a, b) => a.at - b.at);
-  return { submission, settledAt: events[0]?.at ?? null, by: events[0]?.by ?? null };
+  const event = events[0] ?? null;
+  return { submission, settledAt: event?.at ?? null, by: event?.by ?? null, event };
 }
 
 /** `turnSettlement` as a page source over `window.__gate`: whether the turn sent at `sentAt` has settled. */
@@ -121,33 +147,40 @@ export const SETTLED = (sentAt, beforeControl) =>
  * One turn from the input event at or after `sentAt`, the state `before` it shown: feedback is the frame after the
  * first DOM change; settlement is `turnSettlement`'s. `end` is how the driver saw the turn end when it did not settle:
  * `ended` (the script's end), `cut` (nothing to answer and no change for 10 s), or `null`; a turn that neither settled
- * nor ended is not ok, and so is one whose times run backwards.
+ * nor ended is not ok. Every interval is a `span`, so a missing or reversed endpoint throws.
  */
 export function turnTimes(gate, sentAt, before, end = null) {
-  const { submission, settledAt, by } = turnSettlement(gate, sentAt, before.control);
+  const { submission, event } = turnSettlement(gate, sentAt, nullable(before, "control"), nullable);
   if (submission === null) return { ok: false, reason: "no input recorded" };
   const change = gate.changes.find((record) => record.t > submission.t);
+  if (change === undefined) return { ok: false, reason: "no DOM change after the input" };
+  const feedbackFrame = frameOf(change, "the feedback change");
+  if (feedbackFrame === null) return { ok: false, reason: "no feedback frame after the input" };
   const row = gate.rows.find(
     (record) =>
-      record.speaker !== "user" && record.t > submission.t && record.shownFrame !== undefined,
+      record.speaker !== "user" &&
+      record.t > submission.t &&
+      nullable(record, "shownFrame") !== null,
   );
-  const feedbackMs = change?.frame === undefined ? null : change.frame - submission.ts;
   const times = {
     submissionMs: submission.ts,
-    feedbackMs,
-    firstScriptRowMs: row === undefined ? null : row.shownFrame - submission.ts,
+    feedbackMs: span(submission.ts, feedbackFrame, "the turn's input → its feedback frame"),
+    firstScriptRowMs:
+      row === undefined
+        ? null
+        : span(submission.ts, row.shownFrame, "the turn's input → the first script row shown"),
   };
-  // `null >= 0` holds in JavaScript: a missing feedback must fail before the comparison.
-  if (!(Number.isFinite(feedbackMs) && feedbackMs >= 0))
-    return { ok: false, reason: "no feedback after the input", ...times };
-  if (settledAt === null)
+  if (event === null)
     return end === null
       ? { ok: false, reason: "neither settled nor ended", ...times }
       : { ok: true, end, ...times, settledMs: null };
-  const settledMs = settledAt - submission.ts;
-  if (!(Number.isFinite(settledMs) && settledMs >= 0))
-    return { ok: false, reason: "settled before its input", ...times };
-  return { ok: true, ...times, settledMs, settledBy: by };
+  span(event.t, event.at, `the settling ${event.by}: its event → its frame`);
+  return {
+    ok: true,
+    ...times,
+    settledMs: span(submission.ts, event.at, "the turn's input → its settlement"),
+    settledBy: event.by,
+  };
 }
 
 /** The `sessions` publish transactions of scope `scope` (any scope when `null`) that committed after `after`. */
@@ -155,9 +188,9 @@ export function publishesAfter(gate, after, scope = null) {
   return gate.transactions.filter(
     (transaction) =>
       transaction.start > after &&
-      transaction.outcome === "complete" &&
+      nullable(transaction, "outcome") === "complete" &&
       transaction.puts.some(
-        (put) => put.store === "sessions" && (scope === null || put.scope === scope),
+        (put) => put.store === "sessions" && (scope === null || nullable(put, "scope") === scope),
       ),
   );
 }
@@ -176,90 +209,92 @@ export function firstSave(gate, pressMs) {
   );
   if (save === undefined)
     return { ok: false, reason: "no publish with a session and a plan record after Start" };
+  const outcome = nullable(save, "outcome");
+  if (outcome !== "complete")
+    return { ok: false, outcome, reason: `the first save ${outcome ?? "never ended"}` };
   const plan = save.puts.find((put) => put.store === "plans");
   const session = save.puts.find((put) => put.store === "sessions");
-  const longTasks = gate.longTasks;
+  const longTasks = nullable(gate, "longTasks");
   const blocked =
     longTasks === null
       ? null
-      : longTasks.filter(
-          (task) => task.start + task.duration > pressMs && task.start < (save.end ?? Infinity),
-        );
-  // Its endpoints must be finite and in order: the press, then the transaction's start, then its commit.
-  const ordered =
-    Number.isFinite(pressMs) &&
-    Number.isFinite(save.start) &&
-    Number.isFinite(save.end) &&
-    pressMs < save.start &&
-    save.start <= save.end;
-  if (save.outcome === "complete" && !ordered)
-    return {
-      ok: false,
-      reason: "the publish's start and commit are not after the press, in order",
-    };
+      : longTasks.filter((task) => task.start + task.duration > pressMs && task.start < save.end);
   return {
-    ok: save.outcome === "complete",
-    outcome: save.outcome,
-    scope: session.scope,
-    planScope: plan.scope,
-    startToCommitMs: save.end === null ? null : save.end - pressMs,
-    transactionMs: save.end === null ? null : save.end - save.start,
+    ok: true,
+    outcome,
+    scope: nullable(session, "scope"),
+    planScope: nullable(plan, "scope"),
+    startToCommitMs: span(pressMs, save.end, "Start's input → the first save's commit"),
+    transactionMs: span(save.start, save.end, "the first save's transaction"),
     planJsonLength: plan.length,
     longTasksMs: blocked === null ? null : blocked.reduce((sum, task) => sum + task.duration, 0),
     longTaskMaxMs:
       blocked === null || blocked.length === 0
         ? null
         : Math.max(...blocked.map((task) => task.duration)),
-    longTasksUnavailable: gate.longTasksUnavailable ?? null,
+    longTasksUnavailable: nullable(gate, "longTasksUnavailable"),
   };
 }
 
-/** The engine Worker's start: its construction to its `ready`, or `null` for a page without one. */
+/** The engine Worker's start: its construction to its `ready` (`null` until ready), or `null` for a page without one. */
 export function workerStart(gate) {
   const worker = gate.workers.find((record) => record.engine);
   if (worker === undefined) return null;
-  // A `ready` before its construction is no start.
-  if (worker.ready !== null && !(worker.ready >= worker.constructed))
-    return { constructedMs: worker.constructed, readyMs: null, startMs: null };
+  const ready = nullable(worker, "ready");
   return {
     constructedMs: worker.constructed,
-    readyMs: worker.ready,
-    startMs: worker.ready === null ? null : worker.ready - worker.constructed,
+    readyMs: ready,
+    startMs: ready === null ? null : span(worker.constructed, ready, "the engine Worker's start"),
   };
 }
 
 /** Each request in `log` (the instrumented variant's) with its reply: op, ID, post and reply times, round trip. */
 export function requestsOf(log) {
+  // A message outside a request (the Worker's `ready`, a delivery) has no ID: it may truly be absent.
   const replies = new Map(
-    log.filter((entry) => entry.dir === "reply").map((entry) => [entry.id, entry]),
+    log
+      .filter((entry) => entry.dir === "reply" && nullable(entry, "id") !== null)
+      .map((entry) => [entry.id, entry]),
   );
   return log
-    .filter((entry) => entry.dir === "post")
+    .filter((entry) => entry.dir === "post" && nullable(entry, "id") !== null)
     .map((post) => {
-      const reply = replies.get(post.id);
+      const reply = replies.get(post.id) ?? null;
       return {
-        op: post.op,
+        op: nullable(post, "op"),
         id: post.id,
         postAt: post.at,
-        postMs: post.postMs,
-        replyAt: reply?.at ?? null,
-        rttMs: reply === undefined ? null : reply.at - post.at,
-        ...(reply?.size === undefined ? {} : { replySize: reply.size }),
+        postMs: nullable(post, "postMs"),
+        replyAt: reply === null ? null : reply.at,
+        rttMs:
+          reply === null ? null : span(post.at, reply.at, `${nullable(post, "op")}'s round trip`),
+        replySize: reply === null ? null : nullable(reply, "size"),
       };
     });
 }
 
 /** The engine Worker's handling and the delivery latency per request, from its injected log and the page's posts. */
 export function workerSideOf(workerLog, requests, timeOrigin) {
+  // A scenario's live call has no log on a page without an engine Worker.
   if (workerLog === null) return null;
   return requests.map((request) => {
-    const receipt = workerLog.find((entry) => entry.dir === "request" && entry.id === request.id);
-    const reply = workerLog.find((entry) => entry.dir === "reply" && entry.id === request.id);
+    const receipt = workerLog.find(
+      (entry) => entry.dir === "request" && nullable(entry, "id") === request.id,
+    );
+    const reply = workerLog.find(
+      (entry) => entry.dir === "reply" && nullable(entry, "id") === request.id,
+    );
     return {
       op: request.op,
       id: request.id,
-      deliveryMs: receipt === undefined ? null : receipt.at - (timeOrigin + request.postAt),
-      handlingMs: receipt === undefined || reply === undefined ? null : reply.at - receipt.at,
+      deliveryMs:
+        receipt === undefined
+          ? null
+          : crossClock(timeOrigin + request.postAt, receipt.at, `${request.op}'s delivery`),
+      handlingMs:
+        receipt === undefined || reply === undefined
+          ? null
+          : span(receipt.at, reply.at, `${request.op}'s handling in the Worker`),
     };
   });
 }

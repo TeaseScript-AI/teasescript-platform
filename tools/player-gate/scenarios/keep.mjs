@@ -14,6 +14,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { clearOrigin } from "../lib/cdp.mjs";
 import { adb, cdpSession } from "../lib/engines.mjs";
+import { nullable, span } from "../lib/evidence.mjs";
 import { gateProbe, probeConfig } from "../lib/probe.mjs";
 import { activate, ENABLED_CONTROL, readGate, waitForState } from "../lib/player.mjs";
 import { publishesAfter } from "../lib/measure.mjs";
@@ -99,61 +100,64 @@ export function hiddenCapture(gate, hiddenAt, scope, baselineMs) {
     (event) =>
       event.t > hiddenAt &&
       (event.type === "resume" ||
-        (event.type === "visibilitychange" && event.visibility === "visible")),
+        (event.type === "visibilitychange" && nullable(event, "visibility") === "visible")),
   );
-  const shownAt = shown?.t ?? Infinity;
+  const shownAt = shown === undefined ? Infinity : shown.t;
   const boundary = Math.min(shownAt, hiddenAt + HIDDEN_MS);
+  // A transaction still open has no end and no outcome yet: both may truly be absent.
+  const end = (transaction) => nullable(transaction, "end");
   const after = gate.transactions.filter(
     (transaction) =>
       transaction.start >= hiddenAt &&
-      transaction.puts.some((put) => put.store === "sessions" && put.scope === scope),
+      transaction.puts.some((put) => put.store === "sessions" && nullable(put, "scope") === scope),
   );
   const later = (transaction) =>
-    transaction.outcome === "complete" &&
-    transaction.puts.some((put) => put.store === "sessions" && put.observedMs > baselineMs);
-  const kept = after.find((transaction) => later(transaction) && transaction.end <= boundary);
+    nullable(transaction, "outcome") === "complete" &&
+    end(transaction) !== null &&
+    transaction.puts.some(
+      (put) => put.store === "sessions" && (nullable(put, "observedMs") ?? -Infinity) > baselineMs,
+    );
+  const kept = after.find((transaction) => later(transaction) && end(transaction) <= boundary);
   // Past the boundary: after the page showed again, or still hidden but after the 30 s, each its own outcome.
   const keptAfterResume =
     kept === undefined
-      ? after.find((transaction) => later(transaction) && transaction.end > shownAt)
+      ? after.find((transaction) => later(transaction) && end(transaction) > shownAt)
       : undefined;
   const keptLate =
     kept === undefined && keptAfterResume === undefined
       ? after.find(
           (transaction) =>
-            later(transaction) && transaction.end > boundary && transaction.end <= shownAt,
+            later(transaction) && end(transaction) > boundary && end(transaction) <= shownAt,
         )
       : undefined;
-  const failed = after.find(
-    (transaction) =>
-      (transaction.outcome === "abort" || transaction.outcome === "error") &&
-      transaction.end <= boundary,
-  );
+  const failed = after.find((transaction) => {
+    const outcome = nullable(transaction, "outcome");
+    return (outcome === "abort" || outcome === "error") && end(transaction) <= boundary;
+  });
   return { kept, keptAfterResume, keptLate, failed, boundaryMs: boundary };
 }
 
 /**
  * A trial's outcome from its kept records alone, as the trial and the report both read it: `record` holds the
  * lifecycle and transaction records (the hiding is the lifecycle's `visibilitychange` to hidden), the scope and the
- * baseline scene time; for `keepDurable`, the stored and baseline scene times. `null` when a
- * record it needs is missing.
+ * baseline scene time; for `keepDurable`, the stored and the baseline scene times. A missing baseline is missing
+ * evidence (the strict reader throws), never a negative outcome; a stored time may truly be absent (nothing stored).
  */
 export function keepOutcome(trial, record) {
   if (trial === "keepDurable") {
-    if (record.storedMs === undefined || record.baselineMs === undefined) return null;
-    const durable =
-      record.storedMs !== null && record.baselineMs !== null && record.storedMs > record.baselineMs;
+    const baselineMs = record.baselineMs;
+    const storedMs = nullable(record, "storedMs");
+    const durable = storedMs !== null && storedMs > baselineMs;
     return { outcome: durable ? "durable after 1 s" : "not durable after 1 s", completed: durable };
   }
-  if (!Array.isArray(record.lifecycle) || !Array.isArray(record.transactions)) return null;
   // The hiding is the page's own `visibilitychange` to hidden in its lifecycle records, on the desktop too (the probe's
   // `__gateHide` dispatches it): a recorded hiding time without that event is no hiding.
-  const hiddenAt = record.lifecycle.find(
-    (event) => event.type === "visibilitychange" && event.visibility === "hidden",
-  )?.t;
-  if (typeof hiddenAt !== "number")
-    return { outcome: "the page never reported hidden", completed: false };
-  const found = hiddenCapture(record, hiddenAt, record.scope, record.baselineMs);
+  const hidden = record.lifecycle.find(
+    (event) => event.type === "visibilitychange" && nullable(event, "visibility") === "hidden",
+  );
+  if (hidden === undefined) return { outcome: "the page never reported hidden", completed: false };
+  const hiddenAt = hidden.t;
+  const found = hiddenCapture(record, hiddenAt, nullable(record, "scope"), record.baselineMs);
   const froze = record.lifecycle.some((event) => event.type === "freeze");
   const outcome = found.kept
     ? "completed"
@@ -171,7 +175,7 @@ export function keepOutcome(trial, record) {
     completed: found.kept !== undefined,
     froze,
     boundaryMs: found.boundaryMs,
-    hiddenToCommitMs: found.kept ? found.kept.end - hiddenAt : null,
+    hiddenToCommitMs: found.kept ? span(hiddenAt, found.kept.end, "hidden → the commit") : null,
   };
 }
 

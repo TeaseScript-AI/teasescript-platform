@@ -963,34 +963,11 @@ smoke does not predetermine that later tooling decision.
 ## The L5 activation gate kit
 
 `tools/player-gate/` measures what the L5 gate's cost report needs to decide whether the Player's engine moves into its
-Worker: real browsers and the Pixel 4a, outside CI, never a threshold. It changes no product file: it measures the
-production Player builds it is given, gate variants of them built by `variants/vite.config.mjs` (an `instrumented`
-bridge seam on both backends, `delayed` replies at 0, 50 or 250 ms), and the bridge page (`bridge/`), which runs the
-real engine Worker entry and the in-process backend below the Player. Playwright is loaded from the package.json that
-`PLAYWRIGHT_PACKAGE` names; without it, or without a phone, the kit exits 2.
-
-- `drive.mjs` runs one scenario in one engine for one build or an interleaved pair, one JSON line per sample with its
-  raw records: `session` (cold open to playable, the first save, cold-load bytes and heap; reload and Continue; turns
-  and final heap; on the CDP engines the bytes from a second cold page), `sessionInstrumented`, `aa` (the full probe's
-  incremental cost beyond the shared observer, over the cold interval), `taps` and `bridgeTaps` (CDP touches every
-  16 ms while the start page loads or a script is prepared, Chromium and the Pixel), `bridge`, the hidden-page keep
-  (`keepHandler` on the desktop, `keepCompletion` and `keepDurable` on the Pixel) and `demo`.
-- `report.mjs --phase r0|r1 --artifacts FILE` prints the cost report. `cells.mjs` decides every cell: required, or
-  excluded with its reason. The kit's one completeness invariant (`derive.mjs`): every required field of a cell
-  derives from records that passed the shared validation (each required interval present and in order, lifecycle
-  evidence where a trial needs it, a counted turn's feedback present), and a sample that fails it makes its cell
-  incomplete, never a value in a median. It covers every scenario but those in `UNVALIDATED`: their cells are
-  labelled `unvalidated`, printed apart from the headline and the R0 comparison, and listed as declared gaps
-  (#2122), to be validated before the activation PR's R1 run. The byte page may be loaded twice, cold, when CDP leaves a request open on the
-  first (each cell shows how many were discarded); the timing page never is. A required cell without samples (for `aa`, without both arms) or with a
-  failing one, or no artifact inventory, makes the report incomplete (exit 1).
-- `artifacts.mjs` lists a build's files with raw, gzip and brotli sizes, eager, lazy or Worker; `inputs.mjs` writes the
-  bridge page's inputs (a package's project and its plan text) from a built tree.
-
-Every number names its route (the full Player compiles source; plan text exists only on the bridge page), its backend
-and its cohort: headline numbers come from unmodified builds with the passive probe; the instrumented variant and the
-bridge page are diagnostics; taps are an active-input cohort. Desktop runs share their worker's load, so their wall
-times are paired and interleaved and stated as such. The Pixel runs on the LXC under `flock ~/opt/phone-bench/phone.lock`.
+Worker: real browsers and the Pixel 4a, outside CI, never a threshold; it changes no product file. Its completeness
+invariant: every required field of a cell derives from records that passed the shared validation in `validate.mjs`,
+read through the strict reader, and a sample that fails it makes its cell incomplete. The scenarios outside it are
+labelled `unvalidated` (#2122). The kit's README ([`tools/player-gate/README.md`](../tools/player-gate/README.md)) has
+the two sets, the reader rule, the files and how to run R0.
 
 ## Coverage and performance boundaries
 

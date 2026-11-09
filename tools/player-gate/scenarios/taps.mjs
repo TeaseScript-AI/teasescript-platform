@@ -61,7 +61,8 @@ export function tapCounts({ ledger, deliveries, window }) {
   const answered = new Map();
   let outside = 0;
   for (const tap of deliveries) {
-    const sent = ledger[tap.id - 1];
+    // A delivery whose ID no send has (read in range, so the strict reader sees no missing element).
+    const sent = tap.id >= 1 && tap.id <= ledger.length ? ledger[tap.id - 1] : undefined;
     if (
       sent === undefined ||
       Math.abs(tap.x - sent.x) > TAP_SPACING / 2 ||

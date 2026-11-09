@@ -11,86 +11,65 @@ import {
   workerSideOf,
   workerStart,
 } from "./lib/measure.mjs";
+import { isEvidenceError, nullable, span, strictRecord } from "./lib/evidence.mjs";
 import { keepOutcome } from "./scenarios/keep.mjs";
 import { tapCounts } from "./scenarios/taps.mjs";
 
-const list = Array.isArray;
-/** A page's probe records, as `readGate` returns them. */
-const probeRecords = (gate) =>
-  gate !== null &&
-  typeof gate === "object" &&
-  ["states", "inputs", "changes", "rows", "rowChanges", "transactions", "workers", "gaps"].every(
-    (name) => list(gate[name]),
-  );
-
 /** The fields of a session sample, derived from its probe records, its turn records, heap readings and requests. */
 function session(result, cell, problems) {
-  const need = (holds, what) => {
-    if (!holds) problems.push(what);
-  };
-  const cold = result.probe?.cold;
-  const repeat = result.probe?.repeat;
-  need(probeRecords(cold) && probeRecords(repeat), "the probe's records of both pages");
-  const coldPlayable = probeRecords(cold)
-    ? playable(cold, "Start")
-    : { ok: false, reason: "no records" };
-  const repeatPlayable = probeRecords(repeat)
-    ? playable(repeat, "Continue")
-    : { ok: false, reason: "no records" };
-  need(coldPlayable.ok, `cold playable: ${coldPlayable.reason}`);
-  need(repeatPlayable.ok, `repeat playable: ${repeatPlayable.reason}`);
+  const cold = result.probe.cold;
+  const repeat = result.probe.repeat;
+  const coldPlayable = playable(cold, "Start");
+  const repeatPlayable = playable(repeat, "Continue");
+  if (!coldPlayable.ok) problems.push(`cold playable: ${coldPlayable.reason}`);
+  if (!repeatPlayable.ok) problems.push(`repeat playable: ${repeatPlayable.reason}`);
   const save = coldPlayable.ok ? firstSave(cold, coldPlayable.inputMs) : null;
-  need(
-    save?.ok === true,
-    `first save: ${save?.reason ?? save?.outcome ?? "no playable cold page"}`,
+  if (save?.ok !== true) problems.push(`first save: ${save?.reason ?? "no playable cold page"}`);
+  const worker = workerStart(cold);
+  if (cell.backend === "worker" && (worker === null || worker.readyMs === null))
+    problems.push("the engine Worker reaching ready");
+  const turns = result.turns.map((turn) =>
+    nullable(turn, "sentAt") === null
+      ? { ok: false, reason: nullable(turn, "reason") ?? "no records of the turn" }
+      : turnTimes(repeat, turn.sentAt, turn.before, nullable(turn, "end")),
   );
-  const worker = probeRecords(cold) ? workerStart(cold) : null;
-  if (cell.backend === "worker") need(worker?.readyMs != null, "the engine Worker reaching ready");
-  const turns = (result.turns ?? []).map((turn) =>
-    typeof turn.sentAt !== "number" || turn.before === undefined || !probeRecords(repeat)
-      ? { ok: false, reason: turn.reason ?? "no records of the turn" }
-      : turnTimes(repeat, turn.sentAt, turn.before, turn.end ?? null),
-  );
-  need(turns.length > 0, "a turn");
-  turns.forEach((turn, index) => need(turn.ok, `turn ${index}: ${turn.reason}`));
+  if (turns.length === 0) problems.push("a turn");
+  turns.forEach((turn, index) => {
+    if (!turn.ok) problems.push(`turn ${index}: ${turn.reason}`);
+  });
   return {
     cold: coldPlayable,
     repeat: repeatPlayable,
     firstSave: save,
     worker,
     turns,
-    memory: list(result.memory) ? result.memory : [],
-    bytes: result.bytes,
+    memory: result.memory,
+    bytes: cell.scenario === "session" && onCdp(cell) ? result.bytes : null,
   };
 }
 
 /** The instrumented cohort's diagnostics, derived from the raw bridge logs and the injected Worker logs. */
 function diagnostics(result, cell, sample, problems) {
-  const logs = result.diagnostics?.bridgeLogs;
-  if (!(list(logs?.cold) && list(logs?.repeat))) {
-    problems.push("the instrumented port's logs of both pages");
-    return null;
-  }
+  const logs = result.diagnostics.bridgeLogs;
   const cold = requestsOf(logs.cold);
   const repeat = requestsOf(logs.repeat);
   if (!cold.some((request) => request.op === "start" && request.replyAt !== null))
     problems.push("a start request with its reply in the cold log");
-  let workerSide = null;
-  if (onCdp(cell) && cell.backend === "worker") {
-    const workerLogs = result.diagnostics?.workerLogs;
-    const origins = result.diagnostics?.timeOrigins;
-    if (
-      list(workerLogs?.cold) &&
-      list(workerLogs?.repeat) &&
-      Number.isFinite(origins?.cold) &&
-      Number.isFinite(origins?.repeat)
-    )
-      workerSide = {
-        cold: workerSideOf(workerLogs.cold, cold, origins.cold),
-        repeat: workerSideOf(workerLogs.repeat, repeat, origins.repeat),
-      };
-    else problems.push("the engine Worker's injected logs with both pages' clock origins");
-  }
+  const workerSide =
+    onCdp(cell) && cell.backend === "worker"
+      ? {
+          cold: workerSideOf(
+            result.diagnostics.workerLogs.cold,
+            cold,
+            result.diagnostics.timeOrigins.cold,
+          ),
+          repeat: workerSideOf(
+            result.diagnostics.workerLogs.repeat,
+            repeat,
+            result.diagnostics.timeOrigins.repeat,
+          ),
+        }
+      : null;
   return {
     cold,
     repeat,
@@ -104,8 +83,20 @@ function diagnostics(result, cell, sample, problems) {
           )
         : null,
     ),
-    gaps: { cold: result.probe?.cold?.gaps, repeat: result.probe?.repeat?.gaps },
+    gaps: { cold: result.probe.cold.gaps, repeat: result.probe.repeat.gaps },
   };
+}
+
+/**
+ * The demo's pass, from its records: it played at least four turns and fewer than its cap, with no error, and did not
+ * fail (`scenarios/demo.mjs`); the row's own `ok` must agree.
+ */
+function demoPassed(result, problems) {
+  const passed =
+    result.errors.length === 0 && result.turns >= 4 && result.turns < 80 && result.failed === false;
+  if (passed !== (result.ok === true))
+    problems.push(`the recorded ok (${result.ok}) is not its records' pass (${passed})`);
+  return passed;
 }
 
 /** Each scenario's derivation: `(result, cell, problems) => sample`, the sample the report's numbers read. */
@@ -113,66 +104,57 @@ const DERIVE = {
   session,
   sessionInstrumented: (result, cell, problems) => {
     const sample = session(result, cell, problems);
-    return {
-      ...sample,
-      bytes: undefined,
-      diagnostics: diagnostics(result, cell, sample, problems),
-    };
+    return { ...sample, diagnostics: diagnostics(result, cell, sample, problems) };
   },
   aa: (result, cell, problems) => {
-    const cold = probeRecords(result.probe)
-      ? playable(result.probe, "Start")
-      : { ok: false, reason: "no records" };
+    const cold = playable(result.probe, "Start");
     if (!cold.ok) problems.push(`cold playable: ${cold.reason}`);
     return { arm: result.arm, cold };
   },
-  bridge: (result, cell, problems) => {
-    if (!list(result.requests)) problems.push("the request records");
-    let workerSide = null;
-    if (cell.backend === "worker") {
-      if (list(result.workerLog) && Number.isFinite(result.timeOrigin))
-        workerSide = workerSideOf(result.workerLog, result.requests ?? [], result.timeOrigin);
-      else problems.push("the Worker's log with the page's clock origin");
-    }
-    return {
-      requests: result.requests,
-      at: result.at,
-      inputUnits: result.inputUnits,
-      inputBytes: result.inputBytes,
-      workerSide,
-    };
-  },
+  bridge: (result, cell) => ({
+    requests: result.requests,
+    at: result.at,
+    inputUnits: result.inputUnits,
+    inputBytes: result.inputBytes,
+    workerSide:
+      cell.backend === "worker"
+        ? workerSideOf(result.workerLog, result.requests, result.timeOrigin)
+        : null,
+  }),
   taps: (result, cell, problems) => {
     const counts = tapCounts(result);
-    if (counts === null) problems.push("the send ledger, the deliveries and the window");
-    if (!list(result.cdpErrors)) problems.push("the CDP error records");
-    else if (result.cdpErrors.length > 0)
-      problems.push(`${result.cdpErrors.length} CDP send errors`);
-    if (counts !== null && counts.outside > 0)
-      problems.push(`${counts.outside} taps off their grid point`);
+    if (counts === null) {
+      problems.push("the send ledger, the deliveries and the window");
+      return {};
+    }
+    if (result.cdpErrors.length > 0) problems.push(`${result.cdpErrors.length} CDP send errors`);
+    if (counts.outside > 0) problems.push(`${counts.outside} taps off their grid point`);
     return { ...counts, clock: result.clock };
   },
-  // Pass or fail is these scenarios' measurement (`PASS_FAIL`): their records must be intact, their failure is a value.
-  demo: (result, cell, problems) => {
-    if (!list(result.errors) || typeof result.turns !== "number")
-      problems.push("the demo's error and turn records");
-    return { passed: result.ok === true ? 1 : 0, errors: result.errors, turns: result.turns };
-  },
+  // Pass or fail is these scenarios' measurement (`PASS_FAIL`), derived from their primary records; a cached flag that
+  // disagrees is a problem.
+  demo: (result, cell, problems) => ({
+    passed: demoPassed(result, problems) ? 1 : 0,
+    errors: result.errors,
+    turns: result.turns,
+  }),
   delayedSmoke: (result, cell, problems) => {
-    if (typeof result.exit !== "number") problems.push("the smoke's exit status");
-    return { passed: result.ok === true ? 1 : 0 };
+    const passed = result.exit === 0;
+    const recorded = nullable(result, "ok");
+    if (recorded !== null && recorded !== passed)
+      problems.push(`the recorded ok (${recorded}) is not its exit's pass (${passed})`);
+    return { passed: passed ? 1 : 0 };
   },
 };
 DERIVE.bridgeTaps = DERIVE.taps;
 for (const trial of ["keepHandler", "keepCompletion", "keepDurable"])
   DERIVE[trial] = (result, cell, problems) => {
     const derived = keepOutcome(trial, result);
-    if (derived === null) problems.push("the trial's records");
-    else if (derived.outcome !== result.outcome)
+    if (derived.outcome !== result.outcome)
       problems.push(
         `the recorded outcome '${result.outcome}' is not its records' '${derived.outcome}'`,
       );
-    return { outcome: derived?.outcome, hiddenToCommitMs: derived?.hiddenToCommitMs ?? null };
+    return { outcome: derived.outcome, hiddenToCommitMs: derived.hiddenToCommitMs ?? null };
   };
 
 const CDP_ENGINES = new Set(["chromium", "pixel"]);
@@ -257,7 +239,7 @@ const BYTES = [
   [
     "byte pages discarded (a request left open)",
     "",
-    (r) => (Array.isArray(r.bytes?.discarded) ? r.bytes.discarded.length : null),
+    (r) => (r.bytes === null ? null : r.bytes.discarded.length),
     onCdp,
     true,
   ],
@@ -336,7 +318,7 @@ const NUMBERS = {
     [
       "Worker: construction → ready",
       "ms",
-      (r) => span(r, "workerConstructed", "workerReady"),
+      (r) => between(r, "workerConstructed", "workerReady"),
       isWorker,
       true,
     ],
@@ -459,53 +441,60 @@ NUMBERS.aa = PLAYABLE("cold", "Start");
 NUMBERS.bridgeTaps = NUMBERS.taps;
 NUMBERS.keepHandler = NUMBERS.keep;
 NUMBERS.keepCompletion = NUMBERS.keep;
-NUMBERS.keepDurable = NUMBERS.keep;
+NUMBERS.keepDurable = [
+  [
+    "survived force-stop at 1 s",
+    "",
+    (r) => (r.outcome === "durable after 1 s" ? 1 : 0),
+    always,
+    true,
+  ],
+];
 
 /**
  * The served bytes (`encoded` or `decoded`) of `target` (`page` or `Workers`), all or those flagged `phase`: `null`
  * while a request is still open or a finished one lacks its length; 0 for a target that requested nothing (no Worker).
  */
-function bytesOf(result, target, phase, size) {
-  if (result.bytes?.requests === undefined) return null;
-  const requests = result.bytes.requests.filter(
+function bytesOf(sample, target, phase, size) {
+  if (sample.bytes === null || sample.bytes === undefined) return null;
+  const requests = sample.bytes.requests.filter(
     (request) =>
       (target === "page" ? request.target === "page" : request.target !== "page") &&
-      (phase === null || request[phase] === true),
+      (phase === null || nullable(request, phase) === true),
   );
   if (target === "page" && requests.length === 0) return null;
   const field = size === "encoded" ? "encodedBytes" : "decodedBytes";
-  if (
-    requests.some(
-      (request) =>
-        request.failed === null && (!request.finished || !Number.isFinite(request[field])),
-    )
-  )
-    return null;
-  return requests.reduce((sum, request) => sum + (request.failed === null ? request[field] : 0), 0);
-}
-function heapAt(result, at, target) {
-  const reading = (result.memory ?? []).find((entry) => entry.at === at);
-  if (reading === undefined) return null;
-  if (target === "page") return reading.page?.usedBytes ?? null;
-  return (
-    reading.workers?.find((worker) => worker.engine && worker.usedBytes !== undefined)?.usedBytes ??
-    null
+  // A failed request served nothing; any other must have finished with its length (a missing one throws).
+  return requests.reduce(
+    (sum, request) =>
+      nullable(request, "failed") !== null ? sum : sum + (request.finished ? request[field] : NaN),
+    0,
   );
 }
-const span = (result, from, to) =>
-  result.at?.[from] === undefined || result.at?.[to] === undefined
-    ? null
-    : result.at[to] - result.at[from];
-const request = (result, op) => (result.requests ?? []).find((entry) => entry.op === op);
-const rtt = (result, op) => {
-  const found = request(result, op);
-  return found?.replyAt == null ? null : found.replyAt - found.postAt;
+function heapAt(sample, at, target) {
+  const reading = sample.memory.find((entry) => entry.at === at);
+  if (reading === undefined) return null;
+  if (target === "page") return reading.page.usedBytes;
+  const engine = reading.workers.find(
+    (worker) => worker.engine && nullable(worker, "usedBytes") !== null,
+  );
+  return engine === undefined ? null : engine.usedBytes;
+}
+/** The bridge page's interval between two of its marks, both required. */
+const between = (sample, from, to) =>
+  span(sample.at[from], sample.at[to], `the bridge page's ${from} → ${to}`);
+const request = (sample, op) => sample.requests.find((entry) => nullable(entry, "op") === op);
+const rtt = (sample, op) => {
+  const found = request(sample, op);
+  if (found === undefined) return null;
+  const reply = nullable(found, "replyAt");
+  return reply === null ? null : span(found.postAt, reply, `${op}'s round trip`);
 };
-const workerSide = (result, op, field) =>
-  result.workerSide?.find((entry) => entry.op === op)?.[field];
-const diagnosticRequest = (result, page, op) =>
-  result.diagnostics?.[page]?.find((entry) => entry.op === op);
-const diagnosticRtt = (result, page, op) => diagnosticRequest(result, page, op)?.rttMs;
+const workerSide = (sample, op, field) =>
+  sample.workerSide?.find((entry) => entry.op === op)?.[field];
+const diagnosticRequest = (sample, page, op) =>
+  sample.diagnostics?.[page]?.find((entry) => entry.op === op);
+const diagnosticRtt = (sample, page, op) => diagnosticRequest(sample, page, op)?.rttMs;
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
 /** The scenarios whose result is pass or fail: a measured failure is their cell's value, never an incomplete cell. */
@@ -536,17 +525,23 @@ export const UNVALIDATED = {
  */
 export function deriveSample(cell, row) {
   const problems = [];
-  const sample = DERIVE[cell.scenario](row.result ?? {}, cell, problems);
-  // A keep trial's outcome is its measurement, whichever it is; any other failed sample fails.
-  // A keep trial's outcome and a pass/fail scenario's result are their measurement; any other failed sample fails.
-  if (!cell.scenario.startsWith("keep") && !PASS_FAIL.has(cell.scenario) && !row.ok)
-    problems.unshift("the sample failed");
   const values = [];
-  for (const [label, unit, read, applies, required] of NUMBERS[cell.scenario]) {
-    if (!applies(cell)) continue;
-    const value = read(sample);
-    if (required && !finite(value)) problems.push(unit === "" ? label : `${label} (${unit})`);
-    values.push({ label, unit, value: finite(value) ? value : null });
+  try {
+    // The one place a row's records are wrapped: every derivation below reads them strictly.
+    const strict = strictRecord(row, "row");
+    const sample = DERIVE[cell.scenario](strict.result, cell, problems);
+    // A keep trial's outcome and a pass/fail scenario's result are their measurement; any other failed sample fails.
+    if (!cell.scenario.startsWith("keep") && !PASS_FAIL.has(cell.scenario) && strict.ok !== true)
+      problems.unshift("the sample failed");
+    for (const [label, unit, read, applies, required] of NUMBERS[cell.scenario]) {
+      if (!applies(cell)) continue;
+      const value = read(sample);
+      if (required && !finite(value)) problems.push(unit === "" ? label : `${label} (${unit})`);
+      values.push({ label, unit, value: finite(value) ? value : null });
+    }
+  } catch (error) {
+    if (!isEvidenceError(error)) throw error;
+    problems.push(error.message);
   }
   return { values, problems };
 }

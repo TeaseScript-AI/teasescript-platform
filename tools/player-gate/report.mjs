@@ -1,12 +1,12 @@
 // The cost report: reads the JSON lines `drive.mjs` wrote and prints, per cell, the sample count and the median
 // [min–max] of each of its numbers, with the conditions they depend on; then every excluded cell with its reason.
 // A row whose axis value is not declared fails the report (exit 1), and so does a required cell without samples or with
-// one that fails the shared validation (`derive.mjs`; the A/A run needs both arms), or no artifact inventory
+// one that fails the shared validation (`validate.mjs`; the A/A run needs both arms), or no artifact inventory
 // ("incomplete"). Every number is derived from the rows' records there. Phase medians are never summed.
 //   node tools/player-gate/report.mjs --phase r0|r1 [--json FILE] [--artifacts FILE]... RESULTS.jsonl...
 import { readFileSync, writeFileSync } from "node:fs";
 import { allCells, cellName, classify } from "./cells.mjs";
-import { deriveSample, PASS_FAIL, UNVALIDATED } from "./derive.mjs";
+import { deriveSample, PASS_FAIL, UNVALIDATED } from "./validate.mjs";
 import { summarize } from "./lib/measure.mjs";
 
 const format = ({ n, median, min, max }) =>
@@ -24,7 +24,7 @@ const FINDINGS = {
   delayedSmoke: (row) =>
     ({
       50: "the smoke's own wait, #2125",
-      250: "the Player's scene clock, the stutter track, #2126",
+      250: "the Player's scene clock, the stutter track, #2126: scene time advances 100 ms per bridge round trip (about 0.4× wall at 250 ms); affects waits, pacing and timers",
     })[row.delayMs] ?? "unexplained",
   demo: (row) =>
     row.engine === "firefox"
@@ -33,15 +33,43 @@ const FINDINGS = {
 };
 
 /** A pass/fail cell's result as one line: what passed, and each failure with its finding. */
-function resultLine(scenario, rows) {
-  const failed = rows.filter((row) => !row.ok);
+function resultLine(scenario, derived) {
+  // The pass is the derivation's, from the records (`validate.mjs`), never the row's cached flag.
+  const passedOf = (sample) => sample.values.find(({ label }) => label === "passed")?.value === 1;
+  const rows = derived.map((sample) => ({ ...sample.row, passed: passedOf(sample) }));
+  const failed = rows.filter((row) => !row.passed);
   if (failed.length === 0) return `Result: passes (${rows.length} of ${rows.length}).`;
   if (scenario === "delayedSmoke") {
-    const passed = rows.filter((row) => row.ok).map((row) => `${row.delayMs} ms`);
+    const passed = rows.filter((row) => row.passed).map((row) => `${row.delayMs} ms`);
     const fails = failed.map((row) => `at ${row.delayMs} ms (${FINDINGS.delayedSmoke(row)})`);
     return `Result: ${passed.length > 0 ? `passes at ${passed.join(", ")}; ` : ""}fails ${fails.join(" and ")}.`;
   }
   return `Result: fails in ${failed.length} of ${rows.length} samples (${[...new Set(failed.map(FINDINGS[scenario]))].join("; ")}).`;
+}
+
+/**
+ * The conditions a cell's numbers depend on, written beside them: what each keep witness is (a simulated handler check
+ * on the desktop, a real background on the Pixel, a force-stop's survival), and how the Pixel is driven.
+ */
+function conditionLines(cell) {
+  const lines = [];
+  if (cell.scenario === "keepHandler")
+    lines.push(
+      "Witness: a simulated reported-hidden handler check: the probe makes the document report hidden while the page keeps running, so it checks the Player's hidden path, not a browser's background policy.",
+    );
+  if (cell.scenario === "keepCompletion")
+    lines.push(
+      "Witness: a real background: the phone goes home (`KEYCODE_HOME`) for 30 s, then Chrome is brought back.",
+    );
+  if (cell.scenario === "keepDurable")
+    lines.push(
+      "Witness: survival of a force-stop at 1 s: home, `am force-stop` Chrome 1 s later, relaunch, then the stored snapshot read before anything continues it.",
+    );
+  if (cell.engine === "pixel")
+    lines.push(
+      "Pixel: `noDefaults`: no Playwright touch emulation; input is sent through CDP (`Input.dispatchTouchEvent`).",
+    );
+  return lines;
 }
 
 /** What a reader needs beside a scenario's numbers. */
@@ -106,7 +134,7 @@ export function buildReport(rows, phase, artifacts = []) {
       continue;
     }
     const data = byCell.get(name)?.rows ?? [];
-    // The invariant (`derive.mjs` `deriveSample`): a sample that fails the shared validation makes its cell
+    // The invariant (`validate.mjs` `deriveSample`): a sample that fails the shared validation makes its cell
     // incomplete; it is never left out to let the others stand for the cell.
     const derived = data.map((row) => ({ row, ...deriveSample(cell, row) }));
     const failing = derived.filter((sample) => sample.problems.length > 0);
@@ -146,7 +174,8 @@ export function buildReport(rows, phase, artifacts = []) {
       "",
     );
     if (NOTES[cell.scenario]) out.push(NOTES[cell.scenario], "");
-    if (PASS_FAIL.has(cell.scenario)) out.push(resultLine(cell.scenario, data), "");
+    for (const condition of conditionLines(cell)) out.push(condition, "");
+    if (PASS_FAIL.has(cell.scenario)) out.push(resultLine(cell.scenario, derived), "");
     out.push("| Number | Value | Unit |", "| --- | --- | --- |");
     for (const arm of arms)
       for (const [index, { label, unit }] of derived[0].values.entries()) {

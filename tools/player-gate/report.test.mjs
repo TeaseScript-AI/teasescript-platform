@@ -5,7 +5,9 @@ import test from "node:test";
 import { AXES, allCells, cellName, classify } from "./cells.mjs";
 import { buildReport } from "./report.mjs";
 import { playable, turnTimes } from "./lib/measure.mjs";
-import { hiddenCapture } from "./scenarios/keep.mjs";
+import { MissingEvidence, ReversedInterval, strictRecord } from "./lib/evidence.mjs";
+import { hiddenCapture, keepOutcome } from "./scenarios/keep.mjs";
+import { readFileSync } from "node:fs";
 import { releaser } from "./lib/release.mjs";
 import { clearOriginsThrough } from "./lib/cdp.mjs";
 
@@ -173,6 +175,8 @@ function sessionResult({ engine = "chromium", backend = "main" } = {}) {
   return {
     probe: { cold, repeat },
     turns: [{ turn: 0, ok: true, sentAt: 880, before: repeat.states[1], end: null }],
+    // A session row always keeps its heap readings, none where the engine has no CDP (`scenarios/session.mjs`).
+    memory: [],
     ...(cdp
       ? {
           memory: ["startEnabled", "playable", "firstSave", "afterTurns", "end"].map(heap),
@@ -232,10 +236,7 @@ test("a sample counts only with every required field that applies; missing evide
     ARTIFACTS,
   );
   const line = empty.incomplete.find((text) => text.includes(name({})));
-  assert.match(
-    line,
-    /1 failing the validation; the probe's records of both pages; .*cold playable/u,
-  );
+  assert.match(line, /1 failing the validation; missing evidence: row.result.probe/u);
   // A missing heap milestone or an unfinished request is missing evidence too.
   const noHeap = sessionResult();
   noHeap.memory = noHeap.memory.filter((reading) => reading.at !== "startEnabled");
@@ -441,9 +442,9 @@ test("playable is the Player's own two intervals, and a timestamp outside its bo
     inputToControlMs: 161,
     playableMs: 671,
   });
-  // An input stamped before Start was enabled is outside the boundaries.
+  // An input stamped before Start was enabled is a reversed interval.
   const early = { ...gate, inputs: [{ type: "pointerdown", t: 560, ts: 400, trusted: true }] };
-  assert.equal(playable(early, "Start").ok, false);
+  assert.throws(() => playable(early, "Start"), ReversedInterval);
 });
 
 test("a turn settles at an enabled control of another action, even with the same label; neither settled nor ended fails", () => {
@@ -656,7 +657,7 @@ test("a measured failure is a value: the delayed smoke failing at 50 and 250 ms 
   assert.ok(named in report.summary);
   assert.match(
     report.text,
-    /Result: passes at 0 ms; fails at 50 ms \(the smoke's own wait, #2125\) and at 250 ms \(the Player's scene clock, the stutter track, #2126\)\./u,
+    /Result: passes at 0 ms; fails at 50 ms \(the smoke's own wait, #2125\) and at 250 ms \(the Player's scene clock, the stutter track, #2126: scene time advances 100 ms per bridge round trip \(about 0\.4× wall at 250 ms\); affects waits, pacing and timers\)\./u,
   );
   // A missing exit status is a record that fails, not a measured failure.
   const broken = smoke(50, false);
@@ -666,4 +667,127 @@ test("a measured failure is a value: the delayed smoke failing at 50 and 250 ms 
       (text) => text.includes(named),
     ),
   );
+});
+
+/** A delayed-smoke row at `delayMs`, with its exit status and its cached flags. */
+const smokeRow = (delayMs, exit, ok = exit === 0) => ({
+  scenario: "delayedSmoke",
+  script: "smoke",
+  route: "source",
+  backend: "main",
+  engine: "chromium",
+  delayMs,
+  version: null,
+  build: `delayed ${delayMs} ms`,
+  commit: null,
+  ok,
+  result: { ok, exit },
+});
+
+test("Sol code r6's five witnesses each make their cell incomplete through the strict reader", () => {
+  const incompleteIn = (cell, rows) =>
+    buildReport(rows, "r1", ARTIFACTS).incomplete.some((text) => text.includes(name(cell)));
+  const session = (change, options) => {
+    const result = sessionResult(options);
+    change(result);
+    return result;
+  };
+  // A null `ts` on a turn's input; a feedback frame before its change; a Worker without its construction time.
+  assert.ok(
+    incompleteIn({}, [
+      row(
+        { scenario: "session", engine: "chromium" },
+        true,
+        session((r) => (r.probe.repeat.inputs[1].ts = null)),
+      ),
+    ]),
+  );
+  assert.ok(
+    incompleteIn({}, [
+      row(
+        { scenario: "session", engine: "chromium" },
+        true,
+        session((r) => (r.probe.repeat.changes = [{ t: 920, frame: 910 }])),
+      ),
+    ]),
+  );
+  assert.ok(
+    incompleteIn({ backend: "worker" }, [
+      row(
+        { scenario: "session", engine: "chromium", backend: "worker" },
+        true,
+        session((r) => (r.probe.cold.workers[0].constructed = null), { backend: "worker" }),
+      ),
+    ]),
+  );
+  // A durable trial without its baseline is missing evidence, not "not durable".
+  const durable = { scenario: "keepDurable", script: "CelebWorship", engine: "pixel" };
+  assert.ok(
+    incompleteIn(durable, [
+      row(durable, false, { outcome: "not durable after 1 s", baselineMs: null, storedMs: 9 }),
+    ]),
+  );
+  assert.throws(
+    () => keepOutcome("keepDurable", strictRecord({ baselineMs: null, storedMs: 9 })),
+    MissingEvidence,
+  );
+  // A smoke row whose exit says failed while its cached flags say passed.
+  const smoke = { scenario: "delayedSmoke", script: "smoke", engine: "chromium" };
+  assert.ok(incompleteIn(smoke, [smokeRow(0, 0), smokeRow(50, 1, true), smokeRow(250, 1)]));
+});
+
+test("Sol code r5's witnesses stay caught or labelled: a reversed bridge round trip fails, an empty lifecycle stays unvalidated", () => {
+  const cell = { scenario: "bridge", script: "CelebWorship", route: "plan", engine: "chromium" };
+  const bridgeRow = (replyAt) =>
+    row(cell, true, {
+      requests: [{ op: "prepare", id: 1, postAt: 100, postMs: 1, replyAt }],
+      at: {},
+      inputUnits: 1,
+      inputBytes: 1,
+    });
+  assert.ok(
+    buildReport([bridgeRow(99)], "r0", ARTIFACTS).incomplete.some(
+      (text) => text.includes(name(cell)) && text.includes("reversed interval"),
+    ),
+  );
+  const handler = { scenario: "keepHandler", engine: "chromium" };
+  const report = buildReport(
+    [
+      row(handler, false, {
+        outcome: "the page never reported hidden",
+        scope: "s",
+        baselineMs: 5,
+        lifecycle: [],
+        transactions: [],
+      }),
+    ],
+    "r0",
+    ARTIFACTS,
+  );
+  assert.ok(name(handler) in report.unvalidated);
+  assert.ok(!(name(handler) in report.summary));
+});
+
+test("every derivation reads records only through the strict reader, and span is its only timestamp subtraction", () => {
+  const source = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+  const scanned = {
+    "validate.mjs": source("./validate.mjs"),
+    "lib/measure.mjs": source("./lib/measure.mjs"),
+    "scenarios/keep.mjs (its derivations)": `${hiddenCapture}\n${keepOutcome}`,
+  };
+  // The one wrapping site reads a row's records through the reader; nothing else reads `.result` or escapes it.
+  const ALLOWED_RESULT_READS = ["strict.result"];
+  // The subtractions that are no intervals: two sort comparators and the median's neighbour index.
+  const ALLOWED_SUBTRACTIONS = ["a.at - b.at", "a - b", "middle - 1"];
+  for (const [name, text] of Object.entries(scanned)) {
+    const code = text.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/\/\/.*$/gmu, "");
+    for (const read of code.match(/[\w.]*\.result\b/gu) ?? [])
+      assert.ok(ALLOWED_RESULT_READS.includes(read), `${name}: a raw record read '${read}'`);
+    assert.ok(!/\bRAW\b/u.test(code), `${name}: reads past the reader`);
+    for (const minus of code.match(/[\w.)\]]+ - [\w.(]+/gu) ?? [])
+      assert.ok(
+        ALLOWED_SUBTRACTIONS.includes(minus),
+        `${name}: a subtraction outside span: '${minus}'`,
+      );
+  }
 });
