@@ -196,8 +196,8 @@ export function useExportCandidate(options: {
         frozen = !wanted.aborted && lives(origin) ? await capture() : null;
       }
     } catch (error) {
-      // The capture of an activation that retired meanwhile gives nothing, also when it failed.
-      if (!lives(origin)) return null;
+      // The capture of an activation that retired, or that the dialog cancelled, gives nothing, also when it failed.
+      if (!lives(origin) || wanted.aborted) return null;
       throw error;
     }
     if (frozen === PENDING_CAPTURE || frozen === null) return null;
