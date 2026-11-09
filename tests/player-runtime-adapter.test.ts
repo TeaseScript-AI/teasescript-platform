@@ -54,7 +54,10 @@ import {
   type PlayerRuntimeSession,
 } from "../player/runtime/runtime-adapter.js";
 import { playerRuntimeForm } from "../player/runtime/runtime-view.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import {
   activePlayerRuntimeCapture,
   pendingPlayerRuntimeStorageWrite,

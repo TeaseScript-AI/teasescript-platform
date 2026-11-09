@@ -3,7 +3,10 @@ import { CheckpointError } from "../../../src/runtime/snapshot/checkpoint-json.j
 import type { HistoryMarks } from "../../debug/debug-history-marks.js";
 import type { PlayerForegroundPresentation } from "../../presentation/model.js";
 import type { PlayerRuntimeSession } from "../../runtime/runtime-adapter.js";
-import { activePlayerRuntimeInteraction, playerRuntimeForeground } from "../../runtime/runtime-view.js";
+import {
+  activePlayerRuntimeInteraction,
+  playerRuntimeForeground,
+} from "../../runtime/runtime-view.js";
 import { SnapshotStore, type DebugHistorySpill } from "./snapshots.js";
 
 /*

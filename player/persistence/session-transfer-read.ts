@@ -4,10 +4,16 @@ import {
   serializeValidatedRuntimeJson,
 } from "../../src/runtime/snapshot/checkpoint-json.js";
 import { validateScriptStorageEntries } from "../../src/runtime/host-data/script-storage.js";
-import { isWellFormedCapturedMediaReference, validCapturedMediaRecord } from "../media/captured-media.js";
+import {
+  isWellFormedCapturedMediaReference,
+  validCapturedMediaRecord,
+} from "../media/captured-media.js";
 import { capturedMediaReferences } from "../media/captured-media-persistence.js";
 import { capturedMediaReferencesIn, sessionEvents } from "./kept-sessions.js";
-import { restorePlayerRuntimeSession, type PlayerRuntimeSession } from "../runtime/runtime-adapter.js";
+import {
+  restorePlayerRuntimeSession,
+  type PlayerRuntimeSession,
+} from "../runtime/runtime-adapter.js";
 import {
   SESSION_TRANSFER_FORMAT,
   SESSION_TRANSFER_VERSION,

@@ -4,9 +4,18 @@ import test, { before } from "node:test";
 import { CapturedMediaStore } from "../player/media/captured-media.js";
 import { rebuildRecordedSession } from "../player/debug/debug-export.js";
 import { DebugRecorder } from "../player/debug/debug-recorder.js";
-import { loadAge, loadTlock, readLock, type LockServices } from "../player/encryption/content-lock.js";
+import {
+  loadAge,
+  loadTlock,
+  readLock,
+  type LockServices,
+} from "../player/encryption/content-lock.js";
 import { roundTimeMs } from "../player/encryption/drand.js";
-import { LockService, type LockDialog, type LockDialogInput } from "../player/encryption/lock-service.js";
+import {
+  LockService,
+  type LockDialog,
+  type LockDialogInput,
+} from "../player/encryption/lock-service.js";
 import {
   answerPlayerRuntimeLock,
   createPlayerRuntimeRestorePoint,

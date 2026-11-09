@@ -27,7 +27,10 @@ import type {
   StageProjection,
 } from "../../src/runtime/background/media-projection.js";
 import type { InterpreterEvent } from "../../src/runtime/events.js";
-import { runtimeTimedWork, type RuntimeTimedWork } from "../../src/runtime/operations/timed-work.js";
+import {
+  runtimeTimedWork,
+  type RuntimeTimedWork,
+} from "../../src/runtime/operations/timed-work.js";
 import type { RuntimeSessionView } from "../../src/runtime/session.js";
 import { formValueText } from "../../src/interaction-answers.js";
 import type {

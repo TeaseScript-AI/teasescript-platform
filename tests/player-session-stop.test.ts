@@ -9,7 +9,11 @@ import {
   NO_PERSONAL_CONTENT,
   type DebugExportCandidate,
 } from "../player/debug/debug-export-assembly.js";
-import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug/debug-export.js";
+import {
+  debugExportFile,
+  parseDebugExport,
+  replayDebugExport,
+} from "../player/debug/debug-export.js";
 import type { DebugRecorder, DebugRecording } from "../player/debug/debug-recorder.js";
 import type * as CompileProject from "../player/runtime/compile-project.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
@@ -104,7 +108,9 @@ before(async () => {
     ...(await loadPlayerModule("player/runtime/runtime-adapter.ts")),
     ...(await loadPlayerModule("player/runtime/compile-project.ts")),
   };
-  const viewModule: Record<string, unknown> = await loadPlayerModule("player/runtime/runtime-view.ts");
+  const viewModule: Record<string, unknown> = await loadPlayerModule(
+    "player/runtime/runtime-view.ts",
+  );
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof rewind.useDebugRewind, "function");
   assert.equal(typeof time.useDevelopmentTime, "function");

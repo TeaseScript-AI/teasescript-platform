@@ -11,7 +11,10 @@ import {
   memoryKeptSessionStore,
   type KeptSessionStore,
 } from "../../../../persistence/kept-sessions.js";
-import { activePlayerRuntimeInteraction, type PlayerSession } from "../../../../runtime/runtime-view.js";
+import {
+  activePlayerRuntimeInteraction,
+  type PlayerSession,
+} from "../../../../runtime/runtime-view.js";
 import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../../runtime/player-bridge.js";
 import { BridgeRequestError } from "../../../../engine-bridge/client.js";
 import type { KeepCapture } from "../../../../engine-bridge/ops/persistence.js";
@@ -26,7 +29,11 @@ import {
   type PlanJsonEvent,
   type PlanJsonLease,
 } from "../../../../persistence/plan-json-lease.js";
-import { playerNoticeKeys, playerNotices, type PlayerNotices } from "../../../../presentation/notices.js";
+import {
+  playerNoticeKeys,
+  playerNotices,
+  type PlayerNotices,
+} from "../../../../presentation/notices.js";
 import {
   serializeValidatedRuntimeJson,
   type CheckpointErrorInfo,

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { NO_MARKS } from "../player/debug/debug-history-marks.js";
 import { HeldSession } from "../player/engine-bridge/ops/session.js";
 import { playerOpsContext } from "../player/engine-bridge/player-ops.js";

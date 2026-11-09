@@ -4,10 +4,20 @@ import type { CapturedMediaStore } from "../../../../media/captured-media.js";
 import { capturedMediaReferences } from "../../../../media/captured-media-persistence.js";
 import { isWellFormedCapturedMediaReference } from "../../../../media/captured-media.js";
 import type { PlayerRuntimeSessionOptions } from "../../../../runtime/runtime-adapter.js";
-import { pendingPlayerRuntimeStorageWrite, type PlayerSession } from "../../../../runtime/runtime-view.js";
-import { StaleOperation, type PersistenceOwnership } from "../../../../persistence/persistence-ownership.js";
+import {
+  pendingPlayerRuntimeStorageWrite,
+  type PlayerSession,
+} from "../../../../runtime/runtime-view.js";
+import {
+  StaleOperation,
+  type PersistenceOwnership,
+} from "../../../../persistence/persistence-ownership.js";
 import { BridgeRequestError } from "../../../../engine-bridge/client.js";
-import { playerNoticeKeys, playerNotices, type PlayerNotices } from "../../../../presentation/notices.js";
+import {
+  playerNoticeKeys,
+  playerNotices,
+  type PlayerNotices,
+} from "../../../../presentation/notices.js";
 import type { ScriptStorageProvider } from "../../../../persistence/script-storage.js";
 import { RETIRED, type InputSectionHost } from "../runtime-input";
 import { validateScriptStorageEntries } from "../../../../../src/runtime/host-data/script-storage.js";

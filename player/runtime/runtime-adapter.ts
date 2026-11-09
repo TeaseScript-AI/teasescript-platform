@@ -62,7 +62,10 @@ import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkp
 import type { DebugAnswerInput } from "../debug/debug-export.js";
 import type { DebugRecorder } from "../debug/debug-recorder.js";
 import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
-import type { PlayerSpeakerPresentation, PlayerTranscriptEntryPresentation } from "../presentation/model.js";
+import type {
+  PlayerSpeakerPresentation,
+  PlayerTranscriptEntryPresentation,
+} from "../presentation/model.js";
 
 /**
  * What one publication of a session shows: the engine's operational view with the Stage, media, permanent buttons,

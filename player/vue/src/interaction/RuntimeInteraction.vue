@@ -7,7 +7,10 @@ import FormControls from "./FormControls.vue";
 import PopupDialog from "./PopupDialog.vue";
 import ExportTextDialog from "./ExportTextDialog.vue";
 import LockDialog from "./LockDialog.vue";
-import type { LockDialog as LockDialogState, LockDialogInput } from "../../../encryption/lock-service.js";
+import type {
+  LockDialog as LockDialogState,
+  LockDialogInput,
+} from "../../../encryption/lock-service.js";
 import { computed, nextTick, onUnmounted, ref, watch, type Ref } from "vue";
 import { useEventListener } from "@vueuse/core";
 import {

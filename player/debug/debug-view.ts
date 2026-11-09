@@ -16,7 +16,10 @@ import {
   type PlayerDebugTraceRow,
   type PlayerDebugVariable,
 } from "./debug-variables.js";
-import { playerRuntimeDebugVariables, type PlayerRuntimeSession } from "../runtime/runtime-adapter.js";
+import {
+  playerRuntimeDebugVariables,
+  type PlayerRuntimeSession,
+} from "../runtime/runtime-adapter.js";
 
 /*
  * Debug's trace views, made in the engine's host (L5i.3): what the Variables view and the Now view's Stage image origin

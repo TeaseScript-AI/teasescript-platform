@@ -13,7 +13,10 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import { playerRuntimeForeground } from "../player/runtime/runtime-view.js";

@@ -2,7 +2,12 @@ import { computed, ref, shallowReactive, watch, type Ref, type ShallowRef } from
 import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
 import type { MediaProgressReport, TimeObservationOutcome } from "../../../../src/index.js";
 import type { ClockTicket } from "../../../runtime/clock-ticket.js";
-import { bridgeOf, endsQuietly, refusalCode, type SessionSection } from "../../../runtime/player-bridge.js";
+import {
+  bridgeOf,
+  endsQuietly,
+  refusalCode,
+  type SessionSection,
+} from "../../../runtime/player-bridge.js";
 import {
   nextPlayerRuntimeCatchUpStepMs,
   pendingPlayerRuntimeStorageWrite,

@@ -5,7 +5,10 @@ import {
   createPlayerRuntimeRestorePoint,
   playerRuntimeSnapshot,
 } from "../player/runtime/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { playerRuntimeForeground } from "../player/runtime/runtime-view.js";
 import {
   readPlayerTransferFile,
@@ -20,7 +23,10 @@ import {
   type SessionTransfer,
   type SessionTransferMedium,
 } from "../player/persistence/session-transfer.js";
-import { storageTransferFile, StorageTransferError } from "../player/persistence/storage-transfer.js";
+import {
+  storageTransferFile,
+  StorageTransferError,
+} from "../player/persistence/storage-transfer.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 
 const scope = "development-package:story";

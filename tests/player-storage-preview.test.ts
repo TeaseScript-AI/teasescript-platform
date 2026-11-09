@@ -7,7 +7,10 @@ import {
   storageOutline,
   storagePreview,
 } from "../player/persistence/storage-preview.js";
-import { playerRuntimeDebugVariables, playerRuntimeSnapshot } from "../player/runtime/runtime-adapter.js";
+import {
+  playerRuntimeDebugVariables,
+  playerRuntimeSnapshot,
+} from "../player/runtime/runtime-adapter.js";
 import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import { RUNTIME_DEBUG_TRACE_LIMITS, type SerializableRuntimeValue } from "../src/index.js";
 

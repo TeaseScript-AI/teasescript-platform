@@ -12,10 +12,16 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import { playerRuntimeAwaitsHost, type PlayerSession } from "../player/runtime/runtime-view.js";
-import { memoryKeptRoomStore, memoryKeptSessionStore } from "../player/persistence/kept-sessions.js";
+import {
+  memoryKeptRoomStore,
+  memoryKeptSessionStore,
+} from "../player/persistence/kept-sessions.js";
 import type { DebugRecorder } from "../player/debug/debug-recorder.js";
 import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import {

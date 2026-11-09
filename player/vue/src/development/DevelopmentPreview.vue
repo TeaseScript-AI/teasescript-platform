@@ -6,7 +6,11 @@ import type { CapturedMediaRepository } from "../../../media/captured-media.js";
 import { DEMO_PLAYER_PROFILE } from "../../../demo-player-profile.js";
 import type { KeptRoomStore, KeptSessionStore } from "../../../persistence/kept-sessions.js";
 import type { PlayerTimerKind } from "../../../presentation/model.js";
-import { playerNoticeKeys, playerNotices, type PlayerNotice } from "../../../presentation/notices.js";
+import {
+  playerNoticeKeys,
+  playerNotices,
+  type PlayerNotice,
+} from "../../../presentation/notices.js";
 import { createPlayerRuntimeSession } from "../../../runtime/compile-project.js";
 import type { PlayerRuntimeSession } from "../../../runtime/runtime-adapter.js";
 import { browserSavedData } from "../../../persistence/saved-data.js";

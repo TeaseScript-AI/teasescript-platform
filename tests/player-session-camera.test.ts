@@ -10,13 +10,20 @@ import {
 import { nextCamera } from "../player/media/camera-choice.js";
 import { CapturedMediaStore } from "../player/media/captured-media.js";
 import { RgbaImage } from "../player/media/rgba-image.js";
-import { type PlayerCaptureAnswer, playerRuntimeSnapshot } from "../player/runtime/runtime-adapter.js";
+import {
+  type PlayerCaptureAnswer,
+  playerRuntimeSnapshot,
+} from "../player/runtime/runtime-adapter.js";
 import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import type { PlayerSession } from "../player/runtime/runtime-view.js";
 import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
 import { serviceSection } from "./helpers/service-section.js";
-import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../player/media/session-camera.js";
+import {
+  CaptureService,
+  SessionCamera,
+  type PlayerDiagnostic,
+} from "../player/media/session-camera.js";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 

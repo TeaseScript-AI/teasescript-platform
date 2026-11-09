@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { NO_MARKS } from "../player/debug/debug-history-marks.js";
 import { heldRuns, introduceNow } from "../player/engine-bridge/in-process.js";
 import { connectBridge, openBridge, type ClientPort } from "../player/engine-bridge/client.js";

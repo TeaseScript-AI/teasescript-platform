@@ -17,7 +17,10 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime/runtime-adapter.js";
 import { compilePlayerProject } from "../player/runtime/compile-project.js";
-import { StaleOperation, persistenceOwnership } from "../player/persistence/persistence-ownership.js";
+import {
+  StaleOperation,
+  persistenceOwnership,
+} from "../player/persistence/persistence-ownership.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import { answerWith, type Intent } from "./helpers/player-input.js";
 import type { CapturedMediaLocks } from "../player/media/captured-media-persistence.js";
@@ -166,7 +169,9 @@ before(async () => {
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
-  const savedData: Record<string, unknown> = await loadPlayerModule("player/persistence/saved-data.ts");
+  const savedData: Record<string, unknown> = await loadPlayerModule(
+    "player/persistence/saved-data.ts",
+  );
   assert.equal(typeof savedData.browserSavedData, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
   browserSavedData = savedData.browserSavedData as typeof browserSavedData;

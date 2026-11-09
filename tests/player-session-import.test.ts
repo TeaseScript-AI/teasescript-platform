@@ -10,7 +10,10 @@ import {
 import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import { pendingPlayerRuntimeStorageWrite } from "../player/runtime/runtime-view.js";
 import type { SavedDataHost } from "../player/persistence/saved-data.js";
-import { createLocalScriptStorage, type ScriptStorageProvider } from "../player/persistence/script-storage.js";
+import {
+  createLocalScriptStorage,
+  type ScriptStorageProvider,
+} from "../player/persistence/script-storage.js";
 import {
   bundleSavedScripts,
   readStorageTransferFile,
@@ -66,7 +69,9 @@ before(async () => {
   const session: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/session/usePlayerSession.ts",
   );
-  const savedData: Record<string, unknown> = await loadPlayerModule("player/persistence/saved-data.ts");
+  const savedData: Record<string, unknown> = await loadPlayerModule(
+    "player/persistence/saved-data.ts",
+  );
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof savedData.browserSavedData, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.

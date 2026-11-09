@@ -4,7 +4,11 @@ import type {
   RuntimeLockChoice,
   RuntimeLockNotice,
 } from "../../src/index.js";
-import { fileType, OCTET_STREAM, storedFileKind } from "../../src/runtime/host-data/stored-files.js";
+import {
+  fileType,
+  OCTET_STREAM,
+  storedFileKind,
+} from "../../src/runtime/host-data/stored-files.js";
 import type { LockServices, ReadLock } from "./content-lock.js";
 import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey, type PublicKey } from "../../src/public-keys.js";
 import { answerRecord, dropAnswer, sendAnswer, type AnswerRecord } from "../media/answer-media.js";

@@ -1,6 +1,9 @@
 import type { HistoryMarks } from "../../debug/debug-history-marks.js";
 import { DeliveryRefusedError, OwnedMap, type Delivery, type DeliveryOwner } from "../delivery.js";
-import { playerRuntimeSnapshotJson, type PlayerRuntimeSession } from "../../runtime/runtime-adapter.js";
+import {
+  playerRuntimeSnapshotJson,
+  type PlayerRuntimeSession,
+} from "../../runtime/runtime-adapter.js";
 import {
   HistoryCore,
   advanceHistory,

@@ -16,7 +16,10 @@ import {
   type OpOutcome,
   startBridgeHost,
 } from "../../player/engine-bridge/worker-host.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../../player/runtime/compile-project.js";
 import type { HistoryTimeline } from "../../player/engine-bridge/history/core.js";
 import { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";

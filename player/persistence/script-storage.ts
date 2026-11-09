@@ -1,4 +1,7 @@
-import type { RuntimeScriptStorageEntrySnapshot, SerializableRuntimeValue } from "../../src/index.js";
+import type {
+  RuntimeScriptStorageEntrySnapshot,
+  SerializableRuntimeValue,
+} from "../../src/index.js";
 import { validateScriptStorageEntries } from "../../src/runtime/host-data/script-storage.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 

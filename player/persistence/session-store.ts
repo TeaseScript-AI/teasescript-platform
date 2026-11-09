@@ -5,7 +5,10 @@ import type {
   Publication,
   StopReply,
 } from "../engine-bridge/session-protocol.js";
-import type { PlayerSpeakerPresentation, PlayerTranscriptEntryPresentation } from "../presentation/model.js";
+import type {
+  PlayerSpeakerPresentation,
+  PlayerTranscriptEntryPresentation,
+} from "../presentation/model.js";
 import type { PlayerBridge } from "../runtime/player-bridge.js";
 import { appendTranscript, DEFAULT_SPEAKERS, type PlayerSession } from "../runtime/runtime-view.js";
 

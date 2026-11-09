@@ -18,7 +18,10 @@ import type { PlayerSession } from "../player/runtime/runtime-view.js";
 import { CaptureService } from "../player/media/session-camera.js";
 import { FileStoreService } from "../player/media/stored-files.js";
 import { inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
-import { memoryKeptSessionStore, type KeptSessionStore } from "../player/persistence/kept-sessions.js";
+import {
+  memoryKeptSessionStore,
+  type KeptSessionStore,
+} from "../player/persistence/kept-sessions.js";
 import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";

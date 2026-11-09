@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import {
   BridgeRequestError,
   connectBridge,
@@ -674,7 +677,10 @@ const FOREIGN_CALLS: Record<string, (a: PlayerBridge, foreign: PlayerSession) =>
 };
 
 test("every PlayerBridge method that takes a PlayerSession checks it is the bridge's own", () => {
-  const text = readFileSync(new URL("../../player/runtime/player-bridge.ts", import.meta.url), "utf8");
+  const text = readFileSync(
+    new URL("../../player/runtime/player-bridge.ts", import.meta.url),
+    "utf8",
+  );
   const methods = sessionMethods(text);
   assert.deepEqual(
     [...methods].filter(([, checked]) => !checked).map(([name]) => name),

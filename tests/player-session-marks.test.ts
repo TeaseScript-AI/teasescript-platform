@@ -8,7 +8,10 @@ import { introduceNow } from "../player/engine-bridge/in-process.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
 /*

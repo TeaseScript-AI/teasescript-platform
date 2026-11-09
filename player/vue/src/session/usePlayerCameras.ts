@@ -8,7 +8,11 @@ import {
   type PlayerSession,
 } from "../../../runtime/runtime-view.js";
 import { SessionCamera, type PlayerDiagnostic } from "../../../media/session-camera.js";
-import { playerNoticeKeys, playerNotices, type PlayerNotices } from "../../../presentation/notices.js";
+import {
+  playerNoticeKeys,
+  playerNotices,
+  type PlayerNotices,
+} from "../../../presentation/notices.js";
 import { IMAGE_SKIP_TEXT } from "../../../../src/image-input.js";
 import { useCameraChoice } from "../stage/useCameraChoice";
 import { useImageCapture } from "../stage/useImageCapture";

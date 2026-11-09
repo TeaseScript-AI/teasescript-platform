@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import type { DebugViewRequest } from "../player/debug/debug-view.js";
 import { connectBridge } from "../player/engine-bridge/client.js";
 import { heldTrace, introduceNow } from "../player/engine-bridge/in-process.js";

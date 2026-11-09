@@ -4,7 +4,10 @@ import { resolve } from "node:path";
 import test from "node:test";
 import ts from "typescript";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import {
@@ -25,7 +28,10 @@ import {
   type SessionTransfer,
   type SessionTransferMedium,
 } from "../player/persistence/session-transfer.js";
-import { readPlayerTransferText, restoreSessionTransfer } from "../player/persistence/session-transfer-read.js";
+import {
+  readPlayerTransferText,
+  restoreSessionTransfer,
+} from "../player/persistence/session-transfer-read.js";
 import { storageTransferFile, type StorageBundle } from "../player/persistence/storage-transfer.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import {

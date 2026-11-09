@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 
-import { CaptureDevice, type CaptureHost, type CaptureTrack } from "../player/media/capture-device.js";
+import {
+  CaptureDevice,
+  type CaptureHost,
+  type CaptureTrack,
+} from "../player/media/capture-device.js";
 import { CapturedMediaStore } from "../player/media/captured-media.js";
 import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import { loadAge, loadTlock, type LockServices } from "../player/encryption/content-lock.js";

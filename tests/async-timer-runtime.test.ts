@@ -21,7 +21,10 @@ import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { playerStateOf } from "./helpers/player-state.js";
 import { assertRuntimeResumeEquivalent, functionFrames } from "./helpers/runtime-equivalence.js";
-import { activePlayerRuntimePacingGate, playerRuntimeDeadlines } from "../player/runtime/runtime-view.js";
+import {
+  activePlayerRuntimePacingGate,
+  playerRuntimeDeadlines,
+} from "../player/runtime/runtime-view.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
 import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 

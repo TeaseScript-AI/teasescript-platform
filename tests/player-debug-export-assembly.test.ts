@@ -11,7 +11,11 @@ import {
   type DebugExportCandidate,
   type DebugExportChoices,
 } from "../player/debug/debug-export-assembly.js";
-import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug/debug-export.js";
+import {
+  debugExportFile,
+  parseDebugExport,
+  replayDebugExport,
+} from "../player/debug/debug-export.js";
 import { DebugRecorder } from "../player/debug/debug-recorder.js";
 import { prepareExport } from "../player/engine-bridge/recording/export-replay.js";
 import {

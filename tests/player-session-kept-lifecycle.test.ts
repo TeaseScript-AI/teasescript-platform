@@ -13,11 +13,17 @@ import type {
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
 } from "../player/runtime/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import type { SavedDataHost } from "../player/persistence/saved-data.js";
-import { createLocalScriptStorage, type ScriptStorageProvider } from "../player/persistence/script-storage.js";
+import {
+  createLocalScriptStorage,
+  type ScriptStorageProvider,
+} from "../player/persistence/script-storage.js";
 import type { SessionTransfer } from "../player/persistence/session-transfer.js";
 import type { StorageBundle, StorageBundleScript } from "../player/persistence/storage-transfer.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";

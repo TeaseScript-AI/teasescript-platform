@@ -19,7 +19,10 @@ import {
   useVirtualizer,
 } from "@tanstack/vue-virtual";
 import { ChangedContentMeasurement } from "../../../presentation/transcript-measurement.js";
-import { ConversationEntrances, ConversationGlide } from "../../../presentation/conversation-motion.js";
+import {
+  ConversationEntrances,
+  ConversationGlide,
+} from "../../../presentation/conversation-motion.js";
 import { usePreferredReducedMotion, useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";

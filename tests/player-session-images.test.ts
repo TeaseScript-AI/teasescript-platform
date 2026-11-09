@@ -9,7 +9,10 @@ import {
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
 } from "../player/runtime/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import { playerRuntimeForeground, playerRuntimeMedia } from "../player/runtime/runtime-view.js";
@@ -20,8 +23,15 @@ import {
   NO_PERSONAL_CONTENT,
   type DebugExportCandidate,
 } from "../player/debug/debug-export-assembly.js";
-import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug/debug-export.js";
-import { memoryKeptSessionStore, type KeptSessionStore } from "../player/persistence/kept-sessions.js";
+import {
+  debugExportFile,
+  parseDebugExport,
+  replayDebugExport,
+} from "../player/debug/debug-export.js";
+import {
+  memoryKeptSessionStore,
+  type KeptSessionStore,
+} from "../player/persistence/kept-sessions.js";
 import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";

@@ -1,12 +1,18 @@
 import type { Ref } from "vue";
 import { browserMediaUrls } from "../../../../media/browser-capture.js";
-import { CapturedMediaNotStoredError, CapturedMediaStore } from "../../../../media/captured-media.js";
+import {
+  CapturedMediaNotStoredError,
+  CapturedMediaStore,
+} from "../../../../media/captured-media.js";
 import {
   withCapturedMedia,
   type CapturedMediaStorage,
 } from "../../../../media/captured-media-persistence.js";
 import type { ImageDecoder } from "../../../../media/image-file.js";
-import { StaleOperation, type PersistenceOwnership } from "../../../../persistence/persistence-ownership.js";
+import {
+  StaleOperation,
+  type PersistenceOwnership,
+} from "../../../../persistence/persistence-ownership.js";
 import type { ScriptStorageProvider } from "../../../../persistence/script-storage.js";
 import {
   checkStorageTransferImages,

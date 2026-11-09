@@ -9,7 +9,10 @@ import type { BridgeClient } from "../player/engine-bridge/client.js";
 import type { StartOptions } from "../player/engine-bridge/ops/session.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import type { PlayerBridge } from "../player/runtime/player-bridge.js";
-import { observePlayerRuntimeTime, type PlayerRuntimeSession } from "../player/runtime/runtime-adapter.js";
+import {
+  observePlayerRuntimeTime,
+  type PlayerRuntimeSession,
+} from "../player/runtime/runtime-adapter.js";
 import { memoryKeptSessionStore } from "../player/persistence/kept-sessions.js";
 import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";

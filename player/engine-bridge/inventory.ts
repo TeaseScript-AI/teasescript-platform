@@ -229,7 +229,12 @@ export const RATCHET: readonly RatchetEntry[] = [
     name: "resumeRandomDraw",
     family: "L5i",
   },
-  { importer: "player/debug/debug-export.ts", target: "src/playback.ts", name: "run", family: "L5i" },
+  {
+    importer: "player/debug/debug-export.ts",
+    target: "src/playback.ts",
+    name: "run",
+    family: "L5i",
+  },
   {
     importer: "player/debug/debug-export.ts",
     target: "src/playback.ts",

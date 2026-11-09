@@ -1,8 +1,19 @@
 import { computed, ref, shallowRef, watch, type Ref } from "vue";
 import { useIntervalFn } from "@vueuse/core";
-import { isCapturedMediaReference, type CapturedMediaStore } from "../../../media/captured-media.js";
-import { checkImageFile, type ImageDecoder, type ImageFileFilters } from "../../../media/image-file.js";
-import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../../media/media-device.js";
+import {
+  isCapturedMediaReference,
+  type CapturedMediaStore,
+} from "../../../media/captured-media.js";
+import {
+  checkImageFile,
+  type ImageDecoder,
+  type ImageFileFilters,
+} from "../../../media/image-file.js";
+import {
+  MediaDevice,
+  MediaLoadQueue,
+  type MediaDeviceElement,
+} from "../../../media/media-device.js";
 import {
   playerRuntimeMedia,
   playerRuntimeMediaOrigin,

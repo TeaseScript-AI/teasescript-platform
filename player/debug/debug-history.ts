@@ -4,7 +4,10 @@ import type {
   HistoryPosition,
   HistoryTimeline,
 } from "../engine-bridge/history/core.js";
-import type { PlayerSpeakerPresentation, PlayerTranscriptEntryPresentation } from "../presentation/model.js";
+import type {
+  PlayerSpeakerPresentation,
+  PlayerTranscriptEntryPresentation,
+} from "../presentation/model.js";
 import { playerRuntimeTranscript } from "../runtime/runtime-view.js";
 
 /**

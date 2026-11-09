@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { rebuildRecordedSession } from "../player/debug/debug-export.js";
 import { DebugRecorder } from "../player/debug/debug-recorder.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
@@ -909,7 +912,9 @@ const bundle = () =>
       // EVIDENCE: validation: the bundle's in-process backend, whose sessions the composable's facade reaches.
       facade: (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof InProcess,
       // EVIDENCE: validation: the bundle's adapter, whose sessions the bundle's host holds.
-      adapter: (await loadPlayerModule("player/runtime/runtime-adapter.ts")) as typeof RuntimeAdapter,
+      adapter: (await loadPlayerModule(
+        "player/runtime/runtime-adapter.ts",
+      )) as typeof RuntimeAdapter,
     };
   })());
 

@@ -613,9 +613,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       const needs = plan === undefined ? null : planLockNeeds(plan);
       if (needs?.locks !== true) return;
       void import("../../../encryption/content-lock.js").catch(() => {});
-      void (options.lockServices?.tlock ?? (() => import("../../../encryption/time-lock.js")))().catch(
-        () => {},
-      );
+      void (
+        options.lockServices?.tlock ?? (() => import("../../../encryption/time-lock.js"))
+      )().catch(() => {});
       if (needs.encrypts)
         void (options.lockServices?.age ?? (() => import("../../../encryption/age.js")))().catch(
           () => {},

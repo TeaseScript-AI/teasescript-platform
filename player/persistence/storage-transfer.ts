@@ -1,10 +1,16 @@
-import type { RuntimeScriptStorageEntrySnapshot, SerializableRuntimeValue } from "../../src/index.js";
+import type {
+  RuntimeScriptStorageEntrySnapshot,
+  SerializableRuntimeValue,
+} from "../../src/index.js";
 import { validateScriptStorageEntries } from "../../src/runtime/host-data/script-storage.js";
 import {
   serializeValidatedRuntimeJson,
   stateTooLarge,
 } from "../../src/runtime/snapshot/checkpoint-json.js";
-import { isWellFormedCapturedMediaReference, type CapturedMediaStore } from "../media/captured-media.js";
+import {
+  isWellFormedCapturedMediaReference,
+  type CapturedMediaStore,
+} from "../media/captured-media.js";
 
 import { MAX_TEXT_LENGTH } from "../../src/runtime/values/text-length.js";
 import { capturedMediaReferences } from "../media/captured-media-persistence.js";
