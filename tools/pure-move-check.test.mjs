@@ -447,6 +447,8 @@ test(
     assert.match(toFile.out, /unadmitted: src\/sub:1 \(removed\): Subproject commit 1{40}/u);
     assert.match(toFile.out, /unadmitted: src\/sub:1 \(added\): export const value = 1;/u);
     assert.match(toFile.out, /not compared \(not a regular file\): src\/sub \(160000\)/u);
+    // (Git splits a type change into a deletion and an addition: each listing names the path once)
+    assert.equal(toFile.out.split("not compared (unparsed): src/sub\n").length, 2, toFile.out);
     const reason = "the submodule becomes the file it held";
     const declared = run(
       { ...kept, "src/sub": { gitlink: one } },

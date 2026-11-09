@@ -891,7 +891,7 @@ export function reportOf(base, result) {
     out.push(
       `  refused: ${r.file}:${r.line} (${r.side}) "${r.specifier}": ${r.reason}; declare it, the move's compiler run its witness`,
     );
-  for (const name of unparsed) out.push(`  not compared (unparsed): ${name}`);
+  for (const name of new Set(unparsed)) out.push(`  not compared (unparsed): ${name}`);
   for (const side of new Set(irregular)) out.push(`  not compared (not a regular file): ${side}`);
   for (const b of bindings.differing)
     out.push(
