@@ -67,10 +67,10 @@ What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise;
   complete only with its shards `0/N` to `N-1/N` of one plan, counts a repeated place once and refuses a shard given
   twice; a sum of the shards' own totals counts each repeat. Its growth lines are advisory.
 - **A stored baseline's identity:** its MANIFEST (the `src/` tree, the oracle library, the lockfile, Node) and each
-  area's PLAN (the limits above, the allowances, each generator's checks, each shard's places). The runner's own source,
-  `--work` records and `--out` files are no part of it, nor are peaks, `nearCap`, `heapLimit` or `capabilities`, which a
-  stored shard's total line leaves out. `baselines.mjs state` reports, for each stored area, its runs
-  left unanswered by reason and those within a question grant.
+  area's PLAN (the limits above, the allowances, each generator's checks, each shard's places, each by its generator's
+  id). The runner's own source, `--work` records and `--out` files are no part of it, nor are peaks, `nearCap`,
+  `heapLimit` or `capabilities`, which a stored shard's total line leaves out. `baselines.mjs state` reports, for each
+  stored area, its runs left unanswered by reason and those within a question grant.
 
 ## Running an area
 
@@ -427,6 +427,11 @@ A folder of `tests/families` that holds an `.mjs` file is an area: the check and
 `sources.mjs`'s `generatorFolders`, the baselines adding the corpus fixture (`tools/corpus/fixture`), and the runner,
 the check and the baselines take every module in an area as a generator. A folder of data only is no area; a utility
 module stays outside the area folders, as `shadow-bind.mjs` does (#1786).
+
+A generator's id is its `id` export, else its file name, `.mjs` included (`generatorsOf`). A source's place in a
+baseline, its area's PLAN, and the runner's records and stall index name the generator by its id, so a renamed generator that keeps its old file
+name as `export const id` and names it in its header line keeps every stored line and its area's PLAN; its `--work` and
+`--out` lines add `file`, the new name, which a stored line never holds. Two generators with one id are refused.
 
 A module `tests/families/<area>/<name>.mjs` with no imports beyond `node:` built-ins and no side effects:
 

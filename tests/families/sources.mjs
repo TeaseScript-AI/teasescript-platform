@@ -64,15 +64,24 @@ export const generatorFolders = (families) =>
     .filter((entry) => entry.isDirectory() && holdsGenerators(path.join(families, entry.name)))
     .map((entry) => path.join(families, entry.name));
 
-/** An area folder's generators, in name order, each with its checks and every source (`sourcesOf`). */
+/**
+ * An area folder's generators, each by its id (`name`): its `id` export, which a renamed generator keeps as its old file
+ * name so that its sources keep their places in a baseline (`placeOf`), else its file name. In id order, each with its
+ * file, its checks and every source (`sourcesOf`); two generators with one id are refused.
+ */
 export async function generatorsOf(folder, sizes) {
   const generators = [];
-  for (const name of readdirSync(folder)
-    .filter((file) => file.endsWith(".mjs"))
-    .sort()) {
-    const generator = await import(pathToFileURL(path.join(folder, name)).href);
+  for (const file of readdirSync(folder).filter((name) => name.endsWith(".mjs"))) {
+    const generator = await import(pathToFileURL(path.join(folder, file)).href);
+    const name = typeof generator.id === "string" && generator.id !== "" ? generator.id : file;
     const checks = generator.checks ?? ["publication"];
-    generators.push({ name, checks, sources: sourcesOf(generator, sizes) });
+    generators.push({ name, file, checks, sources: sourcesOf(generator, sizes) });
   }
+  generators.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const [index, generator] of generators.entries())
+    if (index > 0 && generators[index - 1].name === generator.name)
+      throw new Error(
+        `${folder}: ${generators[index - 1].file} and ${generator.file} have one id, ${generator.name}`,
+      );
   return generators;
 }

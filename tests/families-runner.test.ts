@@ -606,6 +606,116 @@ function writeSrc(tree: string, extra = ""): void {
   symlinkSync("a.ts", join(tree, "src", "link.ts"));
 }
 
+test("a generator's id is its `id` export, else its file name: a renamed generator that keeps its old name as its id keeps its sources' stored lines and its area's plan, its records name its file, and two generators with one id are refused (B2)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const tree = join(directory, "tree");
+    mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
+    writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
+    writeFileSync(join(tree, "package-lock.json"), "{}\n");
+    writeFileSync(join(tree, "dist", "tests", "helpers", "type-core-oracles.js"), storable(false));
+    writeFileSync(join(tree, ".sha"), `${"1".repeat(40)}\n`);
+    writeSrc(tree);
+    const area = join(tree, "tests", "families", "area");
+    mkdirSync(area, { recursive: true });
+    const cases = 'export const cases = [["same", "same"], ["alike", "alike"]];\n';
+    writeFileSync(join(area, "a.mjs"), cases);
+    const root = join(directory, "baselines");
+    const stored = join(root, SRC, "area");
+    const run = (...args: string[]) =>
+      spawnSync(process.execPath, [runner, area, tree, ...args], { encoding: "utf8" });
+    const state = () =>
+      spawnSync(process.execPath, [baselines, "state", tree, root, "--read-only"], {
+        encoding: "utf8",
+      })
+        .stdout.trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .find((line) => line.area === "area")?.state;
+    const lines = (file: string) =>
+      readFileSync(file, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+
+    // a file without `id`: its id is its file name, `.mjs` included, as every runner before ids stored it
+    assert.equal(
+      run("--store", root, "--shard", "0/1").status,
+      1,
+      "the alike source is unanswered",
+    );
+    const shard = readdirSync(stored).find((name) => name.endsWith(".runs.jsonl"))!;
+    assert.deepEqual(
+      lines(join(stored, shard))
+        .filter((line) => line.source !== undefined)
+        .map(({ generator, source }) => [generator, source]),
+      [
+        ["a.mjs", "same"],
+        ["a.mjs", "alike"],
+      ],
+    );
+    assert.equal(state(), "complete");
+
+    // renamed, keeping its old name as its id: the area's plan and every source's stored line stand, and its records
+    // name its file beside its id; the stored lines never do
+    rmSync(join(area, "a.mjs"));
+    writeFileSync(
+      join(area, "b.mjs"),
+      `// id a.mjs: renamed from a.mjs\nexport const id = "a.mjs";\n${cases}`,
+    );
+    assert.equal(state(), "complete");
+    const work = join(directory, "work.jsonl");
+    const against = run("--baseline", stored, "--work", work);
+    const total = JSON.parse(against.stdout.trim().split("\n").at(-1)!);
+    assert.deepEqual(
+      [total.sources, total.uncompared, total.differences],
+      [2, 0, 0],
+      against.stderr,
+    );
+    assert.deepEqual(
+      lines(work)
+        .slice(1, -1)
+        .map(({ generator, file, source }) => [generator, file, source]),
+      [
+        ["a.mjs", "b.mjs", "same"],
+        ["a.mjs", "b.mjs", "alike"],
+      ],
+    );
+    // a stall in its `--out`: the stall index finds its area by its file, and keeps its id in the place
+    for (const tool of ["baselines.mjs", "run-contract.mjs", "sources.mjs", "stalls.mjs"])
+      cpSync(join("tests", "families", tool), join(tree, "tests", "families", tool));
+    writeFileSync(
+      join(area, "b.mjs"),
+      `// id a.mjs: renamed from a.mjs\nexport const id = "a.mjs";\nexport const cases = [["ends", "ends"]];\n`,
+    );
+    const out = join(directory, "out.jsonl");
+    run(tree, "--out", out);
+    assert.deepEqual(
+      lines(out).map(({ generator, file, source }) => [generator, file, source]),
+      [["a.mjs", "b.mjs", "ends"]],
+    );
+    const index = spawnSync(
+      process.execPath,
+      [join(tree, "tests", "families", "stalls.mjs"), out],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(index.status, 2, index.stderr);
+    assert.match(index.stdout, /"generator":"a\.mjs"[^\n]*"source":"ends"/u);
+    // (renamed without it, its sources are new ones: the stored plan is another)
+    writeFileSync(join(area, "b.mjs"), cases);
+    assert.equal(state(), "another plan");
+
+    // two generators with one id are refused before any source runs
+    writeFileSync(join(area, "b.mjs"), `export const id = "a.mjs";\n${cases}`);
+    writeFileSync(join(area, "c.mjs"), `export const id = "a.mjs";\n${cases}`);
+    const twice = run(tree);
+    assert.equal(twice.status, 2, twice.stderr);
+    assert.match(twice.stderr, /b\.mjs and c\.mjs have one id, a\.mjs/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("the corpus runner stores a tree in the baseline of its src/ tree, verified shard by shard, which judges a head as the base tree beside it does", async () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {

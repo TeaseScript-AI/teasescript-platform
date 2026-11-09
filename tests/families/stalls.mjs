@@ -185,12 +185,14 @@ const nameOf = (area) => path.basename(String(area));
 const placeOf = ({ area, generator, source, key }) =>
   JSON.stringify([nameOf(area), generator, source, key]);
 
-/** The area of a generator (generator names are unique across the areas), for a record that does not say it. */
-function areaOf(generator) {
+/**
+ * The area of a generator's file (file names are unique across the areas), for a record that does not say it: a renamed
+ * generator's record names its file beside its id (`file`), any other's file is its id.
+ */
+function areaOf(file) {
   for (const entry of readdirSync(here, { withFileTypes: true }))
-    if (entry.isDirectory() && existsSync(path.join(here, entry.name, generator)))
-      return entry.name;
-  return refused(`no area of ${here} holds the generator ${generator}`);
+    if (entry.isDirectory() && existsSync(path.join(here, entry.name, file))) return entry.name;
+  return refused(`no area of ${here} holds the generator ${file}`);
 }
 
 /**
@@ -262,7 +264,7 @@ function shardOf(file) {
         .map((line) => ({
           ...entryOf(
             { ...line, key: sourceKey(line), runs: undefined },
-            areaOf(line.generator),
+            areaOf(line.file ?? line.generator),
             undefined,
           ),
           files: undefined,
