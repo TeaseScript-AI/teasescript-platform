@@ -2,19 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSourceWithBackend } from "../../src/compiler.js";
-import type { TypePlan } from "../../src/plan/model.js";
+import type { InstructionPlan, TypePlan } from "../../src/plan/model.js";
+import { run } from "../../src/runtime/engine.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../../src/runtime/host-data/script-storage.js";
 import {
   createSerializableList as list,
   createSerializableObject,
   type SerializableRuntimeValue,
 } from "../../src/runtime/values/serializable-values.js";
+import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { narrower } from "../../src/type-inference/core/check-result/kept-checks.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
+import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
+import { coreRequest } from "../helpers/type-core-analysis.js";
+import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { inMode, MODES } from "../helpers/type-core-oracles.js";
 import { runGlobals } from "../helpers/type-core-route.js";
 
@@ -364,4 +369,69 @@ test("a reader keeps a contract it is at least as strict as, never one it is wea
       kept,
       `${JSON.stringify(reader)} against ${JSON.stringify(contract)}`,
     );
+});
+
+test("a settled stop's check from the receiving completion lists an object's properties by the store's own records, so a value with several misfits reads the natural message at every stopped allowance (#2215)", () => {
+  // (Sol round 13's witness on #2116: five whole stores into `root`, reads that pay for their decisions under a host
+  // condition false when the script runs, then the host value stored whole, the first store to ask for `root`'s contract.
+  // At each demand in held mode 0 a decision stops and the analysis settles. Where the store's check takes the receiving
+  // completion's contract, whose listings found `root`'s properties last first (main reads `.f4.n` at 4 to 45), it lists
+  // them by the store's own records, then as the program first writes them, `f1` first, as the natural check does. The
+  // runtime names, shows and advises on the first property that does not fit: `.f1`'s text, not `.f4.n`'s.)
+  const source = [
+    "let value:integer=1",
+    "let u={f1:{n:value}}",
+    'u={g:"s"}',
+    "let root={f0:{n:value}}",
+    ...[1, 2, 3, 4].map((at) => `root={f${at}:{n:value}}`),
+    "if hostOther is integer {",
+    ...Array.from({ length: 10 }, (_, at) => `let r${at}=root.f${at % 5}.n`),
+    "}",
+    "root=hostValue",
+    'say "accepted"',
+    "exit",
+  ].join("\n");
+  const fields: readonly SerializableRuntimeValue[] = [
+    null,
+    "s",
+    true,
+    1,
+    createSerializableObject([{ name: "n", value: "2" }]),
+  ];
+  const globals = {
+    hostValue: createSerializableObject(fields.map((value, at) => ({ name: `f${at}`, value }))),
+    hostOther: false,
+  };
+  const held = HELD_MODES[0]!;
+  const compiled = (demand: number | null) =>
+    held.run(() =>
+      demand === null
+        ? compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND)
+        : withTestDemandAllowance(demand, () =>
+            compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
+          ),
+    );
+  const failure = (plan: InstructionPlan | null) => {
+    assert.ok(plan !== null);
+    const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals }));
+    const failed = result.events.find((event) => event.kind === "runtimeFailure");
+    return failed?.kind === "runtimeFailure"
+      ? [failed.code, failed.span.start.offset, failed.span.end.offset, failed.message]
+      : null;
+  };
+  const natural = failure(compiled(null).plan);
+  assert.equal(natural?.[0], "TSR058");
+  for (const demand of [4, 20, 36, 45, 133]) {
+    const { budget } = held.run(() =>
+      withTestDemandAllowance(demand, () =>
+        analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!),
+      ),
+    );
+    assert.equal(budget.settled, true, `demand ${demand}`);
+    assert.ok(
+      budget.decisions.some((decision) => decision.stopped),
+      `demand ${demand}`,
+    );
+    assert.deepEqual(failure(compiled(demand).plan), natural, `demand ${demand}`);
+  }
 });
