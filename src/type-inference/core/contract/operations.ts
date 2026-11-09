@@ -210,8 +210,8 @@ export function* contractOfOp(
       contract.contractOfValueAt(term, rest, flow),
     );
     if (indexed !== null) return indexed;
-    // (docs/specifications/type-inference-accepted-record.md#r4-87): a `+` fourth or later in a run of terms answers
-    // below its root as the run's third
+    // (docs/specifications/type-inference-accepted-record/sharing.md#r4-87): a `+` fourth or later in a run of terms
+    // answers below its root as the run's third
     const repeated = contract.plusRepeatOf(c.result, false);
     if (repeated !== c.result) return yield* contract.contractOfValueAt(repeated, rest, flow);
     const operands: (readonly Item[])[] = [];
@@ -299,7 +299,7 @@ export function* contractOfOp(
   // a method without a category, per receiver alternative: its declared result per receiver kind (F25), else the
   // runtime's opaque answer on a known kind; what the core cannot know keeps its own reasons. A receiver without items
   // yet is a provisional bottom: the result stays the bottom (S3 §1,
-  // docs/specifications/type-inference-accepted-record.md#r4-44)
+  // docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44)
   if (family === "method" && c.receiver !== null) {
     // (#1668: a declared result per receiver kind is made anew; the receiver's unknowns the answer holds as they are)
     const kinds = flow?.child() ?? null;

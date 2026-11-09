@@ -1219,11 +1219,11 @@ test("lists of one set of choices in many orders site their host data without wa
 });
 
 /**
- * The value side's gated known limits (docs/specifications/type-inference-accepted-record.md#r4-83): read chains
- * through nested literals, each link's key one step longer (`READ_CHAIN_PRODUCTS`), and adds of several sources into
- * one list in turn (`MIXED_ADD_PRODUCTS`); a regression check on the 64 → 128 step only, each held to its measured
- * doubling in either order. On CI (GitHub Actions sets `CI`) the mixed adds run in the source order only: their orders
- * differ by at most 0.0001.
+ * The value side's gated known limits (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-83):
+ * read chains through nested literals, each link's key one step longer (`READ_CHAIN_PRODUCTS`), and adds of several
+ * sources into one list in turn (`MIXED_ADD_PRODUCTS`); a regression check on the 64 → 128 step only, each held to its
+ * measured doubling in either order. On CI (GitHub Actions sets `CI`) the mixed adds run in the source order only:
+ * their orders differ by at most 0.0001.
  */
 test("read chains and mixed-source adds grow no faster than measured", () => {
   const steep: string[] = [];

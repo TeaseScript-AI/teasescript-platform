@@ -519,7 +519,7 @@ function compareMembers(
   // (a member read through a chain of copies, or its class's, carries its own links' writers, provenance and not the
   // answer: that pair's answers are compared with them set aside, the published records' writers guarded apart)
   // (and its admission: the written type A4 decides it by at the path,
-  // docs/specifications/type-inference-accepted-record.md#r4-72)
+  // docs/specifications/type-inference-accepted-record/sharing.md#r4-72)
   const answer = (
     d: Definition,
     rest: readonly string[],

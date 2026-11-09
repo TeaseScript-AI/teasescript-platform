@@ -147,13 +147,13 @@ function buildHeld(admission: Admission, root: PlaceId): void {
 
 /**
  * The held tries of a component of the places live stores read (A2,
- * docs/specifications/type-inference-accepted-record.md#r4-154: design §2.1.2 as accepted). Its members that hold each
- * other through whole copies (a place read whole into a place) form live groups, the strongly connected components of
- * those copies: each group one trie, its members' own points and what their reads bring from outside the group, sources
- * first; where those meet, a member owes what its own contribution brings there (`groupHeld`). Every other read is by
- * reference, its source's held trie at its path where it stands. A read within the component that adds or takes steps
- * (`a.inner = a`, `a = b.right`) closes a cycle outside that class and brings nothing definite: what reaches a place
- * only through it is found where it is read.
+ * docs/specifications/type-inference-accepted-record/admission.md#r4-154: design §2.1.2 as accepted). Its members that
+ * hold each other through whole copies (a place read whole into a place) form live groups, the strongly connected
+ * components of those copies: each group one trie, its members' own points and what their reads bring from outside the
+ * group, sources first; where those meet, a member owes what its own contribution brings there (`groupHeld`). Every
+ * other read is by reference, its source's held trie at its path where it stands. A read within the component that adds
+ * or takes steps (`a.inner = a`, `a = b.right`) closes a cycle outside that class and brings nothing definite: what
+ * reaches a place only through it is found where it is read.
  */
 function finishHeld(admission: Admission, members: readonly PlaceId[]): void {
   const touches = touchesOf(admission);

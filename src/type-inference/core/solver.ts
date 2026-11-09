@@ -117,8 +117,8 @@ export interface ProofDecision<P extends Proof> {
 
 /**
  * A demand that proves a proof beside its items: one demand, one lifecycle
- * (docs/specifications/type-inference-accepted-record.md#r4-164). Its proof holds no ingress of its own: external data
- * it carries is in its items, which a component's cells anchor (C9).
+ * (docs/specifications/type-inference-accepted-record/sharing.md#r4-164). Its proof holds no ingress of its own:
+ * external data it carries is in its items, which a component's cells anchor (C9).
  */
 export interface ProofDemand<P extends Proof> {
   readonly key: string;

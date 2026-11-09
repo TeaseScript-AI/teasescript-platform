@@ -143,9 +143,9 @@ export function joinSpelling(
 }
 
 /**
- * A spelling's part of an identity (docs/specifications/type-inference-accepted-record.md#r4-277): empty for none, `*`
- * for `MIXED`, else its kinds by value. Every key or snapshot that identifies items or a type test's form includes it
- * (`itemsSignature`, `Values.narrowingMark`), so differently marked lists are different values.
+ * A spelling's part of an identity (docs/specifications/type-inference-accepted-record/contract.md#r4-277): empty for
+ * none, `*` for `MIXED`, else its kinds by value. Every key or snapshot that identifies items or a type test's form
+ * includes it (`itemsSignature`, `Values.narrowingMark`), so differently marked lists are different values.
  */
 export function spellingIdentity(spelling: Spelling | undefined): string {
   return spelling === undefined ? "" : spelling.length === 0 ? "*" : spelling.join("+");

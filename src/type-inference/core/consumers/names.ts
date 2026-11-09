@@ -405,9 +405,9 @@ export function kindsOf(walk: Consumers, value: PlaceId, node: FlowNode | null):
 
 /**
  * A member's or a method's receiver: its kinds at the node, and F19a before them
- * (docs/specifications/type-inference-accepted-record.md#r4-44): where the shared decision on the receiver's contract
- * holds a reference the exact value lacks, its reference kinds too, whose members the consumer's member obligations
- * cover, the two in their one order (`inItsOrder`, #1398).
+ * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44): where the shared decision on the
+ * receiver's contract holds a reference the exact value lacks, its reference kinds too, whose members the consumer's
+ * member obligations cover, the two in their one order (`inItsOrder`, #1398).
  */
 export function receiverKinds(walk: Consumers, value: PlaceId, node: FlowNode | null): Item[] {
   const kinds = kindsOf(walk, value, node);

@@ -284,7 +284,7 @@ export interface Alias {
   readonly at: readonly string[];
   /**
    * The read itself: the copy whose binding's written type, A4's, its class keeps
-   * (docs/specifications/type-inference-accepted-record.md#r4-72, Astra r5 B1).
+   * (docs/specifications/type-inference-accepted-record/sharing.md#r4-72, Astra r5 B1).
    */
   readonly value: PlaceId;
   /** Whether its class is its read's chain's end (§4.1's chains): its items keep their own link's writer. */

@@ -4,7 +4,7 @@ import { Project, ts } from "ts-morph";
 
 /**
  * The derivation inventory's guard, syntactic and scoped by name
- * (docs/specifications/type-inference-accepted-record.md#r4-182). `OBLIGATION_SITES` lists every derivation of
+ * (docs/specifications/type-inference-accepted-record/oracles.md#r4-182). `OBLIGATION_SITES` lists every derivation of
  * admission's that creates an obligation; a stop before admission settled runs each in the fresh pass. A derivation of
  * `Admission`'s or `Consumers`' is a member of the class with a body (a method, a getter and setter pair as one, a
  * property holding a function), or a function of its declared files (`admissionFiles`, `consumersFiles`: the entry, the
@@ -42,7 +42,7 @@ import { Project, ts } from "ts-morph";
  * A listed host read or read is trusted by its reason. A reference the syntax does not name (an inherited member
  * reached through an inferred wrapper, a generic receiver, a computed name, a value passed through an aggregate or a
  * copy) is outside this check, a review matter against the closed forms
- * (docs/specifications/type-inference-accepted-record.md#r4-182), as stated for the question sources.
+ * (docs/specifications/type-inference-accepted-record/oracles.md#r4-182), as stated for the question sources.
  */
 const ADMISSION = "src/type-inference/core/admission.ts";
 const CONSUMERS = "src/type-inference/core/consumers.ts";
@@ -531,9 +531,9 @@ export function obligationInventoryDiagnostics(program, root, files) {
     })();
 
   /**
-   * The direct callee of a call (docs/specifications/type-inference-accepted-record.md#r4-182: the closed forms):
-   * `R.m(…)` or `f(…)`, the callee a member access or a name as written, no wrapper, no `call` or `apply`; the symbol
-   * it stands for, an import followed.
+   * The direct callee of a call (docs/specifications/type-inference-accepted-record/oracles.md#r4-182: the closed
+   * forms): `R.m(…)` or `f(…)`, the callee a member access or a name as written, no wrapper, no `call` or `apply`; the
+   * symbol it stands for, an import followed.
    */
   const directCallee = (call) => {
     const callee = call.expression;

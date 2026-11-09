@@ -8,8 +8,9 @@ import type { WrapperHop } from "./model.js";
 import { writtenOf } from "./terms.js";
 import { wrapperFacts } from "./wrapper-facts.js";
 
-// G3 stage 1 (docs/specifications/type-inference-accepted-record.md#r4-196): a binding's wrapper shape, the frozen
-// structural part of `wrapperHop`, and the lane the keys of each `(binding, first step)` family take from it.
+// G3 stage 1 (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-196): a binding's wrapper shape,
+// the frozen structural part of `wrapperHop`, and the lane the keys of each `(binding, first step)` family take from
+// it.
 
 /** The representation a family's keys take in a pass: cursors (`key-ids.ts`) or their text. */
 export type KeyLane = "cursor" | "text";

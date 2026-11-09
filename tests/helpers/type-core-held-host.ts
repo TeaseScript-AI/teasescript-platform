@@ -788,7 +788,8 @@ export interface CombinedStop {
   readonly records: ReadonlyMap<string, "a" | "w" | "z">;
   /**
    * The reference's checks the stop owes by a more precise label alone, as the natural analysis spells it
-   * (`provenRelabel`, docs/specifications/type-inference-accepted-record.md#r4-322), and the records that go with them.
+   * (`provenRelabel`, docs/specifications/type-inference-accepted-record/oracles.md#r4-322), and the records that go
+   * with them.
    */
   readonly relabelled: {
     readonly checks: ReadonlySet<string>;
@@ -811,8 +812,9 @@ export interface CombinedStop {
   readonly unidentified: ReadonlySet<string>;
   /**
    * The coarse (a) reading's counted class, never a pass
-   * (docs/specifications/type-inference-accepted-record.md#r4-299): the reference's consumer checks (a) would take but
-   * for open reads of their unit the stopped analysis did not answer, each with those reads' keys; and their records.
+   * (docs/specifications/type-inference-accepted-record/oracles.md#r4-299): the reference's consumer checks (a) would
+   * take but for open reads of their unit the stopped analysis did not answer, each with those reads' keys; and their
+   * records.
    */
   readonly coarse: {
     readonly checks: ReadonlyMap<string, readonly string[]>;
@@ -1526,10 +1528,10 @@ function writtenProves(
 }
 
 /**
- * The owner's one accepted difference at a combined stop (docs/specifications/type-inference-accepted-record.md#r4-322,
- * #1595, the lead's rulings on its HEAD 0 and on Q3/Q4): the stopped analysis owes the reference's check `u` under a
- * more precise label than the reference's, which ran out of demand reading the key, where all three hold for the
- * stopped check `x`:
+ * The owner's one accepted difference at a combined stop
+ * (docs/specifications/type-inference-accepted-record/oracles.md#r4-322, #1595, the lead's rulings on its HEAD 0 and on
+ * Q3/Q4): the stopped analysis owes the reference's check `u` under a more precise label than the reference's, which
+ * ran out of demand reading the key, where all three hold for the stopped check `x`:
  * 1. the label follows from a proven type: the natural analysis (no demand, no stop) names that very value so, a check of
  *    its own at `x`'s whole site, the value read there, targeting the label or a path below it (it need not owe `x`
  *    itself: knowing more, it may owe another check there; the value, never a label's text alone nor a read beside it
@@ -1936,7 +1938,7 @@ export function provenRewording(
  *   stands at the site of a store whose value holds the boundary's value (`holds`).
  * A record goes with its obligations, never one the natural analysis reports itself. A check the stop owes by a more
  * precise label alone, the natural analysis's, is accepted (`provenRelabel`,
- * docs/specifications/type-inference-accepted-record.md#r4-322).
+ * docs/specifications/type-inference-accepted-record/oracles.md#r4-322).
  */
 export function combinedStop(reference: Answers, natural: Answers, stopped: Answers): CombinedStop {
   const [reads, finished] = [readsOf(reference), readsOf(stopped)];
@@ -2120,7 +2122,7 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
  * The mark-ownership rule at the analysis (S8): every check of the unstopped analysis the stop removed is a deferred
  * mark's obligation, and every warning or error it removed is a mark's record (its code at its site). At a combined
  * stop (`rule`), what the combined stop's rule accepts is owned too (a proven relabel's checks and records among them,
- * docs/specifications/type-inference-accepted-record.md#r4-322), and the coarse (a) reading's counted class
+ * docs/specifications/type-inference-accepted-record/oracles.md#r4-322), and the coarse (a) reading's counted class
  * (`CombinedStop.coarse`, with its open reads' keys) is named.
  */
 function ownership(unstopped: Answers, stopped: Answers, rule?: CombinedStop): string[] {
@@ -2162,7 +2164,7 @@ function ownership(unstopped: Answers, stopped: Answers, rule?: CombinedStop): s
 
 /**
  * Whether a problem `heldProblems` reports is a named exception (counted, never a pass): an issue's, or the coarse (a)
- * reading's class (docs/specifications/type-inference-accepted-record.md#r4-299).
+ * reading's class (docs/specifications/type-inference-accepted-record/oracles.md#r4-299).
  *
  * @public (the whole family's driver outside CI reads it)
  */

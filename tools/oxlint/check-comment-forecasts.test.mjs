@@ -102,15 +102,29 @@ test("a bare revision and TABLE with another id are counted too, a TABLE revisio
   );
 });
 
-test("a comment's pointer at the accepted record names one of its headings", () => {
-  const page = "# The accepted record\n\n### r4-15\n\n### section-2-f12\n";
-  const record = "docs/specifications/type-inference-accepted-record.md";
+test("a comment's pointer at the accepted record names a heading of the page it names", () => {
+  const pages = new Map([
+    ["sharing", "# Sharing\n\n### r4-15\n\n### section-2-f12\n"],
+    ["oracles", "# Oracles\n\n### r4-16\n"],
+  ]);
+  const record = "docs/specifications/type-inference-accepted-record";
   assert.deepEqual(
     unresolvedPointers(
       "a.ts",
-      `// as ruled (${record}#r4-15)\n/* see ${record}#r4-16 */\nconst s = "${record}#r4-17";\n`,
-      page,
+      [
+        `// as ruled (${record}/sharing.md#r4-15)`,
+        `/* see ${record}/sharing.md#r4-16, on another page */`,
+        `// the old single page (${record}.md#r4-15)`,
+        `// no such page (${record}/stops.md#r4-15)`,
+        `const s = "${record}/sharing.md#r4-17";`,
+        "",
+      ].join("\n"),
+      pages,
     ),
-    [{ line: 2, anchor: "r4-16" }],
+    [
+      { line: 2, page: "sharing", anchor: "r4-16" },
+      { line: 3, page: undefined, anchor: "r4-15" },
+      { line: 4, page: "stops", anchor: "r4-15" },
+    ],
   );
 });

@@ -1892,12 +1892,12 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
 
 /**
  * W34's two remaining combinations, gated known limits by the owner's decision
- * (docs/specifications/type-inference-accepted-record.md#r4-45, PLAN §6b): more than four sources tested at one path,
- * each with more than four anchors in one tree, read there many times; and sources copied from more than four shared
- * roots, stored at one path every copy reads (review r5's generators). The gate is a regression check on the 64 → 128
- * growth step only (3.37 and 2.53), not a bound at larger sizes: 128 → 256 already grows 3.62 and 2.82. They are
- * reconsidered when a realistic script shows both dimensions; a change to that lookup re-measures them and proposes the
- * gate with its counts, never retunes it; the linear alternative is a separate PR after S4.
+ * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-45, PLAN §6b): more than four sources
+ * tested at one path, each with more than four anchors in one tree, read there many times; and sources copied from more
+ * than four shared roots, stored at one path every copy reads (review r5's generators). The gate is a regression check
+ * on the 64 → 128 growth step only (3.37 and 2.53), not a bound at larger sizes: 128 → 256 already grows 3.62 and 2.82.
+ * They are reconsidered when a realistic script shows both dimensions; a change to that lookup re-measures them and
+ * proposes the gate with its counts, never retunes it; the linear alternative is a separate PR after S4.
  */
 export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -4062,11 +4062,11 @@ function nestedOwn(variant: string, wrap: (inner: string, i: number) => string):
  * A6's chain of k dependent rejections (Sol's twelve-step witness at size k): each copy reads its source after the
  * source's misfit, so each rejection shows only in the pass after the one before it, k passes in all: passes × stores,
  * each pass charged. A gated known limit by the owner's decision
- * (docs/specifications/type-inference-accepted-record.md#r4-49, option A): its doubling at k = 64 → 128 as measured,
- * re-measured and proposed with its counts on a change to admission's passes, never retuned; its trigger, a realistic
- * script reaching the allowance through cascading rejections. Beside it, copies interleaved with conditional stores
- * below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form, and copies separated by calls storing
- * their source, accepted in it too.
+ * (docs/specifications/type-inference-accepted-record/admission.md#r4-49, option A): its doubling at k = 64 → 128 as
+ * measured, re-measured and proposed with its counts on a change to admission's passes, never retuned; its trigger, a
+ * realistic script reaching the allowance through cascading rejections. Beside it, copies interleaved with conditional
+ * stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form, and copies separated by calls
+ * storing their source, accepted in it too.
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -4638,10 +4638,10 @@ export const ADMISSION_INGRESS_PRESETS: readonly WorkFamily[] = [
  * `.first`, the same around a record read through k index steps, and a record nested k deep read through its k
  * properties. Each link reads a key one step longer, so the k keys' contracts and their texts grow with the chain's
  * depth (a lookup costs the key's depth): gated known limits
- * (docs/specifications/type-inference-accepted-record.md#r4-83) at their measured 64 → 128 step, not a bound at larger
- * sizes; reconsidered when a realistic chain approaches the allowance. On `main` the `.first` chain grew as 2^k (each
- * selection read its owner twice, at its step and whole, neither once: the allowance at k = 20); S6c reads a
- * selection's whole answer once per value, and a projection's path scans its member steps once.
+ * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-83) at their measured 64 → 128 step, not a
+ * bound at larger sizes; reconsidered when a realistic chain approaches the allowance. On `main` the `.first` chain
+ * grew as 2^k (each selection read its owner twice, at its step and whole, neither once: the allowance at k = 20); S6c
+ * reads a selection's whole answer once per value, and a projection's path scans its member steps once.
  */
 export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -4699,8 +4699,8 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
  * Adds of several sources into one list strictly in turn (S6c's review r1, r2 B4): an add's certainty depends on the
  * state the adds before it leave, so each add of a mixed run is answered at each field read. Gated known limits at
  * their measured 64 → 128 step (in the source order only on CI,
- * docs/specifications/type-inference-accepted-record.md#r4-85), not a bound at larger sizes; reconsidered when a
- * realistic straight-line run of dozens of alternating adds of several sources into one list appears. A script writes
+ * docs/specifications/type-inference-accepted-record/sharing.md#r4-85), not a bound at larger sizes; reconsidered when
+ * a realistic straight-line run of dozens of alternating adds of several sources into one list appears. A script writes
  * tens of such adds at most (a loop body is one add to the analysis); two alternating sources reach the allowance near
  * 650 adds (29,924,630 units at 647 since #1221 charges the event searches by comparison). The sound fix, an
  * order-aware summary of a mixed run, is a redesign of the exact add chain's representation that buys linear work only
@@ -4775,8 +4775,8 @@ export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
  * or between the copies, a copy under a test of its source or of a field, a store between them), literal cells beside
  * their literal's own contribution, which no alias may hold, and Astra's round-5 B1 shape (a written copy of a source
  * beside an unwritten one, at depths one and two, either first: two classes by their written types,
- * docs/specifications/type-inference-accepted-record.md#r4-72). The work test's oracle and the sharing differential run
- * them.
+ * docs/specifications/type-inference-accepted-record/sharing.md#r4-72). The work test's oracle and the sharing
+ * differential run them.
  */
 export const ORACLE_PROGRAMS: readonly {
   readonly name: string;
@@ -6728,8 +6728,9 @@ export interface OutputBoundFamily {
    */
   readonly references: (k: number) => number;
   /**
-   * Whether the pairs grow with the program's answers (docs/specifications/type-inference-accepted-record.md#r4-245:
-   * the exception for its totals), or the family is a control.
+   * Whether the pairs grow with the program's answers
+   * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-245: the exception for its totals), or
+   * the family is a control.
    */
   readonly outputBound: boolean;
   /**

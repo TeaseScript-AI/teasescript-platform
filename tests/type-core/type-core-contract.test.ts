@@ -889,14 +889,14 @@ test("a read its one holder's source answers is that source's answer at its whol
 });
 
 /**
- * #1466 (docs/specifications/type-inference-accepted-record.md#r4-262) (Codex r11's F1, r12's F1 and F2): no path or
- * span id is made while a read's selection runs. A read whose selection passes a listing layer holding nothing at its
- * path (`a`, its own store at `g.r`) to the one holder below it (`seed`) asks that holder's source by reference, as a
- * read finding its holder directly does (`direct`, the control): through each of the four consumers, in the four modes,
- * one forwarded demand and no layer demand, the path arena and the spans' ids unchanged from the consumer's start to
- * the forwarded demand, for each kind of path a read meets: a plain array; a span whose suffixes have no id yet, and a
- * span from a later step whose own id has none; a record whose id is found lazily, a view of one, a join; and a view
- * made again after its first was resolved, which finds the id kept on the steps it views.
+ * #1466 (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-262) (Codex r11's F1, r12's F1 and
+ * F2): no path or span id is made while a read's selection runs. A read whose selection passes a listing layer holding
+ * nothing at its path (`a`, its own store at `g.r`) to the one holder below it (`seed`) asks that holder's source by
+ * reference, as a read finding its holder directly does (`direct`, the control): through each of the four consumers, in
+ * the four modes, one forwarded demand and no layer demand, the path arena and the spans' ids unchanged from the
+ * consumer's start to the forwarded demand, for each kind of path a read meets: a plain array; a span whose suffixes
+ * have no id yet, and a span from a later step whose own id has none; a record whose id is found lazily, a view of one,
+ * a join; and a view made again after its first was resolved, which finds the id kept on the steps it views.
  */
 test("no path or span id is made while a read's selection runs, its one holder's source asked by reference (#1466)", () => {
   const sources = {
