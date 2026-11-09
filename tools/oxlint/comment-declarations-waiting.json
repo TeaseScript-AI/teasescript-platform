@@ -356,13 +356,13 @@
   {
     "file": "tests/type-core-candidate.test.ts",
     "kind": "docblock",
-    "text": "The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; TABLE r4.59; the lead's answer 3). Every",
+    "text": "The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; the lead's answer 3). Every",
     "waits": "#1937"
   },
   {
     "file": "tests/type-core-cells.test.ts",
     "kind": "docblock",
-    "text": "A choice reads a written list's element as its literal analogue does (TABLE r4.42–r4.43, the lead's ruling on #1027):",
+    "text": "A choice reads a written list's element as its literal analogue does (the lead's ruling on #1027):",
     "waits": "#1937"
   },
   {
