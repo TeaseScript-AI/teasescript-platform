@@ -1066,6 +1066,33 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
     ["TSV043 0:155:158", "TSV041 0:167:168"],
   );
   assert.equal(both.kind, "unwitnessed");
+  // (two stores lacking properties of one object share its site, each its own error: with the first store's
+  // `requireExisting` dropped, a run passes it and fails at the second, so the first's escape is open; Codex r1 on #2185)
+  for (const mode of HELD_MODES) {
+    let dropped = false;
+    const found = stopRuns(
+      unit("let root={x:1}\nroot.q=2\nroot.z=3\nexit\n"),
+      ["hostValue"],
+      (make) => mode.run(make),
+      16,
+      (plan) => ({
+        ...plan,
+        instructions: plan.instructions.map((instruction) => {
+          if (dropped || instruction.kind !== "assign" || instruction.requireExisting !== true)
+            return instruction;
+          dropped = true;
+          const { requireExisting: _, ...kept } = instruction;
+          return kept;
+        }),
+      }),
+    );
+    assert.deepEqual(
+      found.sites.map(({ code, site }) => `${code} ${site}`),
+      ["TSV043 0:15:21", "TSV043 0:24:30"],
+      mode.name,
+    );
+    assert.equal(found.kind, "open", mode.name);
+  }
   // (a genuine escape: the stop's plan stores a text the natural compile rejects, under a guard the pool's boolean takes)
   for (const mode of HELD_MODES) {
     const found = stopRuns(
