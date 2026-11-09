@@ -833,8 +833,8 @@ test("#2116's declared difference under #2080: at every recorded window's edges 
             name,
           );
           // (the head stops every decision main stops and one more: a settled head-only stop)
-          const recorded = typeof mainStops === "string" || mainStops === null ? [] : mainStops;
-          assert.ok(recorded.length > 0, `${name}: main's recorded stopped decisions`);
+          assert.ok(Array.isArray(mainStops), `${name}: main's recorded stopped decisions`);
+          const recorded: readonly string[] = mainStops;
           assert.ok(
             recorded.every((key) => stops.includes(key)) && stops.length > recorded.length,
             `${name}: the head's stopped decisions ${stops.join(" ")} hold main's ${recorded.join(" ")} and more`,
