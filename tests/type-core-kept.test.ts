@@ -347,7 +347,7 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a read's value and path in a test's record (`withFrontierBound`), never kept by an analysis",
   ],
-  "contract/prefix-index.ts prefixWork root": [1, "a place's root key, `place|`"],
+  "contract/prefix-index/stores.ts prefixWork root": [1, "a place's root key, `place|`"],
   "contract/marks.ts readGroups groupKey": [
     1,
     "its base made by `keptKey`, which charges its size, with two numbers",

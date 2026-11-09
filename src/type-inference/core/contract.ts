@@ -127,14 +127,9 @@ import type {
 } from "./contract/model.js";
 import { choiceOptions, plusRepeatOf } from "./contract/others.js";
 import { chainOf, literalHop, remember } from "./contract/positions.js";
-import {
-  offendingStores,
-  prefixStores,
-  prefixWork,
-  relevantSubs,
-  subSources,
-  summaryPresence,
-} from "./contract/prefix-index.js";
+import { relevantSubs, subSources } from "./contract/prefix-index/layers.js";
+import { prefixStores, prefixWork } from "./contract/prefix-index/stores.js";
+import { offendingStores, summaryPresence } from "./contract/prefix-index/summaries.js";
 import {
   contractOfValue,
   contractOfValueAt,
@@ -203,7 +198,7 @@ export {
   writtenOf,
   writtenTypeSteps,
 } from "./contract/terms.js";
-export { presenceSteps } from "./contract/prefix-index.js";
+export { presenceSteps } from "./contract/prefix-index/tries.js";
 export { withOwnSelection } from "./contract/value-kinds.js";
 
 /*
@@ -266,8 +261,8 @@ export class Contract {
   readonly aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly projectedLayers = new Map<string, SubLayer | null>();
   /**
-   * #1466: the layers' answers' support nodes, each made once per pass (`prefix-index.ts`): a source's leaf, a summary's
-   * leaf by its source and content, a branch by its bit and children, and the union of each two nodes asked.
+   * #1466: the layers' answers' support nodes, each made once per pass (`prefix-index/tries.ts`): a source's leaf,
+   * a summary's leaf by its source and content, a branch by its bit and children, and the union of each two nodes asked.
    */
   readonly supportLeaves = new Map<Key, SupportNode>();
   /**
