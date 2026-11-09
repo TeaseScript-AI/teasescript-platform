@@ -308,6 +308,13 @@ compatibility, cost, or difficult-to-reverse trade-off that actually requires
 owner authority; do not ask the owner to approve an unexplained technical
 abstraction.
 
+A change under which every script still runs the same, and which changes only a warning, or the wording of a message or
+a reported type, in an edge case, is the coordinator's to decide; the coordinator reports it to the owner afterwards
+(owner, 2026-11-09). "Runs the same" must be established, not expected: apart from that warning or wording, the same
+output, and the same success or failure at the same place, for every script and every input to it, shown by a derivation
+or by a measurement over a stated complete domain. The report says in plain words what a maker could notice and in which
+case.
+
 These rules prevent accidental scope escalation. They do not permit reviewers
 to dismiss reproducible defects or weaken accepted syntax/semantics,
 deterministic execution, serializable checkpoint requirements, or validation at
