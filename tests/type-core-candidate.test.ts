@@ -39,10 +39,9 @@ import { withTestAllowance, withTestDemandAllowance } from "../src/type-inferenc
 import {
   checkedResult,
   coreCheckResult,
-  nodeOf,
   reportedDiagnostics,
-  SliceIndex,
-} from "../src/type-inference/core/consumer.js";
+} from "../src/type-inference/core/check-result/check-result.js";
+import { nodeOf, SliceIndex } from "../src/type-inference/core/check-result/slice-index.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";

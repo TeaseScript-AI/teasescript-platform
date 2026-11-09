@@ -74,12 +74,18 @@
     "TABLE r4": 6,
     "TABLE §": 5
   },
+  "src/type-inference/core/check-result/check-result.ts": {
+    "TABLE r4": 3,
+    "TABLE §": 1
+  },
+  "src/type-inference/core/check-result/runtime-plan.ts": {
+    "TABLE r4": 2
+  },
+  "src/type-inference/core/check-result/store-contracts.ts": {
+    "TABLE r4": 2
+  },
   "src/type-inference/core/checks/interactions.ts": {
     "TABLE r4": 1
-  },
-  "src/type-inference/core/consumer.ts": {
-    "TABLE r4": 7,
-    "TABLE §": 1
   },
   "src/type-inference/core/consumers.ts": {
     "TABLE §": 1,

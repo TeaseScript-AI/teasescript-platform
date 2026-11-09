@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
-import { checkedResult } from "../src/type-inference/core/consumer.js";
+import { checkedResult } from "../src/type-inference/core/check-result/check-result.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { inMode, MODES, type Mode, publishedRoute } from "./helpers/type-core-oracles.js";
 import { runGlobals } from "./helpers/type-core-route.js";

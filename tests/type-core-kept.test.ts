@@ -67,41 +67,53 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     2,
     "a lookup of a variable's element levels, its path then at most SLICE_DEPTH",
   ],
-  "consumer.ts #answerTask spread": [
+  "check-result/store-contracts.ts #answerTask spread": [
     4,
     "paths below a parse's call, cut at SLICE_DEPTH; lookups of its landing below",
   ],
-  "consumer.ts #landing spread": [
+  "check-result/store-contracts.ts #landing spread": [
     1,
     "a node's path in the literal it is in, one per cell, as admission keeps (charged)",
   ],
-  "consumer.ts coreFacts spread": [1, "a lookup of a place's element levels, not kept"],
-  "consumer.ts expected spread": [1, "a lookup of a landing's level, not kept"],
-  "consumer.ts fallbackSteps split": [
+  "check-result/check-result.ts coreFacts spread": [
+    1,
+    "a lookup of a place's element levels, not kept",
+  ],
+  "check-result/store-contracts.ts expected spread": [1, "a lookup of a landing's level, not kept"],
+  "check-result/runtime-plan.ts fallbackSteps split": [
     1,
     "a C10 target's element steps read from its text, not kept",
   ],
-  "consumer.ts fieldOrder spread": [1, "field names, no path"],
-  "consumer.ts partChecksOf split": [
+  "check-result/store-contracts.ts fieldOrder spread": [1, "field names, no path"],
+  "check-result/runtime-plan.ts partChecksOf split": [
     1,
     "a part's steps read from its obligation's target text, once per obligation, not kept",
   ],
-  "consumer.ts partOf split": [1, "a destination's root and steps for a part's place in a message"],
-  "consumer.ts partOf spread": [1, "a part's steps for its place in a message, not kept"],
-  "consumer.ts levelsOf spread": [
+  "check-result/runtime-plan.ts partOf split": [
+    1,
+    "a destination's root and steps for a part's place in a message",
+  ],
+  "check-result/runtime-plan.ts partOf spread": [
+    1,
+    "a part's steps for its place in a message, not kept",
+  ],
+  "check-result/store-contracts.ts levelsOf spread": [
     2,
     "a type plan's levels: a written type's, or a plan cut at SLICE_DEPTH",
   ],
-  "consumer.ts destination join": [
+  "check-result/store-contracts.ts destination join": [
     1,
     "a store's destination's label, one per store with an owed check, read by its part checks",
   ],
-  "consumer.ts destination spread": [
+  "check-result/store-contracts.ts destination spread": [
     1,
     "a store's destination's label, one per store with an owed check, read by its part checks",
   ],
-  "consumer.ts stored join": [1, "a store's target name in a message"],
-  "consumer.ts takesNull spread": [2, "lookups of a landing's levels, not kept"],
+  "check-result/store-contracts.ts stored join": [1, "a store's target name in a message"],
+  "check-result/store-contracts.ts takesNull spread": [
+    2,
+    "lookups of a landing's levels, not kept",
+  ],
   "contract-descriptors.ts #contract composite": [
     1,
     "a memo key: a store target's path (a charged definition key), cut below",

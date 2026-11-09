@@ -10,7 +10,7 @@ import {
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
-import { storeContracts } from "../src/type-inference/core/consumer.js";
+import { storeContracts } from "../src/type-inference/core/check-result/check-result.js";
 import { withoutRecords } from "../src/type-inference/core/consumers.js";
 import { propertyStep } from "../src/type-inference/core/program.js";
 import { outsideSyntax } from "../src/type-inference/core/slice-syntax.js";
