@@ -5,7 +5,7 @@
 // - `instrumented`: every importer of `engine-bridge/client.js` gets `instrumented-client.mjs`, whose `openBridge` and
 //   `connectBridge` wrap the port they are given and log each request's post and each reply's arrival, so both
 //   backends have the same seam;
-// - `delayed`: `usePlayerSession.ts` gets `delayed-in-process.mjs`, whose `createInProcessBackend` delivers replies
+// - `delayed`: `session/usePlayerSession.ts` gets `delayed-in-process.mjs`, whose `createInProcessBackend` delivers replies
 //   after GATE_DELAY_MS (the in-process backend's own `delayMs`); every other importer of `client.js` gets
 //   `delayed-client.mjs`, which delivers what a Worker port receives after the same delay, in order. The in-process
 //   backend's own `openBridge` call is left alone, so no reply is delayed twice; with GATE_LOG=1 it gets
@@ -33,7 +33,11 @@ const IN_PROCESS = fileURLToPath(
   new URL("../../../player/engine-bridge/in-process.ts", import.meta.url),
 );
 
+/** The Player module that creates the in-process backend, whose import the `delayed` variant swaps. */
+const SESSION = "/player/vue/src/session/usePlayerSession.ts";
+
 function gateSwap() {
+  const swapped = new Set();
   return {
     name: "player-gate-variant",
     enforce: "pre",
@@ -41,18 +45,29 @@ function gateSwap() {
       if (importer === undefined || WRAPPERS.has(importer)) return null;
       if (
         variant === "delayed" &&
-        importer.endsWith("/player/vue/src/usePlayerSession.ts") &&
+        importer.endsWith(SESSION) &&
         source.endsWith("engine-bridge/in-process.js")
-      )
+      ) {
+        swapped.add("in-process");
         return here("delayed-in-process.mjs");
+      }
       const client =
         source.endsWith("engine-bridge/client.js") ||
         (source === "./client.js" && importer.includes("/player/engine-bridge/"));
       if (!client) return null;
+      swapped.add("client");
       if (variant === "instrumented") return here("instrumented-client.mjs");
       // With GATE_LOG, the in-process backend's own port is logged too, after its delay: when each reply arrives.
       if (importer === IN_PROCESS) return log ? here("instrumented-client.mjs") : null;
       return here("delayed-client.mjs");
+    },
+    // A variant whose swap never happened (a moved product file) is no variant: the build fails instead of measuring
+    // the production Player under the variant's name.
+    buildEnd() {
+      const needed = variant === "delayed" ? ["in-process", "client"] : ["client"];
+      const missing = needed.filter((swap) => !swapped.has(swap));
+      if (missing.length > 0)
+        throw new Error(`the ${variant} variant swapped no ${missing.join(" or ")} import`);
     },
   };
 }

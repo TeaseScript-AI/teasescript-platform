@@ -9,7 +9,7 @@
 import { connectBridge } from "../../../player/engine-bridge/client.ts";
 import { createInProcessBackend } from "../../../player/engine-bridge/in-process.ts";
 import { playerBuildIdentity } from "../../../player/build-identity.ts";
-import { PlayerBridge } from "../../../player/player-bridge.ts";
+import { PlayerBridge } from "../../../player/runtime/player-bridge.ts";
 import { DEMO_PLAYER_PROFILE } from "../../../player/demo-player-profile.ts";
 import { captureTemporalContext } from "../../../src/temporal-capture.ts";
 
