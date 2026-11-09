@@ -371,11 +371,12 @@ test("a reader keeps a contract it is at least as strict as, never one it is wea
     );
 });
 
-test("a settled stop's store check lists an object's properties as the natural plan's does, so a value that fits none of them reads the natural message (#2215)", () => {
+test("a settled stop's store check lists an object's properties as the natural plan's does, so a value with several misfits reads the natural message (#2215)", () => {
   // (Sol round 13's witness on #2116: five whole stores into `root`, reads that pay for their decisions under a host
-  // condition false when the script runs, then the host value stored whole. At demand 133 in held mode 0 a decision
-  // stops and the analysis settles, and the store's check takes the receiving completion's contract, whose listings found
-  // `root`'s properties in another order. The runtime names, shows and advises on the first property that does not fit.)
+  // condition false when the script runs, then the host value stored whole. At demand 20 in held mode 0 a decision stops
+  // and the analysis settles, and the store's check takes the receiving completion's contract, whose listings found
+  // `root`'s properties last first; the natural check lists them as the program first writes them, `f1` first. The
+  // runtime names, shows and advises on the first property that does not fit: `.f1`'s text, not `.f4.n`'s.)
   const source = [
     "let value:integer=1",
     "let u={f1:{n:value}}",
@@ -418,7 +419,7 @@ test("a settled stop's store check lists an object's properties as the natural p
       : null;
   };
   const { budget } = held.run(() =>
-    withTestDemandAllowance(133, () =>
+    withTestDemandAllowance(20, () =>
       analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!),
     ),
   );
@@ -426,5 +427,5 @@ test("a settled stop's store check lists an object's properties as the natural p
   assert.ok(budget.decisions.some((decision) => decision.stopped));
   const natural = failure(compiled(null).plan);
   assert.equal(natural?.[0], "TSR058");
-  assert.deepEqual(failure(compiled(133).plan), natural);
+  assert.deepEqual(failure(compiled(20).plan), natural);
 });
