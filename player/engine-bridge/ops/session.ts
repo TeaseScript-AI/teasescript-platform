@@ -454,6 +454,11 @@ const observeTime = sessionOp(
 );
 
 export function sessionOps(context: PlayerOpsContext): BridgeOps {
+  return { ...sessionRunOps(context), ...sessionInputOps(), ...catchUpOps() };
+}
+
+/** The session's run: its start and continuation, its call view and its recording. */
+function sessionRunOps(context: PlayerOpsContext): BridgeOps {
   return {
     start: {
       session: "none",
@@ -518,6 +523,37 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
         return publishing(held, result.session, result.outcome);
       },
     ),
+    // Starts or ends the call view of the session's publications (L5f). Its reply is the latest publication's call view,
+    // which the main side merges into the publication of the same revision; it publishes nothing.
+    viewCalls: sessionOp(
+      (args) => isRecord(args) && exactly(args, ["on"]) && typeof args.on === "boolean",
+      (held, args) => {
+        // EVIDENCE: validation: checkArguments accepted `on` as a boolean.
+        const { on } = args as { readonly on: boolean };
+        held.viewingCalls = on;
+        return { result: held.callView(on), view: null };
+      },
+      false,
+    ),
+    beginRecording: sessionOp(
+      (args) => args === null || isRunBegin(args),
+      (held, args) => {
+        // Continue hands over a session the Player held already: it begins Continue's run, which the session joins.
+        // EVIDENCE: validation: the op's check admitted `null` or a run's begin.
+        const run = args as RunBegin | null;
+        if (run !== null && !ensureRun(context.exportObservation, run))
+          throw new RetiredRunError(run.run);
+        held.bindRun();
+        beginRecordingAt(held, context);
+        return { result: null, view: null };
+      },
+    ),
+  };
+}
+
+/** The session's inputs and time: an input's observation, a time step, a pacing skip. */
+function sessionInputOps(): BridgeOps {
+  return {
     observeTime,
     // The input chain's observation (L5c), which reads no basis: an input's staleness is its action ID's.
     observeInput: { ...observeTime, readsBasis: false },
@@ -531,6 +567,29 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
         return publishing(held, next, { moved: next !== held.sessionForOperation() });
       },
     ),
+    skipPacing: sessionOp(
+      (args) => isRecord(args) && exactly(args, ["actionId"]) && typeof args.actionId === "number",
+      (held, args) => {
+        // EVIDENCE: validation: checkArguments accepted these arguments before run.
+        const { actionId } = args as { readonly actionId: number };
+        // The gate the caller saw: input never targets another action.
+        if (playerRuntimePacingGate(held.sessionForOperation())?.actionId !== actionId)
+          return { result: null, view: null };
+        held.endCatchUp();
+        const result = skipPlayerRuntimePacing(held.sessionForOperation());
+        return result === null
+          ? { result: null, view: null }
+          : publishing(held, result.session, result.outcome);
+      },
+      // Input: its staleness is the gate's action ID, checked above, not a basis (L5c).
+      false,
+    ),
+  };
+}
+
+/** A catch-up begun, stepped, adopted or dropped. */
+function catchUpOps(): BridgeOps {
+  return {
     beginCatchUp: sessionOp(
       (args) => isRecord(args) && exactly(args, ["targetMs"]) && isTime(args.targetMs),
       (held, args) => {
@@ -579,48 +638,6 @@ export function sessionOps(context: PlayerOpsContext): BridgeOps {
         return { result: null, view: null };
       },
       false,
-    ),
-    skipPacing: sessionOp(
-      (args) => isRecord(args) && exactly(args, ["actionId"]) && typeof args.actionId === "number",
-      (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { actionId } = args as { readonly actionId: number };
-        // The gate the caller saw: input never targets another action.
-        if (playerRuntimePacingGate(held.sessionForOperation())?.actionId !== actionId)
-          return { result: null, view: null };
-        held.endCatchUp();
-        const result = skipPlayerRuntimePacing(held.sessionForOperation());
-        return result === null
-          ? { result: null, view: null }
-          : publishing(held, result.session, result.outcome);
-      },
-      // Input: its staleness is the gate's action ID, checked above, not a basis (L5c).
-      false,
-    ),
-    // Starts or ends the call view of the session's publications (L5f). Its reply is the latest publication's call view,
-    // which the main side merges into the publication of the same revision; it publishes nothing.
-    viewCalls: sessionOp(
-      (args) => isRecord(args) && exactly(args, ["on"]) && typeof args.on === "boolean",
-      (held, args) => {
-        // EVIDENCE: validation: checkArguments accepted `on` as a boolean.
-        const { on } = args as { readonly on: boolean };
-        held.viewingCalls = on;
-        return { result: held.callView(on), view: null };
-      },
-      false,
-    ),
-    beginRecording: sessionOp(
-      (args) => args === null || isRunBegin(args),
-      (held, args) => {
-        // Continue hands over a session the Player held already: it begins Continue's run, which the session joins.
-        // EVIDENCE: validation: the op's check admitted `null` or a run's begin.
-        const run = args as RunBegin | null;
-        if (run !== null && !ensureRun(context.exportObservation, run))
-          throw new RetiredRunError(run.run);
-        held.bindRun();
-        beginRecordingAt(held, context);
-        return { result: null, view: null };
-      },
     ),
   };
 }

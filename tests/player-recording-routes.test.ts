@@ -63,7 +63,7 @@ const BEGINS: Readonly<Record<string, string>> = {
     "`beginRecordingNow`, the in-process facade",
   [`${SESSION_OPS} beginRecordingAt <- player/engine-bridge/ops/history.ts restartAt`]:
     "L5i.6's host restores: Back's and Forward's commit, Return, Debug-off's reinstatement",
-  [`${SESSION_OPS} beginRecordingAt <- ${SESSION_OPS} sessionOps > beginRecording > sessionOp:callback#9.2`]:
+  [`${SESSION_OPS} beginRecordingAt <- ${SESSION_OPS} sessionRunOps > beginRecording > sessionOp:callback#3.2`]:
     "the host `beginRecording` op: Continue",
 };
 
@@ -205,7 +205,7 @@ const OBSERVATION_ROUTES: Readonly<Record<string, string>> = {
     "an introduction's first publication",
   [`${HELD} HeldSession > publish <- ${HELD} HeldSession > adoptResult > view`]:
     "an op's new revision (`adoptResult`)",
-  [`${HELD} HeldSession > publish <- ${HELD} sessionOps > adoptCatchUp > sessionOp:callback#5.2`]:
+  [`${HELD} HeldSession > publish <- ${HELD} catchUpOps > adoptCatchUp > sessionOp:callback#3.2`]:
     "a catch-up's adoption",
   [`${HELD} HeldSession > publish <- player/engine-bridge/in-process.ts hatch > adopt`]:
     "the in-process facade's adoption",
@@ -215,7 +215,7 @@ const OBSERVATION_ROUTES: Readonly<Record<string, string>> = {
     "the halt's acknowledgement, once the work running at the stop settled",
   [`${HELD} HeldSession > bindRun <- ${HELD} HeldSession > constructor`]:
     "every route that makes a session, before it publishes",
-  [`${HELD} HeldSession > bindRun <- ${HELD} sessionOps > beginRecording > sessionOp:callback#9.2`]:
+  [`${HELD} HeldSession > bindRun <- ${HELD} sessionRunOps > beginRecording > sessionOp:callback#3.2`]:
     "Continue's handoff of a session the Player held already",
 };
 
