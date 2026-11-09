@@ -113,3 +113,26 @@ a vaguer one is illogical. The third condition keeps a real compiler defect from
 
 **Bounded by:** the ruling's condition that demand-only runs show 0 differences stands, so the fallback is not added to
 demand-only runs.
+
+### r4-363
+
+**After a stop, a diagnostic's type-reading sentence parts may follow a proven type (the owner's decision).**
+
+**Rule.** After a stop, a diagnostic's sentence parts that read a type (receiver, operands, arguments, elements,
+stores, fallbacks, choices) may differ from the demand-only reference only where all three hold:
+1. the differing part rests on independently proven type information: the declaration followed to the leaf through the
+   recorded place or path, or a settled proof of that same read, never an inference from names or nearby sites;
+2. the actual check, its location and the expected types are exactly equal;
+3. no other difference hides under the exception.
+
+This extends [r4.322](#r4-322) from the key step to the 17 rule variants whose sentence parts read a type. Where a stop
+changes a check itself, as an operand's `against` or a fallback's expected domain, the difference stays refused.
+
+**Reason.** The owner chose option A′ of Sol's design round on #1708, in [r4.322](#r4-322)'s family. The owner's
+reservation is recorded: the more precise sentence is not always the clearer one (`has .clear()` tells a beginner less
+than `is a list, a set, or a dict with .clear()`). That concerns the existing known-kind wording in both runs, not A′,
+and is filed as its own wording issue.
+
+**Source.** The owner's decision on #1708, 2026-11-05.
+
+**Bounded by:** no compiler change; the stop oracle applies the exception.
