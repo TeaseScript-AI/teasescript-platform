@@ -4,7 +4,7 @@ import { Project, ts } from "ts-morph";
 import { objectsLanguage } from "./objects-language.mjs";
 
 /**
- * Stage 3b's narrowing modules repeat work only through `narrowing-iteration.ts`, which charges every step to the work
+ * Stage 3b's narrowing modules repeat work only through `charged-iteration.ts`, which charges every step to the work
  * ledger (TABLE §13.3), and every function body in them charges a unit on entry. This check guards the ordinary forms
  * of anything else: it is not a proof over every TypeScript execution form (an aliased constructor and a class field
  * initializer pass it; neither occurs in the modules). It reads them with their types and rejects:
@@ -25,13 +25,14 @@ const OBJECTS_FILE = "src/type-inference/core/contract/objects.ts";
 
 const CHARGED_FILES = [
   OBJECTS_FILE,
-  "src/type-inference/core/narrowing.ts",
-  "src/type-inference/core/narrowing-events.ts",
-  "src/type-inference/core/narrowing-routes.ts",
-  "src/type-inference/core/narrowing-statements.ts",
+  "src/type-inference/core/narrowing/narrowings.ts",
+  "src/type-inference/core/narrowing/laminar.ts",
+  "src/type-inference/core/narrowing/events.ts",
+  "src/type-inference/core/narrowing/routes.ts",
+  "src/type-inference/core/narrowing/statement-tree.ts",
 ];
 
-const ITERATION_FILE = "src/type-inference/core/narrowing-iteration.ts";
+const ITERATION_FILE = "src/type-inference/core/charged-iteration.ts";
 const CHARGE = "src/type-inference/core/budget.ts:WorkLedger.charge";
 
 const core = (file, names) => names.map((name) => `src/${file}:${name}`);
@@ -487,7 +488,7 @@ export function chargedIterationDiagnostics(program, root, rules) {
           report(
             node.name ?? node,
             "A function body goes uncharged: charge a positive unit as its first statement, or hand it as an " +
-              "arrow straight to `narrowing-iteration.ts`.",
+              "arrow straight to `charged-iteration.ts`.",
           );
       }
       if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
@@ -551,7 +552,7 @@ export function chargedIterationDiagnostics(program, root, rules) {
               report(
                 node,
                 `\`${name}\` is not in OUTSIDE (tools/oxlint/check-charged-iteration.mjs): list it with why a call ` +
-                  "walks nothing uncharged, or walk through narrowing-iteration.ts.",
+                  "walks nothing uncharged, or walk through charged-iteration.ts.",
               );
             // (in objects.ts an allowed function is only called, so the rule below sees each call's arguments; a getter
             // is read, not handed on)
@@ -577,7 +578,7 @@ export function chargedIterationDiagnostics(program, root, rules) {
               report(
                 node,
                 `\`${name}\` is handed a collection of any size, which it may walk for one charge: walk it ` +
-                  "through narrowing-iteration.ts, or list the call in OBJECTS_COLLECTIONS with what it does with it.",
+                  "through charged-iteration.ts, or list the call in OBJECTS_COLLECTIONS with what it does with it.",
               );
             else if (CONVERSIONS.has(name) && called(node) && node.parent.arguments.some(converts))
               report(node, `\`${symbolText(node)}(…)\` converts an object to text uncharged.`);

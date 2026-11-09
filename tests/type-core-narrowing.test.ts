@@ -12,7 +12,10 @@ import {
   type Item,
   type ItemTag,
 } from "../src/type-inference/core/items.js";
-import { narrowedItems, type NarrowingForm } from "../src/type-inference/core/narrowing.js";
+import {
+  narrowedItems,
+  type NarrowingForm,
+} from "../src/type-inference/core/narrowing/narrowings.js";
 import { siteKey } from "../src/type-inference/core/program.js";
 import type { Obligation } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
