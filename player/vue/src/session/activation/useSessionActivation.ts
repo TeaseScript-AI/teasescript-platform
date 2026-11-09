@@ -11,14 +11,18 @@ import type { TemporalContext } from "../../../../../src/index.js";
 import type { Problem } from "../../start-and-end/ProblemCard.vue";
 import type { PlayerSessionOptions, PlayerSessionStart } from "../usePlayerSession.js";
 import type { useKeptSession } from "../persistence/useKeptSession.js";
-import {
-  stopArguments,
-  useActivationRun,
-  type Origin,
-  type RunOrigin,
-} from "./useActivationRun.js";
+import { useActivationRun, type Origin, type RunOrigin } from "./useActivationRun.js";
 import { continueRestored } from "./work/continue.js";
-import { isSessionTarget, sessionOf, sessionTarget, type SessionTarget } from "./work/target.js";
+import { stopAt, stopLateStart, type StopPage } from "./work/stop.js";
+import {
+  commitIncident,
+  isSessionTarget,
+  sessionOf,
+  sessionTarget,
+  stoppedSession,
+  stopTarget,
+  type SessionTarget,
+} from "./work/target.js";
 
 /** The session a begin gave, as the scheduler installs it: a Continue's target unwrapped, a Start's session as it is. */
 const sessionOfBegun = (begun: PlayerSession | SessionTarget): PlayerSession =>
@@ -158,63 +162,42 @@ export function useSessionActivation({
     activationToken += 1;
     beginning.value = false;
     const stop = activationToken;
-    const target = session.value ?? restoring;
-    // A Continue still beginning beside a shown session runs nothing more either.
-    if (restoring !== null && restoring !== target) void bridgeOf(restoring).halt(restoring);
-    if (target !== null) return stopAt(target, name, stop, origin);
+    const shown = session.value ?? restoring;
+    // A Continue still beginning beside a shown session runs nothing more either: plain-halted, resource-bound cleanup.
+    if (restoring !== null && restoring !== shown) void bridgeOf(restoring).halt(restoring);
+    if (shown !== null)
+      return stopAt(stopTarget(shown, origin, activationRun), name, stop, origin, stopPage);
     // Without a session to stop, the run's incident is committed by itself.
-    const incident = () => {
-      const args = stopArguments(origin, name, stop);
-      if (origin.kind === "run" && args !== null && activationRun.admits(origin))
-        void origin.bridge.commitIncident(args).catch(() => {});
-    };
     if (starting === null) {
       hostError.value = name;
-      incident();
+      commitIncident(origin, name, stop, activationRun);
       return;
     }
-    haltUntil(stop);
-    void starting.then(
-      (begun) => {
-        const started = sessionOfBegun(begun);
-        // A retired activation's late session is only stopped, with no incident and no capture.
-        if (!activationRun.admits(origin)) {
-          endHalting(stop);
-          return void bridgeOf(started).halt(started);
-        }
-        stopAt(started, name, stop, origin);
+    stopLateStart(starting, name, stop, origin, {
+      ...stopPage,
+      target: (begun) => stopTarget(sessionOfBegun(begun), origin, activationRun),
+      haltObsolete: (begun) => {
+        const late = sessionOfBegun(begun);
+        void bridgeOf(late).halt(late);
       },
-      () => {
-        endHalting(stop);
-        if (stop !== activationToken || !activationRun.admits(origin)) return;
+      incident: () => {
         hostError.value ??= name;
-        incident();
+        commitIncident(origin, name, stop, activationRun);
       },
-    );
+    });
   }
-  /**
-   * Stops at `target` in `origin`'s run: once its store froze at the host's acknowledgement, its last publication is the
-   * shown session, which the recording and export hold, and the stop renders. A later activation or unmount supersedes
-   * it; a retired `origin` stops nothing.
-   */
-  function stopAt(target: PlayerSession, name: string, stop: number, origin: Origin) {
-    if (!activationRun.admits(origin)) return endHalting(stop);
-    const host = bridgeOf(target);
-    const acknowledged = host.halt(target, stopArguments(origin, name, stop));
-    if (origin.kind === "run") origin.failure.stopped(target);
-    const commit = () => {
-      if (!activationRun.admits(origin) || stop !== activationToken) return endHalting(stop);
-      // The final publication shows, then the stop; the halt holds the session stopped until then, so nothing reacting
-      // to that publication (the stop's call view, also of an unchanged state) sees it running for a moment.
-      const final = host.latest(target);
+  /** The page operations of the error stop's work, each admitted where it acts (`work/stop.ts`). */
+  const stopPage: StopPage = {
+    admits: (origin) => activationRun.admits(origin),
+    isCurrent: (stop) => stop === activationToken,
+    haltUntil,
+    endHalting,
+    commit: (target, name) => {
+      const { final } = stoppedSession(target);
       if (final !== null) session.value = final;
       hostError.value ??= name;
-      endHalting(stop);
-    };
-    if (host.frozen(target)) return commit();
-    haltUntil(stop);
-    void acknowledged.then(commit);
-  }
+    },
+  };
   /**
    * The loss of the engine's connection, in its own turn: the Player's error stop at once, with what the host last
    * published, and no halt asked of the dead connection, nor waited for. The activation under way and every stop still
@@ -376,7 +359,7 @@ export function useSessionActivation({
         continuing = restored;
         // Only the activation that began it goes on after each reply: a replaced one touches no trace or recorder.
         const owner = activationToken;
-        return continueRestored(sessionTarget(restored, origin, activationRun.admits), origin, {
+        return continueRestored(sessionTarget(restored, origin, activationRun), origin, {
           randomIssued: () => random.issuedRandom() !== undefined,
           owned: () => {
             if (isDisposed() || owner !== activationToken || !activationRun.admits(origin))

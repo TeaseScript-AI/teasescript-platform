@@ -1,8 +1,17 @@
+import type { StopArguments } from "../../../../../engine-bridge/recording/export-observation.js";
 import type { TracingIntent } from "../../../../../engine-bridge/player-ops.js";
 import { bridgeOf } from "../../../../../player-bridge.js";
 import type { PlayerSession } from "../../../../../runtime-view.js";
 import type { TemporalCapture } from "../useSessionActivation.js";
-import type { Origin, RunOrigin } from "../useActivationRun.js";
+import {
+  stopArguments,
+  type Origin,
+  type RunOrigin,
+  type useActivationRun,
+} from "../useActivationRun.js";
+
+/** The activations' record owner, whose admission each operation asks at its action. */
+type Runs = Pick<ReturnType<typeof useActivationRun>, "admits">;
 
 /*
  * The session an activation's work acts on, as that work may hold it (session split S2, HEAD 0 §2): bound to the
@@ -47,15 +56,16 @@ export interface SessionTarget {
 // Each target's session, which only the scheduler reads back (`sessionOf`), to install it.
 const sessions = new WeakMap<object, PlayerSession>();
 
-/** A target for `session`, acting for `origin` while `admits` says it lives. */
+/** A target for `session`, acting for `origin` while `runs` admits it. */
 export function sessionTarget(
   session: PlayerSession,
   origin: RunOrigin,
-  admits: (origin: Origin) => boolean,
+  runs: Runs,
 ): SessionTarget {
   const host = bridgeOf(session);
   const admit = () => {
-    if (!admits(origin)) throw new RetiredActivation("The activation this work began in retired.");
+    if (!runs.admits(origin))
+      throw new RetiredActivation("The activation this work began in retired.");
   };
   const target: SessionTarget = {
     snapshot: () => ({
@@ -64,7 +74,7 @@ export function sessionTarget(
       randomDrawId: session.state.randomDraw?.drawId ?? null,
       debugMode: session.state.debugMode,
     }),
-    latest: () => sessionTarget(host.latest(session) ?? session, origin, admits),
+    latest: () => sessionTarget(host.latest(session) ?? session, origin, runs),
     releaseRandom() {
       admit();
       void host.client
@@ -98,6 +108,59 @@ export function sessionTarget(
   };
   sessions.set(target, session);
   return target;
+}
+
+/**
+ * The session a Player error stops, as the stop's work holds it: bound to the stop's origin (the initial record, or an
+ * activation's run). Its halt and the failure capture admit that origin first.
+ */
+export interface StopTarget {
+  /** Stops the session at error `error`, stop `stop`; resolves once its store froze at the host's acknowledgement. */
+  halt(error: string, stop: number): Promise<void>;
+  /** Whether the session's store already froze, as it does at once in-process. */
+  frozen(): boolean;
+  /** Captures the run's failure recording of the stopped session, once per run; none for the initial record. */
+  captureFailure(): void;
+}
+
+// Each stop target's session, which only the scheduler reads back to commit the final publication (`stoppedSession`).
+const stopped = new WeakMap<object, PlayerSession>();
+
+/** A stop target for `session`, acting for `origin` while `runs` admits it. */
+export function stopTarget(session: PlayerSession, origin: Origin, runs: Runs): StopTarget {
+  const host = bridgeOf(session);
+  const retired = () => new RetiredActivation("The activation this stop began in retired.");
+  const target: StopTarget = {
+    halt(error, stop) {
+      if (!runs.admits(origin)) throw retired();
+      const args: StopArguments | null = stopArguments(origin, error, stop);
+      return host.halt(session, args);
+    },
+    frozen: () => host.frozen(session),
+    captureFailure() {
+      if (!runs.admits(origin)) throw retired();
+      if (origin.kind === "run") origin.failure.stopped(session);
+    },
+  };
+  stopped.set(target, session);
+  return target;
+}
+
+/** The session a stop target names, and its connection's latest publication of it: the scheduler's, to commit it. */
+export function stoppedSession(target: StopTarget): {
+  readonly session: PlayerSession;
+  readonly final: PlayerSession | null;
+} {
+  const session = stopped.get(target);
+  if (session === undefined) throw new TypeError("Not a stop target.");
+  return { session, final: bridgeOf(session).latest(session) };
+}
+
+/** Commits the no-session incident of a Player error in `origin`'s run, while it lives; none for the initial record. */
+export function commitIncident(origin: Origin, error: string, stop: number, runs: Runs): void {
+  const args = stopArguments(origin, error, stop);
+  if (origin.kind === "run" && args !== null && runs.admits(origin))
+    void origin.bridge.commitIncident(args).catch(() => {});
 }
 
 /** Whether `value` is a target (a Continue's begin gives one; a Start's gives its session). */

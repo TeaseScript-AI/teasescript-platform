@@ -441,8 +441,10 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "own observation",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportActivationError > then:callback.1":
-    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
+  "player/vue/src/session/activation/work/stop.ts stopLateStart > then:callback.1": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
   "player/vue/src/session/useRandomControl.ts useRandomControl > resolveDraw > catch:callback": [
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
@@ -525,8 +527,10 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture > captureExport:callback":
     ["lifecycle", ["BridgeClient.request"]],
-  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportActivationError > then:callback.2":
-    ["lifecycle", ["BridgeClient.request"]],
+  "player/vue/src/session/activation/work/stop.ts stopLateStart > then:callback.2": [
+    "lifecycle",
+    ["BridgeClient.request"],
+  ],
 };
 
 /** The escapes that are not followed (a value passed as a callback): each is an entry point too, with its policy. */

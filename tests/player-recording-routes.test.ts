@@ -164,11 +164,13 @@ test("the page's diagnostic senders each check their activation's admission, and
       path: "useFailureRecording > stopped",
     },
   ]);
+  // The error stop's work reaches them only through its targets (`work/target.ts`).
+  const TARGET = "player/vue/src/session/activation/work/target.ts";
   assert.deepEqual(senders, [
-    `player/runtime/player-bridge.ts PlayerBridge > commitIncident <- ${ACTIVATION} > reportActivationError > incident`,
-    `${OWNER} stopArguments <- ${ACTIVATION} > reportActivationError > incident`,
-    `${OWNER} stopArguments <- ${ACTIVATION} > stopAt`,
-    `player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped <- ${ACTIVATION} > stopAt`,
+    `player/runtime/player-bridge.ts PlayerBridge > commitIncident <- ${TARGET} commitIncident`,
+    `${OWNER} stopArguments <- ${TARGET} commitIncident`,
+    `${OWNER} stopArguments <- ${TARGET} stopTarget > halt`,
+    `player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped <- ${TARGET} stopTarget > captureFailure`,
   ]);
   const admitting = new Set(
     callers([{ file: OWNER, path: "useActivationRun > admits" }]).map(
@@ -266,6 +268,7 @@ const ACTIVATION_FILES = [
   ...SESSION_FILES,
   // The activation's work modules: activation work throughout, so every wait in them is in scope.
   "player/vue/src/session/activation/work/continue.ts",
+  "player/vue/src/session/activation/work/stop.ts",
   "player/vue/src/session/activation/work/target.ts",
   "player/vue/src/session/activation/useExportCandidate.ts",
   "player/vue/src/session/activation/useFailureRecording.ts",
@@ -330,7 +333,7 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "the trace restart's rejection, which reports with the Continue's own activation, admitted there (`reportActivationError`)",
   "target.ts: sessionTarget > releaseRandom: catch host.client.request":
     "drops the random release's refusal; nothing follows",
-  "useSessionActivation.ts: useSessionActivation > reportActivationError > incident: catch origin.bridge.commitIncident":
+  "target.ts: commitIncident: catch origin.bridge.commitIncident":
     "drops the incident's refusal; nothing follows",
   "useActivationRun.ts: useActivationRun > retire: catch ended.bridge.retireRun":
     "drops the retirement's refusal: the record retired already, and nothing follows",
@@ -340,8 +343,8 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "drops a release's refusal; nothing follows",
   "useFailureRecording.ts: useFailureRecording > settle: catch bridge.releaseRecording":
     "drops a release's refusal; nothing follows",
-  "useSessionActivation.ts: useSessionActivation > reportActivationError: then starting": READMITS,
-  "useSessionActivation.ts: useSessionActivation > stopAt: then acknowledged": READMITS,
+  "stop.ts: stopLateStart: then starting": READMITS,
+  "stop.ts: stopAt: then acknowledged": READMITS,
   // Reached from the activation bodies through the functions they call.
   "useActivationRun.ts: useActivationRun > reply: then pending":
     "the one settlement boundary: its handlers act on the origin's behalf only while that lives, and their errors go to that origin's error stop (`reply`)",
@@ -385,7 +388,7 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useKeptSession.ts: useKeptSession > forgetKeptSession: then discardKeptSession": KEPT_SESSION,
 };
 /** Calls that re-admit an activation, and calls that request or act for one. */
-const ADMITS = /^(?:goesOn|lives|owned|work\.owned|activationRun\.admits)$/u;
+const ADMITS = /^(?:goesOn|lives|owned|work\.owned|page\.admits|activationRun\.admits)$/u;
 const ACTS =
   /^(?:capture|options\.readPhoto|host\.request|host\.halt|stopAt|started|startedSession|reportActivationError|origin\.bridge\.commitIncident|origin\.failure\.stopped|host\.captureExport|incident)$/u;
 

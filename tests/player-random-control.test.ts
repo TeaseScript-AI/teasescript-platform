@@ -560,6 +560,7 @@ const COMPOSABLE_FILES = [
   "player/vue/src/session/persistence/useSessionTransfer.ts",
   "player/vue/src/session/activation/useSessionActivation.ts",
   "player/vue/src/session/activation/work/continue.ts",
+  "player/vue/src/session/activation/work/stop.ts",
   "player/vue/src/session/activation/work/target.ts",
 ] as const;
 /** The text of the session composable's files, one after another. */
