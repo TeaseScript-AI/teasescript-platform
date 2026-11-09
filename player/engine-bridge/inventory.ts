@@ -261,13 +261,13 @@ export const RATCHET: readonly RatchetEntry[] = [
     family: "L5i",
   },
   {
-    importer: "player/vue/src/usePlayerSession.ts",
+    importer: "player/vue/src/session/activation/useSessionActivation.ts",
     target: "player/engine-bridge/in-process.ts",
     name: "heldRecording",
     family: "L5i",
   },
   {
-    importer: "player/vue/src/usePlayerSession.ts",
+    importer: "player/vue/src/session/activation/useSessionActivation.ts",
     target: "player/engine-bridge/in-process.ts",
     name: "introduceNow",
     family: "L5i",

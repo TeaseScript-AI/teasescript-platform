@@ -17,7 +17,8 @@ import {
   serializeValidatedRuntimeJson,
 } from "../../../src/runtime/snapshot/checkpoint-json.js";
 import { storageNotation } from "../../storage-preview.js";
-import type { PlayerSessionHost, SavedDataEditResult } from "./usePlayerSession";
+import type { PlayerSessionHost } from "./usePlayerSession";
+import type { SavedDataEditResult } from "./session/persistence/useSavedValues";
 
 // Debug's editor for one saved value (DEBUGGER.md "Player Debug"): change it with its type, add a key, or delete one.
 // The change is stored first; a running session's next `load` then returns it.

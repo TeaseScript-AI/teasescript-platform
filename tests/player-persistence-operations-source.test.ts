@@ -10,7 +10,7 @@ import type { PlayerBridge } from "../player/player-bridge.js";
 import { OWNERSHIP_MODES, type Operated, type Ownership } from "./helpers/plan-json-family.js";
 
 /*
- * The persistence operations of the Player's session host (`player/vue/src/usePlayerSession.ts`: keep, the kept
+ * The persistence operations of the Player's session host (`player/vue/src/session/persistence/`: keep, the kept
  * session's restore, the session import, the saved-data import) reach the page's stores and the host only through their
  * ownership's handles (`player/persistence-ownership.ts`), so a stale operation's call is refused wherever it is made.
  * This check reads the syntax tree of every module of the host (`HOST_MODULES`). One recognizer (`useAt`) finds each use
@@ -22,12 +22,15 @@ import { OWNERSHIP_MODES, type Operated, type Ownership } from "./helpers/plan-j
  * lists is outside the check's reach, as is a binding it cannot resolve lexically.
  */
 
-/** The host's modules, under this folder: the composable and every module of its `session/` folder. */
+/** The host's modules, under this folder: the composable and every module of its `session/` folder and subfolders. */
 const HOST_ROOT = "player/vue/src";
 const MAIN = "usePlayerSession.ts";
+/** The rewind's owner, whose adoption replaces the saved values. */
+const REWIND = "session/useSessionRewind.ts";
 const HOST_MODULES = () => [
   MAIN,
-  ...readdirSync(resolve(process.cwd(), HOST_ROOT, "session"))
+  ...readdirSync(resolve(process.cwd(), HOST_ROOT, "session"), { recursive: true })
+    .map(String)
     .filter((name) => name.endsWith(".ts"))
     .sort()
     .map((name) => `session/${name}`),
@@ -56,6 +59,8 @@ const BOUNDARY: Readonly<Record<string, string>> = {
     "binds the script's own saved values and photos to an operation while the debug room is shown",
 };
 
+/** The module the unbound helpers are in: the saved data's import. */
+const UNBOUND_MODULE = "session/persistence/useSavedDataTransfer.ts";
 /**
  * Helpers an operation calls that write without its ownership, and why: none of this page's state retires them. Each
  * must stay a helper of its own, taking no ownership, so the check sees where the operation hands work over.
@@ -90,60 +95,87 @@ const SERVICES =
 const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   [MAIN]: {
     usePlayerSession: SETUP,
-    keptStore: RESOURCE,
-    routed: RESOURCE,
-    "scriptStorage.load": RESOURCE,
-    "scriptStorage.write": RESOURCE,
-    "scriptStorage.replace": RESOURCE,
-    "scriptStorage.clear": RESOURCE,
-    switchStorage: MOVE,
-    enterDebugRoom: MOVE,
-    setDebugMode: MOVE,
+    "usePlayerSession.hasNormalStorage": MOVE,
+    "usePlayerSession.hasScriptStorage": SESSION,
     copyToDebugRoom: MOVE,
-    createDebugRoom: MOVE,
     startDebugSessionAnew: MOVE,
+    "usePlayerSession.readPhoto": READ,
+    ownedSection: SESSION,
+    "usePlayerSession.readSavedData": READ,
+    "usePlayerSession.savedPhoto": READ,
+    resolveAsset: READ,
+    "usePlayerSession.rememberScriptName": EDIT,
+    "usePlayerSession.images.discard": EDIT,
+  },
+  "session/activation/useActivationRun.ts": { "useActivationRun.retire": READ },
+  "session/useCallView.ts": { viewCalls: SESSION },
+  "session/useDebugModeAndTrace.ts": {
+    issueTracing: SESSION,
+    applyDebugMode: SESSION,
+    debugView: SESSION,
+  },
+  "session/persistence/useSessionTransfer.ts": {
+    useSessionTransfer: READ,
+    reviewedImport: READ,
+    exportSession: READ,
+    readTransfer: TRANSFER,
+    discardSessionReview: TRANSFER,
+    sameMedium:
+      "compares a held photo's bytes with an imported one's, by position: it reaches no store",
+  },
+  "session/persistence/useSavedDataTransfer.ts": {
+    savedScripts: READ,
+    reviewSavedDataImport: READ,
+    ownStoredMedia: READ,
+  },
+  "session/activation/useSessionActivation.ts": {
     activate: SESSION,
     "prepareRestore.begin": SESSION,
     prepareActivation: SESSION,
     startedSession: SESSION,
     reportHostError: SESSION,
     incident: SESSION,
-    "usePlayerSession.readPhoto": READ,
     stopAt: SESSION,
     supersede: SESSION,
-    issueTracing: SESSION,
-    applyDebugMode: SESSION,
-    debugView: SESSION,
-    sendRandomRequest: SESSION,
-    randomTried: SESSION,
-    ownedSection: SESSION,
+  },
+  "session/persistence/useKeptSession.ts": {
+    keptStore: RESOURCE,
     settlePlanJson: SESSION,
+    "useKeptSession.keptSessionsNow": RESOURCE,
+    "useKeptSession.startKeeping": SETUP,
+  },
+  "session/persistence/useSavedValues.ts": {
+    useSavedValues: SETUP,
+    "useSavedValues.watchWrites": SETUP,
+    "scriptStorage.load": RESOURCE,
+    "scriptStorage.write": RESOURCE,
+    "scriptStorage.replace": RESOURCE,
+    "scriptStorage.clear": RESOURCE,
     loadScriptStorage: READ,
-    "usePlayerSession.readSavedData": READ,
-    savedScripts: READ,
-    reviewSavedDataImport: READ,
-    reviewedImport: READ,
-    exportSession: READ,
-    storedPhotos: READ,
-    "usePlayerSession.savedPhoto": READ,
-    resolveAsset: READ,
     scriptStorageOptions: READ,
-    ownStoredMedia: READ,
-    readTransfer: TRANSFER,
-    discardSessionReview: TRANSFER,
-    adoptShown: EDIT,
-    settleAdoption: EDIT,
     applySavedDataEdit: EDIT,
     clearScriptStorage: EDIT,
-    storeImageFile: EDIT,
-    "usePlayerSession.rememberScriptName": EDIT,
-    "usePlayerSession.images.discard": EDIT,
-    sameMedium:
-      "compares a held photo's bytes with an imported one's, by position: it reaches no store",
   },
-  "session/useActivationRun.ts": { "useActivationRun.retire": READ },
-  "session/useCallView.ts": { viewCalls: SESSION },
-  "session/useExportCandidate.ts": {
+  "session/persistence/useStorageRoute.ts": {
+    useStorageRoute: SETUP,
+    "useStorageRoute.debugRoomsNow": RESOURCE,
+    "useStorageRoute.debugRoomStorageNow": RESOURCE,
+    "useStorageRoute.storageRouteNow": RESOURCE,
+    routed: RESOURCE,
+    switchStorage: MOVE,
+    enterDebugRoom: MOVE,
+    createDebugRoom: MOVE,
+    storedPhotos: READ,
+  },
+  "session/useSessionRewind.ts": { adoptShown: EDIT, settleAdoption: EDIT },
+  "session/useSessionMedia.ts": { storeImageFile: EDIT, "useSessionMedia.watchMedia": SETUP },
+  "session/useRandomControl.ts": {
+    useRandomControl: SETUP,
+    sendRandomRequest: SESSION,
+    randomTried: SESSION,
+    "useRandomControl.dispose": SETUP,
+  },
+  "session/activation/useExportCandidate.ts": {
     useExportCandidate: READ,
     lives: READ,
     release: READ,
@@ -152,7 +184,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     debugExportCandidate: READ,
     capture: READ,
   },
-  "session/useFailureRecording.ts": {
+  "session/activation/useFailureRecording.ts": {
     settle: READ,
     "useFailureRecording.stopped": READ,
     "useFailureRecording.retire": READ,
@@ -193,6 +225,17 @@ const DERIVED: Readonly<Record<string, string>> = {
   keptScope: "the saved values' scope, a name: no store",
   exportCandidate:
     "a debug export's candidate, reading the media store's photos through `readPhoto`: it writes no store",
+  cameraOffered: "whether a camera is offered here, from the options' capabilities: no store",
+  locks:
+    "the lock service, given the options' lock code: it asks a service, not the host, and writes no store",
+  keptOwner:
+    "the kept session's owner, made from the options, the route and the media store: its own places are checked in its module",
+  savedValues:
+    "the saved values in use, made from the route's provider: its own places are checked in its module",
+  route:
+    "the room and the route of the saved values, made from the options and the media store: its own places are checked in its module",
+  rewind:
+    "the rewind's owner, given the saved values: its adoption writes them, classified there (`settleAdoption`)",
 };
 
 /** The handles an ownership binds a raw resource with. */
@@ -677,28 +720,49 @@ function consumers(source: ts.SourceFile, checked: ReadonlySet<string>): Map<str
  * functions apart: each binding's name.
  */
 function derivedBindings(source: ts.SourceFile): string[] {
-  let host: ts.FunctionDeclaration | undefined;
+  // The host's body, and the body of each owner it is composed of (`use…`, at a module's top level).
+  const hosts: ts.FunctionDeclaration[] = [];
   ts.forEachChild(source, (node) => {
-    if (ts.isFunctionDeclaration(node) && node.name?.text === "usePlayerSession") host = node;
+    if (ts.isFunctionDeclaration(node) && /^use[A-Z]/u.test(node.name?.text ?? ""))
+      hosts.push(node);
   });
   const found: string[] = [];
-  for (const statement of host?.body?.statements ?? []) {
-    if (!ts.isVariableStatement(statement)) continue;
-    for (const declaration of statement.declarationList.declarations) {
-      const value = declaration.initializer;
-      if (!ts.isIdentifier(declaration.name) || value === undefined) continue;
-      if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) continue;
-      let made = false;
-      const visit = (node: ts.Node) => {
-        if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return;
-        if (ts.isIdentifier(node) && RAW.has(node.text) && !declared(node)) made = true;
-        ts.forEachChild(node, visit);
-      };
-      visit(value);
-      if (made) found.push(declaration.name.text);
+  for (const host of hosts)
+    for (const statement of host.body?.statements ?? []) {
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name)) continue;
+        // A binding an owner makes at its place in the setup is declared without a value, and assigned it once there.
+        const value = declaration.initializer ?? assignedOnce(host, declaration.name.text);
+        if (value === undefined) continue;
+        if (ts.isArrowFunction(value) || ts.isFunctionExpression(value)) continue;
+        let made = false;
+        const visit = (node: ts.Node) => {
+          if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return;
+          if (ts.isIdentifier(node) && RAW.has(node.text) && !declared(node)) made = true;
+          ts.forEachChild(node, visit);
+        };
+        visit(value);
+        if (made) found.push(declaration.name.text);
+      }
     }
-  }
   return found;
+}
+
+/** The value `name` is given in `host`'s one assignment of it, as `name = value;`, or `undefined` without exactly one. */
+function assignedOnce(host: ts.FunctionDeclaration, name: string): ts.Expression | undefined {
+  const values: ts.Expression[] = [];
+  host.forEachChild(function visit(node): void {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(node.left) &&
+      node.left.text === name
+    )
+      values.push(node.right);
+    node.forEachChild(visit);
+  });
+  return values.length === 1 ? values[0] : undefined;
 }
 
 /** The function that makes each ownership the host makes, by the operation of the family it belongs to. */
@@ -795,7 +859,8 @@ function check(text: string, module = MAIN) {
   const unclassified = [...reached]
     .filter(
       ([place]) =>
-        !(module === MAIN && Object.hasOwn(UNBOUND, place)) && !Object.hasOwn(outside, place),
+        !(module === UNBOUND_MODULE && Object.hasOwn(UNBOUND, place)) &&
+        !Object.hasOwn(outside, place),
     )
     .map(([place, line]) => `${module}: ${place}, line ${line}`);
   return { found: new Set(found.keys()), failures, reached, unclassified, source };
@@ -812,11 +877,13 @@ test("every persistence operation reaches stores and the host only through its o
   const modules = checkedModules();
   const found = new Set(modules.flatMap((checked) => [...checked.found]));
   for (const name of OPERATIONS) assert.ok(found.has(name), `${name} is an operation of the host`);
-  const text = readFileSync(resolve(process.cwd(), HOST_ROOT, MAIN), "utf8");
+  const text = HOST_MODULES()
+    .map((module) => readFileSync(resolve(process.cwd(), HOST_ROOT, module), "utf8"))
+    .join("\n");
   for (const name of Object.keys(UNBOUND))
     assert.ok(
       new RegExp(`async function ${name}\\((?![^)]*Ownership)`).test(text),
-      `${name} is a helper of ${MAIN} that takes no ownership`,
+      `${name} is a helper of the host that takes no ownership`,
     );
   assert.deepEqual(
     modules.flatMap(({ module, failures }) => failures.map((failure) => `${module}: ${failure}`)),
@@ -839,7 +906,7 @@ test("every place of the host that reaches a store or the host is an operation, 
   );
   for (const { module, reached, found } of modules) {
     const outside = Object.keys(OUTSIDE[module] ?? {});
-    const unbound = module === MAIN ? Object.keys(UNBOUND) : [];
+    const unbound = module === UNBOUND_MODULE ? Object.keys(UNBOUND) : [];
     for (const place of [...outside, ...unbound])
       assert.ok(reached.has(place), `${place} reaches no store or host in ${module}`);
     for (const place of outside) assert.ok(!found.has(place), `${place} takes an ownership`);
@@ -849,6 +916,7 @@ test("every place of the host that reaches a store or the host is an operation, 
     Object.keys(BOUNDARY),
     Object.keys(UNBOUND),
     Object.keys(OUTSIDE[MAIN] ?? {}),
+    Object.keys(OUTSIDE[UNBOUND_MODULE] ?? {}),
   ].flat();
   assert.equal(new Set(main).size, main.length, "a place in two tables");
 });
@@ -931,8 +999,8 @@ function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: 
 test("an adoption's read reaches settleAdoption only from its two callbacks, with nothing chained after it, and settleAdoption begins with its ownership check", () => {
   const { reads, problems } = adoptionSettlements(
     ts.createSourceFile(
-      MAIN,
-      readFileSync(resolve(process.cwd(), HOST_ROOT, MAIN), "utf8"),
+      REWIND,
+      readFileSync(resolve(process.cwd(), HOST_ROOT, REWIND), "utf8"),
       ts.ScriptTarget.Latest,
       true,
     ),
@@ -971,13 +1039,16 @@ test("an adoption's read reaches settleAdoption only from its two callbacks, wit
 });
 
 test("every binding of the host made from a raw resource is one, the media store, or classified", () => {
-  const source = ts.createSourceFile(
-    MAIN,
-    readFileSync(resolve(process.cwd(), HOST_ROOT, MAIN), "utf8"),
-    ts.ScriptTarget.Latest,
-    true,
+  const derived = HOST_MODULES().flatMap((module) =>
+    derivedBindings(
+      ts.createSourceFile(
+        module,
+        readFileSync(resolve(process.cwd(), HOST_ROOT, module), "utf8"),
+        ts.ScriptTarget.Latest,
+        true,
+      ),
+    ),
   );
-  const derived = derivedBindings(source);
   assert.deepEqual(
     derived.filter((name) => !RAW.has(name) && !Object.hasOwn(DERIVED, name)),
     [],

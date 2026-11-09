@@ -18,10 +18,10 @@ import type { SessionTransferMedium } from "../../session-transfer.js";
 import { StorageTransferError, type StorageBundle } from "../../storage-transfer.js";
 import type {
   PlayerTransferRead,
-  SavedDataImportReview,
   SessionImportReview,
   SessionTransferRead,
-} from "./usePlayerSession";
+} from "./session/persistence/useSessionTransfer";
+import type { SavedDataImportReview } from "./session/persistence/useSavedDataTransfer";
 
 // Imports saved data or a session exported from another Player, as a file or pasted text. Saved data goes into the
 // scope of each script in it, or of the ones the player keeps ticked; a session continues the script this Player shows.

@@ -86,7 +86,7 @@ export const RULES: readonly TransferRule[] = [
     variants: ["replacing saved data", "session-local"],
     guards: [],
     source:
-      "player/vue/src/usePlayerSession.ts adoptShown (work begins before an optional replacement)",
+      "player/vue/src/session/useSessionRewind.ts adoptShown (work begins before an optional replacement)",
     decide: (inspection) =>
       inspecting(inspection) ? transfer("becomes adopting", "kept", "adopting") : refused,
   },
@@ -99,7 +99,7 @@ export const RULES: readonly TransferRule[] = [
       "failed, session-local",
     ],
     guards: [],
-    source: "player/vue/src/usePlayerSession.ts adoptShown",
+    source: "player/vue/src/session/useSessionRewind.ts adoptShown",
     decide: (inspection, variant) =>
       inspection !== "adopting"
         ? refused
@@ -165,7 +165,8 @@ export const RULES: readonly TransferRule[] = [
     transition: "close by clear",
     variants: [""],
     guards: [],
-    source: "player/vue/src/usePlayerSession.ts canClearScriptStorage (requires !inspecting)",
+    source:
+      "player/vue/src/session/persistence/useSavedValues.ts canClearScriptStorage (requires !inspecting)",
     decide: (inspection) =>
       inspection === "not inspecting"
         ? [

@@ -6,13 +6,13 @@ import type { CapturedMediaRecord } from "../player/captured-media.js";
 import type { ExportCaptureReply } from "../player/engine-bridge/session-protocol.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
 import type { PlayerSession } from "../player/runtime-view.js";
-import type { ActivationRun } from "../player/vue/src/session/useActivationRun.js";
-import { useExportCandidate } from "../player/vue/src/session/useExportCandidate.js";
+import type { ActivationRun } from "../player/vue/src/session/activation/useActivationRun.js";
+import { useExportCandidate } from "../player/vue/src/session/activation/useExportCandidate.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
 /*
- * L5h.3b's export candidate owner (`session/useExportCandidate.ts`) and the Stage adapter it reads through: until the
+ * L5h.3b's export candidate owner (`session/activation/useExportCandidate.ts`) and the Stage adapter it reads through: until the
  * dialog holds a candidate, the owner releases its ticket on every failed construction; the Stage it reports is the
  * matched view's, not the Player's possibly lagging shown session.
  */

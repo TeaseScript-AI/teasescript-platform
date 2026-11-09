@@ -1,6 +1,6 @@
-import type { RecordingCaptureReply } from "../../../engine-bridge/session-protocol.js";
-import type { PlayerBridge } from "../../../player-bridge.js";
-import type { PlayerSession } from "../../../runtime-view.js";
+import type { RecordingCaptureReply } from "../../../../engine-bridge/session-protocol.js";
+import type { PlayerBridge } from "../../../../player-bridge.js";
+import type { PlayerSession } from "../../../../runtime-view.js";
 
 /*
  * The recording up to a Player error (L5h.3b), as a debug export of the stopped session selects it: captured in the host

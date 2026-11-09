@@ -81,18 +81,21 @@ test("the restart gate's hook is read only by the rewind owner, and the host res
   assert.deepEqual(
     callers([
       {
-        file: "player/vue/src/session/useFailureRecording.ts",
+        file: "player/vue/src/session/activation/useFailureRecording.ts",
         path: "useFailureRecording > beforeRestart",
       },
       {
-        file: "player/vue/src/usePlayerSession.ts",
-        path: "usePlayerSession > beforeRewindRestart",
+        file: "player/vue/src/session/activation/useSessionActivation.ts",
+        path: "useSessionActivation > beforeRewindRestart",
       },
     ]),
     [
-      "player/vue/src/session/useFailureRecording.ts useFailureRecording > beforeRestart <- player/vue/src/usePlayerSession.ts usePlayerSession > beforeRewindRestart",
+      "player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > beforeRestart <- player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart",
+      // The activation owner's seam: its returned member, and the composable's destructuring of it.
+      "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart",
+      "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/usePlayerSession.ts usePlayerSession",
       // The rewind API's `beforeRestart`, which the rewind owner's gate reads before each host restart.
-      "player/vue/src/usePlayerSession.ts usePlayerSession > beforeRewindRestart <- player/vue/src/usePlayerSession.ts usePlayerSession > beforeRestart",
+      "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/usePlayerSession.ts usePlayerSession > beforeRestart",
     ],
   );
   const owner = readFileSync(resolve(process.cwd(), "player/vue/src/rewindOwner.ts"), "utf8");
@@ -114,25 +117,25 @@ test("the failure capture's and the export capture's replies each reach one sett
   assert.deepEqual(
     callers([
       {
-        file: "player/vue/src/session/useFailureRecording.ts",
+        file: "player/vue/src/session/activation/useFailureRecording.ts",
         path: "useFailureRecording > settle",
       },
       { file: "player/player-bridge.ts", path: "PlayerBridge > captureExport" },
       {
-        file: "player/vue/src/session/useExportCandidate.ts",
+        file: "player/vue/src/session/activation/useExportCandidate.ts",
         path: "useExportCandidate > deliver",
       },
     ]),
     [
-      "player/player-bridge.ts PlayerBridge > captureExport <- player/vue/src/session/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture",
-      "player/vue/src/session/useExportCandidate.ts useExportCandidate > deliver <- player/vue/src/session/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture > captureExport:callback",
-      "player/vue/src/session/useFailureRecording.ts useFailureRecording > settle <- player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped > then:callback.1",
-      "player/vue/src/session/useFailureRecording.ts useFailureRecording > settle <- player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped > then:callback.2",
+      "player/player-bridge.ts PlayerBridge > captureExport <- player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture",
+      "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > deliver <- player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture > captureExport:callback",
+      "player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > settle <- player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped > then:callback.1",
+      "player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > settle <- player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped > then:callback.2",
     ],
   );
   // Nothing is chained after the capture's settlement: its handlers only settle.
   const failure = readFileSync(
-    resolve(process.cwd(), "player/vue/src/session/useFailureRecording.ts"),
+    resolve(process.cwd(), "player/vue/src/session/activation/useFailureRecording.ts"),
     "utf8",
   );
   assert.match(
@@ -147,20 +150,22 @@ test("the failure capture's and the export capture's replies each reach one sett
 // activation sends nothing is the completion-lifetime family's runtime claim (`player-session-rewind.test.ts`).
 test("the page's diagnostic senders each check their activation's admission, and only Start and disposal change it", () => {
   const SESSION = "player/vue/src/usePlayerSession.ts usePlayerSession";
-  const OWNER = "player/vue/src/session/useActivationRun.ts";
+  const ACTIVATION =
+    "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation";
+  const OWNER = "player/vue/src/session/activation/useActivationRun.ts";
   const senders = callers([
     { file: "player/player-bridge.ts", path: "PlayerBridge > commitIncident" },
     { file: OWNER, path: "stopArguments" },
     {
-      file: "player/vue/src/session/useFailureRecording.ts",
+      file: "player/vue/src/session/activation/useFailureRecording.ts",
       path: "useFailureRecording > stopped",
     },
   ]);
   assert.deepEqual(senders, [
-    `player/player-bridge.ts PlayerBridge > commitIncident <- ${SESSION} > reportHostError > incident`,
-    `${OWNER} stopArguments <- ${SESSION} > reportHostError > incident`,
-    `${OWNER} stopArguments <- ${SESSION} > stopAt`,
-    `player/vue/src/session/useFailureRecording.ts useFailureRecording > stopped <- ${SESSION} > stopAt`,
+    `player/player-bridge.ts PlayerBridge > commitIncident <- ${ACTIVATION} > reportHostError > incident`,
+    `${OWNER} stopArguments <- ${ACTIVATION} > reportHostError > incident`,
+    `${OWNER} stopArguments <- ${ACTIVATION} > stopAt`,
+    `player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped <- ${ACTIVATION} > stopAt`,
   ]);
   const admitting = new Set(
     callers([{ file: OWNER, path: "useActivationRun > admits" }]).map(
@@ -177,8 +182,8 @@ test("the page's diagnostic senders each check their activation's admission, and
       { file: OWNER, path: "useActivationRun > retire" },
     ]),
     [
-      `${OWNER} useActivationRun > begin <- ${SESSION} > startFrom`,
-      `${OWNER} useActivationRun > retire <- ${SESSION} > tryOnScopeDispose:callback#1`,
+      `${OWNER} useActivationRun > begin <- ${ACTIVATION} > startFrom`,
+      `${OWNER} useActivationRun > retire <- ${SESSION} > tryOnScopeDispose:callback`,
     ],
   );
 });
@@ -240,20 +245,34 @@ test("every publication, stop and binding route of the export observation is cla
  * or is listed with why it needs none. A wait this table does not list fails, and so does a listed re-admission that
  * no longer comes before the next request. Wiring only: that retired work does nothing is the runtime families' claim.
  */
-const ACTIVATION_FILES = [
-  "player/vue/src/session/useExportCandidate.ts",
-  "player/vue/src/session/useFailureRecording.ts",
-  "player/vue/src/session/useActivationRun.ts",
-  "player/vue/src/useDebugExport.ts",
+/** The Player's session composable and the owner modules it is composed of, which `reachable` follows as one. */
+const SESSION_FILES: readonly string[] = [
   "player/vue/src/usePlayerSession.ts",
+  "player/vue/src/session/useRandomControl.ts",
+  "player/vue/src/session/useDebugModeAndTrace.ts",
+  "player/vue/src/session/useSessionMedia.ts",
+  "player/vue/src/session/useSessionRewind.ts",
+  "player/vue/src/session/persistence/useStorageRoute.ts",
+  "player/vue/src/session/persistence/useSavedValues.ts",
+  "player/vue/src/session/persistence/useKeptSession.ts",
+  "player/vue/src/session/persistence/useSavedDataTransfer.ts",
+  "player/vue/src/session/persistence/useSessionTransfer.ts",
+  "player/vue/src/session/activation/useSessionActivation.ts",
+];
+const ACTIVATION_FILES = [
+  ...SESSION_FILES,
+  "player/vue/src/session/activation/useExportCandidate.ts",
+  "player/vue/src/session/activation/useFailureRecording.ts",
+  "player/vue/src/session/activation/useActivationRun.ts",
+  "player/vue/src/useDebugExport.ts",
   // `ownedSection`'s member call `clock.section`, followed into the clock's section and its observation (#1983).
   "player/vue/src/useRuntimeSceneClock.ts",
 ] as const;
 /** In the clock, the section that `ownedSection` opens and its observation; the clock's own scheduling acts for none. */
 const CLOCK_SECTION = ["useRuntimeSceneClock > section", "useRuntimeSceneClock > observeIn"];
 /**
- * In `usePlayerSession.ts`, the functions that act for an activation: its begin, its completions and its error stop,
- * and every function of the file they call, transitively (`reachable`).
+ * In the session composable's files, the functions that act for an activation: its begin, its completions and its error
+ * stop, and every function of those files they call, transitively (`reachable`).
  */
 const SESSION_ACTIVATION = [
   "activate",
@@ -287,22 +306,24 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useDebugExport.ts: useDebugExport > watch:callback: await assembleDebugExport":
     "assembles a handed-over candidate, which stays valid",
   "useDebugExport.ts: useDebugExport > watch:callback: await measuredDebugExportFile": "as above",
-  "usePlayerSession.ts: usePlayerSession > activate: await begunInFlight":
+  "useSessionActivation.ts: useSessionActivation > activate: await begunInFlight":
     "before the activation's record begins (`startFrom`); the click's token decides",
-  "usePlayerSession.ts: usePlayerSession > activate: await startFrom": "the activation itself",
-  "usePlayerSession.ts: usePlayerSession > activate: await camera.open":
+  "useSessionActivation.ts: useSessionActivation > activate: await startFrom":
+    "the activation itself",
+  "useSessionActivation.ts: useSessionActivation > activate: await camera.open":
     "before the activation's record begins; the click's token decides",
-  "usePlayerSession.ts: usePlayerSession > activate: await loadScriptStorage":
+  "useSessionActivation.ts: useSessionActivation > activate: await loadScriptStorage":
     "before the activation's record begins; the click's token decides",
-  "usePlayerSession.ts: usePlayerSession > startFrom: then bridgeReady":
+  "useSessionActivation.ts: useSessionActivation > startFrom: then bridgeReady":
     "before the activation's record begins; the click's token decides",
-  "usePlayerSession.ts: usePlayerSession > startFrom: then begun": READMITS,
-  "usePlayerSession.ts: usePlayerSession > prepareRestore > begin: await host.request": READMITS,
-  "usePlayerSession.ts: usePlayerSession > prepareRestore > begin: catch host.request":
+  "useSessionActivation.ts: useSessionActivation > startFrom: then begun": READMITS,
+  "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: await host.request":
+    READMITS,
+  "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: catch host.request":
     "the trace restart's rejection, which reports with the Continue's own activation, admitted there (`reportHostError`)",
-  "usePlayerSession.ts: usePlayerSession > prepareRestore > begin: catch host.client.request":
+  "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: catch host.client.request":
     "drops the random release's refusal; nothing follows",
-  "usePlayerSession.ts: usePlayerSession > reportHostError > incident: catch origin.bridge.commitIncident":
+  "useSessionActivation.ts: useSessionActivation > reportHostError > incident: catch origin.bridge.commitIncident":
     "drops the incident's refusal; nothing follows",
   "useActivationRun.ts: useActivationRun > retire: catch ended.bridge.retireRun":
     "drops the retirement's refusal: the record retired already, and nothing follows",
@@ -312,48 +333,48 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "drops a release's refusal; nothing follows",
   "useFailureRecording.ts: useFailureRecording > settle: catch bridge.releaseRecording":
     "drops a release's refusal; nothing follows",
-  "usePlayerSession.ts: usePlayerSession > reportHostError: then starting": READMITS,
-  "usePlayerSession.ts: usePlayerSession > stopAt: then acknowledged": READMITS,
+  "useSessionActivation.ts: useSessionActivation > reportHostError: then starting": READMITS,
+  "useSessionActivation.ts: useSessionActivation > stopAt: then acknowledged": READMITS,
   // Reached from the activation bodies through the functions they call.
-  "usePlayerSession.ts: usePlayerSession > sendRandomRequest: then host.client.request": READMITS,
+  "useRandomControl.ts: useRandomControl > sendRandomRequest: then host.client.request": READMITS,
   // The clock's section (#1983): its observation, then the caller's body, which re-admits first (checked below).
   "useRuntimeSceneClock.ts: useRuntimeSceneClock > section > bridgeOf(current).section:callback: await observeIn":
     "the section's observation, before the caller's body: the activation work's body re-admits as it begins (`resolveRandomDraw`, checked below)",
   "useRuntimeSceneClock.ts: useRuntimeSceneClock > observeIn: await opened.send":
     "the section's observation, which shows only its own session's publication (`owned`); the body that acts for an activation re-admits first (`resolveRandomDraw`)",
-  "usePlayerSession.ts: usePlayerSession > resolveRandomDraw > ownedSection:callback: await section.send":
+  "useRandomControl.ts: useRandomControl > resolveRandomDraw > ownedSection:callback: await section.send":
     READMITS,
-  "usePlayerSession.ts: usePlayerSession > resolveRandomDraw: catch ownedSection": READMITS,
-  "usePlayerSession.ts: usePlayerSession > startFrom: finally settled":
+  "useRandomControl.ts: useRandomControl > resolveRandomDraw: catch ownedSection": READMITS,
+  "useSessionActivation.ts: useSessionActivation > startFrom: finally settled":
     "clears the in-flight markers it set, only while they are still its own",
-  "usePlayerSession.ts: usePlayerSession > applyDebugMode: finally bridgeOf.request":
+  "useDebugModeAndTrace.ts: useDebugModeAndTrace > applyDebugMode: finally bridgeOf.request":
     "clears the Debug mode asked, only while it is still this request's",
-  "usePlayerSession.ts: usePlayerSession > applyDebugMode: then bridgeOf.request.finally": READMITS,
-  "usePlayerSession.ts: usePlayerSession > primeAudio: catch element.play":
+  "useDebugModeAndTrace.ts: useDebugModeAndTrace > applyDebugMode: then bridgeOf.request.finally":
+    READMITS,
+  "useSessionMedia.ts: useSessionMedia > primeAudio: catch element.play":
     "drops a blocked play; nothing follows",
-  "usePlayerSession.ts: usePlayerSession > settlePlanJson: catch bridge.client.request":
+  "useKeptSession.ts: useKeptSession > settlePlanJson: catch bridgeNow.client.request":
     "drops the plan JSON's refusal; nothing follows",
-  "usePlayerSession.ts: usePlayerSession > loadScriptStorage: await readScriptStorage": SAVED_DATA,
-  "usePlayerSession.ts: usePlayerSession > readScriptStorage: await values.load": SAVED_DATA,
-  "usePlayerSession.ts: usePlayerSession > readScriptStorage: await capturedMedia.knownReferences.catch":
+  "useSavedValues.ts: useSavedValues > loadScriptStorage: await readScriptStorage": SAVED_DATA,
+  "useSavedValues.ts: useSavedValues > readScriptStorage: await values.load": SAVED_DATA,
+  "useSavedValues.ts: useSavedValues > readScriptStorage: await capturedMedia.knownReferences.catch":
     SAVED_DATA,
-  "usePlayerSession.ts: usePlayerSession > readScriptStorage: catch capturedMedia.knownReferences":
+  "useSavedValues.ts: useSavedValues > readScriptStorage: catch capturedMedia.knownReferences":
     SAVED_DATA,
-  "usePlayerSession.ts: usePlayerSession > keepSessionLater: await Promise.resolve": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepSessionLater: await keepOnce": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepOnce: await owned": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > owned: await operation": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await capturedMedia.promote": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await ctx.admit": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await discardKeptSession": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await forgetKeptSession": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await insertOrAcceptExisting": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await storageRoute": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > keepIn: await store.publish": KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > forgetKeptSession: await discardKeptSession.then":
+  "useKeptSession.ts: useKeptSession > keepSessionLater: await Promise.resolve": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepSessionLater: await keepOnce": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepOnce: await owned": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > owned: await operation": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await capturedMedia.promote": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await ctx.admit": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await discardKeptSession": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await forgetKeptSession": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await insertOrAcceptExisting": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await route.storageRouteNow": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > keepIn: await store.publish": KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > forgetKeptSession: await discardKeptSession.then":
     KEPT_SESSION,
-  "usePlayerSession.ts: usePlayerSession > forgetKeptSession: then discardKeptSession":
-    KEPT_SESSION,
+  "useKeptSession.ts: useKeptSession > forgetKeptSession: then discardKeptSession": KEPT_SESSION,
 };
 /** Calls that re-admit an activation, and calls that request or act for one. */
 const ADMITS = /^(?:goesOn|lives|owned|activationRun\.admits)$/u;
@@ -460,27 +481,29 @@ function waitsOf(file: string, scope: (path: string) => boolean) {
   }));
 }
 
-/** The names of `file`'s functions that `roots` call by name, transitively, the roots included. */
-function reachable(file: string, roots: readonly string[]): ReadonlySet<string> {
-  const source = ts.createSourceFile(
-    file,
-    readFileSync(resolve(process.cwd(), file), "utf8"),
-    ts.ScriptTarget.Latest,
-    true,
-  );
+/** The names of the functions of `files` that `roots` call by name, transitively, the roots included. */
+function reachable(files: readonly string[], roots: readonly string[]): ReadonlySet<string> {
   const functions = new Map<string, ts.Node[]>();
-  source.forEachChild(function collect(node): void {
-    const add = (name: string, body: ts.Node) =>
-      functions.set(name, [...(functions.get(name) ?? []), body]);
-    if (ts.isFunctionDeclaration(node) && node.name !== undefined) add(node.name.text, node);
-    if (
-      ts.isVariableDeclaration(node) &&
-      node.initializer !== undefined &&
-      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
-    )
-      add(node.name.getText(source), node.initializer);
-    node.forEachChild(collect);
-  });
+  for (const file of files) {
+    const source = ts.createSourceFile(
+      file,
+      readFileSync(resolve(process.cwd(), file), "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    source.forEachChild(function collect(node): void {
+      const add = (name: string, body: ts.Node) =>
+        functions.set(name, [...(functions.get(name) ?? []), body]);
+      if (ts.isFunctionDeclaration(node) && node.name !== undefined) add(node.name.text, node);
+      if (
+        ts.isVariableDeclaration(node) &&
+        node.initializer !== undefined &&
+        (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+      )
+        add(node.name.getText(source), node.initializer);
+      node.forEachChild(collect);
+    });
+  }
   const seen = new Set(roots);
   const queue = [...roots];
   for (let name = queue.shift(); name !== undefined; name = queue.shift())
@@ -499,11 +522,11 @@ function reachable(file: string, roots: readonly string[]): ReadonlySet<string> 
 }
 
 test("every wait of the page's activation work re-admits its activation, or is listed with why it needs none", () => {
-  const session = reachable("player/vue/src/usePlayerSession.ts", SESSION_ACTIVATION);
+  const session = reachable(SESSION_FILES, SESSION_ACTIVATION);
   const found = ACTIVATION_FILES.flatMap((file) =>
     waitsOf(
       file,
-      file.endsWith("usePlayerSession.ts")
+      SESSION_FILES.includes(file)
         ? (path) =>
             path
               .split(" > ")
@@ -522,42 +545,43 @@ test("every wait of the page's activation work re-admits its activation, or is l
   for (const { key, readmits } of found)
     if (ACTIVATION_WAITS[key] === READMITS) assert.ok(readmits, `${key} re-admits first`);
   // The clock runs a section's observation before its body: a body of the activation work re-admits as it begins.
-  const file = "player/vue/src/usePlayerSession.ts";
-  const source = ts.createSourceFile(
-    file,
-    readFileSync(resolve(process.cwd(), file), "utf8"),
-    ts.ScriptTarget.Latest,
-    true,
-  );
   // Each `ownedSection` call counts under its innermost named function, in the forms `reachable` follows: a
   // declaration, or an arrow or function expression a variable holds. A body that is not an inline block cannot
   // re-admit first, so it counts as one that does not.
   const bodies: string[] = [];
-  source.forEachChild(function visit(node: ts.Node, owner?: string): void {
-    if (ts.isFunctionDeclaration(node) && node.name !== undefined) owner = node.name.text;
-    if (
-      ts.isVariableDeclaration(node) &&
-      node.initializer !== undefined &&
-      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
-    )
-      owner = node.name.getText(source);
-    if (
-      ts.isCallExpression(node) &&
-      node.expression.getText(source) === "ownedSection" &&
-      owner !== undefined &&
-      owner !== "ownedSection" &&
-      session.has(owner)
-    ) {
-      const body = node.arguments[2];
-      const first =
-        body !== undefined &&
-        (ts.isArrowFunction(body) || ts.isFunctionExpression(body)) &&
-        ts.isBlock(body.body)
-          ? (body.body.statements[0]?.getText(source) ?? "")
-          : "";
-      bodies.push(`${owner}: ${/activationRun\.admits\(/u.test(first)}`);
-    }
-    node.forEachChild((child) => visit(child, owner));
-  });
+  for (const file of SESSION_FILES) {
+    const source = ts.createSourceFile(
+      file,
+      readFileSync(resolve(process.cwd(), file), "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    source.forEachChild(function visit(node: ts.Node, owner?: string): void {
+      if (ts.isFunctionDeclaration(node) && node.name !== undefined) owner = node.name.text;
+      if (
+        ts.isVariableDeclaration(node) &&
+        node.initializer !== undefined &&
+        (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+      )
+        owner = node.name.getText(source);
+      if (
+        ts.isCallExpression(node) &&
+        node.expression.getText(source) === "ownedSection" &&
+        owner !== undefined &&
+        owner !== "ownedSection" &&
+        session.has(owner)
+      ) {
+        const body = node.arguments[2];
+        const first =
+          body !== undefined &&
+          (ts.isArrowFunction(body) || ts.isFunctionExpression(body)) &&
+          ts.isBlock(body.body)
+            ? (body.body.statements[0]?.getText(source) ?? "")
+            : "";
+        bodies.push(`${owner}: ${/activationRun\.admits\(/u.test(first)}`);
+      }
+      node.forEachChild((child) => visit(child, owner));
+    });
+  }
   assert.deepEqual(bodies, ["resolveRandomDraw: true"], "each section body re-admits first");
 });

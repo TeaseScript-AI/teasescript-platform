@@ -1,13 +1,13 @@
 import { watch, type Ref } from "vue";
-import type { CapturedMediaRecord } from "../../../captured-media.js";
+import type { CapturedMediaRecord } from "../../../../captured-media.js";
 import {
   debugPhotoUses,
   type DebugExportCandidate,
   type DebugPhotoCandidate,
-} from "../../../debug-export-assembly.js";
-import type { ExportCaptureReply } from "../../../engine-bridge/session-protocol.js";
-import type { PlayerBridge } from "../../../player-bridge.js";
-import type { PlayerSession } from "../../../runtime-view.js";
+} from "../../../../debug-export-assembly.js";
+import type { ExportCaptureReply } from "../../../../engine-bridge/session-protocol.js";
+import type { PlayerBridge } from "../../../../player-bridge.js";
+import type { PlayerSession } from "../../../../runtime-view.js";
 import type { ActivationRun } from "./useActivationRun.js";
 
 /*

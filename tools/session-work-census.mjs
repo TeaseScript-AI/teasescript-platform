@@ -7,7 +7,8 @@
 // its callers are walked in turn. Where the walk ends is an entry point: a named function nothing in `player/` calls,
 // an anonymous function passed as a value (a callback), or a reference that is not a direct call (an escape: a value
 // passed, bound or stored). An object literal's property that holds a forwarder is followed through its property's
-// references, and reported as an escape too, so the admit-list names it. The test that runs the census
+// references, and reported as an escape too, so the admit-list names it; a destructured binding that declares the
+// variable a shorthand property returns is no reference of that property. The test that runs the census
 // (`tests/player-session-work-census.test.ts`) holds the classifications; this tool only discovers.
 
 import { readdirSync } from "node:fs";
@@ -266,6 +267,8 @@ function walk(service, program, base, rel, surfaces, within) {
         const file = program.getSourceFile(entry.fileName);
         const at = tokenAt(file, entry.textSpan.start);
         if (at === undefined || isTypeOrModuleReference(at) || isDeclarationName(at)) continue;
+        // A shorthand property's own variable, declared by destructuring, is no caller of the property.
+        if (declaresShorthand(program.getTypeChecker(), node, at)) continue;
         const where = rel(entry.fileName);
         const call = directCall(at);
         if (call === undefined) {
@@ -411,6 +414,17 @@ function propertyHolding(node) {
   if (ts.isBindingElement(parent) && (parent.propertyName === node || parent.name === node))
     return parent.name;
   return undefined;
+}
+
+/**
+ * Whether `at` is the destructured binding that declares the variable the shorthand property `node` holds, which
+ * `findReferences` on the property lists as a reference: `const { a } = owner; return { a };`.
+ */
+function declaresShorthand(checker, node, at) {
+  if (!ts.isShorthandPropertyAssignment(node.parent) || !ts.isBindingElement(at.parent))
+    return false;
+  const value = checker.getShorthandAssignmentValueSymbol(node.parent);
+  return value?.declarations?.includes(at.parent) === true;
 }
 
 /** Whether `node` is the name a declaration or a type member declares, which `findReferences` lists as a reference. */
