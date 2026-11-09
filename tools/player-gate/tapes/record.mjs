@@ -29,7 +29,7 @@ const load = (path) => import(pathToFileURL(join(dist, path)).href);
 const { createInProcessBackend } = await load("player/engine-bridge/in-process.js");
 const { connectBridge } = await load("player/engine-bridge/client.js");
 const { nodeWorkerPort } = await load("player/engine-bridge/node-client.js");
-const { PlayerBridge } = await load("player/player-bridge.js");
+const { PlayerBridge } = await load("player/runtime/player-bridge.js");
 const { PackageFolder } = await load("playground/package-folder.js");
 const { driveTape, isComplete } = await load("tests/gate/driver.js");
 const { judgeTape } = await load("tests/gate/oracle.js");

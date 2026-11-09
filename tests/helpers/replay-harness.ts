@@ -32,14 +32,14 @@ import {
   type PlayerFileStoreAnswer,
   type PlayerLockAnswer,
   type PlayerRuntimeSession,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
 import {
   activePlayerRuntimeInteraction,
   playerRuntimePacingGate,
-} from "../../player/runtime-view.js";
+} from "../../player/runtime/runtime-view.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type { MediaLoadReport } from "../../src/runtime/operations/media-reports.js";
-import type { DebugAnswerInput } from "../../player/debug-export.js";
+import type { DebugAnswerInput } from "../../player/debug/debug-export.js";
 import type { MediaProgressReport } from "../../src/playback.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import type { CapturedMediaStore } from "../../player/media/captured-media.js";

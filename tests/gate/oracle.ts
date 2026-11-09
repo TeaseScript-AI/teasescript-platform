@@ -1,13 +1,13 @@
-import { compilePlayerProject } from "../../player/compile-project.js";
+import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
-import type { PlayerProject } from "../../player/runtime-adapter.js";
+import type { PlayerProject } from "../../player/runtime/runtime-adapter.js";
 import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   playerRuntimeSnapshot,
   restorePlayerRuntimeSessionAt,
   type PlayerRuntimeSession,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
 import { adapterCall } from "../helpers/replay-harness.js";
 import type { TapeEntry, TapeReply } from "./tape.js";
 

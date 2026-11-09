@@ -5,7 +5,7 @@ import test from "node:test";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { createInProcessBackend } from "../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
-import { PlayerBridge } from "../player/player-bridge.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
 import type { PlayerCriticalState } from "../player/engine-bridge/session-protocol.js";
 import { ADAPTER_OPS } from "./helpers/replay-harness.js";
 import {

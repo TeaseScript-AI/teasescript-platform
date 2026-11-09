@@ -1,7 +1,7 @@
 import { BridgeRequestError } from "../../player/engine-bridge/client.js";
-import type { PlayerBridge } from "../../player/player-bridge.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
-import type { PlayerSession } from "../../player/runtime-view.js";
+import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import { candidatesFor, type Candidate } from "./candidates.js";
 import { OUTCOMES, UnfamiliarResult } from "./outcomes.js";
 import { recordClient, type TapeEntry } from "./tape.js";

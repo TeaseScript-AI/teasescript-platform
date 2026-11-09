@@ -1,4 +1,4 @@
-import type { PlayerForegroundPresentation } from "../../player/model.js";
+import type { PlayerForegroundPresentation } from "../../player/presentation/model.js";
 import {
   activeInteraction,
   activePlayerRuntimeCapture,
@@ -11,7 +11,7 @@ import {
   playerRuntimeForm,
   playerRuntimePermanentButtons,
   type PlayerSessionView,
-} from "../../player/runtime-view.js";
+} from "../../player/runtime/runtime-view.js";
 import type { RuntimePendingActionSnapshot } from "../../src/runtime/actions/model.js";
 import type { MediaLoadReport } from "../../src/runtime/operations/media-reports.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
@@ -19,7 +19,7 @@ import type {
   PlayerCaptureAnswer,
   PlayerFileStoreAnswer,
   PlayerLockAnswer,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
 
 /*
  * The K/F tape driver's candidate table (the L5 gate's tape plan, design round 1's construction): one row per kind of
