@@ -417,14 +417,14 @@ export const OBLIGATION_SITES = [
     method: "boundaryAtRead",
     runs: "the walk",
     published: "an own read's boundary (C9)",
-    undecided: "none: ingress is structural (r4.113)",
+    undecided: "none: ingress is structural",
     declined: "none",
   },
   {
     method: "boundaryFor",
     runs: "the walk",
     published: "an item's ingress boundary (C9)",
-    undecided: "none: ingress is structural (r4.113)",
+    undecided: "none: ingress is structural",
     declined: "an ingress the store owns (`ownIngress`)",
   },
   {
