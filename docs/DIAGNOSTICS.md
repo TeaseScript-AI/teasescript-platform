@@ -39,7 +39,7 @@ its fix. For arguments, keys, iterables, and button values, a generic unknown-ty
 check already warns about a rejected known type (owner review of #1437, 2026-10-29).
 
 An operator's expansion of one unknown operand counts as one offending type, with one diagnostic and one check
-(2026-10-23, #2089). A member access likewise gets one warning per access and check: when the property's own answer
+(the lead, 2026-10-23). A member access likewise gets one warning per access and check: when the property's own answer
 explains its unknown type, an unknown receiver adds no second warning there. The receiver's own absence still warns
 at its own access, and the retained warning states the cause (2026-10-30, #1481).
 A type test that holds removes types, not the read's cause: where no definition answers the narrowed read, it takes
@@ -104,12 +104,12 @@ property step (2026-11-05, #1764).
 ### Diagnostic and check sites
 
 A member read marks the whole access, including its receiver. An operator marks its offending operand, or the
-operation once if there is no offending operand. An obligation uses its diagnostic's site (2026-10-26, #2089).
+operation once if there is no offending operand. An obligation uses its diagnostic's site (the lead, 2026-10-26).
 
 An external-data boundary sits at the ingress expression, including inside a literal, with the destination's
 target and contract. A record literal's one record-level boundary uses the first evaluated ingress cell.
 A definite non-fitting contribution inside nested literals marks the innermost offending expression recursively
-(2026-10-24, #2089). A stop preserves the unstopped site's choice, including an add reported at its argument
+(the lead, 2026-10-24). A stop preserves the unstopped site's choice, including an add reported at its argument
 rather than an inner literal (2026-10-28, #1063).
 
 For named external data in a nested literal cell, a selection, `otherwise`, `get`, or copy method has no offending
@@ -117,13 +117,13 @@ operand: the destination's check marks the operation once, at the store's value 
 marks the named read that brought the type. Inline host data in an `otherwise` fallback or `get` default likewise
 uses the store's value span, while typed `load` or `fromJson` defaults keep the call's site. A merged host-member
 and own-read or named-data item uses the store's value span for the destination's merged place, while the
-member's own root-place check stays at the member read (2026-10-26, #2089).
+member's own root-place check stays at the member read (the lead, 2026-10-26).
 
 For `askChoice` with an inline external option, the boundary and a written destination's warning and copy check
 sit at that option's expression. With no destination store, the boundary sits at the consumer's operand against
 `unknown`. For options held in a variable, the boundary stays at that variable's store, targeting its element,
 and the destination's warning and check stay at the answer. The choice result adds no ingress of its own, and
-literal-only options add no boundary (2026-10-24, #2089).
+literal-only options add no boundary (the lead, 2026-10-24).
 
 ### Budget-deferred obligations
 
