@@ -108,64 +108,30 @@ function stepped(
 }
 
 /**
+ * Begins the connection's recording and the trace's epoch anew where the deciding function says
+ * (`HistoryEffects.recording`): a committed restore, or the parked session reinstated. Nothing else restarts them.
+ */
+function restartAt(
+  context: PlayerOpsContext,
+  sessions: HostSessions,
+  applied: { readonly recording: string | null },
+): void {
+  if (applied.recording === null) return;
+  beginRecordingAt(heldSession(sessions, applied.recording), context);
+  context.trace?.reset("restore");
+}
+
+/**
  * Debug's rewind in the host (docs/DEBUGGER.md "Rewind"): the history's control and steps, each through its core
  * (`advanceHistory`), and the session-free reads of a held session that rewind and adoption take.
  */
 export function historyOps(context: PlayerOpsContext): BridgeOps {
+  return { ...historyControlOps(context), ...rewindStepOps(context), ...rewindSettleOps(context) };
+}
+
+/** The history's control (open, enroll, close) and its session-free reads (the timeline, a state's saved values). */
+function historyControlOps(context: PlayerOpsContext): BridgeOps {
   const { history } = context;
-  /**
-   * Begins the connection's recording and the trace's epoch anew where the deciding function says
-   * (`HistoryEffects.recording`): a committed restore, or the parked session reinstated. Nothing else restarts them.
-   */
-  const restartAt = (sessions: HostSessions, applied: { readonly recording: string | null }) => {
-    if (applied.recording === null) return;
-    beginRecordingAt(heldSession(sessions, applied.recording), context);
-    context.trace?.reset("restore");
-  };
-  /**
-   * The rest of a prepared step to `position`: reads its snapshot and restores the candidate, with the marks the
-   * preparation gave it. A read that fails, or a step abandoned while it read, keeps nothing: the step is dropped, and
-   * the history, the shown session and the recording stay as they were.
-   */
-  const prepareAt = async (
-    sessions: HostSessions,
-    id: number,
-    prepared: HistoryOutcome,
-    position: HistoryPosition,
-    events: readonly InterpreterEvent[],
-    planToken: string,
-  ): Promise<OpOutcome> => {
-    if (prepared.kind === "refused") return { result: prepared };
-    const step = prepared.step!;
-    // The step's own delivery, taken before anything awaits: the candidate is that delivery's until its reply is
-    // posted, whatever delivery is innermost when the read settles.
-    const delivery = context.delivery.scope();
-    let made: { readonly held: HeldSession; readonly id: string };
-    try {
-      const json = await history.core(id)!.snapshot(position.id);
-      made = restored(
-        context,
-        sessions,
-        planToken,
-        json,
-        events,
-        prepared.effects.marks!,
-        delivery,
-      );
-    } catch (error) {
-      history.drop(id, step);
-      throw error;
-    }
-    if (history.core(id)?.pendingStep !== step) {
-      sessions.delete(made.id);
-      return refused("the step was abandoned while it read");
-    }
-    history.prepared(id, step, made.held.historyKey, made.id, delivery);
-    return stepped(
-      { kind: "prepared", history: id, step },
-      { id: made.id, view: introduction(made.held, context, false) },
-    );
-  };
   return {
     // The session's saved values as its state holds them, for an adoption.
     captureStorage: {
@@ -257,10 +223,73 @@ export function historyOps(context: PlayerOpsContext): BridgeOps {
         });
         if (outcome.kind === "refused") return { result: outcome };
         releaseAll(sessions, applied.released);
-        restartAt(sessions, applied);
+        restartAt(context, sessions, applied);
         return { result: done(outcome, applied) };
       },
     },
+    // The history's whole timeline, for a main side whose deltas did not continue its revision.
+    historyTimeline: {
+      session: "none",
+      checkArguments: (args) =>
+        isRecord(args) && exactly(args, ["history"]) && isSerial(args.history),
+      run: (args) => {
+        // EVIDENCE: validation: checkArguments accepted the serial.
+        const { history: id } = args as { readonly history: number };
+        const core = history.core(id);
+        return { result: core === null ? null : core.timeline() };
+      },
+    },
+  };
+}
+
+/** A rewind step prepared and read: Back and Forward, through `prepareAt`. */
+function rewindStepOps(context: PlayerOpsContext): BridgeOps {
+  const { history } = context;
+  /**
+   * The rest of a prepared step to `position`: reads its snapshot and restores the candidate, with the marks the
+   * preparation gave it. A read that fails, or a step abandoned while it read, keeps nothing: the step is dropped, and
+   * the history, the shown session and the recording stay as they were.
+   */
+  const prepareAt = async (
+    sessions: HostSessions,
+    id: number,
+    prepared: HistoryOutcome,
+    position: HistoryPosition,
+    events: readonly InterpreterEvent[],
+    planToken: string,
+  ): Promise<OpOutcome> => {
+    if (prepared.kind === "refused") return { result: prepared };
+    const step = prepared.step!;
+    // The step's own delivery, taken before anything awaits: the candidate is that delivery's until its reply is
+    // posted, whatever delivery is innermost when the read settles.
+    const delivery = context.delivery.scope();
+    let made: { readonly held: HeldSession; readonly id: string };
+    try {
+      const json = await history.core(id)!.snapshot(position.id);
+      made = restored(
+        context,
+        sessions,
+        planToken,
+        json,
+        events,
+        prepared.effects.marks!,
+        delivery,
+      );
+    } catch (error) {
+      history.drop(id, step);
+      throw error;
+    }
+    if (history.core(id)?.pendingStep !== step) {
+      sessions.delete(made.id);
+      return refused("the step was abandoned while it read");
+    }
+    history.prepared(id, step, made.held.historyKey, made.id, delivery);
+    return stepped(
+      { kind: "prepared", history: id, step },
+      { id: made.id, view: introduction(made.held, context, false) },
+    );
+  };
+  return {
     // Back to `point`, restored from its snapshot; the first Back parks the live session for Return.
     rewindBack: {
       session: "none",
@@ -351,6 +380,13 @@ export function historyOps(context: PlayerOpsContext): BridgeOps {
         return prepareAt(sessions, id, outcome, target, events, parked.planToken);
       },
     },
+  };
+}
+
+/** A prepared step settled: committed, dropped, returned from, or adopted. */
+function rewindSettleOps(context: PlayerOpsContext): BridgeOps {
+  const { history } = context;
+  return {
     // The page shows the prepared step's candidate: the transfer applies, and the recording begins there.
     rewindCommit: {
       session: "none",
@@ -365,7 +401,7 @@ export function historyOps(context: PlayerOpsContext): BridgeOps {
         const { outcome, applied } = history.commit(id, step);
         if (outcome.kind === "refused") return { result: outcome };
         releaseAll(sessions, applied.released);
-        restartAt(sessions, applied);
+        restartAt(context, sessions, applied);
         return { result: done(outcome, applied) };
       },
     },
@@ -396,7 +432,7 @@ export function historyOps(context: PlayerOpsContext): BridgeOps {
         const { outcome, applied } = history.advance(id, { kind: "return" });
         if (outcome.kind === "refused") return { result: outcome };
         releaseAll(sessions, applied.released);
-        restartAt(sessions, applied);
+        restartAt(context, sessions, applied);
         return { result: done(outcome, applied) };
       },
     },
@@ -429,18 +465,6 @@ export function historyOps(context: PlayerOpsContext): BridgeOps {
         );
         if (outcome.kind === "advanced") releaseAll(sessions, applied.released);
         return { result: done(outcome, applied) };
-      },
-    },
-    // The history's whole timeline, for a main side whose deltas did not continue its revision.
-    historyTimeline: {
-      session: "none",
-      checkArguments: (args) =>
-        isRecord(args) && exactly(args, ["history"]) && isSerial(args.history),
-      run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted the serial.
-        const { history: id } = args as { readonly history: number };
-        const core = history.core(id);
-        return { result: core === null ? null : core.timeline() };
       },
     },
   };
