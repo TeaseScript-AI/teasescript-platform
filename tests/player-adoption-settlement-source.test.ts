@@ -16,7 +16,7 @@ const REWIND = "session/useSessionRewind.ts";
 /**
  * Each read of an adoption's saved values (`captureStorage`) in `source`, and how its settlement is wired: a `.then`
  * whose reply and rejection callbacks each call `settleAdoption` and nothing else, awaited as it is, with nothing chained
- * after it; `settleAdoption` referenced nowhere else; and `settleAdoption`'s first statement returning unless
+ * after it; `settleAdoption` referenced nowhere else; and `settleAdoption`'s first statement returning `false` unless
  * `ownsShown(...)` holds. What a settlement says is not seen here: that no stale failure notice shows once the page moved
  * on is the rewind read family's (`player-session-rewind.test.ts`).
  */
@@ -75,10 +75,12 @@ function adoptionSettlements(source: ts.SourceFile): { reads: number; problems: 
         first !== undefined &&
         ts.isIfStatement(first) &&
         ts.isPrefixUnaryExpression(first.expression) &&
+        first.expression.operator === ts.SyntaxKind.ExclamationToken &&
         ts.isCallExpression(first.expression.operand) &&
         ts.isIdentifier(first.expression.operand.expression) &&
         first.expression.operand.expression.text === "ownsShown" &&
-        ts.isReturnStatement(first.thenStatement);
+        ts.isReturnStatement(first.thenStatement) &&
+        first.thenStatement.expression?.kind === ts.SyntaxKind.FalseKeyword;
       if (!guarded)
         problems.push(`${line(node)}: settleAdoption does not begin with its ownership check`);
     }
@@ -113,6 +115,18 @@ test("an adoption's read reaches settleAdoption only from its two callbacks, wit
   );
   assert.equal(of('const c = await host.read(s, "captureStorage");').length, 1);
   assert.equal(of("async function settleAdoption() { await write(); }").length, 1);
+  // The ownership check is `if (!ownsShown(...)) return false;`: another prefix operator is no check.
+  const guardedBy = (operator: string) =>
+    of(
+      `async function settleAdoption() { if (${operator}ownsShown(o, s)) return false; await write(); }`,
+    );
+  assert.deepEqual(guardedBy("!"), []);
+  for (const operator of ["+", "-", "~"])
+    assert.deepEqual(
+      guardedBy(operator),
+      ["1: settleAdoption does not begin with its ownership check"],
+      operator,
+    );
   // A second settlement chained after the read's, which calls settleAdoption again, is found.
   const read =
     'await host.read(s, "captureStorage").then((c) => settleAdoption(o, s, { capture: c }), (e) => settleAdoption(o, s, { error: e }))';
