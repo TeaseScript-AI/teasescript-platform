@@ -146,10 +146,11 @@ export class Contracts {
     if (result !== null) this.results.set(store, result);
     const checked = result === null ? null : checkedType(result);
     if (checked === null) return null;
-    // (where a stop left the settled pass's contract incomplete, the receiving completion's lists each object's properties
-    // as its listings found them: the check lists them by the store's own records, then as the program writes them
-    // (#2215). The settled pass's own lists them by the first asker's records, so where another store asked first the
-    // two differ (#2218). The recorded result, which the lost-check gate reads, keeps the completion's order.)
+    // (where a stop left the settled pass's contract incomplete, the receiving completion's lists each object's
+    // properties as its listings found them: the check lists them by the store's own records, then as the program writes
+    // them (#2215). The settled pass's own lists them by the first asker's records: where another store asked first, with
+    // records that rank them otherwise, the two differ (#2218). The recorded result, which the lost-check gate reads,
+    // keeps the completion's order.)
     const type =
       settled !== null && result !== settled ? this.#inRecordOrder(checked, [value]) : checked;
     const name = [
