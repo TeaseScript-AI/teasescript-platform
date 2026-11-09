@@ -41,7 +41,7 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's F1") is a review reference, 
 
 | label | meaning |
 | --- | --- |
-| `PLAN` | the port plan for the new type core, outside the repository; historical |
+| `PLAN` | the port plan for the new type core, a document outside the repository; its method-category extensibility rules and W34's work-product limits still apply |
 | `G1` | production graph rules govern returnability, reachable registrations, and file-transfer targets ([r4-26](solver-and-work.md#r4-26)) |
 | `G2` | preserve assignment targets in suggested fixes; never replace a store destination with a temporary value |
 | `S2` | the port’s item and result shapes, including shared ingress cells in solver components |
@@ -51,7 +51,7 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's F1") is a review reference, 
 | `G5` | cut whole-copy cycles finitely with distinct member ports; separately, retain a written spelling covering every concrete kind ([r4-181](admission.md#r4-181)) |
 | `S5` | historical port step introducing the candidate backend and its first integrated language slice |
 | `S6` | the admission and boundary carrier design for shared transfers, landings, and source identities |
-| `S6-CARRIERS` | the port plan's design document for step S6, the carrier transport, outside the repository; historical |
+| `S6-CARRIERS` | the port plan's carrier design for step S6, a document outside the repository; it defines the operand roles, ingress identity, landings, alias classes and shared admission work the core still follows |
 | `S6c` | the shared-source value work family using one sound class key across discovery paths ([r4-85](sharing.md#r4-85)) |
 | `S7` | historical port step adding runtime support for the discharge map’s new checks |
 | `S8` | the message and budget-fallback work family, including fresh finishing and warning-owned boundary requests ([r4-226](stops-and-finishing.md#r4-226)) |
