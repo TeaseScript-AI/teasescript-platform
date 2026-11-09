@@ -79,6 +79,21 @@ authority and unjustified duplicated moving facts. Prefer targeted correction or
 append-only amendments when existing wording should carry the meaning. Preserve authority, conditions,
 order, exceptions, executable detail, and resistance to misinterpretation.
 
+### Charging-lint evidence
+
+Size a charging-lint claim to its evidence: name the forms it checks, unseen execution forms and trusted caller/property
+boundaries; do not turn repeated findings about unseen TypeScript forms into an effect checker without an owner
+decision. The narrowing modules' entry-charge discipline requires every function body to charge on entry except an
+inline callback handed to the charging iterator, with its lint check.
+
+For `contract/objects.ts`, the charging lint guards ordinary edits through a closed admitted language, with five
+fail-closed positive enumerations: whole-type mutual assignability for widening (four trivial exceptions), `sorted`
+candidates and uses, callable exports as local function declarations, mixed-element collections on every walked or
+written collection (seven library names), and `any`/`unknown` at every value-position node. Runtime provenance through
+carriers remains a reviewed boundary with the design witnesses as the named residual, including the admitted
+`r2NominalEntry` witness; the lint does not prove that residual. Support the charging invariant with mutants, the family
+growth bar and areas compared with work included.
+
 ### One home for each language rule
 
 Each TeaseScript rule (evaluation order, which code runs, protected names, keyword and unit lists,

@@ -167,9 +167,11 @@ Each class has one of four states:
 
 - `pass`: agreement, or the legacy route's heap exhausted in its analysis while the core finished (legacy behaviour the
   switch resolves);
-- `attributed`: the difference has a known rule class (written copies, absent properties, ingress; the checks or plan
-  a lowering reads; wording; a stop that only one sharing mode, or both differently, take), and the switch still owes
-  each source its accepted expectation, a stop through the stop oracle's lost-check judgment;
+- `attributed`: for `differs/rule`, `/checks`, `/plan` and `/wording`, a pair takes its binding's group only where key,
+  mode, class and guard all match; otherwise it is `changed` (bound but its reading or class differs) or `unbound`, both
+  open until re-adjudication. Only a `conforms` group is attributed for those four classes. Sharing-dependent stop
+  classes retain their attribution; the switch still owes each source its accepted expectation, a stop through the stop
+  oracle's lost-check judgment;
 - `accepted (condition 1; condition 2 list)`: from taxonomy v5, `declined/lost check`, a program the core declines
   where a stop lost a check it requires (#1781), at the natural allowance and at the control alike. #1526 decision 2's
   condition 1 accepts it (the legacy compiles); condition 2 re-assesses every such case before the switch;
@@ -182,6 +184,17 @@ The verdict line is `gate: green` only when no row is `open`. A result the class
 class or two classes take, a result outside the manifests, or a source recorded twice with different results fails
 the run (`gate: failed`, exit 1). An exclusion text or a changed diagnostic code that no taxonomy version decides needs
 a new version with a witness before the gate can pass. `--gate` exits 1 unless the verdict is `green`.
+
+The adjudicated groups in `tests/families/shadow-groups/groups.json` and their `bindings.jsonl.gz` supply each grouped
+pair's verdict, replacing bulk attribution; `pairGuard` is the SHA-256 of the classifier's reading of the pair. A
+`defect` group stays open until its issue is resolved and a new table records it; a `pending` group stays open until its
+construction and a new table. Each group names its state, title, witness and evidence, and an open group names what
+closes it. `bind.mjs` builds bindings from the adjudication and its run, recomputes the raw-publication guard on every
+record and refuses any mismatch; re-adjudication replaces both files whole, with history by version.
+
+Claim gate movement only from replays; counts projected before a construction's replay are ceilings. Before reading the
+switch verdict, add independent area sources for accepted calls, camera forms and tag predicates that neither gate
+sources nor converted units exercise.
 
 ## Checks and corpora by component
 
@@ -210,6 +223,74 @@ of the diff, the reviewer finds its ground and checks that the units added are n
 once (a repeated question). A mechanical check of grounds was tried and dropped (#2051): reading a pin's text, it stayed
 open to a pin written in a form it did not read. A change to a test helper lists only a suite whose pins it holds, not
 every suite that imports it.
+
+### Compiler campaign evidence
+
+The maintained `tests/families/plans.mjs` comparison checks the whole plan, diagnostics, charge trace and questions
+exactly in four modes, including resumed output records in its verdict; it refuses the same build as both trees. Judge
+each compile, each analysis in a held-stop search and the search's work between analyses separately: units past four
+times the program's natural compile allowance are a stall, including a run at a test allowance; the per-run 1,800-second
+safety net records `uncharged`, never a stall.
+
+When either tree leaves nodes unanswered, compare the common answered prefix by hash: answers, records unless a side
+stopped at a binding, every occurrence both answered, and route. A differing prefix is a difference; an agreeing prefix
+carries `prefix` on the unanswered run. Count a run as `unansweredAlike`, separately from ordinary agreement, only when
+both leave the same count unanswered and publish the same recorded parts; missing parts or counts cannot establish it.
+An alike source is listed separately and is not rerun; closure requires agreed plus alike to equal all sources, and
+totals whose alike counts do not add up are refused (an older missing alike total reads as zero).
+
+Read rerun records as judgment attempts in the supplied order: the latest replaces the previous attempt only where
+either stalled. Two completed attempts are repeats and are refused, naming the place, if their results differ; replay
+records are never replaced, and counts, verdicts and the index use only the selected attempt.
+
+Every stall record carries its tree, mode and check, including a stored-base-only stall and a crash between runs; the
+saved stall index preserves them. Count fatal V8 errors and signals as crashes per tree, never as unit-limit stops; a
+head crash without a base crash exits 3 before difference exit 1. Each source process receives `--memory` as its heap
+independently of `NODE_OPTIONS`; probe V8's effective heap in three processes, report a failed probe, and report
+`nodeOptions.heapLimit` in the total and work record where it differs from the source's. Area growth summaries are
+advisory, excluding and counting runs stopped on either tree; stored-area state reports reasons, grants and over-limit
+runs, including older records without a reason. Use `stalls.mjs`'s total as the campaign's evidence total.
+
+Sample per-tree peak heap in the charge hook every 65,536 charged units and at run end, retain exact MiB in work
+records, and carry the base peak into the head's start message so a head abort does not lose it. Count runs above 80
+percent of V8's heap limit as `nearCap` per generator and in the total, naming them in output: sampled peaks are
+advisory, never stalls, exit criteria or stored baseline fields. Record each built tree's actual question-grant,
+work-ledger and publication-hash capabilities in the work header and total, with a compiled test against the real
+exports so a rename cannot silently remove them.
+
+Submit exactly the checked, complete zero-based shard list: reject missing, repeated, out-of-range or malformed items
+and mixed shard counts. The submission wrapper forwards only its fixed admitted queue options and refuses any option
+that could change or multiply the item set; test every forwarded option against the actual received items. A batched
+area is complete only when its batches cover every source; explicit source lists refuse empty, malformed, unknown or
+repeated places and cannot be combined with store, shard or only selection.
+
+Complete every baseline fill whose jobs have started; supersede only a fill with no started job. A seed contains each
+area's plan, no shard, the manifest naming the compiler build and the shard table; imports validate the received folder
+as external data, including plan version, area, positive manifest-matching shard count and complete ordered entries. The
+manifest's recorded shard count controls filling and comparison, including older counts; refuse a first writer using
+another count, and require complete coverage when comparing across counts. Adopt a seed or check it equal; accept a
+shard only against the central manifest and plan, its expected shard membership and a source-bound certificate for every
+stall. Rerun a stalled source alone at the plan's limits: if it finishes, rerun the whole shard once and fail if it
+stalls again; if it stalls alone, keep the stall and its isolated-run record. Compare an existing shard by its lines and
+refuse differences without replacement; baseline status succeeds only when the seed names its build and every recorded
+area is complete.
+
+For corpus writes, the central queue's `data`, `write`, `command` and `data_copies` declarations govern the busy gate,
+whose claim ends at that declaration boundary, not at process-table visibility. Use atomic temporary-file-and-rename
+writes and before/after hashes for undeclared readers; describe only what the records establish. Take declared paths
+whole and identify kits by real-directory device/inode and real-path ancestry, resolving linked kits where the gate
+runs, outside the hidden-corpus sandbox. State the gate's bind-containment and retrospective log-to-attempt join
+boundaries.
+
+Corpus readers use a caught binding only as a direct guard argument; text guards may read properties through
+`caughtProperty(e, k[, onThrow])`, `e` and `??`, with the two enclosing-catch exceptions classified by site. Each
+admitted guard is total with one result type: `caughtValue` returns a string for every thrown value, taking a string
+property as read, else JSON text, else `describeCaught`. Admit the string forms, the two boolean tests, `caughtPlus`
+with literal text and `caughtText` compared with a literal or followed by `??` and a text guard; byte-identical
+`caughtJson` is not a binding guard. Snapshots use `JSON.stringify`'s exact text whenever it returns a string; otherwise
+descend one level with a marker, applying the depth-1,000 cap only to that descent. The successful-text path uses no
+JavaScript recursion: parse the JSON text and use an explicit-stack exact rebuild only for raw texts or key orders a
+plain object cannot keep. Exercise every guard and reader template with the same enumerated hostile values.
 
 ## Test admission and consolidation
 
@@ -246,6 +327,11 @@ decisions stop and when. A test that needs another projection adds it there inst
 recorded evidence run, with their runner and module contract (`tests/families/README.md`). Their runs are outside CI:
 before a type-core review round, the builder runs the affected areas against the base and head builds and reports the
 counts. CI runs only `npm run test:families`, which checks that every module still reproduces its recorded run.
+
+The type-core fixture's narrowing holds form one closed map of named records, each with its reason and issue. In every
+mode, require each name to exist, have an N cell, be held for its own independently derived reason and still differ from
+its record; compare causes as a multiset and report outcome, site, context and N10 payload separately. A matching record
+returns to ordinary assertions; a matching hold fails the completeness check.
 
 ### Sampled sweeps
 
@@ -395,6 +481,10 @@ lifecycle, and a representative ordinary multi-`say` integration path. This
 pattern is a test-isolation technique, not a source compatibility promise or
 permission to hide behavior that the test actually owns.
 
+The solver's `active-read` and `abandon-return` forget handoffs have trusted-API invariant witnesses; the
+admitted-source probes did not reach them, which is evidence rather than an unreachability proof. Count only completed
+source runs, and revisit both witnesses when a feature runs a component's first computation inside a decision.
+
 ## Runtime-check evidence rule
 
 A test that claims a type constraint is actually enforced must not only check
@@ -424,6 +514,77 @@ in enforcement asserts all three layers. Asserting the presence of one owed
 check is a focused lowering assertion about the subject under test, not the
 broad instruction-plan snapshot that the conformance-corpus section
 discourages.
+
+### Type-core stop preservation
+
+Derive the obligation inventory from admission's code, listing each obligation-creating site with its actual published,
+marked-undecided and reasoned-decline exits; key the fresh pass and finishing read to it. Bind the inventory
+structurally: find every syntax-tree call from obligation-creating consumers into admission, requiring each callee to be
+inventoried or listed as a read with its reason, including every host member. Comments cannot count as calls and new
+methods must be caught regardless of name; side effects hidden in a listed read or run remain a review matter against
+that reason. The matrix measures losses at current stops; the structural guard detects obligations later code adds, so
+neither replaces the other.
+
+A retained boundary carries its kinds through discharge without re-deriving them from the destination; direct and
+composed questions use the finishing read's ordered sources.
+
+Generate the stop matrix across consumer positions (destination stores, direct consumers, single- and multi-site
+arguments, returns and conditions), value shapes (mixed list/set/dict literals, nested values, scalar/list/object
+ingress and copies) and four modes, retaining the review witnesses. For every ingress shape, cross default provenance:
+literal, named written variable, named inferred variable and call. At every stop compare diagnostics, the whole plan and
+composed question APIs (`valueAt`, `project`, `properties`, element and member reads) with unstopped answers, requiring
+a retained answer or an owning mark where a check is owed. Keep the structural guard, expanded matrix, whole-plan
+mutants, named-exception recounts and four-mode unstopped comparison together through later ports.
+
+Compare stopped diagnostic messages exactly with the unstopped message or its own words rendering from the message
+module, keeping every other field exact; never parse author text to infer equivalent wording. The extra words rendering
+is test-only and adds nothing to author output, plans or checkpoints.
+
+For a combined stop's equivalent marks, compare accepted domains by an independent predicate over sets of kinds at the
+same kind, target and site, never message text: only marks that owe all and only that slot's checks and whose
+intersected domain equals the reference domain satisfy it. A wider accepted domain must fail the oracle.
+
+Use one per-content check ledger on each side: published copies less the copies represented by owning records, one
+accepted combined-stop replacement, a marked store's records and, on the stopped side, one copy formed only with the
+marks. The remaining counts must match: surplus means extra check, deficit means lost check, and an owning record whose
+side publishes no corresponding check is lost on either side. Match obligation ownership by content, never object
+identity.
+
+A standing null-check replacement is limited to the operator operand, for-iterable and repeat-count consumer pairs named
+by both checks' own words, requiring the same target text, whole site and boundary and a domain without null or unknown
+inside the null check's `against`. Replace one copy at a time, compare order and retain the replacing check's own
+content. Identify decisions by list, place, exact path and occurrence; preserve repeated occurrences in order, compare
+counts and pair by order, and report repetitions separately from the verdict.
+
+A combined-stop check may pair with its demand-only reference through a written-leaf proof only when the stopped kinds
+exactly equal the declared leaf domain reached from the label root through every recorded step. Kind, whole site,
+boundary, `against` and all other fields must agree, except read-derived `fits`, `besides`, `present`, provenance
+context and detail must equal what the proven kinds and proof route imply through the consumer's own derivation or be
+refused. Enumerate kind-reading obligation sites and read-derived fields in a drift guard; keep narrowed operand
+domains, changed fallback expectations, changed sites or boundaries and an extra property-presence sentence unpaired.
+This pairing does not use a settled-read proof and does not alter the shadow gate's wording comparison.
+
+Correctly charged work may move the threshold of a filed baseline defect: attribute column (2) to its scheduled issue
+only when mechanism and lost check are identical, listing each moved row beside its baseline twin. A loss introduced by
+the construction itself never qualifies.
+
+Key oracle sites by file as well as offsets through the shared site-key helper, including plan checks, stop records,
+paste joins and containment; resolve enclosing functions in the site's own file. The reviewed exceptions are the derived
+oracle's single-source set and the enclosing helper's text search in a single-source plan; offsets alone do not identify
+a project site.
+
+A pasted fix counts as executed only after bounded scripted completions drive its session terminal and the instruction
+consuming its evaluated operands runs: the last lowering instruction for the smallest containing statement, or for the
+lazy position containing it. An executed setup instruction, even at the same span, is insufficient; an unreached site is
+a named incomplete outcome, never success.
+
+The typed-default oracle derives variable snapshots independently from syntax, in one forward walk keyed by call node,
+copying finite value trees and capturing only names the statement reads. Join only stores from live falling-through `if`
+arms, using literal-truth syntax to exclude dead arms and omitting arms ending in `exit` or `end`; host data opens a
+join, and stored parts take their binding's written type per block. Refuse by name loops (stores and outer body reads),
+dead calls, stored computations, methods, open property stores, unwalked statements, `goto`, file calls and unmodelled
+variable-reading expressions; distinguish index steps from a property named `element`. Report independent-oracle
+disagreements with the plan instead of changing the oracle's value to match it.
 
 ## Systematic coverage for bounded behavior spaces
 
