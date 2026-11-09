@@ -276,7 +276,6 @@ NUMBERS.keepHandler = NUMBERS.keep;
 NUMBERS.keepCompletion = NUMBERS.keep;
 NUMBERS.keepDurable = NUMBERS.keep;
 
-/** The served bytes of `target` (`page` or `workers`), all or those flagged `phase`; `null` while one is unfinished. */
 /**
  * The served bytes (`encoded` or `decoded`) of `target` (`page` or `Workers`), all or those flagged `phase`: `null`
  * while a request is still open or a finished one lacks its length; 0 for a target that requested nothing (no Worker).

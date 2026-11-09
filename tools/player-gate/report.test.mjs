@@ -105,10 +105,10 @@ test("the report fails on a row for an excluded cell", () => {
   );
 });
 
-/** A complete headline session on `engine` and `backend`, built from the field list's own numbers. */
 /** A page's raw probe records, as `readGate` returns them. */
 const GATE = { states: [], inputs: [], changes: [], rows: [], rowChanges: [] };
 
+/** A complete headline session on `engine` and `backend`, built from the field list's own numbers. */
 function sessionResult({ engine = "chromium", backend = "main" } = {}) {
   const cdp = engine === "chromium" || engine === "pixel";
   const worker = backend === "worker";
