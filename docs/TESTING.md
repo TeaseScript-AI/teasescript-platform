@@ -657,6 +657,33 @@ published.
 
 A frozen failure matches no publication, so it is judged by its recorded successful prefix replayed.
 
+### The L5 gate's K/F tapes
+
+`tests/gate/` drives real packages through the bridge for the L5 activation gate. One typed candidate table
+(`candidates.ts`) proposes finite, ordered requests for every kind of foreground presentation and pending action; the
+engine decides; the driver (`driver.ts`) records every request and reply on the client (`tape.ts`), declines and their
+publications included, and ends a tape `halted`, `failed` or `cut` (250 accepted inputs, a complete prefix for this
+policy, each closed by a final capture) or incomplete, reported as such (`notPrepared`, `unsupported`, `refused`,
+`stalled`, a `thrown` request that ended the session, a `captureFailed`, a `harnessError`). The adapter oracle
+(`oracle.ts`) judges every tape against the adapter, keeping its own revision and event cursor, and the fixed tape
+replays on every backend, failing at its first differing entry. Coverage is what the tapes ran, never what they could reach.
+
+`tests/player-gate-tapes.test.ts` holds the structural claim (the outcome readings cover exactly the table's candidate
+ops, and `ADAPTER_OPS` has a path for each; `prepare`, `start` and `captureCheckpoint` are the driver's own requests)
+and bounded runtime witnesses generated from the engine's guards, with their controls' mutants. The
+workload runs outside CI on a queue worker: `node tools/player-gate/tapes/record.mjs --out DIR --f DIR --k DIR
+--fixtures tests/gate/fixtures [--shard I/N]` in a built tree records, judges and replays every F and K package and
+the gate's fixtures (one small source per mechanism group the corpus never meets), preparation-only ones included, and
+reports what each tape met (`inventory.ts`); `census.mjs` counts every mechanism, lists those no tape met and those met
+only in incomplete tapes, and picks the browser and Pixel cohorts.
+
+In a browser, `node tools/player-gate/tapes/browser.mjs --engine E --bridge DIR --tapes DIR --census FILE --out FILE`
+replays the census's pinned cohort, each tape checked against its pinned hash, on the bridge page's replay mode
+(`tools/player-gate/bridge/replay.mjs`) through both backends, with the same comparison and no tolerance. A tape that
+differs in one engine is a measured value: WebKit replays F `OwlSays` with a colour whose last digits differ from
+Node's, on both backends, because `normalizeColor` prints colorjs.io's OKLCH conversion as full doubles and the JS
+engines' `Math.cbrt`, `atan2` and `pow` differ in their last bits (#2147).
+
 ## Implemented Phase 1 deterministic property harness
 
 The repository keeps one small deterministic campaign around the current public

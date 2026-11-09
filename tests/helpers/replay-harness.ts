@@ -5,13 +5,40 @@ import type { BridgeResult, SectionSend } from "../../player/engine-bridge/clien
 import type { Publication } from "../../player/engine-bridge/session-protocol.js";
 import type { PlayerBridge, PublishHook } from "../../player/runtime/player-bridge.js";
 import {
+  activatePlayerRuntimeButton,
   answeredByPlayerInput,
+  applyPlayerRuntimeStorageEdit,
+  answerPlayerRuntimeCapture,
+  answerPlayerRuntimeFileStore,
+  answerPlayerRuntimeLock,
+  cancelPlayerRuntimeForm,
+  stepPlayerRuntimeFormField,
+  closePlayerRuntimeExport,
+  closePlayerRuntimePopup,
+  completePlayerRuntimeStorageWrite,
   observePlayerRuntimeTime,
+  openPlayerRuntimeUrl,
   playerRuntimeSnapshot,
+  pressPlayerRuntimePermanentButton,
+  reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
+  skipPlayerRuntimeImage,
+  skipPlayerRuntimePacing,
+  stepPlayerRuntimeTime,
+  submitPlayerRuntimeComposer,
+  submitPlayerRuntimeForm,
+  type PlayerCaptureAnswer,
+  type PlayerFileStoreAnswer,
+  type PlayerLockAnswer,
   type PlayerRuntimeSession,
 } from "../../player/runtime/runtime-adapter.js";
+import {
+  activePlayerRuntimeInteraction,
+  playerRuntimePacingGate,
+} from "../../player/runtime/runtime-view.js";
+import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
+import type { MediaLoadReport } from "../../src/runtime/operations/media-reports.js";
 import type { DebugAnswerInput } from "../../player/debug/debug-export.js";
 import type { MediaProgressReport } from "../../src/playback.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
@@ -262,15 +289,28 @@ export interface ReplayStep {
  * The adapter's call for each op a live run sends after the cut, as the host's op makes it from the same arguments
  * (`ops/session.ts`, `ops/input.ts`). An op without an entry fails the oracle: it is added here.
  */
-const ADAPTER_OPS: Readonly<
-  Record<
-    string,
-    (
+type AdapterCall = (
+  session: PlayerRuntimeSession,
+  args: Record<string, unknown>,
+) => { readonly session: PlayerRuntimeSession; readonly outcome: unknown } | null;
+
+/**
+ * An interaction op as the host's `interactionOp` makes it (`ops/input.ts`): another presented action is refused as
+ * `staleAction` without effect, else `answer` runs on the session.
+ */
+const presented =
+  (
+    answer: (
       session: PlayerRuntimeSession,
       args: Record<string, unknown>,
-    ) => { readonly session: PlayerRuntimeSession; readonly outcome: unknown } | null
-  >
-> = {
+    ) => ReturnType<AdapterCall>,
+  ): AdapterCall =>
+  (session, args) =>
+    activePlayerRuntimeInteraction(session.state)?.actionId !== args["actionId"]
+      ? { session, outcome: { kind: "staleAction", actionId: args["actionId"] } }
+      : answer(session, args);
+
+export const ADAPTER_OPS = {
   observeTime: (session, args) => {
     // EVIDENCE: validation: the host accepted `atMs` as a scene time (`ops/session.ts`).
     const atMs = args["atMs"] as number;
@@ -278,7 +318,7 @@ const ADAPTER_OPS: Readonly<
     const media = args["media"] as readonly MediaProgressReport[];
     return observePlayerRuntimeTime(session, atMs, media);
   },
-  selectChoice: (session, args) => {
+  selectChoice: presented((session, args) => {
     // EVIDENCE: validation: the host accepted `optionId` as a string and `input` as an answer input (`ops/input.ts`).
     const optionId = args["optionId"] as string;
     // EVIDENCE: validation: as above.
@@ -287,8 +327,96 @@ const ADAPTER_OPS: Readonly<
     return input === null
       ? select(session)
       : answeredByPlayerInput(session, input, () => select(session));
+  }),
+  // The ops the L5 gate's K/F tapes send (`tests/gate/candidates.ts`), each as its host op calls the adapter, from the
+  // arguments the host accepted (`ops/input.ts`, `ops/resources.ts`, `ops/media.ts`, `ops/session.ts`). The tapes send
+  // no `input`, so none is recorded as how the player answered.
+  submitComposer: presented((session, args) => {
+    // EVIDENCE: validation: the host accepted `text` as a string.
+    const text = args["text"] as string;
+    return submitPlayerRuntimeComposer(session, text);
+  }),
+  activateButton: presented((session) => activatePlayerRuntimeButton(session)),
+  submitForm: presented((session, args) => {
+    // EVIDENCE: validation: the host accepted `draft` as a string or null.
+    const draft = args["draft"] as string | null;
+    return submitPlayerRuntimeForm(session, draft ?? undefined);
+  }),
+  cancelForm: presented((session) => cancelPlayerRuntimeForm(session)),
+  stepFormField: presented((session, args) => {
+    // EVIDENCE: validation: the host accepted `fieldId` as a string.
+    const fieldId = args["fieldId"] as string;
+    // EVIDENCE: validation: the host accepted `draft` as a string or null.
+    const draft = args["draft"] as string | null;
+    return stepPlayerRuntimeFormField(session, fieldId, draft ?? undefined);
+  }),
+  skipImage: presented((session) => skipPlayerRuntimeImage(session)),
+  openUrl: presented((session) => openPlayerRuntimeUrl(session)),
+  closePopup: presented((session) => closePlayerRuntimePopup(session)),
+  closeExport: presented((session) => closePlayerRuntimeExport(session)),
+  pressPermanentButton: (session, args) => {
+    // EVIDENCE: validation: the host accepted `buttonId` as a number.
+    const buttonId = args["buttonId"] as number;
+    return pressPlayerRuntimePermanentButton(session, buttonId);
   },
-};
+  completeStorageWrite: (session, args) => {
+    // EVIDENCE: validation: the host accepted `actionId` as a number.
+    const actionId = args["actionId"] as number;
+    // EVIDENCE: validation: the host accepted `stored` as a boolean.
+    const stored = args["stored"] as boolean;
+    return completePlayerRuntimeStorageWrite(session, actionId, stored);
+  },
+  // The tapes' resource answers carry `held: null`, so no captured media is admitted.
+  answerCapture: (session, args) => {
+    // EVIDENCE: validation: the host accepted `actionId` as a number.
+    const actionId = args["actionId"] as number;
+    // EVIDENCE: validation: the host accepted a capture answer.
+    const answer = args["answer"] as PlayerCaptureAnswer;
+    return answerPlayerRuntimeCapture(session, actionId, answer);
+  },
+  answerFileStore: (session, args) => {
+    // EVIDENCE: validation: the host accepted `actionId` as a number.
+    const actionId = args["actionId"] as number;
+    // EVIDENCE: validation: the host accepted a file-store answer record; the engine validates it.
+    const answer = args["answer"] as PlayerFileStoreAnswer;
+    return answerPlayerRuntimeFileStore(session, actionId, answer);
+  },
+  answerLock: (session, args) => {
+    // EVIDENCE: validation: the host accepted `actionId` as a number.
+    const actionId = args["actionId"] as number;
+    // EVIDENCE: validation: the host accepted a lock answer record; the engine validates it.
+    const answer = args["answer"] as PlayerLockAnswer;
+    return answerPlayerRuntimeLock(session, actionId, answer);
+  },
+  reportMediaLoad: (session, args) => {
+    // EVIDENCE: validation: the host accepted `mediaId` as a number.
+    const mediaId = args["mediaId"] as number;
+    // EVIDENCE: validation: the host accepted `report` as a record; the engine validates it.
+    const report = args["report"] as MediaLoadReport;
+    return reportPlayerRuntimeMediaLoad(session, mediaId, report);
+  },
+  // As `ops/session.ts`: a skip of another gate than the one shown does nothing.
+  skipPacing: (session, args) =>
+    playerRuntimePacingGate(session)?.actionId === args["actionId"]
+      ? skipPlayerRuntimePacing(session)
+      : null,
+  applyStorageEdit: (session, args) => {
+    // EVIDENCE: validation: the host accepted `key` as a string; the engine validates the value.
+    const edit = args as { readonly key: string; readonly value: SerializableRuntimeValue };
+    return applyPlayerRuntimeStorageEdit(session, edit);
+  },
+  stepTime: (session, args) => {
+    // EVIDENCE: validation: the host accepted `targetMs` as a scene time.
+    const next = stepPlayerRuntimeTime(session, args["targetMs"] as number);
+    return { session: next, outcome: { moved: next !== session } };
+  },
+} satisfies Readonly<Record<string, AdapterCall>>;
+
+/** `ADAPTER_OPS` by op name, for a request whose op is a string: `undefined` for an op the oracle has no path for. */
+export function adapterCall(op: string): AdapterCall | undefined {
+  const calls: Readonly<Record<string, AdapterCall>> = ADAPTER_OPS;
+  return Object.hasOwn(calls, op) ? calls[op] : undefined;
+}
 
 /**
  * Fails unless every one of `requests` (a session's after the cut) is an engine input the oracle replays, also when the
@@ -324,7 +452,7 @@ export function adapterReplay(
     const ended = request.ended;
     assert.ok(ended !== null, `request ${index} (${request.op}) after the cut had not ended`);
     assertEngineInputs([request]);
-    const call = ADAPTER_OPS[request.op]!;
+    const call = adapterCall(request.op)!;
     if (!ended.ok && ended.refused) continue;
     // EVIDENCE: validation: every op the Player sends takes an object of arguments.
     const args = request.args as Record<string, unknown>;
@@ -343,7 +471,15 @@ export function adapterReplay(
       continue;
     }
     const made = call(session, args);
-    assert.ok(made !== null, `request ${index} (${request.op}) has no effect on the adapter`);
+    // An op that does nothing (a mandatory image's skip) returns `null` on both sides: a recorded decline, no publication.
+    if (made === null) {
+      assert.equal(
+        ended.result,
+        null,
+        `request ${index} (${request.op}) did nothing on the adapter`,
+      );
+      continue;
+    }
     assert.deepEqual(
       ended.result,
       structuredClone(made.outcome),
