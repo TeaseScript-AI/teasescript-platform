@@ -133,30 +133,6 @@ export async function connectBridge(port: ClientPort, build: BuildIdentity): Pro
 }
 
 /**
- * The client as its transport carries requests, which `openBridge` implements: any op with any arguments, which the
- * host checks, and a result of no type. Not exported: callers send through `BridgeClient`, whose sends the session-work
- * census walks (`tools/session-work-census.mjs`).
- */
-interface Transport {
-  request(op: string, args: unknown, options?: RequestOptions): Promise<BridgeResult>;
-  section<T>(
-    session: string,
-    ticket: ClockTicket,
-    body: (
-      send: (
-        op: string,
-        args: unknown,
-        basis: number | null,
-        onReply?: ReplyHook,
-      ) => Promise<BridgeResult>,
-    ) => Promise<T>,
-  ): Promise<T>;
-  signal(op: string, args: unknown, session: string, onReply?: ReplyHook): Promise<BridgeResult>;
-  terminate(): void;
-  onLoss(listener: (error: BridgeLostError) => void): void;
-}
-
-/**
  * The client of the Worker behind `port`, at once, and `ready`, which settles as `connectBridge` does. Its requests post
  * at once too; a port that delivers them only once its Worker runs, as a browser's does, keeps them until then.
  */
@@ -290,26 +266,39 @@ export function openBridge(
       return before === undefined ? run() : before.then(run);
     }
 
-    const client: Transport = {
-      request: (op, args, options = {}) => {
+    // The transport carries any op with any arguments, and the host checks them; callers see `BridgeClient`'s pairs of
+    // each op with its arguments and result (`op-catalogue.ts`). EVIDENCE: invariant: the same functions under that type.
+    const client = {
+      request: (op: string, args: unknown, options: RequestOptions = {}) => {
         const session = options.session ?? null;
         return exclusive(session ?? options.after ?? "", () =>
           send(op, args, session, options.basis ?? null, options.onReply),
         );
       },
-      section: (session, _ticket, body) =>
+      section: <T>(
+        session: string,
+        _ticket: ClockTicket,
+        body: (
+          send: (
+            op: string,
+            args: unknown,
+            basis: number | null,
+            onReply?: ReplyHook,
+          ) => Promise<BridgeResult>,
+        ) => Promise<T>,
+      ) =>
         exclusive(session, () =>
           body((op, args, basis, onReply) => send(op, args, session, basis, onReply)),
         ),
-      signal: (op, args, session, onReply) => send(op, args, session, null, onReply),
+      signal: (op: string, args: unknown, session: string, onReply?: ReplyHook) =>
+        send(op, args, session, null, onReply),
       terminate: () => lose("The engine Worker was terminated.", true),
-      onLoss: (listener) => {
+      onLoss: (listener: (error: BridgeLostError) => void) => {
         if (lost === null) lossListeners.push(listener);
         else if (!terminated) listener(lost);
       },
-    };
-    // EVIDENCE: invariant: the transport carries any op, and the host checks it; callers see the catalogue's pairs.
-    opened = client as BridgeClient;
+    } as BridgeClient;
+    opened = client;
   });
   return { client: opened, ready };
 }
