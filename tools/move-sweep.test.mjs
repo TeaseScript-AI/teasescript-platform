@@ -259,9 +259,11 @@ test("on purpose unlike the Python sweep: an empty map applies no form, a quoted
   r.write({
     "refs.mjs": 'const x = "/.ts";\n',
     "caf\u00e9.mjs": 'const four = "/a/util.js";\n',
-    "target.mjs": "const y = 1;\n",
+    // The link's target holds a stale reference, and so does the link's own blob, its target's path: reading the blob as
+    // text or following the link would each add a hit.
+    "y/target.js": 'const stale = "y/target.ts";\n',
   });
-  symlinkSync("target.mjs", join(r.root, "link.mjs"));
+  symlinkSync("y/target.js", join(r.root, "link.mjs"));
   r.commit();
   const empty = r.run("--renames", r.json("empty", { renames: {} }));
   assert.equal(empty.status, 0);
@@ -275,8 +277,33 @@ test("on purpose unlike the Python sweep: an empty map applies no form, a quoted
     "--renames",
     r.json("target", { renames: { "y/target.ts": "z/target.ts" } }),
   );
-  assert.deepEqual(section(linked.out, "2b"), []);
-  assert.ok(!linked.out.includes("link.mjs"));
+  assert.deepEqual(section(linked.out, "1"), ['y/target.js:1: const stale = "y/target.ts";']);
+});
+
+test("a map or declaration file that is not UTF-8 cannot be read: exit 2", (t) => {
+  const r = moved(t, ['const fixture = "/a/util.js";']);
+  // Latin-1 writes each character as one byte, so `\xff` is a lone 0xff byte, never UTF-8.
+  const raw = (name, text) => {
+    const file = r.json(name, null);
+    writeFileSync(file, Buffer.from(text, "latin1"));
+    return file;
+  };
+  const map = raw("map", '{"renames": {"src/a/\xff.ts": "src/b/new.ts"}}');
+  for (const args of [
+    ["--renames", map],
+    [r.base, "--splits", map],
+  ]) {
+    const { status, err } = r.run(...args);
+    assert.equal(status, 2, args.join(" "));
+    assert.match(err, /cannot read the map/u);
+  }
+  const declared = raw(
+    "declared",
+    '[{"file": "tools/refs.mjs", "line": 1, "reason": "a \xff fixture"}]',
+  );
+  const refused = r.run(r.base, "--declare", declared);
+  assert.equal(refused.status, 2);
+  assert.match(refused.err, /cannot read the declarations/u);
 });
 
 test("a declared hit passes, an undeclared one fails, and a declaration that matches nothing cannot run", (t) => {

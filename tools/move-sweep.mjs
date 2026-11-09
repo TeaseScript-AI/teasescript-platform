@@ -145,7 +145,8 @@ export function derivedRenames(cwd, base) {
 function renamesFile(file) {
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync(file, "utf8"));
+    // The fatal decoder: a file that is not UTF-8 cannot be read, as the Python sweep's strict reader could not.
+    parsed = JSON.parse(decoder.decode(readFileSync(file)));
   } catch (error) {
     refuse(`cannot read the map ${file}: ${error.message}`);
   }
@@ -350,7 +351,8 @@ export function sweep(cwd, renames, forms = new Set(["1", "2", "3", "4", "5"])) 
 function declarationsOf(file) {
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync(file, "utf8"));
+    // The fatal decoder: a file that is not UTF-8 cannot be read, as the Python sweep's strict reader could not.
+    parsed = JSON.parse(decoder.decode(readFileSync(file)));
   } catch (error) {
     refuse(`cannot read the declarations ${file}: ${error.message}`);
   }
