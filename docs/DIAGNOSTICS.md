@@ -97,6 +97,26 @@ following the root's written annotation to the stored value and retaining every 
 including a written copy or property path, gives words and keeps its own check. Do not offer a null fallback for the
 whole value, and use the property advice for a property step (2026-11-05, #1764).
 
+A mixed-list error describes each element with its own type, retaining the earliest element's nullability below the
+element and the `?` of every intermediate collection layer on each side. At a value's own level, describe nullability at
+its occurrence, including narrowing. For `otherwise`, use the narrowed operand and include the fallback's null only
+where the operand may be null. Below that level, a written copy follows its source expression, another read or call
+result follows its place's accepted type, and other forms follow the values they hold. A join follows only its accepted
+operands (2026-10-28–11-06, #1213, #1764, #1789).
+
+The later element keeps its own types and adds null only where its leaf may hold it under the same rule. A narrowed
+copy's own level holds no null, while a typed host value may unless guarded (2026-11-06, #1819). A join describes each
+operand's leaf null from the types established for that occurrence, while compatibility uses the receiving type. A
+join-held binding retains its written nullability (2026-11-07, #1899).
+
+Each side names its own nested collections as lists, dicts, or sets. For dict descriptions, follow an `otherwise`
+operand only where it may hold a value at every depth, and its fallback where the operand may be null. Treat `get`,
+`load`, and parse defaults as their own values, and describe dict layers below a value's own level from the values its
+contract admits. These descriptions do not change which values are accepted or which runtime checks run (2026-11-06–08,
+#1814, #2017).
+
+## Sites and marks
+
 A member read marks the whole access, including its receiver. An operator marks its offending operand, or the operation
 once if there is no offending operand. An obligation uses its diagnostic's site (the lead, 2026-10-26).
 
@@ -136,24 +156,6 @@ unknown data, keeping its explanation, target, receiving type, and boundary chec
 
 These diagnostic ownership rules remain subject to the candidate route's publication and decline rules in [Resource
 limits](RESOURCE-LIMITS.md#coarse-type-core-bounds).
-
-A mixed-list error describes each element with its own type, retaining the earliest element's nullability below the
-element and the `?` of every intermediate collection layer on each side. At a value's own level, describe nullability at
-its occurrence, including narrowing. For `otherwise`, use the narrowed operand and include the fallback's null only
-where the operand may be null. Below that level, a written copy follows its source expression, another read or call
-result follows its place's accepted type, and other forms follow the values they hold. A join follows only its accepted
-operands (2026-10-28–11-06, #1213, #1764, #1789).
-
-The later element keeps its own types and adds null only where its leaf may hold it under the same rule. A narrowed
-copy's own level holds no null, while a typed host value may unless guarded (2026-11-06, #1819). A join describes each
-operand's leaf null from the types established for that occurrence, while compatibility uses the receiving type. A
-join-held binding retains its written nullability (2026-11-07, #1899).
-
-Each side names its own nested collections as lists, dicts, or sets. For dict descriptions, follow an `otherwise`
-operand only where it may hold a value at every depth, and its fallback where the operand may be null. Treat `get`,
-`load`, and parse defaults as their own values, and describe dict layers below a value's own level from the values its
-contract admits. These descriptions do not change which values are accepted or which runtime checks run (2026-11-06–08,
-#1814, #2017).
 
 ## Owners
 
