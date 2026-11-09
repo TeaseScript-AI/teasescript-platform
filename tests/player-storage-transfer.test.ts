@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { gunzipSync, gzipSync } from "node:zlib";
 
-import { CapturedMediaStore } from "../player/captured-media.js";
-import { playerRuntimeSnapshot } from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+import { CapturedMediaStore } from "../player/media/captured-media.js";
+import { playerRuntimeSnapshot } from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import {
   CheckpointError,
   serializeValidatedRuntimeJson,
@@ -23,7 +23,7 @@ import {
   storageTransferTextWithin,
   StorageTransferError,
   type StorageBundle,
-} from "../player/storage-transfer.js";
+} from "../player/persistence/storage-transfer.js";
 import type { RuntimeScriptStorageEntrySnapshot, SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 

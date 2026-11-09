@@ -3,13 +3,13 @@ import {
   type InstructionPlan,
   type PlanValidationError,
 } from "../../src/playback.js";
-import type { PlayerProject, PlayerScriptDiagnostic } from "../runtime-adapter.js";
-import type { ScriptIdentity } from "../script-identity.js";
+import type { PlayerProject, PlayerScriptDiagnostic } from "../runtime/runtime-adapter.js";
+import type { ScriptIdentity } from "../runtime/script-identity.js";
 import { planMetadata, type PlanMetadata } from "./plan-facts.js";
-import { DebugRecorder } from "../debug-recorder.js";
+import { DebugRecorder } from "../debug/debug-recorder.js";
 import { MAIN_FILE_PATH } from "../../src/project-paths.js";
 import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
-import { RandomHistory } from "../random-decisions.js";
+import { RandomHistory } from "../debug/random-decisions.js";
 import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
 import { type Delivery, type DeliveryOwner, deliveryOwner, OwnedMap } from "./delivery.js";
 import { SourceViewCaches, sourceViewOps } from "./ops/source-views.js";
@@ -26,7 +26,7 @@ import { traceOps } from "./ops/trace.js";
 import { HistoryRegistry } from "./history/registry.js";
 import { ExportObservation } from "./recording/export-observation.js";
 import type { DebugHistorySpill } from "./history/snapshots.js";
-import { openDebugHistorySpill } from "../debug-history-indexeddb.js";
+import { openDebugHistorySpill } from "../debug/debug-history-indexeddb.js";
 import type { BridgeOps, HostSessions } from "./worker-host.js";
 import type { RandomState } from "./connection-state.js";
 
@@ -241,8 +241,8 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
   /** A source's result, after the compiler loads. */
   const compile = async (script: string | PlayerProject): Promise<PrepareResult> => {
     const [{ compilePlayerProject }, { scriptIdentity }] = await Promise.all([
-      import("../compile-project.js"),
-      import("../script-identity.js"),
+      import("../runtime/compile-project.js"),
+      import("../runtime/script-identity.js"),
     ]);
     const compilation = compilePlayerProject(script);
     const identity = scriptIdentity(script);

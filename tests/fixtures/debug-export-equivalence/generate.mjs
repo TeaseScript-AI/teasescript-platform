@@ -11,12 +11,12 @@ const [root, base, out] = process.argv.slice(2);
 const load = (path) => import(pathToFileURL(join(root, "dist", path)).href);
 // The compiler's source Start (`compile-project.js`) after the adapter's plan Start of the same name.
 const api = {
-  ...(await load("player/runtime-adapter.js")),
-  ...(await load("player/runtime-view.js")),
-  ...(await load("player/debug-recorder.js")),
-  ...(await load("player/debug-export-assembly.js")),
-  ...(await load("player/debug-export.js")),
-  ...(await load("player/compile-project.js")),
+  ...(await load("player/runtime/runtime-adapter.js")),
+  ...(await load("player/runtime/runtime-view.js")),
+  ...(await load("player/debug/debug-recorder.js")),
+  ...(await load("player/debug/debug-export-assembly.js")),
+  ...(await load("player/debug/debug-export.js")),
+  ...(await load("player/runtime/compile-project.js")),
 };
 // The base's recorder names its limit in bytes.
 api.smallRecorder = (limit) => new api.DebugRecorder({ argumentBytes: limit });

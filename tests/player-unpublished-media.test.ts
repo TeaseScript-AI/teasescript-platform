@@ -1,21 +1,25 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 
-import { CaptureDevice, type CaptureHost, type CaptureTrack } from "../player/capture-device.js";
-import { CapturedMediaStore } from "../player/captured-media.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import { loadAge, loadTlock, type LockServices } from "../player/encryption/lock.js";
-import { LockService, type LockDialog } from "../player/lock-service.js";
-import { RgbaImage } from "../player/rgba-image.js";
+import {
+  CaptureDevice,
+  type CaptureHost,
+  type CaptureTrack,
+} from "../player/media/capture-device.js";
+import { CapturedMediaStore } from "../player/media/captured-media.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import { loadAge, loadTlock, type LockServices } from "../player/encryption/content-lock.js";
+import { LockService, type LockDialog } from "../player/encryption/lock-service.js";
+import { RgbaImage } from "../player/media/rgba-image.js";
 import {
   observePlayerRuntimeTime,
   playerRuntimeSnapshot,
   resumePlayerRuntimeRandomDraw,
   type PlayerCaptureAnswer,
-} from "../player/runtime-adapter.js";
-import type { PlayerSession } from "../player/runtime-view.js";
-import { CaptureService, SessionCamera } from "../player/session-camera.js";
-import { FileStoreService, type FileStoreMedia } from "../player/stored-files.js";
+} from "../player/runtime/runtime-adapter.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
+import { CaptureService, SessionCamera } from "../player/media/session-camera.js";
+import { FileStoreService, type FileStoreMedia } from "../player/media/stored-files.js";
 import { hatch, inProcessBridge, introduced } from "./helpers/in-process-bridge.js";
 import { serviceSection } from "./helpers/service-section.js";
 

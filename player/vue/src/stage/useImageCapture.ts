@@ -1,13 +1,13 @@
 import { computed, onScopeDispose, shallowRef, watch, type Ref } from "vue";
-import type { CapturedMediaStore } from "../../../captured-media.js";
-import type { DebugAnswerInput } from "../../../debug-export.js";
+import type { CapturedMediaStore } from "../../../media/captured-media.js";
+import type { DebugAnswerInput } from "../../../debug/debug-export.js";
 import { heldMedia } from "../../../engine-bridge/held-media.js";
 import {
   activePlayerRuntimeInteraction,
   type PlayerSession,
   type PlayerSessionView,
-} from "../../../runtime-view.js";
-import type { SessionCamera } from "../../../session-camera.js";
+} from "../../../runtime/runtime-view.js";
+import type { SessionCamera } from "../../../media/session-camera.js";
 import type { InputIntent, InputOutcome } from "../session/runtime-input";
 
 /**

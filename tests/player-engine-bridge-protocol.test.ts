@@ -14,7 +14,7 @@ import {
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import { BRIDGE_VERSION, type BuildIdentity } from "../player/engine-bridge/protocol.js";
-import { compilePlayerProject } from "../player/compile-project.js";
+import { compilePlayerProject } from "../player/runtime/compile-project.js";
 import { listRandomSites, validateInstructionPlan } from "../src/index.js";
 import { clockTicket } from "./helpers/clock-ticket.js";
 
@@ -326,10 +326,10 @@ test("the browser Worker's host loads no compiler or language-tooling module unt
   const loaded = JSON.parse(child.stdout) as string[];
   assert.ok(loaded.some((module) => module.endsWith("/dist/src/plan/load.js")));
   // The adapter and the recorder run the sessions there, on the playback entry: no compiler comes with them.
-  assert.ok(loaded.some((module) => module.endsWith("/dist/player/runtime-adapter.js")));
-  assert.ok(loaded.some((module) => module.endsWith("/dist/player/debug-recorder.js")));
+  assert.ok(loaded.some((module) => module.endsWith("/dist/player/runtime/runtime-adapter.js")));
+  assert.ok(loaded.some((module) => module.endsWith("/dist/player/debug/debug-recorder.js")));
   const authoring =
-    /\/dist\/src\/(index|compiler|parser|lexer|semantic|type-checker|language-tooling|source-debug-sidecar|static-types|ast-validation)(\.js$|\/)|\/dist\/src\/(type-inference|editor)\/|\/dist\/player\/(compile-project|script-identity)\.js$/;
+    /\/dist\/src\/(index|compiler|parser|lexer|semantic|type-checker|language-tooling|source-debug-sidecar|static-types|ast-validation)(\.js$|\/)|\/dist\/src\/(type-inference|editor)\/|\/dist\/player\/runtime\/(compile-project|script-identity)\.js$/;
   assert.deepEqual(
     loaded.filter((module) => authoring.test(module)),
     [],

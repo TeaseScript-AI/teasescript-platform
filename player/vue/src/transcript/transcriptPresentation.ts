@@ -1,7 +1,7 @@
 import type {
   PlayerSpeakerPresentation,
   PlayerTranscriptEntryPresentation,
-} from "../../../model.js";
+} from "../../../presentation/model.js";
 import { authoredColorToOklch, blackOrWhiteInk } from "../../../theme/color.js";
 import { readabilityFor } from "./messageContrast";
 

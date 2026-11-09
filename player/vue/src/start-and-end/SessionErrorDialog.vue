@@ -10,7 +10,7 @@ import DialogContent from "@/components/ui/dialog/DialogContent.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
 import DialogHeader from "@/components/ui/dialog/DialogHeader.vue";
 import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
-import type { PlayerDebugCall } from "../../../runtime-view.js";
+import type { PlayerDebugCall } from "../../../runtime/runtime-view.js";
 import type { RuntimeFailureSnapshot } from "../../../../src/index.js";
 
 // The error dialog (PLAYER-UI "Session end and failure"), opened only from the error line above the composer or its

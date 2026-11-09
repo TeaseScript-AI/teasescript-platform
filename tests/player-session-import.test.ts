@@ -2,15 +2,18 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
-import type { CapturedMediaLocks } from "../player/captured-media-persistence.js";
+import type { CapturedMediaLocks } from "../player/media/captured-media-persistence.js";
 import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import { pendingPlayerRuntimeStorageWrite } from "../player/runtime-view.js";
-import type { SavedDataHost } from "../player/saved-data.js";
-import { createLocalScriptStorage, type ScriptStorageProvider } from "../player/script-storage.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import { pendingPlayerRuntimeStorageWrite } from "../player/runtime/runtime-view.js";
+import type { SavedDataHost } from "../player/persistence/saved-data.js";
+import {
+  createLocalScriptStorage,
+  type ScriptStorageProvider,
+} from "../player/persistence/script-storage.js";
 import {
   bundleSavedScripts,
   readStorageTransferFile,
@@ -18,7 +21,7 @@ import {
   type SavedScript,
   type StorageBundle,
   type StorageBundleScript,
-} from "../player/storage-transfer.js";
+} from "../player/persistence/storage-transfer.js";
 import type { RuntimeScriptStorageEntrySnapshot, SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
@@ -66,7 +69,9 @@ before(async () => {
   const session: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/session/usePlayerSession.ts",
   );
-  const savedData: Record<string, unknown> = await loadPlayerModule("player/saved-data.ts");
+  const savedData: Record<string, unknown> = await loadPlayerModule(
+    "player/persistence/saved-data.ts",
+  );
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof savedData.browserSavedData, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.

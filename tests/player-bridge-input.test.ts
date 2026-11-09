@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { heldRecording } from "../player/engine-bridge/in-process.js";
 import { admissionOf, type HeldMedia } from "../player/engine-bridge/held-media.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
-import { DebugRecorder } from "../player/debug-recorder.js";
-import { PlayerBridge } from "../player/player-bridge.js";
+import { DebugRecorder } from "../player/debug/debug-recorder.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
 import {
   activatePlayerRuntimeButton,
   answeredByPlayerInput,
@@ -29,7 +32,7 @@ import {
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
   type PlayerRuntimeSession,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime/runtime-adapter.js";
 import {
   activePlayerRuntimeInteraction,
   pendingPlayerRuntimeStorageWrite,
@@ -37,7 +40,7 @@ import {
   playerRuntimePermanentButtons,
   type PlayerSession,
   type PlayerSessionView,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { viewCalls, viewed, withoutViews } from "./helpers/debug-readers.js";

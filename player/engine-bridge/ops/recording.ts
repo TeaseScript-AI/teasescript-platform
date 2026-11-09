@@ -1,8 +1,8 @@
-import type { DebugRecording, DebugRecordingEnd } from "../../debug-recorder.js";
+import type { DebugRecording, DebugRecordingEnd } from "../../debug/debug-recorder.js";
 import { exactly, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
 import type { ExportCaptureReply, RecordingCaptureReply } from "../session-protocol.js";
-import { playerRuntimeSnapshotOrNull } from "../../runtime-adapter.js";
+import { playerRuntimeSnapshotOrNull } from "../../runtime/runtime-adapter.js";
 import { prepareExport, type ExportFrozen } from "../recording/export-replay.js";
 import type { BridgeOps } from "../worker-host.js";
 import { heldSession } from "./persistence.js";

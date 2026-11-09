@@ -1,19 +1,23 @@
 import { computed, ref, watch, type Ref } from "vue";
 import { useEventListener } from "@vueuse/core";
-import { createBrowserCaptureHost } from "../../../browser-capture.js";
-import { CaptureDevice } from "../../../capture-device.js";
+import { createBrowserCaptureHost } from "../../../media/browser-capture.js";
+import { CaptureDevice } from "../../../media/capture-device.js";
 import {
   activePlayerRuntimeInteraction,
   playerRuntimeCameraView,
   type PlayerSession,
-} from "../../../runtime-view.js";
-import { SessionCamera, type PlayerDiagnostic } from "../../../session-camera.js";
-import { playerNoticeKeys, playerNotices, type PlayerNotices } from "../../../notices.js";
+} from "../../../runtime/runtime-view.js";
+import { SessionCamera, type PlayerDiagnostic } from "../../../media/session-camera.js";
+import {
+  playerNoticeKeys,
+  playerNotices,
+  type PlayerNotices,
+} from "../../../presentation/notices.js";
 import { IMAGE_SKIP_TEXT } from "../../../../src/image-input.js";
 import { useCameraChoice } from "../stage/useCameraChoice";
 import { useImageCapture } from "../stage/useImageCapture";
 import { usePlayerTextPreference } from "../shell/usePlayerPreference";
-import type { CapturedMediaStore } from "../../../captured-media.js";
+import type { CapturedMediaStore } from "../../../media/captured-media.js";
 import type { PlayerSessionOptions } from "./usePlayerSession.js";
 
 /*

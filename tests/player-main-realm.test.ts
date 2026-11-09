@@ -52,7 +52,7 @@ test("the main realm reaches Worker-side code only through the imports RATCHET l
 });
 
 test("the main realm loads no reader of an exported file: the engine host reads it (L5h.2)", () => {
-  assert.equal(graph.modules.includes("player/session-transfer-read.ts"), false);
+  assert.equal(graph.modules.includes("player/persistence/session-transfer-read.ts"), false);
   assert.equal(graph.modules.includes("player/engine-bridge/ops/transfer.ts"), false);
 });
 
@@ -65,8 +65,8 @@ test("the main realm loads exactly the src modules ALLOWED_SOURCE lists", () => 
 });
 
 test("each export of runtime-adapter.ts and runtime-view.ts has its place in the inventory", async () => {
-  const adapter = await import("../player/runtime-adapter.js");
-  const view = await import("../player/runtime-view.js");
+  const adapter = await import("../player/runtime/runtime-adapter.js");
+  const view = await import("../player/runtime/runtime-view.js");
   assert.deepEqual(Object.keys(adapter).sort(), Object.keys(ADAPTER_EXPORTS).sort());
   assert.deepEqual(Object.keys(view).sort(), [...VIEW_READERS].sort());
 });

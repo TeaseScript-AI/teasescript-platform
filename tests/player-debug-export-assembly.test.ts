@@ -10,9 +10,13 @@ import {
   type DebugCategory,
   type DebugExportCandidate,
   type DebugExportChoices,
-} from "../player/debug-export-assembly.js";
-import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
-import { DebugRecorder } from "../player/debug-recorder.js";
+} from "../player/debug/debug-export-assembly.js";
+import {
+  debugExportFile,
+  parseDebugExport,
+  replayDebugExport,
+} from "../player/debug/debug-export.js";
+import { DebugRecorder } from "../player/debug/debug-recorder.js";
 import { prepareExport } from "../player/engine-bridge/recording/export-replay.js";
 import {
   answerPlayerRuntimeLock,
@@ -29,13 +33,13 @@ import {
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import {
   activePlayerRuntimeLock,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeForeground,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 
 const reference = "captured-media:11111111-1111-4111-8111-111111111111:1";
 const photoBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);

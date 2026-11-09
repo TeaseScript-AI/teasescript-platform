@@ -1,5 +1,5 @@
-import { DebugRecorder } from "../player/debug-recorder.js";
-import { preparePlayerMessageMarkup } from "../player/message-markup.js";
+import { DebugRecorder } from "../player/debug/debug-recorder.js";
+import { preparePlayerMessageMarkup } from "../player/presentation/message-markup.js";
 import { normalizeColor } from "../src/color.js";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -52,9 +52,12 @@ import {
   playerRuntimeSnapshot,
   playerRuntimeSnapshotJson,
   type PlayerRuntimeSession,
-} from "../player/runtime-adapter.js";
-import { playerRuntimeForm } from "../player/runtime-view.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import { playerRuntimeForm } from "../player/runtime/runtime-view.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import {
   activePlayerRuntimeCapture,
   pendingPlayerRuntimeStorageWrite,
@@ -65,7 +68,7 @@ import {
   playerRuntimePacingGate,
   playerRuntimeTimers,
   playerRuntimeTranscript,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 
 test("a Player session starts at main.tease of a project, or of a single source", () => {
   const files = [

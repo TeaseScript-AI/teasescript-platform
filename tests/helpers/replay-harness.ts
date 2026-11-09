@@ -3,7 +3,7 @@ import { effectScope, nextTick, watch, type Ref } from "vue";
 
 import type { BridgeResult, SectionSend } from "../../player/engine-bridge/client.js";
 import type { Publication } from "../../player/engine-bridge/session-protocol.js";
-import type { PlayerBridge, PublishHook } from "../../player/player-bridge.js";
+import type { PlayerBridge, PublishHook } from "../../player/runtime/player-bridge.js";
 import {
   answeredByPlayerInput,
   observePlayerRuntimeTime,
@@ -11,11 +11,11 @@ import {
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
-} from "../../player/runtime-adapter.js";
-import type { DebugAnswerInput } from "../../player/debug-export.js";
+} from "../../player/runtime/runtime-adapter.js";
+import type { DebugAnswerInput } from "../../player/debug/debug-export.js";
 import type { MediaProgressReport } from "../../src/playback.js";
-import type { PlayerSession } from "../../player/runtime-view.js";
-import type { CapturedMediaStore } from "../../player/captured-media.js";
+import type { PlayerSession } from "../../player/runtime/runtime-view.js";
+import type { CapturedMediaStore } from "../../player/media/captured-media.js";
 import {
   LiveHostEffects,
   type EffectSample,
@@ -23,7 +23,7 @@ import {
   type LiveHostOptions,
 } from "./live-host-effects.js";
 import { compareStructures, renderPath } from "./runtime-state-comparison.js";
-import type { ClockTicket } from "../../player/clock-ticket.js";
+import type { ClockTicket } from "../../player/runtime/clock-ticket.js";
 
 /*
  * The shared replay harness (#1919; docs/TESTING.md "Replay through the bridge"): a complete, cursor-based trace of the

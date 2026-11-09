@@ -6,19 +6,22 @@ import {
   memoryKeptSessionStore,
   keptSession,
   type KeptSessionStore,
-} from "../player/kept-sessions.js";
+} from "../player/persistence/kept-sessions.js";
 import {
   activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
   submitPlayerRuntimeComposer as rawSubmitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import { playerRuntimeForeground } from "../player/runtime-view.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
-import type { SessionTransfer } from "../player/session-transfer.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import { playerRuntimeForeground } from "../player/runtime/runtime-view.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
+import type { SessionTransfer } from "../player/persistence/session-transfer.js";
 import {
   INSTRUCTION_PLAN_VERSION,
   RUNTIME_SNAPSHOT_VERSION,

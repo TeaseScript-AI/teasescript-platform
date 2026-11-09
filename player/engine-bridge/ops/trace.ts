@@ -1,5 +1,5 @@
-import { debugViewOf, type DebugTreeState, type DebugViewRequest } from "../../debug-view.js";
-import { setPlayerRuntimeDebugMode } from "../../runtime-adapter.js";
+import { debugViewOf, type DebugTreeState, type DebugViewRequest } from "../../debug/debug-view.js";
+import { setPlayerRuntimeDebugMode } from "../../runtime/runtime-adapter.js";
 import { exactly, isRecord } from "../argument-checks.js";
 import { type PlayerOpsContext } from "../player-ops.js";
 import { alignTrace, isTracingIntent, type TracingIntent } from "../connection-state.js";

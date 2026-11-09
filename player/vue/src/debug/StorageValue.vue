@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { SerializableRuntimeValue } from "../../../../src/index.js";
-import { STORAGE_MEMBER_PAGE, storageOutline } from "../../../storage-preview.js";
+import { STORAGE_MEMBER_PAGE, storageOutline } from "../../../persistence/storage-preview.js";
 import StoragePhoto from "./StoragePhoto.vue";
 import type { PlayerSessionHost } from "../session/usePlayerSession";
 

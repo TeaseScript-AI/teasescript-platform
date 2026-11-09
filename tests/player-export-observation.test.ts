@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
-import { NO_MARKS } from "../player/debug-history-marks.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
+import { NO_MARKS } from "../player/debug/debug-history-marks.js";
 import { HeldSession } from "../player/engine-bridge/ops/session.js";
 import { playerOpsContext } from "../player/engine-bridge/player-ops.js";
 import { connectBridge } from "../player/engine-bridge/client.js";
@@ -16,7 +19,7 @@ import {
   type Observation,
   type ObservedSession,
 } from "../player/engine-bridge/recording/export-observation.js";
-import { PlayerBridge } from "../player/player-bridge.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";

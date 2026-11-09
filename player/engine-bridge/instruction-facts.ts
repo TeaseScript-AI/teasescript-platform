@@ -1,5 +1,5 @@
 import { instructionSourcePath, type InstructionPlan } from "../../src/plan/model.js";
-import type { PlayerRuntimeSession } from "../runtime-adapter.js";
+import type { PlayerRuntimeSession } from "../runtime/runtime-adapter.js";
 
 /** Where an instruction is in the script, and what it is, as the Player's readers name it. */
 export interface InstructionFact {

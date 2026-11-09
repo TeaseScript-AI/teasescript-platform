@@ -4,8 +4,8 @@ import {
   type SourceDebugFile,
   type SourceDebugSidecar,
 } from "../../../src/runtime/debug/source-sidecar.js";
-import type { FileCode } from "../../random-draw-code.js";
-import type { DrawCode } from "../../draw-code.js";
+import type { FileCode } from "../../debug/random-draw-code.js";
+import type { DrawCode } from "../../debug/draw-code.js";
 import { exactly, isRecord, isStringArray } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
 import { type DeliveryOwner, OwnedCell, OwnedMap } from "../delivery.js";
@@ -102,7 +102,7 @@ export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
         const sidecar = await sidecarOf(plan);
         const file: SourceDebugFile | undefined = sidecar?.files.find((each) => each.path === path);
         if (file === undefined) return { result: null };
-        const { drawCode, fileCode } = await import("../../random-draw-code.js");
+        const { drawCode, fileCode } = await import("../../debug/random-draw-code.js");
         // A teardown during the import leaves nothing to keep.
         if (context.plans.get(plan) !== held) return { result: null };
         if (caches.latestFile.value?.file !== file) caches.latestFile.set(fileCode(file));
@@ -126,7 +126,7 @@ export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
         };
         // Nothing to classify loads no tooling.
         if (texts.length === 0) return { result: [] };
-        const { outcomeLines } = await import("../../random-draw-code.js");
+        const { outcomeLines } = await import("../../debug/random-draw-code.js");
         return { result: outcomeLines(texts, first) };
       },
     },

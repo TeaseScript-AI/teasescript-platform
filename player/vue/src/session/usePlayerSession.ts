@@ -1,26 +1,26 @@
 import { computed, ref, shallowRef, watch } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
-import { browserMediaUrls } from "../../../browser-capture.js";
-import { planLockNeeds } from "../../../plan-metadata.js";
+import { browserMediaUrls } from "../../../media/browser-capture.js";
+import { planLockNeeds } from "../../../runtime/plan-metadata.js";
 import {
   CapturedMediaStore,
   isCapturedMediaReference,
   type CapturedMediaRepository,
-} from "../../../captured-media.js";
+} from "../../../media/captured-media.js";
 import {
   browserCapturedMediaLocks,
   capturedMediaStorage,
-} from "../../../captured-media-persistence.js";
-import { browserImageDecoder, type ImageDecoder } from "../../../image-file.js";
-import { type LockDialogInput } from "../../../lock-service.js";
-import type { LockServices } from "../../../encryption/lock.js";
-import type { PlayerRuntimeSession } from "../../../runtime-adapter.js";
+} from "../../../media/captured-media-persistence.js";
+import { browserImageDecoder, type ImageDecoder } from "../../../media/image-file.js";
+import { type LockDialogInput } from "../../../encryption/lock-service.js";
+import type { LockServices } from "../../../encryption/content-lock.js";
+import type { PlayerRuntimeSession } from "../../../runtime/runtime-adapter.js";
 import {
   playerTemporalContext,
   playerRuntimeMedia,
   playerRuntimePermanentButtons,
   type PlayerSession,
-} from "../../../runtime-view.js";
+} from "../../../runtime/runtime-view.js";
 import { createInProcessBackend, heldPlan } from "../../../engine-bridge/in-process.js";
 import type { StartOptions } from "../../../engine-bridge/ops/session.js";
 import {
@@ -29,27 +29,27 @@ import {
   type PlayerBridge,
   type ServiceSection,
   type SessionSection,
-} from "../../../player-bridge.js";
+} from "../../../runtime/player-bridge.js";
 import { RETIRED, type InputSectionHost } from "./runtime-input";
-import { sweepDebugHistories } from "../../../debug-history-indexeddb.js";
+import { sweepDebugHistories } from "../../../debug/debug-history-indexeddb.js";
 import type { DebugHistorySpill } from "../../../engine-bridge/history/snapshots.js";
-import type { DebugRecorder } from "../../../debug-recorder.js";
+import type { DebugRecorder } from "../../../debug/debug-recorder.js";
 import {
   keptPhotoReferences,
   type KeptRoomStore,
   type KeptSessionStore,
-} from "../../../kept-sessions.js";
+} from "../../../persistence/kept-sessions.js";
 import type { RuntimeDebugContext } from "../../../../src/index.js";
-import type { SavedDataHost } from "../../../saved-data.js";
+import type { SavedDataHost } from "../../../persistence/saved-data.js";
 import { playerBuildIdentity } from "../../../build-identity.js";
-import type { ScriptStorageProvider } from "../../../script-storage.js";
-import { type PlayerDiagnostic } from "../../../session-camera.js";
+import type { ScriptStorageProvider } from "../../../persistence/script-storage.js";
+import { type PlayerDiagnostic } from "../../../media/session-camera.js";
 import {
   PlayerNotices,
   playerNoticeKeys,
   playerNotices,
   type PlayerNotice,
-} from "../../../notices.js";
+} from "../../../presentation/notices.js";
 import type { RandomControlOptions, TemporalContext } from "../../../../src/index.js";
 
 import { useRuntimeSceneClock, type SectionWork } from "./useRuntimeSceneClock";
@@ -612,10 +612,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     (plan) => {
       const needs = plan === undefined ? null : planLockNeeds(plan);
       if (needs?.locks !== true) return;
-      void import("../../../encryption/lock.js").catch(() => {});
-      void (options.lockServices?.tlock ?? (() => import("../../../encryption/tlock.js")))().catch(
-        () => {},
-      );
+      void import("../../../encryption/content-lock.js").catch(() => {});
+      void (
+        options.lockServices?.tlock ?? (() => import("../../../encryption/time-lock.js"))
+      )().catch(() => {});
       if (needs.encrypts)
         void (options.lockServices?.age ?? (() => import("../../../encryption/age.js")))().catch(
           () => {},

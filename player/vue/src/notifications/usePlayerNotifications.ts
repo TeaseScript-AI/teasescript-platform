@@ -1,5 +1,5 @@
 import { computed, ref, shallowRef, watch, type Ref } from "vue";
-import type { PlayerNotice, PlayerNoticeLevel } from "../../../notices.js";
+import type { PlayerNotice, PlayerNoticeLevel } from "../../../presentation/notices.js";
 
 /** A current notice with the moment it was last published, for the notification panel and its toast. */
 export interface PlayerNotification {

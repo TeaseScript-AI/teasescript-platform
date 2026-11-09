@@ -255,7 +255,7 @@ export type HostCall =
 
 type CapturedMedia = NonNullable<ActionCompletionOptions["capturedMedia"]>;
 
-/** One question a captured-media admission answered: as `player/debug-export.ts` records its admission queries. */
+/** One question a captured-media admission answered: as `player/debug/debug-export.ts` records its admission queries. */
 interface AdmissionQuery {
   readonly reference: string;
   readonly kind: Parameters<CapturedMedia["holds"]>[1];

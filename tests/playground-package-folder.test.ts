@@ -19,7 +19,10 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { createPlaygroundServer } from "../playground/server.js";
 import {
   compileWorkspaceProject,

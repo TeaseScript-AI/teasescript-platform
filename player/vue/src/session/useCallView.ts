@@ -1,7 +1,7 @@
 import { watch, type Ref } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
-import { type PlayerSession } from "../../../runtime-view.js";
-import { bridgeOf, endsQuietly, refusalCode } from "../../../player-bridge.js";
+import { type PlayerSession } from "../../../runtime/runtime-view.js";
+import { bridgeOf, endsQuietly, refusalCode } from "../../../runtime/player-bridge.js";
 
 /*
  * Debug's call view (L5f), moved from `usePlayerSession` unchanged: who asks for the shown session's active calls, and

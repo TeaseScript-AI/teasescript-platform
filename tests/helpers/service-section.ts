@@ -1,5 +1,5 @@
-import type { PlayerBridge, ServiceSection } from "../../player/player-bridge.js";
-import type { PlayerSession } from "../../player/runtime-view.js";
+import type { PlayerBridge, ServiceSection } from "../../player/runtime/player-bridge.js";
+import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import { clockTicket } from "./clock-ticket.js";
 
 /**

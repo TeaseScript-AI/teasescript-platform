@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import {
   BridgeRequestError,
   openBridge,
   type BridgeResult,
   type ClientPort,
 } from "../player/engine-bridge/client.js";
-import { NO_MARKS } from "../player/debug-history-marks.js";
+import { NO_MARKS } from "../player/debug/debug-history-marks.js";
 import { DeliveryRefusedError } from "../player/engine-bridge/delivery.js";
 import {
   createInProcessBackend,
@@ -31,8 +34,8 @@ import {
   type OpOutcome,
   startBridgeHost,
 } from "../player/engine-bridge/worker-host.js";
-import { createPlayerRuntimeRestorePoint } from "../player/runtime-adapter.js";
-import { sessionTransferText } from "../player/session-transfer.js";
+import { createPlayerRuntimeRestorePoint } from "../player/runtime/runtime-adapter.js";
+import { sessionTransferText } from "../player/persistence/session-transfer.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";

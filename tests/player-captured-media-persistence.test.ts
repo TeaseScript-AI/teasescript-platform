@@ -6,15 +6,15 @@ import {
   CapturedMediaStore,
   storableCapturedMedia,
   type CapturedMediaRepository,
-} from "../player/captured-media.js";
+} from "../player/media/captured-media.js";
 import {
   capturedMediaReferences,
   capturedMediaStorage,
   sweepCapturedMedia,
   withCapturedMedia,
   type CapturedMediaLocks,
-} from "../player/captured-media-persistence.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+} from "../player/media/captured-media-persistence.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import {
   compileSource,
   completeAction,

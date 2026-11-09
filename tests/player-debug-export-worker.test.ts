@@ -13,10 +13,17 @@ import {
   NO_PERSONAL_CONTENT,
   type DebugExportCandidate,
   type DebugExportChoices,
-} from "../player/debug-export-assembly.js";
-import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
-import { PlayerBridge } from "../player/player-bridge.js";
-import { activePlayerRuntimeInteraction, type PlayerSession } from "../player/runtime-view.js";
+} from "../player/debug/debug-export-assembly.js";
+import {
+  debugExportFile,
+  parseDebugExport,
+  replayDebugExport,
+} from "../player/debug/debug-export.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
+import {
+  activePlayerRuntimeInteraction,
+  type PlayerSession,
+} from "../player/runtime/runtime-view.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 
 /*

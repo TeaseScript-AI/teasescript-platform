@@ -18,7 +18,7 @@ import {
   sessionTransferFileName,
   sessionTransferText,
   type SessionTransferMedium,
-} from "../../../session-transfer.js";
+} from "../../../persistence/session-transfer.js";
 import {
   bundleSavedScripts,
   storageTransferFile,
@@ -26,8 +26,8 @@ import {
   storageTransferText,
   StorageTransferError,
   type SavedScript,
-} from "../../../storage-transfer.js";
-import { gzipSupported } from "../../../transfer-encoding.js";
+} from "../../../persistence/storage-transfer.js";
+import { gzipSupported } from "../../../persistence/transfer-encoding.js";
 import type { SessionExport } from "../session/persistence/useSessionTransfer";
 
 // Exports the saved data of every script this browser keeps, or of the scripts the player keeps ticked, or the session

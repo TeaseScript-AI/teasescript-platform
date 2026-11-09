@@ -39,15 +39,15 @@ import {
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import {
   nextPlayerRuntimeEventMs,
   playerRuntimeMedia,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeForeground,
   playerRuntimePermanentButtons,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 import { TraceStore } from "../src/runtime/debug/debug-trace.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { playerStateOf } from "./helpers/player-state.js";

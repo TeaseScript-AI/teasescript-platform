@@ -1,8 +1,8 @@
 import { useEventListener } from "@vueuse/core";
 import { computed, ref, shallowRef, watch, type Ref } from "vue";
-import { cameraFacing, nextCamera, switchCameraLabel } from "../../../camera-choice.js";
-import type { CaptureDeviceInfo } from "../../../capture-device.js";
-import type { SessionCamera } from "../../../session-camera.js";
+import { cameraFacing, nextCamera, switchCameraLabel } from "../../../media/camera-choice.js";
+import type { CaptureDeviceInfo } from "../../../media/capture-device.js";
+import type { SessionCamera } from "../../../media/session-camera.js";
 
 interface CameraChoiceHost {
   /** The Player's cameras; the view shows the first open one. */

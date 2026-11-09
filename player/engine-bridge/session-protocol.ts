@@ -2,16 +2,16 @@ import type { InterpreterEvent } from "../../src/runtime/events.js";
 import type { RuntimeSessionCall } from "../../src/runtime/session.js";
 import type { InstructionFacts } from "./instruction-facts.js";
 import type { PlanMetadata } from "./player-ops.js";
-import type { DebugView, DebugViewRequest } from "../debug-view.js";
+import type { DebugView, DebugViewRequest } from "../debug/debug-view.js";
 import type { CheckpointCapture, KeepCapture } from "./ops/persistence.js";
 import type { RandomTriedView } from "./ops/random.js";
 import type { StorageCapture } from "./ops/history.js";
-import type { HistoryMarks } from "../debug-history-marks.js";
+import type { HistoryMarks } from "../debug/debug-history-marks.js";
 import type { HistoryDelta } from "./history/core.js";
-import type { DebugRecording, DebugRecordingEnd } from "../debug-recorder.js";
+import type { DebugRecording, DebugRecordingEnd } from "../debug/debug-recorder.js";
 import type { RuntimeFailureSnapshot, RuntimeSnapshot } from "../../src/index.js";
 import type { DiagnosticIdentity, ExportIncident } from "./recording/export-observation.js";
-import type { PlayerRuntimeState } from "../runtime-adapter.js";
+import type { PlayerRuntimeState } from "../runtime/runtime-adapter.js";
 
 /*
  * What a session op's reply carries in `view` (the L5 reply contract). The host keeps one cursor per session: how many

@@ -8,7 +8,7 @@ import PopoverTrigger from "@/components/ui/popover/PopoverTrigger.vue";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
-import type { PlayerNoticeLevel } from "../../../notices.js";
+import type { PlayerNoticeLevel } from "../../../presentation/notices.js";
 import { useFocusRecovery } from "./useFocusRecovery.js";
 import type { PlayerNotification } from "./usePlayerNotifications.js";
 

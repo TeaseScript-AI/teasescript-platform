@@ -1,12 +1,12 @@
 import { shallowRef, type ShallowRef } from "vue";
-import type { PlayerProject } from "../../runtime-adapter.js";
+import type { PlayerProject } from "../../runtime/runtime-adapter.js";
 import type { PrepareResult } from "../../engine-bridge/player-ops.js";
 import type { RuntimePlayerProfileInput } from "../../../src/runtime/host-data/player-profile.js";
 import type { ScriptFailure } from "./start-and-end/ScriptProblems.vue";
 import type { PlayerSessionHost } from "./session/usePlayerSession";
 import { MAIN_FILE_PATH } from "../../../src/project-paths.js";
-import { endsQuietly } from "../../player-bridge.js";
-import type { ScriptIdentity } from "../../script-identity.js";
+import { endsQuietly } from "../../runtime/player-bridge.js";
+import type { ScriptIdentity } from "../../runtime/script-identity.js";
 
 export type { ScriptIdentity };
 

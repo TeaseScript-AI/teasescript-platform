@@ -5,11 +5,11 @@ import {
   createPlayerRuntimeRestorePoint,
   playerRuntimeSnapshotJson,
   restorePlayerRuntimeSessionAt,
-} from "../../runtime-adapter.js";
+} from "../../runtime/runtime-adapter.js";
 import { exactly, isEventLog, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
 import type { BridgeOps, HostSessions } from "../worker-host.js";
-import { isHistoryMarks, parseHistoryMarks } from "../../debug-history-marks.js";
+import { isHistoryMarks, parseHistoryMarks } from "../../debug/debug-history-marks.js";
 import { HeldSession, introduction } from "./session.js";
 
 /*

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { RecordingCaptureReply } from "../player/engine-bridge/session-protocol.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import type { PlayerSession } from "../player/runtime-view.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import type { PlayerSession } from "../player/runtime/runtime-view.js";
 import { useFailureRecording } from "../player/vue/src/session/activation/useFailureRecording.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
 

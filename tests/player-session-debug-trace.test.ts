@@ -3,13 +3,13 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, ref, watch, type Ref } from "vue";
 
 import type { RuntimeDebugContext } from "../src/index.js";
-import type * as Adapter from "../player/runtime-adapter.js";
-import type * as CompileProject from "../player/compile-project.js";
-import type { PlayerRuntimeSession } from "../player/runtime-adapter.js";
-import type { DebugRecorder } from "../player/debug-recorder.js";
+import type * as Adapter from "../player/runtime/runtime-adapter.js";
+import type * as CompileProject from "../player/runtime/compile-project.js";
+import type { PlayerRuntimeSession } from "../player/runtime/runtime-adapter.js";
+import type { DebugRecorder } from "../player/debug/debug-recorder.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import type { DebugView, DebugViewRequest } from "../player/debug-view.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import type { DebugView, DebugViewRequest } from "../player/debug/debug-view.js";
 import type * as InProcess from "../player/engine-bridge/in-process.js";
 import { hostTrace, loadHostFacade, onHost, onHostAll } from "./helpers/host-sessions.js";
 
@@ -74,8 +74,8 @@ before(async () => {
   // EVIDENCE: validation: the bundle's backend factory, whose host the composable then uses.
   createInProcessBackend = facade.createInProcessBackend as typeof createInProcessBackend;
   const loaded = {
-    ...(await loadPlayerModule("player/runtime-adapter.ts")),
-    ...(await loadPlayerModule("player/compile-project.ts")),
+    ...(await loadPlayerModule("player/runtime/runtime-adapter.ts")),
+    ...(await loadPlayerModule("player/runtime/compile-project.ts")),
   };
   for (const name of [
     "createPlayerRuntimeSession",

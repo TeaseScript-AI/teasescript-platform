@@ -70,7 +70,7 @@ test(
         );
     assert.deepEqual([...projectsFor([])], []);
     // `player/` outside `player/vue/` belongs to the TypeScript project, and `player/vue/` only to the Player's.
-    assert.deepEqual([...projectsFor(["player/runtime-adapter.ts"])], ["typescript"]);
+    assert.deepEqual([...projectsFor(["player/runtime/runtime-adapter.ts"])], ["typescript"]);
     assert.deepEqual(
       [...projectsFor(["player/vue/src/session/usePlayerSession.ts"])],
       ["player-vue"],

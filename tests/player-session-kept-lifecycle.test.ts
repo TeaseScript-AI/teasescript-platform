@@ -2,24 +2,30 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
-import type { CapturedMediaLocks } from "../player/captured-media-persistence.js";
+import type { CapturedMediaLocks } from "../player/media/captured-media-persistence.js";
 import {
   memoryKeptRoomStore,
   memoryKeptSessionStore,
   type KeptRoomStore,
   type KeptSessionStore,
-} from "../player/kept-sessions.js";
+} from "../player/persistence/kept-sessions.js";
 import type {
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import type { SavedDataHost } from "../player/saved-data.js";
-import { createLocalScriptStorage, type ScriptStorageProvider } from "../player/script-storage.js";
-import type { SessionTransfer } from "../player/session-transfer.js";
-import type { StorageBundle, StorageBundleScript } from "../player/storage-transfer.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import type { SavedDataHost } from "../player/persistence/saved-data.js";
+import {
+  createLocalScriptStorage,
+  type ScriptStorageProvider,
+} from "../player/persistence/script-storage.js";
+import type { SessionTransfer } from "../player/persistence/session-transfer.js";
+import type { StorageBundle, StorageBundleScript } from "../player/persistence/storage-transfer.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { answerWith, type Intent } from "./helpers/player-input.js";
@@ -96,7 +102,7 @@ before(async () => {
   const session: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/session/usePlayerSession.ts",
   );
-  const saved: Record<string, unknown> = await loadPlayerModule("player/saved-data.ts");
+  const saved: Record<string, unknown> = await loadPlayerModule("player/persistence/saved-data.ts");
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof saved.browserSavedData, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.

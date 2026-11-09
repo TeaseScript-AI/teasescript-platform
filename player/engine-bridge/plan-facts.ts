@@ -1,5 +1,5 @@
 import { listRandomSites, type InstructionPlan, type RandomSite } from "../../src/playback.js";
-import { planLockNeeds, playerRuntimeStageImages } from "../plan-metadata.js";
+import { planLockNeeds, playerRuntimeStageImages } from "../runtime/plan-metadata.js";
 
 /*
  * What the host reads from a plan for the Player, Worker-side: the plan's random sites come from the engine. A leaf of

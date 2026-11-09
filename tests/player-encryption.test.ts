@@ -20,12 +20,12 @@ import {
   loadAge,
   loadTlock,
   type LockServices,
-} from "../player/encryption/lock.js";
+} from "../player/encryption/content-lock.js";
 import {
   openWithSignature,
   sealToRound,
   verifyRoundSignature,
-} from "../player/encryption/tlock.js";
+} from "../player/encryption/time-lock.js";
 
 /*
  * The Player's locks (V30 §13, docs/ENCRYPTION.md): AES-256-GCM content with a password opener (PBKDF2) and a time

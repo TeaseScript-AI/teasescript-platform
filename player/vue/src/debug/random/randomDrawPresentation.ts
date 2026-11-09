@@ -2,16 +2,16 @@ import type { RandomDrawView, RandomOutcome } from "../../../../../src/index.js"
 import { checkedOutcome } from "../../../../../src/runtime/random/random-kinds.js";
 import { randomDrawAlternatives } from "../../../../../src/runtime/random/random-alternatives.js";
 import { runtimeDebugPreview } from "../../../../../src/runtime/debug/debug-preview.js";
-import { numberText as text, randomOutcomeLabel } from "../../../../random-outcomes.js";
+import { numberText as text, randomOutcomeLabel } from "../../../../debug/random-outcomes.js";
 
-// The code a draw shows is framework-independent (`player/draw-code.ts`): the engine host makes it, this page shows it.
+// The code a draw shows is framework-independent (`player/debug/draw-code.ts`): the engine host makes it, this page shows it.
 export {
   CONTEXT_ROWS,
   type CodeLine,
   type CodeSegment,
   type CodeTokenClass,
   type DrawCode,
-} from "../../../../draw-code.js";
+} from "../../../../debug/draw-code.js";
 
 /**
  * How the random draw picker (DEBUGGER.md "Random draws") offers a draw's outcomes: a button for each when the draw has

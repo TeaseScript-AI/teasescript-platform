@@ -8,15 +8,15 @@ import {
   restorePlayerRuntimeSession,
   skipPlayerRuntimePacing,
   type PlayerRuntimeSession,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import {
   playerRuntimeDeadlines,
   playerRuntimeForeground,
   playerRuntimeMedia,
   playerRuntimePacingGate,
   playerRuntimePermanentButtons,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 
 /*
  * What the Player presents while a paced message is read (owner decision on #829, 2026-10-11): nothing new appears

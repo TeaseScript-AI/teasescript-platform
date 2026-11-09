@@ -5,7 +5,7 @@ import PlayerActionButton from "../components/PlayerActionButton.vue";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
-import type { PlayerForegroundPresentation } from "../../../model.js";
+import type { PlayerForegroundPresentation } from "../../../presentation/model.js";
 import type { ImageCapturePhase } from "../stage/useImageCapture";
 
 /** The controls of an `askImage` request as its steps stand (`useImageCapture.ts`). */

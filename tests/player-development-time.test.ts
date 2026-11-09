@@ -14,14 +14,14 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import {
   nextPlayerRuntimeEventMs,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeDeadlines,
-} from "../player/runtime-view.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+} from "../player/runtime/runtime-view.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import type { MediaProgressReport } from "../src/index.js";
 import { harness } from "./helpers/player-media.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";

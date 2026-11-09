@@ -5,20 +5,20 @@ import { effectScope, nextTick, type Ref } from "vue";
 
 import type { HistoryPoint } from "../player/engine-bridge/history/core.js";
 import type { DebugHistorySpill } from "../player/engine-bridge/history/snapshots.js";
-import type { DebugHistoryView } from "../player/debug-history.js";
-import type { LifecycleAction } from "../player/rewind-lifecycle.js";
-import type { DebugRecorder } from "../player/debug-recorder.js";
+import type { DebugHistoryView } from "../player/debug/debug-history.js";
+import type { LifecycleAction } from "../player/debug/rewind-lifecycle.js";
+import type { DebugRecorder } from "../player/debug/debug-recorder.js";
 import {
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice as rawSelectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import { playerRuntimeForeground, type PlayerSession } from "../player/runtime-view.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
-import { memoryKeptRoomStore, type KeptRoomStore } from "../player/kept-sessions.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import { playerRuntimeForeground, type PlayerSession } from "../player/runtime/runtime-view.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
+import { memoryKeptRoomStore, type KeptRoomStore } from "../player/persistence/kept-sessions.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../src/index.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { published } from "./helpers/debug-readers.js";
@@ -37,7 +37,7 @@ import {
 } from "./helpers/rewind-transfer-domain.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { hostTrace, loadHostFacade, onHost } from "./helpers/host-sessions.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import type * as ClientModule from "../player/engine-bridge/client.js";
 
 /** The value trace the host's session runs with, as the host holds it. */
@@ -2157,7 +2157,7 @@ test("Debug off waiting on an adoption when the Player unmounts releases everyth
 
 /*
  * Handoff cases a review reproduced, as rows through the real composables and host: each decided by
- * the page side's one function (`player/rewind-lifecycle.ts`) and the host's (`advanceHistory`).
+ * the page side's one function (`player/debug/rewind-lifecycle.ts`) and the host's (`advanceHistory`).
  */
 
 test("Sol r2 B1: Debug off after a commit was sent, before its acknowledgement, reinstates the parked session", async (context) => {

@@ -5,8 +5,8 @@ import {
   commitPlayerRuntimeFormField,
   stepPlayerRuntimeFormField,
   submitPlayerRuntimeComposer,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import { MAX_INTERACTION_STRING_UTF8_BYTES } from "../src/interaction-limits.js";
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";

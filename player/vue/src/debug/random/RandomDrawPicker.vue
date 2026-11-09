@@ -16,7 +16,7 @@ import CodeBlock from "./CodeBlock.vue";
 import PathBreadcrumb from "./PathBreadcrumb.vue";
 import { CONTEXT_ROWS, type CodeLine, type DrawCode } from "./randomDrawPresentation";
 import { useRandomDrawPickerState } from "./useRandomDrawPickerState";
-import { outcomeKey } from "../../../../random-outcomes.js";
+import { outcomeKey } from "../../../../debug/random-outcomes.js";
 import type { DebugRandomNext, DebugRandomTried } from "./useDebugRandom";
 
 // The random draw picker (DEBUGGER.md "Random draws"): the session is paused at a draw, shown in its file's code. A

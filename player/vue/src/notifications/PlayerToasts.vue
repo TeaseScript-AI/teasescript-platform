@@ -2,7 +2,7 @@
 import { toRef } from "vue";
 import { toast } from "vue-sonner";
 import { Toaster } from "@/components/ui/sonner";
-import type { PlayerNoticeLevel } from "../../../notices.js";
+import type { PlayerNoticeLevel } from "../../../presentation/notices.js";
 import type { PlayerNotification } from "./usePlayerNotifications.js";
 import { usePlayerToasts } from "./usePlayerToasts.js";
 

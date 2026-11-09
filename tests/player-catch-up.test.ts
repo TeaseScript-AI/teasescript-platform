@@ -13,11 +13,11 @@ import {
   stepPlayerRuntimeCatchUp,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import { pendingPlayerRuntimeStorageWrite } from "../player/runtime-view.js";
-import type { DebugRecorder, DebugRecording } from "../player/debug-recorder.js";
-import { rebuildRecordedSession } from "../player/debug-export.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import { pendingPlayerRuntimeStorageWrite } from "../player/runtime/runtime-view.js";
+import type { DebugRecorder, DebugRecording } from "../player/debug/debug-recorder.js";
+import { rebuildRecordedSession } from "../player/debug/debug-export.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
 

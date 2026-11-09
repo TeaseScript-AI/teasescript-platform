@@ -1,20 +1,31 @@
 import { computed, ref, shallowRef, watch, type Ref } from "vue";
 import { useIntervalFn } from "@vueuse/core";
-import { isCapturedMediaReference, type CapturedMediaStore } from "../../../captured-media.js";
-import { checkImageFile, type ImageDecoder, type ImageFileFilters } from "../../../image-file.js";
-import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../../media-device.js";
+import {
+  isCapturedMediaReference,
+  type CapturedMediaStore,
+} from "../../../media/captured-media.js";
+import {
+  checkImageFile,
+  type ImageDecoder,
+  type ImageFileFilters,
+} from "../../../media/image-file.js";
+import {
+  MediaDevice,
+  MediaLoadQueue,
+  type MediaDeviceElement,
+} from "../../../media/media-device.js";
 import {
   playerRuntimeMedia,
   playerRuntimeMediaOrigin,
   type PlayerSession,
-} from "../../../runtime-view.js";
+} from "../../../runtime/runtime-view.js";
 import {
   playerNoticeKeys,
   playerNotices,
   type PlayerNotice,
   type PlayerNotices,
-} from "../../../notices.js";
-import { bridgeOf, endsQuietly, type SessionSection } from "../../../player-bridge.js";
+} from "../../../presentation/notices.js";
+import { bridgeOf, endsQuietly, type SessionSection } from "../../../runtime/player-bridge.js";
 import { BridgeRequestError } from "../../../engine-bridge/client.js";
 import type { MediaReportOutcome } from "../../../../src/index.js";
 import { silence } from "../generatedAudio";

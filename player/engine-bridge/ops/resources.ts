@@ -8,7 +8,7 @@ import {
   type PlayerLockAnswer,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
-} from "../../runtime-adapter.js";
+} from "../../runtime/runtime-adapter.js";
 import type { CapturedMediaAdmission } from "../../../src/runtime/actions/capture.js";
 import { exactly, isRecord } from "../argument-checks.js";
 import { admissionOf, isHeldMedia, type HeldMedia } from "../held-media.js";

@@ -8,14 +8,14 @@ import {
   type LifecycleEvent,
   type LifecycleOutcome,
   type LifecycleState,
-} from "../player/rewind-lifecycle.js";
+} from "../player/debug/rewind-lifecycle.js";
 
 /*
- * L5i.6: the page side's deciding function (`player/rewind-lifecycle.ts`), driven over every schedule of its event
+ * L5i.6: the page side's deciding function (`player/debug/rewind-lifecycle.ts`), driven over every schedule of its event
  * grammar to a fixed depth. A driver plays the Player and the host: it answers only what was sent, the host's replies
  * in the order the opens were sent, and sends a decided open only as `rewindOwner.ts` does, once every close before it
  * settled. The oracle keeps its own ledgers of histories, tokens, gates and adoptions from the actions alone, and checks
- * the rules of DEBUGGER.md "Rewind" and of the page side's handoff (`player/rewind-lifecycle.ts`) on them, independently of
+ * the rules of DEBUGGER.md "Rewind" and of the page side's handoff (`player/debug/rewind-lifecycle.ts`) on them, independently of
  * how the function decides:
  *
  * - at most one history is held; an opened history is enrolled or closed at once unless a newer open replaced it in the

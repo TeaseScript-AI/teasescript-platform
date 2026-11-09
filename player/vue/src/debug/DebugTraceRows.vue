@@ -2,8 +2,8 @@
 import { reactive, ref } from "vue";
 import { ArrowUp, ChevronDown, ChevronRight } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import type { PlayerDebugTraceRow } from "../../../debug-variables.js";
-import type { DebugTreeState } from "../../../debug-view.js";
+import type { PlayerDebugTraceRow } from "../../../debug/debug-variables.js";
+import type { DebugTreeState } from "../../../debug/debug-view.js";
 
 // Rows of Debug's derivation trees (DEBUGGER.md "Player Debug"): each root with its immediate causes, and further levels
 // as the player opens them, one row at a time. A record shown again in the same tree is a link to its first row. Every

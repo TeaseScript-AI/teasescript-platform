@@ -4,14 +4,17 @@ import test from "node:test";
 import {
   createPlayerRuntimeRestorePoint,
   playerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
-import { playerRuntimeForeground } from "../player/runtime-view.js";
+} from "../player/runtime/runtime-adapter.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
+import { playerRuntimeForeground } from "../player/runtime/runtime-view.js";
 import {
   readPlayerTransferFile,
   readPlayerTransferText,
   restoreSessionTransfer,
-} from "../player/session-transfer-read.js";
+} from "../player/persistence/session-transfer-read.js";
 import {
   sessionMediumRecord,
   sessionTransferFile,
@@ -19,8 +22,11 @@ import {
   sessionTransferText,
   type SessionTransfer,
   type SessionTransferMedium,
-} from "../player/session-transfer.js";
-import { storageTransferFile, StorageTransferError } from "../player/storage-transfer.js";
+} from "../player/persistence/session-transfer.js";
+import {
+  storageTransferFile,
+  StorageTransferError,
+} from "../player/persistence/storage-transfer.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 
 const scope = "development-package:story";

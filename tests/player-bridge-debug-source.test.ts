@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject } from "../player/compile-project.js";
+import { compilePlayerProject } from "../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PrepareResult, PrepareSource } from "../player/engine-bridge/player-ops.js";
-import { PlayerBridge } from "../player/player-bridge.js";
-import { drawCode, fileCode, outcomeLines } from "../player/random-draw-code.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
+import { drawCode, fileCode, outcomeLines } from "../player/debug/random-draw-code.js";
 import { createSourceDebugSidecar, listRandomSites } from "../src/index.js";
 import { loadSourceDebugSidecar } from "../src/runtime/debug/source-sidecar.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";

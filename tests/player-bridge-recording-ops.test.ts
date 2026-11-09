@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
-import { NO_MARKS } from "../player/debug-history-marks.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
+import { NO_MARKS } from "../player/debug/debug-history-marks.js";
 import { heldRuns, introduceNow } from "../player/engine-bridge/in-process.js";
 import { connectBridge, openBridge, type ClientPort } from "../player/engine-bridge/client.js";
 import {
@@ -18,8 +21,8 @@ import {
   type HostSessions,
 } from "../player/engine-bridge/worker-host.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
-import { PlayerBridge } from "../player/player-bridge.js";
-import { activePlayerRuntimeInteraction } from "../player/runtime-view.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
+import { activePlayerRuntimeInteraction } from "../player/runtime/runtime-view.js";
 import {
   formObligations,
   malformedArguments,

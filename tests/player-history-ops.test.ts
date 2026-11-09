@@ -2,20 +2,20 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { compilePlayerProject } from "../player/compile-project.js";
+import { compilePlayerProject } from "../player/runtime/compile-project.js";
 import { CANNOT_KEEP, type HistoryTimeline } from "../player/engine-bridge/history/core.js";
 import type { HistoryOpened, HistoryOpResult } from "../player/engine-bridge/ops/history.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
 import type { Introduction } from "../player/engine-bridge/session-protocol.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import { playerRuntimeForeground, type PlayerSession } from "../player/runtime-view.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import { playerRuntimeForeground, type PlayerSession } from "../player/runtime/runtime-view.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { inProcessBridge } from "./helpers/in-process-bridge.js";
 import { createInProcessBackend, heldRecording } from "../player/engine-bridge/in-process.js";
 import { HistoryCore } from "../player/engine-bridge/history/core.js";
 import { connectBridge } from "../player/engine-bridge/client.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
-import { PlayerBridge as Bridge } from "../player/player-bridge.js";
+import { PlayerBridge as Bridge } from "../player/runtime/player-bridge.js";
 import { openBridge, type ClientPort } from "../player/engine-bridge/client.js";
 import {
   closeConnection,
@@ -28,7 +28,7 @@ import {
   type HostPort,
   type HostSessions,
 } from "../player/engine-bridge/worker-host.js";
-import { DebugHistoryView } from "../player/debug-history.js";
+import { DebugHistoryView } from "../player/debug/debug-history.js";
 
 /*
  * L5i.6: Debug's rewind ops in the host (`player/engine-bridge/ops/history.ts`), over the in-process bridge: a history

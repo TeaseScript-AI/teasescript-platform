@@ -1,9 +1,12 @@
 import type { InterpreterEvent } from "../../../src/runtime/events.js";
 import { CheckpointError } from "../../../src/runtime/snapshot/checkpoint-json.js";
-import type { HistoryMarks } from "../../debug-history-marks.js";
-import type { PlayerForegroundPresentation } from "../../model.js";
-import type { PlayerRuntimeSession } from "../../runtime-adapter.js";
-import { activePlayerRuntimeInteraction, playerRuntimeForeground } from "../../runtime-view.js";
+import type { HistoryMarks } from "../../debug/debug-history-marks.js";
+import type { PlayerForegroundPresentation } from "../../presentation/model.js";
+import type { PlayerRuntimeSession } from "../../runtime/runtime-adapter.js";
+import {
+  activePlayerRuntimeInteraction,
+  playerRuntimeForeground,
+} from "../../runtime/runtime-view.js";
 import { SnapshotStore, type DebugHistorySpill } from "./snapshots.js";
 
 /*

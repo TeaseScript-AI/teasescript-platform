@@ -1,20 +1,26 @@
 import { computed, type Ref } from "vue";
-import type { CapturedMediaRecord, CapturedMediaStore } from "../../../../captured-media.js";
-import type { CapturedMediaStorage } from "../../../../captured-media-persistence.js";
-import { capturedMediaReferencesIn } from "../../../../kept-sessions.js";
-import { bridgeOf, type PlayerBridge } from "../../../../player-bridge.js";
+import type { CapturedMediaRecord, CapturedMediaStore } from "../../../../media/captured-media.js";
+import type { CapturedMediaStorage } from "../../../../media/captured-media-persistence.js";
+import { capturedMediaReferencesIn } from "../../../../persistence/kept-sessions.js";
+import { bridgeOf, type PlayerBridge } from "../../../../runtime/player-bridge.js";
 import { BridgeRequestError } from "../../../../engine-bridge/client.js";
-import { StaleOperation, type PersistenceOwnership } from "../../../../persistence-ownership.js";
-import type { PlayerRuntimeRestorePoint } from "../../../../runtime-adapter.js";
-import type { PlayerSession } from "../../../../runtime-view.js";
-import type { ScriptStorageProvider } from "../../../../script-storage.js";
+import {
+  StaleOperation,
+  type PersistenceOwnership,
+} from "../../../../persistence/persistence-ownership.js";
+import type { PlayerRuntimeRestorePoint } from "../../../../runtime/runtime-adapter.js";
+import type { PlayerSession } from "../../../../runtime/runtime-view.js";
+import type { ScriptStorageProvider } from "../../../../persistence/script-storage.js";
 import {
   sessionMediumRecord,
   sessionTransferMedium,
   type SessionTransfer,
   type SessionTransferMedium,
-} from "../../../../session-transfer.js";
-import { StorageTransferError, type StorageBundle } from "../../../../storage-transfer.js";
+} from "../../../../persistence/session-transfer.js";
+import {
+  StorageTransferError,
+  type StorageBundle,
+} from "../../../../persistence/storage-transfer.js";
 import type {
   InterpreterEvent,
   RuntimeScriptStorageEntrySnapshot,

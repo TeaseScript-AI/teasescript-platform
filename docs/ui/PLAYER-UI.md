@@ -79,7 +79,7 @@ controlling source adopts it; remove this section and its router references when
   API names and author syntax remain open.
 - **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
   optional labeling. Authored timers carry visible/mystery/hidden display and optional labels (see
-  [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime-adapter.ts` derives presented timers and
+  [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime/runtime-adapter.ts` derives presented timers and
   observation deadlines from runtime state. The Player renders runtime timers in its right rail; its
   development preview shows timer fixtures only while no runtime timer is presented. Stable generic-label numbering across timer lifecycle changes remains unsynchronized.
 
@@ -476,7 +476,7 @@ step.
 The Player keeps the session in this browser: at each interaction it newly presents, a lock's dialog or password field
 too, also one that asks again after a block, when it ends, and when the page
 is hidden, it stores the session's state, the events that led to it, and the photos only the session uses, which no
-save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/kept-sessions.ts`). Opening the script
+save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/persistence/kept-sessions.ts`). Opening the script
 again, after a reload or with the browser closed in between, shows **Continue** on the start page instead of Start; it
 goes on from the last kept point, with those photos as session media again; a stored photo the kept session uses
 stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
@@ -560,7 +560,7 @@ scrolls, and its rows and buttons are at least 44px tall.
 Player notices tell the player that something about the session's environment matters, such as blocked audio,
 unavailable storage, or a camera problem. They never stop the session and are separate from runtime developer warnings,
 which are creator diagnostics about a script location. Host features publish them through one Player-owned channel
-(`player/notices.ts`) with fixed Player wording per condition; a condition has one notice, which it replaces or
+(`player/presentation/notices.ts`) with fixed Player wording per condition; a condition has one notice, which it replaces or
 withdraws, so repeated causes do not stack.
 
 Notices belong to the Player, not the story, so they never appear in the conversation. A new or replaced notice shows

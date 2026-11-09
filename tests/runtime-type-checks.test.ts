@@ -13,7 +13,7 @@ import {
   type InstructionPlan,
   type RuntimeSnapshot,
 } from "../src/index.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
 import { listHasPosition } from "../src/runtime/values/collection-operations.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";

@@ -10,10 +10,10 @@ import {
   type CaptureRecorderSink,
   type CaptureRequest,
   type CaptureTrack,
-} from "../player/capture-device.js";
-import { untilReleased } from "../player/browser-capture.js";
-import { RgbaImage } from "../player/rgba-image.js";
-import { CapturedMediaNotStoredError, CapturedMediaStore } from "../player/captured-media.js";
+} from "../player/media/capture-device.js";
+import { untilReleased } from "../player/media/browser-capture.js";
+import { RgbaImage } from "../player/media/rgba-image.js";
+import { CapturedMediaNotStoredError, CapturedMediaStore } from "../player/media/captured-media.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 
 // A deterministic stand-in for MediaStreamTrack: `end()` simulates the browser ending it, for example on revocation.

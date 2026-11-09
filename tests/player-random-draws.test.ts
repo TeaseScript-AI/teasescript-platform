@@ -11,13 +11,19 @@ import {
   resumePlayerRuntimeRandomDraw,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../player/runtime-adapter.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+} from "../player/runtime/runtime-adapter.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
-import { playerRuntimeAwaitsHost, type PlayerSession } from "../player/runtime-view.js";
-import { memoryKeptRoomStore, memoryKeptSessionStore } from "../player/kept-sessions.js";
-import type { DebugRecorder } from "../player/debug-recorder.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+import { playerRuntimeAwaitsHost, type PlayerSession } from "../player/runtime/runtime-view.js";
+import {
+  memoryKeptRoomStore,
+  memoryKeptSessionStore,
+} from "../player/persistence/kept-sessions.js";
+import type { DebugRecorder } from "../player/debug/debug-recorder.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import {
   listRandomSites,
   type InstructionPlan,
@@ -29,11 +35,11 @@ import {
 } from "../src/index.js";
 import { coverageGaps, product } from "./helpers/family-coverage.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import { drawCode, fileCode, outcomeLines } from "../player/random-draw-code.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import { drawCode, fileCode, outcomeLines } from "../player/debug/random-draw-code.js";
 import { loadSourceDebugSidecar } from "../src/runtime/debug/source-sidecar.js";
 import { createSourceDebugSidecar } from "../src/index.js";
-import { NO_MARKS } from "../player/debug-history-marks.js";
+import { NO_MARKS } from "../player/debug/debug-history-marks.js";
 import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
 import { clockTicket } from "./helpers/clock-ticket.js";
 

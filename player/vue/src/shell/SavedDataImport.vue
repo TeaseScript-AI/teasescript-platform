@@ -14,8 +14,8 @@ import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import DialogTrigger from "@/components/ui/dialog/DialogTrigger.vue";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import type { SessionTransferMedium } from "../../../session-transfer.js";
-import { StorageTransferError, type StorageBundle } from "../../../storage-transfer.js";
+import type { SessionTransferMedium } from "../../../persistence/session-transfer.js";
+import { StorageTransferError, type StorageBundle } from "../../../persistence/storage-transfer.js";
 import type {
   PlayerTransferRead,
   SessionImportReview,

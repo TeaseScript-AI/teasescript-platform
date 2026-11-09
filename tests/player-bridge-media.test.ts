@@ -1,32 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compilePlayerProject } from "../player/compile-project.js";
+import { compilePlayerProject } from "../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { introduceNow } from "../player/engine-bridge/in-process.js";
 import { instructionFacts } from "../player/engine-bridge/instruction-facts.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import type { PlanMetadata, PrepareResult } from "../player/engine-bridge/player-ops.js";
 import type { Introduction } from "../player/engine-bridge/session-protocol.js";
-import { PlayerBridge } from "../player/player-bridge.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
 import {
   playerRuntimeSnapshot,
   playerRuntimeSnapshotJson,
   restorePlayerRuntimeSessionAt,
   type PlayerProject,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime/runtime-adapter.js";
 import {
   playerRuntimeCameraView,
   playerRuntimeMedia,
   playerRuntimeMediaOrigin,
   type PlayerSession,
-} from "../player/runtime-view.js";
+} from "../player/runtime/runtime-view.js";
 import type { MediaReportOutcome } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { viewCalls, viewed, withoutViews } from "./helpers/debug-readers.js";
 import { hatch, inProcessBridge } from "./helpers/in-process-bridge.js";
-import { NO_MARKS } from "../player/debug-history-marks.js";
+import { NO_MARKS } from "../player/debug/debug-history-marks.js";
 
 /*
  * L5d's bridge (B-media): media load reports as an op, the media origin in the view's instruction facts, and the plan

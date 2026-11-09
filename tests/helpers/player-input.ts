@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   activePlayerRuntimeInteraction,
   type PlayerSessionView,
-} from "../../player/runtime-view.js";
+} from "../../player/runtime/runtime-view.js";
 import { loadPlayerModule } from "./player-modules.js";
 
 /*

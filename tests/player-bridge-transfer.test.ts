@@ -4,7 +4,10 @@ import { resolve } from "node:path";
 import test from "node:test";
 import ts from "typescript";
 
-import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
 import { nodeWorkerPort } from "../player/engine-bridge/node-client.js";
 import {
@@ -14,19 +17,22 @@ import {
 } from "../player/engine-bridge/player-ops.js";
 import type { HostSessions } from "../player/engine-bridge/worker-host.js";
 import { transferOps } from "../player/engine-bridge/ops/transfer.js";
-import { PlayerBridge } from "../player/player-bridge.js";
+import { PlayerBridge } from "../player/runtime/player-bridge.js";
 import {
   createPlayerRuntimeRestorePoint,
   playerRuntimeSnapshotJson,
-} from "../player/runtime-adapter.js";
+} from "../player/runtime/runtime-adapter.js";
 import {
   sessionTransferFile,
   sessionTransferText,
   type SessionTransfer,
   type SessionTransferMedium,
-} from "../player/session-transfer.js";
-import { readPlayerTransferText, restoreSessionTransfer } from "../player/session-transfer-read.js";
-import { storageTransferFile, type StorageBundle } from "../player/storage-transfer.js";
+} from "../player/persistence/session-transfer.js";
+import {
+  readPlayerTransferText,
+  restoreSessionTransfer,
+} from "../player/persistence/session-transfer-read.js";
+import { storageTransferFile, type StorageBundle } from "../player/persistence/storage-transfer.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import {
   formObligations,
@@ -175,7 +181,7 @@ test("saved data comes back whole from the host, as the main realm's reader give
 
 /*
  * The transfer ops' family: each op of `transferOps` with each of its declared outcomes, every malformed argument its
- * forms give (`ARGUMENTS`), and each refusal the reader and the review make (`player/session-transfer-read.ts`). Refusal messages are
+ * forms give (`ARGUMENTS`), and each refusal the reader and the review make (`player/persistence/session-transfer-read.ts`). Refusal messages are
  * written here; commit contents are compared with a direct-reader result. Every row runs in-process and over a Node
  * Worker. The coverage check compares the rows with the ops, their declared outcomes, and each `StorageTransferError`
  * the reader's source raises.
@@ -694,7 +700,7 @@ test("every transfer op's argument forms, outcomes and refusals answer as writte
 
 /** The words of each `StorageTransferError` the reader's source raises, as a pattern its template's parts make. */
 function readerRefusals(): RegExp[] {
-  const path = resolve(process.cwd(), "player/session-transfer-read.ts");
+  const path = resolve(process.cwd(), "player/persistence/session-transfer-read.ts");
   const source = ts.createSourceFile(
     path,
     readFileSync(path, "utf8"),

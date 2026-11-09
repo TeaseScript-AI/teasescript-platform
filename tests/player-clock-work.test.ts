@@ -4,19 +4,22 @@ import test, { before, type TestContext } from "node:test";
 import ts from "typescript";
 import { effectScope, ref, shallowRef, type Ref, type ShallowRef } from "vue";
 
-import { compilePlayerProject } from "../player/compile-project.js";
+import { compilePlayerProject } from "../player/runtime/compile-project.js";
 import type { BridgeClient } from "../player/engine-bridge/client.js";
 import type { StartOptions } from "../player/engine-bridge/ops/session.js";
 import type { PrepareResult } from "../player/engine-bridge/player-ops.js";
-import type { PlayerBridge } from "../player/player-bridge.js";
-import { observePlayerRuntimeTime, type PlayerRuntimeSession } from "../player/runtime-adapter.js";
-import { memoryKeptSessionStore } from "../player/kept-sessions.js";
-import type { ScriptStorageProvider } from "../player/script-storage.js";
+import type { PlayerBridge } from "../player/runtime/player-bridge.js";
+import {
+  observePlayerRuntimeTime,
+  type PlayerRuntimeSession,
+} from "../player/runtime/runtime-adapter.js";
+import { memoryKeptSessionStore } from "../player/persistence/kept-sessions.js";
+import type { ScriptStorageProvider } from "../player/persistence/script-storage.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint-json.js";
 import { coverageGaps, product } from "./helpers/family-coverage.js";
 import { loadHostFacade, onHost } from "./helpers/host-sessions.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
-import type { ClockTicket } from "../player/clock-ticket.js";
+import type { ClockTicket } from "../player/runtime/clock-ticket.js";
 import { clockTicket } from "./helpers/clock-ticket.js";
 
 /*

@@ -16,13 +16,16 @@ import {
   type OpOutcome,
   startBridgeHost,
 } from "../../player/engine-bridge/worker-host.js";
-import { compilePlayerProject, createPlayerRuntimeSession } from "../../player/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../../player/runtime/compile-project.js";
 import type { HistoryTimeline } from "../../player/engine-bridge/history/core.js";
-import { PlayerBridge } from "../../player/player-bridge.js";
-import { playerRuntimeForeground } from "../../player/runtime-view.js";
+import { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
 import type { InterpreterEvent } from "../../src/runtime/events.js";
-import { createPlayerRuntimeRestorePoint } from "../../player/runtime-adapter.js";
-import { sessionTransferText } from "../../player/session-transfer.js";
+import { createPlayerRuntimeRestorePoint } from "../../player/runtime/runtime-adapter.js";
+import { sessionTransferText } from "../../player/persistence/session-transfer.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
 import { childCases, markerOf, reach, snapshotForRetention } from "./retention-child.js";
 import { markedProject, planText } from "./source-ops-project.js";

@@ -4,7 +4,7 @@ import {
   MediaLoadQueue,
   SOURCE_UNAVAILABLE_MESSAGE,
   VIDEO_UNSUPPORTED_MESSAGE,
-} from "../player/media-device.js";
+} from "../player/media/media-device.js";
 import {
   createPlayerRuntimeRestorePoint,
   observePlayerRuntimeTime,
@@ -13,9 +13,9 @@ import {
   restorePlayerRuntimeSessionAt,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../player/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../player/compile-project.js";
-import { playerRuntimeDeadlines, playerRuntimeMedia } from "../player/runtime-view.js";
+} from "../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../player/runtime/compile-project.js";
+import { playerRuntimeDeadlines, playerRuntimeMedia } from "../player/runtime/runtime-view.js";
 import { observeTime, type MediaLoadReport } from "../src/index.js";
 import { harness } from "./helpers/player-media.js";
 

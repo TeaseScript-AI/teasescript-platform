@@ -14,7 +14,7 @@ const decodedPreview = `(() => { const image = document.querySelector('[data-sta
 const capturedImages = `[...document.querySelectorAll('img')].filter((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0).length`;
 const LAN_HOST = "player-lan.test";
 // The compiled spill store of Debug's rewind history, which the smoke runs against the browser's real IndexedDB.
-const DEBUG_HISTORY_MODULE_URL = "/smoke/debug-history-indexeddb.js";
+const DEBUG_HISTORY_MODULE_URL = "/smoke/debug/debug-history-indexeddb.js";
 
 await main();
 
@@ -32,8 +32,8 @@ async function main() {
   const [handleRequest] = server.listeners("request");
   server.removeAllListeners("request");
   server.on("request", (request, response) => {
-    // The spill store's module and the compiled Player modules it imports.
-    const smokeModule = /^\/smoke\/([a-z-]+\.js)$/u.exec(request.url ?? "");
+    // The spill store's module and the compiled Player modules it imports, by their path under `dist/player/`.
+    const smokeModule = /^\/smoke\/((?:[a-z-]+\/)*[a-z-]+\.js)$/u.exec(request.url ?? "");
     if (smokeModule !== null) {
       void readFile(new URL(`../dist/player/${smokeModule[1]}`, import.meta.url)).then(
         (module) => {

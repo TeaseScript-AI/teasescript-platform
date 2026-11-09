@@ -4,29 +4,36 @@ import {
   insertOrAcceptExisting,
   type CapturedMediaStore,
   type StoredCapturedMedia,
-} from "../../../../captured-media.js";
+} from "../../../../media/captured-media.js";
 import {
   capturedMediaReferencesIn,
   keptSession,
   memoryKeptSessionStore,
   type KeptSessionStore,
-} from "../../../../kept-sessions.js";
-import { activePlayerRuntimeInteraction, type PlayerSession } from "../../../../runtime-view.js";
-import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../../player-bridge.js";
+} from "../../../../persistence/kept-sessions.js";
+import {
+  activePlayerRuntimeInteraction,
+  type PlayerSession,
+} from "../../../../runtime/runtime-view.js";
+import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../../runtime/player-bridge.js";
 import { BridgeRequestError } from "../../../../engine-bridge/client.js";
 import type { KeepCapture } from "../../../../engine-bridge/ops/persistence.js";
 import {
   StaleOperation,
   persistenceOwnership as ownershipOf,
   type PersistenceOwnership,
-} from "../../../../persistence-ownership.js";
+} from "../../../../persistence/persistence-ownership.js";
 import {
   EMPTY_PLAN_JSON_LEASE,
   settle,
   type PlanJsonEvent,
   type PlanJsonLease,
-} from "../../../../plan-json-lease.js";
-import { playerNoticeKeys, playerNotices, type PlayerNotices } from "../../../../notices.js";
+} from "../../../../persistence/plan-json-lease.js";
+import {
+  playerNoticeKeys,
+  playerNotices,
+  type PlayerNotices,
+} from "../../../../presentation/notices.js";
 import {
   serializeValidatedRuntimeJson,
   type CheckpointErrorInfo,
@@ -37,7 +44,7 @@ import type { InterpreterEvent } from "../../../../../src/index.js";
 import type {
   DebugRewoundWhileDebugging,
   DebugEditedWhileDebugging,
-} from "../../../../debug-export.js";
+} from "../../../../debug/debug-export.js";
 import type { Problem } from "../../start-and-end/ProblemCard.vue";
 import type { PlayerSessionOptions, PlayerSessionStart } from "../usePlayerSession.js";
 import type { useRuntimeSceneClock } from "../useRuntimeSceneClock";

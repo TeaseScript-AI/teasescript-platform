@@ -7,14 +7,14 @@ import { defineConfig } from "vite";
  * as unused. `tools/knip-entries.test.mjs` checks that the two lists match.
  */
 const modules = [
-  "player/captured-media.ts",
-  "player/compile-project.ts",
+  "player/media/captured-media.ts",
+  "player/runtime/compile-project.ts",
   "player/engine-bridge/client.ts",
   "player/engine-bridge/in-process.ts",
-  "player/player-bridge.ts",
-  "player/runtime-adapter.ts",
-  "player/runtime-view.ts",
-  "player/saved-data.ts",
+  "player/runtime/player-bridge.ts",
+  "player/runtime/runtime-adapter.ts",
+  "player/runtime/runtime-view.ts",
+  "player/persistence/saved-data.ts",
   "player/theme/palette.ts",
   "player/theme/photo-theme.ts",
   "player/vue/src/debug/debugStageImage.ts",

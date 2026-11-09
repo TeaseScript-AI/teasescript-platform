@@ -3,8 +3,8 @@ import type {
   RandomOutcome,
 } from "../../../src/runtime/random/random-control.js";
 import { checkedOutcome } from "../../../src/runtime/random/random-kinds.js";
-import { resumePlayerRuntimeRandomDraw } from "../../runtime-adapter.js";
-import type { RandomTried } from "../../random-decisions.js";
+import { resumePlayerRuntimeRandomDraw } from "../../runtime/runtime-adapter.js";
+import type { RandomTried } from "../../debug/random-decisions.js";
 import { everyItem, exactly, isRecord } from "../argument-checks.js";
 import { type PlayerOpsContext } from "../player-ops.js";
 import {

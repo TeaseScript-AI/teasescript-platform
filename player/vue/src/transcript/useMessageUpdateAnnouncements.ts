@@ -1,7 +1,7 @@
 import { nextTick, ref, watch, type Ref } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
-import { MessageUpdateAnnouncer } from "../../../message-update-announcer.js";
-import type { PlayerSession } from "../../../runtime-view.js";
+import { MessageUpdateAnnouncer } from "../../../presentation/message-update-announcer.js";
+import type { PlayerSession } from "../../../runtime/runtime-view.js";
 
 /**
  * The text of the Player's status region for changed messages (PLAYER-UI.md "Conversation"). Only changes that live

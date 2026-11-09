@@ -1,15 +1,20 @@
 import { computed, ref, shallowReactive, watch, type Ref, type ShallowRef } from "vue";
 import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
 import type { MediaProgressReport, TimeObservationOutcome } from "../../../../src/index.js";
-import type { ClockTicket } from "../../../clock-ticket.js";
-import { bridgeOf, endsQuietly, refusalCode, type SessionSection } from "../../../player-bridge.js";
+import type { ClockTicket } from "../../../runtime/clock-ticket.js";
+import {
+  bridgeOf,
+  endsQuietly,
+  refusalCode,
+  type SessionSection,
+} from "../../../runtime/player-bridge.js";
 import {
   nextPlayerRuntimeCatchUpStepMs,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeDeadlines,
   playerRuntimeTimers,
   type PlayerSession,
-} from "../../../runtime-view.js";
+} from "../../../runtime/runtime-view.js";
 
 const DISPLAY_REFRESH_MS = 250;
 // Browsers fire longer `setTimeout` delays immediately; a later wake-up re-schedules the rest.

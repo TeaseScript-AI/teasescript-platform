@@ -30,7 +30,7 @@ import type {
 import {
   activePlayerRuntimeInteraction,
   activePlayerRuntimePacingGate,
-} from "../../player/runtime-view.js";
+} from "../../player/runtime/runtime-view.js";
 import {
   cloneCapturedRuntimeSnapshot,
   createFreshRuntimeSnapshotWithValidatedPlan,
