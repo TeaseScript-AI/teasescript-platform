@@ -915,8 +915,8 @@ export interface StopRunSide {
  * unwitnessed cell is unresolved evidence):
  * - `open`: a run where the natural plan fails at runtime and the stopped plan runs to its end; with no natural plan (a
  *   compile error the stop turned into runtime checks), a run in a single-file unit that executes the error's own store
- *   instruction (the innermost holding the error's site) and passes it: it ends, or it fails elsewhere with no loop round
- *   in its trace;
+ *   instruction (the innermost holding the error's site; a store's absent property, C5c, at the store, not the object the
+ *   diagnostic names) and passes it: it ends, or it fails elsewhere with no loop round in its trace;
  * - `later`: a run where both fail at different sites and the stopped run executed the natural failure's exact
  *   instruction and passed it, in a single-file unit with no loop round in its trace (the instruction trace,
  *   `docs/RUNTIME.md#instruction-trace`);
@@ -950,8 +950,8 @@ export interface StopRuns {
    */
   readonly untested?: readonly string[];
   /**
-   * With no natural plan: each error of the natural compile, by its code and site, and what the stopped analysis checks
-   * there (`typed`, `unknown`, or `none`): the site rule of #2098's ledger.
+   * With no natural plan: each error of the natural compile, by its code and site (a store's absent property at the
+   * store), and what the stopped analysis checks there (`typed`, `unknown`, or `none`): the site rule of #2098's ledger.
    */
   readonly sites: readonly {
     readonly code: string;
