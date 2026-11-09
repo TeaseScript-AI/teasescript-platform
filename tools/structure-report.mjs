@@ -3,7 +3,7 @@
 // "Code structure"). Signals, not limits: each line it prints asks for a seam or a reason.
 //
 //   node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]
-//   node tools/structure-report.mjs [ROOT…] --diff BASE [--json FILE]
+//   node tools/structure-report.mjs [ROOT…] --diff BASE [--moved] [--json FILE] [--summary FILE]
 //
 // ROOT selects what is read, by default the five components: src, player, tests, tools and playground. A component's
 // top level is the code files directly in it; no other folder counts as a top level, whichever ROOT selects it. Only
@@ -38,19 +38,36 @@
 // count; rename detection's similarity threshold (50% by default) and its limit decide what a move is, so an edited
 // move below them counts as a deletion and an addition; and attributes can make a file binary, which adds no lines.
 //
-// Options: each of --top, --json, --compare and --diff takes a value, as the next argument or after `=`
-// (`--json=FILE`); --top's is a whole number. Every other argument is a root; one that starts with `-` is refused as an
-// unknown option, so a root of that name is written `./-name`.
+// With --moved, the lines Git's moved-line detection marks as moved (`moved-lines.mjs`, read once over the whole change)
+// are left out of the lines behind two signals, a file gaining over 300 lines and a function over 150 lines that the
+// change writes into, and each signal this suppresses is printed with the moved lines it discounted; a file over 1,000
+// lines whose added lines are all moved or admitted by `pure-move-check.mjs`'s forms 1-3 (an import or re-export line, a
+// bare `export` on a moved declaration, whitespace: its classification, imported) is printed as suppressed with its
+// admitted lines; every other signal is as without it. Git's detection is heuristic (a moved block below its threshold reads as added).
+//
+// With --summary FILE, the files behind two signals, a file over 1000 lines that the change adds to and a file gaining
+// over 300 lines, are appended to FILE (CI passes its job summary file) and printed after the report: a heading, the
+// command and the merge base's short sha, then a `text` block of one row per file, sorted by name,
+// `<file> | <lines at the merge base> → <lines at HEAD> | <signals>`, the signals `over 1000` and `gaining N` (with
+// `, M moved discounted` under --moved); `no file signalled` when there is none, and `structure report could not run:
+// <reason>` on exit 2. The rows are read from the report's own signals; every other signal is in the report only.
+//
+// Options: each of --top, --json, --compare, --diff and --summary takes a value, as the next argument or after `=`
+// (`--json=FILE`); --top's is a whole number; --moved takes none. Every other argument is a root; one that starts with
+// `-` is refused as an unknown option, so a root of that name is written `./-name`.
 //
 // Exit status: 0 when the report is printed, a --diff report with files it could not measure included; 2, with the
 // usage, before anything is read or written, when an option has no value (it is the last argument, the argument after
 // it starts with `-`, or nothing follows its `=`), is given twice, or is unknown, or --top's value is not a whole
-// number; 2 when --diff cannot read the change's names (a name that is not UTF-8).
+// number; 2 when --diff cannot read the change's names (a name that is not UTF-8) or its moved lines, or --summary has
+// no --diff.
 import { execFileSync } from "node:child_process";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
+import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
+import { verdictsOf } from "./pure-move-check.mjs";
 
 const SIGNALS = {
   fileLines: 1000,
@@ -64,17 +81,18 @@ const CODE = /\.(ts|tsx|mts|cts|js|mjs|cjs|vue)$/;
 const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/;
 
 const USAGE = `usage: node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]
-       node tools/structure-report.mjs [ROOT…] --diff BASE [--json FILE]`;
+       node tools/structure-report.mjs [ROOT…] --diff BASE [--moved] [--json FILE] [--summary FILE]`;
 /** Ends the run before anything is read or written (exit 2). */
 const refuse = (message) => {
   console.error(`structure-report: ${message}\n${USAGE}`);
   process.exit(2);
 };
 /**
- * The command line, read once from left to right: each option takes its value after `=` or as the argument after it,
- * which must be there and must not start with `-`, and is given at most once; an argument that starts with `-` and is
- * no option is refused; every other argument is a root.
+ * The command line, read once from left to right: each option but the flag --moved takes its value after `=` or as the
+ * argument after it, which must be there and must not start with `-`; every option is given at most once; an argument
+ * that starts with `-` and is no option is refused; every other argument is a root.
  */
+const given = process.argv.slice(2);
 const rootArgs = [];
 const options = new Map();
 for (let i = 2; i < process.argv.length; i++) {
@@ -83,9 +101,15 @@ for (let i = 2; i < process.argv.length; i++) {
     rootArgs.push(arg);
     continue;
   }
+  if (arg === "--moved") {
+    if (options.has(arg)) refuse(`${arg} is given twice`);
+    options.set(arg, true);
+    continue;
+  }
   const equals = arg.indexOf("=");
   const name = equals < 0 ? arg : arg.slice(0, equals);
-  if (!["--top", "--json", "--compare", "--diff"].includes(name)) refuse(`unknown option ${name}`);
+  if (!["--top", "--json", "--compare", "--diff", "--summary"].includes(name))
+    refuse(`unknown option ${name}`);
   const value = equals < 0 ? process.argv[++i] : arg.slice(equals + 1);
   if (value === undefined || value === "" || (equals < 0 && value.startsWith("-")))
     refuse(`${name} takes a value`);
@@ -98,6 +122,8 @@ const top = Number(options.get("--top") ?? 10);
 const jsonOut = options.get("--json");
 const compareWith = options.get("--compare");
 const diffBase = options.get("--diff");
+const summaryOut = options.get("--summary");
+const discountMoved = options.has("--moved");
 const roots =
   rootArgs.length > 0
     ? rootArgs.map((root) => path.posix.normalize(root).replace(/\/+$/u, "") || ".")
@@ -346,7 +372,71 @@ function gitAddedLines(mergeBase) {
   return gitAdded;
 }
 
-/** The signals the change from the merge base to `HEAD` adds to, each `{ signal, line }` with the line it prints. */
+/**
+ * The signals `file`'s added lines raise (its `HEAD` blob `text`, its added lines `added` in order): a function over
+ * the signal's length that they write into, and the file gaining over the signal's lines. With --moved, the lines Git
+ * marks as moved (`moved`) are left out, and each signal that leaves out is printed as suppressed with its count.
+ */
+function addedLinesSignals(file, text, added, moved) {
+  const found = [];
+  const counted = added.filter((line) => !moved.has(line));
+  const discounted = (from, to) =>
+    added.filter((line) => line >= from && line <= to && moved.has(line)).length;
+  if (PARSED.test(file))
+    for (const fn of longFunctionsOf(file, text)) {
+      const end = fn.line + fn.lines - 1;
+      const what = `function over ${SIGNALS.functionLines} lines that the change writes into: ${shown(file)}:${fn.line} ${fn.name} (${fn.lines} lines)`;
+      if (holdsLineIn(counted, fn.line, end)) found.push({ signal: "function", line: what });
+      else if (holdsLineIn(added, fn.line, end))
+        found.push({
+          signal: "suppressed",
+          line: `suppressed (moved): ${what}, ${discounted(fn.line, end)} moved lines discounted`,
+        });
+    }
+  const movedCount = added.length - counted.length;
+  if (counted.length > SIGNALS.addedLines)
+    found.push({
+      signal: "added",
+      file,
+      counted: counted.length,
+      moved: movedCount,
+      line: `file gaining over ${SIGNALS.addedLines} lines: +${counted.length} ${shown(file)}${movedCount > 0 ? `, ${movedCount} moved discounted` : ""}`,
+    });
+  else if (added.length > SIGNALS.addedLines)
+    found.push({
+      signal: "suppressed",
+      line: `suppressed (moved): file gaining over ${SIGNALS.addedLines} lines: +${added.length} ${shown(file)}, ${movedCount} moved discounted`,
+    });
+  return found;
+}
+
+/**
+ * With --moved, each file's added lines Git marks as moved (`moved`), and those the pure-move check admits by its forms
+ * 1-3 (an import or re-export line, a bare `export` on a moved declaration, whitespace: `admitted`), by their line in
+ * `HEAD`'s blob.
+ */
+function movedAndAdmitted(mergeBase) {
+  const [moved, admitted] = [new Map(), new Map()];
+  const moves = movedLinesOf(mergeBase, "HEAD");
+  for (const change of moves)
+    if (change.file !== null)
+      moved.set(
+        change.file,
+        new Set(change.addedLines.filter((row) => row.moved).map((row) => row.line)),
+      );
+  for (const [entry, form] of verdictsOf(mergeBase, "HEAD", moves).verdicts)
+    if (entry.side === "added" && ["import", "export", "whitespace"].includes(form)) {
+      if (!admitted.has(entry.file)) admitted.set(entry.file, new Set());
+      admitted.get(entry.file).add(entry.row.line);
+    }
+  return { moved, admitted };
+}
+
+/**
+ * The merge base and the signals the change from it to `HEAD` adds to, each `{ signal, line }` with the line it
+ * prints; a `file` and an `added` signal also carry `file`, `before` and `after` (its lines at the merge base and at
+ * `HEAD`), an `added` one also its `counted` and `moved` added lines.
+ */
 function changeSignals(base) {
   const mergeBase = git("merge-base", base, "HEAD").trim();
   const [headFiles, baseFiles] = [regularFilesAt("HEAD"), regularFilesAt(mergeBase)];
@@ -407,6 +497,10 @@ function changeSignals(base) {
   };
   const blob = (ref, file) => git("cat-file", "blob", `${ref}:${file}`);
 
+  const { moved: movedAdded, admitted: admittedAdded } = discountMoved
+    ? movedAndAdmitted(mergeBase)
+    : { moved: new Map(), admitted: new Map() };
+
   const found = [];
   const relevant = changes
     .filter(({ code, file }) => code !== "D" && selected(file) && headFiles.has(file))
@@ -425,28 +519,28 @@ function changeSignals(base) {
     if (added.length === 0) continue;
     const text = blob("HEAD", file);
     const lines = lineCount(text);
-    if (lines > SIGNALS.fileLines) {
-      const was =
+    let was;
+    const before = () =>
+      (was ??=
         change.old === null || !REGULAR.has(change.oldMode)
           ? 0
-          : lineCount(blob(mergeBase, change.old));
-      found.push({
-        signal: "file",
-        line: `file over ${SIGNALS.fileLines} lines that the change adds to: ${shown(file)} (${lines}, was ${was})`,
-      });
+          : lineCount(blob(mergeBase, change.old)));
+    if (lines > SIGNALS.fileLines) {
+      const what = `file over ${SIGNALS.fileLines} lines that the change adds to: ${shown(file)} (${lines}, was ${before()})`;
+      // with --moved, a file whose added lines are all moved or admitted by the pure-move check's forms 1-3
+      const [moved, admitted] = [movedAdded.get(file), admittedAdded.get(file)];
+      const discounted = added.filter((line) => moved?.has(line) || admitted?.has(line)).length;
+      if (discountMoved && discounted === added.length)
+        found.push({
+          signal: "suppressed",
+          line: `suppressed (moved): ${what}, ${added.filter((line) => admitted?.has(line)).length} admitted lines`,
+        });
+      else found.push({ signal: "file", file, before: before(), after: lines, line: what });
     }
-    if (PARSED.test(file))
-      for (const fn of longFunctionsOf(file, text))
-        if (holdsLineIn(added, fn.line, fn.line + fn.lines - 1))
-          found.push({
-            signal: "function",
-            line: `function over ${SIGNALS.functionLines} lines that the change writes into: ${shown(file)}:${fn.line} ${fn.name} (${fn.lines} lines)`,
-          });
-    if (added.length > SIGNALS.addedLines)
-      found.push({
-        signal: "added",
-        line: `file gaining over ${SIGNALS.addedLines} lines: +${added.length} ${shown(file)}`,
-      });
+    for (const signal of addedLinesSignals(file, text, added, movedAdded.get(file) ?? new Set()))
+      found.push(
+        signal.signal === "added" ? { ...signal, before: before(), after: lines } : signal,
+      );
   }
   // a file Git lists as added adds to its folder; a moved one, and an entry whose type changed, do not
   const [headFolders, baseFolders] = [
@@ -481,18 +575,93 @@ function changeSignals(base) {
         signal: "names",
         line: `names a letter apart: ${shown(pair.dir)}/: ${pair.names.map(shown).join("  ")}`,
       });
-  return found;
+  return { mergeBase, found };
+}
+
+/**
+ * What each kind of signal `changeSignals` returns writes in its file's summary row: its words, or `null` for a kind
+ * the summary leaves to the report. A kind not listed stops the summary.
+ */
+export const SUMMARY_KINDS = {
+  file: () => `over ${SIGNALS.fileLines}`,
+  added: ({ counted, moved }) =>
+    `gaining ${counted}${moved > 0 ? `, ${moved} moved discounted` : ""}`,
+  function: null,
+  suppressed: null,
+  folder: null,
+  "top level": null,
+  names: null,
+  unread: null,
+};
+
+/** The summary's block: a heading, `command` and the merge base's short sha `base`, then `rows` in a text block. */
+const summaryBlock = (command, base, rows) =>
+  [
+    "### Structure signals: files",
+    "",
+    `\`${command}\`${base === undefined ? "" : `, merge base ${base}`}`,
+    "",
+    "```text",
+    ...rows,
+    "```",
+    "",
+  ].join("\n");
+
+/** The summary's rows for `found`: one per file with a `file` or `added` signal, sorted by name. */
+function summaryRows(found) {
+  const files = new Map();
+  for (const signal of found) {
+    if (!Object.hasOwn(SUMMARY_KINDS, signal.signal))
+      throw new Error(
+        `structure-report: the summary does not know the signal kind ${signal.signal}`,
+      );
+    const words = SUMMARY_KINDS[signal.signal];
+    if (words === null) continue;
+    const row = files.get(signal.file) ?? { ...signal, words: [] };
+    row.words.push(words(signal));
+    files.set(signal.file, row);
+  }
+  const rows = [...files.values()]
+    .sort((one, other) => (one.file < other.file ? -1 : one.file > other.file ? 1 : 0))
+    .map(
+      ({ file, before, after, words }) =>
+        `${shown(file)} | ${before} → ${after} | ${words.join(", ")}`,
+    );
+  return rows.length > 0 ? rows : ["no file signalled"];
+}
+
+/** Appends the summary `block` to the --summary file and prints it after the report. */
+function writeSummary(block) {
+  appendFileSync(summaryOut, block);
+  process.stdout.write(`\n${block}`);
 }
 
 /** The report the command line asks for. */
 function main() {
+  const command = [
+    "node tools/structure-report.mjs",
+    ...given.filter(
+      (arg, i) =>
+        arg !== "--summary" && !arg.startsWith("--summary=") && given[i - 1] !== "--summary",
+    ),
+  ].join(" ");
+  if (summaryOut !== undefined && !diffBase) {
+    const reason = "structure-report: --summary needs --diff";
+    console.error(reason);
+    writeSummary(summaryBlock(command, undefined, [`structure report could not run: ${reason}`]));
+    process.exit(2);
+  }
   if (diffBase) {
-    let found;
+    let mergeBase, found;
     try {
-      found = changeSignals(diffBase);
+      ({ mergeBase, found } = changeSignals(diffBase));
     } catch (error) {
-      if (!(error instanceof CannotRun)) throw error;
+      if (!(error instanceof CannotRun || error instanceof MovedLinesUnreadable)) throw error;
       console.error(error.message);
+      if (summaryOut !== undefined)
+        writeSummary(
+          summaryBlock(command, undefined, [`structure report could not run: ${error.message}`]),
+        );
       process.exit(2);
     }
     const header = `structure signals this change adds to against ${diffBase}`;
@@ -505,6 +674,10 @@ function main() {
       writeFileSync(
         jsonOut,
         `${JSON.stringify({ signals: SIGNALS, base: diffBase, change: found }, null, 2)}\n`,
+      );
+    if (summaryOut !== undefined)
+      writeSummary(
+        summaryBlock(command, git("rev-parse", "--short", mergeBase).trim(), summaryRows(found)),
       );
   } else {
     const files = listedAt();

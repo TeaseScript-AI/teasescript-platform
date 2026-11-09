@@ -23,7 +23,8 @@ import { stepName, type CoreProgram } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { EvaluationKey, Expansion, Part, Stop, Stops, Via, ViaChain } from "./model.js";
 import { permittedAt } from "./permitted.js";
-import { fieldsOf, sourceOf } from "./structure.js";
+import { fieldsOf, sourceOfRead } from "./structure.js";
+import { readNow, type Reads } from "../inherited/reads.js";
 
 // The store walk: a stored value's contributions by the path they stand at, the bindings it copies, their order.
 
@@ -70,14 +71,14 @@ export const TYPED_ROLES: ReadonlySet<CarrierRole> = new Set([
   "parse default/default",
 ]);
 
-/** The roles whose operation reads a member of its receiver, the member read C1 sits at (TABLE r4.60). */
+/** The roles whose operation reads a member of its receiver, the member read C1 sits at. */
 export const RECEIVER_ROLES: ReadonlySet<CarrierRole> = new Set([
   "get/receiver",
   "copy/receiver",
   "removal/receiver",
 ]);
 
-/** The roles of operations that combine or remove, whose operand brought the kind (TABLE r4.63 (2)). */
+/** The roles of operations that combine or remove, whose operand brought the kind. */
 const COMBINING_ROLES: ReadonlySet<CarrierRole> = new Set([
   "concatenation/operand",
   "removal/receiver",
@@ -113,7 +114,7 @@ function viaLink(program: CoreProgram, outer: ViaChain | null, level: Via): ViaC
  * through the literals that hold them, or through the values that carry them (a projection, an operation: the path
  * read into it), in element order; once per value. A path below the value is a chain of steps, one per field, made
  * into an array once and only where a binding lands at it, so a literal nested k deep costs k steps, not k paths of
- * up to k steps each (TABLE r4.100 (2)).
+ * up to k steps each.
  */
 export function copySources(
   admission: Admission,
@@ -284,11 +285,23 @@ export function writtenSource(
   admission: Admission,
   value: PlaceId,
   strip: readonly string[],
-): {
+): WrittenSource | null {
+  return readNow(writtenSourceRead(admission, value, strip));
+}
+
+/** A written copy's source (`writtenSource`). */
+interface WrittenSource {
   readonly term: TypeTerm | null;
   readonly from: PlaceId | null;
   readonly strip: readonly string[];
-} | null {
+}
+
+/** `writtenSource` with the receivers' decisions reads (`Read`, #1072 A2). */
+export function* writtenSourceRead(
+  admission: Admission,
+  value: PlaceId,
+  strip: readonly string[],
+): Reads<WrittenSource | null> {
   const { program, contract } = admission.pass;
   const binding = program.occurrenceOf.get(value);
   if (binding !== undefined) {
@@ -303,7 +316,7 @@ export function writtenSource(
   if (term === null && !admission.inheriting.has(place)) return null;
   // (a projection of a receiver that may be a reference is the runtime's member, no copy: F19a)
   for (let at = value; program.projOf.has(at); at = program.projOf.get(at)!.owner)
-    if (admission.keepsOwn(at)) return null;
+    if (yield* admission.keepsOwnRead(at)) return null;
   const steps = keyStepsIn(contract, key);
   if (someStep(steps, (step) => dictList(step) !== undefined)) return null;
   // (a copy's strip keeps an array: a cursor's steps copied out, `stepsArray`, for a source it keeps)
@@ -329,6 +342,17 @@ export function expand(
   strip: readonly string[],
   after = false,
 ): Expansion {
+  return readNow(expandRead(admission, value, node, strip, after));
+}
+
+/** `expand` with the value side's decisions reads (`Read`, #1072 A2). */
+export function* expandRead(
+  admission: Admission,
+  value: PlaceId,
+  node: FlowNode,
+  strip: readonly string[],
+  after = false,
+): Reads<Expansion> {
   const memoKey = keptParts(admission.work, value, node.id, after, strip);
   const known = admission.expansions.get(memoKey);
   if (known !== undefined) return known;
@@ -358,7 +382,7 @@ export function expand(
     at: FlowNode,
     fields: Pick<Part, "step" | "strip" | "deep" | "single" | "position" | "after" | "role">,
   ): Part => ({ value: of, node: at, ...fields, expansion: null });
-  const written = writtenSource(admission, value, strip);
+  const written = yield* writtenSourceRead(admission, value, strip);
   const term = written?.term ?? null;
   const inherits =
     !after && written !== null && written.from !== null
@@ -368,9 +392,9 @@ export function expand(
   let stop: Expansion["stop"] = null;
   const parts: Part[] = [];
   const carried =
-    literal || after || term !== null || sourceOf(admission, value) !== null
+    literal || after || term !== null || (yield* sourceOfRead(admission, value)) !== null
       ? []
-      : admission.carriersOf(value, strip);
+      : yield* admission.carriersOfRead(value, strip);
   if (literal && strip.length > 0) {
     const next = cells(strip[0]!);
     // (its cells' tasks share one rest of the strip, charged as kept)
@@ -448,7 +472,12 @@ export function expand(
 
 /** A part's own task (`expand`), made once and kept on the part. */
 export function partOf(admission: Admission, part: Part): Expansion {
-  part.expansion ??= expand(admission, part.value, part.node, part.strip, part.after);
+  return readNow(partOfRead(admission, part));
+}
+
+/** `partOf` with its task's reads (`Read`, #1072 A2). */
+export function* partOfRead(admission: Admission, part: Part): Reads<Expansion> {
+  part.expansion ??= yield* expandRead(admission, part.value, part.node, part.strip, part.after);
   return part.expansion;
 }
 
@@ -457,10 +486,19 @@ export function partOf(admission: Admission, part: Part): Expansion {
  * (A4), the other values no literal of it holds (a read, a call, external data), and its literals, whose fields and
  * elements stand below them; once per value, from its tasks' recipes (`expand`). `once`: later copies or calls of one
  * source identity at a path are one stop (F2), as every walk made before a stop has them; a walk made after one keeps
- * every stop instead, the same boundaries and sites without asking identities nothing else after the stop asks (TABLE
- * r4.55, r4.126).
+ * every stop instead, the same boundaries and sites without asking identities nothing else after the stop asks.
  */
 export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, once = true): Stops {
+  return readNow(stopsOfRead(admission, value, node, once));
+}
+
+/** `stopsOf` with its tasks' reads (`Read`, #1072 A2). */
+export function* stopsOfRead(
+  admission: Admission,
+  value: PlaceId,
+  node: FlowNode,
+  once = true,
+): Reads<Stops> {
   const memo = once ? admission.stops : admission.everyStop;
   const known = memo.get(value);
   if (known !== undefined) return known;
@@ -478,7 +516,7 @@ export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, on
     ViaChain | null,
     boolean,
     EvaluationKey,
-  ])[] = [[expand(admission, value, node, []), [], false, null, true, root]];
+  ])[] = [[yield* expandRead(admission, value, node, []), [], false, null, true, root]];
   while (pending.length > 0) {
     const [task, path, deep, via, single, key] = pending.pop()!;
     program.work.charge("indexSteps");
@@ -503,7 +541,7 @@ export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, on
     }
     const own = task.stop;
     // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2; a copy only
-    // where it reads the same snapshot, r4.68 (1); and only through the same operations, selected alike: an operand
+    // where it reads the same snapshot; and only through the same operations, selected alike: an operand
     // a `get` never gives is no copy of the store's own element beside it, Astra r5 D1; never a read of an ingress,
     // itself or through projections (`Contract.ingressOf`), which lands by its own leaf, S6-CARRIERS §3.1, #1210)
     const map = own === null ? null : own.list === "written" ? stops.written : stops[own.list];
@@ -515,7 +553,7 @@ export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, on
       sharing() &&
       path.length > 0 &&
       own.list === "values" &&
-      sourceOf(admission, current) !== null &&
+      (yield* sourceOfRead(admission, current)) !== null &&
       contract.ingressOf(current) === null
     ) {
       const identity = keptParts(
@@ -551,7 +589,7 @@ export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, on
     for (let index = task.parts.length - 1; index >= 0; index -= 1) {
       const part = task.parts[index]!;
       pending.push([
-        partOf(admission, part),
+        yield* partOfRead(admission, part),
         part.step === null ? path : keptSteps(admission.work, path, [part.step]),
         part.deep ?? deep,
         part.role === null
@@ -607,7 +645,7 @@ export function viaSignature(admission: Admission, via: ViaChain | null): string
 
 /**
  * A contribution's own expression, C1's site for it (§3.4): a member a receiver's operation reads of it (a `get`, a
- * copy, a removal of the data: TABLE r4.60), else the contribution itself, an ingress, a member read of one or a named
+ * copy, a removal of the data), else the contribution itself, an ingress, a member read of one or a named
  * read.
  */
 export function contributionSite(admission: Admission, stop: Stop, d: Definition): SourceSite {

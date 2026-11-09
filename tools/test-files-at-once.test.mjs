@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { filesAtOnce, memoryLimitMib } from "./test-files-at-once.mjs";
+import { filesAtOnce, jobMemoryMib, memoryLimitMib } from "./test-files-at-once.mjs";
 
 const GIB = 2 ** 30;
 
@@ -60,4 +60,38 @@ test("files at once: one per core but one without a limit, as many as fit at 3 G
     [0, null, 1, "a single core: one"],
   ])
     assert.equal(filesAtOnce({ cores, limitMib }), expected, what);
+});
+
+test("the job's memory: SX_MEM_MIB and a visible cgroup limit, the smaller, so the variable never raises a cap (#2154)", () => {
+  const env = (value) => ({ SX_MEM_MIB: value });
+  // (the variable smaller: a 6 GiB reservation on a worker whose only visible limit is the container's 40 GiB)
+  assert.equal(jobMemoryMib({ env: env("6144"), cgroupMib: 40960 }), 6144);
+  assert.equal(
+    filesAtOnce({ cores: 15, limitMib: jobMemoryMib({ env: env("6144"), cgroupMib: 40960 }) }),
+    4,
+  );
+  // (the cgroup smaller: a cap the runner can see wins over a larger reservation)
+  assert.equal(jobMemoryMib({ env: env("16384"), cgroupMib: 6144 }), 6144);
+  // (one of them alone, or neither)
+  assert.equal(jobMemoryMib({ env: env("6144"), cgroupMib: null }), 6144);
+  assert.equal(jobMemoryMib({ env: {}, cgroupMib: 8192 }), 8192);
+  assert.equal(jobMemoryMib({ env: {}, cgroupMib: null }), null);
+  assert.equal(jobMemoryMib({ env: env("06144"), cgroupMib: null }), 6144);
+  for (const value of ["0", "00", "-1", "6G", "", "6144.5", " 6144", "9".repeat(400)])
+    assert.throws(
+      () => jobMemoryMib({ env: env(value), cgroupMib: null }),
+      /SX_MEM_MIB/u,
+      JSON.stringify(value),
+    );
+});
+
+test("filesAtOnce's default sizes from SX_MEM_MIB, whatever the cgroup this runs in (#2154)", (t) => {
+  // (1 MiB is below the reserve whatever the visible cgroup limit is, so the default gives one file at once, as only a
+  // default that reads the variable can)
+  const before = process.env.SX_MEM_MIB;
+  t.after(() =>
+    before === undefined ? delete process.env.SX_MEM_MIB : (process.env.SX_MEM_MIB = before),
+  );
+  process.env.SX_MEM_MIB = "1";
+  assert.equal(filesAtOnce({ cores: 15 }), 1);
 });

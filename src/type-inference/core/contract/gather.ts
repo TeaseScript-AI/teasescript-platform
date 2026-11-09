@@ -38,7 +38,7 @@ import { selectedObject, selectionOf, selectionPieces } from "./selections.js";
 // The value side's wide gathers (S10 part 2b): a gather site's contributions, its groups, its selections' runs.
 
 /**
- * F12 (r4.7): below a read that stands below an element step, the read's contract answer at the rest of the path
+ * F12: below a read that stands below an element step, the read's contract answer at the rest of the path
  * (definite by P3, else possible; context `member`), with the read's ingress stores and guard mark.
  */
 function* belowRead(contract: Contract, read: PlaceId, below: Steps): Work<readonly Item[]> {
@@ -61,7 +61,7 @@ function* belowRead(contract: Contract, read: PlaceId, below: Steps): Work<reado
 }
 
 /**
- * V30 §19, TABLE r4.46 (1): the button values of the options a literal holds at `path`, read at `after` below them,
+ * V30 §19: the button values of the options a literal holds at `path`, read at `after` below them,
  * per record alternative: the `value` of a record that has the key (`byValue`), the `text` of one that has none (the
  * property's own cell, its sources kept); a value that is no record is its own button's value, and a record whose keys
  * are unknown, or a reference, has the runtime's (both with the `value`s). With the number of alternatives it chooses

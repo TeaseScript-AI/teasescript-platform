@@ -23,6 +23,7 @@ import {
 } from "./consumers.js";
 import { keyLabel } from "./consumers/names.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
+import { Admission } from "./admission.js";
 import { Closure, type ClosureCounts } from "./admission/closure.js";
 import type { ReceivingObligation, ReceivingResult } from "./admission/receiving.js";
 import { ReceivingDomain } from "./inherited/receiving-domain.js";
@@ -35,7 +36,7 @@ import {
 } from "./contract/key-ids.js";
 import { labelText } from "./contract/labels.js";
 import { keyObjects, objectsAt } from "./contract/objects.js";
-import { replayLayer } from "./contract/prefix-index.js";
+import { replayLayer } from "./contract/prefix-index/summaries.js";
 import { selectLanes } from "./contract/lanes.js";
 import {
   Contract,
@@ -58,7 +59,7 @@ import {
 } from "./definitions.js";
 import type { Dominators } from "./dominators.js";
 import { ExactPath, withoutEmpty } from "./exact-path.js";
-import type { Callable, FileRegion, FlowGraph, FlowNode, FunctionRegion } from "./flow-graph.js";
+import type { Callable, FlowGraph, FlowNode } from "./flow-graph.js";
 import { GuardIndex } from "./guards.js";
 import { HandlerIndex } from "./handlers.js";
 import {
@@ -83,13 +84,10 @@ import {
 import {
   checksBySite,
   outcomeOf,
-  type BudgetStop,
   type CoreDiagnostic,
   type CoreOutcome,
   type CoreResult,
-  type NotChecked,
   type Obligation,
-  type WorkPlace,
   type WrittenTypeError,
 } from "./result.js";
 import { Solver, type DemandWork, type Proof, type ProofDemand, type Work } from "./solver.js";
@@ -104,6 +102,7 @@ import {
   type ContractResult,
 } from "./contract-descriptors.js";
 import { admittedLevel } from "./admission/admitted.js";
+import { stopDiagnostics } from "./stop-diagnostics.js";
 
 // (a kind's closed type lives with the contract descriptors, which build types of kinds; the adapters read it here)
 export { closedType };
@@ -130,7 +129,7 @@ export interface CorePass {
   readonly contract: Contract;
   readonly values: Values;
   readonly solver: Solver;
-  /** A4's receiving domain state (`ReceivingDomain`, TABLE r4.375): one per pass, made empty with its parts. */
+  /** A4's receiving domain state (`ReceivingDomain`): one per pass, made empty with its parts. */
   readonly receivingDomain: ReceivingDomain;
   /** The receiving closure of a completion pass (#1526 phase C, `Consumers.#completeFor`), absent in any other pass. */
   readonly closure?: Closure | null;
@@ -141,7 +140,7 @@ type StoreTargets = ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]>>;
 
 /**
  * One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6), the keys of
- * `stopped` stopped from its start (TABLE r4.180), a store below an object's own `first`, `last` or `random` at its
+ * `stopped` stopped from its start, a store below an object's own `first`, `last` or `random` at its
  * target in `targets` (#1275).
  */
 function createPass(
@@ -348,7 +347,7 @@ export interface OccurrenceAnswer {
  * A place's admitted type (A1–A9): its written type; else the kinds admission decided it by, or its contract's kinds
  * where admission found nothing to check (one family, A3), with the site of the contribution that decided (S3 §1: A2's
  * earliest definite one, A4's copy; `null` where no store decides), `null` among the kinds where a `null` contribution
- * is admitted (C9 r4.12): the type its boundary checks are against; `undecided` where it has no kind (an unknown only,
+ * is admitted (C9): the type its boundary checks are against; `undecided` where it has no kind (an unknown only,
  * or no store).
  */
 export type AdmittedType =
@@ -357,7 +356,7 @@ export type AdmittedType =
       readonly by: "decided";
       readonly kinds: readonly ItemTag[];
       readonly decider: SourceSite | null;
-      /** Whether a copy of a written type decides it (A4 through copies, r4.75 (1)): a written domain, not its own. */
+      /** Whether a copy of a written type decides it (A4 through copies): a written domain, not its own. */
       readonly inherited: boolean;
     }
   | { readonly by: "undecided" };
@@ -403,7 +402,7 @@ export interface BudgetAnswer {
   /** `finishing` by counter, with what was counted apart without a stop (`WorkLedger.apart`). */
   readonly apart: ReadonlyMap<WorkCounter, number>;
   /**
-   * The phase the stop came in (TABLE r4.90's lifecycle): the setup (a pass's own included), admission's walk, the
+   * The phase the stop came in: the setup (a pass's own included), admission's walk, the
    * capture of the stores' contracts after admission settled (`extraction`, #1526), the consumers' walk, the publication
    * of boundaries, or the questions after a finished analysis; `null` without a stop.
    */
@@ -456,7 +455,7 @@ export interface DecisionWork {
   readonly stopped: boolean;
   /**
    * A decision of the receiving closure's completion pass (#1526 phase C): its own allowance, the one a decision of the
-   * settled pass has (`allowance` is what was left of the total, r4.269).
+   * settled pass has (`allowance` is what was left of the total).
    */
   readonly completion?: { readonly local: number };
 }
@@ -587,13 +586,13 @@ export interface Answers {
    */
   valueAt(node: FlowNode, path: readonly string[]): ValueAnswer;
   /**
-   * The name an obligation gives the value at a node (§10.5 r4.10, `keyLabel`): its key path, else its text; `null`
+   * The name an obligation gives the value at a node (§10.5, `keyLabel`): its key path, else its text; `null`
    * where the node holds no value. The plan side reads an obligation's target by it, never by a name of its own.
    */
   targetName(node: FlowNode): string | null;
   view(node: FlowNode): CoreView;
   /**
-   * Gives `view` its known values: the one constant service the consumer owns (S3 §1, TABLE r4.81 (3)), so the known
+   * Gives `view` its known values: the one constant service the consumer owns (S3 §1), so the known
    * value a view reads and the consumer's own are one; until then a view knows none.
    */
   shareKnown(known: (expression: Expression) => KnownValue | undefined): void;
@@ -601,7 +600,7 @@ export interface Answers {
 
 /**
  * The analysis of a project by the coarse core: its answers, published after its last pass. A stop is no compile
- * error (the owner's D4, option a′, TABLE r4.54, r4.55): past the work allowance or a read chain's depth the analysis
+ * error (the owner's D4, option a′): past the work allowance or a read chain's depth the analysis
  * stops proving, and statements nested past the nesting limit are not proved at all; what it found stays, every check it
  * did not decide runs when the script runs, and one warning says so (`finished`). `stopped`: the analysis stops at
  * its start, as a question after an analysis that crossed the allowance stops it (the candidate route).
@@ -619,9 +618,10 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
     try {
       program.index();
       // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
-      // whose changing stores stay possibilities. A pass in which a decision stops is not settled either (TABLE r4.180):
-      // the next, from the same rejected set, starts with every stopped key stopped, once per rejected set; a decision
-      // stopping in that pass again stops the analysis, as the work allowance does (TABLE r4.183)
+      // whose changing stores stay possibilities. A pass in which a decision stops is not settled either
+      // (docs/specifications/type-inference-accepted-record.md#r4-180): the next, from the same rejected set, starts
+      // with every stopped key stopped, once per rejected set; a decision stopping in that pass again stops the
+      // analysis, as the work allowance does (docs/specifications/type-inference-accepted-record.md#r4-183)
       let cycling: ReadonlySet<number> = new Set();
       const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
       const selecting = selectingStores(program);
@@ -789,6 +789,9 @@ export function solveDemands(
   const pass = createPass(program);
   // (names holding cursors came with their packet, made here and asked in this pass's identity: #1422 B1)
   const keys = packet === undefined ? asked : importNames(pass.contract, asked, packet);
+  // (an inherited proof is made by an admission on the pass, as the replayed pass's was: `replayProof`)
+  if (keys.some((key) => key.startsWith("a4|")))
+    new Admission(pass, { run: (work) => pass.solver.run(work) }, new Map(), new Set());
   return keys.map((key) => {
     pass.solver.run(demandWork(pass, key));
     // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store); a key's
@@ -799,7 +802,7 @@ export function solveDemands(
     const byId = (path: string): string => `.${pass.contract.pathIdOf(splitPath(path))}`;
     const answer =
       pass.solver.answer(key) ??
-      (kind === "c" || kind === "rc"
+      (kind === "c" || kind === "rc" || kind === "a4"
         ? pass.solver.answer(joinParts(kind, pass.contract.canonicalKey(parts.join("|"))))
         : kind === "op" && parts[1] && !parts[1].startsWith(".")
           ? pass.solver.answer(joinParts("op", parts[0]!, byId(parts[1])))
@@ -817,7 +820,7 @@ function* asked(demand: ProofDemand<Proof>): Work<readonly Item[]> {
 }
 
 /**
- * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`,
+ * The computation that demands `key` (`protoLayer|`, `c|`, `ob|`, `obk|`, `a4|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`,
  * `lit|`, `op|`, `dk|`, `dn|`, `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write
  * them).
  */
@@ -835,6 +838,9 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
       return asked(objectsAt(contract, Number(parts[0]), splitPath(parts[1] ?? "")));
     case "obk":
       return asked(keyObjects(contract, parts.join("|")));
+    // (#1072 A2's inherited proofs, by their key, as the admission made on the pass makes them)
+    case "a4":
+      return asked(pass.receivingDomain.replayProof!(parts.join("|")));
     case "s": {
       const rest = splitPath(parts[2] ?? "");
       return contract.subAt(joinParts(parts[0]!, parts[1] ?? ""), rest);
@@ -956,116 +962,6 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   }
 }
 
-/**
- * The places work is counted to and the stop names (D4 a′): each file's top level and each function, by its region,
- * and the one a site stands in (functions stand at a file's top level, never nested: V30 §11).
- */
-function workPlaces(program: CoreProgram): {
-  readonly of: (site: SourceSite) => FileRegion | FunctionRegion;
-  readonly place: (region: FileRegion | FunctionRegion) => WorkPlace;
-  readonly site: (region: FileRegion | FunctionRegion) => SourceSite;
-} {
-  const files = new Map<number, FileRegion>();
-  const functions = new Map<number, FunctionRegion[]>();
-  for (const region of program.flow.regions)
-    if (region.kind === "file") files.set(region.file, region);
-    else if (region.kind === "function") {
-      const list = functions.get(region.file);
-      if (list === undefined) functions.set(region.file, [region]);
-      else list.push(region);
-    }
-  for (const list of functions.values())
-    list.sort((a, b) => a.declaration.span.start.offset - b.declaration.span.start.offset);
-  const spanSite = (file: number, span: FunctionRegion["declaration"]["span"]): SourceSite => ({
-    file,
-    start: span.start.offset,
-    end: span.end.offset,
-  });
-  return {
-    of: (site) => {
-      const list = functions.get(site.file) ?? [];
-      let low = 0;
-      let high = list.length;
-      while (low < high) {
-        const middle = (low + high) >> 1;
-        if (list[middle]!.declaration.span.start.offset <= site.start) low = middle + 1;
-        else high = middle;
-      }
-      const found = list[low - 1];
-      return found !== undefined && site.end <= found.declaration.span.end.offset
-        ? found
-        : files.get(site.file)!;
-    },
-    place: (region) =>
-      region.kind === "function"
-        ? {
-            name: region.declaration.name.name,
-            path: files.get(region.file)?.path ?? "",
-            lines: spanSite(region.file, region.declaration.span),
-          }
-        : { name: null, path: region.path, lines: program.fileSite(region.file) },
-    site: (region) =>
-      region.kind === "function"
-        ? spanSite(region.file, region.declaration.name.span)
-        : { file: region.file, start: 0, end: 0 },
-  };
-}
-
-/**
- * The stop's diagnostics (D4 a′, TABLE r4.54): one warning at the heaviest place, the function or top level whose work
- * was the most before the stop (the deepest nesting's for `nesting`), counting the checks moved to the runtime; and
- * "not checked (budget)", once per function or top level one of those checks stands in, at its name or at its first.
- */
-function stopDiagnostics(
-  program: CoreProgram,
-  limit: BudgetLimit,
-  deferred: readonly Extract<CoreDiagnostic, { obligation: unknown }>[],
-): (BudgetStop | NotChecked)[] {
-  const places = workPlaces(program);
-  const unchecked = new Map<FileRegion | FunctionRegion, SourceSite>();
-  for (const diagnostic of [...deferred].sort(
-    // (in source order, the whole site: one order for every order of the walk)
-    (a, b) => a.site.file - b.site.file || a.site.start - b.site.start || a.site.end - b.site.end,
-  )) {
-    const region = places.of(diagnostic.site);
-    if (!unchecked.has(region))
-      unchecked.set(region, region.kind === "function" ? places.site(region) : diagnostic.site);
-  }
-  let heaviest: FileRegion | FunctionRegion;
-  if (limit === "nesting") heaviest = places.of(program.deep[0]!);
-  else {
-    // the most work counted to one place, the earliest region on a tie; setup's (0) names none, nor a block's creator
-    const spent = program.work.spent();
-    let best = 0;
-    for (let spender = 1; spender < spent.length; spender += 1)
-      if ((spent[spender] ?? 0) > (best === 0 ? 0 : (spent[best] ?? 0))) best = spender;
-    const region = best === 0 ? undefined : program.flow.regions[best - 1];
-    heaviest =
-      region?.kind === "function" || region?.kind === "file"
-        ? region
-        : places.of({ file: 0, start: 0, end: 0 });
-  }
-  const stop: BudgetStop = {
-    class: "warning-runtime-check",
-    kind: "budget",
-    code: "TSV076",
-    site: unchecked.get(heaviest) ?? places.site(heaviest),
-    limit,
-    place: places.place(heaviest),
-    deferred: deferred.length,
-  };
-  return [
-    stop,
-    ...[...unchecked].map(([region, site]): NotChecked => ({
-      class: "not-checked-budget",
-      kind: "budget",
-      code: "TSV076",
-      site,
-      place: places.place(region),
-    })),
-  ];
-}
-
 /** Whether two passes reject the same stores. */
 function sameSet(a: ReadonlyMap<number, unknown>, b: ReadonlyMap<number, unknown>): boolean {
   return a.size === b.size && [...a.keys()].every((uid) => b.has(uid));
@@ -1124,7 +1020,7 @@ function withBesides(diagnostics: readonly CoreDiagnostic[]): CoreDiagnostic[] {
 /**
  * A published list in source order of its items' sites (file, start, end): at one site in the order the consumers run
  * (`rule`), and one consumer's by their own text, so the order is the same whichever order a consumer visits in and with
- * the sharing on or off (TABLE r4.86 (1)). An item's text (its JSON) is made only where its site and rule tie with
+ * the sharing on or off. An item's text (its JSON) is made only where its site and rule tie with
  * another's, once per item: serializing flattens the operand text its records share, which a stopped analysis's many
  * records would then each keep (#1734).
  */
@@ -1272,7 +1168,8 @@ class CoreAnswers implements Answers {
     this.dominators = program.dom;
     this.initializers = initializersOf(program);
     // published in source order of their sites, at one site the written types' errors first, then each consumer's in
-    // the order they run (TABLE r4.86 (1)), the finishing path's as the walk's, then a stop's own warning and marks
+    // the order they run (docs/specifications/type-inference-accepted-record.md#r4-86), the finishing path's as the
+    // walk's, then a stop's own warning and marks
     const ranked = (
       item: CoreDiagnostic,
     ): { readonly item: CoreDiagnostic; readonly rule: number } => ({
@@ -1328,7 +1225,7 @@ class CoreAnswers implements Answers {
     }
     this.deferred = { parameters: deferredParameters, results: deferredResults };
     // (the facts the fixes' code forms read, once the analysis ran to its end, counted apart from the allowance, so the
-    // walk's charges and stops stay the analysis's own; after a stop none, which reads as unproved: TABLE r4.162)
+    // walk's charges and stops stay the analysis's own; after a stop none, which reads as unproved)
     if (!this.#stopped)
       this.diagnostics = program.work.apart(() =>
         this.diagnostics.map((diagnostic) => consumers.withFacts(diagnostic)),
@@ -1361,15 +1258,15 @@ class CoreAnswers implements Answers {
 
   /**
    * A value's items at a node and a path, for every question, direct or composed: a literal's child's items are its own
-   * question's (`#stoppedShape`), and the last two sources are read here alone (TABLE r4.158; the lint check
-   * `check-question-sources.mjs`). After a stop, the finishing read's sources in their order (TABLE r4.138): the
+   * question's (`#stoppedShape`), and the last two sources are read here alone (the lint check
+   * `check-question-sources.mjs`). After a stop, the finishing read's sources in their order: the
    * solver's finished answer where admission had settled; else what the value's own syntax gives (`#stoppedShape`: a
    * literal's own kinds, a typed call's expected type at every depth); else the domains the consumers' finishing read
    * holds, the key's finished contract and its written or retained admitted type (`Consumers.finishedItems`); where none
    * of them retains anything after a stop where admission had settled, the type admission gives the read's place there,
    * as `place` answers it (`#lazilyDecided`). Every list passes the one rule where it is composed (`inItsOrder`, #1398)
    * and once more here, where it is published: idempotent on items that carry their spelling, so no source publishes
-   * out of the rule even where its producer missed it (TABLE r4.277).
+   * out of the rule even where its producer missed it.
    */
   #items(value: PlaceId, node: FlowNode | null, path: readonly string[]): readonly Item[] {
     const answered = this.#run(this.#pass.values.valueItems(value, node, path));
@@ -1385,7 +1282,7 @@ class CoreAnswers implements Answers {
   /**
    * After a stop where admission had settled, the type admission gives a read's place at a path, as `place` answers it:
    * its written type, its decision, or its key's finished contract where admission decides a path lazily (S3 §5: a
-   * lazily decided path is a source; TABLE r4.152 (2)). A domain, as the finishing read reads one (a collection's element
+   * lazily decided path is a source). A domain, as the finishing read reads one (a collection's element
    * possibly absent, C6); `null` where the read has no place or nothing decides it. One check unit, no new walk: after a
    * stop admission decides nothing more, it reads what had finished.
    */
@@ -1537,8 +1434,8 @@ class CoreAnswers implements Answers {
       return { items: [makeItem(own, null, { cert: "def" })], names };
     }
     // each child at the path's own step (`literalChildren` keys a collection's elements and a dict's values alike): its
-    // items as its own question answers them, through every ordered source (`#items`: one endpoint for every question,
-    // TABLE r4.158), beside its known siblings, the composition in its one order (#1398); its names its own
+    // items as its own question answers them, through every ordered source (`#items`: one endpoint for every question),
+    // beside its known siblings, the composition in its one order (#1398); its names its own
     // syntax's alone; no item at all is an answer where every child's own syntax proves its own (`absentAt`)
     const items: Item[] = [];
     const names = new Set<string>();

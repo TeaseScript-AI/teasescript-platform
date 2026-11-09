@@ -10,25 +10,28 @@ import { NOT_PINS, PIN_SUITES, builtOf, pinFormsOf, suitesFor, testFiles } from 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 test("a core change lists every pinning suite; another change lists none, a suite's own change or its pins' file itself", () => {
-  assert.deepEqual(suitesFor(["src/type-inference/core/admission/literals.ts"]), PIN_SUITES);
+  assert.deepEqual(suitesFor(["src/type-inference/core/admission/literals/join.ts"]), PIN_SUITES);
   // (the published answers' digests move with the core too: #2074 passed the local check and failed CI on
   // one, #2086)
   assert.ok(
     suitesFor(["src/type-inference/core/values.ts"]).some(
-      (suite) => suite.file === "tests/type-core-contract.test.ts",
+      (suite) => suite.file === "tests/type-core/type-core-contract.test.ts",
     ),
   );
   assert.deepEqual(suitesFor(["src/runtime/engine.ts", "docs/TESTING.md"]), []);
   assert.deepEqual(suitesFor(["src/type-inference/core-like.ts"]), []);
   assert.deepEqual(
-    suitesFor(["tests/type-core-kept.test.ts"]).map((suite) => suite.file),
-    ["tests/type-core-kept.test.ts"],
+    suitesFor(["tests/type-core/type-core-kept.test.ts"]).map((suite) => suite.file),
+    ["tests/type-core/type-core-kept.test.ts"],
   );
   assert.deepEqual(
-    suitesFor(["tests/helpers/type-core-families.ts"]).map((suite) => suite.file),
-    ["tests/type-core-work-b.test.ts"],
+    suitesFor(["tests/helpers/type-core/type-core-families.ts"]).map((suite) => suite.file),
+    ["tests/type-core/type-core-work-b.test.ts"],
   );
-  assert.equal(builtOf("tests/type-core-closure.test.ts"), "dist/tests/type-core-closure.test.js");
+  assert.equal(
+    builtOf("tests/type-core/type-core-closure.test.ts"),
+    "dist/tests/type-core/type-core-closure.test.js",
+  );
 });
 
 test("the list is kept true: each file a pin form finds is declared, and each suite's pin is found", () => {

@@ -369,7 +369,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
   if (contract.literals.has(literal)) return;
   contract.indexing.add(literal);
   const { program, definitions } = contract.pass;
-  // (TABLE r4.58: each object, collection, array element and map entry it keeps charged one unit as it is made, each
+  // (each object, collection, array element and map entry it keeps charged one unit as it is made, each
   // kept text its `textUnits`; here the index's own ten)
   contract.keep(10);
   // (an entry in its node's list)
@@ -429,7 +429,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
             );
           continue;
         }
-        // §8 r4.13, r4.15: a call is a read of its callee's result key (F20) and a read its source: k calls of one
+        // §8: a call is a read of its callee's result key (F20) and a read its source: k calls of one
         // function, k copies of one source, are one entry at the path, their guards and ingress its annotations
         const source = yield* contract.needValue(value);
         if (contract.copiedKey(value) === null) {
@@ -447,7 +447,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
           put(node.others, { g, value });
           continue;
         }
-        // one snapshot: one key read here, where nothing between the reads changes what they read (r4.68 (1))
+        // one snapshot: one key read here, where nothing between the reads changes what they read
         const snapshot = contract.readSnapshot(value)!;
         // (k reads of one host global, or of one projection of it, are one entry as well, by their snapshot, their
         // leaves unioned: an occurrence stays fresh as its own leaf, never as an entry each path reads again,
@@ -457,7 +457,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
           !sharing() ? `v${value}` : leaf === undefined ? source.id : snapshot,
         );
         // (the value side reads an exact entry by its first read alone, so an ingress occurrence keeps its own: its
-        // items carry its own leaf, which one shared entry would drop; the read entry above unions them, TABLE r4.72)
+        // items carry its own leaf, which one shared entry would drop; the read entry above unions them)
         const exactId = contract.kept(
           !sharing() || leaf !== undefined ? `xv${value}` : `x${snapshot}`,
         );
@@ -579,9 +579,9 @@ function aloneLiteral(
 }
 
 /**
- * §8 r4.15: a literal's identity is its structure when no reference and no ingress stands in it (the kinds of its own
+ * §8: a literal's identity is its structure when no reference and no ingress stands in it (the kinds of its own
  * terms, the sources of its reads and calls, its objects' properties at every path), else the literal itself; the
- * marks of its reads are never identity (r4.17).
+ * marks of its reads are never identity (docs/specifications/type-inference-accepted-record.md#r4-17).
  */
 export function literalSignature(contract: Contract, literal: PlaceId): string {
   if (!contract.signatures.has(literal)) {

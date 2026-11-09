@@ -19,7 +19,7 @@ import type {
 // A literal's computed values and reads at a path as a gather reads them, a choice's options, a `+`'s repeat.
 
 /**
- * TABLE r4.85: the members of a site its answer reads, by their role minima. Members of one class (`Contract.classOf`)
+ * the members of a site its answer reads, by their role minima. Members of one class (`Contract.classOf`)
  * answer alike at every path apart from the writers of their roles (`classWriters`), each role's writer standing for
  * the kinds it gives, and a merged answer takes each kind's earliest writer: so per class the members whose writer is
  * earliest in some role, merged, answer as all of them, whatever order the writers come in; a class's roles are read
@@ -263,7 +263,7 @@ export function choiceOptions(
 }
 
 /**
- * TABLE r4.87: the `+` whose answer below its root a `+` over a run of terms gives (`plusElements`): the value itself,
+ * the `+` whose answer below its root a `+` over a run of terms gives (`plusElements`): the value itself,
  * or, where it stands fourth or later in a run, the run's third. In a run each `+`'s left operand is the `+` before
  * it, and its right operand is of one class with that one's (`classOf`, no mixed one), its roles' writers no earlier:
  * each answers below its root as the one before with that term's elements merged in once more, and the merge and the

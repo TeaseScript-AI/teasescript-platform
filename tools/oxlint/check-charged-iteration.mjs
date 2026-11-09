@@ -4,8 +4,8 @@ import { Project, ts } from "ts-morph";
 import { objectsLanguage } from "./objects-language.mjs";
 
 /**
- * Stage 3b's narrowing modules repeat work only through `narrowing-iteration.ts`, which charges every step to the work
- * ledger (TABLE §13.3), and every function body in them charges a unit on entry. This check guards the ordinary forms
+ * Stage 3b's narrowing modules repeat work only through `charged-iteration.ts`, which charges every step to the work
+ * ledger, and every function body in them charges a unit on entry. This check guards the ordinary forms
  * of anything else: it is not a proof over every TypeScript execution form (an aliased constructor and a class field
  * initializer pass it; neither occurs in the modules). It reads them with their types and rejects:
  * - every loop but `for…of` over that module's `each(…)` or `steps(…)`; spreads, rest elements and parameters, the
@@ -18,20 +18,21 @@ import { objectsLanguage } from "./objects-language.mjs";
  * - any callable declared elsewhere (a library method, a core helper, a getter) that `OUTSIDE` does not list with why a
  *   call to it walks nothing uncharged; the walking collection constructors only with no argument or a table written
  *   out in full.
- * Text the modules make follows the kept-text rule (TABLE r4.58, `tests/type-core-kept.test.ts`), not this one. Calls
+ * Text the modules make follows the kept-text rule (`tests/type-core/type-core-kept.test.ts`), not this one. Calls
  * from the rest of the core into these modules are outside this check: in part 1 only `guards.ts` makes the index.
  */
 const OBJECTS_FILE = "src/type-inference/core/contract/objects.ts";
 
 const CHARGED_FILES = [
   OBJECTS_FILE,
-  "src/type-inference/core/narrowing.ts",
-  "src/type-inference/core/narrowing-events.ts",
-  "src/type-inference/core/narrowing-routes.ts",
-  "src/type-inference/core/narrowing-statements.ts",
+  "src/type-inference/core/narrowing/narrowings.ts",
+  "src/type-inference/core/narrowing/laminar.ts",
+  "src/type-inference/core/narrowing/events.ts",
+  "src/type-inference/core/narrowing/routes.ts",
+  "src/type-inference/core/narrowing/statement-tree.ts",
 ];
 
-const ITERATION_FILE = "src/type-inference/core/narrowing-iteration.ts";
+const ITERATION_FILE = "src/type-inference/core/charged-iteration.ts";
 const CHARGE = "src/type-inference/core/budget.ts:WorkLedger.charge";
 
 const core = (file, names) => names.map((name) => `src/${file}:${name}`);
@@ -117,7 +118,7 @@ const CHARGING = [
 ];
 
 /**
- * Walks no more than the step that calls it charges (TABLE r4.58: a plain making is that step's own work): a key's or
+ * Walks no more than the step that calls it charges (a plain making is that step's own work): a key's or
  * path's text or steps, made or read where the step charges one unit per step or the text as kept (a key's text escaped
  * as its label is made, `stepLabel`); a parenthesis or sign `peel` charges; a literal's parts and text, an expression's
  * parts (`childrenOf`), an operand's items and a read's loops, each charged at the call.
@@ -487,7 +488,7 @@ export function chargedIterationDiagnostics(program, root, rules) {
           report(
             node.name ?? node,
             "A function body goes uncharged: charge a positive unit as its first statement, or hand it as an " +
-              "arrow straight to `narrowing-iteration.ts`.",
+              "arrow straight to `charged-iteration.ts`.",
           );
       }
       if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
@@ -551,7 +552,7 @@ export function chargedIterationDiagnostics(program, root, rules) {
               report(
                 node,
                 `\`${name}\` is not in OUTSIDE (tools/oxlint/check-charged-iteration.mjs): list it with why a call ` +
-                  "walks nothing uncharged, or walk through narrowing-iteration.ts.",
+                  "walks nothing uncharged, or walk through charged-iteration.ts.",
               );
             // (in objects.ts an allowed function is only called, so the rule below sees each call's arguments; a getter
             // is read, not handed on)
@@ -577,7 +578,7 @@ export function chargedIterationDiagnostics(program, root, rules) {
               report(
                 node,
                 `\`${name}\` is handed a collection of any size, which it may walk for one charge: walk it ` +
-                  "through narrowing-iteration.ts, or list the call in OBJECTS_COLLECTIONS with what it does with it.",
+                  "through charged-iteration.ts, or list the call in OBJECTS_COLLECTIONS with what it does with it.",
               );
             else if (CONVERSIONS.has(name) && called(node) && node.parent.arguments.some(converts))
               report(node, `\`${symbolText(node)}(…)\` converts an object to text uncharged.`);

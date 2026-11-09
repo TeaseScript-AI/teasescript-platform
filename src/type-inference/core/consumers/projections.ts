@@ -28,7 +28,7 @@ import { obligation, propertiesOf, warning } from "./warnings.js";
 
 // A projection's consumers: a `for` loop's iterable (C13), an element selection (C6), a member access.
 
-/** What a `for` loop goes through (C13, TABLE r4.81 (2)): a list, set, dict or range; a dict with a key and a value. */
+/** What a `for` loop goes through (C13): a list, set, dict or range; a dict with a key and a value. */
 const ITERABLE = ["list", "set", "dict", "range"] as const;
 
 const DICT = ["dict"] as const;
@@ -41,7 +41,7 @@ export function projection(
 ): void {
   const { contract } = walk.pass;
   if (c.step === "iteration" || c.step === "entry") {
-    // C13 (TABLE r4.81 (2)): an operand of the loop, at the iterable, against the domain it tests, which the runtime's
+    // C13: an operand of the loop, at the iterable, against the domain it tests, which the runtime's
     // own check of the loop's source applies
     const domain = c.step === "entry" ? DICT : ITERABLE;
     consume(
@@ -117,7 +117,7 @@ export function projection(
   const objects = owners.some((item) => item.tag === "object");
   const extra: Offending[] = [];
   if (objects && selectsElement(property))
-    // F11 (r4.4): an object's own `first`, `last` or `random`: opaque, the member obligation, never an error
+    // F11: an object's own `first`, `last` or `random`: opaque, the member obligation, never an error
     extra.push([OWN_SELECTION, `has its own .${property}`]);
   else if (objects && typeof c.step === "object") {
     const value = walk.valueItems(c.into, node, []);

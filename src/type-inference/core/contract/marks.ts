@@ -13,7 +13,7 @@ import { indexPaths, pathBelow, stepsOf } from "./literal-index.js";
 import type { Holder, HolderReference, ReadGroup, ReferencesByStep } from "./model.js";
 import { addSource, unionOf } from "./selections.js";
 
-// The mark holders (§8 r4.23): each holder's reads and references, and its mark at a path (§3.2).
+// The mark holders (§8): each holder's reads and references, and its mark at a path (§3.2).
 
 /** A set or map: the smaller of two key sets, intersected with the larger. */
 function common<T>(
@@ -271,7 +271,7 @@ function groupHit(contract: Contract, group: ReadGroup, tested: Key): boolean {
 /**
  * A holder's own reads at path `rest` below it: per non-empty prefix q, the keys tested q below them and the reads of
  * such a key (the smaller side walked), each group of only the callables and files a test of the tested path stands
- * in (W40, r4.28, r4.33); the first hit ends the lookup; every visit charged.
+ * in (W40); the first hit ends the lookup; every visit charged.
  */
 function readsAt(contract: Contract, reads: Holder["reads"], rest: readonly string[]): boolean {
   const { program, guards } = contract.pass;
@@ -316,7 +316,7 @@ function readsAt(contract: Contract, reads: Holder["reads"], rest: readonly stri
  * it into its source's holder (stores, adds, arguments, returns, literal cells, alias bindings); each literal's reads
  * as references from the literal's holder under their path, and its guarded reads' paths. A literal another literal
  * holds is among that literal's: its reads stand in the outer literal's index at their paths below it, so its own
- * would repeat them, and its identity would walk its whole depth again at every level (TABLE r4.100 (2)).
+ * would repeat them, and its identity would walk its whole depth again at every level.
  */
 export function collectMarks(contract: Contract): void {
   if (contract.collected) return;
@@ -776,6 +776,8 @@ function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): 
   // its own reads: each tested path below a read's key whose region holds the read (`readsAt`'s hit), the paths of
   // reads `guardedBelow` answers alike asked once (Astra r2 B3: n copies under n tests visit n paths, not n²)
   const asked = new Set<string>();
+  // (#2005: a prefix several groups' reads reach makes its states once; each candidate is still charged)
+  const inserted = new Set<string>();
   for (const read of holder.reads) {
     program.work.charge("eventSteps");
     let current = read.value;
@@ -791,8 +793,11 @@ function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): 
     if (binding === undefined || node === undefined || node === null) continue;
     const base = keyOf(binding, joinSteps(steps.reverse(), read.path));
     for (const text of guards.guardedBelowOnce(base, node, asked) ?? []) {
-      program.work.charge("eventSteps", 1 + text.length);
+      program.work.charge("eventSteps");
       automaton.prefixVisits += 1;
+      if (inserted.has(text)) continue;
+      inserted.add(text);
+      program.work.charge("eventSteps", text.length);
       automaton.states[stateAt(contract, automaton, root, splitPath(text))]!.accepting = true;
     }
   }
@@ -989,4 +994,22 @@ export function annotated(
             : item,
         );
   return entry.guarded || marksAt(contract, entry.holder, rest) ? marked(annotated) : annotated;
+}
+
+/** #2005: a compiled state of the pass's mark automaton, read only: its steps, its epsilon edges and its acceptance. */
+export function markState(
+  contract: Contract,
+  id: number,
+): {
+  readonly next: ReadonlyMap<string, number>;
+  readonly epsilon: readonly number[];
+  readonly accepting: boolean;
+} {
+  return automatonOf(contract).states[id]!;
+}
+
+/** #2005: whether a holder's mark holds at its own root, the empty rest (its automaton compiled). */
+export function rootAccepts(contract: Contract, holder: Holder): boolean {
+  const automaton = automatonOf(contract);
+  return automaton.states[compiled(contract, automaton, holder)]!.accepting;
 }

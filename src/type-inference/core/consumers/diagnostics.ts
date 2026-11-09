@@ -10,12 +10,13 @@ import type { CoreDiagnostic, DiagnosticKind, DiagnosticRule, Presence } from ".
 import { expected } from "./expected.js";
 import { anyRecorded, keptTypes } from "./kinds.js";
 
-// The consumers' diagnostics: an error at its site, and the facts a fix's code forms read (TABLE r4.151).
+// The consumers' diagnostics: an error at its site, and the facts a fix's code forms read.
 
 /**
- * The expression kinds whose presence the core proves (`present`): each reads nothing that may be absent
- * itself, and `expressionParts` gives every operand it evaluates; a property's read is proved by its own facts. An index
- * or a key read, a call, and every kind not listed are unproved, so a fix there gives words (TABLE r4.162).
+ * The expression kinds whose presence the core proves (`present`): each reads nothing that may be absent itself, and
+ * `expressionParts` gives every operand it evaluates; a property's read is proved by its own facts. An index or a key
+ * read, a call, and every kind not listed are unproved, so a fix there gives words
+ * (docs/specifications/type-inference-accepted-record.md#r4-162).
  */
 const PRESENT_KINDS: ReadonlySet<Expression["kind"]> = new Set<Expression["kind"]>([
   "booleanLiteral",
@@ -48,8 +49,7 @@ export function siteOf(site: SourceSite): SourceSite {
 
 /**
  * An error of `rule` at `site`, the offending value's kinds `kinds` (D1, D3: its sentence and code); a member's read or
- * call and an operation, whose fixes write code in place of the value at `site`, with what that value's place takes
- * (TABLE r4.151).
+ * call and an operation, whose fixes write code in place of the value at `site`, with what that value's place takes.
  */
 export function error(
   walk: Consumers,
@@ -58,7 +58,7 @@ export function error(
   rule: DiagnosticRule,
   kinds: readonly ItemTag[],
 ): void {
-  // (in the finishing path only what is settled errs: a literal's own kind, a settled read, TABLE r4.99)
+  // (in the finishing path only what is settled errs: a literal's own kind, a settled read)
   const diagnostic: CoreDiagnostic = {
     class: "compile-error",
     kind,
@@ -72,7 +72,7 @@ export function error(
 }
 
 /**
- * A published diagnostic with the facts its fix's code forms read (TABLE r4.151, r4.162): what the place its value
+ * A published diagnostic with the facts its fix's code forms read: what the place its value
  * lands in takes (`expects`: a member's read or call and an operation's error, a null value's warning) and whether the
  * values it names are there (`present`). Asked once the analysis ran to its end, its work counted apart from the
  * allowance (`WorkLedger.apart`), so the walk's charges and its stops are the analysis's own; after a stop no fact is
@@ -158,13 +158,13 @@ function keptChoice(
 
 /**
  * Whether every value a fix's form reads where the diagnostic at `site` sits is there when the script runs (`Presence`,
- * TABLE r4.162, r4.168): its subject's, a member's receiver's, an operation's operands', by a walk of their whole
- * syntax, an ask's, a `say`'s and a button's operands too (`expressionParts`, Codex r12, r13), one part at a time on
- * its own stack, however wide: proved only through the kinds `PRESENT_KINDS` lists, so not where any of them reads an
- * element by its index or a dict's value by its key, calls a function or a method (whose own reads are not
- * followed), is of a kind not listed, or reads a property or a selection the core finds may be absent; and every
- * value it evaluates, at every depth, a subject, a receiver or an operand, proved non-null (Astra r2, r3 on #1296);
- * unproved where a site has no expression.
+ * docs/specifications/type-inference-accepted-record.md#r4-162): its subject's, a member's receiver's, an operation's
+ * operands', by a walk of their whole syntax, an ask's, a `say`'s and a button's operands too (`expressionParts`, Codex
+ * r12, r13), one part at a time on its own stack, however wide: proved only through the kinds `PRESENT_KINDS` lists, so
+ * not where any of them reads an element by its index or a dict's value by its key, calls a function or a method (whose
+ * own reads are not followed), is of a kind not listed, or reads a property or a selection the core finds may be
+ * absent; and every value it evaluates, at every depth, a subject, a receiver or an operand, proved non-null (Astra r2,
+ * r3 on #1296); unproved where a site has no expression.
  */
 function present(walk: Consumers, site: SourceSite, rule: DiagnosticRule): Presence {
   const { program } = walk.pass;
@@ -228,9 +228,10 @@ function readsAbsent(walk: Consumers, root: Expression, site: SourceSite): boole
       continue;
     }
     program.work.charge("checks");
-    // (only a kind whose every operand `expressionParts` gives, and which reads nothing absent itself, proves
-    // presence; any other kind, a new one too, is unproved: TABLE r4.162, the lead after Codex r13; and every value the
-    // walk evaluates, at every depth, proved non-null, the lead after Astra r2 and r3)
+    // (only a kind whose every operand `expressionParts` gives, and which reads nothing absent itself, proves presence;
+    // any other kind, a new one too, is unproved: docs/specifications/type-inference-accepted-record.md#r4-162, the
+    // lead after Codex r13; and every value the walk evaluates, at every depth, proved non-null, the lead after Astra
+    // r2 and r3)
     if (
       !PRESENT_KINDS.has(expression.kind) ||
       mayBeNull(walk, expression, site) ||

@@ -76,7 +76,7 @@ import { declaration, elementOf, storeFix, storeSubject, textOf, typeAt } from "
  * form stands in place of the member access the diagnostic sits on (`at`) and is offered where `codeAt` proves it
  * there: the receiver's kinds (`holder`: an error's own, a warning's whole receiver's, none where its facts are lost)
  * ones the member takes, a call's elements of a type it takes, and its value one the access's place takes (`site`);
- * else the member or the step in words (TABLE r4.151). It names the receiver where it is a stable path; a conversion
+ * else the member or the step in words. It names the receiver where it is a stable path; a conversion
  * shows another receiver converted in its place, where the whole access is proved (#1268). `text`, the access's code.
  */
 export function memberFix(
@@ -248,7 +248,7 @@ export function memberFix(
 /**
  * An object indexed, which V30 §15 forbids, with the current checker's fix: a dict looks up by a name, and a fixed name
  * written as text is the object's property where the object has it, which no fact here proves (Codex r1): in words,
- * naming the receiver where it is a stable path (TABLE r4.151); `text`, the access.
+ * naming the receiver where it is a stable path; `text`, the access.
  */
 function objectIndexFix(rule: Extract<DiagnosticRule, { rule: "member" }>, text: string): string {
   const access = parsedExpression(text)?.expression;
@@ -306,7 +306,7 @@ export function conditionFix(
 
 /**
  * The fix of a key that is not text: a number written as text, as the current checker gives it (`dict-operations.ts`),
- * in place of the key at `at` where `codeAt` proves it there: every known type of it one `${...}` shows (TABLE r4.162).
+ * in place of the key at `at` where `codeAt` proves it there: every known type of it one `${...}` shows.
  */
 export function keyFix(
   text: string,
@@ -541,7 +541,7 @@ function mixedChoiceSentence(
  * level (`levels`): every kind, `null` and numbers among them, so the type holds every value the joined lists bring
  * (Codex r2–r4 on #1310); one union inside the lists, an optional list where a level holds `null` beside lists (V30
  * §13). Where the joined list is a variable's start value, that declaration with the type and its own start value, where
- * `codeAt` proves it there (`declaration`, #1268, TABLE r4.146); else the type in words (a form at its position, r4.171);
+ * `codeAt` proves it there (`declaration`, #1268); else the type in words (a form at its position);
  * values of one type in words where no written type holds them.
  */
 function mixedJoinFix(
@@ -705,7 +705,7 @@ export function temporalFix(
  * itself on a line of its own (an `add` gives no list, Astra r1). Each code form stands in place of the diagnosed site,
  * the operation or the one operand it names, writes the list where it is a stable path and the value where its code is
  * on one line, and is offered where `codeAt` proves it there: the list's elements' type takes the value (`elements`),
- * and the new list fits what the site takes (`expects`); else the fix in words (TABLE r4.151). Each side's type: the
+ * and the new list fits what the site takes (`expects`); else the fix in words. Each side's type: the
  * operand's own at `site` and the other's place (`domain`), or the operation's `pair`.
  */
 function listJoinFix(
@@ -773,7 +773,7 @@ function listJoinFix(
   }
   const join = written(`[${value}]`);
   // (an add, on a line of its own, where a statement takes any value, and the list itself then where the join stood:
-  // the list read again, before the line, TABLE r4.168)
+  // the list read again, before the line)
   const itself =
     rule.elements === undefined
       ? null
@@ -1071,7 +1071,7 @@ export function writtenTypeMessage(
   source: MessageSource,
   diagnosed: Diagnosed,
 ): string {
-  // (the suggestion is a type at the type's position, TABLE r4.171)
+  // (the suggestion is a type at the type's position, docs/specifications/type-inference-accepted-record.md#r4-171)
   const suggestion = error.suggestion === null ? null : typeAt(error.suggestion, diagnosed);
   return (
     `A union cannot hold a whole list, set, or dict beside another type, but '${source.text(error.union)}' does. ` +

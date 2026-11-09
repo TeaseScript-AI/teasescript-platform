@@ -22,7 +22,8 @@ import type { Expansion, Inheriting, Part } from "./model.js";
 import { contributionOf } from "./own.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
 import { inheritedInto } from "../inherited/waiting.js";
-import { partOf, TYPED_ROLES } from "./walk.js";
+import type { Reads } from "../inherited/reads.js";
+import { partOf, partOfRead, TYPED_ROLES } from "./walk.js";
 
 // The carriers' transfers (G3 2c): what a stored value's walk answers, over its tasks' recipes (`expand`): each
 // carrier's operands answer once per pass, whatever value walks to them, a literal's cells with their literal, by path,
@@ -288,18 +289,22 @@ function groupOf(
 }
 
 /** One operation's answer for the operand of one of its task's parts (`chooses`), once per part and certainty. */
-function linkTest(
+function* linkTest(
   admission: Admission,
   task: Expansion,
   index: number,
   part: Part,
   surely: boolean,
   caches: DeciderCaches,
-): boolean {
+): Reads<boolean> {
   const name = keptParts(admission.work, task.id, index, surely);
   let known = caches.linkTests.get(name);
   if (known === undefined) {
-    known = chooses(admission, { value: task.value, node: task.node, operand: part.value }, surely);
+    known = yield* chooses(
+      admission,
+      { value: task.value, node: task.node, operand: part.value },
+      surely,
+    );
     caches.linkTests.set(name, known);
   }
   return known;
@@ -316,11 +321,11 @@ function writtenResult(admission: Admission, value: PlaceId): boolean {
  * A group's region, made once (on an explicit stack, in the walk's key order: a node's own stops, then its parts by
  * position, a literal's cell walked here as it is met, a carrier's operands at one position a group of their own).
  */
-function regionOf(
+function* regionOf(
   admission: Admission,
   group: DeciderGroup,
   caches: DeciderCaches = admission.deciderCaches,
-): Region {
+): Reads<Region> {
   if (group.region !== null) return group.region;
   const work = admission.pass.program.work;
   const emptyPath = (): RegionPath => ({
@@ -420,7 +425,7 @@ function regionOf(
                 roles: [],
               }),
             );
-          const task = partOf(admission, part);
+          const task = yield* partOfRead(admission, part);
           const deep = part.deep ?? item.deep;
           const single = item.single && part.single;
           if (part.step !== null) {
@@ -435,10 +440,10 @@ function regionOf(
             typed: above.typed || (linked && TYPED_ROLES.has(part.role!)),
             chosen:
               above.chosen &&
-              (!linked || linkTest(admission, item.task, index, part, false, caches)),
+              (!linked || (yield* linkTest(admission, item.task, index, part, false, caches))),
             surely:
               above.surely &&
-              (!linked || linkTest(admission, item.task, index, part, true, caches)),
+              (!linked || (yield* linkTest(admission, item.task, index, part, true, caches))),
             joined: above.joined || part.role === "concatenation/operand",
           });
           at.from.push(item.member);
@@ -582,22 +587,23 @@ function distinctAt(admission: Admission, path: RegionPath, end: boolean): reado
 }
 
 /** Whether a written copy stands in a group's region or in a group below it (`writtenOn` asks only there), once. */
-function holdsWritten(
+function* holdsWritten(
   admission: Admission,
   root: DeciderGroup,
   caches: DeciderCaches = admission.deciderCaches,
-): boolean {
+): Reads<boolean> {
   if (root.holdsWritten !== null) return root.holdsWritten;
-  const bounds = (group: DeciderGroup): readonly DeciderGroup[] =>
-    regionOf(admission, group, caches).bound;
+  function* bounds(group: DeciderGroup): Reads<readonly DeciderGroup[]> {
+    return (yield* regionOf(admission, group, caches)).bound;
+  }
   const stack: {
     readonly group: DeciderGroup;
     readonly below: readonly DeciderGroup[];
     next: number;
-  }[] = [{ group: root, below: bounds(root), next: 0 }];
+  }[] = [{ group: root, below: yield* bounds(root), next: 0 }];
   while (stack.length > 0) {
     const frame = stack.at(-1)!;
-    if (frame.next === 0 && regionOf(admission, frame.group, caches).written) {
+    if (frame.next === 0 && (yield* regionOf(admission, frame.group, caches)).written) {
       frame.group.holdsWritten = true;
       stack.pop();
       continue;
@@ -615,7 +621,7 @@ function holdsWritten(
     }
     if (!found && frame.next < frame.below.length) {
       const child = frame.below[frame.next]!;
-      stack.push({ group: child, below: bounds(child), next: 0 });
+      stack.push({ group: child, below: yield* bounds(child), next: 0 });
       continue;
     }
     frame.group.holdsWritten = found;
@@ -644,19 +650,19 @@ function asksType(admission: Admission, group: DeciderGroup, entry: Entry, end: 
  * operand; reached through no typed default and given by each operation; of definite kinds, no unknown beside them,
  * each held definitely by each operation above it (`mask`).
  */
-function decides(
+function* decides(
   admission: Admission,
   member: Member,
   entry: Entry,
   at: PathRef,
   rest: number,
   mask: ReadonlySet<ItemTag> | null,
-): readonly ItemTag[] | null {
+): Reads<readonly ItemTag[] | null> {
   const { task } = entry;
   if ((rest === at.length && entry.deep) || member.typed || !member.chosen) return null;
   if (mask !== null && mask.size === 0) return null;
   const items = withoutEmpty(
-    admission.run(
+    yield* admission.runRead(() =>
       admission.pass.values.valueItems(
         task.value,
         task.node,
@@ -677,7 +683,7 @@ const EMPTY: ReadonlySet<ItemTag> = new Set();
  * A member's mask below its operation (`through`): the kinds the operation's own value holds definitely at the decided
  * path's rest there, once per operation and rest; nothing where no value below it can decide.
  */
-function narrowed(
+function* narrowed(
   admission: Admission,
   mask: ReadonlySet<ItemTag> | null,
   member: Member,
@@ -686,7 +692,7 @@ function narrowed(
   rest: number,
   id: number,
   caches: DeciderCaches = admission.deciderCaches,
-): ReadonlySet<ItemTag> | null {
+): Reads<ReadonlySet<ItemTag> | null> {
   if (through === null) return mask;
   if (!member.chosen || member.typed || (mask !== null && mask.size === 0)) return EMPTY;
   const name = keptParts(admission.work, through.id, id);
@@ -694,7 +700,7 @@ function narrowed(
   if (held === undefined) {
     held = new Set();
     for (const item of withoutEmpty(
-      admission.run(
+      yield* admission.runRead(() =>
         admission.pass.values.valueItems(
           through.value,
           through.node,
@@ -756,16 +762,31 @@ function forEachPath(
   }
 }
 
+/** `forEachPath` of a visit that makes reads (`Read`), each path visited where `forEachPath` visits it (#1072 A2). */
+function* forEachPathRead(
+  region: Region,
+  at: PathRef,
+  rest: number,
+  visit: (path: RegionPath | null, length: number) => Reads<void>,
+): Reads<void> {
+  let path: RegionPath | null = region.root;
+  for (let length = 0; rest + length <= at.length; length += 1) {
+    if (length > 0) path = path?.below.get(at.at(rest + length - 1)) ?? null;
+    if (path === null && at.kind === "span") break;
+    yield* visit(path, length);
+  }
+}
+
 /**
  * Whether a written copy on the decided path asks a type in a group's region or in a group below it (`asksType`),
  * once per group and rest: only where one stands at all (`holdsWritten`).
  */
-function writtenOn(
+function* writtenOn(
   admission: Admission,
   root: DeciderGroup,
   at: PathRef,
   ids: (rest: number) => number,
-): boolean {
+): Reads<boolean> {
   interface Frame {
     readonly group: DeciderGroup;
     readonly rest: number;
@@ -790,14 +811,14 @@ function writtenOn(
       answer = null;
     } else if (frame.below === null) {
       const known = group.written.get(ids(rest));
-      if (known !== undefined || !holdsWritten(admission, group)) {
+      if (known !== undefined || !(yield* holdsWritten(admission, group))) {
         stack.pop();
         answer = known ?? false;
         continue;
       }
       let asks = false;
       const below: { group: DeciderGroup; rest: number }[] = [];
-      forEachPath(regionOf(admission, group), at, rest, (path, length) => {
+      forEachPath(yield* regionOf(admission, group), at, rest, (path, length) => {
         admission.pass.program.work.charge("checks");
         for (const entry of path?.written ?? [])
           asks ||= asksType(admission, group, entry, rest + length === at.length);
@@ -825,12 +846,12 @@ function writtenOn(
  * end, each operand group asked in turn at the rest there, its mask narrowed by its operation) and its literals at
  * the path's end, merged by rank; once per group, rest and masks; `null` for none.
  */
-function firstValue(
+function* firstValue(
   admission: Admission,
   root: DeciderGroup,
   at: PathRef,
   ids: (rest: number) => number,
-): DecidingValue | null {
+): Reads<DecidingValue | null> {
   interface Frame {
     readonly group: DeciderGroup;
     readonly rest: number;
@@ -878,7 +899,7 @@ function firstValue(
         continue;
       }
       const lists: { list: readonly Entry[]; length: number }[] = [];
-      forEachPath(regionOf(admission, group), at, rest, (path, length) => {
+      forEachPath(yield* regionOf(admission, group), at, rest, (path, length) => {
         if (path === null) return;
         const end = rest + length === at.length;
         const list = distinctAt(admission, path, end);
@@ -908,26 +929,24 @@ function firstValue(
     const below = rest + lists[best]!.length;
     if (entry.bound !== null) {
       const { group: inner, from, through } = entry.bound;
-      stack.push(
-        frame(
-          inner,
-          below,
-          inner.members.map((member, index) =>
-            narrowed(
-              admission,
-              masks[from[index]!]!,
-              member,
-              through[index]!,
-              at,
-              below,
-              ids(below),
-            ),
+      // (each member's mask in turn, as a map makes them)
+      const innerMasks: (ReadonlySet<ItemTag> | null)[] = [];
+      for (const [index, member] of inner.members.entries())
+        innerMasks.push(
+          yield* narrowed(
+            admission,
+            masks[from[index]!]!,
+            member,
+            through[index]!,
+            at,
+            below,
+            ids(below),
           ),
-        ),
-      );
+        );
+      stack.push(frame(inner, below, innerMasks));
       continue;
     }
-    const tags = decides(
+    const tags = yield* decides(
       admission,
       group.members[entry.member]!,
       entry,
@@ -949,12 +968,12 @@ function firstValue(
  * common operand in their keys' order, each group's answer once per pass for its rest of the path, whatever value
  * walks to it (`groupOf`).
  */
-export function transferredDecider(
+export function* transferredDecider(
   admission: Admission,
   task: Expansion,
   asked: Rest,
   written?: { root: DeciderGroup | null; ids: ((rest: number) => number) | null },
-): DecidingValue | null | undefined {
+): Reads<DecidingValue | null | undefined> {
   const root = groupOf(admission, [
     { task, deep: false, single: true, typed: false, chosen: true, surely: true, joined: false },
   ]);
@@ -967,7 +986,7 @@ export function transferredDecider(
     const list = restIds(admission, at.steps());
     ids = (rest) => list[rest]!;
   }
-  if (writtenOn(admission, root, at, ids)) {
+  if (yield* writtenOn(admission, root, at, ids)) {
     if (written !== undefined) [written.root, written.ids] = [root, ids];
     return undefined;
   }
@@ -979,11 +998,14 @@ export function transferredDecider(
     isPlusValue(admission.pass, task.value) &&
     at.at(0) === "element" &&
     plusRun(admission.pass, task.value, at.at(1), true) !== null &&
-    deciding(admission.run(admission.pass.values.valueItems(task.value, task.node, asked)))
-      .length === 0
+    deciding(
+      yield* admission.runRead(() =>
+        admission.pass.values.valueItems(task.value, task.node, asked),
+      ),
+    ).length === 0
   )
     return null;
-  return firstValue(admission, root, at, ids);
+  return yield* firstValue(admission, root, at, ids);
 }
 
 /** The decider's root group's one member: the stored value's own task, chosen, not below an operation. */
@@ -1210,26 +1232,32 @@ export function* writtenDecider(
     if (f.entries === null) {
       admission.summaryStates += 1;
       const entries: { entry: Entry; length: number; kind: Kind }[] = [];
-      forEachPath(regionOf(admission, f.group, caches), at, f.rest, (path, length) => {
-        if (path === null) return;
-        for (const entry of writtenAt(admission, path))
-          entries.push({ entry, length, kind: "written" });
-        const end = f.rest + length === at.length;
-        for (const entry of distinctAt(admission, path, end))
-          if (!end || entry.bound === null)
-            entries.push({ entry, length, kind: entry.bound === null ? "value" : "bound" });
-        // (at the path's end an operand group of operands below operations decides no value, but its written copies
-        // still may: it is entered for them)
-        if (end)
-          for (const entry of distinctAt(admission, path, false))
-            if (
-              entry.bound !== null &&
-              (entry.bound.group.members.some((member) => !member.deep) ||
-                holdsWritten(admission, entry.bound.group, caches))
-            )
-              entries.push({ entry, length, kind: "bound" });
-        if (end) for (const entry of path.literals) entries.push({ entry, length, kind: "value" });
-      });
+      yield* forEachPathRead(
+        yield* regionOf(admission, f.group, caches),
+        at,
+        f.rest,
+        function* (path, length) {
+          if (path === null) return;
+          for (const entry of writtenAt(admission, path))
+            entries.push({ entry, length, kind: "written" });
+          const end = f.rest + length === at.length;
+          for (const entry of distinctAt(admission, path, end))
+            if (!end || entry.bound === null)
+              entries.push({ entry, length, kind: entry.bound === null ? "value" : "bound" });
+          // (at the path's end an operand group of operands below operations decides no value, but its written copies
+          // still may: it is entered for them)
+          if (end)
+            for (const entry of distinctAt(admission, path, false))
+              if (
+                entry.bound !== null &&
+                (entry.bound.group.members.some((member) => !member.deep) ||
+                  (yield* holdsWritten(admission, entry.bound.group, caches)))
+              )
+                entries.push({ entry, length, kind: "bound" });
+          if (end)
+            for (const entry of path.literals) entries.push({ entry, length, kind: "value" });
+        },
+      );
       f.entries = entries;
     }
     if (f.next >= f.entries.length) {
@@ -1262,20 +1290,23 @@ export function* writtenDecider(
       const values =
         (rest !== at.length || inner.members.some((each) => !each.deep)) &&
         entry.rank <= Math.min(f.copyRank, f.firstRank);
-      const masks = inner.members.map((each, index) =>
-        values
-          ? narrowed(
-              admission,
-              f.masks[from[index]!]!,
-              each,
-              through[index]!,
-              at,
-              rest,
-              ids(rest),
-              caches,
-            )
-          : EMPTY,
-      );
+      // (each member's mask in turn, as a map makes them)
+      const masks: (ReadonlySet<ItemTag> | null)[] = [];
+      for (const [index, each] of inner.members.entries())
+        masks.push(
+          values
+            ? yield* narrowed(
+                admission,
+                f.masks[from[index]!]!,
+                each,
+                through[index]!,
+                at,
+                rest,
+                ids(rest),
+                caches,
+              )
+            : EMPTY,
+        );
       const linked = inner.members.map(
         (_, index) => f.linked[from[index]!]! || through[index] !== null,
       );
@@ -1295,7 +1326,7 @@ export function* writtenDecider(
     }
     if (kind === "value") {
       if (entry.rank > Math.min(f.copyRank, f.firstRank)) continue;
-      const tags = decides(admission, member, entry, at, rest, f.masks[entry.member]!);
+      const tags = yield* decides(admission, member, entry, at, rest, f.masks[entry.member]!);
       if (tags !== null)
         merge(
           f,

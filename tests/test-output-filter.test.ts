@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -317,6 +317,8 @@ test("the full suite runs every file once, each in its own process, with the cos
   delete environment.NODE_TEST_CONTEXT;
   mkdirSync(resolve(directory, "dist/tests"), { recursive: true });
   for (const file of files) {
+    // (a costly file's name is its path under dist/tests/, in a folder for most)
+    mkdirSync(dirname(resolve(directory, "dist/tests", file)), { recursive: true });
     // A file that ran in the process of another would find its mark.
     writeFileSync(
       resolve(directory, "dist/tests", file),
@@ -342,6 +344,64 @@ test("the full suite runs every file once, each in its own process, with the cos
       [...results.matchAll(/^([✔✖] \S+) \(/gmu)].map((match) => match[1]),
       files.map((file) => `${file === "z.test.js" ? "✖" : "✔"} ${file}`),
     );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("the full suite fails on a file that reported no test of its own, and names it (#2154)", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  const environment = { ...process.env };
+  delete environment.NODE_TEST_CONTEXT;
+  mkdirSync(resolve(directory, "dist/tests"), { recursive: true });
+  // Each of these reports a test of its own: one named by its file's path, one a helper registers, one importing another
+  // test file, whose results are the importer's only (#2155's round 1).
+  const files: Record<string, string> = {
+    "a.test.js": `require("node:test")("a", () => {});`,
+    "named.test.js": `require("node:test")(__filename, () => {});`,
+    "helper.js": `module.exports = () => require("node:test")("from a helper", () => {});`,
+    "helped.test.js": `require("./helper.js")();`,
+    "importer.test.js": `require("./imported.test.js"); require("node:test")("importer", () => {});`,
+    "imported.test.js": `require("node:test")("imported", () => {});`,
+    // (a test registered from a microtask: node:test reports it with its entry file but no source location)
+    "deferred.test.js": `queueMicrotask(require("node:test").bind(null, "deferred", () => {}));`,
+  };
+  for (const [file, source] of Object.entries(files))
+    writeFileSync(resolve(directory, "dist/tests", file), source);
+  const run = () =>
+    spawnSync(process.execPath, [filterPath, "--full-output"], {
+      cwd: directory,
+      encoding: "utf8",
+      env: environment,
+    });
+  const named = "run-test-files: dist/tests/exit.test.js reported no test of its own";
+  try {
+    const alone = run();
+    assert.equal(alone.status, 0, alone.stderr);
+    assert.ok(!alone.stderr.includes("reported no test of its own"), alone.stderr);
+    // (its process ends before its test reports: `node:test` passes it as its file entry alone)
+    writeFileSync(
+      resolve(directory, "dist/tests/exit.test.js"),
+      `require("node:test")("never reported", () => process.exit(0));`,
+    );
+    const beside = run();
+    assert.equal(beside.status, 1, beside.stderr);
+    assert.ok(beside.stderr.includes(named), beside.stderr);
+    assert.equal(beside.stderr.split("reported no test of its own").length, 2, beside.stderr);
+    // (a file whose own process reports nothing is named though another file imports it and reports its test)
+    writeFileSync(
+      resolve(directory, "dist/tests/imported.test.js"),
+      `if (require.main === module) process.exit(0); require("node:test")("imported", () => {});`,
+    );
+    const imported = run();
+    assert.equal(imported.status, 1, imported.stderr);
+    assert.ok(
+      imported.stderr.includes(
+        "run-test-files: dist/tests/imported.test.js reported no test of its own",
+      ),
+      imported.stderr,
+    );
+    assert.match(beside.stdout, /^✔ a \(/mu);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

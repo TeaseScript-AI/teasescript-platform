@@ -29,7 +29,7 @@ import { memberStep } from "../method-categories.js";
 import { keyLane } from "./lanes.js";
 import { pathAt } from "./literal-index.js";
 
-// G3 stage 1 (TABLE r4.196): a key as a cursor, made one step from its parent's, and the one charged boundary between
+// G3 stage 1: a key as a cursor, made one step from its parent's, and the one charged boundary between
 // cursors and the texts and step arrays of keys; and the one place that decides a key's identity (`keyAt`, `keyBelowIn`,
 // `canonicalKey`): a cursor where its family's lane is cursors (`keyLane`), else its text, made and charged as before.
 
@@ -486,7 +486,7 @@ export interface PathRef extends Iterable<string> {
   /** The step at `index`. */
   at(index: number): string;
   /**
-   * The step at `index`, read making no path or span id (a read's selection, TABLE r4.262): an array's as `at`, a span's
+   * The step at `index`, read making no path or span id (a read's selection): an array's as `at`, a span's
    * from its steps, made once per view at the charged boundary (`steps`).
    */
   read(index: number): string;
@@ -695,9 +695,9 @@ function textOf(contract: Contract, path: number): string {
 }
 
 /**
- * The one charged boundary of the cursors (TABLE r4.196): `visits` arena nodes or steps it inspects, a node already
+ * The one charged boundary of the cursors: `visits` arena nodes or steps it inspects, a node already
  * made too, and `read` code units of text it scans, a unit per eight (`invSteps`), and `entries` it keeps (a unit each);
- * the texts and arrays it makes, through the kept helpers (`keptKey`, `keptArray`, TABLE r4.58). Each conversion is
+ * the texts and arrays it makes, through the kept helpers (`keptKey`, `keptArray`). Each conversion is
  * the asking demand's own work, never a shared build's or work apart; what it makes is kept per id, never per prefix.
  * A label's rendering (`labelText`) is charged here too.
  */
@@ -811,7 +811,7 @@ function ownSteps(steps: PathSteps): readonly string[] {
 /**
  * A path's steps as its record keeps them (G3 stage 1), opaque: read by position (`length`, `at`), spelled only by the
  * record (`text`, `prefixText`, `textOf`), and copied out only by `toArray`, a charged copy, each site's listed with its
- * reason (`tests/type-core-key-ids.test.ts`). Its views (`from`, `to`) read the steps they view in place, never a
+ * reason (`tests/type-core/type-core-key-ids.test.ts`). Its views (`from`, `to`) read the steps they view in place, never a
  * copy; a view's path's id and text, found where asked (`spanId`, `prefixId`, `textOf`), are kept on the steps it views
  * by its offset and length (an entry), so the same view made again finds both free, as a span view's own id is. Its
  * joins (`stepsJoin`, `stepsAfter`) hold the steps a join of arrays held, made as plainly, their path the arena's join
@@ -1040,7 +1040,7 @@ function kept(contract: Contract, path: number, from: number, steps: readonly st
 
 /**
  * `memberStep`: the first step of `path` from `from` on that a built-in value answers, its scan charged by the text it
- * reads, a unit per eight code units (TABLE r4.58; it keeps nothing, so no text's header), so a long member chain of
+ * reads, a unit per eight code units (it keeps nothing, so no text's header), so a long member chain of
  * long names reaches the allowance by its own work.
  */
 export function memberStepOf(contract: Contract, path: Steps, from: number): number {

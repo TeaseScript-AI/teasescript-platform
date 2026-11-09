@@ -48,7 +48,7 @@ import type { SerializableRuntimeValue } from "../../src/runtime/values/serializ
 import type { CompactRecord } from "./type-core-records.js";
 
 /*
- * The reached fixture's derivation (S6-CARRIERS revision 5, §5.2; TABLE r4.59; the lead's answer 3): what a record's
+ * The reached fixture's derivation (S6-CARRIERS revision 5, §5.2; the lead's answer 3): what a record's
  * plan checks, where, and how its runs end, derived from the record and its source alone, never from the plan.
  *
  * The derivation covers the fixture's S6/S7 constructs, including objects, members, lazy defaults, conversions,
@@ -632,7 +632,7 @@ function variableReads(expression: Expression, statements: readonly Statement[])
 
 /**
  * A typed default that reads a value (F18): a host value has no structure; a variable's (a `let`'s) value is its state at
- * the typed call (TABLE r4.81 (1)), which `resolve` reads from the program's snapshots (`snapshotsOf`, #1760). Without a
+ * the typed call, which `resolve` reads from the program's snapshots (`snapshotsOf`, #1760). Without a
  * call to read at (another rule's literal) such a read is underivable, as it is wherever the reader refuses.
  */
 function readDefault(
@@ -920,7 +920,7 @@ function knownTruth(expression: Expression): boolean | null {
 
 /**
  * The snapshot reader (#1760): one forward walk over the program in source order, made once, recording each variable's
- * value at each typed call (`load`, `fromJson`), as the compiler keys a default's reads by its call (TABLE r4.81 (1)):
+ * value at each typed call (`load`, `fromJson`), as the compiler keys a default's reads by its call:
  * the state when the call's statement starts, on the call's own branch. Values are finite `DerivedType` trees copied when
  * stored, so a copy holds what its source held at the copy and a self-copy cannot recurse. Derived from the syntax alone.
  * An `if`'s arms walk from one state and join (`joinSnaps`) what a joining arm's paths store, its written type (X2) the

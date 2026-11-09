@@ -80,7 +80,7 @@ import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, STOPPED, type Item, type Writer } from "./items.js";
 import { methodCategory } from "./method-categories.js";
-import { Laminar } from "./narrowing.js";
+import { Laminar } from "./narrowing/laminar.js";
 import { siteKey, type CoreProgram } from "./program.js";
 import { outsideSyntax } from "./slice-syntax.js";
 import { propertyNames } from "./property-names.js";
@@ -96,7 +96,7 @@ export {
 export type { Omission } from "./consumers/left-out.js";
 
 /*
- * The consumers of the coarse core (checkpoint 9, TABLE §3.3, §4): every use that needs a kind asks its operand's
+ * The consumers of the coarse core (checkpoint 9, §4): every use that needs a kind asks its operand's
  * items. The quiet path answers first: a consumer that every kind of the contract fits, with no `unknown`, asks
  * nothing more (§3.3). Otherwise: all items definite and none fits is an error; some item does not fit, or an
  * `unknown` is present, a warning with one obligation per offending kind (§4); all fit, quiet. Here: C2 to C6, C11,
@@ -203,7 +203,7 @@ export class Consumers {
   readonly deferred: Extract<CoreDiagnostic, { obligation: unknown }>[] = [];
   /**
    * Each diagnostic's rank, `diagnostics`' and `deferred`'s alike: its consumer's place in the order the consumers run,
-   * from 1 (the published order's rules, TABLE r4.86 (1)); the finishing path ranks its findings as the walk does.
+   * from 1 (the published order's rules); the finishing path ranks its findings as the walk does.
    */
   readonly rules = new Map<CoreDiagnostic, number>();
   /** The rank of the consumer running now (`rules`): admission's three, the walk's four stages, the publication. */
@@ -252,9 +252,12 @@ export class Consumers {
   readonly decisions: DecisionWork[] = [];
   /** The ledger's total past which the running admission decision stops (`decide`), or `null`. */
   deciding: number | null = null;
-  /** Whether a decision stopped in this pass (`decide`): it is not settled (TABLE r4.180). */
+  /** Whether a decision stopped in this pass (`decide`): it is not settled. */
   decisionStopped = false;
-  /** Whether this pass restarted one whose decision stopped: a decision stopping here stops the analysis (TABLE r4.183). */
+  /**
+   * Whether this pass restarted one whose decision stopped: a decision stopping here stops the analysis
+   * (docs/specifications/type-inference-accepted-record.md#r4-183).
+   */
   readonly restarted: boolean;
   #readingNode: FlowNode | null = null;
   #callableNodes: Map<unknown, number> | null = null;
@@ -324,7 +327,7 @@ export class Consumers {
       pass,
       {
         run: (work) => this.solve(work),
-        // (after a stop admission reads as every consumer does: the finishing read, TABLE r4.126)
+        // (after a stop admission reads as every consumer does: the finishing read)
         read: (value, node, at) =>
           this.finishing ? finishingRead(this, value, node, stepsArray(restSteps(at))) : null,
         domain: (key) => this.stoppedDomain(key),
@@ -361,7 +364,7 @@ export class Consumers {
 
   /**
    * A value's items at a node and a path: every consumer's one read, unstopped or finishing, so a stop's obligations
-   * come from the same consumers as an unstopped analysis's (TABLE r4.99). In the finishing path it reads what is
+   * come from the same consumers as an unstopped analysis's. In the finishing path it reads what is
    * settled (`finishingRead`), `STOPPED` only where nothing is.
    */
   public valueItems(
@@ -402,7 +405,7 @@ export class Consumers {
 
   /**
    * C9 at a consumer (`Admission.boundariesAt`): each item's boundary requests at `here`, in order. A domain's item is
-   * the content of the warning that owns it there (S8's mark-ownership rule, TABLE r4.110 (a), #1448): where `leftOut`
+   * the content of the warning that owns it there (S8's mark-ownership rule, #1448): where `leftOut`
    * says that warning was left out (`withoutRecords`), its requests are left out with it. An item no warning was asked
    * for keeps its requests. `here` may be its recipe, made only where a check is owed (`Admission.boundaryFor`).
    */
@@ -459,9 +462,9 @@ export class Consumers {
       this.pass.contract.contractOfValueAt(value, rest),
     );
     // C9 (#1073): an item a type test narrowed from external data brings its ingress stores' boundary checks, whatever
-    // its consumer then finds fitting, and host data no ingress store brought its check at the read's root (r4.10, at
+    // its consumer then finds fitting, and host data no ingress store brought its check at the read's root (at
     // the site and with the target the consumers' own requests use, so one check); the test proves its kind, never its
-    // ingress (a look at each of the read's items, at most one per kind, inside the read's own charged step, r4.261)
+    // ingress (a look at each of the read's items, at most one per kind, inside the read's own charged step)
     for (const item of items)
       if (item.fromExternal === true)
         this.admission.boundaryFor(item, () => this.#hostCheck(value));
@@ -490,8 +493,8 @@ export class Consumers {
   }
 
   /**
-   * A consumer's question of a value's items, one demand with the allowance of the read that asks it (S3 §5, TABLE
-   * B1): a demand past it stops, and the read answers its own key's `contract` with the reason `budget` (a contract past
+   * A consumer's question of a value's items, one demand with the allowance of the read that asks it (S3 §5):
+   * a demand past it stops, and the read answers its own key's `contract` with the reason `budget` (a contract past
    * its own allowance, or none, `STOPPED`). Nothing the stopped demand left unfinished is kept, so a later demand of the
    * same key, in either order, computes it again with its own allowance. In the finishing path after a stop the solver
    * answers only from what had finished, else `STOPPED`; it is not asked at all where nothing stopped (the units nested
@@ -558,7 +561,7 @@ export class Consumers {
    * owes its check at its site when the script runs (C9), against its destination's complete type where admission
    * proves it apart from the stopped decision (#1440: the written type, or the one the declaration's start value copies
    * there), else marked with its type undecided, as a stop before admission settled marks every store into an inferred
-   * place (TABLE r4.100, r4.111): `requiredStores`, as for the stores above a stop. A key below it is asked on its own
+   * place: `requiredStores`, as for the stores above a stop. A key below it is asked on its own
    * (Codex r10's B1 on #1310: a key a restarted pass carried stopped kept no check of its stores). Each key once a pass
    * (Codex r11's N2: every receiver asking it again scanned its stores again).
    */
@@ -629,7 +632,7 @@ export class Consumers {
 
   /**
    * Every consumer of the program, once. A stop (the work allowance, a read chain's depth) ends the walk: the units it
-   * finished keep their findings, the running unit's are taken back (D4 a′, TABLE r4.54); whether they stand is
+   * finished keep their findings, the running unit's are taken back (D4 a′); whether they stand is
    * `settled`'s, since a later pass of admission may still change them (A6).
    */
   public check(): void {
@@ -647,7 +650,8 @@ export class Consumers {
       this.admission.literalElements(this.order, (site, found) => mixed(this, site, found));
       this.admission.joinElements(this.order, (found) => mixedJoin(this, found));
       // (a pass whose admission gives the stores below a selection other targets starts the passes again, #1275; one in
-      // which a decision stopped is not settled either: the next starts with its key stopped, TABLE r4.180)
+      // which a decision stopped is not settled either: the next starts with its key stopped,
+      // docs/specifications/type-inference-accepted-record.md#r4-180)
       const own = this.#ownTargets(this.admission, (root, path) => {
         decide(this, { root, path }, true);
       });
@@ -692,7 +696,7 @@ export class Consumers {
   }
 
   /**
-   * The capture (#1526 phase B, TABLE r4.278): once admission settled, before the walk, the contract of each destination
+   * The capture (#1526 phase B): once admission settled, before the walk, the contract of each destination
    * whose store admission owes a check so far (its store warnings, C1, and its ingress stores, C9), read level by level
    * through the answers' own level reader (`admittedLevel`), so each level's decision and contract are made and kept while
    * the solver still runs. Each request is an owing site and the place and path the `let` or assignment holding it stores
@@ -923,7 +927,7 @@ export class Consumers {
    * #1526 phase C steps 1–4: the receiving closure's completion of `obligations` in a completion pass, made once from
    * this pass's inputs (its rejections, its store targets) without its frozen keys, and thrown away after. Every
    * obligation is extracted there through the same level reader; a decision a level asks for is made where it is first
-   * asked, a scoped decision from what is left of the total (r4.269), in that pass's own fresh `Admission`, so nothing
+   * asked, a scoped decision from what is left of the total, in that pass's own fresh `Admission`, so nothing
    * is unfrozen and no cache holds a frozen key's answer; each listing is a cell the frontier schedules, taken whole by a
    * search that reaches it (`Closure.run`). Nothing of it is this pass's: its answers, decisions and stops stand, and the
    * results are kept as each obligation's (the publication and decision 2 are later steps). Its work is this
@@ -1212,12 +1216,12 @@ export class Consumers {
   }
 
   /**
-   * The finishing path (D4 a′, TABLE r4.54, r4.55): the units a stop left, or with `all` every one (admission did not
+   * The finishing path (D4 a′): the units a stop left, or with `all` every one (admission did not
    * settle, so nothing before the stop stands), and the units nested past the nesting limit, each with no further
    * proving: every value they read is `unknown` with the reason `budget` (`STOPPED`), so each consumer owes its check,
    * its warning one of `deferred`. With `all`, also the stores' obligations admission's walk would have made, no
-   * decision read (`freshStores`). Without `all`, admission settled: what it decided and what the walk found before the stop stand
-   * (TABLE r4.90), and a publication the stop cut or never reached finishes against those decisions, the solver
+   * decision read (`freshStores`). Without `all`, admission settled: what it decided and what the walk found before the stop stand,
+   * and a publication the stop cut or never reached finishes against those decisions, the solver
    * answering only what it had finished. Bounded by the units, each a constant number of steps besides its own syntax.
    */
   public finish(all: boolean): void {

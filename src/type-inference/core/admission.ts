@@ -27,17 +27,12 @@ import {
   ownReadItem,
   wholeBelow,
 } from "./admission/ingress.js";
-import { copyGraph } from "./inherited/inherited.js";
+import { copyGraph, inheritedProofOf } from "./inherited/inherited.js";
 import { typedByDefault } from "./admission/landing-index.js";
-import {
-  joinElements,
-  literalChildren,
-  literalElements,
-  type MixedOptional,
-  offendingAt,
-  siteAt,
-  storesAt,
-} from "./admission/literals.js";
+import { literalElements } from "./admission/literals/elements.js";
+import { joinElements } from "./admission/literals/join.js";
+import { type MixedOptional } from "./admission/literals/mixed-sentence.js";
+import { literalChildren, offendingAt, siteAt, storesAt } from "./admission/literals/stores.js";
 import type {
   Alias,
   ChainEnd,
@@ -70,11 +65,15 @@ import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
 import { joinSteps, keptSteps, type WorkLedger } from "./budget.js";
 import type { ReceivingDomain } from "./inherited/receiving-domain.js";
+import { read, readNow, type Reads } from "./inherited/reads.js";
 import {
   arrayStrip,
   carried,
   carriedBy,
+  carriedByRead,
   keepsOwn,
+  keepsOwnRead,
+  type DispatchReads,
   type CarrierRole,
   type Dispatch,
   type StepsStrip,
@@ -122,7 +121,7 @@ export { concrete, contributes, deciding, fits, isExternal, isOpaque } from "./a
 export type { Candidate, DecidedAt, Decision } from "./admission/model.js";
 
 /*
- * Admission (checkpoint 9, TABLE §5) and the boundary checks of external data (C9). A place's type is decided once,
+ * Admission (checkpoint 9) and the boundary checks of external data (C9). A place's type is decided once,
  * in source order, at a destination store, from the value that store transfers at its own node (§3): a written type
  * decides (A1, A9); a copy of a written binding is decided by its type (A4); otherwise the earliest definite
  * contribution in source order (A2), where a settled family needs no scan (A3); the candidates a decided type is checked
@@ -145,8 +144,8 @@ export interface AdmissionHost {
   run<T>(work: Work<T>): T;
   /**
    * After a stop, a value's items at a node and a path as the finishing read answers them (the leaf's own kind, the
-   * finished answer and contract, the retained type: TABLE r4.102, r4.106, r4.109), else `null`: admission's C1 and its
-   * boundaries read as every consumer does (one derivation, TABLE r4.126). The path as asked: a cursor's span is made
+   * finished answer and contract, the retained type), else `null`: admission's C1 and its
+   * boundaries read as every consumer does (one derivation). The path as asked: a cursor's span is made
    * steps only where the finishing read answers (G3 stage 1).
    */
   read?(value: PlaceId, node: FlowNode, at: Rest): readonly Item[] | null;
@@ -160,6 +159,14 @@ function packetPath(packet: KeyPacketMaking, index: number): readonly string[] {
   const steps: string[] = [];
   for (let at = keys[index]![1]; at >= 0; at = nodes[at]![0]) steps.push(nodes[at]![1]);
   return steps.reverse();
+}
+
+/** The runs `Admission.run` refused inside a solver run (#1072 A2): none over the corpora. */
+let runsInsideSolverRuns = 0;
+
+/** `runsInsideSolverRuns`, for the tests that count them over a corpus. */
+export function admissionRunsInsideSolverRuns(): number {
+  return runsInsideSolverRuns;
 }
 
 /**
@@ -204,7 +211,7 @@ export class Admission {
    * 0021 1.3: the kinds present never narrow a written domain, the lead's ruling on external round 7 B1).
    */
   readonly permitsNull = new Set<CanonicalKey>();
-  /** The paths a copy of a written type decides, not the place's own (A4 through copies, r4.75 (1)). */
+  /** The paths a copy of a written type decides, not the place's own (A4 through copies). */
   readonly inheritsWrittenKeys = new Set<CanonicalKey>();
   /** The paths a written type, or a copy of one, leaves unrestricted (`permittedAt`): no decision, every kind fits. */
   readonly unrestricted = new Set<CanonicalKey>();
@@ -218,9 +225,6 @@ export class Admission {
   }
   get inheriting(): ReceivingDomain["inheriting"] {
     return this.pass.receivingDomain.inheriting;
-  }
-  get inherited(): ReceivingDomain["inherited"] {
-    return this.pass.receivingDomain.inherited;
   }
   get inheritedOwn(): ReceivingDomain["inheritedOwn"] {
     return this.pass.receivingDomain.inheritedOwn;
@@ -239,12 +243,6 @@ export class Admission {
   }
   get termLevels(): ReceivingDomain["termLevels"] {
     return this.pass.receivingDomain.termLevels;
-  }
-  get resolving(): boolean {
-    return this.pass.receivingDomain.resolving;
-  }
-  set resolving(value: boolean) {
-    this.pass.receivingDomain.resolving = value;
   }
   readonly whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
@@ -460,8 +458,9 @@ export class Admission {
     readonly rejected: ReadonlyMap<number, ReadonlySet<Key>>,
     readonly cycling: ReadonlySet<number>,
   ) {
-    // (A4's state is the pass's, made afresh for this admission: TABLE r4.375)
+    // (A4's state is the pass's, made afresh for this admission)
     pass.receivingDomain.reset();
+    pass.receivingDomain.replayProof = (key) => inheritedProofOf(this, key);
     const { definitions, program } = pass;
     this.deciderCaches = {
       deciders: this.deciders,
@@ -487,7 +486,7 @@ export class Admission {
       if (d.how === "parameter default") this.#defaulted.add(d.place);
     // A4: the copies of written bindings the stores, adds, returns, parameter defaults and single-site arguments bring
     // (a multi-site argument decides nothing, F21), where they land; and the copies of the unwritten places that may
-    // inherit a written type through them, at any chain length (r4.75 (1)), each decided by the type that place's own
+    // inherit a written type through them, at any chain length, each decided by the type that place's own
     // decision copies at the path (`inheritedAt`)
     copyGraph(this);
     for (const d of [...definitions.storeDefs, ...definitions.transferDefs])
@@ -560,7 +559,20 @@ export class Admission {
   }
 
   public run<T>(work: Work<T>): T {
+    // (a run inside a solver run is a read an inherited proof's run did not yield: refused, and counted for the tests'
+    // corpora, #1072 A2)
+    if (this.pass.solver.running) {
+      runsInsideSolverRuns += 1;
+      throw new Error(
+        "Admission ran a computation inside a solver run (#1072 A2): yield it as a read.",
+      );
+    }
     return this.host.run(work);
+  }
+
+  /** `run` as a read (`Read`): run now outside a solver run, yielded inside an inherited proof (#1072 A2). */
+  public *runRead<T>(work: () => Work<T>): Reads<T> {
+    return yield* read(() => this.run(work()), work);
   }
 
   /**
@@ -625,10 +637,26 @@ export class Admission {
 
   /** A store's value at the path below its destination, by §3 at its node. */
   public valueAt(d: Definition, at: Rest): Item[] {
+    return readNow(this.valueAtRead(d, at));
+  }
+
+  /** `valueAt` as a read (`Read`): run now outside a solver run, yielded inside an inherited proof (#1072 A2). */
+  public *valueAtRead(d: Definition, at: Rest): Reads<Item[]> {
     this.pass.program.work.charge("checks");
     if (d.kind === "const")
       return restRef(this.pass.contract, at).length === 0 ? [...(d.items ?? [])] : [];
-    return this.items(d.value!, d.node, at);
+    return yield* this.itemsRead(d.value!, d.node, at);
+  }
+
+  /** `items` as a read: inside an inherited proof the solver's, the finishing read being after a stop only. */
+  public *itemsRead(value: PlaceId, node: FlowNode, at: Rest): Reads<Item[]> {
+    const values = this.pass.values;
+    return yield* read(
+      () => this.items(value, node, at),
+      function* () {
+        return withoutEmpty(yield* values.valueItems(value, node, at));
+      },
+    );
   }
 
   /** A value's items at a node and a path: the finishing read's after a stop (`AdmissionHost.read`), else the solver's. */
@@ -640,7 +668,7 @@ export class Admission {
   /**
    * A place's path in the contract's vocabulary, as a label's recipe (`labels.ts`), its text made only where it is shown:
    * an element step below a dict is its `entry`, the collection above it as the contract holds it now or, where the
-   * place's written type `written` reaches it (the finishing path before admission settled, TABLE r4.122), as the
+   * place's written type `written` reaches it (the finishing path before admission settled), as the
    * written type has it, final at every stop and asking no solver. Each step is spelled here, so the text made later
    * asks nothing; a recipe already made for the same spelling is the same recipe.
    */
@@ -855,6 +883,42 @@ export class Admission {
     return keepsOwn(this.pass.program, value, this.#dispatch);
   }
 
+  /** `keepsOwn` with the receiver's decision a read (`Read`, #1072 A2). */
+  public keepsOwnRead(value: PlaceId): Reads<boolean> {
+    return keepsOwnRead(this.pass.program, value, (receiver) =>
+      this.#dispatchReads.reference(receiver),
+    );
+  }
+
+  /** `carriersOf` with the value side's decisions reads (`Read`, #1072 A2). */
+  public *carriersOfRead(
+    value: PlaceId,
+    strip: readonly string[],
+  ): Reads<readonly (readonly [PlaceId, readonly string[], CarrierRole, number])[]> {
+    const { program } = this.pass;
+    return (yield* carriedByRead(
+      program,
+      value,
+      arrayStrip(program, strip),
+      this.#dispatchReads,
+    )).map(([operand, below, role, position]) => [operand, below.steps, role, position] as const);
+  }
+
+  /** `#dispatch` with its decisions reads (`Read`, #1072 A2): run now outside a solver run, yielded inside one. */
+  readonly #dispatchReads: DispatchReads = ((admission) => ({
+    *kinds(of) {
+      const items = yield* admission.runRead(() => admission.pass.contract.contractOfValue(of));
+      return new Set(items.map((item) => item.tag));
+    },
+    *reference(receiver) {
+      const decided = yield* admission.runRead(() =>
+        admission.pass.contract.valueReceiver(receiver),
+      );
+      return heldReference(decided);
+    },
+    joined: (operand) => admission.pass.lists.joined(operand),
+  }))(this);
+
   /** A literal's term at one step: an object's property by its step, a collection's element; built once per literal. */
   public termAt(term: TypeTerm, step: string): TypeTerm | undefined {
     const { work } = this.pass.program;
@@ -956,7 +1020,7 @@ export class Admission {
     return typedByDefault(this, value);
   }
 
-  /** A store's destination: the stored value's path; an added value's the collection's element (C9 r4.6). */
+  /** A store's destination: the stored value's path; an added value's the collection's element (C9). */
   public destPath(d: Definition): readonly string[] {
     return d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
   }

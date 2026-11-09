@@ -18,7 +18,10 @@ export interface HolderReference {
   readonly shift: readonly string[];
 }
 
-/** A source of a mark: one holder per source identity and projection (§8 r4.23). */
+/**
+ * A source of a mark: one holder per source identity and projection (§8,
+ * docs/specifications/type-inference-accepted-record.md#r4-23).
+ */
 export interface Holder {
   readonly id: string;
   /** Its own reads: a stored read of a key with a tested key below it, at the path it stands at. */
@@ -43,7 +46,10 @@ export interface ReferencesByStep {
   readonly any: readonly HolderReference[];
 }
 
-/** A source's identity, with the guard bit and the mark holder beside it, never in it (§8 r4.15). */
+/**
+ * A source's identity, with the guard bit and the mark holder beside it, never in it (§8,
+ * docs/specifications/type-inference-accepted-record.md#r4-15).
+ */
 export interface Identity {
   readonly id: string;
   readonly key: Key | null;
@@ -158,14 +164,14 @@ export interface EntryGroup {
 }
 
 /**
- * The sources a prefix's reads take apart from its entries (§8 r4.15: a replaced alias source's own stores below its
+ * The sources a prefix's reads take apart from its entries (§8: a replaced alias source's own stores below its
  * root, kept apart by their first step), as a layer over the one its prefix inherits and the ones its source joins:
- * an alias shares its source's layers and adds only its own sources (r4.38), so k aliases each adding a field are k
- * small layers, never k maps of up to k fields, and a join of two copies references both, never a flattened list
- * (r4.46 (3)). A read below a layer is answered once per layer and path (`layerSupport`, `layerDemand`), from its own
+ * an alias shares its source's layers and adds only its own sources, so k aliases each adding a field are k
+ * small layers, never k maps of up to k fields, and a join of two copies references both, never a flattened list.
+ * A read below a layer is answered once per layer and path (`layerSupport`, `layerDemand`), from its own
  * sources and its parent's and joins' answers (#1466); where the read's layers are one layer whose summary would be one
  * source's answer alone, the read asks that source's own demand instead, a reference, never a summary made
- * (`singleSource`, TABLE r4.251).
+ * (`singleSource`, docs/specifications/type-inference-accepted-record.md#r4-251).
  */
 export interface SubLayer {
   /** Its own sources by their first step. */
@@ -257,7 +263,7 @@ export interface LayerFound {
 }
 
 /**
- * A layer's logical identity (#1466, TABLE r4.227): an alias's the original place whose root it replaces, a projected
+ * A layer's logical identity (#1466): an alias's the original place whose root it replaces, a projected
  * copy's the place and the path it is copied below, both as a cursor (`place#id`), so a summary's demand names its
  * layer by the program and the path, never by the order the analysis made layers in.
  */
@@ -354,7 +360,7 @@ export interface PrefixStores {
   readonly inheritedBy: ReadonlySet<Definition | null>;
   /**
    * The further layers its stores join it to (a copy of one source, then of another), each referenced with the stores
-   * that brought it, never flattened into a layer of its own (r4.46 (3)).
+   * that brought it, never flattened into a layer of its own.
    */
   readonly also: readonly {
     readonly layer: SubLayer;
@@ -515,8 +521,8 @@ export interface StoredChoiceKeys {
 export type Selected = { readonly name: string; readonly type: TypeTerm } | null;
 
 /**
- * What one path of a literal's index holds (§8 r4.9), with a node per step below it. A nested literal that alone
- * stands at a step is its own index's root there, shared, never copied (TABLE r4.164's local recipes): k nested
+ * What one path of a literal's index holds (§8), with a node per step below it. A nested literal that alone
+ * stands at a step is its own index's root there, shared, never copied: k nested
  * literals keep k nodes, never k indexes each through the literals below it.
  */
 export interface IndexNode {
@@ -585,7 +591,7 @@ export interface NodeShape {
   readonly marked: boolean;
 }
 
-/** One index of a literal's structure, through its nested literals at every step (§8 r4.9). */
+/** One index of a literal's structure, through its nested literals at every step (§8). */
 export interface LiteralIndex {
   readonly root: IndexNode;
   /** Its nodes by the pass's path ids (`nodeAt`), each found once; `null` where it holds no node. */

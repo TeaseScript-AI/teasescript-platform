@@ -1,5 +1,7 @@
 // A generator's sources as the runner (`run.mjs`) runs them and the check (`check.mjs`) compares them, and the folders
-// that hold generators, as the check and the baselines (`baselines.mjs`) find them.
+// that hold generators, as the check and the baselines (`baselines.mjs`) find them. A stored baseline's tool: the
+// families runner's test scans this file for writes and computed `import()` outside the gate (#1542), so a helper with
+// either belongs in a module of its own (`units.mjs`).
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
@@ -50,29 +52,59 @@ export function setKey(keys) {
 export const placeOf = (generator, source) =>
   JSON.stringify([generator, source.name, sourceKey(source)]);
 
-/** Whether `folder` holds a generator: a `.mjs` file. A folder of data only holds none. */
-export const holdsGenerators = (folder) =>
-  existsSync(folder) && readdirSync(folder).some((name) => name.endsWith(".mjs"));
+/**
+ * An area's generator files, as paths relative to it: its top-level `.mjs` files; an area with none there holds groups,
+ * and each subfolder's top-level `.mjs` files are its generators (`group/name.mjs`). A group's own subfolders are never
+ * read, and neither are an area's subfolders beside a top-level generator, so `property/`'s tool modules under `lib/`,
+ * `bin/` and the rest are no generators.
+ */
+export function generatorFiles(folder) {
+  const modules = (dir) =>
+    readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => !entry.isDirectory() && entry.name.endsWith(".mjs"))
+      .map((entry) => entry.name);
+  const top = modules(folder);
+  if (top.length > 0) return top;
+  return readdirSync(folder, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((group) =>
+      modules(path.join(folder, group.name)).map((name) => `${group.name}/${name}`),
+    );
+}
+
+/** Whether `folder` holds a generator (`generatorFiles`). A folder of data only, or none, holds none. */
+export const holdsGenerators = (folder) => existsSync(folder) && generatorFiles(folder).length > 0;
 
 /**
  * The runner's areas under `families` (a tree's `tests/families`): each subfolder that holds a generator, in the order
- * the folder lists them. Every `.mjs` file in such a folder is a generator (`generatorsOf`), so a utility stays outside
- * them (#1786, #1865).
+ * the folder lists them. Every `.mjs` file `generatorFiles` lists is a generator (`generatorsOf`), so a utility stays
+ * outside the areas and their groups (#1786, #1865).
  */
 export const generatorFolders = (families) =>
   (existsSync(families) ? readdirSync(families, { withFileTypes: true }) : [])
     .filter((entry) => entry.isDirectory() && holdsGenerators(path.join(families, entry.name)))
     .map((entry) => path.join(families, entry.name));
 
-/** An area folder's generators, in name order, each with its checks and every source (`sourcesOf`). */
+/**
+ * An area folder's generators, each by its id (`name`): its `id` export, which a renamed generator keeps as its old file
+ * name so that its sources keep their places in a baseline (`placeOf`), else its file name without its group, so that a
+ * generator moved into a group keeps them too. In id order, each with its file (its path in the area), its checks and
+ * every source (`sourcesOf`); two generators with one id are refused, in one group or two.
+ */
 export async function generatorsOf(folder, sizes) {
   const generators = [];
-  for (const name of readdirSync(folder)
-    .filter((file) => file.endsWith(".mjs"))
-    .sort()) {
-    const generator = await import(pathToFileURL(path.join(folder, name)).href);
+  for (const file of generatorFiles(folder)) {
+    const generator = await import(pathToFileURL(path.join(folder, file)).href);
+    const name =
+      typeof generator.id === "string" && generator.id !== "" ? generator.id : path.basename(file);
     const checks = generator.checks ?? ["publication"];
-    generators.push({ name, checks, sources: sourcesOf(generator, sizes) });
+    generators.push({ name, file, checks, sources: sourcesOf(generator, sizes) });
   }
+  generators.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const [index, generator] of generators.entries())
+    if (index > 0 && generators[index - 1].name === generator.name)
+      throw new Error(
+        `${folder}: ${generators[index - 1].file} and ${generator.file} have one id, ${generator.name}`,
+      );
   return generators;
 }

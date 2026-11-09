@@ -1,0 +1,223 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  compileSource,
+  createCheckpoint,
+  deserializeCheckpoint,
+  observeTime,
+  run,
+  serializeCheckpoint,
+  type SerializableRuntimeValue,
+} from "../../src/index.js";
+import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
+import { assertRuntimeResumeEquivalent } from "../helpers/runtime-equivalence.js";
+import { compileValidPlan as compiled } from "../helpers/compile-valid-plan.js";
+
+test("reports parser and semantic source diagnostics through the package root", () => {
+  const parserFailure = compileSource("let = 1");
+  assert.equal(parserFailure.plan, null);
+  assert.equal(parserFailure.parserDiagnostics[0]?.code, "TSP013");
+  assert.deepEqual(
+    [
+      parserFailure.parserDiagnostics[0]?.span.start.offset,
+      parserFailure.parserDiagnostics[0]?.span.end.offset,
+    ],
+    [4, 4],
+  );
+
+  const semanticFailure = compileSource("say unknownName");
+  assert.equal(semanticFailure.plan, null);
+  assert.equal(semanticFailure.semanticDiagnostics[0]?.code, "TSV002");
+  assert.deepEqual(
+    [
+      semanticFailure.semanticDiagnostics[0]?.span.start.offset,
+      semanticFailure.semanticDiagnostics[0]?.span.end.offset,
+    ],
+    [4, 15],
+  );
+});
+
+test("executes source output, speaker provenance, collection copies, and control flow", () => {
+  const plan = compiled(
+    [
+      "speaker vera {}",
+      "speaker vera",
+      "let source = [1, 2]",
+      "let copy = source",
+      "copy[0] = 9",
+      'let values = set["first", "second", "first"]',
+      "let total = 0",
+      "for value in 1..=3 { if value == 2 { continue }\ntotal = total + value }",
+      'say "Total ${total}: ${values.first}"',
+      "say source[0]",
+      'say as vera "Override"',
+      "exit",
+    ].join("\n"),
+  );
+
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: 7 }));
+  assert.equal(result.snapshot.status, "halted");
+  assert.deepEqual(
+    result.events
+      .filter((event) => event.kind === "say")
+      .map((event) => [event.text, event.speaker?.identifier, event.speaker?.displayName]),
+    [
+      ["Total 4: first", "vera", "vera"],
+      ["1", "vera", "vera"],
+      ["Override", "vera", "vera"],
+    ],
+  );
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "developerWarning").map((event) => event.code),
+    ["TSW001"],
+  );
+  assert.equal(rootBinding(result.snapshot.frames[0]?.bindings ?? [], "total"), 4);
+});
+
+test("a speaker property continued after ':' runs like the single-line property", () => {
+  const speakers = [
+    'speaker vera { displayName: "Vera" }',
+    'speaker vera {\n    displayName:\n        "Vera"\n}',
+  ];
+  for (const declaration of speakers) {
+    const plan = compiled(`${declaration}\nsay as vera "Hi"\nexit`);
+    const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: 7 }));
+    assert.equal(result.snapshot.status, "halted");
+    assert.deepEqual(
+      result.events
+        .filter((event) => event.kind === "say")
+        .map((event) => [event.text, event.speaker?.identifier, event.speaker?.displayName]),
+      [["Hi", "vera", "Vera"]],
+    );
+  }
+});
+
+test("executes explicit block newlines, dedent, escapes, and interpolation without text loss", () => {
+  const plan = compiled(
+    [
+      'let name = "Ada"',
+      'say """',
+      "  One.",
+      "   ",
+      "    Two.",
+      '"""',
+      'say """',
+      "  Before\\t ${name}",
+      "    After\\nnext",
+      '"""',
+      'say "Escaped:\\t and explicit\\nnext"',
+      "exit",
+    ].join("\n"),
+  );
+
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["One.\n\n  Two.", "Before\t Ada\n  After\nnext", "Escaped:\t and explicit\nnext"],
+  );
+});
+
+test("keeps contextual say skip words available as ordinary identifier expressions", () => {
+  const plan = compiled(
+    [
+      "speaker vera {}",
+      'let skippable = ["indexed"]',
+      'let unskippable = ["unindexed"]',
+      "say skippable",
+      "say skippable[0]",
+      "say unskippable[0]",
+      "say skippable[0], instant",
+      "say as vera skippable[0]",
+      "exit",
+    ].join("\n"),
+  );
+
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ['["indexed"]', "indexed", "unindexed", "indexed", "indexed"],
+  );
+  assert.equal(result.snapshot.status, "halted");
+});
+
+test("keeps contextual say skip words available as call expressions", () => {
+  const plan = compiled(
+    [
+      'function skippable(value) { return "called" }',
+      'function unskippable(value) { return "also called" }',
+      'say skippable("ok"), instant',
+      'say unskippable("ok"), instant',
+      "exit",
+    ].join("\n"),
+  );
+
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["called", "also called"],
+  );
+  assert.equal(result.snapshot.status, "halted");
+});
+
+test("preserves function evaluation, deterministic random output, and checkpoint resume equivalence", () => {
+  const source = [
+    "let order = []",
+    "function mark(value) { order.add(value)\nreturn value }",
+    "function add(left, right = left) { return left + right }",
+    "say add(mark(2))",
+    'say "${order[0]}:${randomInteger(1..=6)}"',
+    "exit",
+  ].join("\n");
+  const seed = 0x2468_ace1;
+  const result = assertRuntimeResumeEquivalent(source, {
+    scenarioName: "public source conformance function and RNG scenario",
+    seed,
+  });
+
+  const [sum, ordered] = result.events
+    .filter((event) => event.kind === "say")
+    .map((event) => event.text);
+  assert.equal(sum, "4");
+  assert.match(ordered!, /^2:[1-6]$/);
+  // The draw advanced the session RNG, so the resume comparison above covered RNG state.
+  assert.notDeepEqual(
+    result.finalSnapshot.rng,
+    createImmediatePacingRuntimeSnapshot(compiled(source), { seed }).rng,
+  );
+});
+
+test("resumes a blocking wait through public checkpoint and time APIs", () => {
+  const plan = compiled('wait 1 ms\nsay "done"\nexit');
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.equal(pending.snapshot.status, "waiting");
+  assert.deepEqual(
+    pending.events.map((event) => event.kind),
+    ["actionRequested"],
+  );
+
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(plan, pending.snapshot)),
+  );
+  const uninterruptedSettled = observeTime(plan, pending.snapshot, 1);
+  const restoredSettled = observeTime(restored.plan, restored.snapshot, 1);
+  const uninterrupted = run(plan, uninterruptedSettled.snapshot);
+  const resumed = run(restored.plan, restoredSettled.snapshot);
+
+  assert.deepEqual(
+    [...pending.events, ...uninterruptedSettled.events, ...uninterrupted.events],
+    [...pending.events, ...restoredSettled.events, ...resumed.events],
+  );
+  assert.deepEqual(resumed.snapshot, uninterrupted.snapshot);
+  assert.deepEqual(
+    resumed.events.map((event) => event.kind),
+    ["say", "exit"],
+  );
+});
+
+function rootBinding(
+  bindings: readonly { readonly name: string; readonly value: SerializableRuntimeValue }[],
+  name: string,
+): SerializableRuntimeValue | undefined {
+  return bindings.find((binding) => binding.name === name)?.value;
+}

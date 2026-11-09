@@ -49,8 +49,10 @@ spans it reads and which it skips. `npm run lint:design` and `npm run test:lint:
 contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
 TypeScript compilation precedes UI work; compiled tests run only after all builds pass, as many files at once as
-`node --test` runs, fewer under a cgroup memory limit: as many as fit at 3 GiB plus 640 MiB a file
-(`tools/test-files-at-once.mjs`). Each command's output is printed together, including warnings. A failure stops the
+`node --test` runs, fewer under the job's memory: as many as fit at 3 GiB plus 640 MiB a file in `SX_MEM_MIB` (the
+queue's reservation, in MiB) or the smallest visible cgroup limit, whichever is smaller, so the variable can lower the
+figure but never raise it above a cap the runner can see (`tools/test-files-at-once.mjs`). A file that reports no test of
+its own, as one whose process ends before its tests report, fails the full suite and is named. Each command's output is printed together, including warnings. A failure stops the
 group and subsequent stages; SIGINT/SIGTERM also terminate
 child process groups, escalating after a grace period. A command stopped this way is labelled `ABORTED`, not `FAIL`,
 and prints after the failed one. `npm run test:verification` checks scheduling, diagnostics and
@@ -85,8 +87,9 @@ under `tests/`, one at the top by its name alone.
 `node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, format, oxlint, knip, the doc links, the imports, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash.
 `node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a tree hash only exists), and finds its unfilled placeholders (its header lists the rules); it never fetches.
 CI's "Structure signals (advisory)" step, after `check:pretest` in the job that runs it, prints
-`node tools/structure-report.mjs --diff HEAD^1`: the structure signals the change adds to, against the merge's first
-parent. It never fails; the plan or the review answers each signal.
+`node tools/structure-report.mjs --diff HEAD^1 --moved`: the structure signals the change adds to, against the merge's
+first parent, without Git's moved lines. Its `--summary` rows, each file over 1,000 lines or gaining over 300, go to
+that job's summary and the end of its log. It never fails; the plan or the review answers each signal.
 `node tools/ci-test-counts.mjs <run id>` prints a GitHub Actions run's node:test totals (tests, pass, fail, skipped) per job and step, read from `gh run view <run id> --log`, and their sum; `--log <file>` reads a saved log.
 `node tools/counters.mjs [ROOT] [--json]` counts a checkout's lint disables, `@ts-expect-error` and `@ts-ignore` directives, skipped and todo tests, shrink-only list entries and structure signals (its header defines each), for comparing them over time.
 
@@ -325,7 +328,7 @@ Chromium DevTools smoke route has no browser-automation package dependency; it p
 cross-browser or production-host E2E suite. Preview groups use fresh browser contexts. On failure the runner reports a
 retained scratch directory with a screenshot and Playwright trace for the failing group; delete it after diagnosis.
 `npm test` separately checks that the default Player build does not statically load development preview content, and
-`tests/player-demo.test.ts` plays the repository demo to its exit through the runtime adapter and media device.
+`tests/player/player-demo.test.ts` plays the repository demo to its exit through the runtime adapter and media device.
 
 After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
 (computer use where available) and inspect the changed state plus its immediate responsive/interaction neighbors. This
@@ -698,13 +701,13 @@ private runner implementation.
 ### Layout and discovery
 
 ```text
-tests/property.test.ts
+tests/runtime/property.test.ts
 tests/property/
   replay.ts
   source-fuzz.ts
 ```
 
-`tests/property.test.ts` is a root test entrypoint, so normal compiled-test
+`tests/runtime/property.test.ts` is a test entrypoint, so normal compiled-test
 discovery executes the required 128-case campaign through `npm run check`.
 The fixed operation, rejected-completion, checkpoint, and malformed-input
 fixtures consume no randomness, so they run once each in that entrypoint and
@@ -779,8 +782,8 @@ preserve private harness bookkeeping as evidence.
 
 ## Source-to-runtime conformance corpus
 
-The current behavior-oriented corpus lives in focused `tests/*.test.ts` files
-next to the behavior they cover, with `tests/source-to-runtime-conformance.test.ts`
+The current behavior-oriented corpus lives in focused test files under `tests/`
+next to the behavior they cover, with `tests/runtime/source-to-runtime-conformance.test.ts`
 exercising representative public-package scenarios. New representative cases
 start with real `.tease` source, call the root `compileSource(...)` API, and
 assert only the relevant observable diagnostic/span, event/order/provenance,
@@ -933,7 +936,7 @@ blocking and asynchronous waits including terminal ones, bounded and indefinite 
 `elapsed` excluding pauses and stalls, one-late versus many-small progress observations, same-time ordering across
 media and timers, cue blocks with self-handles, Stage replacement, playback projections, JSON
 checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state.
-`tests/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
+`tests/player/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
 stand-ins: single load reports, stalls, range repetition and terminal stop, overlapping instances of one file that each
 play out once, also after a late `seeked` notification or a rounding error at the range end, pause/resume/seek
 repositioning, refused playback and retry also within the end tolerance, failed video and unavailable sources, restore

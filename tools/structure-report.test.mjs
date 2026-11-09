@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { addedLinesOfPatch } from "./structure-report.mjs";
+import { addedLinesOfPatch, SUMMARY_KINDS } from "./structure-report.mjs";
 
 const tool = fileURLToPath(new URL("./structure-report.mjs", import.meta.url));
 
@@ -382,6 +382,21 @@ test("a name that is not UTF-8 stops the report; a file whose hunks --numstat do
         "file gaining over 300 lines: +301 src/big.ts",
       ],
     );
+    // with --summary too: the file not measured is in the report only, and the summary still lists the one measured
+    const summary = join(counted.root, "summary.md");
+    const summarized = spawnSync(
+      process.execPath,
+      [tool, "--diff", counted.base, "--summary", summary],
+      {
+        cwd: counted.root,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      },
+    );
+    assert.equal(summarized.status, 0, summarized.stderr);
+    const block = readFileSync(summary, "utf8");
+    assert.match(block, /^src\/big\.ts \| 1 → \d+ \| gaining 301$/mu);
+    assert.doesNotMatch(block, /src\/a\.ts/u);
   } finally {
     rmSync(named.root, { recursive: true, force: true });
     rmSync(counted.root, { recursive: true, force: true });
@@ -390,13 +405,15 @@ test("a name that is not UTF-8 stops the report; a file whose hunks --numstat do
 
 const USAGE =
   "usage: node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]\n" +
-  "       node tools/structure-report.mjs [ROOT…] --diff BASE [--json FILE]\n";
+  "       node tools/structure-report.mjs [ROOT…] --diff BASE [--moved] [--json FILE] [--summary FILE]\n";
 /** Command lines the report refuses, with its reason: each option that takes a value, missing or repeated. */
 const REFUSED = [
   [["--top"], "--top takes a value"],
   [["--json"], "--json takes a value"],
   [["--compare"], "--compare takes a value"],
   [["--diff"], "--diff takes a value"],
+  [["--summary"], "--summary takes a value"],
+  [["--summary="], "--summary takes a value"],
   [["src", "--json"], "--json takes a value"],
   // the next argument is another option, still on the command line when it is read
   [["--json", "--compare", "earlier.json"], "--json takes a value"],
@@ -409,6 +426,8 @@ const REFUSED = [
   [["--json", "first.json", "--json", "second.json"], "--json is given twice"],
   [["--compare", "a.json", "--compare", "b.json"], "--compare is given twice"],
   [["--diff", "HEAD", "--diff", "HEAD"], "--diff is given twice"],
+  [["--summary", "a.md", "--summary", "b.md"], "--summary is given twice"],
+  [["--moved", "--moved"], "--moved is given twice"],
   [["--top", "2", "--top", "3"], "--top is given twice"],
   [["--json=first.json", "--json", "second.json"], "--json is given twice"],
   // --top's value is a whole number (#2090)
@@ -573,3 +592,305 @@ test("--diff counts a line Git places differently at another context as its own 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test(
+  "--moved leaves Git's moved lines out of the added-lines signals and prints what it suppressed",
+  { timeout: 60_000 },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "structure-report-moved-"));
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const report = (...args) =>
+      execFileSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+    try {
+      git("init", "-q");
+      git("config", "user.email", "t@t");
+      git("config", "user.name", "t");
+      const big = longFunction("big", 400);
+      write(root, { "src/a.ts": `${big}\nexport const small = 1;\n` });
+      git("add", "-A");
+      git("commit", "-q", "-m", "base");
+      const base = git("rev-parse", "HEAD");
+      // the 400-line function moved whole into a new file
+      write(root, { "src/a.ts": "export const small = 1;\n", "src/b.ts": `${big}\n` });
+      git("add", "-A");
+      git("commit", "-q", "-m", "move");
+      const plain = report("--diff", base);
+      assert.match(plain, /file gaining over 300 lines: \+400 src\/b\.ts/u);
+      assert.match(
+        plain,
+        /function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\)/u,
+      );
+      const moved = report("--diff", base, "--moved");
+      assert.match(
+        moved,
+        /suppressed \(moved\): file gaining over 300 lines: \+400 src\/b\.ts, 400 moved discounted/u,
+      );
+      assert.match(
+        moved,
+        /suppressed \(moved\): function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\), 400 moved lines discounted/u,
+      );
+      assert.doesNotMatch(moved, /^ {2}file gaining over 300 lines/mu);
+      // one line edited inside the moved function still counts as written into it
+      write(root, { "src/b.ts": `${big.replace("const v7 = 7;", "const v7 = 8;")}\n` });
+      git("add", "-A");
+      git("commit", "-q", "-m", "edit");
+      const edited = report("--diff", base, "--moved");
+      assert.match(
+        edited,
+        /^ {2}function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\)$/mu,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test("--moved reads a file name with spaces as Git names it", { timeout: 60_000 }, () => {
+  const root = mkdtempSync(join(tmpdir(), "structure-report-moved-space-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const report = (...args) =>
+    execFileSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+  try {
+    git("init", "-q");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    const big = longFunction("big", 400);
+    write(root, { "src/a.ts": `${big}\nexport const small = 1;\n` });
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    const base = git("rev-parse", "HEAD");
+    write(root, { "src/a.ts": "export const small = 1;\n", "src/new file.ts": `${big}\n` });
+    git("add", "-A");
+    git("commit", "-q", "-m", "move");
+    const moved = report("--diff", base, "--moved");
+    assert.match(
+      moved,
+      /suppressed \(moved\): file gaining over 300 lines: \+400 src\/new file\.ts, 400 moved discounted/u,
+    );
+    assert.doesNotMatch(moved, /^ {2}file gaining over 300 lines/mu);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test(
+  "--summary writes a row per file over 1000 lines or gaining over 300, the same signals as the report",
+  { timeout: 60_000 },
+  () => {
+    const folder = (dir, count) =>
+      Object.fromEntries(
+        Array.from({ length: count }, (_, i) => [`${dir}/f${i}.ts`, `export const f${i} = ${i};`]),
+      );
+    const big = longFunction("big", 400);
+    const other = longFunction("other", 350);
+    const signalled = history(
+      {
+        "src/crossing.ts": lines(999),
+        "src/exact.ts": `${lines(10)}\n`,
+        "src/over.ts": `${lines(10)}\n`,
+        "src/a.ts": `${big}\nexport const small = 1;\n`,
+        "src/c.ts": `${other}\nexport const kept = 1;\n`,
+        ...folder("src/wide", 20),
+        ...folder("tools", 12),
+      },
+      {
+        "src/crossing.ts": lines(1004),
+        // 300 added lines exactly: not over 300
+        "src/exact.ts": `${lines(310)}\n`,
+        "src/over.ts": `${lines(311)}\n`,
+        // a 400-line function moved whole, and a 350-line one moved beside 301 new lines
+        "src/a.ts": "export const small = 1;\n",
+        "src/b.ts": `${big}\n`,
+        "src/c.ts": "export const kept = 1;\n",
+        "src/d.ts": `${other}\n${lines(301, "export const y")}\n`,
+        "src/wide/f20.ts": "export const f20 = 20;",
+        "tools/f12.ts": "export const f12 = 12;",
+        "src/item.ts": "export const item = 1;",
+        "src/items.ts": "export const items = 1;",
+      },
+    );
+    const quiet = history(
+      { "src/x.ts": "export const x = 1;\n" },
+      { "src/x.ts": "export const x = 2;\n" },
+    );
+    const refused = history(
+      { "src/x.ts": "export const x = 1;\n" },
+      { "src/x.ts": "export const x = 2;\n" },
+    );
+    const run = ({ root, base }, ...args) => {
+      const summary = join(root, "summary.md");
+      writeFileSync(summary, "earlier\n");
+      const result = spawnSync(
+        process.execPath,
+        [tool, "--diff", base, ...args, "--summary", summary, "--json", join(root, "change.json")],
+        { cwd: root, encoding: "utf8" },
+      );
+      const written = readFileSync(summary, "utf8");
+      // appended after what the file held, and printed after the report
+      assert.ok(written.startsWith("earlier\n"), written);
+      const block = written.slice("earlier\n".length);
+      assert.ok(result.stdout.endsWith(`\n${block}`), result.stdout);
+      return { status: result.status, block, kinds: kindsOf(root) };
+    };
+    const kindsOf = (root) => {
+      try {
+        return JSON.parse(readFileSync(join(root, "change.json"), "utf8")).change.map(
+          (s) => s.signal,
+        );
+      } catch {
+        return [];
+      }
+    };
+    const blockOf = ({ base }, command, rows, short = true) =>
+      [
+        "### Structure signals: files",
+        "",
+        `\`node tools/structure-report.mjs ${command}\`${short ? `, merge base ${base.slice(0, 9)}` : ""}`,
+        "",
+        "```text",
+        ...rows,
+        "```",
+        "",
+      ].join("\n");
+    try {
+      for (const { git } of [signalled, quiet, refused]) git("config", "core.abbrev", "9");
+      const plain = run(signalled);
+      assert.equal(plain.status, 0);
+      assert.equal(
+        plain.block,
+        blockOf(
+          signalled,
+          `--diff ${signalled.base} --json ${join(signalled.root, "change.json")}`,
+          [
+            "src/b.ts | 0 → 400 | gaining 400",
+            "src/crossing.ts | 999 → 1004 | over 1000",
+            "src/d.ts | 0 → 651 | gaining 651",
+            "src/over.ts | 10 → 311 | gaining 301",
+          ],
+        ),
+      );
+      const moved = run(signalled, "--moved");
+      assert.equal(moved.status, 0);
+      assert.equal(
+        moved.block,
+        blockOf(
+          signalled,
+          `--diff ${signalled.base} --moved --json ${join(signalled.root, "change.json")}`,
+          [
+            "src/crossing.ts | 999 → 1004 | over 1000",
+            "src/d.ts | 0 → 651 | gaining 301, 350 moved discounted",
+            "src/over.ts | 10 → 311 | gaining 301",
+          ],
+        ),
+      );
+      // every kind the report returns is one the summary has decided on
+      assert.deepEqual(
+        // (`unread`: the --numstat stand-in's test runs it with --summary)
+        [...new Set([...plain.kinds, ...moved.kinds, "unread"])].sort(),
+        Object.keys(SUMMARY_KINDS).sort(),
+      );
+      const none = run(quiet);
+      assert.equal(none.status, 0);
+      assert.equal(
+        none.block,
+        blockOf(quiet, `--diff ${quiet.base} --json ${join(quiet.root, "change.json")}`, [
+          "no file signalled",
+        ]),
+      );
+      writeFileSync(
+        Buffer.from(join(refused.root, "src/bad\xff.ts"), "latin1"),
+        "export const b = 1;\n",
+      );
+      refused.git("add", "-A");
+      refused.git("commit", "-q", "-m", "bad");
+      const failed = run(refused);
+      assert.equal(failed.status, 2);
+      assert.equal(
+        failed.block,
+        blockOf(
+          refused,
+          `--diff ${refused.base} --json ${join(refused.root, "change.json")}`,
+          [
+            "structure report could not run: structure-report: Git names a file that is not UTF-8 (bytes 7372632f626164ff2e7473): the report reads UTF-8 names only",
+          ],
+          false,
+        ),
+      );
+      // --summary without its file stops the report; without --diff, its block says why
+      const valueless = spawnSync(process.execPath, [tool, "--diff", quiet.base, "--summary"], {
+        cwd: quiet.root,
+        encoding: "utf8",
+      });
+      assert.equal(valueless.status, 2);
+      assert.match(valueless.stderr, /^structure-report: --summary takes a value\nusage: /u);
+      const alone = join(quiet.root, "alone.md");
+      const undiffed = spawnSync(process.execPath, [tool, "--summary", alone], {
+        cwd: quiet.root,
+        encoding: "utf8",
+      });
+      assert.equal(undiffed.status, 2);
+      const reasoned = [
+        "### Structure signals: files",
+        "",
+        "`node tools/structure-report.mjs`",
+        "",
+        "```text",
+        "structure report could not run: structure-report: --summary needs --diff",
+        "```",
+        "",
+      ].join("\n");
+      assert.equal(readFileSync(alone, "utf8"), reasoned);
+      assert.equal(undiffed.stdout, `\n${reasoned}`);
+    } finally {
+      for (const { root } of [signalled, quiet, refused])
+        rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "--moved suppresses a file over 1,000 lines whose added lines are all a move's admitted forms",
+  { timeout: 60_000 },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "structure-report-admitted-"));
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const report = (...args) =>
+      execFileSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+    try {
+      git("init", "-q");
+      git("config", "user.email", "t@t");
+      git("config", "user.name", "t");
+      const importer = (from, extra = "") =>
+        `import { f } from "${from}";\n${lines(1001)}\n${extra}`;
+      write(root, { "src/big.ts": importer("./a.js"), "src/a.ts": "export const f = 1;\n" });
+      git("add", "-A");
+      git("commit", "-q", "-m", "base");
+      const base = git("rev-parse", "HEAD");
+      // the module moves; the importer's only edit is its import line
+      rmSync(join(root, "src/a.ts"));
+      write(root, { "src/big.ts": importer("./b.js"), "src/b.ts": "export const f = 1;\n" });
+      git("add", "-A");
+      git("commit", "-q", "-m", "move");
+      const moved = report("--diff", base, "--moved");
+      assert.match(
+        moved,
+        /suppressed \(moved\): file over 1000 lines that the change adds to: src\/big\.ts \(1002, was 1002\), 1 admitted lines/u,
+      );
+      assert.doesNotMatch(
+        moved,
+        /^ {2}file over 1000 lines that the change adds to: src\/big\.ts/mu,
+      );
+      // one added statement beside the import edit keeps the signal
+      write(root, { "src/big.ts": importer("./b.js", "export const added = 2;\n") });
+      git("add", "-A");
+      git("commit", "-q", "-m", "and a statement");
+      const added = report("--diff", base, "--moved");
+      assert.match(
+        added,
+        /^ {2}file over 1000 lines that the change adds to: src\/big\.ts \(1003, was 1002\)$/mu,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

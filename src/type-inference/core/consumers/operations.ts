@@ -26,13 +26,13 @@ import { methodReceiver } from "./receivers.js";
 import { leftOutBy, obligation, shownProperty, warning, type Owner } from "./warnings.js";
 
 /**
- * C1 with C9 r4.29 and r4.43: where external data a store brings enters, for its warning and check: the external
+ * C1 with C9: where external data a store brings enters, for its warning and check: the external
  * value's own expression, found by applying to the stored value, step by step, what the store reads of it, the way the
  * value transfer composes it: a literal's child for a path step, a projection's owner with the projection's step
  * before the rest, a choice's options (a list's or a set's elements, else the argument itself; a labelled option gives
  * its label) each selected (V30 §19: a choice object's `value`, or its `text` without one, else the option itself)
  * before the rest, also where a choice is another choice's option or projected, and an external value's own site
- * whatever remains. A variable read stops it: the store, as for a copy of a variable (r4.43's bound options). The first
+ * whatever remains. A variable read stops it: the store, as for a copy of a variable holding choice options. The first
  * in source order.
  */
 /** The consumers that operations and projections are: C2–C6, C11, C12, C13's iterable, ADR 1.5. */
@@ -315,7 +315,7 @@ function operatorUse(
     row.operands[index] === tag;
   const domain = (index: number): RequiredKind[] => operandDomain(rows, operands, index);
   // D1: an operand's rule names the kinds its place takes; the operation's, none
-  // r4.10: an operand's diagnostic sits on its own span, its `operand` obligation names its text
+  // an operand's diagnostic sits on its own span, its `operand` obligation names its text
   const operandSite = (index: number): SourceSite => ownSpan(walk, c.arguments[index]!, c.site);
   const rule = (
     index: number | null,
@@ -366,7 +366,7 @@ function operatorUse(
     const offending = operands.flatMap((items, index) =>
       items.every((item) => !rows.some((row) => matches(row, index, item.tag))) ? [index] : [],
     );
-    // (`+` beside a list: the list's elements' type, which a fix's list must hold, TABLE r4.151)
+    // (`+` beside a list: the list's elements' type, which a fix's list must hold)
     const list =
       operator === "+"
         ? operands.findIndex((items) => items.every((item) => item.tag === "list"))
@@ -425,7 +425,7 @@ function operatorUse(
       taken(index),
     );
   // the kind obligations (§4: one per offending kind of an operand; every operand that may be null owes its own
-  // null-check below, S4). §3.4, §10.5 (r4.10): in each failing combination without a null, an operand whose kind no
+  // null-check below, S4). §3.4, §10.5: in each failing combination without a null, an operand whose kind no
   // row takes at its place, or else the one operand whose kind no row takes beside the other operands' kinds, owes
   // the obligation at its span; where no single operand offends (the pair has no row; a value predicate of the row
   // decides) the operation owes it once, at its span, its text the target. An unknown operand owes its own

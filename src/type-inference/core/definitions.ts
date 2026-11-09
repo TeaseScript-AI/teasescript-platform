@@ -16,7 +16,7 @@ import { conversionCategory, methodCategory } from "./method-categories.js";
 import { siteKey, type CoreProgram } from "./program.js";
 
 /*
- * The definitions of the coarse core (checkpoint 9, TABLE §2, §3.1 X2–X6, §6 O, §8): every store, add, clear,
+ * The definitions of the coarse core (checkpoint 9, §3.1 X2–X6, §6 O, §8): every store, add, clear,
  * removal, binding and return as a definition of a key at its node, and the indexes the exact path asks of them: per
  * key the definitions in dominator order with a lifting table (X2's nearest dominating definition), per key the own
  * events of the key and the keys below it (X6), the owner sets and the one global list of call sites (X6), and the
@@ -26,7 +26,7 @@ import { siteKey, type CoreProgram } from "./program.js";
 /**
  * A key: a place and a path of steps below it (`state.party.element.hp`), written `place|steps`. The collector's place
  * and the path are its identity; the place's label only shows it. A key, its path or its prefixes that a structure
- * keeps are made through the kept helpers below (`keptKey`, `keptPath`, …), which charge their text first (TABLE r4.58);
+ * keeps are made through the kept helpers below (`keptKey`, `keptPath`, …), which charge their text first;
  * `keyOf` and its kin make the ones a step only looks up or passes on. G3 stage 1: a key of a wrapper's family is its
  * cursor instead (`place#id`, `contract/key-ids.ts`), never its text; the helpers here read a key's text alone and
  * refuse a cursor (`barOf`), except `keyPlace`, which reads both.
@@ -72,7 +72,7 @@ export function keyPath<K extends Key>(key: TextKey<K>): string[] {
 }
 
 /**
- * The path steps of a choice object's button value (V30 §19, TABLE r4.46 (1)), per record alternative: a record's
+ * The path steps of a choice object's button value (V30 §19), per record alternative: a record's
  * `value` where it has the key (`SELECTED_VALUE`), its `text` where it has none (`SELECTED_TEXT`), answered where the
  * path meets the records (a literal's objects). No property's step has a `#`.
  */
@@ -198,7 +198,7 @@ export class KeyTrie {
   }
 }
 
-/** `keyOf`, its text charged before it is made (`keepText`, TABLE r4.58). */
+/** `keyOf`, its text charged before it is made (`keepText`). */
 export function keptKey(work: WorkLedger, place: PlaceId, path: readonly string[]): Key {
   keepText(work, String(place).length + 1 + pathTextLength(path));
   return keyOf(place, path);
@@ -296,7 +296,7 @@ export function keptPrefixes(work: WorkLedger, key: Key): Key[] {
 }
 
 /**
- * What a definition does to its key (TABLE §2): a whole store (a declaration, an assignment, a loop variable's
+ * What a definition does to its key: a whole store (a declaration, an assignment, a loop variable's
  * binding, a parameter's argument or default, a return: F1–F4, F9, F21–F23, F27); an `add` or `addAll` of its
  * collection (F5); a `clear` (F6); a removal, which leaves every element possible (`weaken`, F7a–c); or a fixed value
  * (`const`: a function's result `null` where its body ends without one, a dict loop's text key, F20, F27b).
@@ -368,7 +368,7 @@ export type PositionRange = readonly [number, number];
 
 /**
  * The definitions of a program, made once: per key the definitions, the stores and transfers C9 and admission index,
- * the literal cells' stores, the owner sets and the global site list (TABLE §8: definitions + sites).
+ * the literal cells' stores, the owner sets and the global site list (definitions + sites).
  */
 export class DefinitionIndex {
   readonly byKey = new Map<Key, Definition[]>();
@@ -471,7 +471,7 @@ export class DefinitionIndex {
           append(this.byValue, d.value, d);
         }
     // the owner sets (X6): a live store by a callable other than its key's declaring activation that ordinary code may
-    // run; a helper only blocks run stores as their code does (X7, r4.10)
+    // run; a helper only blocks run stores as their code does (X7)
     const ordinary = this.#ordinaryCallables();
     this.ordinary = ordinary;
     for (const d of this.storeDefs) {
@@ -629,7 +629,7 @@ export class DefinitionIndex {
       value: constraint.value,
       node,
       how: "return",
-      // r4.10: its diagnostics sit on the returned value
+      // its diagnostics sit on the returned value
       site: program.places[constraint.value]?.site ?? constraint.site,
       fn: constraint.fn,
       recv: null,
@@ -664,7 +664,7 @@ export class DefinitionIndex {
         value: argument,
         node: dead ?? region.parameters.get(place.kind.name) ?? region.entry,
         how: "argument",
-        // r4.10: its diagnostics sit on the argument
+        // its diagnostics sit on the argument
         site: program.places[argument]?.site ?? constraint.site,
         fn: constraint.fn,
         recv: null,
@@ -707,7 +707,7 @@ export class DefinitionIndex {
 
   /**
    * A parameter's default is a whole store into the parameter where the default runs, a transfer C9 indexes like an
-   * argument (r4.28): one ingress, one boundary.
+   * argument: one ingress, one boundary.
    */
   #parameterDefaults(
     defaults: ReadonlyMap<PlaceId, { readonly value: PlaceId; readonly site: SourceSite }>,
@@ -762,7 +762,7 @@ export class DefinitionIndex {
   }
 
   /**
-   * F5a (r4.5): a `for` loop whose body holds no `break` and no `goto` runs its body to the end at least once on every
+   * F5a: a `for` loop whose body holds no `break` and no `goto` runs its body to the end at least once on every
    * run that reaches its exit when its iterable is held. An add of the loop's own body (not of an inner loop) that
    * lies on every way back to the head, with no clear, removal or whole store of its key or a prefix after it in the
    * body, is also a definition at the loop's exit; the read asks whether the iterable is held and whether an own event
@@ -1161,7 +1161,7 @@ export class DefinitionLists {
   }
 
   /**
-   * A read's snapshot signature (TABLE r4.68 (1)): `aliasSignature`, the call sites in it only where another callable
+   * A read's snapshot signature: `aliasSignature`, the call sites in it only where another callable
    * stores the source, a key below it or a prefix (`ownedAway`, X6's owner rule): elsewhere no call is an event of any
    * key at or below the source, so reads a call separates read the same (Codex r24 F2).
    */
@@ -1275,7 +1275,7 @@ export class DefinitionLists {
   }
 
   /**
-   * X6: the first own event of a key in a span, by position (§3.4 r4.30: the first in evaluation order names the
+   * X6: the first own event of a key in a span, by position (§3.4: the first in evaluation order names the
    * word): a call site under the owner rule, `call`; a store of the key, a descendant or a prefix, `branch`.
    */
   public eventIn(key: Key, span: readonly PositionRange[]): ContextWord | null {

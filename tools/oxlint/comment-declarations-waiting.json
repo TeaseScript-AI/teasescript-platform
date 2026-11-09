@@ -168,13 +168,13 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/admission/landings.ts",
+    "file": "src/type-inference/core/admission/landings/landed.ts",
     "kind": "docblock",
-    "text": "The place whose inherited type a place's is at a path (`inheritedAt`, r4.75 (1)): a place whose only store on the",
+    "text": "The place whose inherited type a place's is at a path (`inheritedAt`): a place whose only store on the",
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/admission/landings.ts",
+    "file": "src/type-inference/core/admission/landings/landed.ts",
     "kind": "docblock",
     "text": "Whether copies land a path in a place (`Inheritance`): its own landings, else its copies' sources' landings below",
     "waits": "the O4 lead's cleanup"
@@ -200,7 +200,7 @@
   {
     "file": "src/type-inference/core/consumers/operations.ts",
     "kind": "docblock",
-    "text": "C1 with C9 r4.29 and r4.43: where external data a store brings enters, for its warning and check: the external",
+    "text": "C1 with C9: where external data a store brings enters, for its warning and check: the external",
     "waits": "the O4 lead's cleanup"
   },
   {
@@ -218,7 +218,7 @@
   {
     "file": "src/type-inference/core/contract/gather.ts",
     "kind": "docblock",
-    "text": "V30 §19, TABLE r4.46 (1): the button values of the options a literal holds at `path`, read at `after` below them,",
+    "text": "V30 §19: the button values of the options a literal holds at `path`, read at `after` below them,",
     "waits": "the O4 lead's cleanup"
   },
   {
@@ -248,7 +248,7 @@
   {
     "file": "src/type-inference/core/contract/value-kinds.ts",
     "kind": "docblock",
-    "text": "F19 (r4.1): whether a default holds only `null` (or nothing), by its contract (`ONLY_NULL`).",
+    "text": "F19: whether a default holds only `null` (or nothing), by its contract (`ONLY_NULL`).",
     "waits": "the O4 lead's cleanup"
   },
   {
@@ -266,7 +266,7 @@
   {
     "file": "src/type-inference/core/items.ts",
     "kind": "docblock",
-    "text": "The items of the coarse core (checkpoint 9, TABLE §1): what the analysis knows of a value at a read. A value is a",
+    "text": "The items of the coarse core (checkpoint 9): what the analysis knows of a value at a read. A value is a",
     "waits": "the O4 lead's cleanup"
   },
   {
@@ -314,7 +314,7 @@
   {
     "file": "src/type-inference/core/result.ts",
     "kind": "docblock",
-    "text": "The structured result of the coarse core (checkpoint 9, TABLE §3.4, §4, §10.5): the outcome, the diagnostics with",
+    "text": "The structured result of the coarse core (checkpoint 9, §4, §10.5): the outcome, the diagnostics with",
     "waits": "the O4 lead's cleanup"
   },
   {
@@ -326,7 +326,7 @@
   {
     "file": "src/type-inference/core/values.ts",
     "kind": "docblock",
-    "text": "F18 (r4.5): the kinds a `load` or `fromJson` takes from its default's value at `at` (`typedDefault`): definite,",
+    "text": "F18: the kinds a `load` or `fromJson` takes from its default's value at `at` (`typedDefault`): definite,",
     "waits": "the O4 lead's cleanup"
   },
   {
@@ -342,49 +342,49 @@
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core-candidate.test.ts",
+    "file": "tests/type-core/type-core-candidate.test.ts",
     "kind": "docblock",
-    "text": "The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; TABLE r4.59; the lead's answer 3). Every",
+    "text": "The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; the lead's answer 3). Every",
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core-cells.test.ts",
+    "file": "tests/type-core/type-core-cells.test.ts",
     "kind": "docblock",
-    "text": "A choice reads a written list's element as its literal analogue does (TABLE r4.42–r4.43, the lead's ruling on #1027):",
+    "text": "A choice reads a written list's element as its literal analogue does (the lead's ruling on #1027):",
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core-cells.test.ts",
+    "file": "tests/type-core/type-core-cells.test.ts",
     "kind": "docblock",
     "text": "The value carriers (round 11; the walk of `answers.ts` `#propertyNames`): each carrier over a direct, a named, a",
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core-messages.test.ts",
+    "file": "tests/type-core/type-core-messages.test.ts",
     "kind": "docblock",
     "text": "#1272 (Astra's B1, Codex r7's B1 on #1310, ADR 0021 1.3, 1.10): a join answers the same written inline as kept in a",
     "waits": "#1937, #1899"
   },
   {
-    "file": "tests/type-core-mixed-family.test.ts",
+    "file": "tests/type-core/type-core-mixed-family.test.ts",
     "kind": "docblock",
     "text": "#1765's invariant (the lead's family rule on #1789, after Codex r9–r11 and Astra r2), sampled as the owner's",
     "waits": "#1899"
   },
   {
-    "file": "tests/type-core-sharing.test.ts",
+    "file": "tests/type-core/type-core-sharing.test.ts",
     "kind": "reference",
     "text": "x.p.f_i",
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core-sharing.test.ts",
+    "file": "tests/type-core/type-core-sharing.test.ts",
     "kind": "reference",
     "text": "membersMissing",
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core-stop.test.ts",
+    "file": "tests/type-core/type-core-stop.test.ts",
     "kind": "docblock",
     "text": "A source's typed loads and parses as its plan reads them (`load` and `expected` lines, `plannedContent`), or how the",
     "waits": "#1937"

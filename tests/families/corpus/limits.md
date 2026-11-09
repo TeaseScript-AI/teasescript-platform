@@ -25,13 +25,13 @@ those as their READMEs say.
   `probe/famsum.mjs` (`astra-m4-i1249-review-evidence/design-r5.md:797`).
 - #1310's first paste family run on `c1` (`1310/4a11b0553…/run/outc1/paste-*`, `tools/c1-check.sh:13`: 6,507 cases,
   495 forms) ran on an uncommitted state of the paste helper, which no archive keeps, so its forms cannot be pasted
-  again: `messages/1310-paste-family.mjs` holds the PR's thirteen other runs.
+  again: `messages/member-and-conversion-forms/join-aware-conversion-and-null-fixes-applied.mjs` holds the PR's thirteen other runs.
 - #1188's case sets `rel-cases` (450 programs), `contain-cases` (36), `dead-cell-cases` (4) and `dead-reach-cases` (80),
   and the standalone witnesses of #1261's Sol reviews r1 to r5 (308, `sol-m4-i1188-held-nodes-r1-evidence`), reach the
   corpus only through later runs that read them. Their texts survive (the #1188 sets' copies under `1463/retained/`),
   but no record names the run that wrote them or the globals it passed, so no module stands for them.
 - #1272's review r2 also ran `pair.mjs` over 155 of its builder's probe files (`1310/98dcbbae9…/tools/probe-paths.txt`);
   135 of them are in no archive, so no module stands for those runs (its focused pairs are
-  `joins/1272-astra-r2-pair-focused`).
+  `joins/join-operands-and-landings/returned-union-inline-versus-kept-joins`).
 - Three of #1210's review `work.mjs` commands (`astra-m4-i1210-review-evidence/comment-0.md:87`–`88`, `comment-1.md:82`)
-  ran an earlier `work.mjs` no archive keeps; `copies/1210-astra-work.mjs` holds the runs of the kept one.
+  ran an earlier `work.mjs` no archive keeps; `copies/host-ingress/host-list-wrapper-read-work.mjs` holds the runs of the kept one.

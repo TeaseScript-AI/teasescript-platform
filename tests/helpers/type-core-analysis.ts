@@ -3,7 +3,7 @@ import { parse } from "../../src/parser.js";
 import { compareProjectPaths } from "../../src/project-paths.js";
 import { validateProjectSemantics } from "../../src/semantic.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { checkedResult } from "../../src/type-inference/core/consumer.js";
+import { checkedResult } from "../../src/type-inference/core/check-result/check-result.js";
 import type { CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
 import { coreRecord } from "../../src/type-inference/core/result.js";
 import { compactRecord, type CompactRecord } from "./type-core-records.js";

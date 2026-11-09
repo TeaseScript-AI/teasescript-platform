@@ -8,7 +8,7 @@ import { ts } from "ts-morph";
  * family growth bar, the areas with work compared) is what proves the charging.
  */
 
-/** The helpers of `narrowing-iteration.ts` the file uses; the others are not admitted. */
+/** The helpers of `charged-iteration.ts` the file uses; the others are not admitted. */
 const HELPERS = new Set([
   "each",
   "steps",

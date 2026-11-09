@@ -25,8 +25,9 @@ import { selectionOf, selectionPieces } from "./selections.js";
 // A literal's items at a path from its index, and its type or its cell's stores at a path.
 
 /**
- * A literal's items at a path from its index: the value side (`exact`: F12 r4.7, a read below an element step is not
- * followed below its own kinds but takes its contract), else the contract.
+ * A literal's items at a path from its index: the value side (`exact`: F12,
+ * docs/specifications/type-inference-accepted-record.md#section-2-f12, a read below an element step is not followed
+ * below its own kinds but takes its contract), else the contract.
  */
 export function* indexItems(
   contract: Contract,
@@ -113,7 +114,7 @@ export function* indexItems(
       }
       sources += (copies ?? prefix.at.exact).length + prefix.at.others.length;
     }
-    // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
+    // V30 §19: a choice object's button value, per record alternative here
     const step = length < rest.length ? rest.at(length) : undefined;
     if (step === SELECTED_VALUE || step === SELECTED_TEXT) {
       flow?.opaque("selection");
@@ -158,7 +159,7 @@ export function* indexItems(
   // S3 §1's route: past an element step over a copy the contract answered (F12)
   if (exact && overCopy)
     contract.overCopy.add(contract.kept(joinParts(literal, restPart(asked), node?.id ?? "-")));
-  // §3.4 r4.11: the X word is the read's (`member` past an element step over a copy), shared by every known-kind
+  // §3.4: the X word is the read's (`member` past an element step over a copy), shared by every known-kind
   // item, definite ones included, whatever its writer; an unknown keeps its reason's word. Past an element step that
   // gathers several elements the element read makes each kind only possible: its word too, by the precedence
   if (overCopy)

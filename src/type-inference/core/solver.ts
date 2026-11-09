@@ -18,7 +18,7 @@ import {
 import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } from "./items.js";
 
 /*
- * The demand solver of the coarse core (checkpoint 9, TABLE §8; the port plan's S3 note §1). A demand is one answer the
+ * The demand solver of the coarse core (checkpoint 9; the port plan's S3 note §1). A demand is one answer the
  * analysis needs (a key's contract, the value at a definition, a value at a node); what it reads is discovered while
  * it runs, as other demands it yields. Demands run on an explicit frame stack, never the native one, and Tarjan's
  * algorithm finds the strongly connected components among them as they run: a demand that reads an unfinished one
@@ -37,9 +37,9 @@ import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } 
  * That needs answers monotone in what they read. A choice that is not (a `Decision`: F18/F19's default without kinds
  * gives `unknown`; F19a's receiver that holds a reference kind has opaque members) is made on a completed input: at
  * once outside every component; inside one, the component is solved first with every choice open and, where a choice
- * then changes an answer, again from bottom with the choices held (r4.40, r4.44).
+ * then changes an answer, again from bottom with the choices held.
  *
- * A demand may prove more than its items (a `ProofDemand`, TABLE r4.164's proof payload): what a fold selected, where a
+ * A demand may prove more than its items (a `ProofDemand`): what a fold selected, where a
  * prefix's walk stands. Its proof is the solver's as its items are: provisional while its run or component is
  * unfinished, reset with them to none (`null`) at each start from bottom, compared by its semantic signature where its
  * items are (a changed proof under unchanged items reruns its readers; a new object or run with the same signature does
@@ -81,7 +81,7 @@ export interface Demand {
   readonly proves?: undefined;
 }
 
-/** What a proof demand proves beside its items (TABLE r4.164's proof payload). */
+/** What a proof demand proves beside its items. */
 export interface Proof {
   /**
    * Its semantic signature: equal for two proofs no reader can tell apart (the same chosen sources, roles, absences and
@@ -116,8 +116,9 @@ export interface ProofDecision<P extends Proof> {
 }
 
 /**
- * A demand that proves a proof beside its items: one demand, one lifecycle (TABLE r4.164's ruling (1)). Its proof holds
- * no ingress of its own: external data it carries is in its items, which a component's cells anchor (C9).
+ * A demand that proves a proof beside its items: one demand, one lifecycle
+ * (docs/specifications/type-inference-accepted-record.md#r4-164). Its proof holds no ingress of its own: external data
+ * it carries is in its items, which a component's cells anchor (C9).
  */
 export interface ProofDemand<P extends Proof> {
   readonly key: string;
@@ -709,17 +710,24 @@ export class Solver {
   /**
    * A proof demand's items and proof: the demand yielded, so its reader depends on it (and reruns on a changed proof)
    * as on any demand, and its proof as the solver holds it once the items are in: finished, a member's provisional one,
-   * or `null`, none (no run of it returned yet; after a stop, any unfinished one: only looked up, nothing run).
+   * or `null`, none (no run of it returned yet; after a stop, any unfinished one: only looked up, nothing run); and
+   * whether it is a member of a component still being solved (`open`: its proof, if any, is provisional, #1072 A2).
    */
   public *proven<P extends Proof>(
     demand: ProofDemand<P>,
-  ): Work<{ readonly items: readonly Item[]; readonly proof: P | null }> {
+  ): Work<{ readonly items: readonly Item[]; readonly proof: P | null; readonly open: boolean }> {
     const items = yield demand;
     const finished = this.#proofs.get(demand.key);
-    const held = finished ?? (this.#running ? (this.#active.get(demand.key)?.proof ?? null) : null);
+    const active =
+      finished === undefined && this.#running ? this.#active.get(demand.key) : undefined;
     // EVIDENCE: invariant: a key is one demand's identity, so the proof held under it is what its demand's runs return.
-    const proof = held as P | null;
-    return { items, proof };
+    const proof = (finished ?? active?.proof ?? null) as P | null;
+    return { items, proof, open: active !== undefined };
+  }
+
+  /** Whether a top-level demand is running (a computation inside it may yield, never run another: `run`). */
+  public get running(): boolean {
+    return this.#running;
   }
 
   /** The finished demands with the work each cost, in the order they finished. */
@@ -840,7 +848,7 @@ export class Solver {
     }
     const node = this.#active.get(demand.key);
     if (node === undefined) {
-      // (a new demand keeps its key: its text charged first, TABLE r4.58)
+      // (a new demand keeps its key: its text charged first)
       keepText(this.#work, demand.key.length);
       const created: DemandNode = {
         demand,

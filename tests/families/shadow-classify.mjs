@@ -131,8 +131,8 @@ const EXCLUSIONS = [
     S9B,
     "af90ea51aed2 1744-sol-v30-call-holes.mjs/plain-tag-predicate",
   ],
-  // (v4, #1775's decline, `consumer.ts`'s `OPEN_BY_STOP`: a typed parse's or load's reader type a stop left open; no
-  // gate source has reached it yet, so its witness is #1767's own case in `type-core-stop.test.ts`)
+  // (v4, #1775's decline, `store-contracts.ts`'s `OPEN_BY_STOP`: a typed parse's or load's reader type a stop left
+  // open; no gate source has reached it yet, so its witness is #1767's own case in `type-core-stop.test.ts`)
   [
     "a typed parse's or load's default that a stop left open",
     S9B,
@@ -164,7 +164,7 @@ const COMPLETED = new Set(["plan", "rejected"]);
 const CONTROL = 16;
 /**
  * The texts the core declines a program with where a stop lost a check it requires (#1781, #1526 decision 2,
- * condition 1, `core/consumer.ts`): the class declined/lost check's. Any other decline text stays a problem.
+ * condition 1, `runtime-plan.ts`): the class declined/lost check's. Any other decline text stays a problem.
  */
 const LOST_CHECK = new Set([
   "a store whose check was lost at the budget",
@@ -735,7 +735,7 @@ export function classifier(groups = null) {
     r.witnesses.length = Math.min(r.witnesses.length, 3);
   };
   // (the control's runs that left the slice, one row a class that names a text, declined/lost check and each rule of
-  // `EXCLUSIONS`, as the pair classes match it, and one a text no rule matches; information only, r4.382)
+  // `EXCLUSIONS`, as the pair classes match it, and one a text no rule matches; information only)
   const excluded = PAIR_CLASSES.filter(
     (c) => c.id.startsWith("excluded/") || c.id === "declined/lost check",
   );

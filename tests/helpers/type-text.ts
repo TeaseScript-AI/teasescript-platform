@@ -9,7 +9,7 @@ import {
 import { PropertyTable } from "../../src/static-types/property-tables.js";
 import { typeKey } from "../../src/storage-types.js";
 import { VALUE_KIND_NAMES, type ValueKind } from "../../src/value-kinds.js";
-import { structureOf } from "./adapter-parity.js";
+import { structureOf } from "./type-core/adapter-parity.js";
 
 /**
  * The type a fact's text stands for (`typeKey(type, true, true)`), for building a closed operand view from the legacy

@@ -7,16 +7,16 @@ import { propertyName, propertyStep, type CoreProgram } from "../program.js";
 import { copiedAt } from "./decision.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
 
-// The complete type a store owes after a stop (S3 §5, TABLE r4.199, r4.200): known without the stopped decision.
+// The complete type a store owes after a stop (S3 §5): known without the stopped decision.
 
 /**
  * The complete type a store into `place` at `path` is checked against where a decision at, below or above the path
  * stopped (S3 §5, #1416, #1440), from a proof the stopped decision is no part of, without new solving: the place's
  * written type there (A1); else, at a path no stop lies at or above (`stopped` false), the type a copy decides the path
  * by in this pass's own decision of it, whole below it (A4, `Decided.copied`: a pass in which a decision stops is
- * restarted with it stopped, TABLE r4.180, so that decision never read what the stop took back); else, in a pass whose
+ * restarted with it stopped, so that decision never read what the stop took back); else, in a pass whose
  * results may stand (`standing`: not the fresh pass after a stop before admission settled, whose stores into inferred
- * places keep their marks, TABLE r4.135, r4.183), the type the declaration's start value copies there (`initialCopy`).
+ * places keep their marks), the type the declaration's start value copies there (`initialCopy`).
  * `null` where none proves it: its stores keep their marks, their type undecided. A copy a path above retains proves
  * nothing below it: a store there before that copy decides the path by its own value (`let t = hostValue`,
  * `t[0] = [1.5]`, `t = original`: `t.element` holds numbers).
@@ -52,7 +52,7 @@ interface Spine {
 const SPINES = new WeakMap<CoreProgram, Map<PlaceId, Spine | null>>();
 
 /**
- * The initializer-copy certificate (TABLE r4.200): the written type a store into an unwritten `place` at `path` owes
+ * The initializer-copy certificate: the written type a store into an unwritten `place` at `path` owes
  * where the place's declaration's start value, through one object literal's property at each step, holds a direct read
  * of a place with its own written type at the path or above it (the landing; the start value itself for no step): the
  * start value comes before every other store into the place (ADR 0021 1.6), each step's one property selects the

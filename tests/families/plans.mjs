@@ -3,7 +3,7 @@
 // node tests/families/plans.mjs summary <records>... [--list 40]
 // The plans comparison (#1526 phase A's kit, landed from #1678's copy): the plan each source compiles to through the core
 // backend, in the four modes (`HELD_MODES`), on two built trees in one worker, compared as the exact serialized JSON
-// (sha256 of `JSON.stringify(plan)` and of the diagnostics) together with the trace of every work unit the compile
+// (sha256 of `JSON.stringify(plan)`, none where the compile has no plan, and of the diagnostics) together with the trace of every work unit the compile
 // charges (each `WorkLedger.charge` call's counter and units folded into a 64-bit hash, with their count and sum) and the
 // sequence of questions the compile asks its answers (each call of an `Answers` method, with its place, path or node, in
 // order, folded likewise), so a lowering that asks the analysis anything more, less or in another order shows.
@@ -33,6 +33,7 @@ import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs"
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
+import { unitsOf } from "./units.mjs";
 
 /** The exit of a worker whose run passed the unit limit, after it posted the run (`over`). */
 const OVER_EXIT = 86;
@@ -44,55 +45,6 @@ const setOf = (set, headRoot) => {
   if (["corpus", "fixture", "held"].includes(set) || set.includes("/")) return set;
   return path.join(headRoot, "tests", "families", set);
 };
-
-/** The set's sources, each `{ name, files, globals, single, held? }`, the same list in every worker. */
-async function unitsOf(set, baseRoot, headRoot) {
-  if (set === "corpus")
-    return JSON.parse(readFileSync(process.env.CASES_JSON, "utf8")).map(({ name, files }) => ({
-      name,
-      files,
-      globals: ["hostValue", "hostOther", "hostInit"],
-      single: false,
-    }));
-  if (set === "fixture") {
-    const fixture = await import(
-      pathToFileURL(path.join(baseRoot, "tools", "corpus", "fixture", "fixture.mjs")).href
-    );
-    return fixture.cases.map(([name, files]) => ({
-      name,
-      files,
-      globals: fixture.globals,
-      single: false,
-    }));
-  }
-  if (set === "held") {
-    const held = await import(
-      pathToFileURL(path.join(distOf(baseRoot), "tests", "helpers", "type-core-held-host.js")).href
-    );
-    return held
-      .heldFamily()
-      .map((c) => ({
-        name: c.name,
-        files: [{ path: "main.tease", source: c.source }],
-        globals: ["hostValue", "hostOther"],
-        single: true,
-        held: true,
-      }));
-  }
-  const { generatorsOf } = await import(
-    pathToFileURL(path.join(headRoot, "tests", "families", "sources.mjs")).href
-  );
-  const units = [];
-  for (const generator of await generatorsOf(set))
-    for (const source of generator.sources)
-      units.push({
-        name: `${generator.name}/${source.name}`,
-        files: source.files,
-        globals: source.globals,
-        single: false,
-      });
-  return units;
-}
 
 /** The records' classification (`summary`): one line per set, then each difference, stall and safety net reached. */
 function summarize(files, limit) {
@@ -513,7 +465,8 @@ if (isMainThread && process.argv[2] === "summary") {
     tree.trace = null;
     tree.questions = null;
     return {
-      plan: result === null ? null : sha(JSON.stringify(result.plan)),
+      // (a compile with no plan, an error or a decline, records none: never a digest of `null`, #2080)
+      plan: result?.plan == null ? null : sha(JSON.stringify(result.plan)),
       diagnostics: result === null ? null : sha(JSON.stringify(result.diagnostics)),
       checks: result?.plan
         ? result.plan.instructions.filter((i) => i.typeCheck !== undefined).length

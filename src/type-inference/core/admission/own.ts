@@ -4,7 +4,7 @@ import { keptArray, keptParts, keptSteps } from "../budget.js";
 import { keptKeyBelowIn } from "../contract/key-ids.js";
 import { keyOf, type Definition, type Key } from "../definitions.js";
 import { SCALAR } from "./kinds.js";
-import { inheritance } from "./landings.js";
+import { inheritance } from "./landings/inheritance.js";
 import type { HeldExtra, HeldOwn, OwnStructure } from "./model.js";
 import { fieldsOf, sourceOf } from "./structure.js";
 import { stopsOf } from "./walk.js";

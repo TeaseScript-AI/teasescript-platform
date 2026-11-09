@@ -72,10 +72,11 @@
         "src/type-inference/core/contract/levels.ts",
         "src/validation-testing.ts",
         "src/xmp-keywords.ts",
-        "tests/families-runner.test.ts",
-        "tests/type-core-closure.test.ts",
-        "tests/type-core-mixed-family.test.ts",
-        "tests/type-core-stop.test.ts"
+        "tests/families-runner/families-baseline-store.test.ts",
+        "tests/families-runner/families-runner-compare.test.ts",
+        "tests/type-core/type-core-closure.test.ts",
+        "tests/type-core/type-core-mixed-family.test.ts",
+        "tests/type-core/type-core-stop.test.ts"
       ],
       "rules": {
         "no-control-regex": "off",
@@ -137,7 +138,7 @@
       "rules": { "typescript/no-base-to-string": "off" }
     },
     {
-      "files": ["tests/player-session-rewind.test.ts"],
+      "files": ["tests/player/player-session-rewind.test.ts"],
       "rules": { "typescript/no-floating-promises": "off" }
     },
     {

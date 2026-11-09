@@ -21,10 +21,10 @@ const INTEGER: ReadonlySet<ItemTag> = new Set(["integer"]);
 
 /**
  * C2, C3, C11, C12, C13: an operand's items against the kinds that fit: all definite and none fits is an error; an
- * item that does not fit, or an unmodelled unknown, a warning with its obligation; the quiet path first. §4 (r4.6):
+ * item that does not fit, or an unmodelled unknown, a warning with its obligation; the quiet path first. §4:
  * one obligation per offending kind: a possible null owes its null-check, any other offending item the operand's own
  * obligation. `soft`: never an error (true), or the possible receiver's item whose key obligation is owed whether or
- * not the key fits (C2 r4.33).
+ * not the key fits (C2).
  */
 export function consume(
   walk: Consumers,
@@ -190,7 +190,7 @@ export function integerOnly(
     item.tag === "unknown" ? isOpaque(item) || isExternal(item) : item.tag !== "integer",
   );
   if (offending.length === 0 && owedBy === null) return;
-  // the count or index expression's node, inside its parentheses (§3.4 r4.10)
+  // the count or index expression's node, inside its parentheses (§3.4)
   const at = ownSpan(walk, value, site);
   const target = shownLabel(walk, keyLabel(walk, value));
   if (
@@ -250,7 +250,7 @@ export function integerOnly(
 /**
  * C2 and C12 by the receiver's kind: a list's index is a whole number, a dict's key text, and a receiver of any other
  * kind owes neither, its own check reporting it (C5b: an object is not indexed, V30 §15); a receiver whose kinds hold
- * `unknown`, or a dict beside another kind, dispatches to neither as an error (C2 r4.33): a `get`'s key owes each
+ * `unknown`, or a dict beside another kind, dispatches to neither as an error (C2): a `get`'s key owes each
  * possible receiver's obligation as a warning whether or not the key fits it; an index expression keeps the
  * receiver's dispatch, its misfits warnings.
  */

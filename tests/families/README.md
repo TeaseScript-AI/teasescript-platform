@@ -67,10 +67,10 @@ What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise;
   complete only with its shards `0/N` to `N-1/N` of one plan, counts a repeated place once and refuses a shard given
   twice; a sum of the shards' own totals counts each repeat. Its growth lines are advisory.
 - **A stored baseline's identity:** its MANIFEST (the `src/` tree, the oracle library, the lockfile, Node) and each
-  area's PLAN (the limits above, the allowances, each generator's checks, each shard's places). The runner's own source,
-  `--work` records and `--out` files are no part of it, nor are peaks, `nearCap`, `heapLimit` or `capabilities`, which a
-  stored shard's total line leaves out. `baselines.mjs state` reports, for each stored area, its runs
-  left unanswered by reason and those within a question grant.
+  area's PLAN (the limits above, the allowances, each generator's checks, each shard's places, each by its generator's
+  id). The runner's own source, `--work` records and `--out` files are no part of it, nor are peaks, `nearCap`,
+  `heapLimit` or `capabilities`, which a stored shard's total line leaves out. `baselines.mjs state` reports, for each
+  stored area, its runs left unanswered by reason and those within a question grant.
 
 ## Running an area
 
@@ -111,7 +111,7 @@ its safety net has run out (#1498). After the kill the runner waits for the proc
 descendant holding its stderr delays the next source (no compiler or oracle code spawns one). A run that throws on
 either tree is an exception, never compared, because identical exceptions on both trees are not agreement (#1439): the
 runner prints it on stderr with its source, mode and check, writes it with each stack to `--out` and counts it apart
-from stalls, in a source that stalls later too (`tests/families-runner.test.ts`, in CI). A publication is had only up to
+from stalls, in a source that stalls later too (`tests/families-runner/families-runner-compare.test.ts`, in CI). A publication is had only up to
 the oracle's own stop. Its own questions (each binding's admitted types, then the occurrences) run apart from the
 analysis's allowance and stop after the one whose units pass the program's allowance plus 64 per cell returned (an
 occurrence's answer, its element's and each property's; two a binding), where 640 bytes per cell returned pass
@@ -334,6 +334,88 @@ sx-job submit --commit base=<base> --commit head=<head> --shards 16 --mem 3G --t
 
 For `corpus`, add `--data ~/work/o4-m4-g3/cases.json` and `CASES_JSON=$HOME/work/o4-m4-g3/cases.json` before `node`.
 
+## A pull request's replay
+
+`tools/compiler-replay.mjs` runs a compiler pull request's replay of its base against its head through the queue: the
+set and every area above, in 16 shards each. Each step's inputs, in order:
+
+- **`submit <base> <head> --owner <owner> [--campaign <prefix>] [--baseline] [--dry]`:** the two commits. It queues
+  `<prefix>-set` and `<prefix>-areas` and prints each job's id.
+  - The areas are those `baselines.mjs` takes: the folders here that hold a generator, and the fixture folder
+    `tools/corpus/fixture`, each passed by its folder. Copies runs at `--memory 6144`.
+  - `--baseline` compares the areas with the base's stored runs (`--needs-baseline`). The set always runs two trees.
+- **`collect <prefix> --owner <owner> [--results <folder>] [--json <file>] [--replace <job>=<job>]...`:** the
+  campaigns' results.
+  - It prints each area's shards, sources, runs, differences and stalls, and the set's.
+  - It prints each difference that stands: an area's by its first differing part, a set mode's by what differs. A
+    difference in the route alone (the last part, as many parts on both trees) stands until `aside`'s rows agree.
+  - It reads the stall verdicts from `stalls.mjs`, with `<prefix>-rerun`'s records.
+  - A shard is its job name, and one of its attempts is read: the one that left a summary line and whose queue record
+    (`meta.json`) shows the runner's own ending: exit 0 or 1, or 3 for an area job, with the queue's outcome for that
+    exit, an empty `oom`, no timeout and no lost test file. Every other attempt, one killed after its summary among
+    them, is listed with its host and outcome as replaced, and never read.
+  - A shard with no such attempt is "not run", never equal.
+  - Several such attempts are refused unless all but one are replaced, by a rerun's record (`rerun-shard`) or by
+    `--replace <failed>=<rerun>`. A replacement is refused across shards or campaigns, or by a rerun that cannot stand.
+- **`rerun-shard <prefix> <base> <head> <job> --owner <owner> [--baseline] [--host <host>] [--dry]`:** a failed or
+  killed job of `<prefix>-set` or `<prefix>-areas`. It submits that shard again into its campaign, `submit`'s own
+  submission with the shard written in. Its `bash -c` script opens with `: replaces <job>;`, so that the rerun's record
+  (`meta.json`'s `command`, kept verbatim) names the job it replaces; `collect` refuses a record naming a job outside
+  its shard. `<job>` may itself be a rerun. It is refused when `<job>` ran another script or trees. `<base>` and
+  `<head>` go to the queue as full SHAs: what this clone resolves each to, else the job's recorded commit it is a
+  hexadecimal prefix of. `--host` pins the worker.
+- **`rerun-stalls <prefix> <base> <head> --owner <owner> [--memory <MB>] [--host <host>]`:** the standing attempts'
+  work records. It reruns their stalled sources on both trees in one job (`<prefix>-rerun`), at 12,288 MB unless given.
+  A work record `stalls.mjs` refuses is exit 2, never "no stalled source".
+- **`aside <prefix> <base> <head> --owner <owner> --declare <file>`:** the route-only differences, the differing set
+  sources, and a declaration file.
+  - The file is a JSON list of `{ "pattern", "reason" }`, passed as an argument and never read from elsewhere.
+  - It compiles each row on both trees in one job (`<prefix>-aside`). A row agrees where the plans' JSON text is
+    byte-equal and the route text is equal once every declared pattern is removed.
+- **`plan-checks <plan.json>...`:** plan files, counted by `tests/helpers/plan-checks.ts`'s `planChecks` from a built
+  tree.
+
+Exit statuses:
+- 0: the step did what it says. For `collect`, every shard ran, and nothing differs, stalls or stays uncompared beyond
+  route text that `aside` set aside.
+- 1: something differs, stalls or did not compare; each is listed.
+- 2: a usage error, a refused replacement, or input it cannot read.
+- 3: for `collect`, a shard did not run.
+
+## Stop runs
+
+`stop-runs.mjs` (#2080) looks, on one built tree, for a stop that lets a value through that the natural plan rejects.
+For each item it compiles the unit unstopped and at the item's demand allowance, in its mode, and runs both plans over
+host data: `stopRuns` and `hostValues` in `tests/helpers/type-core-stop-oracle.ts`, which also feed that data to
+`stopProblems` as its violating runs. The host data holds scalars and collections, objects by the unit's own property
+names and paths, and values made from every type either plan checks.
+
+It claims only what it demonstrates (#2142, under docs/DEVELOPMENT-WORKFLOW.md#review-convergence). As #2080's design
+round put it: positive escapes are the blockers; an unwitnessed cell is unresolved evidence.
+- `open`: a run where the natural plan fails at runtime and the stopped plan runs to its end. With no natural plan (a
+  compile error the stop turned into runtime checks): a run in a single-file unit that executes the error's own store
+  instruction, the innermost one holding the error's site, and passes it.
+- `later`: a run where both fail at different sites, and the stopped run executed the natural failure's exact
+  instruction and passed it, in a single-file unit with no loop round in its trace (`docs/RUNTIME.md#instruction-trace`).
+- `closed`: the two plans are equal. Nothing else is `closed`, and nothing without a natural plan ever is.
+- `unwitnessed`: every other difference, among them multi-file units, loops, an earlier failure, a failure of a sibling
+  or of another check, and a no-plan error not shown passed. It is unresolved evidence, never proof that no check is
+  owed. `untested` lists each place the plans differ that no run failed either plan inside, and with no natural plan
+  each natural error's site; it and the type-derived values find escapes and never decide `closed`.
+- `declined`, `natural declined`, `no plan`: a refusal, or nothing to run.
+
+An item is a `plans.mjs` record's `{set, name, mode, demand}` or a records row's `{files, globals, label, demand}`.
+The tool writes `rows.jsonl` and `summary.json` to `--out`, a missing unit's row marked `missing`.
+- Exit 1: any `open` or `later` item, a missing unit, or an exception.
+- Exit 2: a usage error or a bad `--shard`.
+- `unwitnessed` is counted, not failed.
+
+```sh
+sx-job submit --commit t=<tree> --shards 8 --mem 6G --campaign <T> --in <items.jsonl> \
+  -- bash -c 'node "$SX_TREE_t/tests/families/stop-runs.mjs" "$SX_TREE_t" "$SX_IN/<items.jsonl>" --shard {i}/{n} \
+  --out "$SX_OUT"'
+```
+
 ## Shadow
 
 `shadow.mjs` (S9b's interim and S11's final shadow comparison, landed by #1704 from the S11 readiness research's copy)
@@ -423,12 +505,21 @@ runner on `main`'s `src/` tree `a5af3a394`: a fill of every area at the runner's
 
 ## A generator
 
-A folder of `tests/families` that holds an `.mjs` file is an area: the check and the baselines find the areas by
-`sources.mjs`'s `generatorFolders`, the baselines adding the corpus fixture (`tools/corpus/fixture`), and the runner,
-the check and the baselines take every module in an area as a generator. A folder of data only is no area; a utility
-module stays outside the area folders, as `shadow-bind.mjs` does (#1786).
+A folder of `tests/families` that holds a generator is an area: the check and the baselines find the areas by
+`sources.mjs`'s `generatorFolders`, the baselines adding the corpus fixture (`tools/corpus/fixture`). An area's
+generators are its top-level `.mjs` files; an area with none there holds groups, one level of subfolders, whose top-level
+`.mjs` files are its generators (`generatorFiles`, which the runner, the check and the baselines share). A group's own
+subfolders are never read, nor an area's subfolders beside a top-level generator, so `property/`'s tool modules are no
+generators. A folder of data only is no area; a utility module stays outside the areas and their groups, as
+`shadow-bind.mjs` does (#1786).
 
-A module `tests/families/<area>/<name>.mjs` with no imports beyond `node:` built-ins and no side effects:
+A generator's id is its `id` export, else its file name, `.mjs` included and its group left out (`generatorsOf`), so a
+generator moved into a group keeps its id. A source's place in a
+baseline, its area's PLAN, and the runner's records and stall index name the generator by its id, so a renamed generator that keeps its old file
+name as `export const id` and names it in its header line keeps every stored line and its area's PLAN; its `--work` and
+`--out` lines add `file`, the new name, which a stored line never holds. Two generators with one id are refused.
+
+A module `tests/families/<area>/<name>.mjs` (`<area>/<group>/<name>.mjs` in an area of groups) with no imports beyond `node:` built-ins and no side effects:
 
 ```js
 // <what it generates> (<its origin>)
@@ -464,7 +555,7 @@ A module reproduces what its run passed to the compiler, at the run's arguments,
   experimental syntax), and with one whose origin meant a parse or name error;
 - without the data a driver read but its review did not write: the repository's type-core fixture
   (`tests/fixtures/type-core/cells.jsonl`, whose sources the recorded fixture runs share unchanged), its exported work
-  families (`tests/helpers/type-core-families.ts`), its paste family (`pasteCases` in `tests/helpers/type-core-paste.ts`),
+  families (`tests/helpers/type-core/type-core-families.ts`), its paste family (`pasteCases` in `tests/helpers/type-core/type-core-paste.ts`),
   the programs of its own test files (a review's gate runs of them, whose inputs those tests hold) and other runs' case
   files (the 3a budget check's), judged by where each input came from: a case file its own review wrote stays, and a
   program the driver derived from a fixture row or a paste case (a pasted fix) stays, even one equal to another row. The
@@ -534,6 +625,6 @@ folder on the desktop worker. A new kit's entry goes to its area's file.
 
 ## The oracle library's next step
 
-`tests/helpers/type-core-enclosing.ts` (#1434) keeps its own `MODES`: eight modes, with the consumers' order and the
+`tests/helpers/type-core/type-core-enclosing.ts` (#1434) keeps its own `MODES`: eight modes, with the consumers' order and the
 solver's order varied apart. The library's four modes reverse both together. Its modes are the candidate for the
 library's next step. Its stop verdict (`enclosingProblems`) is its own oracle and copies no library projection.

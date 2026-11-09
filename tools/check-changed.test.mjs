@@ -35,7 +35,10 @@ const REPRESENTATIVES = {
   "oxlint-rules": ["tools/oxlint/run.mjs", ["oxlint-rules"]],
   tools: ["tools/test-shards.mjs", ["tools"]],
   "repository checks": ["tools/repository-checks/regression-cases.mjs", ["tools"]],
-  families: ["tests/families/copies/1313-astra-composite-cases.mjs", ["families"]],
+  families: [
+    "tests/families/copies/copy-admission/named-and-nested-composite-admission.mjs",
+    ["families"],
+  ],
   fixtures: ["tests/fixtures/type-core/cells.jsonl", ["typescript"]],
   documentation: ["docs/TESTING.md", []],
   // root configuration files, each needing the projects whose checks read it
@@ -375,17 +378,20 @@ test(
     assert.deepEqual(
       unknownToCostly([
         "tests/type-core-unlisted.test.ts",
-        "tests/type-core-cells.test.ts",
+        "tests/type-core/type-core-cells.test.ts",
         "tests/unlisted-other.test.ts",
         "tests/helpers/type-core-unlisted.ts",
         "src/type-inference/core/type-core-unlisted.test.ts",
       ]),
       ["tests/type-core-unlisted.test.ts"],
     );
-    for (const file of ["tests/type-core-unlisted.test.ts", "tests/type-core-cells.test.ts"]) {
+    for (const file of [
+      "tests/type-core-unlisted.test.ts",
+      "tests/type-core/type-core-cells.test.ts",
+    ]) {
       const { directory } = repository({ passing: true });
       try {
-        mkdirSync(join(directory, "tests"), { recursive: true });
+        mkdirSync(dirname(join(directory, file)), { recursive: true });
         writeFileSync(join(directory, file), "\n");
         const result = spawnSync(process.execPath, [tool, "--base", "main"], {
           cwd: directory,

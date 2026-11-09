@@ -31,7 +31,7 @@ const isMissing = (item: Item): boolean =>
   item.tag === "unknown" && (item.reasons & REASON.missing) !== 0;
 
 /**
- * TSV029 (V30 §19, TABLE r4.93): what every button of an `askChoice` returns is a choice value: a written choice
+ * TSV029 (V30 §19): what every button of an `askChoice` returns is a choice value: a written choice
  * object's `value`, or its `text` without one; a value option or element itself; a choice object the options hold
  * without writing it, its `value` or its `text` as the answer reads it (`choiceItems`). The C13 rule decides each over
  * its known kinds: every one a choice value, quiet; none and all definite, an error; else a warning whose check is the

@@ -28,7 +28,7 @@ function isChoice(c: Extract<ValueConstraint, { readonly kind: "operation" }>): 
 }
 
 /**
- * A read's snapshot (TABLE §8, r4.68 (1)): the key it copies, its guard bit, that key's exact-path signature at the
+ * A read's snapshot: the key it copies, its guard bit, that key's exact-path signature at the
  * read's own node (`readSignature`, where the value side reads it: X1–X6, X7's block reach, P3) and the handlers' fact
  * the signature leaves to its caller (X7: whether a handler that may store the key has been created there, H9), so
  * reads of one key in one literal are one key read only where they read the same: a guard, a call storing to the key,
@@ -67,7 +67,7 @@ export function readSnapshot(contract: Contract, value: PlaceId): string | null 
  * S6c: what a read's answer at every path below it rests on, as one text, so reads of one class answer alike at every
  * path: its place and projection steps, and its guards there and below (`guardedRead`, `guardedBelowRead`: the
  * outermost tested paths below it whose regions hold it decide its mark at any path, §3.2); on the value side
- * (`exact`) its snapshot too (`readSnapshot`: the exact path's signature at its node, r4.68 (1)). A read of a stable
+ * (`exact`) its snapshot too (`readSnapshot`: the exact path's signature at its node). A read of a stable
  * alias (`aliasOf`: an unwritten binding whose one definition is a whole copy of a read, on the value side the
  * read's exact answer) is that copy's read's class with its own steps and guards instead (S6-CARRIERS §4: a whole copy
  * of a stable source is an alias, never a contribution of its own), so k aliases of one source are one class; their
@@ -266,7 +266,7 @@ export function boundClass(contract: Contract, value: PlaceId, exact: boolean): 
 }
 
 /**
- * S6c (TABLE r4.85, r4.87): the class every discovery of the value side keys a value by, so that values of one class
+ * S6c: the class every discovery of the value side keys a value by, so that values of one class
  * answer alike at every path apart from the writers of their roles (`classWriters`) and, for a mixed class
  * (`classMixed`), an ingress's leaf or an operand's identity. A read by `readClass`; a read of a host global, whose
  * leaf is its own (`readClass`'s `null`), by the global and its guards, mixed (#1196); a projection (a property, an
@@ -366,7 +366,7 @@ function classed(contract: Contract, value: PlaceId, exact: boolean): KeptClass 
     stack.pop();
     const joined = joinedClass(contract, top, exact, own);
     // (on the value side, the narrowing a read takes is part of every class it is given here, whichever way it was
-    // joined: its environment and its type test's spelling (`Values.narrowingMark`, TABLE r4.277 (2), Codex r8 on
+    // joined: its environment and its type test's spelling (`Values.narrowingMark`, Codex r8 on
     // #1558), appended where its read class (`readClass`, which already holds it) gave none, a host read's and a
     // projection of one's, so no class charges it twice (Codex r10)
     const { program } = contract.pass;

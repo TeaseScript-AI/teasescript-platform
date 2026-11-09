@@ -13,7 +13,7 @@ const COMPOSED = "for (const item of this.#items(child.value, child.node, rest))
 /**
  * The check's messages for answers.ts and consumers.ts, each changed in memory by its `edit` (a scratch copy), or
  * replaced by its text in `replaced`, and the files `added`. The files as they are pass the check in `npm run lint`
- * (`run.mjs`); these are its negative checks (TABLE r4.165).
+ * (`run.mjs`); these are its negative checks.
  */
 function messagesWith(edits, replaced = {}, added = {}) {
   return questionSourceDiagnostics(
@@ -171,10 +171,10 @@ test("a forwarder that is not exact names its function as a reference (the split
 });
 
 /*
- * Identity (Codex r1–r3 on #1371; TABLE r4.182's closed forms): a function's owner and a forwarder's target are proved
- * only as a top-level declaration of their file, or an unrenamed import from the file declaring it; nothing further is
- * followed. Each case changes the clean split layout on one axis: the reports it must give (a file, or a message's
- * start), or none.
+ * Identity (Codex r1–r3 on #1371; docs/specifications/type-inference-accepted-record.md#r4-182: the closed forms): a
+ * function's owner and a forwarder's target are proved only as a top-level declaration of their file, or an unrenamed
+ * import from the file declaring it; nothing further is followed. Each case changes the clean split layout on one axis:
+ * the reports it must give (a file, or a message's start), or none.
  */
 const withoutTypedRead = SPLIT_PART.replace(
   "export function typedRead(walk: Consumers): number {\n  return finishingRead(walk, 0);\n}\n",
