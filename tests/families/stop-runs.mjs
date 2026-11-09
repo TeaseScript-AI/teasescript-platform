@@ -6,8 +6,9 @@
 // it: corpus with CASES_JSON, fixture, held, or an area of the tree's tests/families) or a records row's
 // `{files, globals, label, demand}` (`label` src-on, src-off, rev-on or rev-off, a `MODES` mode). With `--shard i/N`,
 // the items whose index k has k mod N = i. Writes `rows.jsonl` (the item without its files, and `stopRuns`' result) and
-// `summary.json` (the items, each kind's count, missing units and exceptions) to `--out`; exit 0 when no item is `open`
-// or `later` and none threw, else 1.
+// `summary.json` (the items, each kind's count, missing units and exceptions) to `--out`, a missing unit's row marked
+// `missing`; exit 0 when no item is `open`, `later` or `violating`, none is missing and none threw, else 1
+// (`unwitnessed`, a plan difference no host value exercised, is counted, not failed); 2 on a usage error.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -27,6 +28,16 @@ if (root === undefined || itemsFile === undefined || out === undefined) {
   process.exit(2);
 }
 const [shard, shards] = (option("--shard") ?? "0/1").split("/").map(Number);
+if (
+  !Number.isInteger(shard) ||
+  !Number.isInteger(shards) ||
+  shards < 1 ||
+  shard < 0 ||
+  shard >= shards
+) {
+  process.stderr.write(`--shard ${option("--shard")} is no shard i/N with 0 <= i < N\n`);
+  process.exit(2);
+}
 const dist = existsSync(path.join(root, "dist")) ? path.join(root, "dist") : root;
 const load = (file) => import(pathToFileURL(path.join(dist, file)).href);
 const { stopRuns } = await load("tests/helpers/type-core-stop-oracle.js");
@@ -71,15 +82,16 @@ const summary = {
   exceptions: 0,
 };
 for (const item of items) {
-  const unit = await unitOf(item);
   const row = { item: { ...item, files: undefined } };
-  if (unit === undefined) {
-    summary.missing += 1;
-    continue;
-  }
   try {
-    Object.assign(row, stopRuns(unit.files, unit.globals, modeOf(item), item.demand));
-    summary.kinds[row.kind] = (summary.kinds[row.kind] ?? 0) + 1;
+    const unit = await unitOf(item);
+    if (unit === undefined) {
+      summary.missing += 1;
+      row.missing = true;
+    } else {
+      Object.assign(row, stopRuns(unit.files, unit.globals, modeOf(item), item.demand));
+      summary.kinds[row.kind] = (summary.kinds[row.kind] ?? 0) + 1;
+    }
   } catch (error) {
     summary.exceptions += 1;
     row.exception = String(error?.stack ?? error).slice(0, 600);
@@ -88,6 +100,9 @@ for (const item of items) {
 }
 writeFileSync(path.join(out, "summary.json"), JSON.stringify(summary));
 process.stdout.write(`${JSON.stringify(summary)}\n`);
-process.exit(
-  (summary.kinds.open ?? 0) + (summary.kinds.later ?? 0) + summary.exceptions === 0 ? 0 : 1,
-);
+// (a missing unit, an exception, a run a stop let through, or one the oracle reports violating: never a pass)
+const failed =
+  ["open", "later", "violating"].reduce((sum, kind) => sum + (summary.kinds[kind] ?? 0), 0) +
+  summary.missing +
+  summary.exceptions;
+process.exit(failed === 0 ? 0 : 1);

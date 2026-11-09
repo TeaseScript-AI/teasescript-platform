@@ -38,6 +38,7 @@ import {
   withQuestionBound,
   withQuestionMemory,
 } from "./helpers/type-core-oracles.js";
+import type { InstructionPlan } from "../src/plan/model.js";
 import { hostValues, stopRuns } from "./helpers/type-core-stop-oracle.js";
 import { DOUBLING } from "./helpers/type-core-work.js";
 
@@ -624,6 +625,18 @@ test("a decision record is read by its place and its exact path, never by the fi
   );
 });
 
+/** `plan` without its stores' type checks, or without its first one only (a planted lost check, #2080). */
+function withoutTypeChecks(plan: InstructionPlan, firstOnly = false): InstructionPlan {
+  let removed = false;
+  const text = JSON.stringify(plan, (key, value: unknown) => {
+    if (key !== "typeCheck" || (firstOnly && removed)) return value;
+    removed = true;
+    return undefined;
+  });
+  // EVIDENCE: invariant: a plan is JSON-safe data, so its text read back is the same plan less the checks dropped.
+  return JSON.parse(text) as InstructionPlan;
+}
+
 test("a stop's runs take host data made from the source's own property names: one pool per global it reads, the same each time (#2080)", () => {
   const files = [
     { path: "main.tease", source: 'let a = {box: {f: hostValue}}\nsay "${a.box.f}"\nexit\n' },
@@ -646,8 +659,36 @@ test("a stop's runs take host data made from the source's own property names: on
     ),
     "an object two properties deep, by the source's names",
   );
-  // (two globals read: a smaller pool each, its product capped)
+  // (a path read below a value: an object along it, three properties deep)
+  const deep = [{ path: "main.tease", source: 'say "${hostValue.a.b.c}"\nexit\n' }];
+  assert.ok(
+    hostValues(deep, GLOBALS).some(
+      (each) =>
+        JSON.stringify(each.hostValue) ===
+        JSON.stringify({
+          kind: "object",
+          properties: [
+            {
+              name: "a",
+              value: {
+                kind: "object",
+                properties: [
+                  { name: "b", value: { kind: "object", properties: [{ name: "c", value: "s" }] } },
+                ],
+              },
+            },
+          ],
+        }),
+    ),
+  );
+  // (two globals read: a smaller pool each, its scalars and collections whole, the product capped)
   const two = [{ path: "main.tease", source: "let a = hostValue\nlet b = hostOther\nexit\n" }];
+  const both = hostValues(two, GLOBALS);
+  for (const value of [0, 2.5, { kind: "dict", entries: [] }])
+    assert.ok(
+      both.some((each) => JSON.stringify(each.hostOther) === JSON.stringify(value)),
+      JSON.stringify(value),
+    );
   assert.ok(hostValues(two, GLOBALS, 50).length <= 50);
 });
 
@@ -664,17 +705,7 @@ test("a stop's runs find a stopped plan that runs past a runtime failure the nat
       JSON.stringify(mode),
     );
     // (the same plan without its store's type check: the natural plan fails where it runs on)
-    const found = stopRuns(
-      files,
-      ["hostValue"],
-      run,
-      1_000_000,
-      (plan) =>
-        // EVIDENCE: invariant: a plan is JSON-safe data, so its text read back is the same plan less its type checks.
-        JSON.parse(
-          JSON.stringify(plan, (key, value: unknown) => (key === "typeCheck" ? undefined : value)),
-        ) as typeof plan,
-    );
+    const found = stopRuns(files, ["hostValue"], run, 1_000_000, (plan) => withoutTypeChecks(plan));
     assert.equal(found.kind, "open", JSON.stringify(mode));
     assert.equal(found.first?.natural?.failure?.code, "TSR058");
     assert.equal(found.first?.stopped.failure, null);
@@ -687,4 +718,38 @@ test("a stop's runs of a program the natural compile rejects run nothing where t
   const found = stopRuns(files, ["hostValue"], (make) => make(), 16);
   assert.equal(found.kind, "no plan");
   assert.equal(found.runs, 0);
+});
+
+test("a stop's runs report a later failure at another site, and a difference no host value exercised as unwitnessed, never closed (#2080, Codex r1 on #2142)", () => {
+  const run = <T>(make: () => T): T => make();
+  // (the first store's check only removed: the stopped plan fails at the second store, saying nothing more)
+  const later = stopRuns(
+    [
+      {
+        path: "main.tease",
+        source: 'let n: integer = hostValue\nlet m: integer = hostValue\nsay "after"\nexit\n',
+      },
+    ],
+    ["hostValue"],
+    run,
+    1_000_000,
+    (plan) => withoutTypeChecks(plan, true),
+  );
+  assert.equal(later.kind, "later");
+  assert.notEqual(later.first?.natural?.failure?.start, later.first?.stopped.failure?.start);
+  // (the store's check runs only for a duration, which the pool never offers: the plans differ, no run tells them apart)
+  const unwitnessed = stopRuns(
+    [
+      {
+        path: "main.tease",
+        source:
+          'let n: integer = 1\nif hostValue is duration {\n  n = hostOther\n}\nsay "after"\nexit\n',
+      },
+    ],
+    ["hostValue", "hostOther"],
+    run,
+    1_000_000,
+    (plan) => withoutTypeChecks(plan),
+  );
+  assert.equal(unwitnessed.kind, "unwitnessed");
 });

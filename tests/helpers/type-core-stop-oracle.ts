@@ -630,34 +630,52 @@ export function stopProblems(c: StopCase): string[] {
  * run that fails first inside a mark's plan content. `tests/families/stop-runs.mjs` runs it over a set's items.
  */
 
-/** The text names a source's property reads and writes and object keys use, at most `limit`, in source order. */
+/** Words a source's property names are never taken from. */
+const NOT_NAMES = new Set([
+  "let",
+  "integer",
+  "number",
+  "string",
+  "text",
+  "list",
+  "null",
+  "bool",
+  "boolean",
+  "default",
+]);
+
+/** The names a source's property reads and writes and object keys use, at most `limit`, in source order. */
 function propertyNames(files: readonly SourceFile[], limit: number): string[] {
-  const words = new Set([
-    "let",
-    "integer",
-    "number",
-    "string",
-    "text",
-    "list",
-    "null",
-    "bool",
-    "boolean",
-    "default",
-  ]);
   const found: string[] = [];
   for (const { source } of files)
     for (const match of source.matchAll(/\.([A-Za-z_]\w*)|([A-Za-z_]\w*)\s*:/g)) {
       const name = match[1] ?? match[2]!;
-      if (!words.has(name) && !found.includes(name)) found.push(name);
+      if (!NOT_NAMES.has(name) && !found.includes(name)) found.push(name);
     }
   return found.slice(0, limit);
 }
 
+/** The property paths a source reads below a value (`x.a.b.c` gives `a`, `b`, `c`), at most `limit`, in source order. */
+function propertyChains(files: readonly SourceFile[], limit: number): string[][] {
+  const found = new Map<string, string[]>();
+  for (const { source } of files)
+    for (const match of source.matchAll(/[A-Za-z_]\w*((?:\.[A-Za-z_]\w*)+)/g)) {
+      const chain = match[1]!.slice(1).split(".");
+      if (chain.length > 0 && !found.has(chain.join("."))) found.set(chain.join("."), chain);
+    }
+  return [...found.values()].slice(0, limit);
+}
+
 /**
- * Host data for a stop's runs (#2080): each global the files name, in turn, every value of a pool made from their own
- * property names (scalars, lists of each scalar, an empty list, objects one and two properties deep, a list of an object),
- * every other global 1. Past one named global, every `step`th value of the pool, the product capped at `cap` runs. The
- * same list for the same files.
+ * Host data for a stop's runs (#2080): each global the files name takes in turn every value of a pool, every other global
+ * 1. The pool:
+ * - scalars, among them 0, -1, a number with a fraction and the empty text;
+ * - a list of each scalar kind and an empty list, a set, a dict and a range;
+ * - objects one and two properties deep by the files' own property names, and a list of an object;
+ * - an object along each property path the files read below a value (`x.a.b.c`), with a scalar or a list at its end.
+ * Past one named global, the scalars and collections stay whole and the objects are thinned to every `step`th, and the
+ * product is capped at `cap` runs. The same list for the same files. A pool cannot reach every path a program takes:
+ * `stopRuns` reports a difference no value exercised as `unwitnessed`, never `closed`.
  */
 export function hostValues(
   files: readonly SourceFile[],
@@ -677,33 +695,44 @@ export function hostValues(
     kind: "list",
     items,
   });
-  const pool: SerializableRuntimeValue[] = [
-    1,
-    2.5,
-    "s",
-    true,
-    null,
+  const leaves: SerializableRuntimeValue[] = [0, 1, -1, 2.5, "s", "", true, null];
+  const collections: SerializableRuntimeValue[] = [
     list([1]),
+    list([2.5]),
     list(["s"]),
     list([null]),
     list([]),
+    { kind: "set", items: [1] },
+    { kind: "dict", entries: [{ key: "k", value: 1 }] },
+    { kind: "dict", entries: [] },
+    { kind: "range", start: 0, end: 2, inclusive: false },
   ];
+  const objects: SerializableRuntimeValue[] = [];
   for (const name of names)
-    for (const value of [1, "s", null, list(["s"])]) pool.push(object([[name, value]]));
+    for (const value of [1, "s", null, list(["s"])]) objects.push(object([[name, value]]));
   for (const outer of names)
     for (const inner of names)
-      if (outer !== inner) pool.push(object([[outer, object([[inner, "s"]])]]));
+      if (outer !== inner) objects.push(object([[outer, object([[inner, "s"]])]]));
   for (const outer of names)
     for (const inner of names)
-      pool.push(
+      objects.push(
         object([
           [outer, object([[inner, 1]])],
           ...names.filter((other) => other !== outer).map((other) => [other, null] as const),
         ]),
       );
-  pool.push(list([object(names.map((name) => [name, "s"]))]));
-  const step = Math.ceil(pool.length / 12);
-  const each = used.length <= 1 ? pool : pool.filter((_, at) => at % step === 0);
+  objects.push(list([object(names.map((name) => [name, "s"]))]));
+  for (const chain of propertyChains(files, 8))
+    for (const end of [1, "s", null, list(["s"])])
+      objects.push(
+        chain.reduceRight<SerializableRuntimeValue>((inner, name) => object([[name, inner]]), end),
+      );
+  const step = Math.ceil(objects.length / 8);
+  const each = [
+    ...leaves,
+    ...collections,
+    ...(used.length <= 1 ? objects : objects.filter((_, at) => at % step === 0)),
+  ];
   let runs: Record<string, SerializableRuntimeValue>[] = [{}];
   for (const name of used)
     runs = runs.flatMap((run) => each.map((value) => ({ ...run, [name]: value })));
@@ -723,14 +752,26 @@ export interface StopRunSide {
  * What a stop's runs found (`stopRuns`):
  * - `open`: the natural plan fails at runtime where the stopped plan runs to its end, or, with no natural plan (a compile
  *   error the stop turned into runtime checks), the stopped plan runs to its end;
- * - `later`: both fail, the stopped plan after saying more;
+ * - `later`: both fail, the stopped plan after saying more, or saying as much and failing at another site;
+ * - `violating`: `stopProblems` reports a violating run the direct comparison classed as none of the above;
+ * - `unwitnessed`: the two plans differ, but no run made the natural plan fail and every run was alike: the pool did
+ *   not exercise the difference, so nothing is decided;
  * - `stricter`: the stopped plan fails where the natural plan does not;
- * - `closed`: every run alike, or the stopped plan failing first;
+ * - `closed`: the plans equal, or every run alike with some run failing the natural plan, or the stopped plan failing
+ *   first;
  * - `declined`: the stop's compile declined (a refusal, never a missing check);
  * - `natural declined`, `no plan`: nothing to run.
  */
 export type StopRunKind =
-  "open" | "later" | "stricter" | "closed" | "declined" | "natural declined" | "no plan";
+  | "open"
+  | "later"
+  | "violating"
+  | "unwitnessed"
+  | "stricter"
+  | "closed"
+  | "declined"
+  | "natural declined"
+  | "no plan";
 
 export interface StopRuns {
   readonly kind: StopRunKind;
@@ -817,15 +858,16 @@ export function stopRuns(
     const sites = natural.result.diagnostics
       .filter((d) => d.severity === "error")
       .map((d) => {
-        const [start, end] = [d.span.start.offset, d.span.end.offset];
-        const at = stopped.answers.checks.filter((c) => c.site.start <= start && c.site.end >= end);
+        // (a check of the error's own file whose site holds the error's: offsets are each file's own)
+        const site = compiledSite(d, stopped.answers);
+        const at = stopped.answers.checks.filter((c) => inSite(site, c.site));
         const checks =
           at.length === 0
             ? "none"
             : at.some((c) => !c.against.includes("unknown"))
               ? "typed"
               : "unknown";
-        return { code: d.code, site: `${start}-${end}`, checks };
+        return { code: d.code, site: siteKey(site), checks };
       });
     for (const each of pool) {
       const ran = ranWith(got, each);
@@ -846,21 +888,25 @@ export function stopRuns(
     fitting: [],
     violating: pool,
   }).filter((problem) => problem.startsWith("violating "));
+  // (the first run of the most severe kind: open, then later, then stricter)
+  const order: readonly StopRunKind[] = ["open", "later", "stricter"];
   let found: StopRuns | null = null;
+  let witnessed = false;
   for (const each of pool) {
     const [a, b] = [ranWith(want, each), ranWith(got, each)];
+    if (a.failure !== null) witnessed = true;
     const kind: StopRunKind | null =
       a.failure !== null && b.failure === null
         ? "open"
-        : a.failure !== null && b.failure !== null && b.said.length > a.said.length
+        : a.failure !== null &&
+            b.failure !== null &&
+            (b.said.length > a.said.length ||
+              (b.said.length === a.said.length && b.failure.start !== a.failure.start))
           ? "later"
           : a.failure === null && b.failure !== null
             ? "stricter"
             : null;
-    // (the first run of the most severe kind: open, then later, then stricter)
-    const rank = (k: StopRunKind | null): number =>
-      k === null ? 3 : ["open", "later", "stricter"].indexOf(k);
-    if (kind !== null && (found === null || rank(kind) < rank(found.kind)))
+    if (kind !== null && (found === null || order.indexOf(kind) < order.indexOf(found.kind)))
       found = {
         ...none,
         kind,
@@ -869,5 +915,12 @@ export function stopRuns(
         violating,
       };
   }
-  return found ?? { ...none, kind: "closed", runs: pool.length, violating };
+  if (found !== null && found.kind !== "stricter") return found;
+  // (a violating run the direct comparison did not class: never closed)
+  if (violating.length > 0) return { ...none, kind: "violating", runs: pool.length, violating };
+  if (found !== null) return found;
+  // (plans apart that no run told apart, the natural plan never failing: nothing decided)
+  if (!witnessed && JSON.stringify(want) !== JSON.stringify(got))
+    return { ...none, kind: "unwitnessed", runs: pool.length, violating };
+  return { ...none, kind: "closed", runs: pool.length, violating };
 }

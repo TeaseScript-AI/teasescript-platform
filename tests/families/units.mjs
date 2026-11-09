@@ -5,6 +5,8 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+const distOf = (root) => (existsSync(path.join(root, "dist")) ? path.join(root, "dist") : root);
+
 /** The set's sources, each `{ name, files, globals, single, held? }`, the same list in every worker. */
 export async function unitsOf(set, baseRoot, headRoot) {
   if (set === "corpus")
@@ -27,14 +29,7 @@ export async function unitsOf(set, baseRoot, headRoot) {
   }
   if (set === "held") {
     const held = await import(
-      pathToFileURL(
-        path.join(
-          existsSync(path.join(baseRoot, "dist")) ? path.join(baseRoot, "dist") : baseRoot,
-          "tests",
-          "helpers",
-          "type-core-held-host.js",
-        ),
-      ).href
+      pathToFileURL(path.join(distOf(baseRoot), "tests", "helpers", "type-core-held-host.js")).href
     );
     return held
       .heldFamily()
