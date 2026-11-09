@@ -114,13 +114,13 @@ test("a further list of a set's members, in any order, adds contract steps linea
 });
 
 /**
- * #1466, Codex r5's F1 (docs/specifications/type-inference-accepted-record.md#r4-245): k reads of `h.p<i>` each
- * answered by k layers holding a source on its path, so the summaries' demands are the answers' own pairs P, counted
- * from the program's holders: at k 16 and 32 in the four modes the demands are exactly P less the pairs one source
- * answers by reference, one per pair a summary answers, never repeated, never a pass-through layer's, `checks` at or
- * under `main`'s, `invSteps` growing at or under `main`'s, and the total's excess over `main` per pair not rising
- * (docs/specifications/type-inference-accepted-record.md#r4-245: the exception for an output-bound family; the control
- * keeps the total's bound). `main`'s work is the family's measured oracle.
+ * #1466, Codex r5's F1 (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-245): k reads of
+ * `h.p<i>` each answered by k layers holding a source on its path, so the summaries' demands are the answers' own pairs
+ * P, counted from the program's holders: at k 16 and 32 in the four modes the demands are exactly P less the pairs one
+ * source answers by reference, one per pair a summary answers, never repeated, never a pass-through layer's, `checks`
+ * at or under `main`'s, `invSteps` growing at or under `main`'s, and the total's excess over `main` per pair not rising
+ * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-245: the exception for an output-bound
+ * family; the control keeps the total's bound). `main`'s work is the family's measured oracle.
  */
 test("summaries' demands on output-bound reads are their answers' pairs, at main's growth per pair (#1466)", () => {
   const modes = [
@@ -383,9 +383,9 @@ test("a chain of records over shared inputs is identified in linear space (round
 
 /**
  * W34's two known products, gated known limits by the owner's decision
- * (docs/specifications/type-inference-accepted-record.md#r4-45, PLAN §6b): a regression check on the 64 → 128 growth
- * step only, each held to its measured doubling in either order (3.37 and 2.53); not a bound at larger sizes (128 → 256
- * grows 3.62 and 2.82), and no linearity is asserted for them.
+ * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-45, PLAN §6b): a regression check on the 64
+ * → 128 growth step only, each held to its measured doubling in either order (3.37 and 2.53); not a bound at larger
+ * sizes (128 → 256 grows 3.62 and 2.82), and no linearity is asserted for them.
  */
 test("W34's two known products grow no faster than measured", () => {
   const steep: string[] = [];

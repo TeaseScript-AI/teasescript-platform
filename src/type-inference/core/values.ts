@@ -1195,7 +1195,7 @@ export class Values {
     const { program, contract } = this.pass;
     const at = program.exprAt(c.site) ?? node;
     // F19a: a reference's method is opaque, by the receiver's contract before its exact value
-    // (docs/specifications/type-inference-accepted-record.md#r4-44), as `#operation`
+    // (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44), as `#operation`
     if (heldReference(yield* contract.valueReceiver(c.receiver)))
       return alternatives([OPAQUE_MEMBER], program.scope);
     const gives = methodCategory(c.contract.name)?.gives;
@@ -1492,7 +1492,7 @@ export class Values {
     const { family, name } = c.contract;
     const out: Item[] = [];
     // F19a: a reference's method is opaque, by the receiver's contract before its exact value
-    // (docs/specifications/type-inference-accepted-record.md#r4-44)
+    // (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44)
     if (
       family === "method" &&
       c.receiver !== null &&
@@ -1570,8 +1570,8 @@ export class Values {
         this.valueItems(term, at, rest),
       );
       if (indexed !== null) return indexed;
-      // (docs/specifications/type-inference-accepted-record.md#r4-87): a `+` fourth or later in a run of terms answers
-      // below its root as the run's third
+      // (docs/specifications/type-inference-accepted-record/sharing.md#r4-87): a `+` fourth or later in a run of terms
+      // answers below its root as the run's third
       const repeated = contract.plusRepeatOf(c.result, true);
       if (repeated !== c.result) return [...(yield* this.valueItems(repeated, at, rest))];
       const operands: (readonly Item[])[] = [];
@@ -1649,8 +1649,9 @@ export class Values {
     // a method without a category, per receiver alternative: its declared result per receiver kind (F25), else the
     // runtime's opaque answer on a known kind (C2: its consumers keep their checks); what the core cannot know keeps
     // its own reasons. A receiver without items yet is a provisional bottom, no answer: the method's result stays the
-    // bottom, which the solver completes (S3 §1, docs/specifications/type-inference-accepted-record.md#r4-44), never an
-    // `unknown` with a reason of its own
+    // bottom, which the solver completes (S3 §1,
+    // docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44), never an `unknown` with a reason of
+    // its own
     if (family === "method" && c.receiver !== null) {
       const receiver = withoutEmpty(yield* this.valueItems(c.receiver, at, []));
       return receiver.flatMap((item) => {

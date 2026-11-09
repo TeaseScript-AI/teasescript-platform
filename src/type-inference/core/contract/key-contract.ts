@@ -76,11 +76,11 @@ import { members } from "./value-kinds.js";
 const SEVERAL: readonly Item[] = Object.freeze([HELD_REFERENCE]);
 
 /**
- * F19a (docs/specifications/type-inference-accepted-record.md#r4-44): a receiver's kinds (the input) and the choice, on
- * its completed kinds, whether it holds a reference kind, whose members are opaque: `HELD_REFERENCE` beside its kinds
- * where it does. Inside a component it is made once on the completed open solve, in which every receiver is read as a
- * record (a prefix that holds only reference kinds holds nothing a step below), and held for the second; so a receiver
- * whose reference comes only round its own cycle is a reference's.
+ * F19a (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44): a receiver's kinds (the input)
+ * and the choice, on its completed kinds, whether it holds a reference kind, whose members are opaque: `HELD_REFERENCE`
+ * beside its kinds where it does. Inside a component it is made once on the completed open solve, in which every
+ * receiver is read as a record (a prefix that holds only reference kinds holds nothing a step below), and held for the
+ * second; so a receiver whose reference comes only round its own cycle is a reference's.
  */
 const RECEIVER: Decision = {
   choose: (input) => (input.some((item) => REFERENCE.has(item.tag)) ? "reference" : "other"),
@@ -220,7 +220,8 @@ export function* keyContract(
   const written = writtenOf(found.kind);
   // F2, F22: the written type is the contract; the stores keep M. §3.2: it fixes the kinds, never removes the mark of
   // what is stored. An unrestricted written domain (`list`'s element) says what may be held, not what is: its unknown
-  // is opaque, so every consumer owes its check (#1501, docs/specifications/type-inference-accepted-record.md#r4-215)
+  // is opaque, so every consumer owes its check (#1501,
+  // docs/specifications/type-inference-accepted-record/contract.md#r4-215)
   if (written !== null) {
     const at = termAt(written, path);
     if (at !== null) {
@@ -485,7 +486,7 @@ export function* receiverWalk(
 
 /**
  * A receiver's contract as a demand of its own, with F19a's decision whether it is a reference's
- * (docs/specifications/type-inference-accepted-record.md#r4-44).
+ * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44).
  */
 export function* receiverKinds(
   contract: Contract,
@@ -515,8 +516,8 @@ function* receiverRun(contract: Contract, key: Key): Work<readonly Item[]> {
 
 /**
  * A value's contract as a receiver (a method's, a length's owner), a demand of its own with F19a's decision
- * (docs/specifications/type-inference-accepted-record.md#r4-44): the one decision both sides take before an exact
- * answer or a transfer's alternatives.
+ * (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-44): the one decision both sides take
+ * before an exact answer or a transfer's alternatives.
  */
 export function* valueReceiver(contract: Contract, receiver: PlaceId): Work<readonly Item[]> {
   const site = contract.pass.program.places[receiver]?.site ?? null;

@@ -293,7 +293,8 @@ function laterSources(
     return required(syntax?.kinds ?? [], syntax?.spelling);
   }
   // else, at a settled stop, the stores' syntax (source 4,
-  // docs/specifications/type-inference-accepted-record.md#r4-135): every store's syntax decides the key together
+  // docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-135): every store's syntax decides the
+  // key together
   const syntax =
     typedTags === null && retained.kinds.length === 0 ? syntaxRead(walk, value, rest) : null;
   const tags = typedTags ?? (retained.kinds.length > 0 ? retained.kinds : (syntax?.kinds ?? []));
@@ -922,10 +923,11 @@ function sameOf(
 }
 
 /**
- * A read's bounded walk (docs/specifications/type-inference-accepted-record.md#r4-208): the host data standing at its
- * frontier and at the frontiers of the copies standing there, breadth first, each frontier once, at most
- * `frontierBound.depth` copies deep and `.copies` copies met. Cut where a copy would lead deeper, or past the copies it
- * may meet, to a frontier it has not met: then the read answers its place's component's host data (`placeIngress`).
+ * A read's bounded walk (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-208): the host
+ * data standing at its frontier and at the frontiers of the copies standing there, breadth first, each frontier once,
+ * at most `frontierBound.depth` copies deep and `.copies` copies met. Cut where a copy would lead deeper, or past the
+ * copies it may meet, to a frontier it has not met: then the read answers its place's component's host data
+ * (`placeIngress`).
  */
 function explore(
   walk: Consumers,
@@ -1021,9 +1023,10 @@ function valueEdges(walk: Consumers, value: Expansion, edges: Edges, owned?: Pla
 }
 
 /**
- * The host data a read whose walk is cut answers (docs/specifications/type-inference-accepted-record.md#r4-208): its
- * place's component's (`placeIngress`), or, for a value no place holds, what its expression brings (`ownIngress`). A
- * superset of what its walk would name, never a dropped check.
+ * The host data a read whose walk is cut answers
+ * (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-208): its place's component's
+ * (`placeIngress`), or, for a value no place holds, what its expression brings (`ownIngress`). A superset of what its
+ * walk would name, never a dropped check.
  */
 function cutIngress(walk: Consumers, value: PlaceId): IngressNode | undefined {
   const place = readPlace(walk, value);

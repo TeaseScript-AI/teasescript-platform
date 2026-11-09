@@ -780,9 +780,9 @@ export class GuardIndex {
 }
 
 /**
- * The items of a guarded read (docs/specifications/type-inference-accepted-record.md#section-3-2-guarded): every kind
- * possible and marked, so no consumer errs on it; a known kind the exact path answered without a word of its own takes
- * `branch`, the test's; the emptiness mark stays as it is.
+ * The items of a guarded read (docs/specifications/type-inference-accepted-record/contract.md#section-3-2-guarded):
+ * every kind possible and marked, so no consumer errs on it; a known kind the exact path answered without a word of its
+ * own takes `branch`, the test's; the emptiness mark stays as it is.
  */
 export function marked(items: readonly Item[]): Item[] {
   return items.map((item) =>

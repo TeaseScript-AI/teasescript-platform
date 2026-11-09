@@ -140,7 +140,8 @@ function* aliasKey(admission: Admission, d: Definition): Reads<string | null> {
     lists.aliasSignature(admission.pass.contract.keyText(read.source), read.read),
     handlers.afterSomeCreation(read.read) ? "h" : "",
     // (the member's own copied binding's written type at its read, A4's decider, whatever its chain resolves to:
-    // `let b: integer[] = raw` is no `let a = raw`, docs/specifications/type-inference-accepted-record.md#r4-72)
+    // `let b: integer[] = raw` is no `let a = raw`,
+    // docs/specifications/type-inference-accepted-record/sharing.md#r4-72)
     yield* writtenDomainKey(admission, alias),
     // (what its read's narrowing makes of its answer, S10 part 2b)
     admission.pass.values.narrowingMark(alias.value),
@@ -151,7 +152,7 @@ function* aliasKey(admission: Admission, d: Definition): Reads<string | null> {
  * The written type an alias's read copies at its path (A4: a copy of a written binding is decided by it), as the class
  * key holds it: the name of the type's spelling, or the unwritten place whose own decision it copies with the path
  * into it (`inheritedAt`), `null` where the copied binding has none; the member's own, never its chain's end's
- * (docs/specifications/type-inference-accepted-record.md#r4-72, Astra r5 B1).
+ * (docs/specifications/type-inference-accepted-record/sharing.md#r4-72, Astra r5 B1).
  */
 function* writtenDomainKey(admission: Admission, alias: Alias): Reads<string> {
   const written = yield* writtenSourceRead(admission, alias.value, []);

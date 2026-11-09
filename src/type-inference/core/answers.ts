@@ -619,9 +619,10 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
       program.index();
       // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
       // whose changing stores stay possibilities. A pass in which a decision stops is not settled either
-      // (docs/specifications/type-inference-accepted-record.md#r4-180): the next, from the same rejected set, starts
-      // with every stopped key stopped, once per rejected set; a decision stopping in that pass again stops the
-      // analysis, as the work allowance does (docs/specifications/type-inference-accepted-record.md#r4-183)
+      // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-180): the next, from the same
+      // rejected set, starts with every stopped key stopped, once per rejected set; a decision stopping in that pass
+      // again stops the analysis, as the work allowance does
+      // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183)
       let cycling: ReadonlySet<number> = new Set();
       const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
       const selecting = selectingStores(program);
@@ -1168,8 +1169,8 @@ class CoreAnswers implements Answers {
     this.dominators = program.dom;
     this.initializers = initializersOf(program);
     // published in source order of their sites, at one site the written types' errors first, then each consumer's in
-    // the order they run (docs/specifications/type-inference-accepted-record.md#r4-86), the finishing path's as the
-    // walk's, then a stop's own warning and marks
+    // the order they run (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-86), the finishing
+    // path's as the walk's, then a stop's own warning and marks
     const ranked = (
       item: CoreDiagnostic,
     ): { readonly item: CoreDiagnostic; readonly rule: number } => ({

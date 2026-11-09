@@ -47,8 +47,8 @@ function witness(
  * store's own path stops, the store is checked against its destination's whole type, written or the one a copy decides
  * (A4), before the next effect, a value that fits playing on, in source order. In every order the oracle holds: where a
  * decision stopping in the restarted pass stops the analysis before admission settled
- * (docs/specifications/type-inference-accepted-record.md#r4-183), a copy's store is marked with its type undecided
- * instead, as every store into an inferred place is (#1252).
+ * (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183), a copy's store is marked with its
+ * type undecided instead, as every store into an inferred place is (#1252).
  */
 test("a store above a stopped decision is checked against its destination's whole type (#1416)", () => {
   const nested = list(list("bad"));
