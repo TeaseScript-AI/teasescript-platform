@@ -254,7 +254,7 @@ test("a stopped mark whose completion result was lost or is absent is kept by a 
     const at = source.indexOf('[["bad"]]');
     assert.equal(run.failure, `TSR058@${at}:${at + '[["bad"]]'.length}`, `demand ${demand}`);
   }
-  // (at a settled work stop the completion is capped and keeps no result: the stopped marks have none, and the same store
+  // (at this work allowance the completion is capped and keeps no result: the stopped marks have none, and the same store
   // checks carry them; Codex r3)
   const stopped = inMode(MODES[0]!, () => withTestAllowance(1536, () => compiled(source, 1)));
   assert.ok(stopped.plan !== null);
