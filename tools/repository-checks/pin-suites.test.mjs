@@ -69,6 +69,16 @@ test("the three pin forms are found by their text, and a pin written another way
   assert.deepEqual(pinFormsOf("    [7995, 60],\n    [7081, 60],"), []);
 });
 
+test("the test files are the suite as the runner finds it: one folder down too, none in helpers/", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "pin-suites-tests-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const file of ["a.test.ts", "player/b.test.ts", "helpers/c.test.ts"]) {
+    mkdirSync(join(root, "tests", file, ".."), { recursive: true });
+    writeFileSync(join(root, "tests", file), "");
+  }
+  assert.deepEqual(testFiles(root), ["tests/a.test.ts", "tests/player/b.test.ts"]);
+});
+
 test("an option the tool does not take is refused, not ignored", () => {
   const tool = join(ROOT, "tools/repository-checks/pin-suites.mjs");
   for (const args of [["--check-grounds"], ["--base"], ["--run", "extra"]]) {
@@ -83,10 +93,13 @@ test("a file moved out of the core lists every pinning suite (#2049)", { timeout
   const git = (...args) => spawnSync("git", args, { cwd: directory, encoding: "utf8" });
   try {
     mkdirSync(join(directory, "tools/repository-checks"), { recursive: true });
-    copyFileSync(
-      join(ROOT, "tools/repository-checks/pin-suites.mjs"),
-      join(directory, "tools/repository-checks/pin-suites.mjs"),
-    );
+    // (the tool, and the modules it reads the suite's test files through)
+    for (const file of [
+      "tools/repository-checks/pin-suites.mjs",
+      "tools/test-shards.mjs",
+      "tools/costly-test-files.mjs",
+    ])
+      copyFileSync(join(ROOT, file), join(directory, file));
     mkdirSync(join(directory, "src/type-inference/core"), { recursive: true });
     writeFileSync(
       join(directory, "src/type-inference/core/answers.ts"),

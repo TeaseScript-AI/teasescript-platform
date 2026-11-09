@@ -76,6 +76,9 @@ wall clock, and `--zone Europe/Amsterdam` replaces UTC with that IANA time zone.
 Its `playerProfile` has person fields, which `playerProfile.petNames` reads and `player.copyFrom(playerProfile)`
 copies, only when `--player-profile profile.json` gives a JSON object of them, such as
 `{"firstName": "Alex", "petNames": ["puppy"]}`. The probe is a developer aid, not a test.
+The suite is every `tests/*.test.ts` and every `tests/<folder>/*.test.ts` one folder down, except in `fixtures/` and
+`helpers/`, which hold no tests (a closed list, `suiteTestFiles` in `tools/test-shards.mjs`); a file is named by its path
+under `tests/`, one at the top by its name alone.
 `npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
 `node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, format, oxlint, knip, the doc links, the imports, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash.
 `node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a tree hash only exists), and finds its unfilled placeholders (its header lists the rules); it never fetches.

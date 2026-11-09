@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { suiteTestFiles } from "../test-shards.mjs";
 
 // The suites that pin the type core's exact work or its published answers, and the focused list a change needs:
 //
@@ -184,12 +184,9 @@ function main(argv) {
   return status;
 }
 
-/** The test files under `tests/` (the list's test reads them). */
+/** The test files under `tests/`, as the suite finds them (`suiteTestFiles`; the list's test reads them). */
 export function testFiles(root) {
-  return readdirSync(join(root, "tests"))
-    .filter((name) => name.endsWith(".test.ts"))
-    .map((name) => `tests/${name}`)
-    .sort();
+  return suiteTestFiles(join(root, "tests"), ".test.ts").map((name) => `tests/${name}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url))
