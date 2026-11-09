@@ -43,7 +43,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { comparedOf } from "./baselines.mjs";
 import { groupOf, REASON_GROUPS, UNKNOWN_REASON } from "./run-contract.mjs";
-import { sourceKey } from "./sources.mjs";
+import { generatorFolders, generatorsOf, sourceKey } from "./sources.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -186,13 +186,28 @@ const placeOf = ({ area, generator, source, key }) =>
   JSON.stringify([nameOf(area), generator, source, key]);
 
 /**
- * The area of a generator's file (file names are unique across the areas), for a record that does not say it: a renamed
- * generator's record names its file beside its id (`file`), any other's file is its id.
+ * The area of a generator's file, its path in its area (`group/name.mjs` in an area of groups; file names are unique
+ * across the areas), for a record that does not say it: a renamed or grouped generator's record names its file beside its
+ * id (`file`), any other's file is its id. `undefined` where no area holds that file, as for a record made before its
+ * generator was renamed or moved into a group, whose area its id gives (`idAreas`).
  */
 function areaOf(file) {
   for (const entry of readdirSync(here, { withFileTypes: true }))
     if (entry.isDirectory() && existsSync(path.join(here, entry.name, file))) return entry.name;
-  return refused(`no area of ${here} holds the generator ${file}`);
+  return undefined;
+}
+
+/**
+ * Each generator id's areas, for a record whose file a later rename or move into a group left behind (it names its id,
+ * which the generator keeps): every area's generators by id (`generatorsOf`). An id is unique within its area only, so
+ * an id two areas hold names no area.
+ */
+async function idAreas() {
+  const ids = new Map();
+  for (const folder of generatorFolders(here))
+    for (const { name } of await generatorsOf(folder))
+      ids.set(name, [...(ids.get(name) ?? []), path.basename(folder)]);
+  return ids;
 }
 
 /**
@@ -560,7 +575,26 @@ const areaNamed = (name) => {
     areas.set(name, { shards: new Set(), places: new Set(), configuration: undefined });
   return areas.get(name);
 };
-for (const shard of replayFiles.map(shardOf)) {
+const replayShards = replayFiles.map(shardOf);
+// (an `--out` record's generators that its files no longer name, found by their ids)
+const unplaced = replayShards.flatMap(({ entries }) =>
+  entries.filter((entry) => entry.area === undefined),
+);
+if (unplaced.length > 0) {
+  const ids = await idAreas();
+  for (const entry of unplaced) {
+    const held = ids.get(entry.generator) ?? [];
+    if (held.length !== 1)
+      refused(
+        held.length === 0
+          ? `no area of ${here} holds the generator ${entry.file ?? entry.generator}`
+          : `the generator ${entry.generator} is an id in ${held.join(" and ")}: its record names no area`,
+      );
+    entry.area = held[0];
+  }
+}
+
+for (const shard of replayShards) {
   if (shard.ran?.only !== undefined)
     refused(`${shard.file} records a rerun: give it after --rerun`);
   for (const entry of shard.entries) {
