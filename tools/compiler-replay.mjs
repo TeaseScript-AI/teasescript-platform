@@ -26,15 +26,18 @@ import { generatorFolders, holdsGenerators } from "../tests/families/sources.mjs
 // `tests/families/stalls.mjs` over the areas' work records, with `<prefix>-rerun`'s records where `rerun-stalls` ran;
 // each area difference by its first differing part ("route only": the last part, both trees with as many parts); each
 // set difference by what differs; and `<prefix>-aside`'s rows where `aside` ran. A shard is its job name, and of its
-// attempts one is read: the one that left a summary line and whose queue record shows its runner's own ending (`ranOut`).
-// Any other attempt is listed, with its host and outcome, as replaced and never read; a shard none of whose attempts
-// stands is "not run", never equal. Several attempts that could stand are refused (exit 2) unless all but one are
-// replaced: by a rerun's record (`rerun-shard`) or by `--replace <failed>=<rerun>`, which is refused when the jobs are
-// not one shard's attempts or the rerun cannot stand. It prints a table and, with `--json`, writes the report.
+// attempts one is read: the one that left a summary line and whose queue record (`meta.json`) shows its runner's own
+// ending (`ranOut`: exit 0 or 1, 3 as well for an area job, with the queue's outcome for that exit, no OOM kill, no
+// timeout, no lost test file). Any other attempt is listed, with its host and outcome, as replaced and never read; a
+// shard none of whose attempts stands is "not run", never equal. Several attempts that could stand are refused (exit 2)
+// unless all but one are replaced: by a rerun's record (`rerun-shard`) or by `--replace <failed>=<rerun>`, which is
+// refused when the jobs are not one shard's attempts or the rerun cannot stand. It prints a table and, with `--json`,
+// writes the report.
 //
 // `rerun-shard` submits one shard again into its campaign, `submit`'s own submission with the shard written in, as the
-// rerun of `<job>`: the rerun's script opens with `: replaces <job>;`, which `collect` reads from its record. It is
-// refused when `<job>` is not in the campaigns or ran another script or trees; `--host` pins the queue's worker.
+// rerun of `<job>`: its `bash -c` script opens with `: replaces <job>;`, which `collect` reads from the rerun's record
+// (`meta.json`'s `command`, kept verbatim), refusing one that names a job outside its shard. It is refused when `<job>`
+// is not in the campaigns or ran another script or trees; `--host` pins the queue's worker.
 //
 // `rerun-stalls` reruns the standing area attempts' stalled sources on both trees in one queue job (`stalls.mjs --index`,
 // then `stalls.mjs rerun`, at `--memory`, 12,288 MB unless given) as `<prefix>-rerun`; `--host` pins the worker.
