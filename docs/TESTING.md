@@ -309,7 +309,7 @@ Chromium DevTools smoke route has no browser-automation package dependency; it p
 cross-browser or production-host E2E suite. Preview groups use fresh browser contexts. On failure the runner reports a
 retained scratch directory with a screenshot and Playwright trace for the failing group; delete it after diagnosis.
 `npm test` separately checks that the default Player build does not statically load development preview content, and
-`tests/player-demo.test.ts` plays the repository demo to its exit through the runtime adapter and media device.
+`tests/player/player-demo.test.ts` plays the repository demo to its exit through the runtime adapter and media device.
 
 After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
 (computer use where available) and inspect the changed state plus its immediate responsive/interaction neighbors. This
@@ -548,13 +548,13 @@ private runner implementation.
 ### Layout and discovery
 
 ```text
-tests/property.test.ts
+tests/runtime/property.test.ts
 tests/property/
   replay.ts
   source-fuzz.ts
 ```
 
-`tests/property.test.ts` is a root test entrypoint, so normal compiled-test
+`tests/runtime/property.test.ts` is a root test entrypoint, so normal compiled-test
 discovery executes the required 128-case campaign through `npm run check`.
 The fixed operation, rejected-completion, checkpoint, and malformed-input
 fixtures consume no randomness, so they run once each in that entrypoint and
@@ -630,7 +630,7 @@ preserve private harness bookkeeping as evidence.
 ## Source-to-runtime conformance corpus
 
 The current behavior-oriented corpus lives in focused `tests/*.test.ts` files
-next to the behavior they cover, with `tests/source-to-runtime-conformance.test.ts`
+next to the behavior they cover, with `tests/runtime/source-to-runtime-conformance.test.ts`
 exercising representative public-package scenarios. New representative cases
 start with real `.tease` source, call the root `compileSource(...)` API, and
 assert only the relevant observable diagnostic/span, event/order/provenance,
@@ -783,7 +783,7 @@ blocking and asynchronous waits including terminal ones, bounded and indefinite 
 `elapsed` excluding pauses and stalls, one-late versus many-small progress observations, same-time ordering across
 media and timers, cue blocks with self-handles, Stage replacement, playback projections, JSON
 checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state.
-`tests/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
+`tests/player/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
 stand-ins: single load reports, stalls, range repetition and terminal stop, overlapping instances of one file that each
 play out once, also after a late `seeked` notification or a rounding error at the range end, pause/resume/seek
 repositioning, refused playback and retry also within the end tolerance, failed video and unavailable sources, restore

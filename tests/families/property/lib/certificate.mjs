@@ -45,7 +45,7 @@ function properties(text) {
 
 /**
  * The type the source proves at the store whose value is at `site`, apart from every decision, a stopped one included
- * (#1440, TABLE r4.200; the model is `certified` in `tests/helpers/type-core-enclosing.ts`), or `null`: the
+ * (#1440, TABLE r4.200; the model is `certified` in `tests/helpers/type-core/type-core-enclosing.ts`), or `null`: the
  * destination's own written type, or, where its declaration writes none, the written type of a binding that its start
  * value reads directly (a copy, a copy of a written copy) or through one object literal property per step of the
  * store's path (a property a copy decides). Read from the source text alone, never from the compiler: a line, value or

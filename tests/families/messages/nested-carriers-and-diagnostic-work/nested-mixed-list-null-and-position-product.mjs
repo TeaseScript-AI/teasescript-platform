@@ -9,7 +9,7 @@ export const id = "1765-mixed-family.mjs";
 // the pair as list elements, object properties or the operands of `+`, joined with a second disagreeing side, or the
 // whole-number side itself a `+` of two sides whose nulls are at different layers; both orders. The family is the product
 // of its axes (`axes`), a case's source made from its axis values alone and its name exactly them, `<axis>:<value>` in
-// the axes' order: `tests/type-core-mixed-family.test.ts` samples it by them (its coverage invariant).
+// the axes' order: `tests/type-core/type-core-mixed-family.test.ts` samples it by them (its coverage invariant).
 const CARRIERS = {
   take: (value) => `(${value}).take(9)`,
   index: (value) => `[${value}][0]`,

@@ -111,7 +111,7 @@ its safety net has run out (#1498). After the kill the runner waits for the proc
 descendant holding its stderr delays the next source (no compiler or oracle code spawns one). A run that throws on
 either tree is an exception, never compared, because identical exceptions on both trees are not agreement (#1439): the
 runner prints it on stderr with its source, mode and check, writes it with each stack to `--out` and counts it apart
-from stalls, in a source that stalls later too (`tests/families-runner-compare.test.ts`, in CI). A publication is had only up to
+from stalls, in a source that stalls later too (`tests/families-runner/families-runner-compare.test.ts`, in CI). A publication is had only up to
 the oracle's own stop. Its own questions (each binding's admitted types, then the occurrences) run apart from the
 analysis's allowance and stop after the one whose units pass the program's allowance plus 64 per cell returned (an
 occurrence's answer, its element's and each property's; two a binding), where 640 bytes per cell returned pass
@@ -540,7 +540,7 @@ A module reproduces what its run passed to the compiler, at the run's arguments,
   experimental syntax), and with one whose origin meant a parse or name error;
 - without the data a driver read but its review did not write: the repository's type-core fixture
   (`tests/fixtures/type-core/cells.jsonl`, whose sources the recorded fixture runs share unchanged), its exported work
-  families (`tests/helpers/type-core-families.ts`), its paste family (`pasteCases` in `tests/helpers/type-core-paste.ts`),
+  families (`tests/helpers/type-core/type-core-families.ts`), its paste family (`pasteCases` in `tests/helpers/type-core/type-core-paste.ts`),
   the programs of its own test files (a review's gate runs of them, whose inputs those tests hold) and other runs' case
   files (the 3a budget check's), judged by where each input came from: a case file its own review wrote stays, and a
   program the driver derived from a fixture row or a paste case (a pasted fix) stays, even one equal to another row. The
@@ -610,6 +610,6 @@ folder on the desktop worker. A new kit's entry goes to its area's file.
 
 ## The oracle library's next step
 
-`tests/helpers/type-core-enclosing.ts` (#1434) keeps its own `MODES`: eight modes, with the consumers' order and the
+`tests/helpers/type-core/type-core-enclosing.ts` (#1434) keeps its own `MODES`: eight modes, with the consumers' order and the
 solver's order varied apart. The library's four modes reverse both together. Its modes are the candidate for the
 library's next step. Its stop verdict (`enclosingProblems`) is its own oracle and copies no library projection.

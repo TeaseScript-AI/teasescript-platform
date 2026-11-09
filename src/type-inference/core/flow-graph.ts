@@ -54,7 +54,7 @@ export { literalRounds, literalTruth, type LiteralRounds } from "./flow-graph/li
  * L1–L13 and P7), built from the ASTs, not from the plan: `plan/control-flow.ts` has no node per expression, and the
  * core's exact path answers a read at the expression that makes it. Every statement and every expression is a node, in
  * evaluation order (the shared order helpers of `expression-children.ts`), so a definition and a read can be compared
- * by dominance. tests/type-core-flow-graph.test.ts compares it with the lowering's control flow.
+ * by dominance. tests/type-core/type-core-flow-graph.test.ts compares it with the lowering's control flow.
  *
  * Calls are summarized as the lowering's `PlanControlFlow` does: a call's `call-in` node enters the callee's entry, and
  * a summary edge from it to its `call-out` node stands for the return; no edge leads from a callee's exit back. The

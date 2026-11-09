@@ -18,7 +18,7 @@ import { objectsLanguage } from "./objects-language.mjs";
  * - any callable declared elsewhere (a library method, a core helper, a getter) that `OUTSIDE` does not list with why a
  *   call to it walks nothing uncharged; the walking collection constructors only with no argument or a table written
  *   out in full.
- * Text the modules make follows the kept-text rule (TABLE r4.58, `tests/type-core-kept.test.ts`), not this one. Calls
+ * Text the modules make follows the kept-text rule (TABLE r4.58, `tests/type-core/type-core-kept.test.ts`), not this one. Calls
  * from the rest of the core into these modules are outside this check: in part 1 only `guards.ts` makes the index.
  */
 const OBJECTS_FILE = "src/type-inference/core/contract/objects.ts";

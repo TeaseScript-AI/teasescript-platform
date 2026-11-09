@@ -11,7 +11,7 @@ const CHECK_FIELDS = new Set([
 
 /**
  * The checks a plan runs (#2081): each check field of every instruction once, and each part check. An explicit stack,
- * so a plan nested deeper than a recursive walk can follow is counted too. Read by `tests/type-core-budget.test.ts` and,
+ * so a plan nested deeper than a recursive walk can follow is counted too. Read by `tests/type-core/type-core-budget.test.ts` and,
  * from a built tree, by `tools/compiler-replay.mjs`.
  */
 export function planChecks(plan: unknown): number {

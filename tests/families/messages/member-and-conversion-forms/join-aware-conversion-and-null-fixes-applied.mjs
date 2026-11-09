@@ -2,7 +2,7 @@
 export const id = "1310-paste-family.mjs";
 // the forms #1310's paste family runs pasted, each analysed; #1310, builder/review archive
 // (desktop:~/work/evidence/1310/9a9b4382435f5eec49fd995ce5b171b7c2c012d8/tools/pastefam.mjs, on the PR's trees c1 to c13).
-// The cases it read from the repository's paste family (`pasteCases`, `tests/helpers/type-core-paste.ts`) are not
+// The cases it read from the repository's paste family (`pasteCases`, `tests/helpers/type-core/type-core-paste.ts`) are not
 // copied; the programs it pasted from them are, as `pastedForms` pastes them on each run's head (the same 451 on all
 // of them; every run's log that is kept has their counts). The first run on c1 (`c1-check.sh:13`) is not here: it ran on
 // an uncommitted state of the paste helper, which no archive keeps.

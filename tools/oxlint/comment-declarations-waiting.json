@@ -354,49 +354,49 @@
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core-candidate.test.ts",
+    "file": "tests/type-core/type-core-candidate.test.ts",
     "kind": "docblock",
     "text": "The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; TABLE r4.59; the lead's answer 3). Every",
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core-cells.test.ts",
+    "file": "tests/type-core/type-core-cells.test.ts",
     "kind": "docblock",
     "text": "A choice reads a written list's element as its literal analogue does (TABLE r4.42–r4.43, the lead's ruling on #1027):",
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core-cells.test.ts",
+    "file": "tests/type-core/type-core-cells.test.ts",
     "kind": "docblock",
     "text": "The value carriers (round 11; the walk of `answers.ts` `#propertyNames`): each carrier over a direct, a named, a",
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core-messages.test.ts",
+    "file": "tests/type-core/type-core-messages.test.ts",
     "kind": "docblock",
     "text": "#1272 (Astra's B1, Codex r7's B1 on #1310, ADR 0021 1.3, 1.10): a join answers the same written inline as kept in a",
     "waits": "#1937, #1899"
   },
   {
-    "file": "tests/type-core-mixed-family.test.ts",
+    "file": "tests/type-core/type-core-mixed-family.test.ts",
     "kind": "docblock",
     "text": "#1765's invariant (the lead's family rule on #1789, after Codex r9–r11 and Astra r2), sampled as the owner's",
     "waits": "#1899"
   },
   {
-    "file": "tests/type-core-sharing.test.ts",
+    "file": "tests/type-core/type-core-sharing.test.ts",
     "kind": "reference",
     "text": "x.p.f_i",
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core-sharing.test.ts",
+    "file": "tests/type-core/type-core-sharing.test.ts",
     "kind": "reference",
     "text": "membersMissing",
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core-stop.test.ts",
+    "file": "tests/type-core/type-core-stop.test.ts",
     "kind": "docblock",
     "text": "A source's typed loads and parses as its plan reads them (`load` and `expected` lines, `plannedContent`), or how the",
     "waits": "#1937"
