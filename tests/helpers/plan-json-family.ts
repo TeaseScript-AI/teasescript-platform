@@ -109,7 +109,7 @@ export const OWNERSHIP_MODES = {
 } as const satisfies Record<Operated, readonly Ownership[]>;
 
 /**
- * One way an operation runs, as the composable's family (`player-keep-producers.test.ts`) drives it: its producer, its
+ * One way an operation runs, as the composable's family (`player-keep-ownership.test.ts`) drives it: its producer, its
  * route, and its trace, every call it makes in order when nothing retires it. The family records each call of the kept
  * store and its photos (`kept.`), the debug rooms (`rooms.`, with a room's saved values as `rooms.values.`), the saved
  * values' provider (`provider.`), the media store (`repository.`) and the host (`host.<op>`). It holds each call of the
