@@ -286,7 +286,7 @@ test("a choice's selection inspects a record's properties once, not once per rea
 });
 
 /**
- * r4.27: one holder per source and projection merges its contributions' guards, so a tested path's mark reaches an
+ * one holder per source and projection merges its contributions' guards, so a tested path's mark reaches an
  * untested sibling entry's read of that path: its error becomes a warning with its check, never silence; the same read
  * without the test errs, and so does the untested field.
  */
@@ -399,7 +399,7 @@ test("the prefix index and the handler index grow with the copies and reads, not
 });
 
 /**
- * Native resilience (TABLE §8): flat chains of 8,192 links run through every walk along aliases, copies, wrappers and
+ * Native resilience: flat chains of 8,192 links run through every walk along aliases, copies, wrappers and
  * default sources on explicit stacks or loops (review r1: the default-source and alias-root walks recursed natively).
  */
 const CHAINS: readonly [string, string, (k: number) => string][] = [
@@ -436,7 +436,7 @@ test("flat chains of 8,192 links analyse without native recursion", () => {
 });
 
 /**
- * A literal's signature names each path by its id (TABLE r4.58): `first` and `second` hold the same kinds in the same
+ * A literal's signature names each path by its id: `first` and `second` hold the same kinds in the same
  * order under the same record names and empty lists, but their integer at different paths, so they are two sources and
  * `archive`'s element at `.a` holds an integer; a signature without the paths' ids would merge them and lose it (the
  * deep-literal review's witness). Alike in both orders, with the sharing on and off.

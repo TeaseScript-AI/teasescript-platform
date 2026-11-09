@@ -57,7 +57,7 @@ import { itemScope } from "./type-core-items.js";
 
 /**
  * A diagnostic as a stop must keep it, its identity: without the facts its fix's code forms read (`expects`,
- * `present`), which a stop never proves, so a fix there may be words (TABLE r4.162). The stop tests compare these.
+ * `present`), which a stop never proves, so a fix there may be words. The stop tests compare these.
  */
 export function stopIdentity(
   diagnostic: CoreDiagnostic | CheckedDiagnostic,
@@ -74,7 +74,7 @@ export function sentences(text: string): string[] {
 
 /**
  * The errors of `source`'s analysis as a stop keeps them: each error's identity and its message's first sentence. A
- * stop proves nothing of a fix's code, so the fix after that sentence may be words (TABLE r4.162).
+ * stop proves nothing of a fix's code, so the fix after that sentence may be words.
  */
 export function keptErrors(
   answers: Answers,
@@ -87,7 +87,7 @@ export function keptErrors(
 }
 
 /**
- * The record with the route as the merged stops pin it (TABLE r4.185): each diagnostic by its identity
+ * The record with the route as the merged stops pin it: each diagnostic by its identity
  * (`stopIdentity`) without the other facts only its fix reads, the kinds its site's other diagnostics report
  * (`besides`) and its store root's declaration, and each of the route's (`publishedRoute`'s text) by its severity, code
  * and span, without its message.
@@ -161,8 +161,8 @@ function compareSites(a: readonly number[], b: readonly number[]): number {
 /**
  * One analysis's part: its answers (the outcome and diagnostics with the checks that owe the runtime nothing,
  * `checkedResult`, and the checks) and every binding's admitted types at its root and its element (`text`); the record
- * alone, its answers and the same serialized (`record`); and whether each of its lists is in source order of its sites
- * (r4.86 (1)). The admitted types are the oracle's own questions (`Questions`, two cells a binding; `questions`, a
+ * alone, its answers and the same serialized (`record`); and whether each of its lists is in source order of its sites.
+ * The admitted types are the oracle's own questions (`Questions`, two cells a binding; `questions`, a
  * publication's meter, else one of their own): where they stop, it throws `AnswersStopped`, never publishing answers
  * asked again on a stopped analysis. The answers and the checks are the backend's questions, which stop past the
  * finished analysis's allowance as the backend's do (`asked`).

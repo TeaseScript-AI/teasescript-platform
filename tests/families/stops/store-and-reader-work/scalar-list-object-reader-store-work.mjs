@@ -18,7 +18,7 @@ const bindings = {
       objectRead: ["repeat {kept: tally}.kept {}"],
       listRead: ["repeat [tally].first {}"],
       operation: ["repeat tally + 1 {}"],
-      // TABLE r4.180: a stored literal holding the read, reread after the stop
+      // a stored literal holding the read, reread after the stop
       dependent: ["let pair = [tally]", "repeat pair.first {}"],
       // Codex c-r8 B1: a read under a type test of the key, and one beside it
       narrowed: ["if tally is integer {", "  let picked: integer = tally", "}", "repeat tally {}"],

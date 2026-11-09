@@ -40,7 +40,7 @@ import { Project, ts } from "ts-morph";
  * - an `AdmissionHost` member, inherited ones included, that is not a host read `HOST_READS` lists with why it creates
  *   no obligation (a derivation returns what it leaves open to the consumers, which record it), so no new callback
  *   records one for admission whatever its wiring (Codex r23, r24 T1).
- * A listed host read or read is trusted by its reason (TABLE r4.152 (3)). A reference the syntax does not name (an
+ * A listed host read or read is trusted by its reason. A reference the syntax does not name (an
  * inherited member reached through an inferred wrapper, a generic receiver, a computed name, a value passed through an
  * aggregate or a copy) is outside this check, a review matter against r4.182, as r4.165 states it for the question
  * sources.
@@ -165,7 +165,7 @@ export const HOST_READS = new Map([
 ]);
 
 /**
- * The members read outside admission's own code, by the forms the inventory recognises (TABLE r4.182): [member, form,
+ * The members read outside admission's own code, by the forms the inventory recognises: [member, form,
  * file, why it creates no obligation]. A form is `length` (its `.length`), `for-of` (iterated), `spread` (spread into
  * an array), `operand` (an operand of arithmetic or a comparison), `variable` (a variable's whole initializer),
  * `argument` (a call's argument), `property` (an object literal's property value), `.<method>` (a call of the value's
@@ -576,7 +576,7 @@ export function obligationInventoryDiagnostics(program, root, files) {
   if (entries.size === 0) report(admissionClass, "OBLIGATION_SITES lists no derivation.");
 
   /*
-   * The guarded members, by the compiler's symbols (TABLE r4.182, Codex r6): every member of `Admission` per the type
+   * The guarded members, by the compiler's symbols (Codex r6): every member of `Admission` per the type
    * checker (its properties, a constructor's parameter properties, its methods and accessors, each with all their
    * declarations), `readChecks` the creation channel among them; `Consumers`' recording arrays; `boundaryCheck`; every
    * parameter named `error` in admission's files; and every derivation of admission's moved to a function. Each reference

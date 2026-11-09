@@ -14,7 +14,7 @@ import { completedCore, coreRequest } from "./type-core-analysis.js";
 import { HELD_MODES, heldStops, testedStops, type HeldMode } from "./type-core-held-host.js";
 import { plannedContent, plannedStores, runGlobals } from "./type-core-route.js";
 
-// #1526 decision 2, condition 1 (TABLE r4.390): the lost-check gate's invariant over a generated matrix. Each cell is a
+// #1526 decision 2, condition 1: the lost-check gate's invariant over a generated matrix. Each cell is a
 // destination of type `integer[][]` (its own, a copy's, a property's, a written one, one a later store decides, an object
 // literal's property) and a value form bringing `[["x"]]` into it, alone or after sixteen stores that make
 // the receiving completion reach its allowance; each run is a stop of it (a decision's at a demand allowance, a settled

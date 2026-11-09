@@ -11,7 +11,7 @@ import { COPY_CHAIN_DEPTH, COPY_CHAIN_SOURCES } from "./helpers/type-core-famili
 import { inMode, MODES, orderedItems, publication } from "./helpers/type-core-oracles.js";
 
 /*
- * G3 3a (TABLE r4.164, r4.178, r4.187): a read through wrappers (`a2 = {q: a1}`, `a2.q.q`) stands one step below its
+ * G3 3a: a read through wrappers (`a2 = {q: a1}`, `a2.q.q`) stands one step below its
  * parent's position (`positions.ts`), never at its root and its whole path, and that is output-neutral: every program
  * of the family below publishes the same (the answers, every binding's admitted types with their deciders, the plan or
  * the rejection, and the observed answer at every flow node with its element and properties) with positions and

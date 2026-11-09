@@ -13,7 +13,7 @@ const COMPOSED = "for (const item of this.#items(child.value, child.node, rest))
 /**
  * The check's messages for answers.ts and consumers.ts, each changed in memory by its `edit` (a scratch copy), or
  * replaced by its text in `replaced`, and the files `added`. The files as they are pass the check in `npm run lint`
- * (`run.mjs`); these are its negative checks (TABLE r4.165).
+ * (`run.mjs`); these are its negative checks.
  */
 function messagesWith(edits, replaced = {}, added = {}) {
   return questionSourceDiagnostics(

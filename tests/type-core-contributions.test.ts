@@ -185,7 +185,7 @@ test("each key's edges are the keys its contract includes: copies, written place
         ["g", ["f"], ["xs.element.f"]],
       ],
     ],
-    // (a load's default that reads a variable reads it at the call (F18, r4.81 (1)), by the value side's walk, which
+    // (a load's default that reads a variable reads it at the call (F18), by the value side's walk, which
     // records no flow: no edges, never none; a `null` default none)
     [
       'let d = {f: 1}\nlet v = load("k", default: d)\nsay "${v.f}"\nexit\n',

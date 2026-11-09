@@ -55,7 +55,7 @@ import {
  * (not whether the route still leaves it out: the slice grows). Each exact source is analysed once per mode and planned
  * in each where its row is executable, else in the source order alone; the two orders' plans are compared whole, and
  * each distinct plan runs its host values once; every row that holds the source is compared with that. The same
- * analyses and plans give the sharing differential (TABLE r4.72, `type-core-oracles.ts`) of the sources of the four
+ * analyses and plans give the sharing differential (`type-core-oracles.ts`) of the sources of the four
  * matrices checked so, which `type-core-sharing.test.ts` runs for every other program.
  * V30 §13's union rule is a compile error with no plan: its examples in the decision layer and the candidate route's
  * rejection; `UNION_RULE_MATRIX` at the check of written types the analysis reports (`writtenTypeErrors`, which reads
@@ -979,7 +979,7 @@ test("V30 §13's union examples: f–p one compile error at the written type nam
     analyseCore(project).diagnostics.map((found) => [found.kind, found.site]),
     [["written-type", { file: 1, start: 16, end: 30 }]],
   );
-  // the place keeps its written type (TABLE A1, A4): stores and copies that fit it add nothing to the one error
+  // the place keeps its written type (A4): stores and copies that fit it add nothing to the one error
   const kept = writtenErrors(
     requestOf('let h: integer | string[] = 1\nh = ["a"]\nlet copy = h\ncopy = 2\nh = copy\nexit\n'),
   );
@@ -1040,7 +1040,7 @@ test("a copy of an unannotated parameter whose default copies a written binding 
 });
 
 /**
- * The sharing differential (TABLE r4.72, r4.86) of the four matrices' sources above, each exact source once, on those
+ * The sharing differential of the four matrices' sources above, each exact source once, on those
  * tests' observations (made here where those tests did not run): in each order its answers, every binding's
  * admitted types at its root and its element and the candidate route's plan or rejection (in the source order alone
  * where its row is not executable) are byte-identical with the sharing on and off; its record is the same in both

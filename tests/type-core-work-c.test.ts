@@ -66,7 +66,7 @@ test("two choices read in k lists grow with the program in either order, each co
  * sparse paths (`LAYER_FAMILIES`), each read answered once per layer and path from the layers below it that hold its
  * property, at one small doubling, in either order and with the sharing off too: the total and the contract's own
  * counter (`invSteps`), which `main` grew as k³ on the diamonds (7.85 per doubling from 16 to 32); where `main` grows
- * faster than the bound on a family's shape, at or under `main`'s growth (`WorkFamily.main`, TABLE r4.233). The
+ * faster than the bound on a family's shape, at or under `main`'s growth (`WorkFamily.main`). The
  * support's other counters carry its log factor, which reads above the counters' bound at these sizes. The series to
  * k = 64 in four modes is the PR's evidence, outside CI.
  */
@@ -83,7 +83,7 @@ test("a stack of diamonds of copies and its siblings grow with the program in ei
 
 /**
  * #1466, the READY replay's `graph/224` and `graph/533` (a mutual feedback whose candidate route asks one `q` deeper per
- * question), the deep read they showed and Astra r1's alternating feedback (`a.next.back.next…`; TABLE r4.250, r4.251):
+ * question), the deep read they showed and Astra r1's alternating feedback (`a.next.back.next…`):
  * a read `depth` properties down, one holder answering it, asks that holder's source by reference at the caller's own
  * path (`singleSource`), never a layer's summary rebuilt from the path's record, makes no path id (only a summary's
  * demand needs one), and walks its path's steps once, its prefixes' texts never kept. At depths 16 and 32 in the four
@@ -240,7 +240,7 @@ test("a read finds the joined layer listing its step by the place's map (#1466)"
 /**
  * #1466, Codex r2's sibling and its shared shape: a read below nested joins, or below joined copies over a record listing
  * the same step, asks only the layer holding its property, never a joining layer or a copy it passes through. Below
- * nested joins that layer's one source answers the read by reference, so no summary's demand is made (TABLE r4.251);
+ * nested joins that layer's one source answers the read by reference, so no summary's demand is made;
  * over the shared record a listing layer lies below the step, so each property's holder makes its summary's demand, one
  * per property: k, at each size and in either order (r4.227's bound; a regression oracle of the selection, where a
  * joining layer asked too would make the read's summaries' demands).
@@ -315,8 +315,8 @@ test("a deep literal's decision grows with its depth, never with its square (#14
  * a gated known limit by the owner's decision (TABLE r4.49, option A): a regression check on the 64 → 128 step only,
  * at its measured doubling, not a bound at larger sizes; a change to admission's passes re-measures and proposes the
  * gate with its counts, never retunes it. Copies interleaved with conditional stores below their path (S6-CARRIERS
- * §4.7, condition (b)) are gated in the same form, a known limit by the owner's decision too (TABLE r4.69 (1)), and so
- * are copies separated by calls storing their source (r4.71).
+ * §4.7, condition (b)) are gated in the same form, a known limit by the owner's decision too, and so
+ * are copies separated by calls storing their source.
  */
 test("every admission family's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters(ADMISSION_FAMILIES), []);
@@ -386,7 +386,7 @@ test("a written decider in nested selections is answered once per level, each pa
 });
 
 /**
- * S6c (TABLE r4.61, r4.69 (2), r4.85): the value side's inherited products, gated as W34 is: same-source adds, choices
+ * S6c: the value side's inherited products, gated as W34 is: same-source adds, choices
  * and a literal's `get`s (S6-CARRIERS §4.5, §4.7: `ADMISSION_SAME_SOURCES`), product (c) of W34's class, k literals of
  * typed ingresses of one default (`ADMISSION_INGRESS_PRESETS`), and each discovery site's class (`VALUE_CLASS_SITES`),
  * their totals and each counter of at least 200 units in either order (they were gated at their measured doublings,

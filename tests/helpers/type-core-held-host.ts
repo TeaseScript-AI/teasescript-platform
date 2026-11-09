@@ -47,7 +47,7 @@ import { sampled } from "./sweep.js";
  * Host data a script place holds through its stores, read after a settled program stop (#1432, #1415; S3 §5, TABLE
  * r4.113, the mark-ownership rule of S8: a stop changes nothing of the unstopped analysis but what its deferred marks
  * stand for, each carrying its obligation; at a combined stop the unstopped analysis is the run at the same demand
- * allowance, except where the finishing walk answers a read the demand stop left `unknown`, TABLE r4.285,
+ * allowance, except where the finishing walk answers a read the demand stop left `unknown`,
  * `combinedStop`). A generated family over the holder: a list's element, an object's property,
  * a host property, a chain of copies, copies inside objects, a selection, a `get` default, a property's store, a
  * parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll` (and the owner reviewer's
@@ -795,7 +795,7 @@ export interface CombinedStop {
     readonly records: ReadonlySet<string>;
   };
   /**
-   * The reference's checks the stop owes in proof-derived words (`provenRewording`, TABLE r4.363), each with the stopped
+   * The reference's checks the stop owes in proof-derived words (`provenRewording`), each with the stopped
    * check that pairs with it (both by their JSON), and the records that go with them.
    */
   readonly reworded: {
@@ -1663,7 +1663,7 @@ function memberTakes(
 }
 
 /**
- * Condition (3)'s derived record (TABLE r4.363, the lead's ruling on #1708's decision note): the fields a consumer
+ * Condition (3)'s derived record (the lead's ruling on #1708's decision note): the fields a consumer
  * derives from the read it made, each as the proven kinds and the leaf proof imply it, never free to differ; every
  * other field the reference record's own. `null` where a field cannot be derived (a variant without its entry), which
  * refuses.
@@ -1794,7 +1794,7 @@ function writtenKinds(members: readonly (TypeAnnotation | null)[]): ReadonlySet<
 }
 
 /**
- * Condition (1)'s strict leaf proof (TABLE r4.363): the kinds a written declaration gives the stopped check's label, the
+ * Condition (1)'s strict leaf proof: the kinds a written declaration gives the stopped check's label, the
  * declaration at its root's recorded place followed through every step of its recorded label to the leaf (element and
  * `entry` steps through the element types, optionals and unions as `termAt` follows them); `null` where a step cannot be
  * followed, the root declares no type, or the label was not recorded. Never read from a name, a site nearby or a text.
@@ -1917,7 +1917,7 @@ export function provenRewording(
 }
 
 /**
- * A combined stop's rule (S8, TABLE r4.285, r4.290 and its inventory). The demand-only run is the reference, recorded with
+ * A combined stop's rule (S8 and its inventory). The demand-only run is the reference, recorded with
  * its consumers' reads (`recordingReads`); each of its checks the stopped analysis neither keeps nor marks is accepted only
  * by one clause, every site whole (file and offsets), a slot a site, target, boundary and kind, a domain the kinds a check
  * lets through (`domainOf`):
@@ -1926,7 +1926,7 @@ export function provenRewording(
  *   its key by the stopped analysis's last run of that unit (its finishing walk's where that ran it again): read there
  *   again, every such read settled, or left to its contract (`Consumers.skip`, the quiet path, which needs every contract
  *   it reads settled); and at whose slot the natural analysis (no demand, no stop) and the stopped one owe the same
- *   domains, the natural one not the check itself. The coarse reading (TABLE r4.299): a finer one, by the consumer
+ *   domains, the natural one not the check itself. The coarse reading: a finer one, by the consumer
  *   invocation that emitted the check, has no entry to hook, as the consumers are module functions no test can replace
  *   and a call stack names no call; where (a) is denied only by such a read, the check is the counted class (`coarse`);
  * - (w) marks at its place (site, target, boundary), of any kind, the only checks owed there, together letting through
@@ -2023,7 +2023,7 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
       ? unanswered
       : "relabelled";
   };
-  // (TABLE r4.363: each reference check the stop does not owe as it is, paired with a stopped check in proof-derived
+  // (each reference check the stop does not owe as it is, paired with a stopped check in proof-derived
   // words where one is, whatever clause takes it: the pair stands for one check on both sides of the inventory)
   const pairs = new Map<string, string>();
   for (const u of reference.checks) {
@@ -2207,7 +2207,7 @@ export function combinedMarkProblems(
   stopped: Answers,
 ): string[] {
   const rule = combinedStop(reference, natural, stopped);
-  // (TABLE r4.363: a stopped check paired with a reference check in proof-derived words stands at that check's place, as
+  // (a stopped check paired with a reference check in proof-derived words stands at that check's place, as
   // that check, on both sides of the inventory)
   const paired = new Map<string, Obligation>();
   for (const u of reference.checks) {
@@ -2402,7 +2402,7 @@ const fields0 = (k: number, value: (i: number) => string): string =>
  * field, nested cycles, two-way copies, and a chain whose links each store their own property. Codex r5's B1 and T1: k
  * readers each holding the same two unrelated objects (`unshared-readers`), or one object and the tip of a chain whose
  * links store their own property (`unshared-chain-readers`), and k readers each holding a chain's root and its tip, root
- * first (`tie-root-first`) or tip first (`tie-tip-first`). Sol's design round r1 (TABLE r4.208): reader i holding the
+ * first (`tie-root-first`) or tip first (`tie-tip-first`). Sol's design round r1: reader i holding the
  * i+1-th link of one chain and the k-i-th of another, each link storing its own property (`staggered-pairs`), and k
  * branches of one object, each storing its own property, each read through a reader that also holds another object
  * (`branch-disjoint-readers`). Codex r6's B1: one `addAll` of k copies holding host data (`addAll-copies`). The owner
@@ -2636,7 +2636,7 @@ function gateShapes(): Record<string, (k: number) => string> {
 const FIRST_SETTLED: readonly string[] = ["extraction", "walk"];
 
 /**
- * The finishing growth gate (#1445, TABLE r4.208): each shape at its two sizes (`sizes`, one doubling), in both orders,
+ * The finishing growth gate (#1445): each shape at its two sizes (`sizes`, one doubling), in both orders,
  * measured at its first settled stop (in the walk, or the extraction before it). Per doubling of the syntax nodes, the frontier's own counter (`checks`) grows
  * within 2.35; the ring and the chain whose links store their own property are also gated whole, finishing within 2.15
  * and every finishing counter within 2.35. The other shapes' admission and contract work and decision-stop bookkeeping

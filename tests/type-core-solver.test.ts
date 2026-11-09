@@ -186,7 +186,7 @@ const layerRequest = (source: string): CoreAnalysisRequest => {
 };
 
 test("a layer's summary in a copy cycle is solved alike from each member as the entry and in either order (#1466)", () => {
-  // (a cycle whose read one source answers asks it by reference, no summary made (TABLE r4.251): its component is solved
+  // (a cycle whose read one source answers asks it by reference, no summary made: its component is solved
   // alike too; the others' components hold a layer's summary)
   const layered = LAYER_CYCLES.filter((source) => {
     const found = componentDifferences(source, layerRequest(source));
@@ -251,7 +251,7 @@ test("every finished layer summary is asked again in a fresh pass by its name an
 });
 
 /**
- * #1398 (TABLE r4.277 (2)): a written value read through a layer's summary keeps its spelling: the summary's items carry
+ * #1398: a written value read through a layer's summary keeps its spelling: the summary's items carry
  * it, a fresh pass asked by the summary's name and packet alone gives them again with it, and the summary that merges
  * both layers' leaves stands in the direct read's order, in the four modes. Of a written value in both copies' stores,
  * and beside a whole number it spells.
@@ -443,7 +443,7 @@ test("a method chain round its own component answers alike from every entry, its
 });
 
 /**
- * #1398 (TABLE r4.277 (2), Codex r6 on #1558): an item's spelling is part of its value, so a component member whose
+ * #1398 (Codex r6 on #1558): an item's spelling is part of its value, so a component member whose
  * answer gains a spelling changes, and the members reading it run again: A merges unmarked kinds with C, B is A, C
  * merges B with a written type's. From each member as the entry, all three end with the written spelling, in its order.
  */
@@ -794,7 +794,7 @@ test("a recursive projection of a reference or a record closes its component", (
 const NARRATOR = 'speaker narrator { value: "Hello" }\n';
 
 /**
- * Programs whose receiver gains a reference kind only round its own cycle (r4.44), whose receiver holds a reference from
+ * Programs whose receiver gains a reference kind only round its own cycle, whose receiver holds a reference from
  * outside the cycle beside a record, a nested record or an external leaf round it (B2, B2-r2), and the record-only
  * control, with their diagnostics (a class `warning-runtime-check` unless written; a member's at the whole access, TABLE
  * §3.4). A return that may not fit the result
@@ -970,7 +970,7 @@ test("an external value read below its record without a cycle keeps its reasons 
       .map((d) => `${d.kind} ${d.class} ${source.slice(d.site.start, d.site.end)}`)
       .sort();
   });
-  // (the member read at the whole access, its receiver included, TABLE §3.4)
+  // (the member read at the whole access, its receiver included)
   const want = [
     "integer-use warning-runtime-check f(true).custom.custom",
     "member-read warning-runtime-check f(true).custom.custom",

@@ -4,8 +4,8 @@ import test from "node:test";
 
 /*
  * The core makes every path and key through the helpers of `budget.ts` and `definitions.ts`: a kept one (`keptText`,
- * `keptKey`, `keptSteps`, …) where a structure keeps what it makes, which charges its size to the literal work first
- * (TABLE r4.58), and its plain twin (`pathText`, `keyOf`, `joinSteps`, …) where a step only looks it up or passes it on.
+ * `keptKey`, `keptSteps`, …) where a structure keeps what it makes, which charges its size to the literal work first,
+ * and its plain twin (`pathText`, `keyOf`, `joinSteps`, …) where a step only looks it up or passes it on.
  * A literal's depth, breadth and names make these long and many, and each one kept uncharged let a deep or long-named
  * literal reach the heap before the allowance (the deep-literal reviews' B1 and R2-B1), so a path or key made past the
  * helpers is a choice no one made. This scan is a tripwire for the usual spellings, not a proof: it finds a path's text

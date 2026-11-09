@@ -192,7 +192,7 @@ test("a literal count of one or more runs the body before the loop is left (P7)"
   assert.equal(forever.dom.dominates(forever.at("B"), forever.at("R")), true);
   const maybe = analyse('while hostFlag {\n  say "B"\n}\nsay "R"\nexit');
   assert.equal(maybe.dom.dominates(maybe.at("B"), maybe.at("R")), false);
-  // A `for` over a literal collection: an empty one never runs its body, a non-empty one runs it first (r4.22).
+  // A `for` over a literal collection: an empty one never runs its body, a non-empty one runs it first.
   const filled = analyse('for item in [1, 2] {\n  say "D"\n}\nsay "R"\nexit');
   assert.equal(filled.dom.dominates(filled.at("D"), filled.at("R")), true);
   const empty = analyse('for item in [] {\n  say "B"\n}\nsay "R"\nexit');
@@ -480,7 +480,7 @@ test("code after a call that cannot return is dead, and after one that may retur
     ]),
     true,
   );
-  // A `goto` out of a function to a label returns the file only through the label's continuation (r4.25).
+  // A `goto` out of a function to a label returns the file only through the label's continuation.
   const leave = (ending: string) => [
     { path: "main.tease", source: 'say "START"\ncall "part.tease"\nsay "R"\nexit' },
     {
@@ -504,7 +504,7 @@ test("code after a call that cannot return is dead, and after one that may retur
       never,
     );
   // A block registered only behind a call that cannot return registers nothing, so its `end` cannot justify that
-  // call's return (r4.26): behind `stop()` in the called file, after the call in main, or in a function called there.
+  // call's return: behind `stop()` in the called file, after the call in main, or in a function called there.
   const exits = { path: "part.tease", source: 'say "TARGET"\nexit' };
   const button = 'showPermanentButton "Never" {\n  end\n}\n';
   assert.equal(

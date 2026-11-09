@@ -135,7 +135,7 @@ test("every store above a stopped decision keeps its check whole or its owned ma
 });
 
 /**
- * #1440 (TABLE r4.200), `certificateFamily`'s anchors through the candidate's compile and run, at every allowance
+ * #1440, `certificateFamily`'s anchors through the candidate's compile and run, at every allowance
  * around the work of each decision of the store's binding: where the decision of a store's own destination stops, the
  * store is checked against the complete type the source proves apart from it, the one its declaration's start value
  * copies there through object literal properties (the root's own, one or two levels down, a property named `element` or

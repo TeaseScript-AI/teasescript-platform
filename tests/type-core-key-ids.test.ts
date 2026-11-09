@@ -62,7 +62,7 @@ import { Admission } from "../src/type-inference/core/admission.js";
 import { sharedPaths } from "../src/type-inference/core/admission/structure.js";
 
 /*
- * G3 stage 1 (TABLE r4.196): the key cursors (`contract/key-ids.ts`) and the frozen wrapper lane
+ * G3 stage 1: the key cursors (`contract/key-ids.ts`) and the frozen wrapper lane
  * (`contract/lanes.ts`), exercised directly and through the decided paths that carry them (PR 3). A cursor names one
  * key of its pass whichever way it is made, orders as its key's text, survives the pass's stops and forgets, and
  * crosses passes only as a packet; a family's lane is frozen at its first question, by the binding's wrapper shape

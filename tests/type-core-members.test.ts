@@ -294,7 +294,7 @@ test("every member a receiver kind has answers its declared result to a consumer
             : use.collection;
           const label = inner;
           const collection = itemsAt(inner);
-          // (the member check at the whole access, its parentheses included, TABLE §3.4)
+          // (the member check at the whole access, its parentheses included)
           if (unknown(collection))
             expected.push(`null-check ${label} [non-null] @${siteOf(use.value)}`);
           if (unknown(collection) || value.some((item) => item.tag === "empty"))

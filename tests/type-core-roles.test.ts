@@ -25,7 +25,7 @@ import { recordsOf, shapesOf } from "./helpers/type-core-rule.js";
  * The role matrix (S6-CARRIERS revision 5, §6), beside the floor. Its purpose is the carrier table (`CARRIER_ROLES`):
  * every role it lists takes its role at each placement of the data and owes the rule function's records there, and a
  * shape the candidate route takes plans the checked stores its record derives and runs as derived under every host
- * value (§5.2, r4.59); the others report the route's reason. The floor leaves to this test the shapes it holds as they
+ * value (§5.2); the others report the route's reason. The floor leaves to this test the shapes it holds as they
  * are. The placements: inside a literal operand, the whole operand, the operation's own read, a member's receiver
  * (`type-core-roles.ts` holds the table and the compositions). Each placement is a class of the rule function
  * (`type-core-rule.ts`), its shapes each named and inline, without and with a later store, compared exactly in both
@@ -58,7 +58,7 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
       wrong.push(
         `${shape.name}: ${JSON.stringify(actual)}, the rule owes ${JSON.stringify(shape.expected)}`,
       );
-    // the plan and its runs where the candidate route takes the shape (TABLE r4.59), derived from its record
+    // the plan and its runs where the candidate route takes the shape, derived from its record
     let plan;
     try {
       plan = compileSourceWithBackend(shape.source, { globals: ["hostValue"] }, CORE_BACKEND).plan;
@@ -108,8 +108,8 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
  * regressions (inline data a published choice selects owes the store's boundary at the host value, beside C13's warning
  * where it is a button's value, an unselected property none), a carrier of a carrier and a carrier inside a literal inside a carrier (inline and named), inline and
  * named data in one selected collection (the named data's C1 at the selecting expression, the inline data's boundary
- * alone: r4.63 (1), (2), TABLE r4.67 (3)) and inline data or a host member beside an own read's named data (the merged
- * item's C1 at the store's value, the member's own place's at its read: r4.70 (1)), a choice over a held list (§3.3's
+ * alone) and inline data or a host member beside an own read's named data (the merged
+ * item's C1 at the store's value, the member's own place's at its read), a choice over a held list (§3.3's
  * record boundary beside C1), a union holding a reference across two carriers (a list or the speaker from an
  * unrestricted dict's values; opaque by dispatch, checked at its consumer), and nullable root and inner receivers of a
  * member (r4.60 beside each receiver's C5 check). The eighth, plain options (`askChoice 1, hostValue`), and the mixed

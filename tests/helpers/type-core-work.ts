@@ -8,7 +8,7 @@ import { coreRequest } from "./type-core-analysis.js";
 import { type WorkFamily } from "./type-core-families.js";
 
 /**
- * The work of the coarse core (checkpoint 9, TABLE §8 and §10.1's W rows) as a sampled regression oracle: every
+ * The work of the coarse core (checkpoint 9 and §10.1's W rows) as a sampled regression oracle: every
  * family's charged work at k = 128 against k = 64, per doubling of the programs' syntax nodes, since a family's source
  * need not double exactly. Linear work doubles; a structure bounded by a product of two program dimensions about
  * quadruples. The TABLE's `n log n` structures (a key's definitions sorted, its lifting table, its own events) give up
@@ -75,7 +75,7 @@ export function steepCounters(
     for (const reversed of [false, true]) {
       const small = measure(at64, reversed);
       const large = measure(at128, reversed);
-      // (an output-bound family per its output's growth, TABLE r4.245, r4.294; any other per its source's)
+      // (an output-bound family per its output's growth; any other per its source's)
       const scale =
         family.output === undefined
           ? (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1)
@@ -83,7 +83,7 @@ export function steepCounters(
       const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}${sizes[0] === 64 ? "" : ` ${sizes[0]} → ${sizes[1]}`}`;
       const doubling = (before: number, after: number): number =>
         (2 * (after / Math.max(1, before))) / scale;
-      // (where `main` grows faster on the family's shape, at or under `main`'s growth, TABLE r4.233)
+      // (where `main` grows faster on the family's shape, at or under `main`'s growth)
       const bound = Math.max(DOUBLING, family.main?.total ?? 0);
       const counterBound = (counter: string): number =>
         counter === "invSteps"

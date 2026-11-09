@@ -5,7 +5,7 @@ import type { CapturedContract } from "../../src/type-inference/core/contract-de
 import { runGlobals } from "./type-core-route.js";
 
 /*
- * The obligation-level knowledge of a stopped analysis (#1526 phase B, TABLE r4.278): which contract each store owing a
+ * The obligation-level knowledge of a stopped analysis (#1526 phase B): which contract each store owing a
  * check was captured with (`Answers.contracts`: complete, open, or lost with its cause), and an execution predicate
  * that judges a store's check from what the script does, apart from the checker. Kept apart from the held-host oracle
  * until #1597 lands there (the lead's ruling).

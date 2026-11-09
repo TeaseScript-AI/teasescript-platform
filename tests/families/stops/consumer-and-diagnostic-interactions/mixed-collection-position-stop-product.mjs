@@ -3,7 +3,7 @@ export const id = "s8b-r6-astra-matrix.mjs";
 // #1165 / S8, Astra r6 (R/astra-m4-s8b-r6-evidence/probe/matrix.mjs): the generated stop matrix, of which the r6 sweeps
 // ran the fourteen cases its cases.mjs selects.
 
-// The generated stop matrix (TABLE r4.138): every consumer position against every value shape, each program one case.
+// The generated stop matrix: every consumer position against every value shape, each program one case.
 // Positions: a store into an inferred place, into a written one, a direct consumer, an argument of a single-site and of
 // a multi-site call, a return, a condition, a selection (`.first`, `.get`). Shapes: mixed literals with a named element
 // (list, set, dict, nested), a plain literal, ingress (a scalar, in a list, in an object), typed calls (fromJson with a

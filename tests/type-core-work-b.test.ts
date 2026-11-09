@@ -267,7 +267,7 @@ test("the composition of an operand's parts visits only its smaller part, its sh
  *
  * Measured per pass (steps ÷ passes), as `c1Visits`'s bound divides by `rejectPasses`: at 64 levels `out`'s decision
  * crosses its allowance (its cost is depth × copies, G6 in #1319's design-round list), and the pass that restarts it
- * (TABLE r4.180, r4.183) walks the type again.
+ * walks the type again.
  */
 test("copies of a deep written type walk the type once, not once per copy (#1194)", () => {
   const measured = (k: number): { steps: number; nodes: number } => {
@@ -345,7 +345,7 @@ test("nested selections of objects merge each level's items once, in either orde
 });
 
 /**
- * A4 through copies (the owner's reviewer's F1 on #1049, TABLE r4.80): the inherited-field families, gated above with
+ * A4 through copies (the owner's reviewer's F1 on #1049): the inherited-field families, gated above with
  * the admission families, are gated with the sharing off too, so what a copy costs never hangs on equivalent answers
  * being shared; and his budget witness, a chain of 1,024 whole copies of a root of 1,024 written-typed fields (a source
  * of 6,153 syntax nodes that reached the allowance), completes within the default allowance.
@@ -426,7 +426,7 @@ test("every family's member visits are bounded by its output and its decided pat
 });
 
 /**
- * G3 stage 1 (TABLE r4.196): the retained wrapper pairs, one read through k wrappers by a short step and by a long one,
+ * G3 stage 1: the retained wrapper pairs, one read through k wrappers by a short step and by a long one,
  * their decided paths' keys cursors from birth (`keyLane`), never texts or arrays per prefix: their work and each
  * counter grow with the program in either order, with the sharing on and off (on `main` 2.17 and 2.96 at 16 → 32). The
  * pairs at 64 → 128 and 40 → 80, the uncharged-work probe and the reversed schedule are the PR's evidence, outside CI.

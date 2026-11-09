@@ -282,7 +282,7 @@ test("C10 takes a fallback's family from its value's domain where the read canno
       'let input = hostValue\nlet result = input otherwise "bad"\nsay result',
       "warning-runtime-check | written-target@35:W | copy-typeB:input[unknown] copy-type:result[string]",
     ],
-    // (Codex r1's N1 on #1824: a read the test proves only `null` takes no family, r4.106)
+    // (Codex r1's N1 on #1824: a read the test proves only `null` takes no family)
     [
       "narrowed/is-null",
       'let n: integer? = hostValue\nif n is null { say n otherwise "bad" }',

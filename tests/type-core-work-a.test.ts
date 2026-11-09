@@ -223,7 +223,7 @@ test("a decided object's property search grows with the program in a stack of co
 });
 
 /**
- * Stage 3b's families (TABLE §13.3, W27–W34 and the tested-copy variant): the narrowing index built and every read's
+ * Stage 3b's families (W27–W34 and the tested-copy variant): the narrowing index built and every read's
  * narrowing (N2 with N5) and route (N3) asked, as S10's second part's consumers will ask them, in source order and
  * reversed with the solver's worklist; its total and each counter under the standard gate. The series to k = 1,024 is
  * the step's evidence, outside CI.
@@ -1218,7 +1218,7 @@ test("lists of one set of choices in many orders site their host data without wa
  * The value side's gated known limits (TABLE r4.83 (2), (5)): read chains through nested literals, each link's key one
  * step longer (`READ_CHAIN_PRODUCTS`), and adds of several sources into one list in turn (`MIXED_ADD_PRODUCTS`); a
  * regression check on the 64 → 128 step only, each held to its measured doubling in either order. On CI (GitHub
- * Actions sets `CI`) the mixed adds run in the source order only: their orders differ by at most 0.0001 (TABLE r4.85).
+ * Actions sets `CI`) the mixed adds run in the source order only: their orders differ by at most 0.0001.
  */
 test("read chains and mixed-source adds grow no faster than measured", () => {
   const steep: string[] = [];
@@ -1262,7 +1262,7 @@ test("a literal of 4,096 distinct records is searched in linear time", () => {
 });
 
 /**
- * A value's identity names its inputs by their own identities (TABLE §8, round 12 B4): a chain of 32 `otherwise`s, each
+ * A value's identity names its inputs by their own identities (round 12 B4): a chain of 32 `otherwise`s, each
  * of the one before twice, is a source of 32 lines, never an identity of 2^32 characters.
  */
 test("a chain of carriers over shared inputs is identified in linear space", () => {

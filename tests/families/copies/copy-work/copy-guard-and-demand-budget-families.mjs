@@ -16,7 +16,7 @@ const a3CopyWidths = (() => {
   const corpus = (() => {
     const many = (k, f, sep = "\n") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
     const COPIES = [
-      // round 17 (r4.36): a test on the source before each copy (Sol r9 D1), and copies inside tests that mark their reads
+      // round 17: a test on the source before each copy (Sol r9 D1), and copies inside tests that mark their reads
       [
         "a tested whole-copy chain read at k fields",
         (k) =>
@@ -27,7 +27,7 @@ const a3CopyWidths = (() => {
         (k) =>
           `let box0 = {${many(k, (i) => `f${i}: 1`, ", ")}}\nif hostFlag { box0 = {${many(k, (i) => `f${i}: null`, ", ")}} }\n${many(k, (i) => `if box${i}.f0 > 1 {\nlet box${i + 1} = box${i}`)}\n${many(k, (i) => `repeat box${k}.f${i} {}`)}\n${"}".repeat(k)}\nexit`,
       ],
-      // round 18 (r4.38): k sibling guarded copies each testing its own field (Astra r10 D1), an `and` over k fields with k
+      // round 18: k sibling guarded copies each testing its own field (Astra r10 D1), an `and` over k fields with k
       // copies inside (Sol R10-D1), a chain of copies with a store to a different field between each pair (Astra r10 D2)
       [
         "sibling guarded copies, one field each",
@@ -197,7 +197,7 @@ const a3GuardedAliasMarks = (() => {
         (k) =>
           `let root = {wrap: {${many(k, (i) => `f${i}: "x"`, ", ")}}}\nlet picked = root.wrap\n${many(k, (i) => `function contribute${i} { if root.wrap.f${i} is integer { picked = root.wrap } }\ncontribute${i}()`)}\n${many(k, (i) => `say picked.f${i} + 1`)}`,
       ],
-      // round 16 (r4.33, W40's logical variants): tests in logical operands, the copies in k callables
+      // round 16 (W40's logical variants): tests in logical operands, the copies in k callables
       [
         "logical operand tests, k callables",
         (k) =>
@@ -306,7 +306,7 @@ const a3IdentityEntries = (() => {
       (k) =>
         `${SNAP}let archive = [${many(k, () => "snapshot()", ", ")}]\nlet n: integer = archive.first.a`,
     ],
-    // r4.17: guarded stores of one wrapper literal, the guards on alternating children of a fixed two-field root
+    // guarded stores of one wrapper literal, the guards on alternating children of a fixed two-field root
     [
       "guarded wrapper literal",
       "prefixEntries",
@@ -476,7 +476,7 @@ const a3WideFieldStores = (() => {
           `let box0 = {${many(k, (i) => `f${i}: 1`, ", ")}}\nif hostFlag { box0 = {${many(k, (i) => `f${i}: null`, ", ")}} }\n${many(k, (i) => `if hostFlag { box${i}.f${i} = 2 }\nlet box${i + 1} = box${i}`)}\n${many(k, (i) => `repeat box${k}.f${i} {}`)}\nexit`,
         ["exactQueries", "invSteps"],
       ],
-      // round 19d (r4.46 (3), W44): k sibling fields, each stored, projected into its own copy and read: the keys below a
+      // round 19d (W44): k sibling fields, each stored, projected into its own copy and read: the keys below a
       // projection from the prefix index, never the root's whole key set per copy
       [
         "sibling fields each stored, projected and read",
@@ -491,7 +491,7 @@ const a3WideFieldStores = (() => {
           `let box0 = {${many(k, (i) => `f${i}: 1`, ", ")}}\nif hostFlag { box0 = {${many(k, (i) => `f${i}: null`, ", ")}} }\n${many(k, (i) => `if hostFlag { box${i}.f${i} = 2 }\nlet box${i + 1} = box${i}`)}\nrepeat box${k}.f0 {}\nexit`,
         ["invSteps", "prefixEntries"],
       ],
-      // round 19e (r4.47 (3), W45): k destinations each copying root `a` then storing root `b`, each root with k stored
+      // round 19e (W45): k destinations each copying root `a` then storing root `b`, each root with k stored
       // fields: each root listed whole in one shared entry, never flattened per destination
       [
         "the two-roots join",

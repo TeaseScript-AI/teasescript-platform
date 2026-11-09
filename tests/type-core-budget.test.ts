@@ -37,7 +37,7 @@ import {
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 import { planChecks } from "./helpers/plan-checks.js";
 
-// The work budget (TABLE §8; the reference model's `budget-check.mjs`, checks 1 and 2): the counters sum to the charged
+// The work budget (the reference model's `budget-check.mjs`, checks 1 and 2): the counters sum to the charged
 // total, and an analysis stops at exactly the unit that crosses its allowance. This proves the accounting, not that
 // every loop is charged: that is review's and the work tests' to show.
 
@@ -234,7 +234,7 @@ test("repeated work counts to the demand and its spender, never to the total, a 
 });
 
 /**
- * #1323 (r4.371): a generator's shared build (`sharedSteps`) counts its units, the demands it yields included, to the
+ * #1323: a generator's shared build (`sharedSteps`) counts its units, the demands it yields included, to the
  * total and not to the asker: its `own` stands where the build began, repeats included, until the build ends; one a
  * stop abandons suspended ends when the solver closes it (`closeShared`), as its end would have.
  */
@@ -301,7 +301,7 @@ test("statements nested past 256 levels are checked when the script runs, the re
       errors: ["TSV041 1.5"],
       stops: 1,
       unchecked: ["top level"],
-      // (the host read is its own data after the stop, as unstopped: S3 §5 revision 18, TABLE r4.109 (1))
+      // (the host read is its own data after the stop, as unstopped: S3 §5 revision 18)
       deferred: ["operand hostValue unknown"],
     });
   assert.equal(analysed(requestOf(main(chained(255)))).budget.exhausted, null);
@@ -310,7 +310,7 @@ test("statements nested past 256 levels are checked when the script runs, the re
 });
 
 /**
- * D4 a′ (TABLE r4.54): a stop is no compile error. At every allowance below the analysis's work, wherever the stop
+ * D4 a′: a stop is no compile error. At every allowance below the analysis's work, wherever the stop
  * falls (the setup, admission, the walk), in both orders: the literal error stands (found before the stop, or by the
  * finishing path, which knows a literal's kind); the count that waits on the recursive contract is checked when the
  * script runs; one warning; and the finishing path's work stays within a small multiple of the program's size.
@@ -372,7 +372,7 @@ test("the stop's warning names the heaviest place and marks each function it lef
     const stop = stopOf(answers, source);
     assert.equal(stop.stops, 1, String(fraction));
     // once per function, exactly those whose checks moved, and the top level where a stop before admission settled
-    // marks the arguments into the inferred parameters (TABLE r4.110 (3))
+    // marks the arguments into the inferred parameters
     const functions = Array.from({ length: 40 }, (_, i) => {
       const text = `function f${i}(p) {\n  repeat p {}\n}`;
       const start = source.indexOf(text);
@@ -399,7 +399,7 @@ test("the stop's warning names the heaviest place and marks each function it lef
 });
 
 /**
- * S8's obligations (TABLE r4.55 (3)): the finishing path is bounded when the setup, admission's passes, or a recursive
+ * S8's obligations: the finishing path is bounded when the setup, admission's passes, or a recursive
  * contract spend the allowance. Each stop compiles, with one warning and its checks, its finishing work small.
  */
 test("the finishing path is bounded after a stop in the setup, in admission's passes and in a recursive contract", () => {
@@ -575,7 +575,7 @@ test("a cycle of calls passing host data on is resolved once, unstopped and fini
 /**
  * #1364, Codex r2's witness: a component answers every member with what the whole component reaches. Here a converting
  * call's default carries host data into a cycle of three calls. That default is no carrier operand, so no landing names
- * its host data, and each read of the cycle owes the boundary check at its consumer (r4.10). A component closed before
+ * its host data, and each read of the cycle owes the boundary check at its consumer. A component closed before
  * its root, as when a closed child's low number is not passed up, answers `b` and `c` without it, in source order.
  */
 test("every read of a cycle of calls holding host data no landing names owes its boundary check (#1364)", () => {
@@ -787,7 +787,7 @@ test("a settled stop finishes the host data of every copy-graph topology in line
 });
 
 /**
- * #1710 (TABLE r4.261: a charge where work grows with the input): two consumer debits, each its site's own work, one
+ * #1710 (a charge where work grows with the input): two consumer debits, each its site's own work, one
  * per site it serves, observed at the site (`chargesBySite`), not as a total. `integerOnly` charges one `checks` unit for
  * each count it checks, before it reads the count's items: `repeat []` once, twice, three times. The expected-site
  * question (`expectedTask`, which a fix's code form asks of the site its value lands at) charges one for each site it

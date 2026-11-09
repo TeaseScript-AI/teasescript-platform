@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 /*
- * Scale regressions of deep literals (TABLE r4.56, r4.58): before the core charged the work its literal indexes keep,
+ * Scale regressions of deep literals: before the core charged the work its literal indexes keep,
  * the candidate route's analysis of a list literal nested 1,024 deep, and the core's of any literal nested 1,024 deep
  * with one read of it, grew until the process died (V8's heap abort, or a 2 GiB scope's OOM kill). Now the program's
  * work allowance stops them first. Per literal kind, a child process with a capped V8 heap compiles `let value =` the

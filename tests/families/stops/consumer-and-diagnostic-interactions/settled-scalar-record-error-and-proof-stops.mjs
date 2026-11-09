@@ -174,7 +174,7 @@ export const cases = (() => {
       true,
     ],
     // Codex r6's nested typed default, whose route questions take more than 400 units past its analysis
-    // Astra r3's T1 (TABLE r4.108): a property store's guard, and the guard beside a default a stop marks
+    // Astra r3's T1: a property store's guard, and the guard beside a default a stop marks
     astraGuard: [
       'let vessel = hostValue\nvessel.amount = 4\nsay "AFTER"\nexit\n',
       [{ hostValue: object({ amount: 1 }), hostOther: 2 }],
@@ -194,7 +194,7 @@ export const cases = (() => {
       [],
       [],
     ],
-    // Codex r12's B1 (TABLE r4.113): a host global the script writes; its reads' ingress is structural
+    // Codex r12's B1: a host global the script writes; its reads' ingress is structural
     b1Field: [
       "hostValue.n = 2\nexit\n",
       [{ hostValue: object({ n: 1 }), hostOther: 2 }],

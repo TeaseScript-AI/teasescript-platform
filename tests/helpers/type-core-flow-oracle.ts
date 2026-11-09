@@ -121,9 +121,9 @@ function lower(
  * Which functions and files of the plan can return, by the rules of the graph's `decideReturns`, on instructions: a
  * function returns at a `return`; a file at an `end` of its top level, at an `end` in a function it calls, through a
  * file it starts with `goto` that returns, or at an `end` of a block whose registering instruction the session reaches
- * through the calls found to return so far (r4.26: never through a return that the block's own `end` would justify);
+ * through the calls found to return so far (never through a return that the block's own `end` would justify);
  * a function may end the running file at an `end`, through a function that may, a `goto` of a file that returns, or a
- * `goto` of a label whose continuation in its file's top level reaches such an ending (r4.25). A call goes on only once
+ * `goto` of a label whose continuation in its file's top level reaches such an ending. A call goes on only once
  * its callee is found to return. Iterated until nothing changes, the registered blocks found afresh each round.
  */
 function planReturns(lowered: Lowered): {
