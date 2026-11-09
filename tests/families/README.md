@@ -367,6 +367,24 @@ Exit statuses:
 - 2: a usage error, or input it cannot read.
 - 3: for `collect`, a shard did not run.
 
+## Stop runs
+
+`stop-runs.mjs` (#2080) checks, on one built tree, that a stop never lets a value through that the natural plan
+rejects. For each item it compiles the unit unstopped and at the item's demand allowance, in its mode, and runs both
+plans over host data made from the unit's own property names: `stopRuns` and `hostValues` in
+`tests/helpers/type-core-stop-oracle.ts`, which also feed that data to `stopProblems` as its violating runs.
+- An item is `open` where the natural plan fails at runtime and the stopped plan runs to its end, or where the natural
+  compile errs and the stopped plan runs to its end. It is `later`, `stricter`, `closed` or `declined` otherwise.
+- With no natural plan, each natural error's site lists what the stopped analysis checks there.
+- An item is a `plans.mjs` record's `{set, name, mode, demand}` or a records row's `{files, globals, label, demand}`.
+- It writes `rows.jsonl` and `summary.json` to `--out`, and exits 1 on any `open` or `later` item.
+
+```sh
+sx-job submit --commit t=<tree> --shards 8 --mem 6G --campaign <T> --in <items.jsonl> \
+  -- bash -c 'node "$SX_TREE_t/tests/families/stop-runs.mjs" "$SX_TREE_t" "$SX_IN/<items.jsonl>" --shard {i}/{n} \
+  --out "$SX_OUT"'
+```
+
 ## Shadow
 
 `shadow.mjs` (S9b's interim and S11's final shadow comparison, landed by #1704 from the S11 readiness research's copy)

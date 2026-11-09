@@ -1,14 +1,17 @@
-import type { CompilationResult } from "../../src/compiler.js";
+import { compileProjectWithBackend, type CompilationResult } from "../../src/compiler.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
 import { run } from "../../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
-import type { Answers } from "../../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice } from "../../src/type-inference/core/backend.js";
+import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
+import { CORE_BACKEND, CandidateOutsideSlice } from "../../src/type-inference/core/backend.js";
+import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
 import { withMessagesInWords } from "../../src/type-inference/core/consumer.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
+import { withoutRecords } from "../../src/type-inference/core/consumers/left-out.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import type { SourceSite } from "../../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
+import { coreRequest, type SourceFile } from "./type-core-analysis.js";
 import { decisionsByKey } from "./type-core-oracles.js";
 import { siteKey } from "./site-keys.js";
 
@@ -617,4 +620,254 @@ export function stopProblems(c: StopCase): string[] {
       problems.push(`violating ${JSON.stringify(b)} against ${JSON.stringify(a)}`);
   });
   return problems;
+}
+
+/*
+ * A stop's runs against its unstopped compile's (#2080): the stopped plan must stop wherever the natural plan stops with a
+ * runtime failure, for any host data. `hostValues` gives each global the source names the values of a pool made from the
+ * source's own property names; `stopRuns` compiles a unit unstopped and at a demand allowance in a mode, feeds the pool to
+ * `stopProblems` as its violating runs, and also compares each run directly (`ranWith`), since `stopProblems` excuses a
+ * run that fails first inside a mark's plan content. `tests/families/stop-runs.mjs` runs it over a set's items.
+ */
+
+/** The text names a source's property reads and writes and object keys use, at most `limit`, in source order. */
+function propertyNames(files: readonly SourceFile[], limit: number): string[] {
+  const words = new Set([
+    "let",
+    "integer",
+    "number",
+    "string",
+    "text",
+    "list",
+    "null",
+    "bool",
+    "boolean",
+    "default",
+  ]);
+  const found: string[] = [];
+  for (const { source } of files)
+    for (const match of source.matchAll(/\.([A-Za-z_]\w*)|([A-Za-z_]\w*)\s*:/g)) {
+      const name = match[1] ?? match[2]!;
+      if (!words.has(name) && !found.includes(name)) found.push(name);
+    }
+  return found.slice(0, limit);
+}
+
+/**
+ * Host data for a stop's runs (#2080): each global the files name, in turn, every value of a pool made from their own
+ * property names (scalars, lists of each scalar, an empty list, objects one and two properties deep, a list of an object),
+ * every other global 1. Past one named global, every `step`th value of the pool, the product capped at `cap` runs. The
+ * same list for the same files.
+ */
+export function hostValues(
+  files: readonly SourceFile[],
+  globals: readonly string[],
+  cap = 4000,
+): Globals[] {
+  const text = files.map((file) => file.source).join("\n");
+  const used = globals.filter((name) => new RegExp(`\\b${name}\\b`).test(text));
+  const names = propertyNames(files, 6);
+  const object = (
+    entries: readonly (readonly [string, SerializableRuntimeValue])[],
+  ): SerializableRuntimeValue => ({
+    kind: "object",
+    properties: entries.map(([name, value]) => ({ name, value })),
+  });
+  const list = (items: SerializableRuntimeValue[]): SerializableRuntimeValue => ({
+    kind: "list",
+    items,
+  });
+  const pool: SerializableRuntimeValue[] = [
+    1,
+    2.5,
+    "s",
+    true,
+    null,
+    list([1]),
+    list(["s"]),
+    list([null]),
+    list([]),
+  ];
+  for (const name of names)
+    for (const value of [1, "s", null, list(["s"])]) pool.push(object([[name, value]]));
+  for (const outer of names)
+    for (const inner of names)
+      if (outer !== inner) pool.push(object([[outer, object([[inner, "s"]])]]));
+  for (const outer of names)
+    for (const inner of names)
+      pool.push(
+        object([
+          [outer, object([[inner, 1]])],
+          ...names.filter((other) => other !== outer).map((other) => [other, null] as const),
+        ]),
+      );
+  pool.push(list([object(names.map((name) => [name, "s"]))]));
+  const step = Math.ceil(pool.length / 12);
+  const each = used.length <= 1 ? pool : pool.filter((_, at) => at % step === 0);
+  let runs: Record<string, SerializableRuntimeValue>[] = [{}];
+  for (const name of used)
+    runs = runs.flatMap((run) => each.map((value) => ({ ...run, [name]: value })));
+  if (runs.length > cap) runs = runs.filter((_, at) => at % Math.ceil(runs.length / cap) === 0);
+  const rest = Object.fromEntries(globals.map((name) => [name, 1]));
+  return runs.map((run) => ({ ...rest, ...run }));
+}
+
+/** One side of a stop's runs: its compile's plan and check count, or the candidate route's reason for declining it. */
+export interface StopRunSide {
+  readonly plan: boolean;
+  readonly checks: number;
+  readonly declined: string | null;
+}
+
+/**
+ * What a stop's runs found (`stopRuns`):
+ * - `open`: the natural plan fails at runtime where the stopped plan runs to its end, or, with no natural plan (a compile
+ *   error the stop turned into runtime checks), the stopped plan runs to its end;
+ * - `later`: both fail, the stopped plan after saying more;
+ * - `stricter`: the stopped plan fails where the natural plan does not;
+ * - `closed`: every run alike, or the stopped plan failing first;
+ * - `declined`: the stop's compile declined (a refusal, never a missing check);
+ * - `natural declined`, `no plan`: nothing to run.
+ */
+export type StopRunKind =
+  "open" | "later" | "stricter" | "closed" | "declined" | "natural declined" | "no plan";
+
+export interface StopRuns {
+  readonly kind: StopRunKind;
+  readonly natural: StopRunSide;
+  readonly stopped: StopRunSide;
+  readonly runs: number;
+  /** The first run of the kind: its globals and each plan's outcome. */
+  readonly first: {
+    readonly globals: Globals;
+    readonly natural: ReturnType<typeof ranWith> | null;
+    readonly stopped: ReturnType<typeof ranWith>;
+  } | null;
+  /** `stopProblems`' violating lines, where both compiles have a plan. */
+  readonly violating: readonly string[];
+  /**
+   * With no natural plan: each error of the natural compile, by its code and site, and what the stopped analysis checks
+   * there (`typed`, `unknown`, or `none`): the site rule of #2098's ledger.
+   */
+  readonly sites: readonly {
+    readonly code: string;
+    readonly site: string;
+    readonly checks: string;
+  }[];
+}
+
+/**
+ * A unit's runs at a demand stop against its unstopped compile's, in a mode (`run`), over `hostValues` (#2080): see
+ * `StopRuns`. Both compiles and analyses are made here, each with its `without` for `stopProblems`; `planted` (for the
+ * oracle's own tests) replaces the stopped plan before it runs.
+ */
+export function stopRuns(
+  files: readonly SourceFile[],
+  globals: readonly string[],
+  run: <T>(make: () => T) => T,
+  demand: number,
+  planted?: (plan: InstructionPlan) => InstructionPlan,
+): StopRuns {
+  const request = coreRequest(files, globals);
+  if (request === null) throw new Error("The unit does not resolve.");
+  const runAt = (stop: number | null): StopRun & { readonly declined: string | null } => {
+    const allowed = <T>(make: () => T): T =>
+      run(() => (stop === null ? make() : withTestDemandAllowance(stop, make)));
+    let declined: string | null = null;
+    const both = () => {
+      let result: Compiled;
+      try {
+        result = compileProjectWithBackend(files, { globals }, CORE_BACKEND);
+      } catch (error) {
+        if (!(error instanceof CandidateOutsideSlice)) throw error;
+        declined = error.what;
+        result = { diagnostics: [], plan: null };
+      }
+      return { result, answers: analyseCore(request) };
+    };
+    const made = allowed(both);
+    return { ...made, declined, without: (omit) => allowed(() => withoutRecords(omit, both)) };
+  };
+  const natural = runAt(null);
+  const made = runAt(demand);
+  const stopped =
+    planted === undefined || made.result.plan === null
+      ? made
+      : { ...made, result: { ...made.result, plan: planted(made.result.plan) } };
+  const side = (each: typeof natural): StopRunSide => ({
+    plan: each.result.plan !== null,
+    checks: each.answers.checks.length,
+    declined: each.declined,
+  });
+  const none = {
+    natural: side(natural),
+    stopped: side(stopped),
+    runs: 0,
+    first: null,
+    violating: [],
+    sites: [],
+  };
+  if (natural.declined !== null) return { ...none, kind: "natural declined" };
+  if (stopped.declined !== null) return { ...none, kind: "declined" };
+  const [want, got] = [natural.result.plan, stopped.result.plan];
+  if (got === null) return { ...none, kind: "no plan" };
+  const pool = hostValues(files, globals);
+  if (want === null) {
+    // (a compile error the stop turned into runtime checks: open where some run of the stopped plan ends)
+    const sites = natural.result.diagnostics
+      .filter((d) => d.severity === "error")
+      .map((d) => {
+        const [start, end] = [d.span.start.offset, d.span.end.offset];
+        const at = stopped.answers.checks.filter((c) => c.site.start <= start && c.site.end >= end);
+        const checks =
+          at.length === 0
+            ? "none"
+            : at.some((c) => !c.against.includes("unknown"))
+              ? "typed"
+              : "unknown";
+        return { code: d.code, site: `${start}-${end}`, checks };
+      });
+    for (const each of pool) {
+      const ran = ranWith(got, each);
+      if (ran.failure === null)
+        return {
+          ...none,
+          kind: "open",
+          runs: pool.length,
+          first: { globals: each, natural: null, stopped: ran },
+          sites,
+        };
+    }
+    return { ...none, kind: "closed", runs: pool.length, sites };
+  }
+  const violating = stopProblems({
+    unstopped: natural,
+    stopped,
+    fitting: [],
+    violating: pool,
+  }).filter((problem) => problem.startsWith("violating "));
+  let found: StopRuns | null = null;
+  for (const each of pool) {
+    const [a, b] = [ranWith(want, each), ranWith(got, each)];
+    const kind: StopRunKind | null =
+      a.failure !== null && b.failure === null
+        ? "open"
+        : a.failure !== null && b.failure !== null && b.said.length > a.said.length
+          ? "later"
+          : a.failure === null && b.failure !== null
+            ? "stricter"
+            : null;
+    // (the first run of the most severe kind: open, then later, then stricter)
+    const rank = (k: StopRunKind | null): number =>
+      k === null ? 3 : ["open", "later", "stricter"].indexOf(k);
+    if (kind !== null && (found === null || rank(kind) < rank(found.kind)))
+      found = {
+        ...none,
+        kind,
+        runs: pool.length,
+        first: { globals: each, natural: a, stopped: b },
+        violating,
+      };
+  }
+  return found ?? { ...none, kind: "closed", runs: pool.length, violating };
 }
