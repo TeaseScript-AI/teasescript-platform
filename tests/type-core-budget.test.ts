@@ -35,6 +35,7 @@ import {
   type HeldMode,
 } from "./helpers/type-core-held-host.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
+import { planChecks } from "./helpers/plan-checks.js";
 
 // The work budget (TABLE §8; the reference model's `budget-check.mjs`, checks 1 and 2): the counters sum to the charged
 // total, and an analysis stops at exactly the unit that crosses its allowance. This proves the accounting, not that
@@ -817,30 +818,21 @@ test("a count's check and an expected site's question each charge their own site
  * warning names ("none" without the sentence) against the plan's checks.
  */
 test("the stop's warning counts the plan's checks only the stop owes, not the warnings it deferred, in four modes (#2081)", () => {
-  const FIELDS = new Set([
-    "typeCheck",
-    "indexCheck",
-    "fallbackCheck",
-    "expected",
-    "repair",
-    "requireExisting",
-    "partChecks",
-  ]);
-  // (every check field of the plan once, a part check each: what runs while the script plays)
-  const planChecks = (plan: unknown): number => {
-    let count = 0;
-    const walk = (value: unknown): void => {
-      if (Array.isArray(value)) for (const each of value) walk(each);
-      else if (typeof value === "object" && value !== null)
-        for (const [key, each] of Object.entries(value)) {
-          if (FIELDS.has(key) && each !== undefined && each !== false)
-            count += Array.isArray(each) ? each.length : 1;
-          walk(each);
-        }
-    };
-    walk(plan);
-    return count;
-  };
+  // (the walk counts each check field once and each part check, at any depth: `planChecks`)
+  assert.equal(
+    planChecks({
+      instructions: [
+        { typeCheck: {}, partChecks: [{}, {}] },
+        { body: [{ indexCheck: true, requireExisting: true, fallbackCheck: undefined }] },
+      ],
+    }),
+    5,
+  );
+  // (a plan wider than a spread or a recursive walk can follow, #2132's Codex r1)
+  assert.equal(
+    planChecks({ instructions: Array.from({ length: 150_002 }, () => ({ typeCheck: {} })) }),
+    150_002,
+  );
   const stops = (source: string, allowance: number | null = null): string[] =>
     MODES.map((mode) =>
       inMode(mode, () => {

@@ -39,7 +39,7 @@
     "test:player:preview": "node tools/player-preview-checks.mjs",
     "test:player:firefox-camera": "node tools/player-firefox-camera.mjs",
     "dev:player": "vite --config player/vue/vite.config.ts",
-    "test:verification": "node --test tools/run-parallel.test.mjs tools/test-shards.test.mjs tools/test-files-at-once.test.mjs tools/test-in-flight.test.mjs tools/check-changed.test.mjs tools/check-shas.test.mjs tools/ci-test-counts.test.mjs tools/counters.test.mjs tools/benchmark-runtime.test.mjs tools/knip-entries.test.mjs tools/structure-report.test.mjs tools/repository-checks/doc-links.test.mjs tools/repository-checks/regression-cases.test.mjs tools/repository-checks/imports.test.mjs tools/repository-checks/pin-suites.test.mjs",
+    "test:verification": "node --test tools/run-parallel.test.mjs tools/test-shards.test.mjs tools/test-files-at-once.test.mjs tools/test-in-flight.test.mjs tools/check-changed.test.mjs tools/check-shas.test.mjs tools/compiler-replay.test.mjs tools/ci-test-counts.test.mjs tools/counters.test.mjs tools/benchmark-runtime.test.mjs tools/knip-entries.test.mjs tools/structure-report.test.mjs tools/repository-checks/doc-links.test.mjs tools/repository-checks/regression-cases.test.mjs tools/repository-checks/imports.test.mjs tools/repository-checks/pin-suites.test.mjs",
     "test:families": "node tests/families/check.mjs",
     "test:lint:design": "node --test tools/design-lint/test.mjs"
   },
