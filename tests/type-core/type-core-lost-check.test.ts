@@ -238,6 +238,21 @@ test("a stopped program whose checks its complete store check or a typed reader 
       assert.ok(inMode(mode, () => compiled(source, demand)).plan !== null, JSON.stringify(mode));
 });
 
+test("a stopped mark whose completion result was lost is kept by a complete store check that carries it: the plan publishes and fails at the store (#2080)", () => {
+  // (in source order with sharing, demands 1 and 22: the completion's results are lost, and `t`'s complete store checks,
+  // from the written type `t` copies, carry them; the plan publishes and rejects `[["bad"]]` at its store, Codex r2)
+  const source =
+    'let seed: integer[][] = [[1]]\nlet t = seed\nsay "BEFORE"\nt = [["bad"]]\nsay "AFTER"\nexit\n';
+  for (const demand of [1, 22]) {
+    const stopped = inMode(MODES[0]!, () => compiled(source, demand));
+    assert.ok(stopped.plan !== null, `demand ${demand}`);
+    const run = runGlobals(stopped.plan, {});
+    assert.equal(said(run), false, `demand ${demand}`);
+    const at = source.indexOf('[["bad"]]');
+    assert.equal(run.failure, `TSR058@${at}:${at + '[["bad"]]'.length}`, `demand ${demand}`);
+  }
+});
+
 test("a stopped mark is kept by its part checks only where each carries the completed contract there: a weaker element declines (#2080)", () => {
   // (in source order with sharing, demand 16: the completion completes `{f: list<integer>, g: string}` at the store and
   // owes it there, and the published part checks are `.f` against an open list and `.g` against `string`; the weaker one
