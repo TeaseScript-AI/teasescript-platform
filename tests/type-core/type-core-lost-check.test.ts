@@ -11,7 +11,10 @@ import {
 } from "../../src/runtime/values/serializable-values.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { narrower } from "../../src/type-inference/core/check-result/kept-checks.js";
-import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../../src/type-inference/core/budget.js";
 import { inMode, MODES } from "../helpers/type-core-oracles.js";
 import { runGlobals } from "../helpers/type-core-route.js";
 
@@ -61,7 +64,11 @@ const witness = (
   ...(storage === undefined ? {} : { storage }),
 });
 
-/** At demand 16 in four modes: a required check is Lost at a settled decision stop. */
+/**
+ * At demand 16 in four modes: a required check is Lost at a settled decision stop. Where a rejection or a retarget lost
+ * the completion's results, the decline names the first stopped mark it lost, often the place's first literal, before the
+ * host store (#2080 part 1).
+ */
 const DECLINED: readonly Witness[] = [
   witness(
     "1645-whole-object",
@@ -75,26 +82,48 @@ const DECLINED: readonly Witness[] = [
     { hostValue: nested("x"), hostOther: list(["t"]) },
     "{a: hostOther, z: hostValue}",
   ),
-  witness("1648-retarget-exact", retarget(4)),
-  witness("1648-retarget-whole", retarget(16)),
+  // (#2080: every completion result here is lost by the retarget, the stopped marks' too, so the program declines at its
+  // first store, `let box`'s, which the gate reads before the host store)
+  witness(
+    "1648-retarget-exact",
+    retarget(4),
+    undefined,
+    "{first: {n: [[1]]}}\nbox = {first: {n: [[0]]}}",
+  ),
+  witness(
+    "1648-retarget-whole",
+    retarget(16),
+    undefined,
+    "{first: {n: [[1]]}}\nbox = {first: {n: [[0]]}}",
+  ),
   // (a rejection's lost obligation: the stopped plan fails at an earlier store, but its check at the host store is lost)
-  witness("1648-rejection", reject(16), { hostValue: "x" }),
-  witness("1648-rejection-projection", copied('b.f = "s"', "let c = b.f\nc = hostValue")),
-  witness("1648-rejection-wrapper", copied('b.f = "s"', "let c = {q: b}\nc.q = hostValue"), {
-    hostValue: object({ f: nested("x"), first: object({ n: nested("x") }) }),
-  }),
+  witness("1648-rejection", reject(16), { hostValue: "x" }, "{f0: 1}\nb = {f0: 0}"),
+  witness(
+    "1648-rejection-projection",
+    copied('b.f = "s"', "let c = b.f\nc = hostValue"),
+    undefined,
+    "{f: [[1]], first: {n: [[1]]}}\nb = {f: [[0]]",
+  ),
+  witness(
+    "1648-rejection-wrapper",
+    copied('b.f = "s"', "let c = {q: b}\nc.q = hostValue"),
+    { hostValue: object({ f: nested("x"), first: object({ n: nested("x") }) }) },
+    "{f: [[1]], first: {n: [[1]]}}\nb = {f: [[0]]",
+  ),
   witness(
     "1648-r2-escaping-wrapper",
     "let b = {first: {n: null}}\nb.first.n = [[1]]\nlet c = {q: b}\nc.q = hostValue",
     { hostValue: object({ first: object({ n: nested("x") }) }) },
+    "{first: {n: null}}",
   ),
   // (a store role's obligation, internal data: the natural compile rejects `combined={v:wide}`, the stop moves that to a
-  // check against bare `unknown` at `let combined=base`)
+  // check against bare `unknown` at `let combined=base`; the rejection lost every completion result, so the decline
+  // names `let base`'s, the first)
   witness(
     "store-role-moved-error",
     'let wide:number=53\nlet narrow:string="s"\nlet base={v:narrow}\nlet combined=base\ncombined={v:wide}\nlet outcome=[base,combined]',
     {},
-    "base\ncombined",
+    "{v:narrow}",
   ),
   // (Codex r1: a boundary the stop checks against bare `unknown`, no store, reader or part check carrying its contract)
   witness(
@@ -132,11 +161,12 @@ const DECLINED: readonly Witness[] = [
     { hostValue: '{"n":[["x"]]}' },
     "fromJson",
   ),
-  // (declined at the first Lost store in source order: the retarget's, before the independent store's)
+  // (declined at the first Lost store in source order: the retarget's `let box`, before the independent store's)
   witness(
     "1648-independent-beside-retarget",
     `${retarget(4)}\nlet independent = {value: [[1]]}\nindependent.value = hostOther`,
     { hostValue: nested(2), hostOther: nested("x") },
+    "{first: {n: [[1]]}}\nbox = {first: {n: [[0]]}}",
   ),
 ];
 
@@ -202,19 +232,68 @@ test("a stopped program whose required checks are all published with their contr
 });
 
 test("a stopped program whose checks its complete store check or a typed reader keeps compiles (#1526 decision 2, condition 1)", () => {
-  // (from the set: a cycle of stores whose settled contract the store check carries whole, at demand 64 in source order
-  // without sharing; a typed parse whose reader carries its default's contract, at demand 16)
+  // (from the set: a typed parse whose reader carries its default's contract, at demand 16)
   const kept: readonly (readonly [string, number, readonly (typeof MODES)[number][]])[] = [
-    [
-      'let vi:integer=23\nlet vs:string="s"\nlet m0={f:vs,g:0}\nlet m1={f:vi,g:0}\nlet m2={f:vi,g:0}\nm1=m0\nm2=m1\nm0=m2\nlet final=[m0,m1]\nexit\n',
-      64,
-      [MODES[1]!],
-    ],
     ['let x = fromJson("{}", default: {n: 1})\nsay x\nexit\n', 16, MODES],
   ];
   for (const [source, demand, modes] of kept)
     for (const mode of modes)
       assert.ok(inMode(mode, () => compiled(source, demand)).plan !== null, JSON.stringify(mode));
+});
+
+test("a stopped mark whose completion result was lost or is absent is kept by a complete store check that carries it: the plan publishes and fails at the store (#2080)", () => {
+  // (in source order with sharing, demands 1 and 22: the completion's results are lost, and `t`'s complete store checks,
+  // from the written type `t` copies, carry them; the plan publishes and rejects `[["bad"]]` at its store, Codex r2)
+  const source =
+    'let seed: integer[][] = [[1]]\nlet t = seed\nsay "BEFORE"\nt = [["bad"]]\nsay "AFTER"\nexit\n';
+  for (const demand of [1, 22]) {
+    const stopped = inMode(MODES[0]!, () => compiled(source, demand));
+    assert.ok(stopped.plan !== null, `demand ${demand}`);
+    const run = runGlobals(stopped.plan, {});
+    assert.equal(said(run), false, `demand ${demand}`);
+    const at = source.indexOf('[["bad"]]');
+    assert.equal(run.failure, `TSR058@${at}:${at + '[["bad"]]'.length}`, `demand ${demand}`);
+  }
+  // (at this work allowance the completion is capped and keeps no result: the stopped marks have none, and the same store
+  // checks carry them; Codex r3)
+  const stopped = inMode(MODES[0]!, () => withTestAllowance(1536, () => compiled(source, 1)));
+  assert.ok(stopped.plan !== null);
+  const run = runGlobals(stopped.plan, {});
+  assert.equal(said(run), false);
+  const at = source.indexOf('[["bad"]]');
+  assert.equal(run.failure, `TSR058@${at}:${at + '[["bad"]]'.length}`);
+});
+
+test("a stopped mark is kept by its part checks only where each carries the completed contract there: a weaker element declines (#2080)", () => {
+  // (in source order with sharing, demand 16: the completion completes `{f: list<integer>, g: string}` at the store and
+  // owes it there, and the published part checks are `.f` against an open list and `.g` against `string`; the weaker one
+  // carries nothing, so the program declines at the store, where accepting any one part would run `["x"]` through)
+  const source = 'let a = {f: [1], g: "s"}\na = {f: hostValue, g: hostOther}\nsay "AFTER"\nexit\n';
+  const forbidden = { hostValue: list(["x"]), hostOther: "t" };
+  const natural = inMode(MODES[0]!, () => compiled(source, null));
+  assert.equal(said(runGlobals(natural.plan!, forbidden)), false);
+  assert.throws(
+    () => inMode(MODES[0]!, () => compiled(source, 16)),
+    (error) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === LOST &&
+      error.site.start === source.indexOf("{f: hostValue"),
+  );
+});
+
+test("a stopped mark whose completion result a rejection lost declines at its store: a typed-copy cycle (#2080)", () => {
+  // (at demand 64 in source order without sharing, every completion result is lost by the rejection, the stopped marks'
+  // too, and none of them has a complete store check: the program declines at its first, `m1`'s literal; a certificate
+  // that a copy of a checked place owes nothing would let it publish, #2131)
+  const source =
+    'let vi:integer=23\nlet vs:string="s"\nlet m0={f:vs,g:0}\nlet m1={f:vi,g:0}\nlet m2={f:vi,g:0}\nm1=m0\nm2=m1\nm0=m2\nlet final=[m0,m1]\nexit\n';
+  assert.throws(
+    () => inMode(MODES[1]!, () => compiled(source, 64)),
+    (error) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === LOST &&
+      error.site.start === source.indexOf("{f:vi,g:0}"),
+  );
 });
 
 test("a program whose receiving completion reached its allowance keeps a check only by its complete store check (Codex r2)", () => {

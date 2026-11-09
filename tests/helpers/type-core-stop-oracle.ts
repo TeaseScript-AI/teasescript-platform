@@ -5,7 +5,10 @@ import { assertValueType } from "../../src/runtime/values/value-types.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import { CORE_BACKEND, CandidateOutsideSlice } from "../../src/type-inference/core/backend.js";
-import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../../src/type-inference/core/budget.js";
 import { withMessagesInWords } from "../../src/type-inference/core/check-result/check-result.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
 import { withoutRecords } from "../../src/type-inference/core/consumers/left-out.js";
@@ -963,7 +966,8 @@ export interface StopRuns {
 /**
  * A unit's runs at a demand stop against its unstopped compile's, in a mode (`run`), over `hostValues` (#2080): see
  * `StopRuns`. Both compiles and analyses are made here, each with its `without` for `stopProblems`; `planted` (for the
- * oracle's own tests) replaces the stopped plan before it runs.
+ * oracle's own tests) replaces the stopped plan before it runs. `stop` names the allowance `demand` sets on the stopped
+ * side: a demand allowance, or (for the oracle's own tests) the work allowance, which stops before admission settles.
  */
 export function stopRuns(
   files: readonly SourceFile[],
@@ -971,12 +975,19 @@ export function stopRuns(
   run: <T>(make: () => T) => T,
   demand: number,
   planted?: (plan: InstructionPlan) => InstructionPlan,
+  stop: "demand" | "work" = "demand",
 ): StopRuns {
   const request = coreRequest(files, globals);
   if (request === null) throw new Error("The unit does not resolve.");
-  const runAt = (stop: number | null): StopRun & { readonly declined: string | null } => {
+  const runAt = (at: number | null): StopRun & { readonly declined: string | null } => {
     const allowed = <T>(make: () => T): T =>
-      run(() => (stop === null ? make() : withTestDemandAllowance(stop, make)));
+      run(() =>
+        at === null
+          ? make()
+          : stop === "work"
+            ? withTestAllowance(at, make)
+            : withTestDemandAllowance(at, make),
+      );
     let declined: string | null = null;
     const both = () => {
       let result: Compiled;

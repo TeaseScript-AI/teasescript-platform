@@ -2,7 +2,10 @@ import { compileSourceWithBackend, type CompilationResult } from "../../../src/c
 import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 import type { TypeTerm } from "../../../src/type-inference/graph.js";
 import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { asked } from "../../../src/type-inference/core/check-result/check-result.js";
+import { runtimeChecks } from "../../../src/type-inference/core/check-result/runtime-plan.js";
+import { SliceIndex } from "../../../src/type-inference/core/check-result/slice-index.js";
 import { withTestDemandAllowance } from "../../../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../../../src/type-inference/core/consumers.js";
 import {
@@ -830,6 +833,11 @@ export interface EnclosingVerdict {
    * requirement where `certified` is `false` (#1440), nothing for a case that does not say (#1275).
    */
   readonly judged: "domain" | "mark" | "exact";
+  /**
+   * Whether the compile declined at a settled stop that lost a stopped mark's completion result (#2080): no plan to
+   * run, nothing published to judge.
+   */
+  readonly declined?: true;
   readonly problems: readonly string[];
 }
 
@@ -1048,9 +1056,60 @@ export function enclosingProblems(
       problems,
     };
   }
-  const compiled: CompilationResult = capped(() =>
-    compileSourceWithBackend(c.source, { globals: ["hostValue"] }, CORE_BACKEND),
-  );
+  let compiled: CompilationResult;
+  try {
+    compiled = capped(() =>
+      compileSourceWithBackend(c.source, { globals: ["hostValue"] }, CORE_BACKEND),
+    );
+  } catch (error) {
+    // (#2080 part 1: a settled stop whose stopped mark's completion result was lost or is absent declines at that mark
+    // where no complete store check carries it, publishing nothing; any other decline is a problem. Read where the gate
+    // reads: the registry inside `asked`, and the published contract and store check `runtimeChecks` gives the gate)
+    if (
+      !(error instanceof CandidateOutsideSlice) ||
+      error.what !== "a store whose check was lost at the budget" ||
+      phase !== "settled"
+    )
+      throw error;
+    const site = error.site;
+    const read = capped(() =>
+      asked(analyseCore(request), (answers) => {
+        const index = new SliceIndex(request.files.map((file) => file.program));
+        const { checks, contracts } = runtimeChecks(answers, index, request);
+        const at = (answers.gated() ?? []).filter(
+          ({ obligation, result }) =>
+            obligation.epoch === answers.epoch &&
+            obligation.slot.role === "stopped" &&
+            obligation.slot.site.file === site.file &&
+            obligation.slot.site.start === site.start &&
+            obligation.slot.site.end === site.end &&
+            (result === null || result.state === "lost"),
+        );
+        const carried = at.some(({ obligation }) => {
+          const store = index.storeAt(obligation.slot.site);
+          return (
+            store !== undefined && contracts.get(store)?.state === "complete" && checks.has(store)
+          );
+        });
+        return { unresolved: at.length > 0, carried };
+      }),
+    );
+    if (!read.unresolved)
+      problems.push(`declined at ${site.start}:${site.end} with no lost or absent result there`);
+    else if (read.carried)
+      problems.push(
+        `declined at ${site.start}:${site.end} where a complete store check carries it`,
+      );
+    return {
+      allowance,
+      stops: stopped.map((path) => path.join(".")),
+      relation,
+      phase,
+      judged,
+      problems,
+      declined: true,
+    };
+  }
   const plan = compiled.plan;
   const within = (d: CompilationResult["diagnostics"][number]): boolean =>
     d.span.start.offset >= c.site.start && d.span.end.offset <= c.site.end;

@@ -5,6 +5,9 @@ import {
   citationCounts,
   FORECASTS,
   forecastsIn,
+  glossaryFindings,
+  glossaryRows,
+  labelsIn,
   unresolvedPointers,
 } from "./check-comment-forecasts.mjs";
 
@@ -125,6 +128,86 @@ test("a comment's pointer at the accepted record names a heading of the page it 
       { line: 2, page: "sharing", anchor: "r4-16" },
       { line: 3, page: undefined, anchor: "r4-15" },
       { line: 4, page: "stops", anchor: "r4-15" },
+    ],
+  );
+});
+
+test("a comment's port-plan or research label is found; a review reference, a document name and a string are not", () => {
+  assert.deepEqual(
+    labelsIn(
+      "a.ts",
+      [
+        "// S8c's stop marks, by C9 (AD-1) and PLAN §6b (S6-CARRIERS §4.1), TABLE's §3.2",
+        "/* Codex r2's B1 and Astra r1 F2, r1's and r2's B3, the owner's reviewer's F1, S6's B2, B4 of Astra's review */",
+        "// (#1027's B1, F12), the owner's D4; Codex confirms X9 at ingress",
+        "/* Codex r21",
+        " * N1, Astra r1's",
+        " * A1, Sol's final F7, Astra's reviews B5 and B6, Astra's recheck r3 F8, N9, Astra B7-r2, Codex r3 R3-F6 */",
+        "// V30 §19",
+        'const s = "C13";',
+        "",
+      ].join("\n"),
+    ),
+    [
+      { line: 1, label: "S8c" },
+      { line: 1, label: "C9" },
+      { line: 1, label: "AD-1" },
+      { line: 1, label: "PLAN" },
+      { line: 1, label: "S6-CARRIERS" },
+      { line: 2, label: "S6" },
+      { line: 3, label: "F12" },
+      { line: 3, label: "D4" },
+      { line: 3, label: "X9" },
+    ],
+  );
+});
+
+test("the glossary's rows are the labels of the README's Labels table", () => {
+  const readme = [
+    "# Record",
+    "",
+    "## Labels",
+    "",
+    "| label | meaning |",
+    "| --- | --- |",
+    "| `C9` | the boundary check |",
+    "| `S8c` | historical |",
+    "",
+    "## Index",
+    "",
+    "| `X1` | not a glossary row |",
+  ].join("\n");
+  assert.deepEqual(
+    [...glossaryRows(readme)],
+    [
+      ["C9", 7],
+      ["S8c", 8],
+    ],
+  );
+});
+
+test("a label without a glossary row, and a row no comment carries, are findings; the bare §N row is not", () => {
+  const glossary = new Map([
+    ["C9", 7],
+    ["S8c", 8],
+    ["§N", 9],
+  ]);
+  const findings = glossaryFindings(
+    [
+      { fileName: "src/type-inference/core/a.ts", line: 3, label: "C9" },
+      { fileName: "src/type-inference/core/a.ts", line: 4, label: "Q77" },
+    ],
+    glossary,
+  );
+  assert.deepEqual(
+    findings.map(({ fileName, line, message }) => [fileName, line, message.split(",")[0]]),
+    [
+      ["src/type-inference/core/a.ts", 4, "a comment carries the label Q77"],
+      [
+        "docs/specifications/type-inference-accepted-record/README.md",
+        8,
+        "the glossary defines S8c",
+      ],
     ],
   );
 });
