@@ -374,3 +374,83 @@ test("a name that is not UTF-8, and hunks that --numstat does not count, stop th
     rmSync(counted.root, { recursive: true, force: true });
   }
 });
+
+test(
+  "--moved leaves Git's moved lines out of the added-lines signals and prints what it suppressed",
+  { timeout: 60_000 },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "structure-report-moved-"));
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const report = (...args) =>
+      execFileSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+    try {
+      git("init", "-q");
+      git("config", "user.email", "t@t");
+      git("config", "user.name", "t");
+      const big = longFunction("big", 400);
+      write(root, { "src/a.ts": `${big}\nexport const small = 1;\n` });
+      git("add", "-A");
+      git("commit", "-q", "-m", "base");
+      const base = git("rev-parse", "HEAD");
+      // the 400-line function moved whole into a new file
+      write(root, { "src/a.ts": "export const small = 1;\n", "src/b.ts": `${big}\n` });
+      git("add", "-A");
+      git("commit", "-q", "-m", "move");
+      const plain = report("--diff", base);
+      assert.match(plain, /file gaining over 300 lines: \+400 src\/b\.ts/u);
+      assert.match(
+        plain,
+        /function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\)/u,
+      );
+      const moved = report("--diff", base, "--moved");
+      assert.match(
+        moved,
+        /suppressed \(moved\): file gaining over 300 lines: \+400 src\/b\.ts, 400 moved discounted/u,
+      );
+      assert.match(
+        moved,
+        /suppressed \(moved\): function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\), 400 moved lines discounted/u,
+      );
+      assert.doesNotMatch(moved, /^ {2}file gaining over 300 lines/mu);
+      // one line edited inside the moved function still counts as written into it
+      write(root, { "src/b.ts": `${big.replace("const v7 = 7;", "const v7 = 8;")}\n` });
+      git("add", "-A");
+      git("commit", "-q", "-m", "edit");
+      const edited = report("--diff", base, "--moved");
+      assert.match(
+        edited,
+        /^ {2}function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\)$/mu,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test("--moved reads a file name with spaces as Git names it", { timeout: 60_000 }, () => {
+  const root = mkdtempSync(join(tmpdir(), "structure-report-moved-space-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const report = (...args) =>
+    execFileSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+  try {
+    git("init", "-q");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    const big = longFunction("big", 400);
+    write(root, { "src/a.ts": `${big}\nexport const small = 1;\n` });
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    const base = git("rev-parse", "HEAD");
+    write(root, { "src/a.ts": "export const small = 1;\n", "src/new file.ts": `${big}\n` });
+    git("add", "-A");
+    git("commit", "-q", "-m", "move");
+    const moved = report("--diff", base, "--moved");
+    assert.match(
+      moved,
+      /suppressed \(moved\): file gaining over 300 lines: \+400 src\/new file\.ts, 400 moved discounted/u,
+    );
+    assert.doesNotMatch(moved, /^ {2}file gaining over 300 lines/mu);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
