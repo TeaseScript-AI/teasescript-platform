@@ -268,8 +268,30 @@ test("an element error after loading reports one playback failure, invents no pr
       { kind: "failed", message: "The Player could not play this media source." },
     ],
   );
+  assert.deepEqual(player.phases, ["load", "playback"]);
   // The runtime stopped the media: reconciliation released it, and the script went on.
   assert.deepEqual(player.device.sample(), []);
+  assert.deepEqual(player.texts(), ["after"]);
+});
+
+test("restored media that was loaded already reports an element error as a playback failure, once", () => {
+  const source = 'playAudio "music.mp3"\nsay "after"\nexit';
+  const original = harness(source);
+  original.start();
+  original.elements[0]!.metadata(10);
+  original.tick(1000);
+  const player = harness(source);
+  player.replace(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(original.session)));
+  const [element] = player.elements;
+  element!.metadata(10);
+  assert.equal(player.loads.length, 0, "restored media is already loaded");
+  element!.emit("error");
+  element!.emit("error");
+  assert.deepEqual(
+    player.loads.map(([, report]) => report),
+    [{ kind: "failed", message: "The Player could not play this media source." }],
+  );
+  assert.deepEqual(player.phases, ["playback"]);
   assert.deepEqual(player.texts(), ["after"]);
 });
 

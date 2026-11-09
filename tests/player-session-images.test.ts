@@ -12,7 +12,7 @@ import {
 import { compilePlayerProject, createPlayerRuntimeSession } from "../player/compile-project.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
 import type { PlayerBridge } from "../player/player-bridge.js";
-import { playerRuntimeForeground } from "../player/runtime-view.js";
+import { playerRuntimeForeground, playerRuntimeMedia } from "../player/runtime-view.js";
 import {
   assembleDebugExport,
   chooseDebugCategory,
@@ -418,6 +418,48 @@ test("audio that loaded and then fails while it plays is a 'could not be played'
         (entry) => entry.kind === "message" && entry.text === "after",
       ) === true,
     "the blocking play did not end",
+  );
+  assert.deepEqual(
+    host.notices.value.map((notice) => notice.message),
+    ["Audio could not be played: sounds/chime.wav (main.tease, line 1)"],
+  );
+});
+
+test("audio a Continue restores as loaded that then fails while it plays is also 'could not be played'", async (context) => {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() =>
+    usePlayerSession({
+      resolveAsset: (path) => (path === "sounds/chime.wav" ? `/files/${path}` : null),
+      decodeImage: async () => ({ width: 1, height: 1 }),
+    }),
+  );
+  assert.ok(host);
+  context.after(() => scope.stop());
+  host.prepare(() => createPlayerRuntimeSession('playAudio "sounds/chime.wav"\nsay "after"\nexit'));
+  await host.activate();
+  const chime = () => audioElements.findLast((element) => element.src.endsWith("sounds/chime.wav"));
+  await until(() => chime() !== undefined, "the chime did not play");
+  Object.assign(chime()!, { duration: 10, currentTime: 0 });
+  chime()!.dispatchEvent(new Event("loadedmetadata"));
+  const loaded = () => playerRuntimeMedia(host.session.value!.state).media[0]?.loaded === true;
+  await until(loaded, "the chime's load did not show");
+  // A Continue restores the session with the chime already loaded: its new element reports no load of its own.
+  host.prepareRestore(host.session.value!);
+  await host.activate();
+  await until(
+    () => chime()?.src.endsWith("sounds/chime.wav") === true && loaded(),
+    "the restored chime did not play",
+  );
+  Object.assign(chime()!, { duration: 10, currentTime: 0 });
+  chime()!.dispatchEvent(new Event("loadedmetadata"));
+  chime()!.dispatchEvent(new Event("error"));
+  await until(
+    () =>
+      host.session.value?.transcriptEntries.some(
+        (entry) => entry.kind === "message" && entry.text === "after",
+      ) === true,
+    "the restored blocking play did not end",
   );
   assert.deepEqual(
     host.notices.value.map((notice) => notice.message),

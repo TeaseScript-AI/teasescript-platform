@@ -213,9 +213,10 @@ export class MediaDevice {
       // A failed element cannot be retried, so it no longer counts as refused playback.
       entry.blocked = false;
       this.#updateBlocked();
-      // Before the load report this is the load failure. After a `loaded` report, sent or already published, it is a
-      // playback failure, reported once: the runtime stops the media and releases its wait. Progress stays as measured.
-      if (!entry.loadReported)
+      // Before the media loaded this is the load failure. Once it loaded, by a `loaded` report sent or already published,
+      // or as restored media that was loaded already, it is a playback failure, reported once: the runtime stops the
+      // media and releases its wait. Progress stays as measured.
+      if (!entry.loadReported && !entry.projection.loaded)
         this.#reportLoad(entry, { kind: "failed", message: LOAD_FAILED_MESSAGE });
       else if (!entry.failureReported) {
         entry.failureReported = true;
