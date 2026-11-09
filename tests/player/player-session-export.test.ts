@@ -295,7 +295,11 @@ test("a session whose plan and saved value hold a list nested 2,048 deep is kept
   const reloaded = await page(context, second, plan);
   assert.equal(reloaded.activation.value, "continue");
   await reloaded.activate();
-  assert.equal(playerRuntimeForeground(reloaded.session.value!)?.kind, "ask-text");
+  // The session may be kept, and so exported, before its save was serviced: Continue then resolves at that save.
+  await until(
+    () => playerRuntimeForeground(reloaded.session.value!)?.kind === "ask-text",
+    "the save was not serviced",
+  );
 });
 
 /** A store of kept sessions whose discard, or whose photo writes, fail while `failing` says so. */
