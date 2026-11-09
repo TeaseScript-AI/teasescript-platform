@@ -12,7 +12,7 @@ import {
   deferred,
   createHost,
   start,
-} from "../helpers/storage-host.js";
+} from "../helpers/player/storage-host.js";
 
 test("Vue host writes each pending action once and continues only in a later task", async (context) => {
   const writes: { key: string; value: unknown }[] = [];

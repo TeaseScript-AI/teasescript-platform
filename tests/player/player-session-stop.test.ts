@@ -25,8 +25,8 @@ import type { SerializableRuntimeValue } from "../../src/index.js";
 import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
 import { published } from "../helpers/debug-readers.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { answerWith, type Intent } from "../helpers/player-input.js";
-import { loadHostFacade, onHostAll } from "../helpers/host-sessions.js";
+import { answerWith, type Intent } from "../helpers/player/player-input.js";
+import { loadHostFacade, onHostAll } from "../helpers/player/host-sessions.js";
 
 // A Player error stops the session where it stands (PLAYER-UI "Session end and failure"). Input and the work that
 // continues it take their session from `observe()`, which gives none once stopped; these include continuations that

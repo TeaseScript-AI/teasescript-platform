@@ -11,7 +11,7 @@ import { loadPlayerModule } from "../helpers/player-modules.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { DebugView, DebugViewRequest } from "../../player/debug/debug-view.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
-import { hostTrace, loadHostFacade, onHost, onHostAll } from "../helpers/host-sessions.js";
+import { hostTrace, loadHostFacade, onHost, onHostAll } from "../helpers/player/host-sessions.js";
 
 /** The value trace the host's session runs with, as the host holds it. */
 const sessionTrace = (session: PlayerRuntimeSession | null | undefined) =>

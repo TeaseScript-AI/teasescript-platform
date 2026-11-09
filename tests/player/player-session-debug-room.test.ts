@@ -32,9 +32,9 @@ import type {
 } from "../../src/index.js";
 import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { loadHostFacade, onHost } from "../helpers/host-sessions.js";
+import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 
-// The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
 
 // The debug room (DEBUGGER.md "Debug room") through the real Vue session host: Debug on during a normal session goes on

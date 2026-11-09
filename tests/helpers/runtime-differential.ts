@@ -40,7 +40,7 @@ import {
   type SidePort,
   type SideRecord,
   type Written,
-} from "./runtime-differential-side.js";
+} from "./runtime/runtime-differential-side.js";
 
 export { thisBuild } from "./runtime-differential-build.js";
 export type {
@@ -61,7 +61,7 @@ export type {
   SidePort,
   Stage,
   Tail,
-} from "./runtime-differential-side.js";
+} from "./runtime/runtime-differential-side.js";
 
 /**
  * Runs `input` through two pipelines on one route and compares them completely: the compile results, then every state

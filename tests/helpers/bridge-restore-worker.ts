@@ -5,7 +5,7 @@ import { isBuildIdentity } from "../../player/engine-bridge/protocol.js";
 import { parentHostPort } from "../../player/engine-bridge/node-port.js";
 import { playerBridgeOps, playerOpsContext } from "../../player/engine-bridge/player-ops.js";
 import { startBridgeHost } from "../../player/engine-bridge/worker-host.js";
-import { plainRecording } from "./plain-recording.js";
+import { plainRecording } from "./bridge/plain-recording.js";
 import { DebugRecorder } from "../../player/debug/debug-recorder.js";
 import { restorePlayerRuntimeSessionAt } from "../../player/runtime/runtime-adapter.js";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";

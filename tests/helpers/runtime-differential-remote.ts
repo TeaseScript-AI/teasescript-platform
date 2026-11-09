@@ -28,7 +28,7 @@ import {
   type SidePort,
   type Stage,
   type SideRecord,
-} from "./runtime-differential-side.js";
+} from "./runtime/runtime-differential-side.js";
 
 /*
  * The side port across processes (docs/TESTING.md "Differential harness"): each side is a root's runner

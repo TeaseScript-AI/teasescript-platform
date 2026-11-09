@@ -5,7 +5,7 @@
  * import's save) borrows it there and keeps nothing (`ops/persistence.ts`). `settle` is pure: a state and an event give
  * the next state and the host messages the event implies, which the composable posts. Nothing else changes the state.
  *
- * Its invariant, which `tests/player-plan-json-lease.test.ts` checks over a generated family: once its messages are
+ * Its invariant, which `tests/player/player-plan-json-lease.test.ts` checks over a generated family: once its messages are
  * processed, the host holds a plan's JSON only for the live page's current plan, written once for it; nothing is posted
  * once the page closed.
  */

@@ -9,7 +9,7 @@ import {
   snapshotForRetention,
   stillHeld,
 } from "./retention-child.js";
-import { deliveredRun } from "./delivered-run.js";
+import { deliveredRun } from "./bridge/delivered-run.js";
 
 /*
  * The retention child of the witness's positive controls (`retention-witness.test.ts`). A `scan/holder/piece` or
@@ -24,7 +24,7 @@ import { deliveredRun } from "./delivered-run.js";
 
 const { playerBridgeOps, playerOpsContext } =
   await import("../../player/engine-bridge/player-ops.js");
-const { markedProject } = await import("./source-ops-project.js");
+const { markedProject } = await import("./bridge/source-ops-project.js");
 const sessions: HostSessions = {
   get: () => undefined,
   add: () => {

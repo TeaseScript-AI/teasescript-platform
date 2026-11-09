@@ -1,6 +1,6 @@
 /*
  * What the Player's main realm may load once the engine runs in its Worker, and what still has to move there (the L5
- * series). `tests/player-main-realm.test.ts` checks each list against the source: the `src/` modules the main realm
+ * series). `tests/player/player-main-realm.test.ts` checks each list against the source: the `src/` modules the main realm
  * reaches, the imports that still reach Worker-side code, and the exports of `runtime-adapter.ts` and `runtime-view.ts`.
  *
  * `RATCHET` only shrinks: a family's PR removes the entries tagged with its family and adds none (its reviewers check

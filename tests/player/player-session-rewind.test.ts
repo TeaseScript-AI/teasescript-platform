@@ -9,7 +9,7 @@ import { createPlayerRuntimeSession } from "../../player/runtime/compile-project
 import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
 import { memoryKeptRoomStore } from "../../player/persistence/kept-sessions.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
-import { hostTrace, onHost } from "../helpers/host-sessions.js";
+import { hostTrace, onHost } from "../helpers/player/host-sessions.js";
 import {
   selectPlayerRuntimeChoice,
   playerRuntimeSnapshot,
@@ -29,7 +29,7 @@ import {
   ExitCase,
   holdRead,
   heldInHost,
-} from "../helpers/rewind-host.js";
+} from "../helpers/player/rewind-host.js";
 
 /** The value trace the host's session runs with, as the host holds it. */
 const traceOf = (session: PlayerRuntimeSession | null | undefined) =>

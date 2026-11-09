@@ -157,7 +157,7 @@ export const MECHANISMS: readonly string[] = [
 export const POLICY_RESIDUALS: Readonly<Record<string, string>> = {
   // Accepted as named gaps (orchestrator 2's disposition, 2026-11-09).
   "accepted answerImage":
-    "policy scope (design r2 DR2-05): the table answers no image; the op is L5e's (`tests/player-bridge-resources.test.ts`)",
+    "policy scope (design r2 DR2-05): the table answers no image; the op is L5e's (`tests/bridge/player-bridge-resources.test.ts`)",
   "host openUrl tab": "a host side effect, not a bridge op; the op's dismissal is exercised",
   ...Object.fromEntries(
     CAPTURE_UNAVAILABLE_REASONS.filter((reason) => reason !== "unconfigured").map((reason) => [
