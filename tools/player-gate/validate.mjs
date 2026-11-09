@@ -457,10 +457,6 @@ NUMBERS.keepDurable = [
   ],
 ];
 
-/**
- * The served bytes (`encoded` or `decoded`) of `target` (`page` or `Workers`), all or those flagged `phase`: `null`
- * while a request is still open or a finished one lacks its length; 0 for a target that requested nothing (no Worker).
- */
 /** Each byte phase and the cold page's mark that ends it (`scenarios/session.mjs` `coldBytes`). */
 const PHASE_MARKS = { beforeStartEnabled: "startEnabled", beforePlayable: "playable" };
 
