@@ -1,5 +1,5 @@
 import type { ScalarTypeName } from "./ast.js";
-import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
+import { compileChild, runCompileTask, type CompileTask } from "./compile-continuation.js";
 import type { SourceSpan } from "./source.js";
 import { mergedOrigins, type Origins } from "./static-types/origins.js";
 import type { PropertyTable } from "./static-types/property-tables.js";

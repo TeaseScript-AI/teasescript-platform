@@ -1,4 +1,4 @@
-import { compileChild, runCompileTask, type CompileTask } from "../compiler/continuation.js";
+import { compileChild, runCompileTask, type CompileTask } from "../compile-continuation.js";
 import {
   canonical,
   containsType,

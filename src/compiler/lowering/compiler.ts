@@ -43,7 +43,7 @@ import {
   type CoreRuntimeChecks,
   type RuntimeCheckSite,
 } from "../../type-inference/backend.js";
-import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
+import { runCompileTask, compileChild, type CompileTask } from "../../compile-continuation.js";
 import {
   expressionChildren as instructionEmissionChildren,
   tagQueryOperands,

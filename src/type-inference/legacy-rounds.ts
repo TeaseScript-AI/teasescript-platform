@@ -11,7 +11,7 @@ import type {
   SpeakerDeclaration,
   TypeAnnotation,
 } from "../ast.js";
-import { compileChild, runCompileTask, type CompileTask } from "../compiler/continuation.js";
+import { compileChild, runCompileTask, type CompileTask } from "../compile-continuation.js";
 import { staticText, unwrap } from "../expression-children.js";
 import type { TypePlan } from "../plan/model.js";
 import { someNode } from "../project-globals.js";

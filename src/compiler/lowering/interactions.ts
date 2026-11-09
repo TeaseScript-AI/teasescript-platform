@@ -16,7 +16,7 @@ import type {
 import { DEFAULT_OPEN_URL_BUTTON_TEXT, DEFAULT_POPUP_BUTTON_TEXT } from "../../plan/model.js";
 import { canonicalWebUrl } from "../../web-url.js";
 import { staticVisibleText } from "../../static-evaluation.js";
-import { compileChild, type CompileTask } from "../continuation.js";
+import { compileChild, type CompileTask } from "../../compile-continuation.js";
 import { showButtonOptions } from "../../expression-children.js";
 import type { InstructionCompiler, LoweredExpression } from "./compiler.js";
 import { planSpan } from "./expression-plans.js";

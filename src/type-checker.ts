@@ -43,7 +43,7 @@ import {
   packageGlobProblem,
   packagePathProblem,
 } from "./project-paths.js";
-import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
+import { compileChild, runCompileTask, type CompileTask } from "./compile-continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
   askOperands,

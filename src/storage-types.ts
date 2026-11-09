@@ -1,4 +1,4 @@
-import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
+import { compileChild, runCompileTask, type CompileTask } from "./compile-continuation.js";
 import type { SourceSpan } from "./source.js";
 import { isAssignable, openType, resolved, union, type StaticType } from "./static-types.js";
 import { PropertyTable } from "./static-types/property-tables.js";
