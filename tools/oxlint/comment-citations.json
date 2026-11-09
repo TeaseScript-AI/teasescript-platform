@@ -1,7 +1,1 @@
-{
-  "tools/oxlint/check-comment-forecasts.mjs": {
-    "TABLE r4": 1,
-    "TABLE §": 1,
-    "other TABLE": 2
-  }
-}
+{}

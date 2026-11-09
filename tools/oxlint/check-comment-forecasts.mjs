@@ -5,9 +5,9 @@ import { checkedFiles, fileComments } from "./comments.mjs";
 // A comment says what the code does now and never forecasts later work (IMPLEMENTATION-AND-REVIEW.md "Code that does
 // not mislead", #1977). This check reads comments only, never strings or code, in the linted files and in `.vue`
 // files' `<script>` blocks. A citation of a repository record matches no form: a bare `#N`, a completed stage, `PR N`,
-// "(as) before #N". `TABLE r4`, `TABLE §`, a bare `r4.N` and `TABLE` with another id are no citations, as TABLE is not
-// in the repository (#1977): each file's exact count of them in comments is in `comment-citations.json`, which may only
-// fall. A comment that points at the accepted record (`docs/specifications/type-inference-accepted-record.md#<anchor>`,
+// "(as) before #N". The forms of `COUNTED_CITATIONS` cite the old design record, which is not in the repository
+// (#1977), so they are no citations: each file's exact count of them in comments is in `comment-citations.json`, which
+// may only fall. A comment that points at the accepted record (`docs/specifications/type-inference-accepted-record.md#<anchor>`,
 // #2089) names one of its headings; the doc-links check reads Markdown only and never sees a comment.
 // `comment-forecasts-allowed.json` lists the forecasts this check accepts, and every entry must still be found.
 
