@@ -2,6 +2,7 @@ import { watch, type Ref } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
 import { type PlayerSession } from "../../../runtime/runtime-view.js";
 import { bridgeOf, endsQuietly, refusalCode } from "../../../runtime/player-bridge.js";
+import type { Origin } from "./activation/useActivationRun.js";
 
 /*
  * Debug's call view (L5f), moved from `usePlayerSession` unchanged: who asks for the shown session's active calls, and
@@ -14,7 +15,10 @@ interface CallViewHost {
   readonly stopped: Readonly<Ref<boolean>>;
   readonly isDisposed: () => boolean;
   readonly publishOwned: (next: PlayerSession) => PlayerSession | null;
-  readonly reportPageError: (error: unknown) => void;
+  /** The activation live now, which a call view request's failure stops. */
+  readonly currentOrigin: () => Origin;
+  /** The activation error-stop sink. */
+  readonly reportActivationError: (origin: Origin, error: unknown) => void;
 }
 
 export function useCallView({
@@ -22,7 +26,8 @@ export function useCallView({
   stopped,
   isDisposed,
   publishOwned,
-  reportPageError,
+  currentOrigin,
+  reportActivationError,
 }: CallViewHost) {
   // The call view (L5f): Debug's Now view and the error dialog read the active calls, which only publications of a
   // session whose calls are viewed carry. While any demand stands, the shown session's calls are viewed; the view moves
@@ -31,6 +36,9 @@ export function useCallView({
   let callDemands = 0;
   let callViewed: PlayerSession | null = null;
   function viewCalls(target: PlayerSession, on: boolean) {
+    // Its failure stops the activation live as it is asked, and none that began since (Q1 B); its view stays the
+    // lineage's.
+    const origin = currentOrigin();
     void bridgeOf(target)
       .viewCalls(target, on)
       .then(
@@ -42,7 +50,7 @@ export function useCallView({
           // nothing ends further.
           if (endsQuietly(error) || refusalCode(error) === "session") return;
           if (!isDisposed() && !stopped.value && session.value?.lineage === target.lineage)
-            reportPageError(error);
+            reportActivationError(origin, error);
         },
       );
   }

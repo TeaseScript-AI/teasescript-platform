@@ -477,7 +477,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     resolvePackageAsset,
     resolveAsset,
     isDisposed: () => disposed,
-    reportPageError,
+    currentOrigin: () => activationRun.current(),
+    reportActivationError,
     ownedSection,
     publishOwned,
     clock: () => clock,
@@ -595,7 +596,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     stopped,
     isDisposed: () => disposed,
     publishOwned,
-    reportPageError,
+    currentOrigin: () => activationRun.current(),
+    reportActivationError,
   });
 
   media.watchMedia();

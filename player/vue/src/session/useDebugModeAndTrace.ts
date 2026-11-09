@@ -105,6 +105,9 @@ export function useDebugModeAndTrace({
   function debugView(request: DebugViewRequest): Promise<DebugView | null> {
     const current = session.value;
     if (current === null || !debugTracing.value) return Promise.resolve(null);
+    // Its failure stops the activation live as it is asked, and none that began since (Q1 B); its view stays the
+    // lineage's.
+    const origin = activationRun.current();
     return bridgeOf(current)
       .read(current, "debugView", { request })
       .then(
@@ -120,7 +123,7 @@ export function useDebugModeAndTrace({
             !stopped.value &&
             session.value?.lineage === current.lineage
           )
-            reportPageError(error);
+            reportActivationError(origin, error);
           return null;
         },
       );

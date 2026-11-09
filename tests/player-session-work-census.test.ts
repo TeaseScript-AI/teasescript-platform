@@ -718,12 +718,10 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {supersede}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportActivationError {reportActivationError}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportPageError {reportPageError}",
-  "player/vue/src/session/useCallView.ts useCallView {reportPageError}",
   "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace {reportActivationError}",
   "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace {reportPageError}",
   "player/vue/src/session/useRandomControl.ts useRandomControl {reportActivationError}",
   "player/vue/src/session/useRandomControl.ts useRandomControl {reportPageError}",
-  "player/vue/src/session/useSessionMedia.ts useSessionMedia {reportPageError}",
   "player/vue/src/session/useSessionRewind.ts useSessionRewind {reportPageError}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > reportActivationError {reportActivationError}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > reportHostError {reportPageError}",
@@ -737,6 +735,8 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > failed {failed}",
   "player/vue/src/session/activation/work/adopt.ts adopt > done {done}",
   "player/vue/src/session/activation/work/adopt.ts adopt > failed {failed}",
+  "player/vue/src/session/useCallView.ts useCallView {reportActivationError}",
+  "player/vue/src/session/useSessionMedia.ts useSessionMedia {reportActivationError}",
 ];
 
 /**
