@@ -37,7 +37,8 @@ import { generatorFolders, holdsGenerators } from "../tests/families/sources.mjs
 // `rerun-shard` submits one shard again into its campaign, `submit`'s own submission with the shard written in, as the
 // rerun of `<job>`: its `bash -c` script opens with `: replaces <job>;`, which `collect` reads from the rerun's record
 // (`meta.json`'s `command`, kept verbatim), refusing one that names a job outside its shard. `<job>` may itself be a
-// rerun; it is refused when `<job>` is not in the campaigns or ran another script or trees. `--host` pins the worker.
+// rerun; it is refused when `<job>` is not in the campaigns or ran another script or trees. `<base>` and `<head>` go
+// to the queue as the SHAs this clone resolves them to. `--host` pins the worker.
 //
 // `rerun-stalls` reruns the standing area attempts' stalled sources on both trees in one queue job (`stalls.mjs --index`,
 // then `stalls.mjs rerun`, at `--memory`, 12,288 MB unless given) as `<prefix>-rerun`; `--host` pins the worker. A work
@@ -624,8 +625,18 @@ export function shardSubmission(all, campaign, name, id, host) {
   ];
 }
 
-function rerunShard({ positional: [prefix, base, head, id], options }) {
+function rerunShard({ positional: [prefix, givenBase, givenHead, id], options }) {
   if (id === undefined || options.owner === undefined) throw new Usage(USAGE);
+  // (each commit resolved once, in this clone, and that SHA both compared and submitted, so the queue cannot read the
+  // name as another commit; one this clone does not have goes as given, compared by its prefix)
+  const resolved = (ref) => {
+    const run = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    return run.status === 0 ? run.stdout.trim() : ref;
+  };
+  const [base, head] = [resolved(givenBase), resolved(givenHead)];
   const results = options.results ?? path.join(homedir(), "jobs", "results", options.owner);
   const job = ["areas", "set"]
     .flatMap((kind) => jobsOf(results, `${prefix}-${kind}`).map((j) => ({ ...j, kind })))
@@ -644,16 +655,9 @@ function rerunShard({ positional: [prefix, base, head, id], options }) {
     options.host,
   );
   // (the job it replaces, itself perhaps a rerun, ran this same script on these trees: else the rerun is of another
-  // shard, trees or baseline; a commit this clone resolves is compared by its full SHA, any other by its prefix)
+  // shard, trees or baseline)
   const script = args.at(-1).replace(REPLACES, "");
-  const full = (ref) => {
-    const run = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
-      cwd: ROOT,
-      encoding: "utf8",
-    });
-    return run.status === 0 ? run.stdout.trim() : ref;
-  };
-  const trees = { base: full(base), head: full(head) };
+  const trees = { base, head };
   const commits = Object.entries(job.record.commits ?? {});
   if (
     scriptOf(job.record)?.replace(REPLACES, "") !== script ||

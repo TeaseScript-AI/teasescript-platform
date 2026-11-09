@@ -682,6 +682,11 @@ test("rerun-shard reruns a rerun and takes any name of the recorded commits; ano
     const again = rerun(`${commit}^0`);
     assert.equal(again.status, 0, again.stderr);
     assert.equal(JSON.parse(again.stdout).at(-2), `: replaces ${jobId("c", 5)}; ${script}`);
+    // (a name is submitted as the commit it was checked as, never for the queue's clone to read again)
+    const named = rerun("HEAD");
+    assert.equal(named.status, 0, named.stderr);
+    assert.ok(JSON.parse(named.stdout).includes(`head=${commit}`), named.stdout);
+    assert.ok(JSON.parse(named.stdout).includes(`base=${commit}`), named.stdout);
     // (the script given beside another one that ran, as Bash's `$0`: refused)
     job(["bash", "-c", "exit 1", script]);
     assert.equal(rerun(commit).status, 2);
