@@ -266,6 +266,7 @@ function callee(checker, call) {
 // 3. Shapes.
 function shapes({ checker, path, file, declared, refuse }) {
   const roles = declared.exports[path] ?? {};
+  const { operation, data } = typeWalk(checker, declared, refuse);
   for (const statement of file.statements) {
     const name = statement.name?.getText(file);
     if (name === undefined) continue;
@@ -297,7 +298,10 @@ function shapes({ checker, path, file, declared, refuse }) {
       if (signature !== undefined) operation(signature, name, statement);
     }
   }
+}
 
+/** The walks of operation signatures, carriers and plain data that `shapes` reads protocol types with. */
+function typeWalk(checker, declared, refuse) {
   // An operation's parameters and result: handles and records pass; a callable parameter is a hook, read in turn.
   function operation(signature, at, node) {
     signature.getParameters().forEach((parameter, index) => {
@@ -416,6 +420,7 @@ function shapes({ checker, path, file, declared, refuse }) {
       data(checker.getTypeOfSymbolAtLocation(property, node), `${at}.${property.name}`, node, seen);
     }
   }
+  return { operation, carrier, data };
 }
 
 /** The name of a declared type, or `null` for an anonymous one. */
