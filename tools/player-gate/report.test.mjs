@@ -1038,7 +1038,10 @@ test("the reader guard fails every raw-read form at the wrapping site, and the p
     '({}).constructor.getOwnPropertyDescriptor(strict, "result").value',
     '({})["constructor"].getOwnPropertyDescriptor(strict, "result").value',
   ])
-    assert.ok(reflective(site.replace("strict.result", read)), `the ${read} mutant passed the guard`);
+    assert.ok(
+      reflective(site.replace("strict.result", read)),
+      `the ${read} mutant passed the guard`,
+    );
   // Aliases: an initializer, a destructuring source, a parameter default, a destructured prototype link.
   for (const alias of [
     `(() => { const O = Object; return DERIVE[cell.scenario](O.getOwnPropertyDescriptor(strict, "result").value, cell, problems); })()`,
@@ -1178,7 +1181,11 @@ test("the headline summary holds ms and boolean fields only: byte and count fiel
   const fields = Object.values(NUMBERS).flat();
   const headline = new Set(fields.filter(isHeadline).map(([label]) => label));
   const other = new Set(fields.filter((field) => !isHeadline(field)).map(([label]) => label));
-  assert.deepEqual([...headline].filter((label) => other.has(label)), [], "a label in both partitions");
+  assert.deepEqual(
+    [...headline].filter((label) => other.has(label)),
+    [],
+    "a label in both partitions",
+  );
   for (const [label, unit] of fields)
     assert.equal(isHeadline([label, unit]), unit === "ms" || unit === "boolean", label);
   const session = { scenario: "session", engine: "chromium" };
@@ -1200,7 +1207,11 @@ test("the headline summary holds ms and boolean fields only: byte and count fiel
         `${cell}: "${label}" is no ms or boolean field`,
       );
   const counts = Object.keys(report.unvalidated[`${name(session)} / bytes and counts`]);
-  for (const label of ["served the whole cold page, page, encoded", "heap, page (cold), at Start enabled", "turns answered"])
+  for (const label of [
+    "served the whole cold page, page, encoded",
+    "heap, page (cold), at Start enabled",
+    "turns answered",
+  ])
     assert.ok(counts.includes(label), label);
   assert.match(report.text, /## Declared gaps[\s\S]*byte and count fields[\s\S]*R11-01/u);
   // A byte record's failure, a reader's or a malformed record's, fails the byte cell alone, never the timings (Sol code

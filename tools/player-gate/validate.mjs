@@ -272,7 +272,13 @@ const NUMBERS = {
       (cell) => LONG_TASK_ENGINES.has(cell.engine),
       true,
     ],
-    ["first save: plan JSON, UTF-16 units", "count", (r) => r.firstSave?.planJsonLength, always, true],
+    [
+      "first save: plan JSON, UTF-16 units",
+      "count",
+      (r) => r.firstSave?.planJsonLength,
+      always,
+      true,
+    ],
     [
       "turn: input → feedback frame (median of the sample's turns)",
       "ms",
