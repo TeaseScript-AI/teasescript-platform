@@ -623,10 +623,9 @@ function otherReferencesOf(source, text, compared) {
       inDoc ||
       (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode);
     const within = !doc && (inCompared || compared.has(node));
-    if (node.kind > ts.SyntaxKind.LastToken) {
-      for (const child of node.getChildren(source)) visit(child, within, doc);
-      return;
-    }
+    // every child, a token's too (the end-of-file token holds the JSDoc after the last statement)
+    for (const child of node.getChildren(source)) visit(child, within, doc);
+    if (node.kind > ts.SyntaxKind.LastToken) return;
     for (const range of doc
       ? []
       : [
