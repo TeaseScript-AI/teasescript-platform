@@ -76,10 +76,22 @@ test("the job's memory: SX_MEM_MIB and a visible cgroup limit, the smaller, so t
   assert.equal(jobMemoryMib({ env: env("6144"), cgroupMib: null }), 6144);
   assert.equal(jobMemoryMib({ env: {}, cgroupMib: 8192 }), 8192);
   assert.equal(jobMemoryMib({ env: {}, cgroupMib: null }), null);
-  for (const value of ["0", "-1", "6G", "", "6144.5", " 6144", "06144"])
+  assert.equal(jobMemoryMib({ env: env("06144"), cgroupMib: null }), 6144);
+  for (const value of ["0", "00", "-1", "6G", "", "6144.5", " 6144", "9".repeat(400)])
     assert.throws(
       () => jobMemoryMib({ env: env(value), cgroupMib: null }),
       /SX_MEM_MIB/u,
       JSON.stringify(value),
     );
+});
+
+test("filesAtOnce's default sizes from SX_MEM_MIB, whatever the cgroup this runs in (#2154)", (t) => {
+  // (1 MiB is below the reserve whatever the visible cgroup limit is, so the default gives one file at once, as only a
+  // default that reads the variable can)
+  const before = process.env.SX_MEM_MIB;
+  t.after(() =>
+    before === undefined ? delete process.env.SX_MEM_MIB : (process.env.SX_MEM_MIB = before),
+  );
+  process.env.SX_MEM_MIB = "1";
+  assert.equal(filesAtOnce({ cores: 15 }), 1);
 });

@@ -257,7 +257,18 @@ test("the full suite fails on a file that reported no test of its own, and names
   const environment = { ...process.env };
   delete environment.NODE_TEST_CONTEXT;
   mkdirSync(resolve(directory, "dist/tests"), { recursive: true });
-  writeFileSync(resolve(directory, "dist/tests/a.test.js"), `require("node:test")("a", () => {});`);
+  // Each of these reports a test of its own: one named by its file's path, one a helper registers, one importing another
+  // test file, whose results are the importer's only (#2155's round 1).
+  const files: Record<string, string> = {
+    "a.test.js": `require("node:test")("a", () => {});`,
+    "named.test.js": `require("node:test")(__filename, () => {});`,
+    "helper.js": `module.exports = () => require("node:test")("from a helper", () => {});`,
+    "helped.test.js": `require("./helper.js")();`,
+    "importer.test.js": `require("./imported.test.js"); require("node:test")("importer", () => {});`,
+    "imported.test.js": `require("node:test")("imported", () => {});`,
+  };
+  for (const [file, source] of Object.entries(files))
+    writeFileSync(resolve(directory, "dist/tests", file), source);
   const run = () =>
     spawnSync(process.execPath, [filterPath, "--full-output"], {
       cwd: directory,
@@ -277,6 +288,20 @@ test("the full suite fails on a file that reported no test of its own, and names
     const beside = run();
     assert.equal(beside.status, 1, beside.stderr);
     assert.ok(beside.stderr.includes(named), beside.stderr);
+    assert.equal(beside.stderr.split("reported no test of its own").length, 2, beside.stderr);
+    // (a file whose own process reports nothing is named though another file imports it and reports its test)
+    writeFileSync(
+      resolve(directory, "dist/tests/imported.test.js"),
+      `if (require.main === module) process.exit(0); require("node:test")("imported", () => {});`,
+    );
+    const imported = run();
+    assert.equal(imported.status, 1, imported.stderr);
+    assert.ok(
+      imported.stderr.includes(
+        "run-test-files: dist/tests/imported.test.js reported no test of its own",
+      ),
+      imported.stderr,
+    );
     assert.match(beside.stdout, /^✔ a \(/mu);
   } finally {
     rmSync(directory, { recursive: true, force: true });

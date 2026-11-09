@@ -52,9 +52,10 @@ export function memoryLimitMib({
 export function jobMemoryMib({ env = process.env, cgroupMib = memoryLimitMib() } = {}) {
   const value = env.SX_MEM_MIB;
   if (value === undefined) return cgroupMib;
-  if (!/^[1-9][0-9]*$/.test(value))
+  const mib = /^[0-9]+$/.test(value) ? Number(value) : NaN;
+  if (!Number.isSafeInteger(mib) || mib < 1)
     throw new Error(`SX_MEM_MIB is not a positive whole number of MiB: ${JSON.stringify(value)}`);
-  return cgroupMib === null ? Number(value) : Math.min(Number(value), cgroupMib);
+  return cgroupMib === null ? mib : Math.min(mib, cgroupMib);
 }
 
 /** The test files to run at once on `cores` (default: one per core but one) under `limitMib` (`null`: no limit). */

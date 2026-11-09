@@ -29,17 +29,20 @@ const tests = run({
 trackInFlight((type, listener) => tests.on(type, listener));
 const seconds = {};
 // The files that reported a test of their own, and those `node:test` failed as a whole (a killed process): a given file
-// in neither reported nothing.
+// in neither reported nothing. A result is the given file's that ran it (`entryFile`), whichever module registered the
+// test, so a file that another imports is not credited with that file's results; a file's own entry has no `entryFile`.
 const reported = new Set();
 const failedWhole = new Set();
 tests.on("test:complete", (data) => {
   if (data.nesting !== 0 || data.file === undefined) return;
-  // (a file's own entry is named by its path as given; its seconds are kept by its path under `dist/tests/`, which for a
-  // file at the top is its name, as `suiteTestFiles` names it)
-  if (resolve(data.name) === data.file) {
-    seconds[suiteName(data.file)] = data.details.duration_ms / 1000;
-    if (!data.details.passed) failedWhole.add(data.file);
-  } else reported.add(data.file);
+  if (data.entryFile !== undefined) {
+    reported.add(data.entryFile);
+    return;
+  }
+  // (its seconds are kept by its path under `dist/tests/`, which for a file at the top is its name, as
+  // `suiteTestFiles` names it)
+  seconds[suiteName(data.file)] = data.details.duration_ms / 1000;
+  if (!data.details.passed) failedWhole.add(data.file);
 });
 tests.on("test:summary", (summary) => {
   if (!summary.success) process.exitCode = 1;
