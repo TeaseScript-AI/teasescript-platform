@@ -172,5 +172,12 @@ test("a record made before its generator moved into a group, or was renamed keep
     assert.notEqual(index.status, 2, index.stderr);
     assert.match(index.stdout, /"area":"area","generator":"g\.mjs"/u);
     assert.match(index.stdout, /"area":"area","generator":"h\.mjs"/u);
+    // (an id is unique within its area only: where another area holds it too, the record names no area, and is refused)
+    area(families, "other", { "group/also.mjs": generator(["u"], "g.mjs") });
+    const twice = spawnSync(process.execPath, [join(families, "stalls.mjs"), out], {
+      encoding: "utf8",
+    });
+    assert.equal(twice.status, 2, twice.stderr);
+    assert.match(twice.stderr, /the generator g\.mjs is an id in (area and other|other and area)/u);
   });
 });

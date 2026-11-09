@@ -198,13 +198,15 @@ function areaOf(file) {
 }
 
 /**
- * Each generator id's area, for a record whose file a later rename or move into a group left behind (it names its id,
- * which the generator keeps): every area's generators by id (`generatorsOf`).
+ * Each generator id's areas, for a record whose file a later rename or move into a group left behind (it names its id,
+ * which the generator keeps): every area's generators by id (`generatorsOf`). An id is unique within its area only, so
+ * an id two areas hold names no area.
  */
 async function idAreas() {
   const ids = new Map();
   for (const folder of generatorFolders(here))
-    for (const { name } of await generatorsOf(folder)) ids.set(name, path.basename(folder));
+    for (const { name } of await generatorsOf(folder))
+      ids.set(name, [...(ids.get(name) ?? []), path.basename(folder)]);
   return ids;
 }
 
@@ -580,11 +582,18 @@ const unplaced = replayShards.flatMap(({ entries }) =>
 );
 if (unplaced.length > 0) {
   const ids = await idAreas();
-  for (const entry of unplaced)
-    entry.area =
-      ids.get(entry.generator) ??
-      refused(`no area of ${here} holds the generator ${entry.file ?? entry.generator}`);
+  for (const entry of unplaced) {
+    const held = ids.get(entry.generator) ?? [];
+    if (held.length !== 1)
+      refused(
+        held.length === 0
+          ? `no area of ${here} holds the generator ${entry.file ?? entry.generator}`
+          : `the generator ${entry.generator} is an id in ${held.join(" and ")}: its record names no area`,
+      );
+    entry.area = held[0];
+  }
 }
+
 for (const shard of replayShards) {
   if (shard.ran?.only !== undefined)
     refused(`${shard.file} records a rerun: give it after --rerun`);
