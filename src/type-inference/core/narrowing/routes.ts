@@ -1,7 +1,7 @@
-import type { Expression } from "../../ast.js";
-import type { PlaceId, SourceSite } from "../graph.js";
-import type { CorePass } from "./answers.js";
-import { joinParts, keepText, type WorkLedger } from "./budget.js";
+import type { Expression } from "../../../ast.js";
+import type { PlaceId, SourceSite } from "../../graph.js";
+import type { CorePass } from "../answers.js";
+import { joinParts, keepText, type WorkLedger } from "../budget.js";
 import {
   keptParent,
   keptPrefixes,
@@ -9,20 +9,11 @@ import {
   keyPlace,
   type Definition,
   type Key,
-} from "./definitions.js";
-import type { FlowNode } from "./flow-graph.js";
-import { REASON, type Item, type ItemTag } from "./items.js";
-import type { Work } from "./solver.js";
-import {
-  copied,
-  each,
-  holds,
-  mapped,
-  passing,
-  some,
-  sorted,
-  steps,
-} from "./narrowing-iteration.js";
+} from "../definitions.js";
+import type { FlowNode } from "../flow-graph.js";
+import { REASON, type Item, type ItemTag } from "../items.js";
+import type { Work } from "../solver.js";
+import { copied, each, holds, mapped, passing, some, sorted, steps } from "../charged-iteration.js";
 import {
   locationOf,
   pathKey,
@@ -33,16 +24,16 @@ import {
   type NarrowingForm,
   type NarrowingIndex,
   type StablePath,
-} from "./narrowing.js";
+} from "./narrowings.js";
 import {
   countIn,
   lowerBound,
   type StatementTree,
   type TreeBlock,
   type TreeStatement,
-} from "./narrowing-statements.js";
-import { selectsElement } from "./method-categories.js";
-import { propertyName } from "./program.js";
+} from "./statement-tree.js";
+import { selectsElement } from "../method-categories.js";
+import { propertyName } from "../program.js";
 
 /*
  * N3's route query of stage 3b (checkpoint 9): a consumer of key k at node n that needs a
@@ -51,7 +42,7 @@ import { propertyName } from "./program.js";
  * kind, built once on the key's first question:
  * - the **sparse per-key layer**: the statements that kill k (a whole store of k or a prefix), the blocking tests of the
  *   needed form (every live arm starts with a narrowing that removes the kind, or is closed), and the branches and loops
- *   every live alternative of which those close beside the shared layer (`narrowing-statements.ts`), computed over the
+ *   every live alternative of which those close beside the shared layer (`statement-tree.ts`), computed over the
  *   statements holding a definition or a test of k and their ancestors: events and tests times the nesting depth;
  * - the **candidates kept at the key they store**: k's own definitions that certify the kind, and each prefix's whole
  *   stores, projected only for the one candidate examined; each with the reach of its writer side (the outermost block

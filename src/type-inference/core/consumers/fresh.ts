@@ -5,7 +5,7 @@ import { termAt, writtenOf } from "../contract.js";
 import { keyOf, type Definition } from "../definitions.js";
 import { STOPPED } from "../items.js";
 import { pathPhrase } from "../messages.js";
-import { Laminar } from "../narrowing.js";
+import { Laminar } from "../narrowing/laminar.js";
 import { siteKey } from "../program.js";
 import { targetName, type StoreRoot, type StoreStep } from "../result.js";
 import { mixed, mixedJoin } from "./mixed.js";

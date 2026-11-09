@@ -9,7 +9,7 @@ import type { FlowNode } from "../flow-graph.js";
 import { kindsInOrder, REASON, type ContextWord, type Item, type ItemTag } from "../items.js";
 import { codeOf, pathPhrase } from "../messages.js";
 import { measuresLength } from "../method-categories.js";
-import { stablePath } from "../narrowing.js";
+import { stablePath } from "../narrowing/narrowings.js";
 import { propertyName, propertyStep, siteKey, stepName } from "../program.js";
 import { propertyNames, type PropertyNamesTask } from "../property-names.js";
 import {

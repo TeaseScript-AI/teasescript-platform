@@ -1,9 +1,9 @@
-import type { CorePass } from "./answers.js";
-import { joinParts, keepText, keptParts, type WorkLedger } from "./budget.js";
-import { keyPlace, type Definition, type Key, type PositionRange } from "./definitions.js";
-import type { FlowLoop, FlowNode } from "./flow-graph.js";
-import { makeItem, type ContextWord, type Item, type ItemTag } from "./items.js";
-import { locationOf, stablePath, type Narrowing, type NarrowingIndex } from "./narrowing.js";
+import type { CorePass } from "../answers.js";
+import { joinParts, keepText, keptParts, type WorkLedger } from "../budget.js";
+import { keyPlace, type Definition, type Key, type PositionRange } from "../definitions.js";
+import type { FlowLoop, FlowNode } from "../flow-graph.js";
+import { makeItem, type ContextWord, type Item, type ItemTag } from "../items.js";
+import { locationOf, stablePath, type Narrowing, type NarrowingIndex } from "./narrowings.js";
 import {
   copied,
   each,
@@ -14,9 +14,9 @@ import {
   some,
   sorted,
   steps,
-} from "./narrowing-iteration.js";
-import { countIn, lowerBound } from "./narrowing-statements.js";
-import type { Work } from "./solver.js";
+} from "../charged-iteration.js";
+import { countIn, lowerBound } from "./statement-tree.js";
+import type { Work } from "../solver.js";
 
 /*
  * N2 and N5 of stage 3b (checkpoint 9): whether a narrowing definition G still answers a read

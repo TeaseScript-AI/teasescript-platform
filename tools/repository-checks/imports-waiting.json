@@ -1,9 +1,1 @@
-[
-  {
-    "cycle": [
-      "src/type-inference/core/narrowing-statements.ts",
-      "src/type-inference/core/narrowing.ts"
-    ],
-    "waits": "#2040: the shared part, `Laminar`, moves out of the pair (the O4 lead's structure work)"
-  }
-]
+[]

@@ -62,7 +62,7 @@ export type WorkCounter =
   | "eventSteps"
   // the contract per demanded path and its source indexes
   | "invSteps"
-  // #1747: the objects query's own work (`contract/objects.ts`, through `narrowing-iteration.ts`'s charged helpers):
+  // #1747: the objects query's own work (`contract/objects.ts`, through `charged-iteration.ts`'s charged helpers):
   // each function entry, proof node, entry, group, store, writer, list, child edge, copied element, joined part and
   // sort step
   | "objectSteps"

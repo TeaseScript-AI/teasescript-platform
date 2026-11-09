@@ -1,14 +1,14 @@
-import type { Expression, TypeAnnotation } from "../../ast.js";
-import { expressionChildren } from "../../expression-children.js";
-import { dictMethod } from "../../dict-operations.js";
-import { listMethod } from "../../list-methods.js";
-import { caseLiteral } from "../../switch-cases.js";
-import type { ValueKind } from "../../value-kinds.js";
-import type { PlaceId } from "../graph.js";
-import { conditionShape } from "../narrowing-shapes.js";
-import { joinParts, keepText, keptArray, keptParts, type WorkLedger } from "./budget.js";
-import { keyBelow, keyOf, type Key } from "./definitions.js";
-import type { Callable, FlowNode } from "./flow-graph.js";
+import type { Expression, TypeAnnotation } from "../../../ast.js";
+import { expressionChildren } from "../../../expression-children.js";
+import { dictMethod } from "../../../dict-operations.js";
+import { listMethod } from "../../../list-methods.js";
+import { caseLiteral } from "../../../switch-cases.js";
+import type { ValueKind } from "../../../value-kinds.js";
+import type { PlaceId } from "../../graph.js";
+import { conditionShape } from "../../narrowing-shapes.js";
+import { joinParts, keepText, keptArray, keptParts, type WorkLedger } from "../budget.js";
+import { keyBelow, keyOf, type Key } from "../definitions.js";
+import type { Callable, FlowNode } from "../flow-graph.js";
 import {
   mergeItems,
   REASON,
@@ -16,9 +16,9 @@ import {
   type ItemScope,
   type ItemTag,
   type Spelling,
-} from "./items.js";
-import { selectsElement } from "./method-categories.js";
-import { propertyStep, siteKey, type CoreProgram } from "./program.js";
+} from "../items.js";
+import { selectsElement } from "../method-categories.js";
+import { propertyStep, siteKey, type CoreProgram } from "../program.js";
 import {
   copied,
   each,
@@ -29,8 +29,9 @@ import {
   some,
   sorted,
   steps,
-} from "./narrowing-iteration.js";
-import { StatementTree } from "./narrowing-statements.js";
+} from "../charged-iteration.js";
+import { StatementTree } from "./statement-tree.js";
+import { Laminar } from "./laminar.js";
 
 /*
  * Stage 3b's narrowing definitions (checkpoint 9): a test is a definition. A null test or a
@@ -41,7 +42,7 @@ import { StatementTree } from "./narrowing-statements.js";
  * nearest G of its own path text and of each element-step scope by a binary search and a jump up the list's nest
  * (`NarrowingIndex.nearest`), never by scanning sibling paths. The mutating method calls of a collection key are one
  * sorted invalidation list per key (N2). Everything here is built once from the program; what the definitions and the
- * handlers decide is asked per pass (`narrowing-events.ts`, `narrowing-routes.ts`).
+ * handlers decide is asked per pass (`events.ts`, `routes.ts`).
  */
 
 /** A step of a stable path (N1): a property, a fixed index or key, or an index or key held in a plain variable. */
@@ -234,6 +235,7 @@ export type NarrowingForm =
   | { readonly kind: "is-not"; readonly kinds: readonly ValueKind[] };
 
 const NON_NULL: NarrowingForm = { kind: "non-null" };
+
 const ONLY_NULL: NarrowingForm = { kind: "null" };
 
 /** Whether an item of kind `tag` lies wholly within `kinds` (an integer is a number), each kind compared charged. */
@@ -554,88 +556,6 @@ export interface OperandSpan {
   readonly file: number;
   readonly start: number;
   readonly end: number;
-}
-
-/**
- * Intervals that nest or lie apart, sorted by where they start (the longer first, and at one interval in the order
- * given), each linked to the nearest one holding it, with skew-binary jumps up that chain (Myers): the innermost one
- * holding a point is a binary search and a logarithmic climb (as the guard index's nests, §3.2).
- */
-export class Laminar<T> {
-  readonly starts: readonly number[];
-  readonly ends: readonly number[];
-  readonly items: readonly T[];
-  readonly parents: readonly number[];
-  readonly #jumps: readonly number[];
-
-  public constructor(
-    readonly work: WorkLedger,
-    entries: { readonly start: number; readonly end: number; readonly item: T }[],
-  ) {
-    work.charge("indexSteps");
-    const order = mapped(work, "indexSteps", entries, (_, index) => index);
-    sorted(
-      work,
-      "indexSteps",
-      order,
-      (a, b) => entries[a]!.start - entries[b]!.start || entries[b]!.end - entries[a]!.end || a - b,
-    );
-    const ordered = mapped(work, "indexSteps", order, (index) => entries[index]!);
-    const parents: number[] = [];
-    const jumps: number[] = [];
-    const depths: number[] = [];
-    const open: number[] = [];
-    for (const [index, entry] of each(work, "indexSteps", ordered.entries())) {
-      for (const _ of steps(
-        work,
-        "indexSteps",
-        () => open.length > 0 && ordered[open.at(-1)!]!.end < entry.start,
-      ))
-        open.pop();
-      const parent = open.at(-1) ?? -1;
-      parents.push(parent);
-      depths.push(parent < 0 ? 0 : depths[parent]! + 1);
-      const up = parent < 0 ? -1 : jumps[parent]!;
-      const further = up < 0 ? -1 : jumps[up]!;
-      jumps.push(
-        further >= 0 && depths[parent]! - depths[up]! === depths[up]! - depths[further]!
-          ? further
-          : parent,
-      );
-      open.push(index);
-    }
-    this.starts = mapped(work, "indexSteps", ordered, (entry) => entry.start);
-    this.ends = mapped(work, "indexSteps", ordered, (entry) => entry.end);
-    this.items = mapped(work, "indexSteps", ordered, (entry) => entry.item);
-    this.parents = parents;
-    this.#jumps = jumps;
-  }
-
-  /** The index of the innermost interval holding `at`, or -1. */
-  public innermostIndex(at: number): number {
-    this.work.charge("eventSteps");
-    let low = 0;
-    let high = this.starts.length;
-    for (const _ of steps(this.work, "eventSteps", () => low < high)) {
-      const middle = (low + high) >> 1;
-      if (this.starts[middle]! <= at) low = middle + 1;
-      else high = middle;
-    }
-    // (up the chain the intervals end no earlier: a jump whose interval ends before `at` passes every one below it)
-    let index = low - 1;
-    for (const _ of steps(this.work, "eventSteps", () => index >= 0 && this.ends[index]! < at)) {
-      const jump = this.#jumps[index]!;
-      index = jump >= 0 && this.ends[jump]! < at ? this.parents[jump]! : this.parents[index]!;
-    }
-    return index;
-  }
-
-  /** The innermost interval's item holding `at`, or `null`. */
-  public innermost(at: number): T | null {
-    this.work.charge("eventSteps");
-    const index = this.innermostIndex(at);
-    return index < 0 ? null : this.items[index]!;
-  }
 }
 
 /** A mutating method call of a collection (N2's invalidations): where it takes effect and the callable it stands in. */
