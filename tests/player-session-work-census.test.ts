@@ -441,8 +441,10 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportActivationError > then:callback.1":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
-  "player/vue/src/session/useRandomControl.ts useRandomControl > resolveRandomDraw > catch:callback":
-    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
+  "player/vue/src/session/useRandomControl.ts useRandomControl > resolveDraw > catch:callback": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
   "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > restoreKept > admit:callback":
     ["creation", ["BridgeClient.request"]],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > rooms > reloadDebug": [
@@ -453,7 +455,13 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "creation",
     ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
   ],
-  "player/vue/src/session/useRandomControl.ts useRandomControl > sendRandomRequest > then:callback.2":
+  "player/vue/src/session/useRandomControl.ts useRandomControl > flushRandom > then:callback.2": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
+  "player/vue/src/session/activation/useActivationRun.ts useActivationRun > reply > then:callback.1":
+    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
+  "player/vue/src/session/activation/useActivationRun.ts useActivationRun > reply > then:callback.2":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > startDebugSessionAnew > then:callback":
     ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
@@ -713,6 +721,8 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > reportPageError {reportPageError}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {reportActivationError}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {reportPageError}",
+  "player/vue/src/session/activation/useActivationRun.ts useActivationRun {report}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > report {report}",
 ];
 
 /**

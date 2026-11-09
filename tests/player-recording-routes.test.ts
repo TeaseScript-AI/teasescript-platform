@@ -339,15 +339,16 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useSessionActivation.ts: useSessionActivation > reportActivationError: then starting": READMITS,
   "useSessionActivation.ts: useSessionActivation > stopAt: then acknowledged": READMITS,
   // Reached from the activation bodies through the functions they call.
-  "useRandomControl.ts: useRandomControl > sendRandomRequest: then host.client.request": READMITS,
+  "useActivationRun.ts: useActivationRun > reply: then pending":
+    "the one settlement boundary: its handlers act on the origin's behalf only while that lives, and their errors go to that origin's error stop (`reply`)",
   // The clock's section (#1983): its observation, then the caller's body, which re-admits first (checked below).
   "useRuntimeSceneClock.ts: useRuntimeSceneClock > section > bridgeOf(current).section:callback: await observeIn":
-    "the section's observation, before the caller's body: the activation work's body re-admits as it begins (`resolveRandomDraw`, checked below)",
+    "the section's observation, before the caller's body: the activation work's body re-admits as it begins (`resolveDraw`, checked below)",
   "useRuntimeSceneClock.ts: useRuntimeSceneClock > observeIn: await opened.send":
-    "the section's observation, which shows only its own session's publication (`owned`); the body that acts for an activation re-admits first (`resolveRandomDraw`)",
-  "useRandomControl.ts: useRandomControl > resolveRandomDraw > ownedSection:callback: await section.send":
+    "the section's observation, which shows only its own session's publication (`owned`); the body that acts for an activation re-admits first (`resolveDraw`)",
+  "useRandomControl.ts: useRandomControl > resolveDraw > ownedSection:callback: await section.send":
     READMITS,
-  "useRandomControl.ts: useRandomControl > resolveRandomDraw: catch ownedSection": READMITS,
+  "useRandomControl.ts: useRandomControl > resolveDraw: catch ownedSection": READMITS,
   "useSessionActivation.ts: useSessionActivation > startFrom: finally settled":
     "clears the in-flight markers it set, only while they are still its own",
   "useDebugModeAndTrace.ts: useDebugModeAndTrace > applyDebugMode: finally bridgeOf.request":
@@ -586,5 +587,5 @@ test("every wait of the page's activation work re-admits its activation, or is l
       node.forEachChild((child) => visit(child, owner));
     });
   }
-  assert.deepEqual(bodies, ["resolveRandomDraw: true"], "each section body re-admits first");
+  assert.deepEqual(bodies, ["resolveDraw: true"], "each section body re-admits first");
 });

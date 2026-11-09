@@ -58,6 +58,7 @@ import { useCallView } from "./useCallView.js";
 import { usePlayerCameraLifecycle, useSessionCamera } from "./usePlayerCameras.js";
 import { usePlayerSessionServices } from "./usePlayerSessionServices.js";
 import { useExportCandidate } from "./activation/useExportCandidate.js";
+import type { Origin } from "./activation/useActivationRun.js";
 import { useRandomControl } from "./useRandomControl.js";
 import { useDebugModeAndTrace } from "./useDebugModeAndTrace.js";
 import { useSessionMedia } from "./useSessionMedia.js";
@@ -405,11 +406,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     stopped,
     isDisposed: () => disposed,
     reportPageError,
-    showSession,
+    // The rewind's show and its descendants act for the activation live at its synchronous entry.
+    showSession: (next, options) => showSession(next, activationRun.current(), options),
     scriptStorage,
-    applyDebugMode,
+    applyDebugMode: () => applyDebugMode(activationRun.current()),
     adoptRandom: (next) => adoptRandom(next, activationRun.current()),
-    settleUncontrolledDraw: () => settleUncontrolledDraw(),
+    settleUncontrolledDraw: () => settleUncontrolledDraw(activationRun.current()),
     rewindApi: () => rewindApi,
     clock: () => clock,
     notices: () => notices,
@@ -793,8 +795,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // Shows a session a Start began or a restore brought, as the Player's from now on; its scene time continues from the
   // persisted observation, so a gap while no Player ran is not consumed. `paused`: a state Debug's rewind restored and
   // shows for inspection (`showRewound`), which takes Debug's random control and the clock only once input adopts it.
+  // `origin`: the activation that shows it, which its caller captured at its synchronous entry; its adoption, Debug
+  // application and draw settlement act for it.
   function showSession(
     next: PlayerSession,
+    origin: Origin,
     { paused }: { readonly paused: boolean } = { paused: false },
   ) {
     // A failed write concerns the run it happened in.
@@ -808,12 +813,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     interactionReset.value++;
     jumpedRevision.value = -1;
     // An inspected state takes Debug's random control only once input adopts it (`adoptRewound` below).
-    if (!paused) adoptRandom(next, activationRun.current());
+    if (!paused) adoptRandom(next, origin);
     session.value = next;
     clock.rebase();
     if (!paused) {
-      applyDebugMode();
-      settleUncontrolledDraw();
+      applyDebugMode(origin);
+      settleUncontrolledDraw(origin);
     }
     // The session that runs is the one a reload continues in its room.
     if (!paused) keepSessionLater();
@@ -932,7 +937,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           return enterDebugRoom(scope, making ? { session: live } : debugRoom.value!, durable);
         });
         await loadScriptStorage();
-        if (live) applyDebugMode();
+        if (live) applyDebugMode(activationRun.current());
         else {
           // A normal session that ended meanwhile stays in the normal room.
           endSession();
@@ -1272,7 +1277,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     inputSection,
     publishJump,
     /** Shows `next` as the Player's session from now on; Debug's rewind shows its own states through its owner. */
-    showSession: (next: PlayerSession) => showSession(next),
+    showSession: (next: PlayerSession) => showSession(next, activationRun.current()),
     update,
     prepareInput,
     /** Debug's rewind (DEBUGGER.md "Rewind"): how the session host shows the states it restores. */

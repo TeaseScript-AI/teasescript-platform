@@ -571,8 +571,10 @@ function composableText(): string {
 // `adoptRandom` gives a session a Player's control, and only at the invariant's points; a settings change never does
 // (orchestrator 2's ruling on P5's fourth occurrence). A sender in another module needs adding here.
 const RANDOM_SENDERS: readonly (readonly [string, string])[] = [
-  ['op: "randomControl" | "adoptRandom",', "the senders' type"],
-  ['"randomControl",', "not adopting: a settings change (`flushRandom`)"],
+  [
+    '.request("randomControl", { intent: lastRandom }',
+    "not adopting: a settings change (`flushRandom`)",
+  ],
   ['"randomControl",', "not adopting: the Player's teardown"],
   ['"adoptRandom",', "adopting: `adoptRandom`, the one adoption"],
   ['.request("releaseRandom",', "releasing: Continue before its kept draw went on"],
@@ -604,7 +606,7 @@ test("every random-op sender in the composable is classified as adopting or not"
       // The activation owner's and the rewind owner's dependencies, which forward their adoption to the random control's.
       "adoptRandom: (next, origin) => adoptRandom(next, origin),",
       "adoptRandom: (next) => adoptRandom(next, activationRun.current()),",
-      "if (!paused) adoptRandom(next, activationRun.current());",
+      "if (!paused) adoptRandom(next, origin);",
       "if (session.value !== null) adoptRandom(session.value);",
       "adoptRandom(continued, origin);",
     ],

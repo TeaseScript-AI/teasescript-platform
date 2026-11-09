@@ -32,7 +32,26 @@ export interface InitialOrigin {
 /** What an activation's completion acts for: the initial record or an activation's run. */
 export type Origin = InitialOrigin | RunOrigin;
 
-export function useActivationRun() {
+/** A reply's settlement, as a retired origin's cleanup receives it. */
+export type Settlement<T> =
+  { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown };
+/** What a reply does: on its origin's behalf while it lives, else only its cleanup. Each handler returns nothing. */
+export interface ReplyHandlers<T> {
+  readonly done: (value: T) => undefined;
+  readonly failed: (error: unknown) => undefined;
+  /** Cleanup of what the reply brought, for a retired origin: it acts for no activation. */
+  readonly retired?: (outcome: Settlement<T>) => undefined;
+}
+
+/**
+ * The record owner. `report` is the activation error-stop sink a reply's unexpected handler error goes to, for the
+ * reply's own origin.
+ */
+export function useActivationRun({
+  report,
+}: {
+  readonly report: (origin: Origin, error: unknown) => void;
+}) {
   // The live record: the initial one until the first begin, then each activation's run; none after disposal.
   let live: Origin | null = { kind: "initial" };
   // What `current()` gives after disposal: a record no completion is admitted for.
@@ -66,6 +85,30 @@ export function useActivationRun() {
       };
       live = next;
       return next;
+    },
+    /**
+     * Settles `pending` for `origin`, in the one reaction attached to it: its `done` or `failed` while `origin` lives,
+     * else its `retired` cleanup. A handler's error goes to `origin`'s error stop; a handler returns nothing, never a
+     * promise, so no later work hides in it.
+     */
+    reply<T>(origin: Origin, pending: Promise<T>, handlers: ReplyHandlers<T>): Promise<void> {
+      const settle = (outcome: Settlement<T>) => {
+        try {
+          const returned: unknown =
+            live !== origin
+              ? handlers.retired?.(outcome)
+              : outcome.ok
+                ? handlers.done(outcome.value)
+                : handlers.failed(outcome.error);
+          if (returned !== undefined) throw new TypeError("A reply's handler returns nothing.");
+        } catch (error) {
+          report(origin, error);
+        }
+      };
+      return pending.then(
+        (value) => settle({ ok: true, value }),
+        (error: unknown) => settle({ ok: false, error }),
+      );
     },
     /** Retires the live record at the Player's disposal, before it gives up its bridge: the host ends its run. */
     retire(): void {

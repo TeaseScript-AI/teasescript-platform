@@ -137,13 +137,13 @@ export function useDebugModeAndTrace({
     clock().before("debugMode");
     debugMode = enabled;
     if (enabled && room().value === "normal" && hasNormalStorage()) void copyToDebugRoom();
-    else applyDebugMode();
+    else applyDebugMode(activationRun.current());
   }
   /**
    * Gives the running session the current Debug state. One that waits for Continue takes it at Continue, and a state
    * Debug's rewind shows for inspection once it is adopted or the session it left is back.
    */
-  function applyDebugMode() {
+  function applyDebugMode(origin: Origin) {
     const current = session.value;
     if (
       current === null ||
@@ -160,9 +160,8 @@ export function useDebugModeAndTrace({
     const on = debugMode;
     const asked = { lineage: current.lineage, on };
     debugModeAsked = asked;
-    // It acts for the activation that shows the session: a Continue keeps the lineage, so the lineage alone does not
-    // say that its activation still lives.
-    const origin = activationRun.current();
+    // It acts for `origin`, the activation that shows the session, which its caller captured at its synchronous entry:
+    // a Continue keeps the lineage, so the lineage alone does not say that its activation still lives.
     // In the host (`setDebugMode`); the session shows the change while it still owns the UI.
     void bridgeOf(current)
       .request<{ readonly kind: string }>(

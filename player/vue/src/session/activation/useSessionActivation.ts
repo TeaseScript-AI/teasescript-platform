@@ -46,7 +46,8 @@ interface SessionActivationHost {
   readonly bridgeReady: Promise<PlayerBridge>;
   readonly requireBridge: () => PlayerBridge;
   readonly isDisposed: () => boolean;
-  readonly showSession: (next: PlayerSession) => void;
+  /** Shows `next` as the Player's, for `origin`, the activation that began it. */
+  readonly showSession: (next: PlayerSession, origin: Origin) => void;
   // The owners made after this one, as the activation reaches them: forwarders and getters.
   readonly camera: { open(capability: boolean): Promise<boolean>; release(): void };
   readonly captures: { reset(): void };
@@ -98,7 +99,9 @@ export function useSessionActivation({
   // Each activation's diagnostic run, the one owner of what its completions may do; with its recording up to a Player
   // error, captured in the host as the stop is sent and kept until the next Start, while Debug's rewind may begin the
   // recorder anew at a restored state.
-  const activationRun = useActivationRun();
+  const activationRun = useActivationRun({
+    report: (origin, error) => reportActivationError(origin, error),
+  });
   /**
    * The recording the host holds for diagnostics and tests: a Player error's, while its captured ticket is held, else
    * the recorder's current one. Not a debug export's selection (the failure recording's `selection()`), which waits for
@@ -369,7 +372,8 @@ export function useSessionActivation({
         const tracing = tracingIntent();
         if (tracing?.on)
           void host.request(restored, "restartTrace", { tracing }).catch((error: unknown) => {
-            if (!endsQuietly(error) && !isDisposed() && !stopped.value) reportActivationError(origin, error);
+            if (!endsQuietly(error) && !isDisposed() && !stopped.value)
+              reportActivationError(origin, error);
           });
         let continued: PlayerSession = host.latest(restored) ?? restored;
         // A session kept while paused at a random draw goes on with its natural outcome first: until then, the engine
@@ -526,12 +530,12 @@ export function useSessionActivation({
     } finally {
       clicked = null;
     }
-    if (!(begun instanceof Promise)) return started(pending, begun);
+    if (!(begun instanceof Promise)) return started(pending, begun, origin);
     sessionBeginning = begun;
     const settled = begun.then(
       (next) => {
         if (!isDisposed() && token === activationToken && activationRun.admits(origin))
-          started(pending, next);
+          started(pending, next, origin);
       },
       (error: unknown) => {
         // An obsolete activation's failure stops nothing: the session that replaced it goes on.
@@ -546,9 +550,9 @@ export function useSessionActivation({
     });
     return settled;
   }
-  function started(pending: Activation, next: PlayerSession) {
+  function started(pending: Activation, next: PlayerSession, origin: RunOrigin) {
     if (continuing?.id === next.id) continuing = null;
-    showSession(next);
+    showSession(next, origin);
     // A new session replaces the one kept before.
     if (pending.kind === "start") {
       keptOwner().forgetKeptPoint();

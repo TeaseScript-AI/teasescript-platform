@@ -90,40 +90,22 @@ export function useRandomControl({
     });
     resetRequested = false;
     // A page-wide setting: it lives as long as the Player, whichever activation runs.
-    sendRandomRequest(
-      host,
-      "randomControl",
-      { intent: lastRandom },
-      ahead === null ? {} : { after: ahead.id },
-      null,
-    );
+    host.client
+      .request("randomControl", { intent: lastRandom }, ahead === null ? {} : { after: ahead.id })
+      .then(
+        (reply) => {
+          if (!isDisposed()) adoptRevision(reply);
+        },
+        (error: unknown) => {
+          if (!endsQuietly(error) && !isDisposed()) reportPageError(error);
+        },
+      );
   }
-  /**
-   * Sends a random op on the Worker itself; its reply gives the history's revision. `origin` is the activation an
-   * adoption acts for: once it retired, its reply writes nothing and its failure stops nothing (`useActivationRun`). A
-   * page-wide setting (`null`, `flushRandom`) lives as long as the Player.
-   */
-  function sendRandomRequest(
-    host: PlayerBridge,
-    op: "randomControl" | "adoptRandom",
-    args: Record<string, unknown>,
-    options: { readonly after?: string },
-    origin: Origin | null,
-  ) {
-    host.client.request(op, args, options).then(
-      (reply) => {
-        if (isDisposed() || (origin !== null && !activationRun.admits(origin))) return;
-        // EVIDENCE: validation: the random ops reply from the same build with the history's revision.
-        const { revision } = reply.result as { readonly revision: number };
-        randomRevision.value = revision;
-      },
-      (error: unknown) => {
-        if (endsQuietly(error) || isDisposed()) return;
-        if (origin !== null && !activationRun.admits(origin)) return;
-        if (origin === null) reportPageError(error);
-        else reportActivationError(origin, error);
-      },
-    );
+  /** Takes the history's revision from a random op's reply. */
+  function adoptRevision(reply: { readonly result: unknown }) {
+    // EVIDENCE: validation: the random ops reply from the same build with the history's revision.
+    const { revision } = reply.result as { readonly revision: number };
+    randomRevision.value = revision;
   }
   /**
    * Adopts `next`: gives it this Player's random control from its next op on. Only the invariant's points call it:
@@ -132,14 +114,23 @@ export function useRandomControl({
    */
   function adoptRandom(next: PlayerSession, origin: Origin) {
     if (lastRandom === undefined || isDisposed()) return;
-    // The adoption acts for the activation that shows `next`, and only while that lives.
-    sendRandomRequest(
-      bridgeOf(next),
+    // The adoption acts for the activation that shows `next`, and only while that lives: once it retired, its reply
+    // writes nothing and its failure stops nothing.
+    const request = bridgeOf(next).client.request(
       "adoptRandom",
       { session: next.id, intent: lastRandom },
       { after: next.id },
-      origin,
     );
+    void activationRun.reply(origin, request, {
+      done: (reply) => {
+        if (!isDisposed()) adoptRevision(reply);
+        return undefined;
+      },
+      failed: (error) => {
+        if (!endsQuietly(error) && !isDisposed()) reportActivationError(origin, error);
+        return undefined;
+      },
+    });
   }
   /** What a Start carries: this Player, whose session it is, and its newest random intent. */
   const startRandom = () =>
@@ -174,25 +165,35 @@ export function useRandomControl({
   }
   // A session that runs again while paused at a draw nobody decides any more, such as a restored state adopted after
   // Debug's control ended, goes on naturally.
-  function settleUncontrolledDraw() {
+  function settleUncontrolledDraw(origin: Origin) {
     const draw = session.value?.state.randomDraw;
-    if (desiredRandom === null && draw != null) void resolveRandomDraw(draw.drawId, "natural");
+    if (desiredRandom === null && draw != null)
+      void resolveDraw(draw.drawId, "natural", false, origin);
   }
   /**
    * Resolves the random draw the session is paused at, naturally, with a chosen outcome, or with its site's least-tried
    * one, in the host; with `record`, the outcome goes into the site's history. The session's clock goes on from the
    * time it paused at. `null` when the session is not paused at that draw or no longer owns the UI. It acts for the
-   * activation that shows the session: once that retired, its reply writes nothing and its failure stops nothing.
+   * activation that shows the session, live at this call: once that retired, its reply writes nothing and its failure
+   * stops nothing.
    */
   function resolveRandomDraw(
     drawId: number,
     outcome: DrawResolution,
     record = false,
   ): Promise<ResolveDrawResult["outcome"] | null> {
+    return resolveDraw(drawId, outcome, record, activationRun.current());
+  }
+  /** `resolveRandomDraw` for `origin`, which its caller captured at its synchronous entry. */
+  function resolveDraw(
+    drawId: number,
+    outcome: DrawResolution,
+    record: boolean,
+    origin: Origin,
+  ): Promise<ResolveDrawResult["outcome"] | null> {
     if (inspecting.value) return Promise.resolve(null);
     // Which reset the record belongs to, as it was asked: one asked for since enters nothing.
     const recorded = record ? { resetAt: lastRandom?.resetAt ?? 0 } : null;
-    const origin = activationRun.current();
     return ownedSection(session.value, "inputAnswer", async (section, owned, current) => {
       // Paused at the draw, the session observes no time; a stopped session gives none.
       if (!activationRun.admits(origin)) return null;

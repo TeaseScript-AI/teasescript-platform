@@ -119,6 +119,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     usePlayerSession: SETUP,
     "usePlayerSession.hasNormalStorage": MOVE,
     "usePlayerSession.hasScriptStorage": SESSION,
+    "usePlayerSession.showSession": SESSION,
     copyToDebugRoom: MOVE,
     startDebugSessionAnew: MOVE,
     "usePlayerSession.readPhoto": READ,
@@ -193,7 +194,8 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "session/useSessionMedia.ts": { storeImageFile: EDIT, "useSessionMedia.watchMedia": SETUP },
   "session/useRandomControl.ts": {
     useRandomControl: SETUP,
-    sendRandomRequest: SESSION,
+    flushRandom: SESSION,
+    adoptRandom: SESSION,
     randomTried: SESSION,
     "useRandomControl.dispose": SETUP,
   },
