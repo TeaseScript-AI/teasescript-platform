@@ -7,9 +7,11 @@ import {
   asked,
   coreCheckResult,
   coreFacts,
+} from "../../src/type-inference/core/check-result/check-result.js";
+import {
   OutsideContract,
   SliceIndex,
-} from "../../src/type-inference/core/consumer.js";
+} from "../../src/type-inference/core/check-result/slice-index.js";
 import { withoutRecords } from "../../src/type-inference/core/consumers.js";
 import type { CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
 import type { HeldMode } from "./type-core-held-host.js";

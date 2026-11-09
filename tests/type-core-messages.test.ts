@@ -9,8 +9,8 @@ import {
   checkedResult,
   coreCheckResult,
   reportedDiagnostics,
-  SliceIndex,
-} from "../src/type-inference/core/consumer.js";
+} from "../src/type-inference/core/check-result/check-result.js";
+import { SliceIndex } from "../src/type-inference/core/check-result/slice-index.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import {

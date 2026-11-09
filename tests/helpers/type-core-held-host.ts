@@ -749,7 +749,7 @@ const NON_EMPTY: ReadonlySet<string> = new Set(["non-empty"]);
 /**
  * A check's accepted domain (TABLE r4.290's inventory, amended): an empty check's non-emptiness, the family it names its
  * label alone (its plan content, a member read's store requirement, reads no `against`: `runtimeChecks` in
- * `core/consumer.ts`);
+ * `core/check-result/runtime-plan.ts`);
  * any other check's kinds by its `against` (`domainOf`).
  */
 const domainOfCheck = (check: Obligation): ReadonlySet<string> =>

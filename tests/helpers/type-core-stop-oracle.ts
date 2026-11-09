@@ -6,7 +6,7 @@ import type { SerializableRuntimeValue } from "../../src/runtime/values/serializ
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import { CORE_BACKEND, CandidateOutsideSlice } from "../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
-import { withMessagesInWords } from "../../src/type-inference/core/consumer.js";
+import { withMessagesInWords } from "../../src/type-inference/core/check-result/check-result.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
 import { withoutRecords } from "../../src/type-inference/core/consumers/left-out.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";

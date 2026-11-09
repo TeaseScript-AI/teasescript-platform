@@ -15,7 +15,7 @@ import {
 } from "../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
-import { checkedResult } from "../src/type-inference/core/consumer.js";
+import { checkedResult } from "../src/type-inference/core/check-result/check-result.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";

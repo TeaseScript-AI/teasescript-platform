@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileProjectWithBackend } from "../src/compiler.js";
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
-import { nodeOf, SliceIndex } from "../src/type-inference/core/consumer.js";
+import { nodeOf, SliceIndex } from "../src/type-inference/core/check-result/slice-index.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { VALUE_KIND_NAMES } from "../src/value-kinds.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
