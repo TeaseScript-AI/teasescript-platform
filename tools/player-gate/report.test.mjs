@@ -6,6 +6,7 @@ import { AXES, allCells, cellName, classify } from "./cells.mjs";
 import { buildReport } from "./report.mjs";
 import { playable, turnTimes } from "./lib/measure.mjs";
 import { hiddenCapture } from "./scenarios/keep.mjs";
+import { releaser } from "./lib/release.mjs";
 
 test("every cell is decided in both phases, and every axis value is required somewhere", () => {
   for (const phase of ["r0", "r1"]) {
@@ -105,6 +106,9 @@ test("the report fails on a row for an excluded cell", () => {
 });
 
 /** A complete headline session on `engine` and `backend`, built from the field list's own numbers. */
+/** A page's raw probe records, as `readGate` returns them. */
+const GATE = { states: [], inputs: [], changes: [], rows: [], rowChanges: [] };
+
 function sessionResult({ engine = "chromium", backend = "main" } = {}) {
   const cdp = engine === "chromium" || engine === "pixel";
   const worker = backend === "worker";
@@ -122,8 +126,9 @@ function sessionResult({ engine = "chromium", backend = "main" } = {}) {
   return {
     cold: play,
     repeat: play,
+    probe: { cold: GATE, repeat: GATE },
     worker: worker ? { startMs: 50, readyMs: 60 } : null,
-    firstSave: { startToCommitMs: 30, planJsonLength: 10, longTasksMs: cdp ? 0 : null },
+    firstSave: { ok: true, startToCommitMs: 30, planJsonLength: 10, longTasksMs: cdp ? 0 : null },
     turns: [{ ok: true, feedbackMs: 5, settledMs: 50 }],
     ...(cdp
       ? {
@@ -135,8 +140,8 @@ function sessionResult({ engine = "chromium", backend = "main" } = {}) {
                 finished: true,
                 failed: null,
                 encodedBytes: 7,
+                decodedBytes: 14,
                 beforeStartEnabled: true,
-                beforeFirstSave: true,
                 beforePlayable: true,
               },
               ...(worker
@@ -146,7 +151,7 @@ function sessionResult({ engine = "chromium", backend = "main" } = {}) {
                       finished: true,
                       failed: null,
                       encodedBytes: 3,
-                      beforeFirstSave: true,
+                      decodedBytes: 6,
                     },
                   ]
                 : []),
@@ -183,7 +188,7 @@ test("a sample counts only with every required field that applies; missing evide
     ARTIFACTS,
   );
   const line = empty.incomplete.find((text) => text.includes(name({})));
-  assert.match(line, /0 complete; missing: cold: playable/u);
+  assert.match(line, /0 complete; missing: the probe.s raw records; .*cold: playable/u);
   // A missing heap milestone or an unfinished request is missing evidence too.
   const noHeap = sessionResult();
   noHeap.memory = noHeap.memory.filter((reading) => reading.at !== "startEnabled");
@@ -193,9 +198,26 @@ test("a sample counts only with every required field that applies; missing evide
     finished: false,
     failed: null,
     encodedBytes: null,
-    beforeFirstSave: true,
   });
   for (const result of [noHeap, unfinished])
+    assert.ok(
+      buildReport(
+        [row({ scenario: "session", engine: "chromium" }, true, result)],
+        "r0",
+        ARTIFACTS,
+      ).incomplete.some((text) => text.includes(name({}))),
+    );
+  // A failed turn without its numbers, a failed first save, a missing byte length or no raw probe records: each one
+  // alone leaves the sample incomplete, whatever the medians say.
+  const failedTurn = sessionResult();
+  failedTurn.turns.push({ ok: false, reason: "Turn 1 did not settle" });
+  const failedSave = sessionResult();
+  failedSave.firstSave.ok = false;
+  const noLength = sessionResult();
+  delete noLength.bytes.requests[0].encodedBytes;
+  const noProbe = sessionResult();
+  delete noProbe.probe;
+  for (const result of [failedTurn, failedSave, noLength, noProbe])
     assert.ok(
       buildReport(
         [row({ scenario: "session", engine: "chromium" }, true, result)],
@@ -217,7 +239,11 @@ test("a worker build needs its engine Worker's start and heap; the A/A run needs
     /Worker: construction → ready/u,
   );
   const aa = (arm) =>
-    row({ scenario: "aa", engine: "chromium" }, true, { arm, cold: sessionResult().cold });
+    row({ scenario: "aa", engine: "chromium" }, true, {
+      arm,
+      cold: sessionResult().cold,
+      probe: GATE,
+    });
   const one = buildReport([aa("full"), aa("full")], "r0", ARTIFACTS);
   assert.ok(one.incomplete.some((text) => text.includes("no complete minimal arm")));
   const both = buildReport([aa("full"), aa("minimal")], "r0", ARTIFACTS);
@@ -300,4 +326,81 @@ test("a hidden capture counts only while hidden; one committed after resume is i
   assert.equal(resumed.kept, undefined);
   assert.notEqual(resumed.keptAfterResume, undefined);
   assert.notEqual(hiddenCapture(gate(20_000), 100, "s", 5).kept, undefined);
+});
+
+test("a run's release clears the Pixel's origins before it closes the browser, goes on past a failure, and runs once", async () => {
+  const steps = [];
+  const run = {
+    opened: {
+      clearOrigins: async (origins) => steps.push(`clear ${origins.join(",")}`),
+      close: async () => {
+        steps.push("close");
+        throw new Error("lost");
+      },
+    },
+    origins: ["http://localhost:1"],
+    reverses: [1],
+    removeReverse: (port) => steps.push(`reverse ${port}`),
+    hosts: [{ close: async () => steps.push("host") }],
+  };
+  const release = releaser(run);
+  const [first, second] = await Promise.all([release(), release()]);
+  assert.equal(first, second);
+  assert.deepEqual(steps, ["clear http://localhost:1", "close", "reverse 1", "host"]);
+  assert.deepEqual(first, [{ step: "browser", error: "lost" }]);
+});
+
+test("a hidden capture committed after the 30 s but before the page showed again is late, not after resume", () => {
+  const gate = {
+    lifecycle: [{ type: "visibilitychange", t: 32_000, visibility: "visible" }],
+    transactions: [
+      {
+        start: 30_400,
+        end: 30_500,
+        outcome: "complete",
+        puts: [{ store: "sessions", scope: "s", observedMs: 9 }],
+      },
+    ],
+  };
+  const found = hiddenCapture(gate, 100, "s", 5);
+  assert.equal(found.kept, undefined);
+  assert.equal(found.keptAfterResume, undefined);
+  assert.notEqual(found.keptLate, undefined);
+});
+
+test("a turn settles at an update of a message shown before it, and a new row at its first positive-opacity frame", () => {
+  const before = {
+    t: 100,
+    frame: 110,
+    start: null,
+    control: 1,
+    buttons: [{ label: "Next", enabled: true }],
+    composer: null,
+  };
+  const base = {
+    states: [before],
+    changes: [{ t: 250, frame: 262 }],
+    inputs: [{ type: "pointerdown", t: 201, ts: 200, trusted: true }],
+  };
+  const updated = turnTimes(
+    {
+      ...base,
+      rows: [{ id: "m1", speaker: "mistress", t: 50, frame: 60, shownFrame: 70 }],
+      rowChanges: [{ id: "m1", t: 250, frame: 262 }],
+    },
+    150,
+    before,
+  );
+  assert.equal(updated.settledBy, "row update");
+  assert.equal(updated.settledMs, 62);
+  const entering = turnTimes(
+    {
+      ...base,
+      rows: [{ id: "m2", speaker: "mistress", t: 220, frame: 230, shownFrame: 600 }],
+      rowChanges: [],
+    },
+    150,
+    before,
+  );
+  assert.equal(entering.settledMs, 400);
 });

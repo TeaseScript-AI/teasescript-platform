@@ -214,7 +214,11 @@ export function gateProbe(config) {
         ?.getAttribute("data-message-id");
       if (id && seenRows.has(id)) changed.add(id);
     }
-    for (const id of changed) keep(gate.rowChanges, { id, t: change.t });
+    for (const id of changed) {
+      const record = { id, t: change.t };
+      keep(gate.rowChanges, record);
+      frameAfter(record);
+    }
     for (const row of document.querySelectorAll(".transcript-entry[data-message-id]")) {
       const id = row.getAttribute("data-message-id");
       if (!seenRows.has(id)) {

@@ -20,6 +20,9 @@ export async function workerSide(page, result) {
     page.evaluate(() => performance.timeOrigin),
   ]);
   return {
+    // The raw log, epoch-based, with the page's clock origin its delivery latencies use.
+    workerLog: log,
+    timeOrigin: origin,
     workerSide: (result.requests ?? []).map((request) => {
       const receipt = log.find((entry) => entry.dir === "request" && entry.id === request.id);
       const reply = log.find((entry) => entry.dir === "reply" && entry.id === request.id);

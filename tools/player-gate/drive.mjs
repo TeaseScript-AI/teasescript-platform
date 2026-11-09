@@ -17,6 +17,7 @@ import { HOST_POLICY, startGateHost } from "./lib/host.mjs";
 import { clearOrigin } from "./lib/cdp.mjs";
 import { cdpSession } from "./lib/engines.mjs";
 import { coldBytes, session } from "./scenarios/session.mjs";
+import { releaser } from "./lib/release.mjs";
 import { calibrate, tapsSample } from "./scenarios/taps.mjs";
 import { bridge, bridgeUrl } from "./scenarios/bridge.mjs";
 import { keep } from "./scenarios/keep.mjs";
@@ -70,20 +71,22 @@ const hosts = [];
 const reverses = [];
 let opened = null;
 let failures = 0;
-let cleaned = null;
-/** Releases the browser, each reverse and each host, once, each even when another fails. */
-const cleanup = () =>
-  (cleaned ??= (async () => {
-    await opened?.close().catch(() => {});
-    for (const port of reverses) {
-      try {
-        adb(opened?.serial ?? process.env.PIXEL_SERIAL, "reverse", "--remove", `tcp:${port}`);
-      } catch {
-        // The reverse ends with the adb server anyway.
-      }
-    }
-    for (const host of hosts) await host.close().catch(() => {});
-  })());
+// What the run owns, released once in order (`lib/release.mjs`); `opened` is read when it runs.
+const run = {
+  get opened() {
+    return opened;
+  },
+  origins: [],
+  reverses,
+  hosts,
+  removeReverse: (port) =>
+    adb(opened?.serial ?? process.env.PIXEL_SERIAL, "reverse", "--remove", `tcp:${port}`),
+};
+const release = releaser(run);
+const cleanup = async () => {
+  for (const { step, error } of await release())
+    console.error(`player-gate: releasing ${step} failed: ${error}`);
+};
 for (const signal of ["SIGINT", "SIGTERM"])
   process.once(signal, () => {
     void cleanup().finally(() => process.exit(130));
@@ -112,6 +115,7 @@ try {
       reverses.push(host.port);
     }
     build.origin = pixel ? `http://localhost:${host.port}` : host.origin;
+    if (pixel) run.origins.push(build.origin);
     build.commit = commits[build.backend] ?? gitHead(build.tree);
   }
   opened = await openEngine(values.engine);

@@ -104,31 +104,29 @@ const NUMBERS = {
       always,
       false,
     ],
+    // The cold page's served bytes, cumulative, per target (the page; every Worker together) and phase, encoded and
+    // decoded; a worker build must also show its engine Worker's own requests.
+    ...["page", "Workers"].flatMap((target) =>
+      [
+        ["beforeStartEnabled", "before Start enabled"],
+        ["beforePlayable", "before playable"],
+        [null, "the whole cold page"],
+      ].flatMap(([phase, label]) =>
+        ["encoded", "decoded"].map((size) => [
+          `served ${label}, ${target}, ${size}`,
+          "bytes",
+          (r) => bytesOf(r, target, phase, size),
+          onCdp,
+          true,
+        ]),
+      ),
+    ),
     [
-      "served before Start enabled, page (cumulative)",
-      "bytes",
-      (r) => bytesOf(r, "page", "beforeStartEnabled"),
-      onCdp,
-      true,
-    ],
-    [
-      "served before playable, page (cumulative)",
-      "bytes",
-      (r) => bytesOf(r, "page", "beforePlayable"),
-      onCdp,
-      true,
-    ],
-    [
-      "served by the cold page through its first save, page",
-      "bytes",
-      (r) => bytesOf(r, "page", "beforeFirstSave"),
-      onCdp,
-      true,
-    ],
-    [
-      "served by the cold page through its first save, Workers",
-      "bytes",
-      (r) => bytesOf(r, "workers", "beforeFirstSave"),
+      "requests of the engine Worker's target",
+      "",
+      (r) =>
+        (r.bytes?.requests ?? []).filter((q) => q.target !== "page" && /engine/u.test(q.target))
+          .length || null,
       (cell) => onCdp(cell) && isWorker(cell),
       true,
     ],
@@ -279,18 +277,27 @@ NUMBERS.keepCompletion = NUMBERS.keep;
 NUMBERS.keepDurable = NUMBERS.keep;
 
 /** The served bytes of `target` (`page` or `workers`), all or those flagged `phase`; `null` while one is unfinished. */
-function bytesOf(result, target, phase) {
-  const requests = (result.bytes?.requests ?? []).filter(
+/**
+ * The served bytes (`encoded` or `decoded`) of `target` (`page` or `Workers`), all or those flagged `phase`: `null`
+ * while a request is still open or a finished one lacks its length; 0 for a target that requested nothing (no Worker).
+ */
+function bytesOf(result, target, phase, size) {
+  if (result.bytes?.requests === undefined) return null;
+  const requests = result.bytes.requests.filter(
     (request) =>
       (target === "page" ? request.target === "page" : request.target !== "page") &&
       (phase === null || request[phase] === true),
   );
+  if (target === "page" && requests.length === 0) return null;
+  const field = size === "encoded" ? "encodedBytes" : "decodedBytes";
   if (
-    requests.length === 0 ||
-    requests.some((request) => !request.finished && request.failed === null)
+    requests.some(
+      (request) =>
+        request.failed === null && (!request.finished || !Number.isFinite(request[field])),
+    )
   )
     return null;
-  return requests.reduce((sum, request) => sum + (request.encodedBytes ?? 0), 0);
+  return requests.reduce((sum, request) => sum + (request.failed === null ? request[field] : 0), 0);
 }
 function heapAt(result, at, target) {
   const reading = (result.memory ?? []).find((entry) => entry.at === at);
@@ -317,17 +324,81 @@ const diagnosticRequest = (result, page, op) =>
 const diagnosticRtt = (result, page, op) => diagnosticRequest(result, page, op)?.rttMs;
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
+const list = (value) => Array.isArray(value);
+/** The probe's raw records of one page, as `readGate` returns them. */
+const probeRecords = (gate) =>
+  gate !== null &&
+  typeof gate === "object" &&
+  list(gate.states) &&
+  list(gate.inputs) &&
+  list(gate.changes);
+
+/**
+ * The record-level checks per scenario, before any number counts (`reviews/l5-gate/field-inventory.md`): the raw
+ * records a row must keep, and each turn, save and log valid on its own. Each gives what is missing or contradicted.
+ */
+const EVIDENCE = {
+  session: (r, cell) => [
+    ...(probeRecords(r.probe?.cold) && probeRecords(r.probe?.repeat)
+      ? []
+      : ["the probe's raw records"]),
+    ...(r.firstSave?.ok === true ? [] : ["a committed first save"]),
+    ...(list(r.turns) && r.turns.length > 0 ? [] : ["a turn"]),
+    ...(r.turns ?? []).flatMap((turn, index) =>
+      turn.ok === true &&
+      finite(turn.feedbackMs) &&
+      (finite(turn.settledMs) || turn.end === "ended" || turn.end === "cut")
+        ? []
+        : [`turn ${index}: ${turn.reason ?? "no feedback, or neither settled nor ended"}`],
+    ),
+    ...(onCdp(cell) && !list(r.bytes?.requests) ? ["the cold page's request records"] : []),
+  ],
+  aa: (r) => (probeRecords(r.probe) ? [] : ["the probe's raw records"]),
+  bridge: (r, cell) => [
+    ...(list(r.requests) ? [] : ["the request records"]),
+    ...(isWorker(cell) && !(list(r.workerLog) && finite(r.timeOrigin))
+      ? ["the Worker's log with its clock origin"]
+      : []),
+  ],
+  taps: (r) =>
+    list(r.ledger) && list(r.deliveries) && list(r.cdpErrors)
+      ? []
+      : ["the send ledger and deliveries"],
+  keepHandler: (r) =>
+    list(r.lifecycle) && list(r.transactions) ? [] : ["the lifecycle and transaction records"],
+  keepCompletion: (r) =>
+    list(r.lifecycle) && list(r.transactions) ? [] : ["the lifecycle and transaction records"],
+};
+EVIDENCE.sessionInstrumented = (r, cell) => [
+  ...EVIDENCE.session(r, cell).filter((problem) => problem !== "the cold page's request records"),
+  ...(list(r.diagnostics?.cold) && list(r.diagnostics?.repeat)
+    ? []
+    : ["the bridge log's request records"]),
+  ...(onCdp(cell) &&
+  isWorker(cell) &&
+  !(list(r.diagnostics?.workerLogs?.cold) && list(r.diagnostics?.workerLogs?.repeat))
+    ? ["the engine Worker's injected logs"]
+    : []),
+];
+EVIDENCE.bridgeTaps = EVIDENCE.taps;
+
 /** The required fields of `cell` that `row` lacks: an empty list for a complete sample. */
 export function missingFields(cell, row) {
+  const records = EVIDENCE[cell.scenario]?.(row.result ?? {}, cell) ?? [];
   // A keep trial's outcome is its measurement, whichever it is.
   if (cell.scenario.startsWith("keep"))
-    return typeof row.result?.outcome === "string" ? [] : ["the trial gave no outcome"];
+    return typeof row.result?.outcome === "string"
+      ? records
+      : ["the trial gave no outcome", ...records];
   if (!row.ok) return ["the sample failed"];
-  return NUMBERS[cell.scenario]
-    .filter(
-      ([, , read, applies, required]) => required && applies(cell) && !finite(read(row.result)),
-    )
-    .map(([label, unit]) => (unit === "" ? label : `${label} (${unit})`));
+  return [
+    ...records,
+    ...NUMBERS[cell.scenario]
+      .filter(
+        ([, , read, applies, required]) => required && applies(cell) && !finite(read(row.result)),
+      )
+      .map(([label, unit]) => (unit === "" ? label : `${label} (${unit})`)),
+  ];
 }
 const format = ({ n, median, min, max }) =>
   n === 0 ? "—" : `${round(median)} [${round(min)}–${round(max)}] (n=${n})`;

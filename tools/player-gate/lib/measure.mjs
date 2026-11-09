@@ -50,13 +50,44 @@ export function playable(gate, label) {
 }
 
 /**
+ * The script rows' events after the input at `after` that settle a turn, each with its frame: a new script row when it
+ * is first drawn with a positive opacity (`shownFrame`), and a change of a script row already shown before the input
+ * (an updated message), at the frame after the change. User echoes never settle a turn. The driver's settlement wait
+ * uses the same events (`SETTLING_ROW`).
+ */
+export function settlingRows(gate, after) {
+  const speakers = new Map(gate.rows.map((row) => [row.id, row]));
+  const shown = gate.rows
+    .filter((row) => row.speaker !== "user" && row.t > after && row.shownFrame !== undefined)
+    .map((row) => ({ kind: "row", frame: row.shownFrame }));
+  const updated = (gate.rowChanges ?? [])
+    .filter((change) => {
+      const row = speakers.get(change.id);
+      return row !== undefined && row.speaker !== "user" && row.t < after && change.t > after;
+    })
+    .filter((change) => change.frame !== undefined)
+    .map((change) => ({ kind: "row update", frame: change.frame }));
+  return [...shown, ...updated].sort((a, b) => a.frame - b.frame);
+}
+
+/** The input types that submit a turn. */
+const SUBMISSION = ["pointerdown", "touchstart", "keydown"];
+
+/**
+ * `settlingRows`' test as a page source over `window.__gate`, for the driver's wait: from the turn's submission, the
+ * first trusted input at or after `sentAt`, a script row appeared or a script row shown before it changed.
+ */
+export const SETTLING_ROW = (sentAt) =>
+  `((at) => window.__gate.rows.some((row) => row.speaker !== "user" && row.t > at) || window.__gate.rowChanges.some((change) => change.t > at && window.__gate.rows.some((row) => row.id === change.id && row.speaker !== "user" && row.t < at)))(window.__gate.inputs.find((input) => input.t >= ${sentAt} && input.trusted && ${JSON.stringify(SUBMISSION)}.includes(input.type))?.t ?? Infinity)`;
+
+/**
  * One turn from the input event at or after `sentAt`, the state `before` it shown: feedback is the frame after the
- * first DOM change; settlement is the frame after the first script row or the first state with an enabled control of
- * another action (its serial). `end` is how the driver saw the turn end when it did not settle: `ended` (the script's
+ * first DOM change; settlement is the frame after the first state with an enabled control of another action (its
+ * serial), or the first settling row event (`settlingRows`), whichever comes first. `end` is how the driver saw the turn end when it did not settle: `ended` (the script's
  * end), `cut` (nothing to answer for 10 s), or `null`; a turn that neither settled nor ended is not ok.
  */
 export function turnTimes(gate, sentAt, before, end = null) {
-  const submission = inputAfter(gate, sentAt, ["pointerdown", "touchstart", "keydown"]);
+  const submission = inputAfter(gate, sentAt, SUBMISSION);
   if (submission === null) return { ok: false, reason: "no input recorded" };
   const change = gate.changes.find((record) => record.t > submission.t);
   const control = gate.states.find(
@@ -64,7 +95,8 @@ export function turnTimes(gate, sentAt, before, end = null) {
       state.t > submission.t && hasEnabledControl(state) && state.control !== before.control,
   );
   const row = gate.rows.find((record) => record.speaker !== "user" && record.t > submission.t);
-  const settledAt = Math.min(control?.frame ?? Infinity, row?.frame ?? Infinity);
+  const settling = settlingRows(gate, submission.t)[0];
+  const settledAt = Math.min(control?.frame ?? Infinity, settling?.frame ?? Infinity);
   const feedbackMs = change?.frame === undefined ? null : change.frame - submission.ts;
   const times = {
     submissionMs: submission.ts,
@@ -79,7 +111,7 @@ export function turnTimes(gate, sentAt, before, end = null) {
     ok: feedbackMs !== null,
     ...times,
     settledMs: settledAt - submission.ts,
-    settledBy: settledAt === row?.frame ? "row" : "control",
+    settledBy: settledAt === settling?.frame ? settling.kind : "control",
   };
 }
 

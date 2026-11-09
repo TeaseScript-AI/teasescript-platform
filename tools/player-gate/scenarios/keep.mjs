@@ -91,7 +91,8 @@ const HIDDEN_MS = 30_000;
 /**
  * The capture after `hiddenAt` that kept a later scene time than `baselineMs`, from the probe's records: `kept` when it
  * committed while still hidden (before the first later `visibilitychange` to visible or `resume`, and within 30 s),
- * `keptAfterResume` when it committed only after that boundary, `failed` for an aborted or failed one.
+ * `keptAfterResume` when it committed only after the page showed again, `keptLate` when it committed still hidden but
+ * after the 30 s, `failed` for an aborted or failed one.
  */
 export function hiddenCapture(gate, hiddenAt, scope, baselineMs) {
   const shown = gate.lifecycle.find(
@@ -100,7 +101,8 @@ export function hiddenCapture(gate, hiddenAt, scope, baselineMs) {
       (event.type === "resume" ||
         (event.type === "visibilitychange" && event.visibility === "visible")),
   );
-  const boundary = Math.min(shown?.t ?? Infinity, hiddenAt + HIDDEN_MS);
+  const shownAt = shown?.t ?? Infinity;
+  const boundary = Math.min(shownAt, hiddenAt + HIDDEN_MS);
   const after = gate.transactions.filter(
     (transaction) =>
       transaction.start >= hiddenAt &&
@@ -110,16 +112,24 @@ export function hiddenCapture(gate, hiddenAt, scope, baselineMs) {
     transaction.outcome === "complete" &&
     transaction.puts.some((put) => put.store === "sessions" && put.observedMs > baselineMs);
   const kept = after.find((transaction) => later(transaction) && transaction.end <= boundary);
+  // Past the boundary: after the page showed again, or still hidden but after the 30 s, each its own outcome.
   const keptAfterResume =
     kept === undefined
-      ? after.find((transaction) => later(transaction) && transaction.end > boundary)
+      ? after.find((transaction) => later(transaction) && transaction.end > shownAt)
+      : undefined;
+  const keptLate =
+    kept === undefined && keptAfterResume === undefined
+      ? after.find(
+          (transaction) =>
+            later(transaction) && transaction.end > boundary && transaction.end <= shownAt,
+        )
       : undefined;
   const failed = after.find(
     (transaction) =>
       (transaction.outcome === "abort" || transaction.outcome === "error") &&
       transaction.end <= boundary,
   );
-  return { kept, keptAfterResume, failed, boundaryMs: boundary };
+  return { kept, keptAfterResume, keptLate, failed, boundaryMs: boundary };
 }
 
 export async function keep({ opened, origin, script, trial, reopen }) {
@@ -148,6 +158,10 @@ export async function keep({ opened, origin, script, trial, reopen }) {
         outcome,
         baselineMs: session.baselineMs,
         hiddenToCommitMs: found.kept ? found.kept.end - hiddenAt : null,
+        ...(await readGate(session.page).then((gate) => ({
+          lifecycle: gate.lifecycle,
+          transactions: gate.transactions,
+        }))),
       };
     }
     if (trial === "keepCompletion") {
@@ -173,9 +187,11 @@ export async function keep({ opened, origin, script, trial, reopen }) {
           ? "aborted"
           : found.keptAfterResume
             ? "completed after resume"
-            : froze
-              ? "suspended"
-              : "not observed within 30 s";
+            : found.keptLate
+              ? "completed after 30 s, still hidden"
+              : froze
+                ? "suspended"
+                : "not observed within 30 s";
       return {
         ok: found.kept !== undefined,
         outcome,

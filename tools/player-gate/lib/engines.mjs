@@ -77,6 +77,18 @@ export async function openEngine(engine) {
         page.once("close", () => opened.delete(page));
         return { page, context, close: () => page.close().catch(() => {}) };
       },
+      /** Clears every kind of site data of each of `origins` and the HTTP cache, through a page of its own. */
+      async clearOrigins(origins) {
+        const page = await context.newPage();
+        try {
+          const cdp = await context.newCDPSession(page);
+          for (const origin of origins)
+            await cdp.send("Storage.clearDataForOrigin", { origin, storageTypes: "all" });
+          await cdp.send("Network.clearBrowserCache");
+        } finally {
+          await page.close().catch(() => {});
+        }
+      },
       async close() {
         for (const page of opened) await page.close().catch(() => {});
         await browser.close().catch(() => {});

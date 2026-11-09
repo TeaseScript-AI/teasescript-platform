@@ -15,7 +15,14 @@ import {
   readGate,
   waitForState,
 } from "../lib/player.mjs";
-import { firstSave, playable, publishesAfter, turnTimes, workerStart } from "../lib/measure.mjs";
+import {
+  firstSave,
+  playable,
+  publishesAfter,
+  SETTLING_ROW,
+  turnTimes,
+  workerStart,
+} from "../lib/measure.mjs";
 
 const OPEN_MS = 120_000;
 const TURN_MS = 60_000;
@@ -107,7 +114,13 @@ export async function session({
     if (aa) {
       await page.waitForTimeout(AA_LIFETIME_MS);
       const gate = await readGate(page);
-      return { ok: true, arm: probe, cold: playable(gate, "Start"), errors: gate.errors };
+      return {
+        ok: true,
+        arm: probe,
+        cold: playable(gate, "Start"),
+        errors: gate.errors,
+        probe: gate,
+      };
     }
     await heap("playable", "cold");
 
@@ -158,7 +171,7 @@ export async function session({
       try {
         await waitForState(
           page,
-          `(state) => state.ended || state.failed || ((${ENABLED_CONTROL})(state) && state.control !== ${JSON.stringify(before.control)}) || window.__gate.rows.some((row) => row.speaker !== "user" && row.t > ${sentAt}) || (!(${ENABLED_CONTROL})(state) && (window.__gate.changes.at(-1)?.t ?? 0) < performance.now() - ${IDLE_MS})`,
+          `(state) => state.ended || state.failed || ((${ENABLED_CONTROL})(state) && state.control !== ${JSON.stringify(before.control)}) || ${SETTLING_ROW(sentAt)} || (!(${ENABLED_CONTROL})(state) && (window.__gate.changes.at(-1)?.t ?? 0) < performance.now() - ${IDLE_MS})`,
           TURN_MS,
           `Turn ${turn} did not settle`,
         );
@@ -194,6 +207,7 @@ export async function session({
     if (instrumented) {
       const repeatLog = (await page.evaluate(() => globalThis.__gateBridgeLog ?? null)) ?? [];
       const repeatTimeOrigin = await page.evaluate(() => performance.timeOrigin);
+      const repeatWorkerLog = reads === null ? null : await reads.workerLog();
       const coldRequests = requestsOf(coldLog);
       const repeatRequests = requestsOf(repeatLog);
       diagnostics = {
@@ -216,8 +230,11 @@ export async function session({
             ? null
             : {
                 cold: workerSideOf(coldWorkerLog, coldRequests, coldTimeOrigin),
-                repeat: workerSideOf(await reads.workerLog(), repeatRequests, repeatTimeOrigin),
+                repeat: workerSideOf(repeatWorkerLog, repeatRequests, repeatTimeOrigin),
               },
+        // The raw logs, with each page's clock origin: the Worker's times are epoch-based, the page's from its origin.
+        workerLogs: reads === null ? null : { cold: coldWorkerLog, repeat: repeatWorkerLog },
+        timeOrigins: { cold: coldTimeOrigin, repeat: repeatTimeOrigin },
         gaps: { cold: coldGate.gaps, repeat: repeatGate.gaps },
       };
     }
@@ -250,8 +267,8 @@ export async function session({
 
 /**
  * The bytes a cold load serves (CDP engines): a fresh page with the network account on the page and each Worker,
- * Start pressed, up to the first save; each request with its phases against the page's milestones, by start time,
- * those started before the first save followed to their end.
+ * Start pressed, up to the first save, then every request it started followed to its end; each with its phases
+ * against the page's milestones, by start time.
  */
 export async function coldBytes({ opened, origin, script }) {
   const { page, close } = await opened.page();
@@ -284,15 +301,13 @@ export async function coldBytes({ opened, origin, script }) {
           beforeStartEnabled:
             marks.startEnabled !== null && request.wallTimeMs <= marks.startEnabled,
           beforePlayable: marks.playable !== null && request.wallTimeMs <= marks.playable,
-          beforeFirstSave: marks.firstSave !== null && request.wallTimeMs <= marks.firstSave,
         }));
-    // The requests started before the first save, each followed to its end (finished or failed), for up to 10 s.
+    // The observation window is the whole cold page, from its navigation to here: every request it started, each
+    // followed to its end (finished or failed), for up to 10 s; one still open after that leaves the account incomplete.
     const settledBy = Date.now() + 10_000;
     let requests = phased();
     while (
-      requests.some(
-        (request) => request.beforeFirstSave && !request.finished && request.failed === null,
-      ) &&
+      requests.some((request) => !request.finished && request.failed === null) &&
       Date.now() < settledBy
     ) {
       await page.waitForTimeout(100);
