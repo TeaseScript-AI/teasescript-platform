@@ -11,7 +11,9 @@
 // Zebra, not plain: plain marks any added line equal to a removed one anywhere, with no block threshold. Git's
 // detection is heuristic: a moved block below its threshold (20 alphanumeric characters) is shown as added and
 // removed, and its similarity threshold decides what a renamed file is. A quoted file name (one with a tab, newline,
-// quote or backslash) is refused, and a binary change is reported as such, its lines unread.
+// quote or backslash) is refused, and a binary change is reported as such, its lines unread. Each side's mode comes
+// from its commit's tree (`git ls-tree`), since a renamed file's diff names none: a reader skips a side that is no
+// regular file (a gitlink, a symbolic link), whose content is no file's text.
 import { execFileSync } from "node:child_process";
 
 /** Why Git's output cannot be read as it wrote it. */
@@ -105,7 +107,8 @@ function diffLines(base, head, paths, cwd, coloured) {
 
 /**
  * Each changed file of `base`..`head` (commits; `paths` limits the diff, all files when empty): its names at both
- * sides (`null` where it does not exist), its `diff --git` line, whether the change adds it, whether Git shows it as binary (its lines then
+ * sides (`null` where it does not exist) and their modes (`oldMode`, `newMode`: `100644`, `100755`, `120000` for a
+ * symbolic link, `160000` for a gitlink; `null` where it does not exist), its `diff --git` line, whether the change adds it, whether Git shows it as binary (its lines then
  * unread), and its added and removed lines in order, each `{ line, text, moved }` with `line` its line in its own
  * side's blob and `text` its exact bytes.
  */
@@ -197,6 +200,24 @@ export function movedLinesOf(base, head, paths = [], cwd = process.cwd()) {
       throw new MovedLinesUnreadable(`moved-lines: an unreadable file header: ${change.header}`);
     if (!change.added) change.old = name;
     if (!deleted.has(change)) change.file = name;
+  }
+  // each side's mode, from its commit's tree: a renamed file's diff names none
+  const modesOf = (ref) => {
+    const modes = new Map();
+    const tree = execFileSync("git", ["ls-tree", "-r", "-z", "--full-tree", ref], {
+      cwd,
+      maxBuffer: 256 * 1024 * 1024,
+      encoding: "utf8",
+    });
+    for (const entry of tree.split("\0"))
+      if (entry !== "")
+        modes.set(entry.slice(entry.indexOf("\t") + 1), entry.slice(0, entry.indexOf(" ")));
+    return modes;
+  };
+  const [baseModes, headModes] = [modesOf(base), modesOf(head)];
+  for (const change of files) {
+    change.oldMode = change.old === null ? null : (baseModes.get(change.old) ?? null);
+    change.newMode = change.file === null ? null : (headModes.get(change.file) ?? null);
   }
   return files;
 }
