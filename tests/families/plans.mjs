@@ -33,6 +33,7 @@ import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs"
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
+import { unitsOf } from "./sources.mjs";
 
 /** The exit of a worker whose run passed the unit limit, after it posted the run (`over`). */
 const OVER_EXIT = 86;
@@ -44,55 +45,6 @@ const setOf = (set, headRoot) => {
   if (["corpus", "fixture", "held"].includes(set) || set.includes("/")) return set;
   return path.join(headRoot, "tests", "families", set);
 };
-
-/** The set's sources, each `{ name, files, globals, single, held? }`, the same list in every worker. */
-async function unitsOf(set, baseRoot, headRoot) {
-  if (set === "corpus")
-    return JSON.parse(readFileSync(process.env.CASES_JSON, "utf8")).map(({ name, files }) => ({
-      name,
-      files,
-      globals: ["hostValue", "hostOther", "hostInit"],
-      single: false,
-    }));
-  if (set === "fixture") {
-    const fixture = await import(
-      pathToFileURL(path.join(baseRoot, "tools", "corpus", "fixture", "fixture.mjs")).href
-    );
-    return fixture.cases.map(([name, files]) => ({
-      name,
-      files,
-      globals: fixture.globals,
-      single: false,
-    }));
-  }
-  if (set === "held") {
-    const held = await import(
-      pathToFileURL(path.join(distOf(baseRoot), "tests", "helpers", "type-core-held-host.js")).href
-    );
-    return held
-      .heldFamily()
-      .map((c) => ({
-        name: c.name,
-        files: [{ path: "main.tease", source: c.source }],
-        globals: ["hostValue", "hostOther"],
-        single: true,
-        held: true,
-      }));
-  }
-  const { generatorsOf } = await import(
-    pathToFileURL(path.join(headRoot, "tests", "families", "sources.mjs")).href
-  );
-  const units = [];
-  for (const generator of await generatorsOf(set))
-    for (const source of generator.sources)
-      units.push({
-        name: `${generator.name}/${source.name}`,
-        files: source.files,
-        globals: source.globals,
-        single: false,
-      });
-  return units;
-}
 
 /** The records' classification (`summary`): one line per set, then each difference, stall and safety net reached. */
 function summarize(files, limit) {
