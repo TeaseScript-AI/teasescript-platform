@@ -53,7 +53,8 @@ Do not knowingly introduce or retain material accidental amplification or an avo
 on the changed scalable path when a local, proportionate structural repair exists; address it as part of
 the implementation rather than relabeling it as later optimization. Code inspection should catch these
 structural red flags. Reuse, caching, indexing, or micro-allocation changes whose benefit is not evident
-remain profiling-driven rather than mandatory pre-optimization.
+remain profiling-driven rather than mandatory pre-optimization. In narrowing modules, every function body
+charges on entry, except an inline callback handed to the charging iterator, with lint coverage of that discipline.
 
 Do not categorically forbid superlinear algorithms, recursion, copying, or other deliberate trade-offs:
 judge realistic workloads, normal-path CPU/memory cost, implementation complexity, and alternatives.
@@ -120,6 +121,8 @@ tool's contract page), not by which forms a builder has seen reached: a form the
 takes one of three shapes: a declared bounded difference with its measured term and bound; a record held under a named
 issue; a refusal by name of forms outside the documents. A form silently handled for fewer cases is not a narrower
 claim, and a claim that would drop a documented form is not the builder's to make ([Who decides what](../../AGENTS.md)).
+A charging-lint claim names its checked and unseen execution forms and trusted caller/property boundaries; expanding it
+into a TypeScript effect checker remains an owner decision.
 For the forms that stay supported, a rule that ranges over an open set, such as every option, every caller, every code
 form or every value that reaches a boundary, is built so that its completeness follows from the construction, before the
 first review:
@@ -129,7 +132,12 @@ first review:
   is never silently skipped or passed. The default under-offers and never over-offers: it may refuse what the rule
   could admit until a row admits it, and it never admits what the function has not proved.
 - The rule is written as the closed set of forms it admits, never as a list of forms it rejects: a reject-list fails
-  open on every form it did not name, and each unnamed form becomes a sibling.
+  open on every form it did not name, and each unnamed form becomes a sibling. For ordinary edits of the objects-query
+  module, the charging lint uses closed enumerations for whole-type mutually assignable widening (with reviewed trivial
+  exceptions), sorted candidates and uses, local callable export declarations, mixed-element checks on every walked or
+  written collection, and value-position `any`/`unknown` checks. Runtime provenance through carriers remains a reviewed
+  residual, which the lint does not prove; support the charging invariant with mutants, the family growth bar and area
+  comparisons including work.
 - A generated test family covers the rule's axes (for example sites × forms × kinds, in both orders), with a check
   that every combination is covered.
 
