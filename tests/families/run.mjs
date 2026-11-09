@@ -597,8 +597,7 @@ if (process.argv[2] === "--child") {
     rmSync(pathOf(progress, "outside"), { force: true });
     writeFileSync(pathOf(progress, "outside"), "", { flag: "wx" });
   }
-  // (a line of a generator whose id is not its file's path, a renamed or grouped one's, names its file too: `file`, never
-  // stored)
+  // (a line of a generator whose id is not its file's name, a renamed one's, names its file too: `file`, never stored)
   let renamed = {};
   const record = (line) => {
     if (out !== undefined)

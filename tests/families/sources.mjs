@@ -57,7 +57,6 @@ export const placeOf = (generator, source) =>
  * `bin/` and the rest are no generators.
  */
 export function generatorFiles(folder) {
-  if (!existsSync(folder)) return [];
   const modules = (dir) =>
     readdirSync(dir, { withFileTypes: true })
       .filter((entry) => !entry.isDirectory() && entry.name.endsWith(".mjs"))
@@ -71,8 +70,8 @@ export function generatorFiles(folder) {
     );
 }
 
-/** Whether `folder` holds a generator (`generatorFiles`). A folder of data only holds none. */
-export const holdsGenerators = (folder) => generatorFiles(folder).length > 0;
+/** Whether `folder` holds a generator (`generatorFiles`). A folder of data only, or none, holds none. */
+export const holdsGenerators = (folder) => existsSync(folder) && generatorFiles(folder).length > 0;
 
 /**
  * The runner's areas under `families` (a tree's `tests/families`): each subfolder that holds a generator, in the order

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -122,5 +123,54 @@ test("two generators with one id in two groups are refused", async () => {
       generatorsOf(folder),
       /a\/same\.mjs and b\/same\.mjs have one id, same\.mjs/u,
     );
+  });
+});
+
+test("an area that does not exist is refused where it is read, and holds no generator", async () => {
+  await withRoot(async (root, { generatorFiles, generatorsOf, holdsGenerators }) => {
+    const missing = join(root, "missing");
+    assert.equal(holdsGenerators(missing), false);
+    assert.throws(() => generatorFiles(missing), /ENOENT/u);
+    await assert.rejects(generatorsOf(missing), /ENOENT/u);
+  });
+});
+
+test("a record made before its generator moved into a group, or was renamed keeping its id, finds its area by that id", async () => {
+  await withRoot(async (root, { generatorsOf }) => {
+    // (a tree's tools, and its area after the move: `g.mjs` renamed keeping its id, `h.mjs` moved as it was)
+    const families = join(root, "tests", "families");
+    mkdirSync(families, { recursive: true });
+    for (const tool of ["baselines.mjs", "run-contract.mjs", "sources.mjs", "stalls.mjs"])
+      cpSync(join("tests", "families", tool), join(families, tool));
+    const folder = area(families, "area", {
+      "group/renamed.mjs": generator(["s"], "g.mjs"),
+      "group/h.mjs": generator(["t"]),
+    });
+    // an `--out` record from before the move: each stalled source by its generator's id alone, no `file`
+    const out = join(root, "out.jsonl");
+    const {
+      sourcesOf,
+    }: { sourcesOf: (generator: unknown) => { name: string; files: unknown; globals: unknown }[] } =
+      await import(pathToFileURL(join(families, "sources.mjs")).href);
+    const record = [];
+    for (const { name, file } of await generatorsOf(folder)) {
+      const [source] = sourcesOf(await import(pathToFileURL(join(folder, file)).href));
+      record.push(
+        JSON.stringify({
+          generator: name,
+          source: source!.name,
+          files: source!.files,
+          globals: source!.globals,
+          stalled: { head: "units" },
+        }),
+      );
+    }
+    writeFileSync(out, `${record.join("\n")}\n`);
+    const index = spawnSync(process.execPath, [join(families, "stalls.mjs"), out], {
+      encoding: "utf8",
+    });
+    assert.notEqual(index.status, 2, index.stderr);
+    assert.match(index.stdout, /"area":"area","generator":"g\.mjs"/u);
+    assert.match(index.stdout, /"area":"area","generator":"h\.mjs"/u);
   });
 });
