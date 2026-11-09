@@ -18,7 +18,8 @@ import { SliceIndex, type Store, nodeOf, unwrap } from "./slice-index.js";
  * store whole, its part checks there equal to it (#1682). With no result, a completion past its allowance or a stop of the
  * analysis, only a complete store check keeps it, else it declines (#1832). A stricter reader is never a lost check: it
  * accepts no more values than the natural reader. A check against bare `unknown` where the contract owes a domain carries
- * nothing.
+ * nothing. A stopped decision's own mark is kept as NoCheck where the completion owes nothing at its store (#2080):
+ * its result complete, no completed check at the stored value and no completion C1 warning at the store (`warned`).
  */
 export function keeps(
   answers: Answers,
@@ -29,7 +30,21 @@ export function keeps(
   published: ReadonlyMap<Store, ContractResult>,
   checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
   core: CoreRuntimeChecks,
+  warned: ReadonlySet<Store>,
 ): boolean {
+  // (#2080, NoCheck: a stopped mark whose completion result is complete, with no completed check at the stored value and
+  // no completion C1 warning at the store, owes no check there. Its one declared claim, #2184: the completion's C1 covers
+  // the natural C1's candidates and dependencies at the store. Whatever this cannot establish falls through: Required,
+  // kept only by a check that carries it, or Unresolved, a lost or absent result, declined)
+  if (
+    obligation.slot.role === "stopped" &&
+    result?.state === "complete" &&
+    !warned.has(store) &&
+    !answers.completedCheck(
+      index.site(unwrap(store.kind === "letStatement" ? store.initializer : store.value)),
+    )
+  )
+    return true;
   const own = published.get(store);
   const whole = own?.state === "complete" && checks.has(store);
   // (no result, a completion past its allowance or a stop of the analysis: the plan is the settled pass's, and only its
