@@ -19,6 +19,7 @@ import type { InstructionPlan } from "../src/index.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { preparedPlan } from "./helpers/prepared-plan.js";
+import { clockTicket } from "./helpers/clock-ticket.js";
 
 /*
  * Session split S2's runtime family (HEAD 0 §7): an activation's completions act only while it lives. Each case is a
@@ -51,6 +52,7 @@ const AXES = {
     "debugModePublish",
     "debugModeKeep",
     "draw",
+    "drawQueued",
     "export",
     "debugView",
     "callView",
@@ -87,8 +89,9 @@ const STOPS: readonly Handle[] = ["haltAck", "captureReply"];
 const REPORTERS: readonly Handle[] = ["debugView", "callView", "mediaLoad"];
 /** The operations sent in a section of the session, which holds the session's other requests until it ends. */
 const SECTIONS: readonly Handle[] = ["draw", "mediaLoad"];
+// `drawQueued` holds no reply of its own: another section of the session holds the draw's from beginning.
 /** The operations whose entry gives a result its caller takes: the draw's outcome, the candidate, the view. */
-const RESULTS: readonly Handle[] = ["draw", "export", "debugView"];
+const RESULTS: readonly Handle[] = ["draw", "drawQueued", "export", "debugView"];
 
 /** Why a tuple is no case, or `null` for a feasible one. */
 function infeasible(c: Case): string | null {
@@ -125,6 +128,10 @@ function infeasible(c: Case): string | null {
     return "an error stop retires nothing: what completes after it is the stop-ownership tests' (`player-stop-ownership`)";
   if (c.transition === "loss" && c.window === "inFlight" && c.settlement === "success")
     return "the loss rejects every reply in transit";
+  if (c.handle === "drawQueued" && c.settlement === "rejection")
+    return "what the draw waits for is another section's end, which has no failure of the draw's";
+  if (c.handle === "drawQueued" && c.transition === "sameLineage")
+    return "the Continue's requests wait for the section that holds the draw: a run that never ends it never continues";
   if (c.handle === "haltAck" && c.settlement === "rejection")
     return "a halt's failed acknowledgement freezes the store as its success does (`PlayerBridge.halt`)";
   return null;
@@ -656,6 +663,31 @@ async function run(context: TestContext, c: Case, mode: Mode): Promise<Seen> {
       pending = host.resolveRandomDraw(draw.drawId, "natural");
       break;
     }
+    case "drawQueued": {
+      host.setRandomControl({ sites: [] });
+      await begin();
+      const session = host.session.value!;
+      const draw = session.state.randomDraw;
+      assert.ok(draw !== null, "the session waits at its draw");
+      // Another section of the session holds it: the draw's section waits until that one ends.
+      let unblock!: () => void;
+      let blocking = false;
+      void bridge.section(session, clockTicket(), async () => {
+        blocking = true;
+        await new Promise<void>((resolve) => (unblock = resolve));
+      });
+      await until(() => blocking, "another section holds the session");
+      pending = host.resolveRandomDraw(draw.drawId, "natural");
+      held = {
+        held: () => blocking,
+        release: async (_error, then) => {
+          unblock();
+          if (then !== undefined) queueMicrotask(then);
+        },
+        applyHost: async () => {},
+      };
+      break;
+    }
     case "export":
       await begin();
       held = traffic.arm("captureExport", { hook: true });
@@ -878,6 +910,7 @@ for (const coordinates of FEASIBLE) {
       // The debug view's success stays its lineage's (Q1 B): its caller still gets the view.
       if (
         c.handle === "draw" ||
+        c.handle === "drawQueued" ||
         c.handle === "export" ||
         (c.handle === "debugView" && c.settlement === "rejection")
       )
