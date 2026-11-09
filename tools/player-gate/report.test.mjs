@@ -13,6 +13,7 @@ import {
   strictRecord,
 } from "./lib/evidence.mjs";
 import { hiddenCapture, keepOutcome } from "./scenarios/keep.mjs";
+import { isHeadline, NUMBERS } from "./validate.mjs";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { releaser } from "./lib/release.mjs";
@@ -793,6 +794,11 @@ test("Sol code r5's witnesses stay caught or labelled: a reversed bridge round t
  * is a violation (a dot or bracket read, a destructuring pattern, `in`, a spread, a call such as `Object.keys` or
  * `Reflect.get`, an assignment or a return) except passing it to `strictRecord` or `nullable`, the reader's calls; and
  * a plain alias (`const copy = row`) is itself tainted. Every subtraction in the scanned code must be one of `allowed`.
+ * Reflection is matched by symbol, not by spelling (Sol code r10 and r11, orchestrator 2's ruling): every reference to a
+ * reflective global (`REFLECTIVE_GLOBALS`) is a violation wherever it stands, so a call or a computed access through one,
+ * and an alias of one (an initializer, a destructuring source, a parameter default), fail at that reference; so does a
+ * prototype link (`constructor`, `__proto__`), the one way to such a global without naming it. One reference is
+ * allowed, by its place (`allowedReflection`).
  */
 function readerViolations(
   text,
@@ -818,16 +824,17 @@ function readerViolations(
     }
     if (ts.isIdentifier(node) && ["RAW", "PATH"].includes(node.text))
       at(node, "a read past the reader");
-    // A reflective read anywhere in the derivations, whatever it is applied to (Sol code r10): a descriptor, the property
-    // names, `Reflect.*`, a serialization or a clone hands out values past the reader's traps.
-    if (ts.isCallExpression(node)) {
-      const callee = node.expression.getText(source);
-      if (
-        (REFLECTIVE.has(callee) || callee.startsWith("Reflect.")) &&
-        !ALLOWED_REFLECTION.includes(node.getText(source))
-      )
-        at(node, `a reflective read: ${node.getText(source)}`);
-    }
+    // A reflective global anywhere in the derivations, whatever it is applied to: a descriptor, the property names,
+    // `Reflect.*`, a serialization or a clone hands out values past the reader's traps.
+    if (
+      ts.isIdentifier(node) &&
+      REFLECTIVE_GLOBALS.has(node.text) &&
+      !isMemberName(node) &&
+      !allowedReflection(node, file)
+    )
+      at(node, `a reflective read: ${node.text} in ${node.parent.getText(source)}`);
+    if (prototypeLink(node))
+      at(node, `a reflective read through a prototype link: ${node.getText(source)}`);
     if (!ts.isFunctionDeclaration(node) || node.name?.text !== "deriveSample") return;
     roots += 1;
     const raw = node.parameters[1];
@@ -897,15 +904,80 @@ function readerViolations(
   return violations;
 }
 
-/** The reflective calls the derivations never make, and the one the page-source builder makes on a serial number. */
-const REFLECTIVE = new Set([
-  "Object.getOwnPropertyDescriptor",
-  "Object.getOwnPropertyDescriptors",
-  "Object.getOwnPropertyNames",
-  "JSON.stringify",
+/** The globals that read an object past its traps or reach one that does: the derivations never reference them. */
+const REFLECTIVE_GLOBALS = new Set([
+  "Object",
+  "Reflect",
+  "JSON",
   "structuredClone",
+  "globalThis",
+  "window",
+  "self",
+  "global",
+  "Function",
+  "eval",
 ]);
-const ALLOWED_REFLECTION = ["JSON.stringify(beforeControl)"];
+const PROTOTYPE_LINKS = new Set(["constructor", "__proto__"]);
+
+/** Whether the identifier `node` names a member or a key, not a binding: `x.JSON`, `{ JSON: 1 }`, `{ JSON: j } = x`. */
+const isMemberName = (node) => {
+  const parent = node.parent;
+  return (
+    ((ts.isPropertyAccessExpression(parent) ||
+      ts.isPropertyAssignment(parent) ||
+      ts.isMethodDeclaration(parent) ||
+      ts.isPropertyDeclaration(parent)) &&
+      parent.name === node) ||
+    (ts.isBindingElement(parent) && parent.propertyName === node)
+  );
+};
+
+/** Whether `node` reads a prototype link: by dot, by a literal bracket, or as a destructured key. */
+const prototypeLink = (node) => {
+  const key = ts.isPropertyAccessExpression(node)
+    ? node.name
+    : ts.isElementAccessExpression(node)
+      ? node.argumentExpression
+      : ts.isBindingElement(node)
+        ? node.propertyName
+        : undefined;
+  return (
+    key !== undefined &&
+    (ts.isIdentifier(key) || ts.isStringLiteralLike(key)) &&
+    PROTOTYPE_LINKS.has(key.text)
+  );
+};
+
+/**
+ * The one reflective reference allowed: `JSON.stringify(beforeControl)` in `lib/measure.mjs`'s page-source builder
+ * (`SETTLED`), which serializes the control serial number it is given into the page's source.
+ */
+function allowedReflection(node, file) {
+  const member = node.parent;
+  const call = member.parent;
+  let enclosing = call;
+  while (enclosing !== undefined && !ts.isFunctionLike(enclosing)) enclosing = enclosing.parent;
+  return (
+    file === "lib/measure.mjs" &&
+    node.text === "JSON" &&
+    ts.isPropertyAccessExpression(member) &&
+    member.expression === node &&
+    member.name.text === "stringify" &&
+    ts.isCallExpression(call) &&
+    call.expression === member &&
+    call.arguments.length === 1 &&
+    ts.isIdentifier(call.arguments[0]) &&
+    call.arguments[0].text === "beforeControl" &&
+    enclosing !== undefined &&
+    ts.isArrowFunction(enclosing) &&
+    ts.isVariableDeclaration(enclosing.parent) &&
+    ts.isIdentifier(enclosing.parent.name) &&
+    enclosing.parent.name.text === "SETTLED" &&
+    enclosing.parameters.some(
+      (parameter) => ts.isIdentifier(parameter.name) && parameter.name.text === "beforeControl",
+    )
+  );
+}
 
 const DERIVATION_SOURCES = () => ({
   "validate.mjs": readFileSync(new URL("./validate.mjs", import.meta.url), "utf8"),
@@ -946,20 +1018,53 @@ test("the reader guard fails every raw-read form at the wrapping site, and the p
     ).some((violation) => violation.includes("a reflective read")),
     "the descriptor mutant passed the guard",
   );
-  for (const reflective of [
+  const reflective = (mutant, file = "validate.mjs", text = original) =>
+    readerViolations(text.replace(site, mutant), file, NO_INTERVALS).some((violation) =>
+      violation.includes("a reflective read"),
+    );
+  for (const read of [
     'Reflect.getOwnPropertyDescriptor(strict, "result").value',
     "JSON.parse(JSON.stringify(strict)).result",
     "structuredClone(strict).result",
     "Object.getOwnPropertyDescriptors(strict).result.value",
+    // Sol code r11's spellings, and the forms around them: a computed, parenthesized or optional callee, a global
+    // object, a prototype link.
+    'Object["getOwnPropertyDescriptor"](strict, "result").value',
+    'Reflect["get"](strict, "result")',
+    '(JSON["stringify"]({ evidence: null }), strict.result)',
+    '(Object).getOwnPropertyDescriptor(strict, "result").value',
+    'Object?.getOwnPropertyDescriptor(strict, "result").value',
+    'globalThis["Reflect"].get(strict, "result")',
+    '({}).constructor.getOwnPropertyDescriptor(strict, "result").value',
+    '({})["constructor"].getOwnPropertyDescriptor(strict, "result").value',
   ])
-    assert.ok(
-      readerViolations(
-        original.replace(site, site.replace("strict.result", reflective)),
-        "validate.mjs",
-        NO_INTERVALS,
-      ).some((violation) => violation.includes("a reflective read")),
-      `the ${reflective} mutant passed the guard`,
-    );
+    assert.ok(reflective(site.replace("strict.result", read)), `the ${read} mutant passed the guard`);
+  // Aliases: an initializer, a destructuring source, a parameter default, a destructured prototype link.
+  for (const alias of [
+    `(() => { const O = Object; return DERIVE[cell.scenario](O.getOwnPropertyDescriptor(strict, "result").value, cell, problems); })()`,
+    `(() => { const { getOwnPropertyDescriptor: g } = Object; return DERIVE[cell.scenario](g(strict, "result").value, cell, problems); })()`,
+    `((O = Object) => DERIVE[cell.scenario](O["getOwnPropertyDescriptor"](strict, "result").value, cell, problems))()`,
+    `(() => { const { constructor: O } = {}; return DERIVE[cell.scenario](O.getOwnPropertyDescriptor(strict, "result").value, cell, problems); })()`,
+  ])
+    assert.ok(reflective(alias), `the alias ${alias} passed the guard`);
+  // The one allowed serialization is allowed by its place: moved into `deriveSample`, or made again elsewhere in
+  // `lib/measure.mjs`, it fails.
+  assert.ok(
+    reflective(
+      `(() => { const beforeControl = { evidence: null }; JSON.stringify(beforeControl); return ${site}; })()`,
+    ),
+    "the allowed serialization, moved into deriveSample, passed the guard",
+  );
+  const measure = DERIVATION_SOURCES()["lib/measure.mjs"];
+  assert.equal(readerViolations(measure, "lib/measure.mjs", NO_INTERVALS).length, 0);
+  assert.ok(
+    readerViolations(
+      `${measure}\nexport const again = (beforeControl) => JSON.stringify(beforeControl);\n`,
+      "lib/measure.mjs",
+      NO_INTERVALS,
+    ).some((violation) => violation.includes("a reflective read")),
+    "a second serialization in lib/measure.mjs passed the guard",
+  );
   // Renaming the raw parameter must not switch the guard off (Sol code r9): the rename plus a bracket read.
   const renamed = original
     .replace(
@@ -1068,32 +1173,52 @@ test("a reflective read of a strict record reads it strictly: a descriptor's val
   assert.equal("kept" in record.result, true);
 });
 
-test("no byte number is in the headline summary: a session's byte fields are their own unvalidated cell", () => {
-  const report = buildReport(
-    [row({ scenario: "session", engine: "chromium" }, true, sessionResult())],
-    "r0",
-    ARTIFACTS,
-  );
-  const timings = report.summary[name({})];
-  assert.ok(timings !== undefined);
-  assert.ok(
-    !Object.keys(timings).some((label) => /served|byte|request/u.test(label)),
-    "a byte field in the headline summary",
-  );
-  assert.ok(
-    Object.keys(report.unvalidated[`${name({})} / bytes`]).some((label) =>
-      label.startsWith("served"),
-    ),
-  );
-  assert.match(report.text, /## Declared gaps[\s\S]*byte fields[\s\S]*R10-01/u);
-  // A byte record's failure fails the byte cell alone, never the timings.
-  const noMarks = sessionResult();
-  delete noMarks.bytes.marks;
-  const failing = buildReport(
-    [row({ scenario: "session", engine: "chromium" }, true, noMarks)],
-    "r0",
-    ARTIFACTS,
-  );
-  assert.ok(name({}) in failing.summary);
-  assert.ok(failing.incomplete.some((text) => text.startsWith(`- ${name({})} / bytes`)));
+test("the headline summary holds ms and boolean fields only: byte and count fields are their own unvalidated cell", () => {
+  // The field table by unit (orchestrator 2's ruling after Sol code r11), not by label words.
+  const fields = Object.values(NUMBERS).flat();
+  const headline = new Set(fields.filter(isHeadline).map(([label]) => label));
+  const other = new Set(fields.filter((field) => !isHeadline(field)).map(([label]) => label));
+  assert.deepEqual([...headline].filter((label) => other.has(label)), [], "a label in both partitions");
+  for (const [label, unit] of fields)
+    assert.equal(isHeadline([label, unit]), unit === "ms" || unit === "boolean", label);
+  const session = { scenario: "session", engine: "chromium" };
+  const rows = [
+    row(session, true, sessionResult()),
+    row({ scenario: "demo", script: "demo", engine: "chromium" }, true, {
+      errors: [],
+      turns: 6,
+      failed: false,
+      ok: true,
+    }),
+  ];
+  const report = buildReport(rows, "r0", ARTIFACTS);
+  assert.ok(name(session) in report.summary);
+  for (const [cell, table] of Object.entries(report.summary))
+    for (const label of Object.keys(table))
+      assert.ok(
+        headline.has(label.replace(/^(full|minimal) probe: /u, "")),
+        `${cell}: "${label}" is no ms or boolean field`,
+      );
+  const counts = Object.keys(report.unvalidated[`${name(session)} / bytes and counts`]);
+  for (const label of ["served the whole cold page, page, encoded", "heap, page (cold), at Start enabled", "turns answered"])
+    assert.ok(counts.includes(label), label);
+  assert.match(report.text, /## Declared gaps[\s\S]*byte and count fields[\s\S]*R11-01/u);
+  // A byte record's failure, a reader's or a malformed record's, fails the byte cell alone, never the timings (Sol code
+  // r11's malformed requests among them), through the public report.
+  for (const [what, change] of [
+    ["no marks", (result) => delete result.bytes.marks],
+    ["requests false", (result) => (result.bytes.requests = false)],
+    ["requests no array", (result) => (result.bytes.requests = {})],
+    ["bytes no object", (result) => (result.bytes = "bytes")],
+  ]) {
+    const result = sessionResult();
+    change(result);
+    const failing = buildReport([row(session, true, result)], "r0", ARTIFACTS);
+    assert.deepEqual(failing.summary[name(session)], report.summary[name(session)], what);
+    assert.ok(
+      failing.incomplete.some((line) => line.startsWith(`- ${name(session)} / bytes and counts`)),
+      what,
+    );
+    assert.ok(!failing.incomplete.some((line) => line.startsWith(`- ${name(session)}:`)), what);
+  }
 });

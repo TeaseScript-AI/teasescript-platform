@@ -172,9 +172,9 @@ const isWorker = (cell) => cell.backend === "worker";
 const onCdp = (cell) => CDP_ENGINES.has(cell.engine);
 
 /**
- * The numbers each scenario reports: `[label, unit, value of one sample's result, applies(cell), required]`. A field that
- * does not apply to a cell is left out of it, never printed as a dash; a required one that applies must be a finite
- * number in a sample for that sample to count (`reviews/l5-gate/field-inventory.md`).
+ * The numbers each scenario reports: `[label, unit, value of one sample's result, applies(cell), required]`, the unit one
+ * of `UNITS`. A field that does not apply to a cell is left out of it, never printed as a dash; a required one that
+ * applies must be a finite number in a sample for that sample to count (`reviews/l5-gate/field-inventory.md`).
  */
 const always = () => true;
 const PLAYABLE = (of, label) => [
@@ -237,7 +237,7 @@ const BYTES = [
   ),
   [
     "requests of the engine Worker's target",
-    "",
+    "count",
     (r) =>
       (r.bytes?.requests ?? []).filter((q) => q.target !== "page" && /engine/u.test(q.target))
         .length || null,
@@ -247,7 +247,7 @@ const BYTES = [
   // The byte page is loaded once more, cold, when CDP leaves a request open (`drive.mjs`): the attempts discarded.
   [
     "byte pages discarded (a request left open)",
-    "",
+    "count",
     (r) => (r.bytes === null ? null : r.bytes.discarded.length),
     onCdp,
     true,
@@ -272,7 +272,7 @@ const NUMBERS = {
       (cell) => LONG_TASK_ENGINES.has(cell.engine),
       true,
     ],
-    ["first save: plan JSON", "UTF-16 units", (r) => r.firstSave?.planJsonLength, always, true],
+    ["first save: plan JSON, UTF-16 units", "count", (r) => r.firstSave?.planJsonLength, always, true],
     [
       "turn: input → feedback frame (median of the sample's turns)",
       "ms",
@@ -289,14 +289,14 @@ const NUMBERS = {
     ],
     [
       "turns answered",
-      "",
+      "count",
       (r) => (r.turns ?? []).filter((t) => t.ok !== false).length,
       always,
       true,
     ],
     [
       "turns ended or cut, not settled",
-      "",
+      "count",
       (r) => (r.turns ?? []).filter((t) => t.end).length,
       always,
       false,
@@ -314,12 +314,12 @@ const NUMBERS = {
     ...BYTES,
   ],
   taps: [
-    ["taps sent in the window", "", (r) => r.sent, always, true],
-    ["taps answered", "", (r) => r.answered, always, true],
-    ["taps unanswered", "", (r) => r.unanswered, always, true],
+    ["taps sent in the window", "count", (r) => r.sent, always, true],
+    ["taps answered", "count", (r) => r.answered, always, true],
+    ["taps unanswered", "count", (r) => r.unanswered, always, true],
     ["delay, median", "ms", (r) => r.delay?.median, always, false],
     ["delay, max", "ms", (r) => r.delay?.max, always, false],
-    ["answered within 16 ms", "", (r) => r.within16, always, true],
+    ["answered within 16 ms", "count", (r) => r.within16, always, true],
     ["send cadence, median", "ms", (r) => r.cadence?.median, always, true],
     ["clock offset uncertainty", "ms", (r) => r.clock?.uncertaintyMs, always, true],
   ],
@@ -347,8 +347,8 @@ const NUMBERS = {
       isWorker,
       true,
     ],
-    ["input", "UTF-16 units", (r) => r.inputUnits, always, true],
-    ["input", "UTF-8 bytes", (r) => r.inputBytes, always, true],
+    ["input, UTF-16 units", "count", (r) => r.inputUnits, always, true],
+    ["input, UTF-8", "bytes", (r) => r.inputBytes, always, true],
     ["start: request → reply", "ms", (r) => rtt(r, "start"), always, true],
     ["preparePlanText: request → reply", "ms", (r) => rtt(r, "preparePlanText"), always, true],
     ["captureKeep: request → reply", "ms", (r) => rtt(r, "captureKeep"), always, true],
@@ -357,14 +357,14 @@ const NUMBERS = {
   keep: [
     [
       "completed while hidden",
-      "",
+      "boolean",
       (r) => (r.outcome === "completed" || r.outcome === "durable after 1 s" ? 1 : 0),
       always,
       true,
     ],
     [
       "completed after resume",
-      "",
+      "boolean",
       (r) => (r.outcome === "completed after resume" ? 1 : 0),
       always,
       false,
@@ -372,11 +372,11 @@ const NUMBERS = {
     ["hidden → commit", "ms", (r) => r.hiddenToCommitMs, always, false],
   ],
   demo: [
-    ["passed", "", (r) => r.passed, always, true],
-    ["errors", "", (r) => r.errors?.length, always, true],
-    ["turns", "", (r) => r.turns, always, true],
+    ["passed", "boolean", (r) => r.passed, always, true],
+    ["errors", "count", (r) => r.errors?.length, always, true],
+    ["turns", "count", (r) => r.turns, always, true],
   ],
-  delayedSmoke: [["passed", "", (r) => r.passed, always, true]],
+  delayedSmoke: [["passed", "boolean", (r) => r.passed, always, true]],
 };
 NUMBERS.sessionInstrumented = [
   ...NUMBERS.session.filter((field) => !BYTES.includes(field)),
@@ -409,15 +409,15 @@ NUMBERS.sessionInstrumented = [
     false,
   ],
   [
-    "diagnostic: captureKeep reply",
-    "UTF-16 units",
+    "diagnostic: captureKeep reply, UTF-16 units",
+    "count",
     (r) => diagnosticRequest(r, "cold", "captureKeep")?.replySize,
     always,
     false,
   ],
   [
     "diagnostic: requests per settled turn (median)",
-    "",
+    "count",
     (r) => summarize((r.diagnostics?.turns ?? []).filter(Boolean).map((t) => t.length)).median,
     always,
     false,
@@ -438,7 +438,7 @@ NUMBERS.sessionInstrumented = [
   ],
   [
     "diagnostic: scheduling gaps over 50 ms",
-    "",
+    "count",
     (r) =>
       (r.diagnostics?.gaps?.cold?.length ?? NaN) + (r.diagnostics?.gaps?.repeat?.length ?? NaN),
     always,
@@ -453,7 +453,7 @@ NUMBERS.keepCompletion = NUMBERS.keep;
 NUMBERS.keepDurable = [
   [
     "survived force-stop at 1 s",
-    "",
+    "boolean",
     (r) => (r.outcome === "durable after 1 s" ? 1 : 0),
     always,
     true,
@@ -524,12 +524,26 @@ const diagnosticRtt = (sample, page, op) => diagnosticRequest(sample, page, op)?
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
 /**
- * The byte cells, outside the invariant like `UNVALIDATED` (orchestrator 2's bound after Sol code r10): every session
- * cell's byte fields (`BYTES`) are reported apart, as their own `unvalidated` cell, out of the headline and the R0
- * comparison, which are timings only.
+ * Every field's unit, and whether the invariant covers it (orchestrator 2's bound after Sol code r10 and r11): the
+ * headline, the summary and the R0 comparison are timings and pass/fail only, `ms` and `boolean`. A cell's `bytes` and
+ * `count` fields (served bytes, requests, heap, sizes, counts) are their own `unvalidated` cell, `<cell> / bytes and
+ * counts`, whose failure fails that cell alone.
  */
+const UNITS = new Map([
+  ["ms", true],
+  ["boolean", true],
+  ["bytes", false],
+  ["count", false],
+]);
+for (const scenario in NUMBERS)
+  for (const [label, unit] of NUMBERS[scenario])
+    if (!UNITS.has(unit)) throw new Error(`${scenario} "${label}": no unit of UNITS`);
+/** Whether `field` is in the headline: its unit is `ms` or `boolean`. */
+export const isHeadline = ([, unit]) => UNITS.get(unit);
+export { NUMBERS };
+
 export const BYTE_GAP =
-  "R10-01: byte phases compare request starts with the page's marks without validating them as finite and ordered";
+  "R10-01 and R11-01: the headline is timings and pass/fail only; byte and count fields are outside the invariant (the byte phases compare request starts with the page's marks without validating them as finite and ordered)";
 
 /** The scenarios whose result is pass or fail: a measured failure is their cell's value, never an incomplete cell. */
 export const PASS_FAIL = new Set(["demo", "delayedSmoke"]);
@@ -561,14 +575,14 @@ export function deriveSample(cell, row) {
   const problems = [];
   const values = [];
   const fields = NUMBERS[cell.scenario].filter(([, , , applies]) => applies(cell));
-  const timings = fields.filter((field) => !BYTES.includes(field));
-  const byteFields = fields.filter((field) => BYTES.includes(field));
+  const timings = fields.filter(isHeadline);
+  const byteFields = fields.filter((field) => !isHeadline(field));
   const bytes = { values: [], problems: [] };
   /** Reads `list`'s fields from `sample` into `into`, a required one that is not a number into `failed`. */
   const readFields = (list, sample, into, failed) => {
     for (const [label, unit, read, , required] of list) {
       const value = read(sample);
-      if (required && !finite(value)) failed.push(unit === "" ? label : `${label} (${unit})`);
+      if (required && !finite(value)) failed.push(`${label} (${unit})`);
       into.push({ label, unit, value: finite(value) ? value : null });
     }
   };
@@ -585,14 +599,14 @@ export function deriveSample(cell, row) {
     if (!isEvidenceError(error)) throw error;
     problems.push(error.message);
   }
-  // The byte fields, outside the invariant (`BYTE_GAP`): their failures fail their own cell, never the timings'.
+  // The byte and count fields, outside the invariant (`BYTE_GAP`), are their own failure boundary: any error their
+  // derivation throws, a reader's or a malformed record's, fails their cell, never the timings'.
   if (byteFields.length > 0)
     try {
       if (sample === null) bytes.problems.push("the sample's records gave no derivation");
       else readFields(byteFields, sample, bytes.values, bytes.problems);
     } catch (error) {
-      if (!isEvidenceError(error)) throw error;
-      bytes.problems.push(error.message);
+      bytes.problems.push(isEvidenceError(error) ? error.message : `malformed records: ${error}`);
     }
   return { values, problems, bytes: byteFields.length > 0 ? bytes : null };
 }

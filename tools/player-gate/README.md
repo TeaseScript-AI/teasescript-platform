@@ -22,15 +22,16 @@ exits 2.
   A sample that fails the validation makes its cell incomplete; it is never a value in a median.
 
 - **The two sets.**
-  - The invariant holds for the timings of `session`, `aa`, `keepDurable`, `demo` and `delayedSmoke`. The headline and
-    the R0 comparison are timings only: playable, A/A, keep timings, and the demo's and the smoke's pass or fail.
+  - The invariant holds for the `ms` and `boolean` fields of `session`, `aa`, `keepDurable`, `demo` and `delayedSmoke`.
+    The headline, the summary and the R0 comparison hold only those, by unit: playable, A/A, the keep timings and
+    outcomes, and the demo's and the smoke's pass or fail.
   - The scenarios in `UNVALIDATED` (`bridge`, `sessionInstrumented`, `taps`, `bridgeTaps`, `keepHandler`,
     `keepCompletion`) are labelled `unvalidated`. The report prints them apart from the headline and the R0
     comparison and lists them as declared gaps (#2122). They are validated before the activation PR's R1 run.
-  - Every session cell's byte fields (`BYTES`: served bytes per phase, encoded and decoded, the engine Worker's
-    request count, the discarded byte pages) are their own `unvalidated` cell (`<cell> / bytes`), and so is the
-    artifact inventory: outside the headline, the summary and the R0 comparison (#2122, R10-01). A byte record's
-    failure fails the byte cell alone.
+  - Every cell's `bytes` and `count` fields (served bytes per phase, requests, heap, sizes, counts) are its own
+    `unvalidated` cell (`<cell> / bytes and counts`), and so is the artifact inventory: outside the headline, the
+    summary and the R0 comparison (#2122, R10-01, R11-01). Any error from their derivation, a reader's or a malformed
+    record's, fails that cell alone.
   - A measured failure is a value (`cells.mjs`): a pass/fail scenario's failing run is its result, with its finding.
 - **The reader rule (`lib/evidence.mjs`).** The derivations read a row's records only through `strictRecord`:
   - a read of a missing value throws `MissingEvidence`, by a property read or by reflection (a descriptor's value,
@@ -43,9 +44,16 @@ exits 2.
 
   `deriveSample` is the one wrapping site, and its one `try` turns any of the reader's errors (missing evidence, a
   reversed interval, a contradicted cache) into that sample's problem. A kit test parses the derivations (the
-  TypeScript compiler API) and fails on any use of `deriveSample`'s raw row (its second parameter, found by the declaration, whatever its name; no such root fails the test) other than passing it to the reader, in
-  every form (dot, bracket, destructuring, `in`, spread, `Object.keys`, `Reflect.get`, an alias), and on any
-  subtraction outside `span`; its negative controls are those forms at the wrapping site.
+  TypeScript compiler API) and fails on:
+  - any use of `deriveSample`'s raw row other than passing it to the reader, in every form (dot, bracket,
+    destructuring, `in`, spread, a call, an alias); the row is its second parameter, found by the declaration whatever
+    its name, and no such root fails the test;
+  - any reference to a reflective global (`Object`, `Reflect`, `JSON`, `structuredClone`, a global object, `Function`,
+    `eval`) or a prototype link (`constructor`, `__proto__`), so a call, a computed access or an alias through one
+    fails; the one allowance, `JSON.stringify(beforeControl)` in `lib/measure.mjs`'s `SETTLED`, is bound to that place;
+  - any subtraction outside `span`.
+
+  Its negative controls are those forms at the wrapping site.
 
 Pass or fail is derived from primary records, never from a cached flag:
 

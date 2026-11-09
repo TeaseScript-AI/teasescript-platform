@@ -188,9 +188,9 @@ export function buildReport(rows, phase, artifacts = []) {
         table[named] = value;
         out.push(`| ${named} | ${format(value)} | ${unit} |`);
       }
-    // The cell's byte fields: their own `unvalidated` cell (`BYTE_GAP`), never in the timings' table or summary.
+    // The cell's byte and count fields: their own `unvalidated` cell (`BYTE_GAP`), never in the headline or summary.
     if (derived[0].bytes !== null) {
-      const bytesName = `${name} / bytes`;
+      const bytesName = `${name} / bytes and counts`;
       const failingBytes = derived.filter((sample) => sample.bytes.problems.length > 0);
       if (failingBytes.length > 0)
         incomplete.push(
@@ -245,7 +245,7 @@ export function buildReport(rows, phase, artifacts = []) {
         `\`${scenario}\` (every required cell)`,
         gap,
       ]),
-      ["every session cell's byte fields (`/ bytes`)", BYTE_GAP],
+      ["every cell's byte and count fields (`/ bytes and counts`)", BYTE_GAP],
     ].map(
       ([what, gap]) =>
         `- ${what}: ${gap}. ${GAP_ISSUE}: the label is lifted (these derivations validated under the kit's invariant in docs/TESTING.md) before the activation PR's R1 run, since the gate's decision is R1's.`,
