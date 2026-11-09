@@ -14,6 +14,14 @@ export class MissingEvidence extends Error {
   }
 }
 
+/** A cached classification a record carries that its primary evidence contradicts. */
+export class ContradictoryEvidence extends Error {
+  constructor(what) {
+    super(`contradictory evidence: ${what}`);
+    this.name = "ContradictoryEvidence";
+  }
+}
+
 /** An interval whose end lies before its start. */
 export class ReversedInterval extends Error {
   constructor(what, from, to) {
@@ -46,10 +54,40 @@ export function strictRecord(value, path = "record") {
 }
 
 /**
- * `record[key]` when it may truly be absent: `null` for `undefined` or `null`, else the value read strictly. On a raw
- * record (a scenario's live call) it reads the plain value the same way.
+ * The fields that may truly be absent, each with why; `nullable` reads no other. A classification or a required field is
+ * never on it, so a missing one cannot pass as an absence.
+ */
+export const NULLABLE = Object.freeze({
+  frame: "a record's animation-frame callback has not run yet",
+  shownFrame: "a row not yet drawn with a positive opacity",
+  start: "no start button is shown",
+  composer: "the page shows no composer",
+  control: "no foreground controls root is shown",
+  ready: "the engine Worker has not posted its ready",
+  end: "a transaction still open, or a turn the driver saw settle",
+  outcome: "a transaction still open",
+  scope: "a put whose stored record names no scope",
+  observedMs: "a plans put carries no scene time",
+  failed: "a request that did not fail",
+  usedBytes: "a Worker whose heap read failed",
+  id: "a bridge message outside a request (the Worker's ready)",
+  op: "a bridge message outside a request",
+  replyAt: "a request whose reply has not arrived",
+  size: "a reply that is not captureKeep's",
+  longTasks: "a browser that does not report long tasks",
+  longTasksUnavailable: "a browser that reports long tasks gives no reason",
+  storedMs: "the store held no snapshot",
+  sentAt: "a turn the driver could not send",
+  reason: "a turn that did not fail",
+});
+
+/**
+ * `record[key]` when it may truly be absent, `key` one of `NULLABLE`'s: `null` for `undefined` or `null`, else the value
+ * read strictly. On a raw record (a scenario's live call) it reads the plain value the same way. Another key throws.
  */
 export function nullable(record, key) {
+  if (!Object.hasOwn(NULLABLE, key))
+    throw new Error(`'${String(key)}' is no field that may be absent (NULLABLE)`);
   const raw = record[RAW] ?? record;
   const found = raw[key];
   if (found === undefined || found === null) return null;
@@ -78,6 +116,8 @@ export function crossClock(from, to, what = "a cross-clock difference") {
   return to - from;
 }
 
-/** Whether `error` is one of the reader's: missing evidence or a reversed interval. */
+/** Whether `error` is one of the reader's: missing evidence, a reversed interval or a contradicted cache. */
 export const isEvidenceError = (error) =>
-  error instanceof MissingEvidence || error instanceof ReversedInterval;
+  error instanceof MissingEvidence ||
+  error instanceof ReversedInterval ||
+  error instanceof ContradictoryEvidence;

@@ -11,7 +11,13 @@ import {
   workerSideOf,
   workerStart,
 } from "./lib/measure.mjs";
-import { isEvidenceError, nullable, span, strictRecord } from "./lib/evidence.mjs";
+import {
+  ContradictoryEvidence,
+  isEvidenceError,
+  nullable,
+  span,
+  strictRecord,
+} from "./lib/evidence.mjs";
 import { keepOutcome } from "./scenarios/keep.mjs";
 import { tapCounts } from "./scenarios/taps.mjs";
 
@@ -140,8 +146,8 @@ const DERIVE = {
   }),
   delayedSmoke: (result, cell, problems) => {
     const passed = result.exit === 0;
-    const recorded = nullable(result, "ok");
-    if (recorded !== null && recorded !== passed)
+    const recorded = result.ok;
+    if (recorded !== passed)
       problems.push(`the recorded ok (${recorded}) is not its exit's pass (${passed})`);
     return { passed: passed ? 1 : 0 };
   },
@@ -455,12 +461,33 @@ NUMBERS.keepDurable = [
  * The served bytes (`encoded` or `decoded`) of `target` (`page` or `Workers`), all or those flagged `phase`: `null`
  * while a request is still open or a finished one lacks its length; 0 for a target that requested nothing (no Worker).
  */
+/** Each byte phase and the cold page's mark that ends it (`scenarios/session.mjs` `coldBytes`). */
+const PHASE_MARKS = { beforeStartEnabled: "startEnabled", beforePlayable: "playable" };
+
+/**
+ * Whether `request` belongs to `phase`, from its retained start and the phase's retained mark (both required, epoch ms):
+ * it started at or before the mark. The cached flag the row carries must agree, or the evidence is contradictory.
+ */
+function inPhase(bytes, request, phase) {
+  const member = request.wallTimeMs <= bytes.marks[PHASE_MARKS[phase]];
+  if (request[phase] !== member)
+    throw new ContradictoryEvidence(
+      `${request.url}: its cached ${phase} (${request[phase]}) is not its start against the mark (${member})`,
+    );
+  return member;
+}
+
+/**
+ * The served bytes (`encoded` or `decoded`) of `target` (`page` or `Workers`), all or those in `phase`: a missing
+ * length, start or mark throws; 0 for a target that requested nothing (no Worker).
+ */
 function bytesOf(sample, target, phase, size) {
   if (sample.bytes === null || sample.bytes === undefined) return null;
-  const requests = sample.bytes.requests.filter(
+  const bytes = sample.bytes;
+  const requests = bytes.requests.filter(
     (request) =>
       (target === "page" ? request.target === "page" : request.target !== "page") &&
-      (phase === null || nullable(request, phase) === true),
+      (phase === null || inPhase(bytes, request, phase)),
   );
   if (target === "page" && requests.length === 0) return null;
   const field = size === "encoded" ? "encodedBytes" : "decodedBytes";

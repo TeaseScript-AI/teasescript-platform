@@ -20,6 +20,7 @@ exits 2.
   - a counted turn's feedback present.
 
   A sample that fails the validation makes its cell incomplete; it is never a value in a median.
+
 - **The two sets.**
   - The invariant holds for `session`, `aa`, `keepDurable`, `demo` and `delayedSmoke`.
   - The scenarios in `UNVALIDATED` (`bridge`, `sessionInstrumented`, `taps`, `bridgeTaps`, `keepHandler`,
@@ -28,18 +29,24 @@ exits 2.
   - A measured failure is a value (`cells.mjs`): a pass/fail scenario's failing run is its result, with its finding.
 - **The reader rule (`lib/evidence.mjs`).** The derivations read a row's records only through `strictRecord`:
   - a read of a missing value throws `MissingEvidence`;
-  - a value that may truly be absent is read with `nullable`, by name;
+  - a value that may truly be absent is read with `nullable`, by name, and only a field on its closed list
+    (`NULLABLE`, each with why it may be absent); a classification or a required field is never on it;
   - `span(from, to)` is the only subtraction over timestamps, and it requires both ends present and in order;
   - the bridge's delivery latency compares two realms' clocks with `crossClock`, which requires both ends but no
     order (Firefox and WebKit coarsen each clock to 1 ms).
 
-  `deriveSample` is the one wrapping site, and its one `try` turns either error into that sample's problem. A kit
-  test scans the derivations for any other `.result` read and any subtraction outside `span`.
+  `deriveSample` is the one wrapping site, and its one `try` turns any of the reader's errors (missing evidence, a
+  reversed interval, a contradicted cache) into that sample's problem. A kit test parses the derivations (the
+  TypeScript compiler API) and fails on any use of `deriveSample`'s raw `row` other than passing it to the reader, in
+  every form (dot, bracket, destructuring, `in`, spread, `Object.keys`, `Reflect.get`, an alias), and on any
+  subtraction outside `span`; its negative controls are those forms at the wrapping site.
 
 Pass or fail is derived from primary records, never from a cached flag:
+
 - the smoke's pass comes from its exit status;
 - the demo's pass comes from its errors and turns;
 - a keep trial's outcome comes from its lifecycle and transactions;
+- a byte request's phase comes from its start against the cold page's mark, not its cached phase flag;
 - a cached flag that disagrees with its records is a problem.
 
 ## Files
@@ -59,7 +66,7 @@ Pass or fail is derived from primary records, never from a cached flag:
   - `demo`.
 - **`validate.mjs`** derives every field again from a row's records, applies the invariant, and lists `UNVALIDATED`.
 - **`report.mjs`** prints the cost report: `node tools/player-gate/report.mjs --phase r0|r1 --artifacts FILE
-  ROWS.jsonl...`. Beside each number it writes the conditions it depends on. The report is incomplete (exit 1) in any
+ROWS.jsonl...`. Beside each number it writes the conditions it depends on. The report is incomplete (exit 1) in any
   of these cases:
   - a required cell has no samples, or for `aa` lacks either arm;
   - a cell has a failing sample;
@@ -70,6 +77,7 @@ Pass or fail is derived from primary records, never from a cached flag:
 
 Every number names its route (the full Player compiles source; plan text exists only on the bridge page), its backend
 and its cohort:
+
 - headline numbers come from unmodified builds with the passive probe;
 - the instrumented variant and the bridge page are diagnostics;
 - taps are an active-input cohort.
@@ -79,7 +87,7 @@ and its cohort:
 Each step runs through the queue; nothing runs on the LXC except the Pixel, which runs on the LXC under the phone lock.
 
 - **Desktop, one engine at a time.** On the desktop worker, `sx-job submit --host desktop --mem 4G --checkout <head>
-  --in r0.sh -- bash -c 'bash "$SX_IN/r0.sh" <engine>'` runs for `chromium`, then `firefox`, then `webkit`. One
+--in r0.sh -- bash -c 'bash "$SX_IN/r0.sh" <engine>'` runs for `chromium`, then `firefox`, then `webkit`. One
   engine at a time keeps their measurements off each other's load.
   - `r0.sh` builds the bridge page, the instrumented variant and the bridge inputs.
   - It then runs every R0 scenario of that engine.

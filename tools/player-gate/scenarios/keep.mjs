@@ -100,7 +100,7 @@ export function hiddenCapture(gate, hiddenAt, scope, baselineMs) {
     (event) =>
       event.t > hiddenAt &&
       (event.type === "resume" ||
-        (event.type === "visibilitychange" && nullable(event, "visibility") === "visible")),
+        (event.type === "visibilitychange" && event.visibility === "visible")),
   );
   const shownAt = shown === undefined ? Infinity : shown.t;
   const boundary = Math.min(shownAt, hiddenAt + HIDDEN_MS);
@@ -153,7 +153,7 @@ export function keepOutcome(trial, record) {
   // The hiding is the page's own `visibilitychange` to hidden in its lifecycle records, on the desktop too (the probe's
   // `__gateHide` dispatches it): a recorded hiding time without that event is no hiding.
   const hidden = record.lifecycle.find(
-    (event) => event.type === "visibilitychange" && nullable(event, "visibility") === "hidden",
+    (event) => event.type === "visibilitychange" && event.visibility === "hidden",
   );
   if (hidden === undefined) return { outcome: "the page never reported hidden", completed: false };
   const hiddenAt = hidden.t;

@@ -5,9 +5,16 @@ import test from "node:test";
 import { AXES, allCells, cellName, classify } from "./cells.mjs";
 import { buildReport } from "./report.mjs";
 import { playable, turnTimes } from "./lib/measure.mjs";
-import { MissingEvidence, ReversedInterval, strictRecord } from "./lib/evidence.mjs";
+import {
+  MissingEvidence,
+  NULLABLE,
+  nullable,
+  ReversedInterval,
+  strictRecord,
+} from "./lib/evidence.mjs";
 import { hiddenCapture, keepOutcome } from "./scenarios/keep.mjs";
 import { readFileSync } from "node:fs";
+import ts from "typescript";
 import { releaser } from "./lib/release.mjs";
 import { clearOriginsThrough } from "./lib/cdp.mjs";
 
@@ -182,9 +189,13 @@ function sessionResult({ engine = "chromium", backend = "main" } = {}) {
           memory: ["startEnabled", "playable", "firstSave", "afterTurns", "end"].map(heap),
           bytes: {
             discarded: [],
+            // The cold byte page's marks and its requests' starts, epoch ms (`scenarios/session.mjs` `coldBytes`).
+            marks: { startEnabled: 10_500, playable: 10_716, firstSave: 10_630 },
             requests: [
               {
+                url: "/player/",
                 target: "page",
+                wallTimeMs: 10_000,
                 finished: true,
                 failed: null,
                 encodedBytes: 7,
@@ -195,11 +206,15 @@ function sessionResult({ engine = "chromium", backend = "main" } = {}) {
               ...(worker
                 ? [
                     {
+                      url: "engine.worker.js",
                       target: "engine.worker.js",
+                      wallTimeMs: 10_600,
                       finished: true,
                       failed: null,
                       encodedBytes: 3,
                       decodedBytes: 6,
+                      beforeStartEnabled: false,
+                      beforePlayable: true,
                     },
                   ]
                 : []),
@@ -460,6 +475,7 @@ test("a turn settles at an enabled control of another action, even with the same
   const gate = {
     states: [before, next(2, 300)],
     changes: [{ t: 250, frame: 262 }],
+    rowChanges: [],
     rows: [],
     inputs: [{ type: "pointerdown", t: 201, ts: 200, trusted: true }],
   };
@@ -546,6 +562,7 @@ test("a turn settles at an update of a message shown before it, and a new row at
   const base = {
     states: [before],
     changes: [{ t: 250, frame: 262 }],
+    rowChanges: [],
     inputs: [{ type: "pointerdown", t: 201, ts: 200, trusted: true }],
   };
   const updated = turnTimes(
@@ -768,26 +785,176 @@ test("Sol code r5's witnesses stay caught or labelled: a reversed bridge round t
   assert.ok(!(name(handler) in report.summary));
 });
 
-test("every derivation reads records only through the strict reader, and span is its only timestamp subtraction", () => {
-  const source = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
-  const scanned = {
-    "validate.mjs": source("./validate.mjs"),
-    "lib/measure.mjs": source("./lib/measure.mjs"),
-    "scenarios/keep.mjs (its derivations)": `${hiddenCapture}\n${keepOutcome}`,
+/**
+ * The reader boundary, from the parsed source (orchestrator 2's ruling after Sol code r8): raw records exist only as
+ * `deriveSample`'s `row`; every binding that holds it, or anything read from it, is tainted. Any use of a tainted binding
+ * is a violation (a dot or bracket read, a destructuring pattern, `in`, a spread, a call such as `Object.keys` or
+ * `Reflect.get`, an assignment or a return) except passing it to `strictRecord` or `nullable`, the reader's calls; and
+ * a plain alias (`const copy = row`) is itself tainted. Every subtraction in the scanned code must be one of `allowed`.
+ */
+function readerViolations(text, file, allowedSubtractions = []) {
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const violations = [];
+  const at = (node, what) =>
+    violations.push(
+      `${file}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}: ${what}`,
+    );
+  const walk = (node, visit) => {
+    visit(node);
+    ts.forEachChild(node, (child) => walk(child, visit));
   };
-  // The one wrapping site reads a row's records through the reader; nothing else reads `.result` or escapes it.
-  const ALLOWED_RESULT_READS = ["strict.result"];
-  // The subtractions that are no intervals: two sort comparators and the median's neighbour index.
-  const ALLOWED_SUBTRACTIONS = ["a.at - b.at", "a - b", "middle - 1"];
-  for (const [name, text] of Object.entries(scanned)) {
-    const code = text.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/\/\/.*$/gmu, "");
-    for (const read of code.match(/[\w.]*\.result\b/gu) ?? [])
-      assert.ok(ALLOWED_RESULT_READS.includes(read), `${name}: a raw record read '${read}'`);
-    assert.ok(!/\bRAW\b/u.test(code), `${name}: reads past the reader`);
-    for (const minus of code.match(/[\w.)\]]+ - [\w.(]+/gu) ?? [])
-      assert.ok(
-        ALLOWED_SUBTRACTIONS.includes(minus),
-        `${name}: a subtraction outside span: '${minus}'`,
-      );
-  }
+  walk(source, (node) => {
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.MinusToken) {
+      const text = node.getText(source);
+      if (!allowedSubtractions.includes(text)) at(node, `a subtraction outside span: '${text}'`);
+    }
+    if (ts.isIdentifier(node) && ["RAW", "PATH"].includes(node.text))
+      at(node, "a read past the reader");
+    if (!ts.isFunctionDeclaration(node) || node.name?.text !== "deriveSample") return;
+    const tainted = new Set(
+      node.parameters
+        .map((parameter) => parameter.name.getText(source))
+        .filter((name) => name === "row"),
+    );
+    const READER = new Set(["strictRecord", "nullable"]);
+    // Aliases first, to a fixed point; then every other use of a tainted name.
+    for (let grew = true; grew;) {
+      grew = false;
+      walk(node.body, (inner) => {
+        if (
+          ts.isVariableDeclaration(inner) &&
+          ts.isIdentifier(inner.name) &&
+          inner.initializer !== undefined &&
+          ts.isIdentifier(inner.initializer) &&
+          tainted.has(inner.initializer.text) &&
+          !tainted.has(inner.name.text)
+        ) {
+          tainted.add(inner.name.text);
+          grew = true;
+        }
+      });
+    }
+    walk(node.body, (inner) => {
+      if (!ts.isIdentifier(inner) || !tainted.has(inner.text)) return;
+      const parent = inner.parent;
+      if (ts.isVariableDeclaration(parent) && parent.name === inner) return;
+      if (
+        ts.isVariableDeclaration(parent) &&
+        parent.initializer === inner &&
+        ts.isIdentifier(parent.name)
+      )
+        return;
+      if (
+        ts.isCallExpression(parent) &&
+        parent.arguments[0] === inner &&
+        ts.isIdentifier(parent.expression) &&
+        READER.has(parent.expression.text)
+      )
+        return;
+      const form = ts.isPropertyAccessExpression(parent)
+        ? "a dot read"
+        : ts.isElementAccessExpression(parent)
+          ? "a bracket read"
+          : ts.isVariableDeclaration(parent)
+            ? "a destructuring pattern"
+            : ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.InKeyword
+              ? "an `in` test"
+              : ts.isSpreadElement(parent) || ts.isSpreadAssignment(parent)
+                ? "a spread"
+                : ts.isCallExpression(parent)
+                  ? `a call of ${parent.expression.getText(source)}`
+                  : `a ${ts.SyntaxKind[parent.kind]}`;
+      at(inner, `a raw read of '${inner.text}': ${form}`);
+    });
+  });
+  return violations;
+}
+
+const DERIVATION_SOURCES = () => ({
+  "validate.mjs": readFileSync(new URL("./validate.mjs", import.meta.url), "utf8"),
+  "lib/measure.mjs": readFileSync(new URL("./lib/measure.mjs", import.meta.url), "utf8"),
+  "scenarios/keep.mjs": `${hiddenCapture}\n${keepOutcome}`,
+});
+// The subtractions that are no intervals: two sort comparators and the median's neighbour index.
+const NO_INTERVALS = ["a.at - b.at", "a - b", "middle - 1"];
+
+test("every derivation reads a row only through the strict reader, and span is its only timestamp subtraction", () => {
+  for (const [file, text] of Object.entries(DERIVATION_SOURCES()))
+    assert.deepEqual(readerViolations(text, file, NO_INTERVALS), [], file);
+});
+
+test("the reader guard fails every raw-read form at the wrapping site, and the public report still fails a witness", () => {
+  const original = DERIVATION_SOURCES()["validate.mjs"];
+  const site = "DERIVE[cell.scenario](strict.result, cell, problems)";
+  assert.ok(original.includes(site), "the wrapping site is where the mutants expect it");
+  const mutants = {
+    dot: site.replace("strict.result", "row.result"),
+    bracket: site.replace("strict.result", 'row["result"]'),
+    destructuring: `(() => { const { result } = row; return DERIVE[cell.scenario](result, cell, problems); })()`,
+    reflect: site.replace("strict.result", 'Reflect.get(row, "result")'),
+    alias: `(() => { const copy = row; return DERIVE[cell.scenario](copy["result"], cell, problems); })()`,
+    keys: site.replace("strict.result", "row[Object.keys(row)[0]]"),
+    spread: site.replace("strict.result", "{ ...row }.result"),
+    in: site.replace("strict.result", '"result" in row ? strict.result : strict.result'),
+  };
+  for (const [form, mutant] of Object.entries(mutants))
+    assert.ok(
+      readerViolations(original.replace(site, mutant), "validate.mjs", NO_INTERVALS).some(
+        (violation) => violation.includes("a raw read of"),
+      ),
+      `the ${form} mutant passed the guard`,
+    );
+  // Sol code r6's durable-baseline witness, through the public report: a missing baseline fails its cell.
+  const durable = { scenario: "keepDurable", script: "CelebWorship", engine: "pixel" };
+  assert.ok(
+    buildReport(
+      [row(durable, true, { outcome: "durable after 1 s", baselineMs: null, storedMs: 9 })],
+      "r1",
+      ARTIFACTS,
+    ).incomplete.some((text) => text.includes(name(durable))),
+  );
+});
+
+test("byte phases derive from each request's start and the page's marks: Sol code r8's four witnesses fail the cell", () => {
+  const incomplete = (change) => {
+    const result = sessionResult();
+    change(result);
+    return buildReport(
+      [row({ scenario: "session", engine: "chromium" }, true, result)],
+      "r0",
+      ARTIFACTS,
+    ).incomplete.some((text) => text.includes(name({})));
+  };
+  assert.equal(
+    incomplete(() => {}),
+    false,
+    "intact evidence is complete",
+  );
+  const page = (r) => r.bytes.requests[0];
+  assert.ok(
+    incomplete((r) => delete page(r).beforeStartEnabled),
+    "the cached flag deleted",
+  );
+  assert.ok(
+    incomplete((r) => (page(r).beforeStartEnabled = false)),
+    "the flag false, the start before the mark",
+  );
+  assert.ok(
+    incomplete((r) => (page(r).wallTimeMs = null)),
+    "the request's start missing",
+  );
+  assert.ok(
+    incomplete((r) => delete r.bytes.marks),
+    "the page's marks missing",
+  );
+});
+
+test("nullable reads only the fields that may truly be absent", () => {
+  assert.equal(nullable({ frame: null }, "frame"), null);
+  assert.throws(
+    () => nullable({ beforeStartEnabled: true }, "beforeStartEnabled"),
+    /no field that may be absent/u,
+  );
+  for (const reason of Object.values(NULLABLE))
+    assert.ok(typeof reason === "string" && reason.length > 0);
 });

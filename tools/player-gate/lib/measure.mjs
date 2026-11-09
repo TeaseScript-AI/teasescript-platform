@@ -120,7 +120,7 @@ export function turnSettlement(
     ...gate.rows
       .filter((row) => row.speaker !== "user" && row.t > after && read(row, "shownFrame") !== null)
       .map((row) => ({ by: "row", t: row.t, at: read(row, "shownFrame") })),
-    ...(read(gate, "rowChanges") ?? [])
+    ...gate.rowChanges
       .filter((change) => {
         const row = rows.get(change.id);
         const shown = row === undefined ? null : read(row, "shownFrame");
@@ -264,7 +264,7 @@ export function requestsOf(log) {
         op: nullable(post, "op"),
         id: post.id,
         postAt: post.at,
-        postMs: nullable(post, "postMs"),
+        postMs: post.postMs,
         replyAt: reply === null ? null : reply.at,
         rttMs:
           reply === null ? null : span(post.at, reply.at, `${nullable(post, "op")}'s round trip`),
