@@ -238,7 +238,7 @@ test("the copied and direct nested stores owe their checks at every mode's stop"
  * the unmarked function result (her M2), a checked argument and return, an `add`, a list join, a compound assignment and
  * an interpolation. The candidate route declines them, and the analysis is main's: no receiving obligation, no
  * completion, and every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221
- * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1–6 units more on four rows; a regression oracle of this gate only), and the route rule's queries since #1073 PR 4 (AD-1: a possible null's route asked at its use, on the rows that have one), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
+ * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1–6 units more on four rows; a regression oracle of this gate only), the route rule's queries since #1073 PR 4 (AD-1: a possible null's route asked at its use, on the rows that have one), and 7 more on the three rows of `frozen` in reversed order at demand 64 since #2065 (their decided paths below `b`'s property look up `b`'s decision index and keep its state, `holdersOf`), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
  * then 64's).
  */
 const frozen = `let a = {f: [[1]]}\nlet b = a\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\nb.f = hostValue`;
@@ -267,17 +267,17 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
   [
     "a list join",
     `${frozen}\nlet xs = [1]\nlet ys = ["s"]\nb.f = [xs + ys]`,
-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],
+    [20044, 21252, 19818, 21009, 32920, 34396, 32070, 33455],
   ],
   [
     "a compound assignment",
     `${frozen}\nlet n = 1\nn += 1`,
-    [18994, 19136, 18864, 19006, 20720, 22181, 20460, 21814],
+    [18994, 19136, 18864, 19006, 20720, 22188, 20460, 21821],
   ],
   [
     "an interpolation",
     `${frozen}\nsay "n \${b.f}"`,
-    [19238, 19354, 19108, 19224, 20963, 22390, 20703, 22030],
+    [19238, 19354, 19108, 19224, 20963, 22397, 20703, 22037],
   ],
 ];
 
@@ -531,7 +531,9 @@ test("a completion past its allowance ends and keeps no result, the analysis at 
   for (const [name, body] of [
     ["a directed copy chain at 4", directed(4)],
     ["W15 at 256", w15(256)],
-    ["whole stores into one place at 64", fields(64)],
+    // (#2065: at 256; at 64 and 128 the reversed order's completion now ends within its allowance, each decision
+    // reading the stores that hold its field, `holdersOf`)
+    ["whole stores into one place at 256", fields(256)],
   ] as const) {
     const source = body + ending;
     const request = coreRequest([{ path: "main.tease", source }], [...GLOBALS, "hostFlag"]);

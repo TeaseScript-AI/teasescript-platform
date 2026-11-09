@@ -3,7 +3,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { type Answers } from "../../src/type-inference/core/answers.js";
+import { compileProjectWithBackend } from "../../src/compiler.js";
+import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
+import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance, type WorkCounter } from "../../src/type-inference/core/budget.js";
 import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
 import {
@@ -11,12 +13,15 @@ import {
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
+  DECISION_HOLDER_FAMILIES,
   LAYER_FAMILIES,
   NARROWING_FAMILIES,
   VALUE_CLASS_SITES,
   type WorkFamily,
 } from "../helpers/type-core/type-core-families.js";
+import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
+import { inMode, MODES } from "../helpers/type-core-oracles.js";
 import {
   DOUBLING,
   type Sized,
@@ -615,4 +620,119 @@ test("a search of a key's events charges each comparison it makes (#1221)", () =
     assert.equal(lists.eventIn(key, [[first! + 1, second! - 1]]), null, `k = ${k}`);
     assert.equal(lists.eventIn(key, [[last + 1, Number.MAX_SAFE_INTEGER]]), null, `k = ${k}`);
   }
+});
+
+/**
+ * #2065 (#2059, #1585): a decided path below an ordinary property reads, of its prefix's whole stores and settled
+ * stores, those that may hold the property and those unproved (`holdersOf`), once the reads it saves pay for the index.
+ * Every family of `DECISION_HOLDER_FAMILIES` (k objects stored into a place or copied into it from k terminal places;
+ * one holder each, none, every one, or every other store an unproved copy; decided below, at and past the index's
+ * first bound) grows from k = 16 to 32 within the suite's bound, or within 1 % of `main`'s own growth where `main` grows
+ * faster (`MAIN_GROWTH`, measured once on `53c7b4bfc`, sharing on and off). Publications equal `main`'s on every family,
+ * size and mode, and each counter keeps within its row's declared term (the PR's evidence, outside CI).
+ */
+test("a decided path reads its prefix's stores that may hold its first step, the family within main's growth (#2065)", () => {
+  const MAIN_GROWTH: Record<string, readonly [number, number]> = {
+    "holders-direct-holders-below": [3.069, 3.158],
+    "holders-direct-holders-at": [3.169, 3.258],
+    "holders-direct-holders-past": [2.797, 2.867],
+    "holders-direct-none-below": [3.053, 3.134],
+    "holders-direct-none-at": [3.146, 3.216],
+    "holders-direct-none-past": [2.777, 2.832],
+    "holders-direct-every-below": [2.625, 2.692],
+    "holders-direct-every-at": [2.678, 2.743],
+    "holders-direct-every-past": [2.765, 2.729],
+    "holders-direct-unproved-below": [2.78, 2.966],
+    "holders-direct-unproved-at": [2.892, 3.076],
+    "holders-direct-unproved-past": [2.496, 2.631],
+    "holders-copy-holders-below": [2.074, 2.065],
+    "holders-copy-holders-at": [2.044, 2.032],
+    "holders-copy-holders-past": [3.05, 3.093],
+    "holders-copy-none-below": [2.107, 2.099],
+    "holders-copy-none-at": [2.203, 2.191],
+    "holders-copy-none-past": [3.305, 3.326],
+    "holders-copy-every-below": [2.084, 2.083],
+    "holders-copy-every-at": [2.156, 2.151],
+    "holders-copy-every-past": [2.898, 2.905],
+    "holders-copy-unproved-below": [2.022, 2.012],
+    "holders-copy-unproved-at": [1.925, 1.894],
+    "holders-copy-unproved-past": [2.801, 2.79],
+  };
+  assert.deepEqual(
+    DECISION_HOLDER_FAMILIES.map((family) => family.name).sort(),
+    Object.keys(MAIN_GROWTH).sort(),
+  );
+  const steep: string[] = [];
+  for (const family of DECISION_HOLDER_FAMILIES)
+    for (const [index, mode] of [MODES[0]!, MODES[1]!].entries()) {
+      const [small, large] = [16, 32].map((k) => {
+        const request = coreRequest(family.program(k), ["hostValue", "hostOther"]);
+        assert.ok(request !== null, family.name);
+        const { budget } = inMode(mode, () => analyseCore(request));
+        assert.equal(budget.exhausted, null, family.name);
+        return { total: budget.total, nodes: budget.counts.get("syntaxNodes") ?? 1 };
+      });
+      const growth = (2 * (large!.total / small!.total)) / (large!.nodes / small!.nodes);
+      const bound = Math.max(DOUBLING, 1.01 * MAIN_GROWTH[family.name]![index]!);
+      if (growth > bound)
+        steep.push(`${family.name} ${JSON.stringify(mode)}: ${growth.toFixed(3)}`);
+    }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * #2065: a place's stores, past the index's first bound (six decided paths below properties no store holds before
+ * the last), decide the last path as the full scan does, in every held mode: the earliest holder's kind, a whole copy of
+ * a terminal place (its literal's names, Sol's copied-source witness) or a store of the place itself; a source's own
+ * store below its root, a layer no settled store shows (#1466); a holder whose element is `null` alone, which decides
+ * nothing beside a later holder; a copy of a written binding (A4), whose written type answers where its value holds
+ * nothing; a copy of a place of two stores, unproved. Each program's diagnostics, by code, severity and line, are
+ * `main`'s.
+ */
+test("a decided path past the decision index's first bound decides as the full scan does (#2065)", () => {
+  const pad = (n: number) => Array.from({ length: n }, (_, i) => `a={x${i}:1}`).join("\n");
+  const reads = (n: number) => Array.from({ length: n }, (_, i) => `repeat a.x${i} {}`).join("\n");
+  const repeats = (lines: readonly number[]) =>
+    lines.flatMap((line) => [`TSV011 warning L${line}`, `TSV043 warning L${line}`]);
+  const cases: readonly { readonly source: string; readonly diagnostics: readonly string[] }[] = [
+    {
+      source: `let root={p:1}\nlet a=root\n${pad(6)}\na={p:"wrong"}\n${reads(6)}\nrepeat a.p {}\nexit`,
+      diagnostics: ["TSV041 error L8", ...repeats([9, 10, 11, 12, 13, 15])],
+    },
+    {
+      source: `let t:integer=1\nlet s={q:1}\ns.p=t\nlet a=s\n${pad(6)}\na={p:"wrong"}\n${reads(6)}\nrepeat a.p {}\nexit`,
+      diagnostics: ["TSV043 error L1", "TSV041 error L10", ...repeats([11, 12, 13, 14, 15, 17])],
+    },
+    {
+      source: `let a={p:[null]}\n${pad(6)}\na={p:[1]}\n${reads(6)}\nlet b=a.p\nexit`,
+      diagnostics: repeats([8, 9, 10, 11, 12, 13]),
+    },
+    {
+      source: `let a={p:1}\n${pad(6)}\na={p:"wrong"}\n${reads(6)}\nrepeat a.p {}\nexit`,
+      diagnostics: ["TSV041 error L7", ...repeats([8, 9, 10, 11, 12, 14])],
+    },
+    {
+      source: `let typed:object={x:1}\nlet a=typed\n${pad(6)}\na={p:"wrong"}\n${reads(6)}\nrepeat a.p {}\nexit`,
+      diagnostics: [...repeats([9, 10, 11, 12, 13, 14]), "TSV011 error L15"],
+    },
+    {
+      source: `let u={p:1}\nu={q:2}\nlet a=u\n${pad(6)}\na={p:"wrong"}\n${reads(6)}\nrepeat a.p {}\nexit`,
+      diagnostics: [...repeats([10, 11, 12, 13, 14, 15]), "TSV011 error L16"],
+    },
+  ];
+  for (const { source, diagnostics } of cases)
+    for (const mode of HELD_MODES) {
+      const result = mode.run(() =>
+        compileProjectWithBackend(
+          [{ path: "main.tease", source }],
+          { globals: ["hostValue"] },
+          CORE_BACKEND,
+        ),
+      );
+      assert.deepEqual(
+        result.diagnostics.map((d) => `${d.code} ${d.severity} L${d.span.start.line}`),
+        diagnostics,
+        `${mode.name}: ${source}`,
+      );
+    }
 });
