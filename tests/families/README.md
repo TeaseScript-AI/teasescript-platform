@@ -334,6 +334,39 @@ sx-job submit --commit base=<base> --commit head=<head> --shards 16 --mem 3G --t
 
 For `corpus`, add `--data ~/work/o4-m4-g3/cases.json` and `CASES_JSON=$HOME/work/o4-m4-g3/cases.json` before `node`.
 
+## A pull request's replay
+
+`tools/compiler-replay.mjs` runs a compiler pull request's replay of its base against its head through the queue: the
+set and every area above, in 16 shards each. Each step's inputs, in order:
+
+- **`submit <base> <head> --owner <owner> [--campaign <prefix>] [--baseline] [--dry]`:** the two commits. It queues
+  `<prefix>-set` and `<prefix>-areas` and prints each job's id.
+  - The areas are those `baselines.mjs` takes: the folders here that hold a generator, and the fixture folder
+    `tools/corpus/fixture`, each passed by its folder. Copies runs at `--memory 6144`.
+  - `--baseline` compares the areas with the base's stored runs (`--needs-baseline`). The set always runs two trees.
+- **`collect <prefix> --owner <owner> [--results <folder>] [--json <file>]`:** the campaigns' results.
+  - It prints each area's shards, sources, runs, differences and stalls, and the set's.
+  - It prints each difference that stands: an area's by its first differing part, a set mode's by what differs. A
+    difference in the route alone (the last part, as many parts on both trees) stands until `aside`'s rows agree.
+  - It reads the stall verdicts from `stalls.mjs`, with `<prefix>-rerun`'s records.
+  - A shard whose job left no summary line is "not run", never equal.
+- **`rerun-stalls <prefix> <base> <head> --owner <owner> [--memory <MB>]`:** the areas' work records. It reruns their
+  stalled sources on both trees in one job (`<prefix>-rerun`), at 12,288 MB unless given.
+- **`aside <prefix> <base> <head> --owner <owner> --declare <file>`:** the route-only differences, the differing set
+  sources, and a declaration file.
+  - The file is a JSON list of `{ "pattern", "reason" }`, passed as an argument and never read from elsewhere.
+  - It compiles each row on both trees in one job (`<prefix>-aside`). A row agrees where the plans' JSON text is
+    byte-equal and the route text is equal once every declared pattern is removed.
+- **`plan-checks <plan.json>...`:** plan files, counted by `tests/helpers/plan-checks.ts`'s `planChecks` from a built
+  tree.
+
+Exit statuses:
+- 0: the step did what it says. For `collect`, every shard ran, and nothing differs, stalls or stays uncompared beyond
+  route text that `aside` set aside.
+- 1: something differs, stalls or did not compare; each is listed.
+- 2: a usage error, or input it cannot read.
+- 3: for `collect`, a shard did not run.
+
 ## Shadow
 
 `shadow.mjs` (S9b's interim and S11's final shadow comparison, landed by #1704 from the S11 readiness research's copy)
