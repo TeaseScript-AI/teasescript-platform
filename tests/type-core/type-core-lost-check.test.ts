@@ -371,11 +371,12 @@ test("a reader keeps a contract it is at least as strict as, never one it is wea
     );
 });
 
-test("a settled stop's store check lists an object's properties as the natural plan's does, so a value with several misfits reads the natural message (#2215)", () => {
+test("a settled stop's check from the receiving completion lists an object's properties by the store's own records, so a value with several misfits reads the natural message at every stopped allowance (#2215)", () => {
   // (Sol round 13's witness on #2116: five whole stores into `root`, reads that pay for their decisions under a host
-  // condition false when the script runs, then the host value stored whole. At demand 20 in held mode 0 a decision stops
-  // and the analysis settles, and the store's check takes the receiving completion's contract, whose listings found
-  // `root`'s properties last first; the natural check lists them as the program first writes them, `f1` first. The
+  // condition false when the script runs, then the host value stored whole, the first store to ask for `root`'s contract.
+  // At each demand in held mode 0 a decision stops and the analysis settles. Where the store's check takes the receiving
+  // completion's contract, whose listings found `root`'s properties last first (main reads `.f4.n` at 4 to 45), it lists
+  // them by the store's own records, then as the program first writes them, `f1` first, as the natural check does. The
   // runtime names, shows and advises on the first property that does not fit: `.f1`'s text, not `.f4.n`'s.)
   const source = [
     "let value:integer=1",
@@ -418,14 +419,19 @@ test("a settled stop's store check lists an object's properties as the natural p
       ? [failed.code, failed.span.start.offset, failed.span.end.offset, failed.message]
       : null;
   };
-  const { budget } = held.run(() =>
-    withTestDemandAllowance(20, () =>
-      analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!),
-    ),
-  );
-  assert.equal(budget.settled, true);
-  assert.ok(budget.decisions.some((decision) => decision.stopped));
   const natural = failure(compiled(null).plan);
   assert.equal(natural?.[0], "TSR058");
-  assert.deepEqual(failure(compiled(20).plan), natural);
+  for (const demand of [4, 20, 36, 45, 133]) {
+    const { budget } = held.run(() =>
+      withTestDemandAllowance(demand, () =>
+        analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!),
+      ),
+    );
+    assert.equal(budget.settled, true, `demand ${demand}`);
+    assert.ok(
+      budget.decisions.some((decision) => decision.stopped),
+      `demand ${demand}`,
+    );
+    assert.deepEqual(failure(compiled(demand).plan), natural, `demand ${demand}`);
+  }
 });
