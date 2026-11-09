@@ -43,7 +43,9 @@ the framework-independent `player/` no `player/vue/`); cycles through imports th
 refused. Not seen: a `<script src>` block, a `.js` file beside a same-name `.ts` (read as the `.js`), and a `.vue` file
 Vue's parser refuses (vue-tsc refuses it in CI). `tools/repository-checks/imports.mjs` lists the boundaries with their
 sources, the packages each area may import with their reasons, the generated-component exception, and what no document
-declares. `npm run lint:design` and `npm run test:lint:design` check the [Player design
+declares. `npm run check:readme-paths` checks that every backticked path in the Player's two maps (`player/README.md`,
+`player/vue/src/README.md`) names a tracked file or folder; `tools/repository-checks/readme-paths.mjs` says which
+spans it reads and which it skips. `npm run lint:design` and `npm run test:lint:design` check the [Player design
 contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
 TypeScript compilation precedes UI work; compiled tests run only after all builds pass, as many files at once as

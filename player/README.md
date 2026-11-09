@@ -18,39 +18,39 @@ This is a local inspection route, not the production cross-origin Player/host pr
 
 ## Implementation seams
 
-- `runtime-adapter.ts` contains framework-independent runtime-to-Player translation and shared action helpers used by
+- `runtime/runtime-adapter.ts` contains framework-independent runtime-to-Player translation and shared action helpers used by
   the Player and playground workspace controller, including reporting a persisted script-storage write.
 - `engine-bridge/` is the bridge to the engine's host (the L5 series of Runtime 2): its protocol, host, client and ops,
-  which run the adapter's sessions where the host is. The main realm holds a `PlayerSession` (`runtime-view.ts`), the
-  published state with its transcript, which `session-store.ts` builds from each reply; `player-bridge.ts` sends the
+  which run the adapter's sessions where the host is. The main realm holds a `PlayerSession` (`runtime/runtime-view.ts`), the
+  published state with its transcript, which `persistence/session-store.ts` builds from each reply; `runtime/player-bridge.ts` sends the
   requests; it serves one live Player at a time (`claim`), and a later Player may reuse it. Until the Worker is
   activated, the host runs in the page (`engine-bridge/in-process.ts`), whose transition facade the families not yet
   converted use; `engine-bridge/inventory.ts` lists what still moves.
   The player's input reaches the host from one section of the shown session (`vue/src/session/runtime-input.ts`): it observes,
   checks that the session still owns the UI and that the action the player acted on is still presented, then posts the
   control's op. Input's ops read no basis; an answer to another action is refused by its action ID.
-- `notices.ts` contains the Player notice channel and its fixed wording per condition; see
+- `presentation/notices.ts` contains the Player notice channel and its fixed wording per condition; see
   [`PLAYER-UI.md`](../docs/ui/PLAYER-UI.md#player-notices).
-- `script-storage.ts` contains the asynchronous script-storage provider boundary and its browser-local
+- `persistence/script-storage.ts` contains the asynchronous script-storage provider boundary and its browser-local
   implementation; see [`DATA-AND-API.md`](../docs/DATA-AND-API.md#script-storage-in-the-browser).
 - `vue/src/` contains the Player composition, components, shared layout/theme CSS, demo host, and development preview;
   its [component map](vue/src/README.md) records responsibility boundaries.
-- `model.ts` and `presentation.ts` contain shared presentation shapes and timer formatting helpers.
+- `presentation/model.ts` and `presentation/presentation.ts` contain shared presentation shapes and timer formatting helpers.
 - `theme/` owns theme generation and authored action-button material.
-- `capture-device.ts`, `rgba-image.ts`, and `browser-capture.ts` contain the framework-independent camera/microphone
+- `media/capture-device.ts`, `media/rgba-image.ts`, and `media/browser-capture.ts` contain the framework-independent camera/microphone
   capture foundation: Player-owned stream lifecycle, bounded failures, recording, still frames, pixel copies, and
-  microphone sampling. `session-camera.ts` opens the session camera at Start and answers `takePhoto()`;
-  `captured-media.ts`, `indexeddb-media-repository.ts`, and `captured-media-persistence.ts` keep captured photos and
+  microphone sampling. `media/session-camera.ts` opens the session camera at Start and answers `takePhoto()`;
+  `media/captured-media.ts`, `media/indexeddb-media-repository.ts`, and `media/captured-media-persistence.ts` keep captured photos and
   images chosen for `askImage(...)` as session media and durable while saved script storage references them;
-  `image-file.ts` checks a chosen file before it is stored. These shapes are implementation details rather
+  `media/image-file.ts` checks a chosen file before it is stored. These shapes are implementation details rather
   than an accepted author-facing API.
-- `transfer-encoding.ts` holds the base64url and gzip encoding of the files players move by hand: saved-data transfers
-  (`storage-transfer.ts`), session transfers (`session-transfer.ts`), and debug exports (`debug-export.ts`, read offline by `tools/debug-export.mjs`; see
-  [`DEBUGGER.md`](../docs/DEBUGGER.md#debug-export)). `debug-recorder.ts` records each session's engine calls, and
-  `debug-export-assembly.ts` builds an export from the player's choices. `debug-history.ts` keeps Debug's rewind
-  history and `debug-history-indexeddb.ts` the database it spills to (see
-  [`DEBUGGER.md`](../docs/DEBUGGER.md#rewind)); `restorePlayerRuntimeSessionAt` in `runtime-adapter.ts` restores its
-  states, and those of the session `kept-sessions.ts` keeps for a reload, also the debug room's (see
+- `persistence/transfer-encoding.ts` holds the base64url and gzip encoding of the files players move by hand: saved-data transfers
+  (`persistence/storage-transfer.ts`), session transfers (`persistence/session-transfer.ts`), and debug exports (`debug/debug-export.ts`, read offline by `tools/debug-export.mjs`; see
+  [`DEBUGGER.md`](../docs/DEBUGGER.md#debug-export)). `debug/debug-recorder.ts` records each session's engine calls, and
+  `debug/debug-export-assembly.ts` builds an export from the player's choices. `debug/debug-history.ts` keeps Debug's rewind
+  history and `debug/debug-history-indexeddb.ts` the database it spills to (see
+  [`DEBUGGER.md`](../docs/DEBUGGER.md#rewind)); `restorePlayerRuntimeSessionAt` in `runtime/runtime-adapter.ts` restores its
+  states, and those of the session `persistence/kept-sessions.ts` keeps for a reload, also the debug room's (see
   [`PLAYER-UI.md`](../docs/ui/PLAYER-UI.md#session-start-and-user-activation)).
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
@@ -71,7 +71,7 @@ The Player currently renders generated light/dark theme roles. In the developmen
 edits the live theme intent. See the [component map](vue/src/README.md).
 
 `theme/palette.ts` resolves Material-based light/dark roles; `theme/material.ts` isolates MCU's tonal palettes;
-`theme/color.ts` isolates Color.js conversion, gamut mapping and contrast. `usePlayerTheme.ts` applies the generated
+`theme/color.ts` isolates Color.js conversion, gamut mapping and contrast. `vue/src/shell/usePlayerTheme.ts` applies the generated
 roles to the document root, including body-portaled controls, and restores previous inline values on unmount.
 Theme Lab edits session-local intent: accent, surface hue/tint, maximum chroma and monochrome. Contrast is shared
 with Player Settings and kept browser-locally like the other Player Settings. Zero tint is achromatic; accent remains
@@ -119,7 +119,7 @@ animations.
 animation, swipe-to-hide, pause under the pointer and polite announcement. The alternative is a locally maintained
 toast stack with its own timers, stacking and animation. It adds browser code/CSS and dependency-update review from a single
 maintainer, without a network service, data access or host boundary; notice state, the bell and the panel stay
-Player-owned. Version 2.0.9 orders its stack by mount, so `PlayerToasts.vue` creates each toast in its own render. On
+Player-owned. Version 2.0.9 orders its stack by mount, so `vue/src/notifications/PlayerToasts.vue` creates each toast in its own render. On
 upgrades, verify that order, placement, swipe, expiry and the theme status colours.
 
 ## Tool panel ordering
@@ -133,7 +133,7 @@ Its type package is development-only; versions live in the manifest/lockfile. Ve
 
 ## Development-only behavior
 
-`DevelopmentPreview.vue` opens one runtime choice scenario and supplies Visual Lab's Owner A/B presentation settings:
+`vue/src/development/DevelopmentPreview.vue` opens one runtime choice scenario and supplies Visual Lab's Owner A/B presentation settings:
 Theme Lab, the Stage media picker, and timer/background-button fixtures. As the scenario's development host, it
 resolves the scenario's Stage images to the development illustrations and its chime to a generated tone; the picker's
 "Runtime" option shows the scenario's own Stage image, and a fixture overrides it. Visual Lab and Layout Debug are development
@@ -156,7 +156,7 @@ playing audio seeks along, and browser video seeking waits for video playback. E
 closed; these lines are local UI state, never transcript entries, notices, or checkpoint data. The explanations of
 Auto-skip and the jumps open from their labels. While Debug runs, `playerRuntimeDebugCountdown` selects the foreground
 wait that the countdown line under the foreground controls shows, and the scene clock refreshes its display estimate
-for it. The **Now** tab (`DebugNow.vue`) combines `playerRuntimeDebugNow` (next statement, waiting statement, calls,
+for it. The **Now** tab (`vue/src/debug/DebugNow.vue`) combines `playerRuntimeDebugNow` (next statement, waiting statement, calls,
 timers, and media with their start statements) with the Stage's load reports for its current image element
 (`stageImageObservation`, judged by `debugStageImageStatus`); it adds nothing to the session. Its readers read only the
 published view: while the tab or the error dialog's call chain shows, the session's publications carry its active calls
@@ -179,24 +179,24 @@ with `[data-debug-trace-status]`, each derivation list `[data-debug-trace]` with
 `[data-debug-selected-message]` with `[data-debug-selected-dismiss]` and `[data-debug-selected-unavailable]`, each chat
 message's `[data-explain-values]`, the log lines under
 `[data-debug-log]` in
-the Log tab, and the latest announcement in `[data-debug-announcement]`. The Storage tab (`DebugStorage.vue`) reads
+the Log tab, and the latest announcement in `[data-debug-announcement]`. The Storage tab (`vue/src/debug/DebugStorage.vue`) reads
 the saved values through the session host's `readSavedData`, which in the debug room are the debug room's own,
 refreshes on its `savedDataRevision`, renders each value as the flat, paged outline of `storageOutline`
-(`player/persistence/storage-preview.ts`, `StorageValue.vue`), and loads a thumbnail through `savedPhoto` only once it is in view,
-keyed by its reference. `StorageEditDialog.vue` edits through the host's `editSavedData`, which stores the edit through
+(`player/persistence/storage-preview.ts`, `vue/src/debug/StorageValue.vue`), and loads a thumbnail through `savedPhoto` only once it is in view,
+keyed by its reference. `vue/src/debug/StorageEditDialog.vue` edits through the host's `editSavedData`, which stores the edit through
 the provider first, then applies it with the recorded `applyPlayerRuntimeStorageEdit`. It refuses an edit (`busy`)
 while a script write waits for the host; a script write issued meanwhile settles first, and the session then follows
 the value the provider kept (`overtaken` when that is the script's). `debugEdits` holds the Edited-while-debugging mark,
 which `debugExportCandidate` passes to the debug export's `editedWhileDebugging`. While Debug runs, `usePlayerDebug`
 turns the value trace on (`setDebugTracing`): the engine's host keeps it as the connection's state (`debugTracing`),
 and every session operation there records into it. A setting made before the host is reachable waits as the Player's,
-and only its latest goes once the host is reachable, while the Player lives. The Variables tab (`DebugVariables.vue`, `DebugTraceRows.vue`) and
+and only its latest goes once the host is reachable, while the Player lives. The Variables tab (`vue/src/debug/DebugVariables.vue`, `vue/src/debug/DebugTraceRows.vue`) and
 the Now tab's Stage image origin show views the host makes from its session and trace (`debugView`,
 `player/debug/debug-view.ts`), with `player/debug/debug-variables.ts`: `playerDebugVariables` groups live variables, and
 `playerDebugTraceRows` builds the visible derivation rows iteratively from the rows the player opened. The tabs keep
-the selection, the opened rows, the pages and the filter, send them with each request (`useDebugView.ts`), and show a
+the selection, the opened rows, the pages and the filter, send them with each request (`vue/src/debug/useDebugView.ts`), and show a
 reply only while it is of the shown publication and trace, from the first reply on. `PlayerApp`
-provides Explain values (`explainValues.ts`) to the transcript: a message offers it while Debug runs if
+provides Explain values (`vue/src/transcript/explainValues.ts`) to the transcript: a message offers it while Debug runs if
 `playerRuntimeTranscriptEventSequence` reads a runtime event sequence from its entry ID, and choosing it stores the
 selection in `usePlayerDebug` with the host's trace and epoch it belongs to (`traceId`, `epoch`), selects the Variables tab, and opens the panel
 through `PlayerToolsShell`'s exposed `showTool`. The tab finds the selected message with
