@@ -192,6 +192,11 @@ replaces the group table and bindings together, with history by version. Claim g
 projected counts remain ceilings until replay. Before reading the switch verdict, add independent area sources for
 accepted calls, camera forms and tag predicates that neither gate sources nor converted units exercise.
 
+A wording difference that drops a fix the legacy route gives, or gives a worse one, is a defect to repair, not an
+owner question: the new checker keeps every fix the legacy checker gives, in the form of
+[Messages](DIAGNOSTICS.md#messages) (owner decision, 2026-10-27, #1195). The legacy route is the reference until #2201
+freezes its messages as the reference for after its removal.
+
 ## Checks and corpora by component
 
 Each row defines that component's [evidence levels](DEVELOPMENT-WORKFLOW.md#evidence); each level includes the ones
