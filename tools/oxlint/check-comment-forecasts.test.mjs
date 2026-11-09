@@ -5,6 +5,8 @@ import {
   citationCounts,
   FORECASTS,
   forecastsIn,
+  glossaryRows,
+  labelsIn,
   unresolvedPointers,
 } from "./check-comment-forecasts.mjs";
 
@@ -125,6 +127,50 @@ test("a comment's pointer at the accepted record names a heading of the page it 
       { line: 2, page: "sharing", anchor: "r4-16" },
       { line: 3, page: undefined, anchor: "r4-15" },
       { line: 4, page: "stops", anchor: "r4-15" },
+    ],
+  );
+});
+
+test("a comment's port-plan or research label is found; a review reference, a document name and a string are not", () => {
+  assert.deepEqual(
+    labelsIn(
+      "a.ts",
+      [
+        "// S8c's stop marks, by C9 (AD-1)",
+        "/* Codex r2's B1 and Astra r1 F2 */",
+        "// V30 §19",
+        'const s = "C13";',
+        "",
+      ].join("\n"),
+    ),
+    [
+      { line: 1, label: "S8c" },
+      { line: 1, label: "C9" },
+      { line: 1, label: "AD-1" },
+    ],
+  );
+});
+
+test("the glossary's rows are the labels of the README's Labels table", () => {
+  const readme = [
+    "# Record",
+    "",
+    "## Labels",
+    "",
+    "| label | meaning |",
+    "| --- | --- |",
+    "| `C9` | the boundary check |",
+    "| `S8c` | historical |",
+    "",
+    "## Index",
+    "",
+    "| `X1` | not a glossary row |",
+  ].join("\n");
+  assert.deepEqual(
+    [...glossaryRows(readme)],
+    [
+      ["C9", 7],
+      ["S8c", 8],
     ],
   );
 });
