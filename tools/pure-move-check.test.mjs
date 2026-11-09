@@ -794,7 +794,7 @@ test(
 );
 
 test(
-  "a configuration the tree does not establish refuses by name; a nearer config that leaves the file out does not apply",
+  "each configuration the tree does not establish refuses by name; a file no config owns otherwise resolves as Node runs it",
   { timeout: 60_000 },
   () => {
     const run = (before, after, ...args) => {
@@ -811,7 +811,8 @@ test(
     const esm = '{ "type": "module" }\n';
     const nodeNext = (include) =>
       `{ "compilerOptions": { "module": "NodeNext", "moduleResolution": "NodeNext" }, "include": ${JSON.stringify(include)} }\n`;
-    // a nearer config whose include leaves the importer out: the root's NodeNext applies, and `./new` resolves to nothing
+    // Codex r4's first case: a nearer config whose include leaves the importer out; the root's NodeNext applies, and
+    // `./new` resolves to nothing
     const nearer = {
       "package.json": esm,
       "tsconfig.json": nodeNext(["src/**/*"]),
@@ -834,7 +835,8 @@ test(
       notOwned.out,
       /refused: src\/lib\/a\.ts:1 \(added\) "\.\/new": resolves to no file/u,
     );
-    // an `extends` the committed tree does not hold: refused by name on both sides, passed only when declared
+    // Codex r4's second case: an `extends` the committed tree does not hold; refused by name on both sides, passed only
+    // when declared, each declaration printed with the refusal reason it covers
     const inherited = {
       "package.json": esm,
       "tsconfig.json": '{ "extends": "@fixture/config/base.json", "include": ["src/**/*.ts"] }\n',
@@ -864,23 +866,57 @@ test(
     );
     assert.equal(declared.status, 0, declared.out);
     assert.match(declared.out, /refused 0/u);
-    // a TypeScript file no committed config includes is refused by name
-    const outside = { "tsconfig.json": nodeNext(["src/**/*"]) };
-    const uncovered = run(
-      { ...outside, "tools/a.ts": importer("./old.js"), "tools/old.ts": value },
-      {
-        ...outside,
-        "tools/a.ts": importer("./new.js"),
-        "tools/old.ts": null,
-        "tools/new.ts": value,
-      },
-      "--renames",
-      (move) => move.renames({ "tools/old.ts": "tools/new.ts" }),
-    );
-    assert.equal(uncovered.status, 1, uncovered.out);
     assert.match(
-      uncovered.out,
-      /refused: tools\/a\.ts:1 \(added\) "\.\/new\.js": no committed tsconfig\.json includes it/u,
+      declared.out,
+      /declared refusal: src\/a\.ts:1 \(removed\) "\.\/old\.js": tsconfig\.json: .*; declared: the configuration extends/u,
     );
+    // a true rename of `tools/old.ts`, its import updated, under each place a file's configuration can come from
+    const rename = (configs, ext, from, to) =>
+      run(
+        { ...configs, [`tools/a.${ext}`]: importer(from), [`tools/old.${ext}`]: value },
+        {
+          ...configs,
+          [`tools/a.${ext}`]: importer(to),
+          [`tools/old.${ext}`]: null,
+          [`tools/new.${ext}`]: value,
+        },
+        "--renames",
+        (move) => move.renames({ [`tools/old.${ext}`]: `tools/new.${ext}` }),
+      );
+    // a TypeScript file the nearest config's include leaves out, and no config above includes: refused by name
+    const leftOut = rename(
+      { "tsconfig.json": nodeNext(["src/**/*"]) },
+      "ts",
+      "./old.js",
+      "./new.js",
+    );
+    assert.equal(leftOut.status, 1, leftOut.out);
+    assert.match(
+      leftOut.out,
+      /refused: tools\/a\.ts:1 \(added\) "\.\/new\.js": no committed tsconfig\.json includes it \(the nearest, tsconfig\.json, leaves it out\)/u,
+    );
+    // a TypeScript file with no config above it, in a tree that has one: refused by name
+    const none = rename({ "src/tsconfig.json": nodeNext(["**/*"]) }, "ts", "./old.js", "./new.js");
+    assert.equal(none.status, 1, none.out);
+    assert.match(
+      none.out,
+      /refused: tools\/a\.ts:1 \(added\) "\.\/new\.js": no committed tsconfig\.json is above it/u,
+    );
+    // a JavaScript file no config owns resolves as Node runs it: in an ESM package `./new` names no file, `./new.js` does
+    const js = { "package.json": esm, "tsconfig.json": nodeNext(["src/**/*"]) };
+    const jsExtensionless = rename(js, "js", "./old.js", "./new");
+    assert.equal(jsExtensionless.status, 1, jsExtensionless.out);
+    assert.match(
+      jsExtensionless.out,
+      /refused: tools\/a\.js:1 \(added\) "\.\/new": resolves to no file/u,
+    );
+    const jsRenamed = rename(js, "js", "./old.js", "./new.js");
+    assert.equal(jsRenamed.status, 0, jsRenamed.out);
+    assert.match(jsRenamed.out, /bindings differing 0; refused 0/u);
+    // a tree with no tsconfig.json resolves a TypeScript file as Node runs it too (its ESM extensionless case is in the
+    // package-context test)
+    const unconfigured = rename({ "package.json": esm }, "ts", "./old.js", "./new.js");
+    assert.equal(unconfigured.status, 0, unconfigured.out);
+    assert.match(unconfigured.out, /bindings differing 0; refused 0/u);
   },
 );

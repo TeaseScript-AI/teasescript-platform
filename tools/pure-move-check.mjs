@@ -39,9 +39,11 @@
 // specifier; form 1 admits an import line's presence, this rule its content. A target the move relocates or adds
 // without a family in `--renames` fails, and the report names the flag. A relative specifier either side cannot
 // resolve, to no file or in a file whose configuration the tree does not establish (a config with an error, such as an
-// `extends` the tree does not hold, or a TypeScript file no config includes), is refused by name: reported unless a
+// `extends` the tree does not hold, or a TypeScript file no config includes or none is above), is refused by name: reported unless a
 // declaration names its side and line, never passed; the move's compiler run is the witness for what the check
-// declines.
+// declines. A declared refusal, its line changed or not, is printed with the refusal reason it covers. One known class is
+// a config that `extends` an uncommitted package, which only an install supplies: `player/vue/tsconfig.json` extends
+// `@vue/tsconfig`, so every relative import in a file it owns is refused, and a move there declares those lines.
 //
 // The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines, the
 // bindings differing and the refused specifiers.
@@ -423,9 +425,11 @@ function treeResolver(ref, tree, folders, git) {
   };
   const configOf = (file) => {
     let dir = path.posix.dirname(file);
+    let nearest = null;
     for (;;) {
       const config = dir === "." ? "tsconfig.json" : `${dir}/tsconfig.json`;
       if (tree.has(config)) {
+        nearest ??= config;
         const parsed = parse(config);
         if (parsed.error !== null) return { refused: `${config}: ${parsed.error}` };
         if (parsed.files.has(ROOT + file)) return { options: parsed.options };
@@ -434,7 +438,12 @@ function treeResolver(ref, tree, folders, git) {
       dir = path.posix.dirname(dir);
     }
     if (!anyConfig || /\.(js|mjs|cjs|jsx)$/u.test(file)) return { options: NODE };
-    return { refused: "no committed tsconfig.json includes it" };
+    return {
+      refused:
+        nearest === null
+          ? "no committed tsconfig.json is above it"
+          : `no committed tsconfig.json includes it (the nearest, ${nearest}, leaves it out)`,
+    };
   };
   const formatOf = (file, options) =>
     ts.getImpliedNodeFormatForFile(ROOT + file, undefined, host, options);
@@ -693,18 +702,20 @@ export function checkMove(
     renames === null ? null : renamesOf(renames),
     git,
   );
-  // a refusal is declared by a declaration of its side and line, used or not, even where the line is no changed one
+  // a refusal is declared by a declaration of its side and line, used or not, even where the line is no changed one;
+  // each is printed with the refusal reason it covers
   const refused = [];
+  const covered = [];
   for (const refusal of bindings.refusals) {
     const index = declarations.findIndex(
       (d) => d.file === refusal.file && d.side === refusal.side && d.line === refusal.line,
     );
     if (index === -1) refused.push(refusal);
     else {
+      covered.push({ ...refusal, declared: declarations[index].reason });
       if (!used.has(index)) {
         used.add(index);
         counts.declared += 1;
-        declared.push({ ...refusal, reason: declarations[index].reason });
       }
     }
   }
@@ -716,6 +727,7 @@ export function checkMove(
     declared,
     stale,
     refused,
+    covered,
     bindings,
     renames: renames !== null,
     counts,
@@ -724,7 +736,8 @@ export function checkMove(
 
 /** The report's lines and exit status for `result`. */
 export function reportOf(base, result) {
-  const { mergeBase, unadmitted, declared, stale, refused, bindings, renames, counts } = result;
+  const { mergeBase, unadmitted, declared, stale, refused, covered, bindings, renames, counts } =
+    result;
   const out = [`pure-move check of ${base}..HEAD (merge base ${mergeBase.slice(0, 12)}):`];
   for (const u of unadmitted) out.push(`  unadmitted: ${u.file}:${u.line} (${u.side}): ${u.text}`);
   for (const s of stale)
@@ -732,6 +745,10 @@ export function reportOf(base, result) {
       `  declaration matching no unmoved line: ${s.file}:${s.line} (${s.side}): ${s.reason}`,
     );
   for (const d of declared) out.push(`  declared: ${d.file}:${d.line} (${d.side}): ${d.reason}`);
+  for (const c of covered)
+    out.push(
+      `  declared refusal: ${c.file}:${c.line} (${c.side}) "${c.specifier}": ${c.reason}; declared: ${c.declared}`,
+    );
   for (const r of refused)
     out.push(
       `  refused: ${r.file}:${r.line} (${r.side}) "${r.specifier}": ${r.reason}; declare it, the move's compiler run its witness`,
