@@ -23,7 +23,10 @@ import { ConversationEntrances, ConversationGlide } from "../../../conversation-
 import { usePreferredReducedMotion, useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
+import type {
+  PlayerTranscriptEntryPresentation,
+  PlayerSpeakerPresentation,
+} from "../../../model.js";
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { recordSpeakerAvatarMessage, speakerAvatarPalette } from "./speakerAvatar";
 import { backdropBehind, resolveColour, vignetteEdge } from "./messageContrast";

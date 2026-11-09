@@ -206,7 +206,9 @@ before(async () => {
   const rewind: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/debug/history/useDebugRewind.ts",
   );
-  const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/debug/usePlayerDebug.ts");
+  const debug: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/debug/usePlayerDebug.ts",
+  );
   const facade: Record<string, unknown> = await loadPlayerModule(
     "player/engine-bridge/in-process.ts",
   );

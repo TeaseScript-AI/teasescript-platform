@@ -98,7 +98,10 @@ test("the restart gate's hook is read only by the rewind owner, and the host res
       "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > beforeRewindRestart <- player/vue/src/session/usePlayerSession.ts usePlayerSession > beforeRestart",
     ],
   );
-  const owner = readFileSync(resolve(process.cwd(), "player/vue/src/session/rewindOwner.ts"), "utf8");
+  const owner = readFileSync(
+    resolve(process.cwd(), "player/vue/src/session/rewindOwner.ts"),
+    "utf8",
+  );
   assert.equal(owner.match(/host\.beforeRestart\(\)/gu)?.length, 1, "one gate reads the hook");
   // The history ops that restart the recorder in the host (`restartAt`), each sent only by the lifecycle's actions
   // that follow its gate: the commit of Back or Forward, Return, and a reinstating close.

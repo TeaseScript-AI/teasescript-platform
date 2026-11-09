@@ -176,7 +176,10 @@ test("every reader of a draw's ID in the picker's modules goes through its ident
         `${file}: a draw's ID read outside its identity: ${line.trim()}`,
       );
   }
-  const app = readFileSync(new URL("../../player/vue/src/shell/PlayerApp.vue", import.meta.url), "utf8");
+  const app = readFileSync(
+    new URL("../../player/vue/src/shell/PlayerApp.vue", import.meta.url),
+    "utf8",
+  );
   const picker = /<RandomDrawPicker\b[\s\S]*?\/>/u.exec(app)?.[0] ?? "";
   assert.match(picker, /:key="randomPicker\.random\.drawKey\.value \?\? ''"/u);
   assert.match(picker, /:draw-key="randomPicker\.random\.drawKey\.value \?\? ''"/u);

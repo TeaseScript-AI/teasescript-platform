@@ -5,7 +5,10 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import { Message, MessageAvatar, MessageContent, MessageHeader } from "@/components/ui/message";
-import type { PlayerSpeakerPresentation, PlayerTranscriptEntryPresentation } from "../../../model.js";
+import type {
+  PlayerSpeakerPresentation,
+  PlayerTranscriptEntryPresentation,
+} from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
 import { nameOf, resolveAppearance } from "./transcriptPresentation";
 import { speakerAvatarColors, speakerAvatarFailure, speakerAvatarSource } from "./speakerAvatar";

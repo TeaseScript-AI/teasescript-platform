@@ -837,6 +837,9 @@ test("only the composer takes the composer's writable model", () => {
         /import\s*\*\s*as\s+\w+\s+from\s*["'][^"']*useComposerFields["']/.test(source))
     );
   });
-  assert.ok(files.includes("interaction/Composer.vue") && files.includes("interaction/RuntimeInteraction.vue"));
+  assert.ok(
+    files.includes("interaction/Composer.vue") &&
+      files.includes("interaction/RuntimeInteraction.vue"),
+  );
   assert.deepEqual(takers, ["interaction/Composer.vue"]);
 });

@@ -3,7 +3,12 @@ import { tryOnScopeDispose } from "@vueuse/core";
 import type { PlanMetadata } from "../../../../engine-bridge/player-ops.js";
 import type { RandomOutcome, RandomSite } from "../../../../../src/index.js";
 import type { CodeLine, DrawCode } from "./randomDrawPresentation";
-import { drawIdentity, drawKey, sameDraw, type DrawIdentity } from "../../../../random-draw-identity.js";
+import {
+  drawIdentity,
+  drawKey,
+  sameDraw,
+  type DrawIdentity,
+} from "../../../../random-draw-identity.js";
 import type { PlayerSessionHost } from "../../session/usePlayerSession";
 
 /** What a site does when it draws next: ask in the picker, go on naturally, or take its least-taken outcome. */

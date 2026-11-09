@@ -89,7 +89,9 @@ before(async () => {
   const module: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/session/usePlayerSession.ts",
   );
-  const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/debug/usePlayerDebug.ts");
+  const debug: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/debug/usePlayerDebug.ts",
+  );
   assert.equal(typeof module.usePlayerSession, "function");
   assert.equal(typeof debug.usePlayerDebug, "function");
   // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.

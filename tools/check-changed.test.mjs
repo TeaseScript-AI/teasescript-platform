@@ -71,7 +71,10 @@ test(
     assert.deepEqual([...projectsFor([])], []);
     // `player/` outside `player/vue/` belongs to the TypeScript project, and `player/vue/` only to the Player's.
     assert.deepEqual([...projectsFor(["player/runtime-adapter.ts"])], ["typescript"]);
-    assert.deepEqual([...projectsFor(["player/vue/src/session/usePlayerSession.ts"])], ["player-vue"]);
+    assert.deepEqual(
+      [...projectsFor(["player/vue/src/session/usePlayerSession.ts"])],
+      ["player-vue"],
+    );
     // A check that several projects name runs once: `lint:design` is the Player's and the design lint's.
     const everyCheck = checksOf(projectsFor([".github/workflows/ci.yml"]));
     assert.deepEqual(everyCheck, [

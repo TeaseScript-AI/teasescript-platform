@@ -272,7 +272,10 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "read",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/debug/history/useDebugExport.ts useDebugExport": ["none", ["BridgeClient.request"]],
+  "player/vue/src/debug/history/useDebugExport.ts useDebugExport": [
+    "none",
+    ["BridgeClient.request"],
+  ],
   "player/vue/src/debug/history/useDebugExport.ts useDebugExport > watch:callback#1": [
     "none",
     ["BridgeClient.request"],
@@ -422,10 +425,8 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "own observation",
     ["BridgeClient.request"],
   ],
-  "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > section > section:callback": [
-    "own observation",
-    ["BridgeClient.request"],
-  ],
+  "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > section > section:callback":
+    ["own observation", ["BridgeClient.request"]],
   "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > prepareKept > owned:callback":
     ["creation", ["BridgeClient.request"]],
   "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > prepareKept > owned:callback > commit:callback#1":
@@ -454,10 +455,8 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/useRandomControl.ts useRandomControl > sendRandomRequest > then:callback.2":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
-  "player/vue/src/session/usePlayerSession.ts usePlayerSession > startDebugSessionAnew > then:callback": [
-    "creation",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
-  ],
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession > startDebugSessionAnew > then:callback":
+    ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#1":
     ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#2.1":
@@ -496,18 +495,12 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > requestObservation > observing:callback":
     ["clock scheduling", ["BridgeClient.request"]],
-  "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > step > inNextTask:callback": [
-    "clock scheduling",
-    ["BridgeClient.request"],
-  ],
-  "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > useEventListener:callback#1": [
-    "clock scheduling",
-    ["BridgeClient.request"],
-  ],
-  "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > useEventListener:callback#2": [
-    "clock: pageHide",
-    ["BridgeClient.request"],
-  ],
+  "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > step > inNextTask:callback":
+    ["clock scheduling", ["BridgeClient.request"]],
+  "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > useEventListener:callback#1":
+    ["clock scheduling", ["BridgeClient.request"]],
+  "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > useEventListener:callback#2":
+    ["clock: pageHide", ["BridgeClient.request"]],
   "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > watch:callback#1": [
     "clock scheduling",
     ["BridgeClient.request"],
@@ -538,12 +531,14 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
   "player/player-bridge.ts PlayerBridge > request > #send:callback {onReply}": "bridge plumbing",
   "player/lock-service.ts LockService > #present > wake {wake}": "own observation",
   "player/vue/src/session/useCallView.ts useCallView {followCallView}": "lifecycle",
-  "player/vue/src/session/usePlayerSession.ts usePlayerSession > then:callback {bridgeLost}": "lifecycle",
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession > then:callback {bridgeLost}":
+    "lifecycle",
   "player/vue/src/session/useSessionMedia.ts useSessionMedia > watchMedia {catchUp}":
     "clock scheduling",
   "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock > scheduleWakeUp {catchUp}":
     "clock scheduling",
-  "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock {catchUp}": "clock scheduling",
+  "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock {catchUp}":
+    "clock scheduling",
 };
 
 /** The escapes the census follows: an object literal's property, or a destructured binding, that holds a forwarder. */
