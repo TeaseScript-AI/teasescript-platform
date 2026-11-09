@@ -33,6 +33,15 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
 - `PlayerApp.vue` composes the product Player from props and slots. It installs `usePlayerKeyboardFocus.ts`
   once, including for body-portaled controls; the [focus contract](../../../docs/ui/PLAYER-UI.md#input-growth-focus-and-keyboard-behavior)
   defines input modality and composer/Send focus.
+- The session composable is its owners, each one `use…` function under `session/`:
+  - `usePlayerSession.ts`, the composition root: the options, the shared state, the owners' composition in setup
+    order, the one disposal hook and the return surface;
+  - `session/activation/`: the activation under way (`useSessionActivation.ts`: prepared Start or Continue, begin,
+    error stop), each activation's run (`useActivationRun.ts`), its failure recording and a debug export's candidate;
+  - `session/persistence/`: the room and the saved values' route, the saved values, the kept session and its
+    persistence operations, the saved data's export and import, a session's export and import;
+  - flat: Debug's random control (`useRandomControl.ts`), Debug mode and the value trace (`useDebugModeAndTrace.ts`),
+    the shown session's media (`useSessionMedia.ts`), Debug's rewind work (`useSessionRewind.ts`).
 - `usePlayerSession.ts` holds the shown `PlayerSession` publication for presentation; the engine's host owns the
   canonical runtime state. Starting a session remounts the transcript and resets interaction-local state. Vue derives
   everything else from that publication. Its
