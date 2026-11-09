@@ -10,7 +10,7 @@ import { DebugRecorder } from "../debug/debug-recorder.js";
 import { MAIN_FILE_PATH } from "../../src/project-paths.js";
 import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
 import { RandomHistory } from "../debug/random-decisions.js";
-import { everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
+import { absentOr, everyItem, exactly, isRecord, isStringArray } from "./argument-checks.js";
 import { type Delivery, type DeliveryOwner, deliveryOwner, OwnedMap } from "./delivery.js";
 import { SourceViewCaches, sourceViewOps } from "./ops/source-views.js";
 import { historyOps } from "./ops/history.js";
@@ -69,19 +69,16 @@ export type PrepareSource =
 
 function isProject(value: unknown): value is PlayerProject {
   if (!isRecord(value) || !exactly(value, ["files"], ["images", "unreadableFiles"])) return false;
-  const files = value.files;
-  const images = value.images;
-  const unreadable = value.unreadableFiles;
   return (
     everyItem(
-      files,
+      value.files,
       (file) =>
         isRecord(file) &&
         exactly(file, ["path", "source"]) &&
         typeof file.path === "string" &&
         typeof file.source === "string",
     ) &&
-    (images === undefined ||
+    absentOr(value, "images", (images) =>
       everyItem(
         images,
         (image) =>
@@ -89,9 +86,10 @@ function isProject(value: unknown): value is PlayerProject {
           exactly(image, ["path", "keywords"], ["tagsProblem"]) &&
           typeof image.path === "string" &&
           isStringArray(image.keywords) &&
-          (image.tagsProblem === undefined || typeof image.tagsProblem === "string"),
-      )) &&
-    (unreadable === undefined ||
+          absentOr(image, "tagsProblem", (problem) => typeof problem === "string"),
+      ),
+    ) &&
+    absentOr(value, "unreadableFiles", (unreadable) =>
       everyItem(
         unreadable,
         (file) =>
@@ -99,38 +97,18 @@ function isProject(value: unknown): value is PlayerProject {
           exactly(file, ["path", "reason"], ["folder"]) &&
           typeof file.path === "string" &&
           typeof file.reason === "string" &&
-          (file.folder === undefined || typeof file.folder === "boolean"),
-      ))
+          absentOr(file, "folder", (folder) => typeof folder === "boolean"),
+      ),
+    )
   );
 }
 
 /**
- * A project as `isProject` admits it: `PlayerProject`'s shape, whose optional fields it also admits as `undefined`; the
- * compiler validates the paths and contents.
+ * What `prepare`'s check admits: script text or a project, whose paths and contents the compiler validates, or plan
+ * text.
  */
-interface AdmittedProject {
-  readonly files: readonly { readonly path: string; readonly source: string }[];
-  readonly images?:
-    | readonly {
-        readonly path: string;
-        readonly keywords: readonly string[];
-        readonly tagsProblem?: string | undefined;
-      }[]
-    | undefined;
-  readonly unreadableFiles?:
-    | readonly {
-        readonly path: string;
-        readonly reason: string;
-        readonly folder?: boolean | undefined;
-      }[]
-    | undefined;
-}
-
-/** What `prepare`'s check admits: a source whose project is an `AdmittedProject`, or plan text. */
 interface PrepareArguments {
-  readonly source:
-    | { readonly kind: "source"; readonly script: string | AdmittedProject }
-    | { readonly kind: "plan"; readonly text: string };
+  readonly source: PrepareSource;
 }
 
 function isPrepareArguments(args: unknown): args is PrepareArguments {
@@ -294,8 +272,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()) 
       session: "none",
       checkArguments: isPrepareArguments,
       run: (args) => {
-        // EVIDENCE: validation: `isProject` declares `PlayerProject` but admits optional fields as `undefined` (#2211).
-        const { source } = args as { readonly source: PrepareSource };
+        const { source } = args;
         return source.kind === "plan"
           ? { result: loadPlan(source.text) }
           : compile(source.script).then((result) => ({ result }));

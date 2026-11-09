@@ -243,6 +243,28 @@ const ROWS = {
             script: { files: [], unreadableFiles: [{ path: "b", reason: "r", folder: "yes" }] },
           },
         },
+        // An optional field present as `undefined`, which a clone keeps, as its type excludes it.
+        "a project's images of undefined": {
+          source: { kind: "source", script: { files: [], images: undefined } },
+        },
+        "a project's unreadable files of undefined": {
+          source: { kind: "source", script: { files: [], unreadableFiles: undefined } },
+        },
+        "an image's tags problem of undefined": {
+          source: {
+            kind: "source",
+            script: {
+              files: [],
+              images: [{ path: "a.png", keywords: [], tagsProblem: undefined }],
+            },
+          },
+        },
+        "an unreadable file's folder of undefined": {
+          source: {
+            kind: "source",
+            script: { files: [], unreadableFiles: [{ path: "b", reason: "r", folder: undefined }] },
+          },
+        },
       },
     },
   ),
@@ -329,6 +351,29 @@ const ROWS = {
           recording: false,
           run: { run: 1, retires: "0" },
         },
+        // An optional field present as `undefined`, which a clone keeps, as its type excludes it.
+        ...Object.fromEntries(
+          [
+            "scriptStorage",
+            "persistentScriptStorage",
+            "temporalContext",
+            "wallClockMs",
+            "debugMode",
+            "storedFiles",
+            "playerProfile",
+          ].map((option) => [
+            `an option ${option} of undefined`,
+            { plan: "p1", options: { [option]: undefined }, recording: false },
+          ]),
+        ),
+        "a random intent of undefined": {
+          plan: "p1",
+          options: {},
+          recording: false,
+          random: { owner: 1, intent: undefined },
+        },
+        "random of undefined": { plan: "p1", options: {}, recording: false, random: undefined },
+        "a run of undefined": { plan: "p1", options: {}, recording: false, run: undefined },
       },
     },
   ),
@@ -530,7 +575,12 @@ const ROWS = {
       { sample: { bytes: new Uint8Array([1]) }, fields: { bytes: ["bytes"] } },
       { sample: { text: "t" }, fields: { text: S } },
     ],
-    rejected: { "bytes and a text": { bytes: new Uint8Array([1]), text: "t" } },
+    // A view of part of a buffer, as a clone keeps it.
+    also: [{ bytes: new Uint8Array(new ArrayBuffer(4)).subarray(1, 3) }],
+    rejected: {
+      "bytes and a text": { bytes: new Uint8Array([1]), text: "t" },
+      "bytes over a shared buffer": { bytes: new Uint8Array(new SharedArrayBuffer(1)) },
+    },
   }),
   reviewTransfer: record(
     { ticket: "t1", scope: "s", plan: "p1" },
@@ -594,7 +644,7 @@ const ROWS = {
       ],
       rejected: {
         ...SERIAL_REJECTED("history", { by: "debugOff" }),
-        // A loss closes a history in the host alone, never by request.
+        // No request closes by a loss: the Player only seals the history; a lost Worker's histories go with it.
         "closed by a loss": { history: 1, by: "loss" },
         "closed for no reason": { history: 1, by: "other" },
       },

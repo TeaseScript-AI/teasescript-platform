@@ -51,16 +51,20 @@ export function transferOps(context: PlayerOpsContext) {
     // A file's bytes or a pasted text: saved data comes back whole; a session as plain data, its checkpoint kept here.
     readTransfer: {
       session: "none",
-      checkArguments: (args): args is { readonly bytes: Uint8Array } | { readonly text: string } =>
+      checkArguments: (
+        args,
+      ): args is { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string } =>
         isRecord(args) &&
-        ((exactly(args, ["bytes"]) && args.bytes instanceof Uint8Array) ||
+        ((exactly(args, ["bytes"]) &&
+          args.bytes instanceof Uint8Array &&
+          // One realm, as `instanceof Uint8Array` assumes; names no `SharedArrayBuffer`, absent in non-isolated pages.
+          args.bytes.buffer instanceof ArrayBuffer) ||
           (exactly(args, ["text"]) && typeof args.text === "string")),
       run: async (args) => {
         const input = args;
-        // EVIDENCE: validation: the check admits any `Uint8Array`, not only one over an `ArrayBuffer` (#2211).
         const read =
           "bytes" in input
-            ? await readPlayerTransferFile(input.bytes as Uint8Array<ArrayBuffer>)
+            ? await readPlayerTransferFile(input.bytes)
             : await readPlayerTransferText(input.text);
         if (read.kind === "savedData") return { result: read };
         const { session: transfer } = read;
@@ -81,7 +85,7 @@ export function transferOps(context: PlayerOpsContext) {
         };
       },
     } satisfies BridgeOp<
-      { readonly bytes: Uint8Array } | { readonly text: string },
+      { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string },
       TransferRead,
       "none"
     >,

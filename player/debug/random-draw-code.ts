@@ -1,6 +1,5 @@
 import { classifyTokens, parse, type ParseResult } from "../../src/index.js";
 import { isNativeStackExhaustion } from "../../src/compiler.js";
-import type { RandomSite } from "../../src/playback.js";
 import type { SourceDebugFile, SourceDebugSpan } from "../../src/runtime/debug/source-sidecar.js";
 import {
   CONTEXT_ROWS,
@@ -23,6 +22,14 @@ interface ClassedRange {
   readonly end: number;
 }
 
+/** A random site's place in its file (`RandomSite`'s), all the code of its draw reads. */
+export interface SitePlace {
+  readonly line: number;
+  readonly column: number;
+  readonly endLine: number;
+  readonly endColumn: number;
+}
+
 /** What every draw in a file shows alike: its lines, unmarked. The caller keeps it while the file's draws follow. */
 export interface FileCode {
   readonly file: SourceDebugFile;
@@ -42,7 +49,7 @@ export function fileCode(file: SourceDebugFile): FileCode {
  * default lines do not show whole, or the whole file when none of several lines is around it. `enclosing` is `null`
  * when the default lines already show it. `null` for a site outside the file.
  */
-export function drawCode(code: FileCode, site: RandomSite): DrawCode | null {
+export function drawCode(code: FileCode, site: SitePlace): DrawCode | null {
   const { file, starts, lines: shown } = code;
   const { source } = file;
   if (site.line < 1 || site.line > starts.length) return null;
@@ -198,7 +205,7 @@ function markLine(
  */
 function enclosingRange(
   spans: SourceDebugFile["enclosing"],
-  site: RandomSite,
+  site: SitePlace,
   lineCount: number,
   context: readonly number[],
 ): {
