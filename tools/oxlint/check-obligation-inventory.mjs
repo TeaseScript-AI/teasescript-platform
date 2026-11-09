@@ -70,6 +70,7 @@ function splitFiles(root, entry) {
  */
 export const admissionFiles = (root) => [
   ...splitFiles(root, ADMISSION),
+  ...folderFiles(root, `${CORE}/admission/literals`),
   ...folderFiles(root, `${CORE}/inherited`),
 ];
 

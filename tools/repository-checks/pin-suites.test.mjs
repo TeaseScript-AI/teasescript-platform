@@ -10,7 +10,7 @@ import { NOT_PINS, PIN_SUITES, builtOf, pinFormsOf, suitesFor, testFiles } from 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 test("a core change lists every pinning suite; another change lists none, a suite's own change or its pins' file itself", () => {
-  assert.deepEqual(suitesFor(["src/type-inference/core/admission/literals.ts"]), PIN_SUITES);
+  assert.deepEqual(suitesFor(["src/type-inference/core/admission/literals/join.ts"]), PIN_SUITES);
   // (the published answers' digests move with the core too: #2074 passed the local check and failed CI on
   // one, #2086)
   assert.ok(
