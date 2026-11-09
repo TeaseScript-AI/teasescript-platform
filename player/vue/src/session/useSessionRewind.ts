@@ -29,7 +29,7 @@ interface SessionRewindHost {
   readonly generation: Readonly<Ref<number>>;
   readonly stopped: Readonly<Ref<boolean>>;
   readonly isDisposed: () => boolean;
-  readonly reportHostError: (error: unknown) => void;
+  readonly reportPageError: (error: unknown) => void;
   readonly showSession: (next: PlayerSession, options: { readonly paused: boolean }) => void;
   readonly scriptStorage: ScriptStorageProvider | undefined;
   readonly applyDebugMode: () => void;
@@ -61,7 +61,7 @@ export function useSessionRewind({
   generation,
   stopped,
   isDisposed,
-  reportHostError,
+  reportPageError,
   showSession,
   scriptStorage,
   applyDebugMode,
@@ -94,7 +94,7 @@ export function useSessionRewind({
     show: (next, paused) => showRewound(next, { paused }),
     // Read at each call, so a host or a test can put its own gate there.
     beforeRestart: () => rewindApi().beforeRestart(),
-    reportHostError: (error) => reportHostError(error),
+    reportPageError: (error) => reportPageError(error),
   });
   // While Debug's rewind shows a restored state (DEBUGGER.md "Rewind"), nothing runs on its own: the clock stands, media
   // hold their position, and load reports and capture requests wait, until new input adopts the state as the session.

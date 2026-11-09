@@ -5,7 +5,7 @@ import type { DebugView, DebugViewRequest } from "../../../debug/debug-view.js";
 import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../runtime/player-bridge.js";
 import type { PlayerSession } from "../../../runtime/runtime-view.js";
 import type { useRuntimeSceneClock } from "./useRuntimeSceneClock";
-import type { ActivationRun, useActivationRun } from "./activation/useActivationRun.js";
+import type { Origin, useActivationRun } from "./activation/useActivationRun.js";
 
 /*
  * Debug's two switches as the host holds them, moved from `usePlayerSession` unchanged: the value trace, with its
@@ -17,7 +17,10 @@ interface DebugModeAndTraceHost {
   /** The engine's host now, or `null` before it is ready. */
   readonly bridgeNow: () => PlayerBridge | null;
   readonly isDisposed: () => boolean;
-  readonly reportHostError: (error: unknown, origin?: ActivationRun | null) => void;
+  /** The activation error-stop sink, for an origin's failure. */
+  readonly reportActivationError: (origin: Origin, error: unknown) => void;
+  /** The page's error reporter, for the page-wide trace's failure. */
+  readonly reportPageError: (error: unknown) => void;
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly stopped: Readonly<Ref<boolean>>;
   readonly activationRun: ReturnType<typeof useActivationRun>;
@@ -39,7 +42,8 @@ interface DebugModeAndTraceHost {
 export function useDebugModeAndTrace({
   bridgeNow,
   isDisposed,
-  reportHostError,
+  reportActivationError,
+  reportPageError,
   session,
   stopped,
   activationRun,
@@ -86,7 +90,7 @@ export function useDebugModeAndTrace({
         if (toggle === tracingToggles && !isDisposed()) traceId.value = now;
       },
       (error: unknown) => {
-        if (!endsQuietly(error) && !isDisposed()) reportHostError(error);
+        if (!endsQuietly(error) && !isDisposed()) reportPageError(error);
       },
     );
   }
@@ -114,7 +118,7 @@ export function useDebugModeAndTrace({
             !stopped.value &&
             session.value?.lineage === current.lineage
           )
-            reportHostError(error);
+            reportPageError(error);
           return null;
         },
       );
@@ -172,15 +176,15 @@ export function useDebugModeAndTrace({
       })
       .then(
         (outcome) => {
-          if (origin !== null && !activationRun.admits(origin)) return;
+          if (!activationRun.admits(origin)) return;
           if (outcome.kind === "set" && session.value?.lineage === current.lineage)
             keepSessionLater();
         },
         (error: unknown) => {
           if (endsQuietly(error)) return;
-          if (origin !== null && !activationRun.admits(origin)) return;
+          if (!activationRun.admits(origin)) return;
           if (!isDisposed() && !stopped.value && session.value?.lineage === current.lineage)
-            reportHostError(error, origin ?? activationRun.current());
+            reportActivationError(origin, error);
         },
       );
   }

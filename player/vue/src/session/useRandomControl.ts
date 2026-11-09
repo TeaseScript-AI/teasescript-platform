@@ -15,7 +15,7 @@ import {
 } from "../../../runtime/player-bridge.js";
 import type { PlayerSession } from "../../../runtime/runtime-view.js";
 import type { SectionWork, useRuntimeSceneClock } from "./useRuntimeSceneClock";
-import type { ActivationRun, useActivationRun } from "./activation/useActivationRun.js";
+import type { Origin, useActivationRun } from "./activation/useActivationRun.js";
 
 /*
  * Debug's random control as the host holds it for this Player, moved from `usePlayerSession` unchanged: the intents it
@@ -29,7 +29,10 @@ interface RandomControlHost {
   readonly claim: symbol;
   readonly isDisposed: () => boolean;
   readonly activationRun: ReturnType<typeof useActivationRun>;
-  readonly reportHostError: (error: unknown, origin?: ActivationRun | null) => void;
+  /** The activation error-stop sink, for an origin's failure. */
+  readonly reportActivationError: (origin: Origin, error: unknown) => void;
+  /** The page's error reporter, for a page-wide setting's failure. */
+  readonly reportPageError: (error: unknown) => void;
   /** The scene clock, read when used. */
   readonly clock: () => ReturnType<typeof useRuntimeSceneClock>;
   readonly session: Readonly<Ref<PlayerSession | null>>;
@@ -51,7 +54,8 @@ export function useRandomControl({
   claim,
   isDisposed,
   activationRun,
-  reportHostError,
+  reportActivationError,
+  reportPageError,
   clock,
   session,
   inspecting,
@@ -104,7 +108,7 @@ export function useRandomControl({
     op: "randomControl" | "adoptRandom",
     args: Record<string, unknown>,
     options: { readonly after?: string },
-    origin: ActivationRun | null,
+    origin: Origin | null,
   ) {
     host.client.request(op, args, options).then(
       (reply) => {
@@ -116,7 +120,8 @@ export function useRandomControl({
       (error: unknown) => {
         if (endsQuietly(error) || isDisposed()) return;
         if (origin !== null && !activationRun.admits(origin)) return;
-        reportHostError(error, origin ?? activationRun.current());
+        if (origin === null) reportPageError(error);
+        else reportActivationError(origin, error);
       },
     );
   }
@@ -125,7 +130,7 @@ export function useRandomControl({
    * `showSession` without inspection, input adopting an inspected state, Continue after its kept draw went on. A Start's
    * session is already its Player's from the `start` that made it.
    */
-  function adoptRandom(next: PlayerSession, origin = activationRun.current()) {
+  function adoptRandom(next: PlayerSession, origin: Origin) {
     if (lastRandom === undefined || isDisposed()) return;
     // The adoption acts for the activation that shows `next`, and only while that lives.
     sendRandomRequest(
@@ -190,7 +195,7 @@ export function useRandomControl({
     const origin = activationRun.current();
     return ownedSection(session.value, "inputAnswer", async (section, owned, current) => {
       // Paused at the draw, the session observes no time; a stopped session gives none.
-      if (origin !== null && !activationRun.admits(origin)) return null;
+      if (!activationRun.admits(origin)) return null;
       if (current === null || inspecting.value || current.state.randomDraw?.drawId !== drawId)
         return null;
       const result = await section.send<ResolveDrawResult>("resolveDraw", {
@@ -198,15 +203,15 @@ export function useRandomControl({
         outcome,
         record: recorded,
       });
-      if (isDisposed() || (origin !== null && !activationRun.admits(origin))) return null;
+      if (isDisposed() || !activationRun.admits(origin)) return null;
       randomRevision.value = result.revision;
       if (!owned() || publishOwned(section.session) === null) return null;
       clock().rebase();
       return result.outcome;
     }).catch((error: unknown) => {
       if (endsQuietly(error) || refusalCode(error) !== null || isDisposed()) return null;
-      if (origin !== null && !activationRun.admits(origin)) return null;
-      reportHostError(error, origin ?? activationRun.current());
+      if (!activationRun.admits(origin)) return null;
+      reportActivationError(origin, error);
       return null;
     });
   }

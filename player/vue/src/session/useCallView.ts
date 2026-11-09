@@ -14,7 +14,7 @@ interface CallViewHost {
   readonly stopped: Readonly<Ref<boolean>>;
   readonly isDisposed: () => boolean;
   readonly publishOwned: (next: PlayerSession) => PlayerSession | null;
-  readonly reportHostError: (error: unknown) => void;
+  readonly reportPageError: (error: unknown) => void;
 }
 
 export function useCallView({
@@ -22,7 +22,7 @@ export function useCallView({
   stopped,
   isDisposed,
   publishOwned,
-  reportHostError,
+  reportPageError,
 }: CallViewHost) {
   // The call view (L5f): Debug's Now view and the error dialog read the active calls, which only publications of a
   // session whose calls are viewed carry. While any demand stands, the shown session's calls are viewed; the view moves
@@ -42,7 +42,7 @@ export function useCallView({
           // nothing ends further.
           if (endsQuietly(error) || refusalCode(error) === "session") return;
           if (!isDisposed() && !stopped.value && session.value?.lineage === target.lineage)
-            reportHostError(error);
+            reportPageError(error);
         },
       );
   }

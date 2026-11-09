@@ -603,8 +603,8 @@ test("every random-op sender in the composable is classified as adopting or not"
     [
       // The activation owner's and the rewind owner's dependencies, which forward their adoption to the random control's.
       "adoptRandom: (next, origin) => adoptRandom(next, origin),",
-      "adoptRandom: (next) => adoptRandom(next),",
-      "if (!paused) adoptRandom(next);",
+      "adoptRandom: (next) => adoptRandom(next, activationRun.current()),",
+      "if (!paused) adoptRandom(next, activationRun.current());",
       "if (session.value !== null) adoptRandom(session.value);",
       "adoptRandom(continued, origin);",
     ],

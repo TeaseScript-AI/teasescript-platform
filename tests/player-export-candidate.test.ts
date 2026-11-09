@@ -6,10 +6,16 @@ import type { CapturedMediaRecord } from "../player/media/captured-media.js";
 import type { ExportCaptureReply } from "../player/engine-bridge/session-protocol.js";
 import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import type { PlayerSession } from "../player/runtime/runtime-view.js";
-import type { ActivationRun } from "../player/vue/src/session/activation/useActivationRun.js";
+import type {
+  InitialOrigin,
+  RunOrigin,
+} from "../player/vue/src/session/activation/useActivationRun.js";
 import { useExportCandidate } from "../player/vue/src/session/activation/useExportCandidate.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+
+/** The Player's record before any activation. */
+const INITIAL: InitialOrigin = { kind: "initial" };
 
 /*
  * L5h.3b's export candidate owner (`session/activation/useExportCandidate.ts`) and the Stage adapter it reads through: until the
@@ -87,8 +93,8 @@ function ownerOver(readPhoto: (reference: string) => Promise<CapturedMediaRecord
   const owner = useExportCandidate({
     session: shallowRef(view),
     bridge: () => typed,
-    // No activation: the recording is the current one, and nothing retires the export.
-    activation: { current: () => null, admits: () => false },
+    // No activation: the initial record, whose recording is the current one, and nothing retires the export.
+    activation: { current: () => INITIAL, admits: (origin) => origin === INITIAL },
     halting: ref(false),
     build: { commit: null, dirty: null, mode: "development", appVersion: "0" },
     package: { id: null, version: null },
@@ -201,13 +207,13 @@ test("a candidate whose activation retires while it is built hands nothing over,
     const c = asRetirementCase(coordinates);
     const references = [PHOTO, PHOTO.replace(/:1$/u, ":2")].slice(0, c.photos === "one" ? 1 : 2);
     // An activation without a Player error: its export selects the current recording.
-    const activation = () => ({ failure: { selection: async () => "current" as const } });
+    const activation = () => ({
+      kind: "run" as const,
+      failure: { selection: async () => "current" as const },
+    });
     // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads an activation's failure selection, and compares activations by identity.
-    const [origin, successor] = [activation(), activation()] as unknown as [
-      ActivationRun,
-      ActivationRun,
-    ];
-    let live: ActivationRun = origin;
+    const [origin, successor] = [activation(), activation()] as unknown as [RunOrigin, RunOrigin];
+    let live: RunOrigin = origin;
     const retire = () => void (live = successor);
     let resolveCapture!: () => void;
     const captured = new Promise<void>((resolve) => (resolveCapture = resolve));

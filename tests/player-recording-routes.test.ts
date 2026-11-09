@@ -165,8 +165,8 @@ test("the page's diagnostic senders each check their activation's admission, and
     },
   ]);
   assert.deepEqual(senders, [
-    `player/runtime/player-bridge.ts PlayerBridge > commitIncident <- ${ACTIVATION} > reportHostError > incident`,
-    `${OWNER} stopArguments <- ${ACTIVATION} > reportHostError > incident`,
+    `player/runtime/player-bridge.ts PlayerBridge > commitIncident <- ${ACTIVATION} > reportActivationError > incident`,
+    `${OWNER} stopArguments <- ${ACTIVATION} > reportActivationError > incident`,
     `${OWNER} stopArguments <- ${ACTIVATION} > stopAt`,
     `player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped <- ${ACTIVATION} > stopAt`,
   ]);
@@ -283,7 +283,7 @@ const SESSION_ACTIVATION = [
   "startedSession",
   "prepareStart",
   "prepareRestore",
-  "reportHostError",
+  "reportActivationError",
   "stopAt",
 ];
 const READMITS = "re-admits before its next request or further work";
@@ -323,10 +323,10 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: await host.request":
     READMITS,
   "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: catch host.request":
-    "the trace restart's rejection, which reports with the Continue's own activation, admitted there (`reportHostError`)",
+    "the trace restart's rejection, which reports with the Continue's own activation, admitted there (`reportActivationError`)",
   "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: catch host.client.request":
     "drops the random release's refusal; nothing follows",
-  "useSessionActivation.ts: useSessionActivation > reportHostError > incident: catch origin.bridge.commitIncident":
+  "useSessionActivation.ts: useSessionActivation > reportActivationError > incident: catch origin.bridge.commitIncident":
     "drops the incident's refusal; nothing follows",
   "useActivationRun.ts: useActivationRun > retire: catch ended.bridge.retireRun":
     "drops the retirement's refusal: the record retired already, and nothing follows",
@@ -336,7 +336,7 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "drops a release's refusal; nothing follows",
   "useFailureRecording.ts: useFailureRecording > settle: catch bridge.releaseRecording":
     "drops a release's refusal; nothing follows",
-  "useSessionActivation.ts: useSessionActivation > reportHostError: then starting": READMITS,
+  "useSessionActivation.ts: useSessionActivation > reportActivationError: then starting": READMITS,
   "useSessionActivation.ts: useSessionActivation > stopAt: then acknowledged": READMITS,
   // Reached from the activation bodies through the functions they call.
   "useRandomControl.ts: useRandomControl > sendRandomRequest: then host.client.request": READMITS,
@@ -382,7 +382,7 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
 /** Calls that re-admit an activation, and calls that request or act for one. */
 const ADMITS = /^(?:goesOn|lives|owned|activationRun\.admits)$/u;
 const ACTS =
-  /^(?:capture|options\.readPhoto|host\.request|host\.halt|stopAt|started|startedSession|reportHostError|origin\.bridge\.commitIncident|origin\.failure\.stopped|host\.captureExport|incident)$/u;
+  /^(?:capture|options\.readPhoto|host\.request|host\.halt|stopAt|started|startedSession|reportActivationError|origin\.bridge\.commitIncident|origin\.failure\.stopped|host\.captureExport|incident)$/u;
 
 /** Each wait of `file`'s functions within `scope`, with what follows it there. */
 function waitsOf(file: string, scope: (path: string) => boolean) {

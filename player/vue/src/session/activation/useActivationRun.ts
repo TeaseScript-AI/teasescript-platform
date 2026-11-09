@@ -12,44 +12,60 @@ import { useFailureRecording } from "./useFailureRecording.js";
  * current one. Every completion that would act (a Start's or Continue's reply, a deferred error, a halt's
  * acknowledgement, a failure capture) acts only while its record lives: the next activation and the Player's disposal
  * retire it for good, so nothing of a retired activation halts, commits, captures or shows. An error stop, a rewind, a
- * Return and Debug-off keep the run.
+ * Return and Debug-off keep the run. Before the first activation the initial record stands in, with no run.
  */
 
 /** One activation's run: its bridge, its begin as the host receives it, and its failure recording. */
-export interface ActivationRun {
+export interface RunOrigin {
+  readonly kind: "run";
   readonly bridge: PlayerBridge;
   readonly begin: RunBegin;
   readonly failure: ReturnType<typeof useFailureRecording>;
 }
+/**
+ * The Player's record before its first activation: it admits the no-session export and the page's error stop, never an
+ * incident or a failure recording (it has no run), and the first begin or the Player's disposal retires it for good.
+ */
+export interface InitialOrigin {
+  readonly kind: "initial";
+}
+/** What an activation's completion acts for: the initial record or an activation's run. */
+export type Origin = InitialOrigin | RunOrigin;
 
 export function useActivationRun() {
-  let live: ActivationRun | null = null;
+  // The live record: the initial one until the first begin, then each activation's run; none after disposal.
+  let live: Origin | null = { kind: "initial" };
+  // What `current()` gives after disposal: a record no completion is admitted for.
+  const disposed: InitialOrigin = Object.freeze({ kind: "initial" });
 
-  /** Retires the live record's failure recording; the record admits nothing from now on. */
-  function end(): ActivationRun | null {
+  /** Retires the live record (a run's failure recording with it); it admits nothing from now on. */
+  function end(): RunOrigin | null {
     const ended = live;
     live = null;
-    ended?.failure.retire();
+    if (ended?.kind !== "run") return null;
+    ended.failure.retire();
     return ended;
   }
 
   return {
-    /** The live activation's record, or `null` before the first activation and after disposal. */
-    current: (): ActivationRun | null => live,
+    /** The live record: the initial one before the first activation, a retired one after disposal. */
+    current: (): Origin => live ?? disposed,
     /** Whether `origin` still lives: what its completion may do anything for. */
-    admits: (origin: ActivationRun): boolean => origin === live,
+    admits: (origin: Origin): boolean => origin === live,
     /**
-     * Begins the next activation's record on `host`, retiring the live one: its run ends with the new run's begin,
-     * which names it (`retires`).
+     * Begins the next activation's record on `host`, retiring the live one: a run ends with the new run's begin, which
+     * names it (`retires`).
      */
-    begin(host: PlayerBridge): ActivationRun {
+    begin(host: PlayerBridge): RunOrigin {
       const previous = end();
-      live = {
+      const next: RunOrigin = {
+        kind: "run",
         bridge: host,
         begin: Object.freeze({ run: host.nextRun(), retires: previous?.begin.run ?? null }),
         failure: useFailureRecording(),
       };
-      return live;
+      live = next;
+      return next;
     },
     /** Retires the live record at the Player's disposal, before it gives up its bridge: the host ends its run. */
     retire(): void {
@@ -59,11 +75,7 @@ export function useActivationRun() {
   };
 }
 
-/** The stop arguments of a Player error `error` at stop `stop` in `origin`'s run, or `null` outside any run. */
-export function stopArguments(
-  origin: ActivationRun | null,
-  error: string,
-  stop: number,
-): StopArguments | null {
-  return origin === null ? null : { error, stop, ...origin.begin };
+/** The stop arguments of a Player error `error` at stop `stop` in `origin`'s run, or `null` for the initial record. */
+export function stopArguments(origin: Origin, error: string, stop: number): StopArguments | null {
+  return origin.kind === "run" ? { error, stop, ...origin.begin } : null;
 }

@@ -223,7 +223,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     heldDebugRecording,
     hostError,
     halting,
-    reportHostError,
+    reportActivationError,
+    reportPageError,
     activation,
     beginning,
     lastStart,
@@ -279,13 +280,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // So did every state Debug's rewind could reinstate, and its history: its view stays, read-only, and nothing waiting
     // on it acts.
     retireRewind("loss");
-    reportHostError(error);
+    reportPageError(error);
   }
   // Debug's value trace and Debug mode (`session/useDebugModeAndTrace.ts`).
   const debug = useDebugModeAndTrace({
     bridgeNow: () => bridge,
     isDisposed: () => disposed,
-    reportHostError,
+    reportActivationError,
+    reportPageError,
     session,
     stopped,
     activationRun,
@@ -402,11 +404,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     generation,
     stopped,
     isDisposed: () => disposed,
-    reportHostError,
+    reportPageError,
     showSession,
     scriptStorage,
     applyDebugMode,
-    adoptRandom: (next) => adoptRandom(next),
+    adoptRandom: (next) => adoptRandom(next, activationRun.current()),
     settleUncontrolledDraw: () => settleUncontrolledDraw(),
     rewindApi: () => rewindApi,
     clock: () => clock,
@@ -436,7 +438,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     claim,
     isDisposed: () => disposed,
     activationRun,
-    reportHostError,
+    reportActivationError,
+    reportPageError,
     clock: () => clock,
     session,
     inspecting,
@@ -471,7 +474,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     resolvePackageAsset,
     resolveAsset,
     isDisposed: () => disposed,
-    reportHostError,
+    reportPageError,
     ownedSection,
     publishOwned,
     clock: () => clock,
@@ -589,7 +592,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     stopped,
     isDisposed: () => disposed,
     publishOwned,
-    reportHostError,
+    reportPageError,
   });
 
   media.watchMedia();
@@ -805,7 +808,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     interactionReset.value++;
     jumpedRevision.value = -1;
     // An inspected state takes Debug's random control only once input adopts it (`adoptRewound` below).
-    if (!paused) adoptRandom(next);
+    if (!paused) adoptRandom(next, activationRun.current());
     session.value = next;
     clock.rebase();
     if (!paused) {
@@ -1171,7 +1174,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     hostError: computed(() => hostError.value),
     /** Whether an exception of the Player itself stopped the session where it stands; until the next Start. */
     stopped,
-    reportHostError,
+    /** Reports an exception of the Player's interface or host: the page's error reporter (`reportPageError`). */
+    reportHostError: reportPageError,
     /** What a debug export can contain, frozen (`useExportCandidate`). */
     debugExportCandidate: exportCandidate.debugExportCandidate,
     /** Whether Debug's value trace runs: the host keeps it, and every session operation there records into it. */

@@ -8,7 +8,7 @@ import {
 import type { ExportCaptureReply } from "../../../../engine-bridge/session-protocol.js";
 import type { PlayerBridge } from "../../../../runtime/player-bridge.js";
 import type { PlayerSession } from "../../../../runtime/runtime-view.js";
-import type { ActivationRun } from "./useActivationRun.js";
+import type { Origin } from "./useActivationRun.js";
 
 /*
  * A debug export's candidate (L5h.3b): captured in the host (`captureExport`), decided in the capture's reply hook
@@ -32,7 +32,7 @@ export function useExportCandidate(options: {
    * The activations' runs (`useActivationRun`): the export is of the live one, with the recording its failure
    * recording selects, and only while it lives.
    */
-  readonly activation: { current(): ActivationRun | null; admits(origin: ActivationRun): boolean };
+  readonly activation: { current(): Origin; admits(origin: Origin): boolean };
   /** Whether a Player error stop is under way here, until the host acknowledged it. */
   readonly halting: Readonly<Ref<boolean>>;
   readonly build: DebugExportCandidate["build"];
@@ -51,7 +51,7 @@ export function useExportCandidate(options: {
    */
   function deliver(
     host: PlayerBridge,
-    origin: ActivationRun | null,
+    origin: Origin,
     current: PlayerSession | null,
     reply: ExportCaptureReply,
     view: PlayerSession | null,
@@ -63,7 +63,8 @@ export function useExportCandidate(options: {
     const release = () => void host.releaseRecording(reply.ticket).catch(() => {});
     const matches =
       current === null
-        ? session.value === null && reply.identity.run === (origin?.begin.run ?? null)
+        ? session.value === null &&
+          reply.identity.run === (origin.kind === "run" ? origin.begin.run : null)
         : view !== null && session.value?.lineage === current.lineage;
     if (!live() || halting.value || !matches || !lives(origin)) {
       release();
@@ -99,9 +100,8 @@ export function useExportCandidate(options: {
     };
   }
 
-  /** Whether the activation `origin` still lives; without an activation, nothing retires. */
-  const lives = (origin: ActivationRun | null) =>
-    origin === null ? options.activation.current() === null : options.activation.admits(origin);
+  /** Whether `origin` still lives: an activation's run, or the initial record until the first activation. */
+  const lives = (origin: Origin) => options.activation.admits(origin);
 
   /** Resolves once no Player error stop is under way here (`halting`). */
   function stopShown(): Promise<void> {
@@ -130,7 +130,8 @@ export function useExportCandidate(options: {
     // A Player error's capture under way settles first: the export then selects what it settled to. The export is of
     // the activation it began in, and asks nothing more once that retired.
     const origin = options.activation.current();
-    const failed = origin === null ? "current" : await origin.failure.selection();
+    // The initial record has no failure recording: its selection is the current recording at once, with no wait.
+    const failed = origin.kind === "run" ? await origin.failure.selection() : "current";
     if (!lives(origin)) return null;
     const current = session.value;
     const host = current?.connection ?? options.bridge();

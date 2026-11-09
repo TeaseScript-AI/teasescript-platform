@@ -439,7 +439,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "own observation",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportHostError > then:callback.1":
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportActivationError > then:callback.1":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/useRandomControl.ts useRandomControl > resolveRandomDraw > catch:callback":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
@@ -519,7 +519,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > debugExportCandidate > capture > captureExport:callback":
     ["lifecycle", ["BridgeClient.request"]],
-  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportHostError > then:callback.2":
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportActivationError > then:callback.2":
     ["lifecycle", ["BridgeClient.request"]],
 };
 
@@ -553,7 +553,6 @@ const FOLLOWED: readonly string[] = [
   "player/runtime/player-bridge.ts PlayerBridge > viewCalls > #send:callback > onReply {onReply}",
   "player/engine-bridge/client.ts openBridge > Promise:callback > signal {signal}",
   "player/vue/src/session/useCallView.ts useCallView > demandCallView {demandCallView}",
-  "player/vue/src/session/useCallView.ts useCallView {reportHostError}",
   "player/vue/src/session/usePlayerSessionServices.ts usePlayerSessionServices > section {serviceSection}",
   "player/vue/src/session/usePlayerSessionServices.ts usePlayerSessionServices {serviceSection}",
   "player/vue/src/debug/random/useDebugRandom.ts useDebugRandom > resolve {resolve}",
@@ -581,7 +580,6 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > pressPermanentButton {pressPermanentButton}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > publishJump {publishJump}",
   "player/vue/src/session/useRandomControl.ts useRandomControl > randomTried {randomTried}",
-  "player/vue/src/session/usePlayerSession.ts usePlayerSession > reportHostError {reportHostError}",
   "player/vue/src/session/useRandomControl.ts useRandomControl > resolveRandomDraw {resolveRandomDraw}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > clearScriptStorage {clearScriptStorage}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > serviceSection {serviceSection}",
@@ -599,7 +597,6 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/useRandomControl.ts useRandomControl > flushRandom {flushRandom}",
   "player/vue/src/session/useRandomControl.ts useRandomControl > settleUncontrolledDraw {settleUncontrolledDraw}",
   "player/vue/src/session/useRandomControl.ts useRandomControl {ownedSection}",
-  "player/vue/src/session/useRandomControl.ts useRandomControl {reportHostError}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > forgetRandomHistory {forgetRandomHistory}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > ownedSection {ownedSection}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > randomTried {randomTried}",
@@ -617,7 +614,6 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > setDebugTracing {setDebugTracing}",
   "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace {copyToDebugRoom}",
   "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace {keepSessionLater}",
-  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace {reportHostError}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > copyToDebugRoom {copyToDebugRoom}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > debugView {debugView}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > keepSessionLater {keepSessionLater}",
@@ -629,13 +625,11 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {setDebugMode}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {setDebugTracing}",
   "player/vue/src/session/useSessionMedia.ts useSessionMedia {ownedSection}",
-  "player/vue/src/session/useSessionMedia.ts useSessionMedia {reportHostError}",
   "player/vue/src/session/useSessionRewind.ts useSessionRewind > adoptRewound {adoptRewound}",
   "player/vue/src/session/useSessionRewind.ts useSessionRewind > prepareInput {prepareInput}",
   "player/vue/src/session/useSessionRewind.ts useSessionRewind > retireRewind {retireRewind}",
   "player/vue/src/session/useSessionRewind.ts useSessionRewind {adoptRandom}",
   "player/vue/src/session/useSessionRewind.ts useSessionRewind {applyDebugMode}",
-  "player/vue/src/session/useSessionRewind.ts useSessionRewind {reportHostError}",
   "player/vue/src/session/useSessionRewind.ts useSessionRewind {settleUncontrolledDraw}",
   "player/vue/src/session/useSessionRewind.ts useSessionRewind {showSession}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > adoptRandom {adoptRandom}",
@@ -696,7 +690,6 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > prepareRestore {prepareRestore}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > prepareStart > begin {begin}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > prepareStart {prepareStart}",
-  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportHostError {reportHostError}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > supersede {supersede}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation {adoptRandom}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation {settlePlanJson}",
@@ -705,8 +698,21 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {prepareRestore}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {prepareStart}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {prepare}",
-  "player/vue/src/session/usePlayerSession.ts usePlayerSession {reportHostError}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {supersede}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportActivationError {reportActivationError}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > reportPageError {reportPageError}",
+  "player/vue/src/session/useCallView.ts useCallView {reportPageError}",
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace {reportActivationError}",
+  "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace {reportPageError}",
+  "player/vue/src/session/useRandomControl.ts useRandomControl {reportActivationError}",
+  "player/vue/src/session/useRandomControl.ts useRandomControl {reportPageError}",
+  "player/vue/src/session/useSessionMedia.ts useSessionMedia {reportPageError}",
+  "player/vue/src/session/useSessionRewind.ts useSessionRewind {reportPageError}",
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession > reportActivationError {reportActivationError}",
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession > reportHostError {reportPageError}",
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession > reportPageError {reportPageError}",
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession {reportActivationError}",
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession {reportPageError}",
 ];
 
 /**

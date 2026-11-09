@@ -155,7 +155,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "prepareRestore.begin": SESSION,
     prepareActivation: SESSION,
     startedSession: SESSION,
-    reportHostError: SESSION,
+    reportActivationError: SESSION,
     incident: SESSION,
     stopAt: SESSION,
     supersede: SESSION,

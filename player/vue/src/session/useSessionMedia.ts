@@ -30,7 +30,6 @@ import { BridgeRequestError } from "../../../engine-bridge/client.js";
 import type { MediaReportOutcome } from "../../../../src/index.js";
 import { silence } from "../generatedAudio";
 import type { SectionWork, useRuntimeSceneClock } from "./useRuntimeSceneClock";
-import type { ActivationRun } from "./activation/useActivationRun.js";
 
 /*
  * The shown session's media on browser elements, moved from `usePlayerSession` unchanged: the audio device and its load
@@ -54,7 +53,8 @@ interface SessionMediaHost {
   readonly resolvePackageAsset: (path: string) => string | null;
   readonly resolveAsset: (path: string) => string | null;
   readonly isDisposed: () => boolean;
-  readonly reportHostError: (error: unknown, origin?: ActivationRun | null) => void;
+  /** The page's error reporter. */
+  readonly reportPageError: (error: unknown) => void;
   readonly ownedSection: <T>(
     current: PlayerSession | null,
     work: SectionWork,
@@ -81,7 +81,7 @@ export function useSessionMedia({
   resolvePackageAsset,
   resolveAsset,
   isDisposed,
-  reportHostError,
+  reportPageError,
   ownedSection,
   publishOwned,
   clock,
@@ -152,7 +152,7 @@ export function useSessionMedia({
         if (endsQuietly(error) || (error instanceof BridgeRequestError && error.code === "basis"))
           return;
         if (!isDisposed() && !stopped.value && session.value?.lineage === current.lineage)
-          reportHostError(error);
+          reportPageError(error);
       }
     },
     () => (pendingLoadCount.value = loads.size),
