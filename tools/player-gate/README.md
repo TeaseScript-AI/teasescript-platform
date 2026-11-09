@@ -11,49 +11,28 @@ runs real browsers and the Pixel 4a, outside CI, and never sets a threshold. It 
 Playwright is loaded from the package.json that `PLAYWRIGHT_PACKAGE` names. Without it, or without a phone, the kit
 exits 2.
 
-## The invariant, the two sets, the reader
+## Every value is unvalidated
 
-- **The invariant (`validate.mjs`).** Every required field of a cell derives from records that passed the shared
-  validation:
-  - each required interval present and in order;
-  - lifecycle evidence where a trial needs it;
-  - a counted turn's feedback present.
+The kit's values are read from its retained rows without a validation claim; the validation obligation is #2122,
+before the activation PR's R1 run. Every cell in the report is labelled `measured, unvalidated`.
 
-  A sample that fails the validation makes its cell incomplete; it is never a value in a median.
+- **The headline.** The headline, the summary (`--json`) and the R0 comparison hold the `ms` and `boolean` fields of
+  `session`, `aa`, `keepDurable`, `demo` and `delayedSmoke`: playable, A/A, the keep timings and outcomes, and the
+  demo's and the smoke's pass or fail.
+- **Outside the headline.** The scenarios in `UNVALIDATED` (`bridge`, `sessionInstrumented`, `taps`, `bridgeTaps`,
+  `keepHandler`, `keepCompletion`), every cell's `bytes` and `count` fields (`<cell> / bytes and counts`: served bytes
+  per phase, requests, heap, sizes, counts) and the artifact inventory print apart, with their known gaps under
+  "Declared gaps".
+- **A measured failure is a value** (`cells.mjs`): a pass/fail scenario's failing run is its result, with its finding.
+- **The derivation code, where #2122 starts.**
+  - `lib/evidence.mjs`'s strict reader: `strictRecord`, `nullable` and its closed `NULLABLE` list, `span` and
+    `crossClock`.
+  - The partition by unit in `validate.mjs`.
+  - `deriveSample`'s per-cell failure boundary: a sample whose derivation fails makes its cell incomplete, and is never
+    a value in a median.
+  - A kit test that parses the derivations for raw row reads, reflective globals and subtractions outside `span`.
 
-- **The two sets.**
-  - The invariant holds for the `ms` and `boolean` fields of `session`, `aa`, `keepDurable`, `demo` and `delayedSmoke`.
-    The headline, the summary and the R0 comparison hold only those, by unit: playable, A/A, the keep timings and
-    outcomes, and the demo's and the smoke's pass or fail.
-  - The scenarios in `UNVALIDATED` (`bridge`, `sessionInstrumented`, `taps`, `bridgeTaps`, `keepHandler`,
-    `keepCompletion`) are labelled `unvalidated`. The report prints them apart from the headline and the R0
-    comparison and lists them as declared gaps (#2122). They are validated before the activation PR's R1 run.
-  - Every cell's `bytes` and `count` fields (served bytes per phase, requests, heap, sizes, counts) are its own
-    `unvalidated` cell (`<cell> / bytes and counts`), and so is the artifact inventory: outside the headline, the
-    summary and the R0 comparison (#2122, R10-01, R11-01). Any error from their derivation, a reader's or a malformed
-    record's, fails that cell alone.
-  - A measured failure is a value (`cells.mjs`): a pass/fail scenario's failing run is its result, with its finding.
-- **The reader rule (`lib/evidence.mjs`).** The derivations read a row's records only through `strictRecord`:
-  - a read of a missing value throws `MissingEvidence`, by a property read or by reflection (a descriptor's value,
-    `Object.values`, a spread);
-  - a value that may truly be absent is read with `nullable`, by name, and only a field on its closed list
-    (`NULLABLE`, each with why it may be absent); a classification or a required field is never on it;
-  - `span(from, to)` is the only subtraction over timestamps, and it requires both ends present and in order;
-  - the bridge's delivery latency compares two realms' clocks with `crossClock`, which requires both ends but no
-    order (Firefox and WebKit coarsen each clock to 1 ms).
-
-  `deriveSample` is the one wrapping site, and its one `try` turns any of the reader's errors (missing evidence, a
-  reversed interval, a contradicted cache) into that sample's problem. A kit test parses the derivations (the
-  TypeScript compiler API) and fails on:
-  - any use of `deriveSample`'s raw row other than passing it to the reader, in every form (dot, bracket,
-    destructuring, `in`, spread, a call, an alias); the row is its second parameter, found by the declaration whatever
-    its name, and no such root fails the test;
-  - any reference to a reflective global (`Object`, `Reflect`, `JSON`, `structuredClone`, a global object, `Function`,
-    `eval`) or a prototype link (`constructor`, `__proto__`), so a call, a computed access or an alias through one
-    fails; the one allowance, `JSON.stringify(beforeControl)` in `lib/measure.mjs`'s `SETTLED`, is bound to that place;
-  - any subtraction outside `span`.
-
-  Its negative controls are those forms at the wrapping site.
+  #2122 lists what they do not yet cover, with its acceptance controls.
 
 Pass or fail is derived from primary records, never from a cached flag:
 
@@ -78,7 +57,8 @@ Pass or fail is derived from primary records, never from a cached flag:
   - `bridge`;
   - the hidden-page keep: `keepHandler` on the desktop, `keepCompletion` and `keepDurable` on the Pixel;
   - `demo`.
-- **`validate.mjs`** derives every field again from a row's records, applies the invariant, and lists `UNVALIDATED`.
+- **`validate.mjs`** derives every field again from a row's records, partitions the fields by unit, and lists
+  `UNVALIDATED`.
 - **`report.mjs`** prints the cost report: `node tools/player-gate/report.mjs --phase r0|r1 --artifacts FILE
 ROWS.jsonl...`. Beside each number it writes the conditions it depends on. The report is incomplete (exit 1) in any
   of these cases:

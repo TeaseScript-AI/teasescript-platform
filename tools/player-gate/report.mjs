@@ -119,7 +119,12 @@ export function buildReport(rows, phase, artifacts = []) {
     if (!byCell.has(name)) byCell.set(name, { cell, rows: [] });
     byCell.get(name).rows.push(row);
   }
-  const lines = [`# L5 gate cost report (${phase})`, ""];
+  const lines = [
+    `# L5 gate cost report (${phase})`,
+    "",
+    `The kit's values are read from its retained rows without a validation claim; the validation obligation is ${GAP_ISSUE}.`,
+    "",
+  ];
   const incomplete = [];
   const excluded = [];
   const summary = {};
@@ -150,7 +155,7 @@ export function buildReport(rows, phase, artifacts = []) {
     if (data.length === 0 || failing.length > 0 || delays.length > 0 || missingArms.length > 0) {
       const reasons = [...new Set(failing.flatMap((sample) => sample.problems))];
       incomplete.push(
-        `- ${name}: ${data.length} samples, ${failing.length} failing the validation${delays.length > 0 ? `, no run at ${delays.join(", ")} ms` : ""}${missingArms.length > 0 ? `, no ${missingArms.join(" or ")} arm` : ""}${reasons.length > 0 ? `; ${reasons.join("; ")}` : ""}`,
+        `- ${name}: ${data.length} samples, ${failing.length} failing the kit's checks${delays.length > 0 ? `, no run at ${delays.join(", ")} ms` : ""}${missingArms.length > 0 ? `, no ${missingArms.join(" or ")} arm` : ""}${reasons.length > 0 ? `; ${reasons.join("; ")}` : ""}`,
       );
       continue;
     }
@@ -168,9 +173,9 @@ export function buildReport(rows, phase, artifacts = []) {
     if (gap === null) summary[name] = table;
     else unvalidated[name] = table;
     out.push(
-      `## ${name}${gap === null ? "" : " (unvalidated)"}`,
+      `## ${name} (measured, unvalidated)`,
       "",
-      `${data.length} samples, ${gap === null ? "all validated" : `outside the invariant (${gap})`}. ${conditions.join(" | ")}`,
+      `${data.length} samples, measured, unvalidated${gap === null ? "" : ` (${gap})`}. ${conditions.join(" | ")}`,
       "",
     );
     if (NOTES[cell.scenario]) out.push(NOTES[cell.scenario], "");
@@ -199,9 +204,9 @@ export function buildReport(rows, phase, artifacts = []) {
       else {
         const byteTable = (unvalidated[bytesName] = {});
         unvalidatedLines.push(
-          `## ${bytesName} (unvalidated)`,
+          `## ${bytesName} (measured, unvalidated)`,
           "",
-          `${derived.length} samples, outside the invariant (${BYTE_GAP}).`,
+          `${derived.length} samples, measured, unvalidated (${BYTE_GAP}).`,
           "",
           "| Number | Value | Unit |",
           "| --- | --- | --- |",
@@ -233,12 +238,14 @@ export function buildReport(rows, phase, artifacts = []) {
   }
   // The cells outside the invariant, apart from the headline, then the gaps they declare.
   lines.push(
-    "## Unvalidated cells",
+    "## Cells outside the headline",
     "",
     "Outside the headline and the R0 comparison, which are timings only (the declared gaps below).",
     "",
     ...(unvalidatedLines.length === 0 ? ["None with samples.", ""] : unvalidatedLines),
     "## Declared gaps",
+    "",
+    `Every cell is unvalidated until ${GAP_ISSUE} closes, before the activation PR's R1 run, since the gate's decision is R1's. The known gaps in the derivations:`,
     "",
     ...[
       ...Object.entries(UNVALIDATED).map(([scenario, gap]) => [
@@ -246,10 +253,15 @@ export function buildReport(rows, phase, artifacts = []) {
         gap,
       ]),
       ["every cell's byte and count fields (`/ bytes and counts`)", BYTE_GAP],
-    ].map(
-      ([what, gap]) =>
-        `- ${what}: ${gap}. ${GAP_ISSUE}: the label is lifted (these derivations validated under the kit's invariant in docs/TESTING.md) before the activation PR's R1 run, since the gate's decision is R1's.`,
-    ),
+      [
+        "every session cell",
+        "R12-01: the session derivation reads its heap evidence (`result.memory`) with the timings, so its absence fails the timing cell",
+      ],
+      [
+        "the reflective guard",
+        "R12-02: a shorthand destructured prototype link (`const { constructor } = {}`) passes it",
+      ],
+    ].map(([what, gap]) => `- ${what}: ${gap} (${GAP_ISSUE}).`),
     "",
   );
   // The build's files and their sizes: byte evidence too, outside the headline, which is timings only.

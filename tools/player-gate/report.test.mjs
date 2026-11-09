@@ -252,7 +252,7 @@ test("a sample counts only with every required field that applies; missing evide
     ARTIFACTS,
   );
   const line = empty.incomplete.find((text) => text.includes(name({})));
-  assert.match(line, /1 failing the validation; missing evidence: row.result.probe/u);
+  assert.match(line, /1 failing the kit's checks; missing evidence: row.result.probe/u);
   // A missing heap milestone or an unfinished request is missing evidence too.
   const noHeap = sessionResult();
   noHeap.memory = noHeap.memory.filter((reading) => reading.at !== "startEnabled");
@@ -347,7 +347,7 @@ test("a worker build needs its engine Worker's start and heap; the A/A run needs
   assert.ok(
     buildReport([aa("full"), emptied], "r0", ARTIFACTS).incomplete.some(
       (text) =>
-        text.includes(name({ scenario: "aa" })) && text.includes("1 failing the validation"),
+        text.includes(name({ scenario: "aa" })) && text.includes("1 failing the kit's checks"),
     ),
   );
 });
@@ -642,8 +642,16 @@ test("an unvalidated cell's numbers stay out of the headline summary, and its ga
   assert.ok(named in report.unvalidated);
   assert.match(
     report.text,
-    /## Declared gaps[\s\S]*`keepHandler` \(every required cell\): R5-02.*#2122.*before the activation PR's R1 run/u,
+    /## Declared gaps\n\nEvery cell is unvalidated until #2122 closes, before the activation PR's R1 run[\s\S]*`keepHandler` \(every required cell\): R5-02.*\(#2122\)/u,
   );
+  // No validation claim (orchestrator 2's fallback after Sol code r12): every cell is measured and unvalidated.
+  assert.ok(!/\bvalidated\b/iu.test(report.text), "a validation claim in the report");
+  assert.match(
+    report.text,
+    /The kit's values are read from its retained rows without a validation claim; the validation obligation is #2122\./u,
+  );
+  for (const heading of report.text.match(/^## .+ \/ .+$/gmu) ?? [])
+    assert.match(heading, /\(measured, unvalidated\)$/u, heading);
 });
 
 test("a measured failure is a value: the delayed smoke failing at 50 and 250 ms is a complete cell with its findings", () => {

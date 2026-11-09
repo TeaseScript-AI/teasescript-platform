@@ -963,13 +963,11 @@ smoke does not predetermine that later tooling decision.
 ## The L5 activation gate kit
 
 `tools/player-gate/` measures what the L5 gate's cost report needs to decide whether the Player's engine moves into its
-Worker: real browsers and the Pixel 4a, outside CI, never a threshold; it changes no product file. Its completeness
-invariant: every required field of a cell derives from records that passed the shared validation in `validate.mjs`,
-read through the strict reader, and a sample that fails it makes its cell incomplete. The scenarios outside it, every
-byte and count field and the artifact inventory are labelled `unvalidated` (#2122), so the headline, the summary and the
-R0 comparison hold timings and pass/fail only. The kit's README
-([`tools/player-gate/README.md`](../tools/player-gate/README.md)) has the two sets, the reader rule, the files and how
-to run R0.
+Worker: real browsers and the Pixel 4a, outside CI, never a threshold; it changes no product file. Its values are read
+from its retained rows without a validation claim: every cell is `measured, unvalidated` until #2122, the validation
+obligation, closes before the activation PR's R1 run. The headline, the summary and the R0 comparison hold timings and
+pass/fail only. The kit's README ([`tools/player-gate/README.md`](../tools/player-gate/README.md)) has what it
+measures, the files and how to run R0.
 
 ## Coverage and performance boundaries
 
