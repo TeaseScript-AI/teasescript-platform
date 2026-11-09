@@ -1,9 +1,9 @@
-import type { Block, Statement, SwitchStatement } from "../../ast.js";
-import { joinParts, keptParts, type WorkLedger } from "./budget.js";
-import type { FlowLoop, FlowNode, GuardUse } from "./flow-graph.js";
-import { Laminar } from "./narrowing.js";
-import { each, some, sorted, steps } from "./narrowing-iteration.js";
-import type { CoreProgram } from "./program.js";
+import type { Block, Statement, SwitchStatement } from "../../../ast.js";
+import { joinParts, keptParts, type WorkLedger } from "../budget.js";
+import type { FlowLoop, FlowNode, GuardUse } from "../flow-graph.js";
+import { Laminar } from "./laminar.js";
+import { each, some, sorted, steps } from "../charged-iteration.js";
+import type { CoreProgram } from "../program.js";
 
 /*
  * The statements of a program as N3's corridor composes them (checkpoint 9): per callable body (a
@@ -15,7 +15,7 @@ import type { CoreProgram } from "./program.js";
  * with an owner outside its activation (X6's owner predicate); and a branch or loop whose every live alternative is
  * closed by those alone, in either applicability. Per block, the indexes of its closed statements are sorted, so a
  * segment of a block is one binary search per layer. X7's events are the flat veto they are and stay out of the
- * layer; kills and blocking tests are each key's (`narrowing-routes.ts`).
+ * layer; kills and blocking tests are each key's (`routes.ts`).
  */
 
 /** A statement of the tree: where it stands, its alternatives, and whether the shared layer closes it. */

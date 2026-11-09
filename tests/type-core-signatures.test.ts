@@ -15,7 +15,7 @@ import {
 } from "../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
-import { checkedResult } from "../src/type-inference/core/consumer.js";
+import { checkedResult } from "../src/type-inference/core/check-result/check-result.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -1104,7 +1104,7 @@ const LITERALS: Readonly<Record<string, string>> = {
  * orders, `toJson` writes and a choice's list gives are its written element type's: one that does not fit owes the check
  * at the use, a warning (a list may be empty, so never an error), and one that fits is quiet; the incoming check is no
  * substitute. A known empty list is quiet. (A narrowing `is` test's element type narrows an element read, `v[0]`, not
- * the element path these checks read: `narrowing.ts`'s, outside this family.)
+ * the element path these checks read: `narrowing/narrowings.ts`'s, outside this family.)
  */
 test("a content check reads the written element type of a value from outside the script: a misfit owes the use's check", (t) => {
   const consumers: readonly {

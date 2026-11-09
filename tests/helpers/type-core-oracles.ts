@@ -17,7 +17,7 @@ import {
 } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { BudgetExhausted, withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
-import { asked, checkedResult } from "../../src/type-inference/core/consumer.js";
+import { asked, checkedResult } from "../../src/type-inference/core/check-result/check-result.js";
 import { Consumers, withConsumerOrder } from "../../src/type-inference/core/consumers.js";
 import type { FlowNode } from "../../src/type-inference/core/flow-graph.js";
 import {
@@ -1219,10 +1219,10 @@ export function decisionRecords(
 }
 
 /**
- * The type a store's whole check checks at `path` below it, as `reaches` in `consumer.ts` reads it: a property's type
- * where an object lists it, a collection's element type, through a union's members at any depth that can hold the step
- * (one member's type, else their union); `null` where the check reaches nothing there (an object without the property, a collection
- * with open elements, no member that holds the step).
+ * The type a store's whole check checks at `path` below it, as `reaches` in `runtime-plan.ts` reads it: a property's
+ * type where an object lists it, a collection's element type, through a union's members at any depth that can hold the
+ * step (one member's type, else their union); `null` where the check reaches nothing there (an object without the
+ * property, a collection with open elements, no member that holds the step).
  */
 function projectedType(type: TypePlan, path: readonly PartStep[]): TypePlan | null {
   // (a union's members, a nested union's at any depth, as `reaches` walks them)

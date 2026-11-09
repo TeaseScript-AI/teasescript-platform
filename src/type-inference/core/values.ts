@@ -88,7 +88,12 @@ import {
   type Spelling,
   type Writer,
 } from "./items.js";
-import { narrowedItems, selectionLinks, type Narrowing, type NarrowingForm } from "./narrowing.js";
+import {
+  narrowedItems,
+  selectionLinks,
+  type Narrowing,
+  type NarrowingForm,
+} from "./narrowing/narrowings.js";
 import { operationItems } from "./operator-table.js";
 import { indexedPlus } from "./plus-index.js";
 import { stepName, type CoreProgram, type ValueConstraint } from "./program.js";

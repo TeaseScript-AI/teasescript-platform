@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CARRIER_ROLES, operandsOf } from "../src/type-inference/core/carriers.js";
-import { checkedResult } from "../src/type-inference/core/consumer.js";
+import { checkedResult } from "../src/type-inference/core/check-result/check-result.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import type { CoreResult } from "../src/type-inference/core/result.js";

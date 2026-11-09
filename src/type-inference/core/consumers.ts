@@ -80,7 +80,7 @@ import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, STOPPED, type Item, type Writer } from "./items.js";
 import { methodCategory } from "./method-categories.js";
-import { Laminar } from "./narrowing.js";
+import { Laminar } from "./narrowing/laminar.js";
 import { siteKey, type CoreProgram } from "./program.js";
 import { outsideSyntax } from "./slice-syntax.js";
 import { propertyNames } from "./property-names.js";

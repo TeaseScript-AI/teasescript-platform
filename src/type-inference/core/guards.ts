@@ -19,10 +19,10 @@ import {
 import type { Callable, FlowNode } from "./flow-graph.js";
 import type { Item } from "./items.js";
 import type { CorePass } from "./answers.js";
-import { NarrowingIndex } from "./narrowing.js";
-import { NarrowingEvents } from "./narrowing-events.js";
-import { NarrowingRoutes } from "./narrowing-routes.js";
-import type { StatementTree } from "./narrowing-statements.js";
+import { NarrowingIndex } from "./narrowing/narrowings.js";
+import { NarrowingEvents } from "./narrowing/events.js";
+import { NarrowingRoutes } from "./narrowing/routes.js";
+import type { StatementTree } from "./narrowing/statement-tree.js";
 import { siteKey, stepName, type CoreProgram } from "./program.js";
 
 /*

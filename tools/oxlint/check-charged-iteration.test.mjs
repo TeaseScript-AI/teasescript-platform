@@ -302,7 +302,7 @@ function objectsLines(source, others = {}) {
 test("the configured checker covers objects.ts: a raw loop there is rejected, a charged one accepted (#1747)", () => {
   // (through the configured scope itself: dropping objects.ts from it lets the raw loop pass, and this fails)
   const lines = objectsLines(`
-import { each } from "../narrowing-iteration.js";
+import { each } from "../charged-iteration.js";
 import type { WorkLedger } from "../budget.js";
 declare const work: WorkLedger;
 export function raw(items: readonly number[]): number {
@@ -336,7 +336,7 @@ export function keyBelow(key: string, rest: readonly string[]): string {
     `
 import { joinParts, type WorkLedger } from "../budget.js";
 import { keyBelow, keyOf } from "../definitions.js";
-import { mapped } from "../narrowing-iteration.js";
+import { mapped } from "../charged-iteration.js";
 declare const work: WorkLedger;
 export function copy(input: object): object {
   work.charge("objectSteps");

@@ -14,10 +14,10 @@ import {
   some,
   sorted,
   steps,
-} from "../src/type-inference/core/narrowing-iteration.js";
+} from "../src/type-inference/core/charged-iteration.js";
 
 /*
- * The charged helpers' laws (#1747's charging round, `narrowing-iteration.ts`): each item, prefix, copied element and
+ * The charged helpers' laws (#1747's charging round, `charged-iteration.ts`): each item, prefix, copied element and
  * joined part taken is charged, a repeated one too, and a charge that stops the analysis stops the body, the copy or
  * the sort before it runs. `objects.ts` and the narrowing modules iterate only through them (the charged-iteration lint).
  */
