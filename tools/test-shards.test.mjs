@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
@@ -14,7 +14,14 @@ import {
   testFilesAtOnce,
 } from "./costly-test-files.mjs";
 import { UNKNOWN_TO_COSTLY, unknownToCostly } from "./check-changed.mjs";
-import { shardFiles, shardOption, shardSeconds, suiteTestFiles } from "./test-shards.mjs";
+import {
+  isTypeCoreTestFile,
+  shardFiles,
+  shardOption,
+  shardSeconds,
+  suiteName,
+  suiteTestFiles,
+} from "./test-shards.mjs";
 
 // The suite's files: the costly ones and 298 others.
 const files = [
@@ -47,7 +54,7 @@ test("a type-core test file the table does not list runs, in exactly one shard, 
   assert.equal(shardSeconds([unlisted], 1, 1), otherTestSeconds);
 });
 
-test("the suite is each test file at the top and one folder down, but none in fixtures/, helpers/ or deeper", (t) => {
+test("the suite is each regular test file at the top and one folder down, but none in fixtures/, helpers/, deeper or behind a link", (t) => {
   const root = mkdtempSync(join(tmpdir(), "suite-test-files-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const file of [
@@ -64,6 +71,10 @@ test("the suite is each test file at the top and one folder down, but none in fi
     mkdirSync(join(root, file, ".."), { recursive: true });
     writeFileSync(join(root, file), "");
   }
+  // (a link named as a test file is not one, whether it points at a folder or at a test file)
+  symlinkSync("player", join(root, "alias.test.js"));
+  symlinkSync("a.test.js", join(root, "link.test.js"));
+  symlinkSync("b.test.js", join(root, "player", "link.test.js"));
   assert.deepEqual(suiteTestFiles(root, ".test.js"), ["a.test.js", "player/b.test.js"]);
   assert.deepEqual(suiteTestFiles(root, ".test.ts"), ["a.test.ts", "player/b.test.ts"]);
   // (a type-core test file in a folder is one the costly table must list, as one at the top is)
@@ -72,9 +83,24 @@ test("the suite is each test file at the top and one folder down, but none in fi
       "tests/type-core-new.test.ts",
       "tests/type-core/type-core-new.test.ts",
       "tests/type-core/deep/type-core-new.test.ts",
+      "tests/helpers/type-core-new.test.ts",
+      "tests/type-core/new.test.ts",
     ]),
     ["tests/type-core-new.test.ts", "tests/type-core/type-core-new.test.ts"],
   );
+});
+
+test("a compiled test file is named by its path under dist/tests/, and is type-core by its own name", () => {
+  assert.equal(suiteName(resolve("dist/tests/a.test.js")), "a.test.js");
+  assert.equal(suiteName(resolve("dist/tests/player/b.test.js")), "player/b.test.js");
+  for (const name of [
+    "type-core-x.test.js",
+    "type-core/type-core-x.test.js",
+    "player/type-core-x.test.ts",
+  ])
+    assert.ok(isTypeCoreTestFile(name), name);
+  for (const name of ["x.test.js", "type-core/x.test.js", "player/x-type-core-y.test.js"])
+    assert.ok(!isTypeCoreTestFile(name), name);
 });
 
 test("the shards' estimated ends, the first's with the oracle comparison, the last's with the pre-test checks, differ by no more than the costliest file", () => {
@@ -120,7 +146,7 @@ test("each shard's fixed seconds are counted where they fall: shard 1 gets fewer
 test("every file with seconds exists, costliest first; a type-core test file without them is named, not refused (#2088)", (t) => {
   const sources = suiteTestFiles(join(import.meta.dirname, "../tests"), ".test.ts");
   const suite = sources.map((file) => file.replace(/\.ts$/, ".js"));
-  assert.ok(suite.some((file) => file.startsWith("type-core-")));
+  assert.ok(suite.some(isTypeCoreTestFile));
   // (a new type-core test file runs in full until the coordinator lands its entry from the merge's CI runs: the line
   // `check-changed` prints, here on every run until then)
   const unknown = unknownToCostly(sources.map((file) => `tests/${file}`));
