@@ -198,7 +198,9 @@ answered them, for the files the change touches as well as for the code it adds.
 line or adding to one already over; CI prints that list on every pull request (`docs/TESTING.md`).
 
 Moving or splitting files is its own pull request on the light route. It changes no behavior, and its build output
-is byte-identical where the build allows it. The coordinator schedules it between packages, so that no open pull
+is byte-identical where the build allows it. `node tools/pure-move-check.mjs <base>` checks that every line it adds or
+removes is moved, one of the forms that file names, or declared with a reason, and `structure-report.mjs --diff <base>
+--moved` reads its signals without the moved lines. The coordinator schedules it between packages, so that no open pull
 request's hunks collide. A feature pull request never moves files another open pull request changes.
 
 Report a structure concern as [friction](#report-what-cost-a-wrong-turn), class `structure`. Each pull request can be
@@ -318,15 +320,15 @@ Non-authoritative memory aid; mark `N/A` only after considering the item.
 - [ ] Simplest complete solution; DRY keeps or lowers total complexity.
 - [ ] Code, tests, documentation, workflows, and integrations form one result.
 - [ ] Language rules reused from their one home; analyses that predict runtime behavior derive it from
-  the plan or shared helpers and are tested against the runtime.
+      the plan or shared helpers and are tested against the runtime.
 - [ ] Nothing the change adds or touches misleads; friction met on the way is fixed or filed, and reported with its
-  class.
+      class.
 - [ ] New code sits in the module and folder its owner names; each structure signal is answered.
 - [ ] Supported behavior and failures proved through real paths.
 - [ ] Tests and oracles are sound and worth their run time; negative probes used when warranted.
 - [ ] Documentation is canonical, current, consolidated, and token-efficient without semantic loss.
 - [ ] Dependencies, trust boundaries, input-driven scaling/native-JavaScript failures, security, performance,
-  and resources checked proportionately.
+      and resources checked proportionately.
 - [ ] Diff contains no unrelated changes, residue, secrets, debug code, or stale text.
 - [ ] Exact head, comparison base, checks, skips, uncertainty, and PR metadata recorded.
 - [ ] Findings classified; blockers resolved; convergence or escalation recorded.

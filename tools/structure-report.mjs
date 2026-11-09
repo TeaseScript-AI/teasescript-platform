@@ -3,7 +3,7 @@
 // "Code structure"). Signals, not limits: each line it prints asks for a seam or a reason.
 //
 //   node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]
-//   node tools/structure-report.mjs [ROOT…] --diff BASE [--json FILE]
+//   node tools/structure-report.mjs [ROOT…] --diff BASE [--moved] [--json FILE]
 //
 // ROOT selects what is read, by default the five components: src, player, tests, tools and playground. A component's
 // top level is the code files directly in it; no other folder counts as a top level, whichever ROOT selects it. Only
@@ -35,12 +35,18 @@
 // count; rename detection's similarity threshold (50% by default) and its limit decide what a move is, so an edited
 // move below them counts as a deletion and an addition; and attributes can make a file binary, which adds no lines.
 //
+// With --moved, the lines Git's moved-line detection marks as moved (`moved-lines.mjs`, read once over the whole change)
+// are left out of the lines behind two signals, a file gaining over 300 lines and a function over 150 lines that the
+// change writes into, and each signal this suppresses is printed with the moved lines it discounted; every other
+// signal is as without it. Git's detection is heuristic (a moved block below its threshold reads as added).
+//
 // Exit status: 0 when the report is printed, 2 when --diff cannot read the change as Git wrote it.
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
+import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
 
 const SIGNALS = {
   fileLines: 1000,
@@ -65,6 +71,9 @@ const top = Number(option("--top") ?? 10);
 const jsonOut = option("--json");
 const compareWith = option("--compare");
 const diffBase = option("--diff");
+const movedAt = args.indexOf("--moved");
+const discountMoved = movedAt !== -1;
+if (discountMoved) args.splice(movedAt, 1);
 const roots =
   args.length > 0
     ? args.map((root) => path.posix.normalize(root).replace(/\/+$/u, "") || ".")
@@ -285,6 +294,41 @@ function regularFilesAt(ref) {
   return files;
 }
 
+/**
+ * The signals `file`'s added lines raise (its `HEAD` blob `text`, its added lines `added` in order): a function over
+ * the signal's length that they write into, and the file gaining over the signal's lines. With --moved, the lines Git
+ * marks as moved (`moved`) are left out, and each signal that leaves out is printed as suppressed with its count.
+ */
+function addedLinesSignals(file, text, added, moved) {
+  const found = [];
+  const counted = added.filter((line) => !moved.has(line));
+  const discounted = (from, to) =>
+    added.filter((line) => line >= from && line <= to && moved.has(line)).length;
+  if (PARSED.test(file))
+    for (const fn of longFunctionsOf(file, text)) {
+      const end = fn.line + fn.lines - 1;
+      const what = `function over ${SIGNALS.functionLines} lines that the change writes into: ${shown(file)}:${fn.line} ${fn.name} (${fn.lines} lines)`;
+      if (holdsLineIn(counted, fn.line, end)) found.push({ signal: "function", line: what });
+      else if (holdsLineIn(added, fn.line, end))
+        found.push({
+          signal: "suppressed",
+          line: `suppressed (moved): ${what}, ${discounted(fn.line, end)} moved lines discounted`,
+        });
+    }
+  const movedCount = added.length - counted.length;
+  if (counted.length > SIGNALS.addedLines)
+    found.push({
+      signal: "added",
+      line: `file gaining over ${SIGNALS.addedLines} lines: +${counted.length} ${shown(file)}${movedCount > 0 ? `, ${movedCount} moved discounted` : ""}`,
+    });
+  else if (added.length > SIGNALS.addedLines)
+    found.push({
+      signal: "suppressed",
+      line: `suppressed (moved): file gaining over ${SIGNALS.addedLines} lines: +${added.length} ${shown(file)}, ${movedCount} moved discounted`,
+    });
+  return found;
+}
+
 /** The signals the change from the merge base to `HEAD` adds to, each `{ signal, line }` with the line it prints. */
 function changeSignals(base) {
   const mergeBase = git("merge-base", base, "HEAD").trim();
@@ -352,6 +396,16 @@ function changeSignals(base) {
   };
   const blob = (ref, file) => git("cat-file", "blob", `${ref}:${file}`);
 
+  // with --moved, each file's added lines Git marks as moved, by their line in `HEAD`'s blob
+  const movedAdded = new Map();
+  if (discountMoved)
+    for (const moved of movedLinesOf(mergeBase, "HEAD"))
+      if (moved.file !== null)
+        movedAdded.set(
+          moved.file,
+          new Set(moved.addedLines.filter((row) => row.moved).map((row) => row.line)),
+        );
+
   const found = [];
   const relevant = changes
     .filter(({ code, file }) => code !== "D" && selected(file) && headFiles.has(file))
@@ -372,18 +426,7 @@ function changeSignals(base) {
         line: `file over ${SIGNALS.fileLines} lines that the change adds to: ${shown(file)} (${lines}, was ${was})`,
       });
     }
-    if (PARSED.test(file))
-      for (const fn of longFunctionsOf(file, text))
-        if (holdsLineIn(added, fn.line, fn.line + fn.lines - 1))
-          found.push({
-            signal: "function",
-            line: `function over ${SIGNALS.functionLines} lines that the change writes into: ${shown(file)}:${fn.line} ${fn.name} (${fn.lines} lines)`,
-          });
-    if (added.length > SIGNALS.addedLines)
-      found.push({
-        signal: "added",
-        line: `file gaining over ${SIGNALS.addedLines} lines: +${added.length} ${shown(file)}`,
-      });
+    found.push(...addedLinesSignals(file, text, added, movedAdded.get(file) ?? new Set()));
   }
   // a file Git lists as added adds to its folder; a moved one, and an entry whose type changed, do not
   const [headFolders, baseFolders] = [
@@ -428,7 +471,7 @@ function main() {
     try {
       found = changeSignals(diffBase);
     } catch (error) {
-      if (!(error instanceof CannotRun)) throw error;
+      if (!(error instanceof CannotRun || error instanceof MovedLinesUnreadable)) throw error;
       console.error(error.message);
       process.exit(2);
     }
