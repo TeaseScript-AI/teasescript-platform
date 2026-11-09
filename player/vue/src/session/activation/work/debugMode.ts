@@ -23,6 +23,7 @@ export interface DebugModePage {
   readonly quiet: (error: unknown) => boolean;
   /** Whether a failure is still the Player's error stop (it lives, has not stopped, and still shows the session). */
   readonly reportable: () => boolean;
+  /** The activation error-stop sink, which admits `origin`. */
   readonly report: (origin: Origin, error: unknown) => void;
 }
 
@@ -42,9 +43,7 @@ export function completeDebugMode(
         if (outcome.kind === "set" && page.stillShown()) page.keep();
       },
       (error: unknown) => {
-        if (page.quiet(error)) return;
-        if (!page.admits(origin)) return;
-        if (page.reportable()) page.report(origin, error);
+        if (!page.quiet(error) && page.reportable()) page.report(origin, error);
       },
     );
 }

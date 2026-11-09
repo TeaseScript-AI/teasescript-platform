@@ -38,6 +38,7 @@ export interface DrawPage {
   readonly rebase: () => void;
   /** Whether a failure is no error stop (it ends quietly, is a refusal, or the Player was unmounted). */
   readonly quiet: (error: unknown) => boolean;
+  /** The activation error-stop sink, which admits `origin`. */
   readonly report: (origin: Origin, error: unknown) => void;
 }
 
@@ -61,7 +62,6 @@ export function resolveDrawFor(
   });
   return resolved.catch((error: unknown) => {
     if (page.quiet(error)) return null;
-    if (!page.admits(origin)) return null;
     page.report(origin, error);
     return null;
   });
