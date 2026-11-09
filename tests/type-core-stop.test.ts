@@ -6665,13 +6665,14 @@ test("a combined stop's label after a call's result is one precise form, made wh
 
 /**
  * A stopped operand check stands for a lost null check only as the lead's ruling (A) on #1688 allows
- * (`standsForNullCheck`). `null-divisors@4` (`tests/families/messages/1268-astra-r4-growth.mjs`, k = 4) under
- * demand allowance 32, both reversed modes, at the settled decision stop of `xs`'s element: the natural analysis owes
- * at each divisor "check that xs.element is not null before /" against `integer` and `number`; the stopped run owes an
- * operand check there instead, against the same two kinds at the first three divisors, and also against `duration`,
- * `calendarDuration` and `angle` at the last, where the chain on its left is unknown too. The first three stand for
- * their null checks, reported apart (`standing check`); the last is a weaker check and stays lost; every operand check
- * is still its own content, so the extras are unchanged. The predicate's clauses each refuse alone.
+ * (`standsForNullCheck`). `null-divisors@4`
+ * (`tests/families/messages/nested-carriers-and-diagnostic-work/selection-store-and-object-index-diagnostic-work.mjs`,
+ * k = 4) under demand allowance 32, both reversed modes, at the settled decision stop of `xs`'s element: the natural
+ * analysis owes at each divisor "check that xs.element is not null before /" against `integer` and `number`; the
+ * stopped run owes an operand check there instead, against the same two kinds at the first three divisors, and also
+ * against `duration`, `calendarDuration` and `angle` at the last, where the chain on its left is unknown too. The first
+ * three stand for their null checks, reported apart (`standing check`); the last is a weaker check and stays lost;
+ * every operand check is still its own content, so the extras are unchanged. The predicate's clauses each refuse alone.
  */
 test("a stopped operand check stands for a lost null check only at its site, excluding null, within its kinds (#1688)", () => {
   const source = `let xs = [4, null]\nsay 1${" / xs[1]".repeat(4)}\nexit\n`;
