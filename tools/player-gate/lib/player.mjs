@@ -1,6 +1,7 @@
 // Driving the hosted Player through its DOM with real input, and reading what the probe (`probe.mjs`) recorded.
-// The turn driver answers the control kinds the gate's scripts present: buttons (a showButton or a choice's options)
-// and the composer (a text or number question). Any other control ends the run (`UnknownControl`), never a skip.
+// The turn driver answers the control kinds the gate's scripts present: buttons (a showButton or a choice's options),
+// the composer (a text or number question) and an image ask, which it skips: the driver never opens a camera or a file
+// picker, so every engine takes the same path. Any other control ends the run (`UnknownControl`).
 
 export class UnknownControl extends Error {}
 
@@ -132,6 +133,14 @@ function typedAnswer(composer) {
  * it asks (its prefill kept, else `typedAnswer`). Resolves with what it answered.
  */
 export async function answer(opened, page, state, turn) {
+  // An image ask is skipped, on every engine the same; one that cannot be skipped is no control the driver answers.
+  if (state.buttons.some((button) => button.image !== null && button.image !== undefined)) {
+    const skip = state.buttons.findIndex((button) => button.image === "skip" && button.enabled);
+    if (skip === -1)
+      throw new UnknownControl(`an image ask without an enabled skip: ${JSON.stringify(state)}`);
+    await press(opened, page, "[data-foreground-controls] button", skip);
+    return { kind: "image skip", label: state.buttons[skip].label, of: state.buttons.length };
+  }
   // Buttons first: a choice or a showButton leaves the composer open too (buttons-only, where typing answers nothing).
   const enabled = state.buttons
     .map((button, index) => ({ ...button, index }))

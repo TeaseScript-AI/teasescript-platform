@@ -159,6 +159,10 @@ export function gateProbe(config) {
       (button) => ({
         label: button.textContent.trim(),
         enabled: !button.disabled && button.getAttribute("aria-disabled") !== "true",
+        // An image ask's controls (`ForegroundControls.vue`): the camera, the file picker, use, retry, or skip.
+        image:
+          button.getAttribute("data-image-control") ??
+          (button.hasAttribute("data-image-skip") ? "skip" : null),
       }),
     );
     const input = document.querySelector("[data-composer-input]");
