@@ -98,6 +98,32 @@ export function glossaryRows(readme) {
   return rows;
 }
 
+/**
+ * Each label the core's comments carry (`carried`, with its file and line) that the glossary has no row for, and each
+ * row whose label no comment carries; the bare `§N` row is not checked against comments.
+ */
+export function glossaryFindings(carried, glossary) {
+  const findings = [];
+  for (const { fileName, line, label } of carried)
+    if (!glossary.has(label))
+      findings.push({
+        fileName,
+        line,
+        column: 1,
+        message: `a comment carries the label ${label}, which the accepted record's glossary does not define (${RECORD}/README.md, Labels)`,
+      });
+  const labels = new Set(carried.map(({ label }) => label));
+  for (const [label, line] of glossary)
+    if (!labels.has(label) && !label.startsWith("§"))
+      findings.push({
+        fileName: `${RECORD}/README.md`,
+        line,
+        column: 1,
+        message: `the glossary defines ${label}, which no comment of the type core carries any more; remove its row`,
+      });
+  return findings;
+}
+
 /** The forecasts in `text`'s comments: each comment line's form and text. */
 export function forecastsIn(fileName, text) {
   const found = [];
@@ -173,7 +199,7 @@ export function checkCommentForecasts(root) {
       .map((name) => [name.slice(0, -3), readFileSync(resolve(root, RECORD, name), "utf8")]),
   );
   const glossary = glossaryRows(pages.get("README") ?? "");
-  const carried = new Set();
+  const carried = [];
   const diagnostics = [];
   const used = new Set();
   const counted = {};
@@ -204,27 +230,11 @@ export function checkCommentForecasts(root) {
         message: `a comment points at ${RECORD}${page ? `/${page}` : ""}.md#${anchor}, which is no heading of that accepted-record page`,
       });
     if (file.startsWith(CORE))
-      for (const { line, label } of labelsIn(file, text)) {
-        carried.add(label);
-        if (!glossary.has(label))
-          diagnostics.push({
-            fileName: file,
-            line,
-            column: 1,
-            message: `a comment carries the label ${label}, which the accepted record's glossary does not define (${RECORD}/README.md, Labels)`,
-          });
-      }
+      for (const found of labelsIn(file, text)) carried.push({ fileName: file, ...found });
     const counts = citationCounts(file, text);
     if (Object.keys(counts).length > 0) counted[file] = counts;
   }
-  for (const [label, line] of glossary)
-    if (!carried.has(label) && !label.startsWith("§"))
-      diagnostics.push({
-        fileName: `${RECORD}/README.md`,
-        line,
-        column: 1,
-        message: `the glossary defines ${label}, which no comment of the type core carries any more; remove its row`,
-      });
+  diagnostics.push(...glossaryFindings(carried, glossary));
   for (const [index, item] of allowed.entries())
     if (!used.has(index))
       diagnostics.push({

@@ -5,6 +5,7 @@ import {
   citationCounts,
   FORECASTS,
   forecastsIn,
+  glossaryFindings,
   glossaryRows,
   labelsIn,
   unresolvedPointers,
@@ -173,6 +174,32 @@ test("the glossary's rows are the labels of the README's Labels table", () => {
     [
       ["C9", 7],
       ["S8c", 8],
+    ],
+  );
+});
+
+test("a label without a glossary row, and a row no comment carries, are findings; the bare §N row is not", () => {
+  const glossary = new Map([
+    ["C9", 7],
+    ["S8c", 8],
+    ["§N", 9],
+  ]);
+  const findings = glossaryFindings(
+    [
+      { fileName: "src/type-inference/core/a.ts", line: 3, label: "C9" },
+      { fileName: "src/type-inference/core/a.ts", line: 4, label: "Q77" },
+    ],
+    glossary,
+  );
+  assert.deepEqual(
+    findings.map(({ fileName, line, message }) => [fileName, line, message.split(",")[0]]),
+    [
+      ["src/type-inference/core/a.ts", 4, "a comment carries the label Q77"],
+      [
+        "docs/specifications/type-inference-accepted-record/README.md",
+        8,
+        "the glossary defines S8c",
+      ],
     ],
   );
 });

@@ -30,6 +30,141 @@ and, where it applies, what superseded or bounded it.
 - [Oracles](oracles.md): the test oracles and evidence about the core: the stop oracle, the member-answer oracle and
   what a difference may be.
 
+## Labels
+
+The type core's comments carry labels from the port plan and the research design that preceded the core: a plan step
+(`S8c`), a design document (`S6-CARRIERS`), or an id of the research table's rules, cells and work families (`C9`,
+`F19a`, `W34`). Each label carried in a comment under `src/type-inference/core/` has one row here, and the citation
+lint refuses a label without a row and a row no comment carries. An id after a review round, a pull request or a
+reviewer ("Codex r2's B1", "#1422 B1", "the owner's F1") is a review reference, not a label. A section number (`§3.2`,
+`S3 §5`) is no label either; the bare `§N` row says what it points at.
+
+| label | meaning |
+| --- | --- |
+| `PLAN` | the port plan for the new type core, outside the repository; historical |
+| `G1` | production graph rules govern returnability, reachable registrations, and file-transfer targets ([r4-26](solver-and-work.md#r4-26)) |
+| `G2` | preserve assignment targets in suggested fixes; never replace a store destination with a temporary value |
+| `S2` | the port’s item and result shapes, including shared ingress cells in solver components |
+| `G3` | admission’s shared-query work family for cursors, carrier transfers, and positioned proof frontiers ([r4-164](sharing.md#r4-164)) |
+| `S3` | the port’s design note defining answer queries, surviving checks, discharge, and budget fallback |
+| `S4` | a possible null requires a null check at each consumer; also the port plan's step S4, the first core build |
+| `G5` | cut whole-copy cycles finitely with distinct member ports; separately, retain a written spelling covering every concrete kind ([r4-181](admission.md#r4-181)) |
+| `S5` | historical port step introducing the candidate backend and its first integrated language slice |
+| `S6` | the admission and boundary carrier design for shared transfers, landings, and source identities |
+| `S6-CARRIERS` | the port plan's design document for step S6, the carrier transport, outside the repository; historical |
+| `S6c` | the shared-source value work family using one sound class key across discovery paths ([r4-85](sharing.md#r4-85)) |
+| `S7` | historical port step adding runtime support for the discharge map’s new checks |
+| `S8` | the message and budget-fallback work family, including fresh finishing and warning-owned boundary requests ([r4-226](stops-and-finishing.md#r4-226)) |
+| `S8c` | historical port step implementing number-to-integer checks and rounding advice |
+| `S8d` | historical port step restoring existing fix sentences and reviewing their source-preserving forms |
+| `S9b` | the consumer-completion work family covering surviving checks, signatures, storage, and side outputs |
+| `checkpoint 9` | historical research checkpoint that established the coarse core’s design tables and port baseline |
+| `S10` | the port work family implementing narrowing, preserving loops, and required-check route errors |
+| `A1` | a written type decides the place’s domain and checks every store |
+| `A2` | the earliest eligible contribution decides an unwritten place; conflicting whole copies are checked where they meet ([section-5-a2](admission.md#section-5-a2)) |
+| `A3` | a settled single-family contract needs no admission scan |
+| `A4` | a copy inherits its source’s written domain rather than its current value ([r4-375](admission.md#r4-375)) |
+| `A5` | only stores whose source can offend the decided family become conflict candidates |
+| `A6` | reject incompatible definite stores and repeat fresh admission passes until rejections stabilize ([r4-49](admission.md#r4-49)) |
+| `A7` | possible conflicts warn; earlier copies use `later`; whole external-store boundaries cover descendants; unknown receivers owe member checks |
+| `A8` | collection elements and dictionary values follow admission, retaining admitted nullability |
+| `A9` | arguments, parameter-body stores, and returns must fit their written parameter or result type |
+| `A59` | a fallback after a proved non-null value receives the never-null warning |
+| `A68` | the same never-null decision marks the remaining otherwise fallbacks unreachable |
+| `C1` | a store or copy must fit its destination’s written or decided type |
+| `C2` | counts, range bounds, list positions, and taking limits require whole numbers |
+| `C3` | conditions and logical operands require booleans |
+| `C4` | arithmetic and ordering operands must match a supported runtime operator row |
+| `C5` | member access checks receiver non-nullness, member suitability, and property presence |
+| `C5a` | a member, index, or method receiver must not be null |
+| `C5b` | a receiver’s kind must support the requested member or operation |
+| `C5c` | a property read or store requires a property present on its receiver |
+| `C6` | element selections require proven non-emptiness or an empty-collection runtime check |
+| `C7` | arguments and returned values must fit written parameter and result types |
+| `C8` | saved values must fit the storage key’s schema derived from its loads |
+| `C9` | validate external data at its ingress store against the admitted type, or at its own read when no store brings it |
+| `C10` | A fallback may be null; otherwise check the direct family, typed ingress’s expected type, or a directly receiving union |
+| `C11` | interpolation requires showable values and showable list elements |
+| `C12` | dictionary keys must be strings |
+| `C13` | built-in signatures check receiver, argument, iterable, and content suitability with certainty |
+| `F1` | declaration initializers contribute facts; inherited-field admission tracks named contents and finite copy-cycle landings |
+| `F1a` | a global default creates distinct startup and executable definitions |
+| `F2` | written declarations fix contracts; admission indexes values’ and source keys’ own fields, elements, depths, and shared source identities |
+| `F4` | an uncertain-receiver store contributes to the contract but never becomes an exact definition |
+| `F5` | add and addAll contribute elements; an exact add also proves non-emptiness |
+| `F5a` | a guaranteed loop ending in an unconditional add proves the collection non-empty afterward |
+| `F6` | clear opens emptiness and removes exact elements while preserving the collection kind |
+| `F7` | removals preserve possible element kinds, open emptiness, and return their operation-specific result |
+| `F7a` | positional removals return possible elements and leave the collection possibly empty |
+| `F8` | reordering preserves kind, elements, and emptiness but can invalidate path narrowings |
+| `F9` | a copy takes the source snapshot while retaining any inherited written domain |
+| `F10` | collection conversions and concatenation transfer element kinds and their specified emptiness |
+| `F11` | combine stored and copied property facts with missing evidence; dispatch built-in names by receiver, keeping object selections opaque |
+| `F12` | element projections follow literal structure; copied descendants take the contract answer ([section-2-f12](contract.md#section-2-f12)) |
+| `F13` | stores and mutations through element steps are weak and never exact definitions |
+| `F14` | built-in length reads produce integers on supported text and collection receivers |
+| `F15` | member access on unknown data preserves its reasons and owes receiver and destination checks |
+| `F16` | arithmetic and comparison results and obligations follow the runtime operator table |
+| `F17a` | otherwise removes the left operand’s null and joins fallback kinds, retaining them even when the graph never evaluates the fallback |
+| `F17b` | get returns possible elements unchanged, including null, alongside its default |
+| `F18` | typed loads and parses validate against the receiving type or their typed default |
+| `F19` | untyped external inputs produce external unknowns, retaining null when their default is null |
+| `F19a` | access through speakers or handles is opaque and owes its own member check |
+| `F20` | function results use the joined return contract, including null from value-less exits |
+| `F21` | unwritten parameters use captured single-call arguments or conservative multi-call contracts |
+| `F22` | written parameter types constrain every argument while preserving its evaluation snapshot |
+| `F23` | returning a value stores it into the function’s result key |
+| `F24` | stores reachable from callbacks count as handler stores |
+| `F25` | built-in results follow declared kinds, with choice results derived from option values |
+| `F26b` | interpolation returns text while checking showability and selected-list non-emptiness |
+| `F27` | loop variables receive iterable snapshots: elements, dictionary keys and values, or range integers |
+| `F27b` | dictionary loops bind string keys and, when requested, dictionary values |
+| `F28` | explanations retain the earliest admitted writer per offending kind without discarding obligations |
+| `X1` | the read and its reaching definition must both be live |
+| `X2` | choose the nearest dominating definition over the key and its prefixes |
+| `X3` | the nearest definition must be exact; never skip a weak definition for an earlier one |
+| `X4` | definition and read must share their nearest dominating callable or entered-label boundary |
+| `X5` | every loop enclosing the read must also enclose its definition |
+| `X6` | no relevant own store or conservative call event may intervene after the definition |
+| `X7` | exact reads require freedom from block execution and previously registered handler interference |
+| `N1` | stable-path tests create narrowing definitions that filter kinds without proving collection non-emptiness |
+| `N2` | the nearest valid dominating narrowing answers a read until relevant events invalidate it ([r4-403](contract.md#r4-403)) |
+| `N3` | a route proof promotes an unchecked nullable or written-union use to an error ([r4-444](contract.md#r4-444)) |
+| `N3a` | written-union offending members participate in the required-check route proof, as re-derived under AD-1 ([r4-444](contract.md#r4-444)) |
+| `N5` | loop narrowings survive jointly preserving stores solved as one greatest fixpoint ([r4-129](contract.md#r4-129)) |
+| `N8` | constants retain narrowing absent dependency changes; reference-member paths are never narrowed |
+| `N9` | unsupported narrowing forms retain guarded warnings rather than inventing stronger proofs |
+| `N10` | required-check errors identify the producer and missing test; failed narrowings name their invalidating event |
+| `U4a` | stored selections take their element narrowing while emptiness remains a separate proof |
+| `U5` | a lost narrowing names the failing event that prevented keeping its check ([r4-444](contract.md#r4-444)) |
+| `H1` | a read before any handler registration can keep its exact answer |
+| `H6` | registrations reached through file transfers propagate possible handler interference |
+| `H9` | calling a helper that registers a handler counts as a registration in its caller |
+| `L1` | without an entered label, label boundaries do not obstruct the exact path |
+| `L5` | a label reached only by fall-through creates no exact-path boundary |
+| `L6` | jumping to a later label does not revisit the code before it |
+| `L10` | a call whose target cannot return leaves its continuation unreachable |
+| `L11` | computed transfers target every candidate file; glob targets use the name pass’s picks |
+| `L13` | stores reached through a called file’s onward transfer count against the original call |
+| `O4` | historical name of the type-analysis initiative behind the coarse core |
+| `O15` | block-local reads use the contract because handlers can run after intervening stores |
+| `P3` | a present, dominating, unguarded single-kind contract can prove a read definite |
+| `P7` | literal graph facts prove branch feasibility, loop entry, and selected literal elements |
+| `W30` | the work family for long and/or test chains without repeated sibling-test scans |
+| `W34` | the whole-copy chain and fan work family sharing source marks across demanded fields ([r4-38](sharing.md#r4-38)) |
+| `W40` | the work family indexing tested paths by callable or file instead of scanning contributions |
+| `B1` | per-demand and program work budgets defer unproved checks to runtime ([r4-23](sharing.md#r4-23)) |
+| `B2` | rejected copies contribute no contents in the next pass, but retain their landings |
+| `D1` | diagnostic sentences name the consumer, its context, the problem, and the fix; also, in the receiving checks, the extent of a store's receiving obligation (a review finding's id) |
+| `D2` | diagnostic sites and names use the relevant expression’s source text |
+| `D3` | each diagnostic rule keeps one code across error and warning severities |
+| `D4` | exhaustion stops proving, preserves findings, and moves undecided checks to runtime |
+| `R2` | each open landing record retains one earlier event per path text |
+| `R3` | a covered listing is skipped at its taker’s order and invalidates older open records |
+| `AD-1` | a proved unchecked nullable or written-union route makes the use a compile error ([r4-444](contract.md#r4-444)) |
+| `AD-3` | intrinsic known-type errors remain errors in unreachable code, with flow facts conservatively dropped |
+| `§N` | a section of the research design table (TABLE), or of the plan document the comment names, outside the repository and not resolvable from it; #2209 rewrites these |
+
 ## Index
 
 | entry | page | rule |
