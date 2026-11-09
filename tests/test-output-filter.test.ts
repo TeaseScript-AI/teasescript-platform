@@ -266,6 +266,8 @@ test("the full suite fails on a file that reported no test of its own, and names
     "helped.test.js": `require("./helper.js")();`,
     "importer.test.js": `require("./imported.test.js"); require("node:test")("importer", () => {});`,
     "imported.test.js": `require("node:test")("imported", () => {});`,
+    // (a test registered from a microtask: node:test reports it with its entry file but no source location)
+    "deferred.test.js": `queueMicrotask(require("node:test").bind(null, "deferred", () => {}));`,
   };
   for (const [file, source] of Object.entries(files))
     writeFileSync(resolve(directory, "dist/tests", file), source);

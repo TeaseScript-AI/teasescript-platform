@@ -34,11 +34,13 @@ const seconds = {};
 const reported = new Set();
 const failedWhole = new Set();
 tests.on("test:complete", (data) => {
-  if (data.nesting !== 0 || data.file === undefined) return;
+  if (data.nesting !== 0) return;
+  // (a result may have no source location, as a test registered from a microtask: it is still its entry file's)
   if (data.entryFile !== undefined) {
     reported.add(data.entryFile);
     return;
   }
+  if (data.file === undefined) return;
   // (its seconds are kept by its path under `dist/tests/`, which for a file at the top is its name, as
   // `suiteTestFiles` names it)
   seconds[suiteName(data.file)] = data.details.duration_ms / 1000;
