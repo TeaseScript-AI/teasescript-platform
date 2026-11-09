@@ -2,7 +2,7 @@ import { compileSourceWithBackend, type CompilationResult } from "../../../src/c
 import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 import type { TypeTerm } from "../../../src/type-inference/graph.js";
 import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance } from "../../../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../../../src/type-inference/core/consumers.js";
 import {
@@ -830,6 +830,11 @@ export interface EnclosingVerdict {
    * requirement where `certified` is `false` (#1440), nothing for a case that does not say (#1275).
    */
   readonly judged: "domain" | "mark" | "exact";
+  /**
+   * Whether the compile declined at a settled stop that lost a stopped mark's completion result (#2080): no plan to
+   * run, nothing published to judge.
+   */
+  readonly declined?: true;
   readonly problems: readonly string[];
 }
 
@@ -1048,9 +1053,29 @@ export function enclosingProblems(
       problems,
     };
   }
-  const compiled: CompilationResult = capped(() =>
-    compileSourceWithBackend(c.source, { globals: ["hostValue"] }, CORE_BACKEND),
-  );
+  let compiled: CompilationResult;
+  try {
+    compiled = capped(() =>
+      compileSourceWithBackend(c.source, { globals: ["hostValue"] }, CORE_BACKEND),
+    );
+  } catch (error) {
+    // (#2080 part 1: a settled stop whose stopped mark's completion result was lost declines, publishing nothing)
+    if (
+      !(error instanceof CandidateOutsideSlice) ||
+      error.what !== "a store whose check was lost at the budget" ||
+      phase !== "settled"
+    )
+      throw error;
+    return {
+      allowance,
+      stops: stopped.map((path) => path.join(".")),
+      relation,
+      phase,
+      judged,
+      problems,
+      declined: true,
+    };
+  }
   const plan = compiled.plan;
   const within = (d: CompilationResult["diagnostics"][number]): boolean =>
     d.span.start.offset >= c.site.start && d.span.end.offset <= c.site.end;
