@@ -25,22 +25,37 @@
 // (a split that keeps the original file) is not stale in form 1, and form 3 lists an old name only when none of its
 // new files keeps that name.
 //
-// The tree is HEAD's committed tree (commit first): its tracked files with a text extension, outside `node_modules/` and
-// `dist/`, read as UTF-8 (a file that is not is skipped), each line ended by `\n`, `\r\n` or `\r`. The forms are those of
-// the reference sweep this tool replaces (the notes' `shared/move-sweep/move-sweep.py`), which ran in Python: a word
-// character is a Unicode letter, digit or underscore (`[\p{L}\p{N}_]`, Python's `\w` for text), written so in every
-// pattern, and each of its word boundaries is the same class's lookaround, so the two agree by construction.
+// The tree is HEAD's committed tree (commit first): its tracked regular files with a text extension, outside
+// `node_modules/` and `dist/`, read as UTF-8 with a byte-order mark kept as a character (a file that is not UTF-8 is
+// skipped), each line ended by `\n`, `\r\n` or `\r`. The forms are those of the reference sweep this tool replaces (the
+// notes' `shared/move-sweep/move-sweep.py`), which ran in Python, and its text semantics are written out so that the
+// two agree by construction:
+//   - a word character is a Unicode letter, digit or underscore, `[\p{L}\p{N}_]`: Python's `\w` for text, exactly, for
+//     every character Unicode 15.1 assigns (Python 3.13's database; a character a later Unicode adds counts here too),
+//     and each of its word boundaries is the same class's lookaround;
+//   - whitespace is Python's (`str.isspace`, its `\s`): `\t` to `\r`, U+001C to U+0020, U+0085, U+00A0, U+1680, U+2000
+//     to U+200A, U+2028, U+2029, U+202F, U+205F and U+3000, which neither JavaScript's `\s` nor `trim` is (they take
+//     U+FEFF and leave U+001C to U+001F and U+0085); a hit's line is trimmed of it, as Python's `strip`;
+//   - any character but `\n` matches where Python's `.` does (`[^\n]`, also U+2028 and U+2029).
+// It differs from the Python sweep on purpose in three inputs, each tested:
+//   - an empty map (no move): nothing is moved, so no form applies (the Python's forms 2, 4 and 5 then match an empty
+//     name, `"/.ts"`);
+//   - a file name Git quotes (one with a non-ASCII character, a tab, a quote or a backslash): read here as it is,
+//     through NUL-separated names; the Python read `git ls-files`' quoted names, could not open such a file and
+//     skipped it;
+//   - a symbolic link: its committed blob is its target's path, so it is not read as a text file; the Python opened the
+//     file it pointed to, which the tree holds under its own path anyway.
 //
-// --declare FILE: a JSON array of `{ "file", "line", "reason" }`, a hit of form 1, 4 or 5 the reader states is not stale
-// (a test fixture's invented path), printed with its reason; every declaration must match such a hit.
+// --declare FILE: a JSON array of `{ "file", "line", "reason" }`, a hit of form 1, 4 or 5 the reader states is not
+// stale (a test fixture's invented path), printed with its reason; every declaration must match such a hit.
 //
-// Output: each form's section, `== <form>. <title>: <count>` and its hits, `<file>:<line>: <the line, trimmed, its first
-// 150 characters>`, in the order 1, 2, 3, 4, 5, then 2b; then the declared hits.
+// Output: each form's section, `== <form>. <title>: <count>` and its hits, `<file>:<line>: <the line, trimmed, its
+// first 150 characters>`, in the order 1, 2, 3, 4, 5, then 2b; then the declared hits.
 //
 // Exit status: 0 when forms 1, 4 and 5 find nothing undeclared (forms 2 and 3 are listed, never failing); 1 when one
-// does; 2 when it cannot run: an unknown or valueless option, no BASE and no --renames, a map or declaration file that
-// cannot be read or has the wrong shape, a declaration that matches no hit, or a file name Git reports that is not
-// UTF-8.
+// does; 2 when it cannot run: `--help`, an unknown or valueless option, or no BASE and no --renames (each with the
+// usage), a map or declaration file that cannot be read or has the wrong shape, a declaration that matches no hit, or
+// a file name Git reports that is not UTF-8.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -56,6 +71,9 @@ const refuse = (message) => {
 };
 
 const WORD = String.raw`\p{L}\p{N}_`;
+// Python's whitespace (`str.isspace`, its `\s` for text), and its `strip`.
+const SPACE = String.raw`[\t\n\v\f\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]`;
+const STRIP_SPACE = new RegExp(String.raw`^${SPACE}+|${SPACE}+$`, "gu");
 const notWordBefore = String.raw`(?<![${WORD}])`;
 const notWordAfter = String.raw`(?![${WORD}])`;
 const TEXT = /\.(ts|mts|cts|tsx|js|mjs|cjs|vue|json|ya?ml|html|md|css)$/u;
@@ -68,7 +86,7 @@ const QUOTE = "[\"'`]";
 const QUOTE_OR_END = "[\"'`$]";
 const END = String.raw`(?:${EXT}|(?=${QUOTE_OR_END}))`;
 const SPECIFIER = new RegExp(
-  String.raw`^\s*(${notWordBefore}import${notWordAfter}|${notWordBefore}export${notWordAfter}.*${notWordBefore}from${notWordAfter}|\}\s*from${notWordAfter}|${notWordBefore}from${notWordAfter})|${notWordBefore}import\(|${notWordBefore}require\(`,
+  String.raw`^${SPACE}*(${notWordBefore}import${notWordAfter}|${notWordBefore}export${notWordAfter}[^\n]*${notWordBefore}from${notWordAfter}|\}${SPACE}*from${notWordAfter}|${notWordBefore}from${notWordAfter})|${notWordBefore}import\(|${notWordBefore}require\(`,
   "u",
 );
 const PATH = new Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-");
@@ -81,11 +99,12 @@ const TITLES = {
   "2b": "bare names without extension, mostly words",
 };
 
-// The characters a `u` pattern lets one escape outside a class: its syntax characters and `/` (not `-`, which paths hold).
+// The characters a `u` pattern lets one escape outside a class: its syntax characters and `/` (not `-`, which paths
+// hold).
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&");
 const byLengthDown = (a, b) => b.length - a.length;
 const stem = (file) => file.split("/").at(-1).replace(STRIP, "");
-const decoder = new TextDecoder("utf-8", { fatal: true });
+const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 /** Git's output as bytes, from the repository at `cwd`. */
 const gitBytes = (cwd, args, input) =>
@@ -110,7 +129,8 @@ export function derivedRenames(cwd, base) {
   const fields = namesOf(
     gitBytes(cwd, ["diff", "-z", "-M", "--name-status", "--no-ext-diff", mergeBase, "HEAD"]),
   );
-  const renames = {};
+  // No prototype, so a path named `__proto__` is a key like any other.
+  const renames = Object.create(null);
   for (let i = 0; i < fields.length;) {
     const status = fields[i];
     if (status.startsWith("R")) {
@@ -135,7 +155,8 @@ function renamesFile(file) {
     Array.isArray(parsed.renames)
   )
     refuse(`the map ${file} has no "renames" object`);
-  const renames = {};
+  // No prototype, so a path named `__proto__` is a key like any other.
+  const renames = Object.create(null);
   for (const [old, next] of Object.entries(parsed.renames)) {
     const list = Array.isArray(next) ? next : [next];
     if (list.length === 0 || !list.every((item) => typeof item === "string"))
@@ -285,7 +306,11 @@ export function sweep(cwd, renames, forms = new Set(["1", "2", "3", "4", "5"])) 
   for (const { file, lines } of files) {
     for (const [index, line] of lines.entries()) {
       const number = index + 1;
-      const hit = { file, line: number, text: [...line.trim()].slice(0, 150).join("") };
+      const hit = {
+        file,
+        line: number,
+        text: [...line.replace(STRIP_SPACE, "")].slice(0, 150).join(""),
+      };
       if (
         forms.has("1") &&
         ((form1 && form1.test(line)) ||
@@ -350,6 +375,7 @@ function argumentsOf(argv) {
       rest.push(arg);
       continue;
     }
+    if (arg === "--help" || arg === "-h") refuse(USAGE);
     const equals = arg.indexOf("=");
     const name = equals < 0 ? arg : arg.slice(0, equals);
     if (!["--renames", "--splits", "--declare", "--forms"].includes(name))

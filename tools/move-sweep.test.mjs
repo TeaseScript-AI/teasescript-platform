@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -10,8 +10,11 @@ const TOOL = fileURLToPath(new URL("./move-sweep.mjs", import.meta.url));
 
 /** A temporary repository: `write` stages files, `commit` commits them, `run` runs the sweep there. */
 function repository(t) {
-  const root = mkdtempSync(join(tmpdir(), "move-sweep-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // The repository and its maps and declarations, in one folder the test removes.
+  const fixture = mkdtempSync(join(tmpdir(), "move-sweep-"));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const root = join(fixture, "repository");
+  mkdirSync(root);
   const git = (...args) =>
     execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
       cwd: root,
@@ -30,8 +33,8 @@ function repository(t) {
     return git("rev-parse", "HEAD");
   };
   const json = (name, value) => {
-    writeFileSync(join(root, `../${name}-${root.split("/").at(-1)}.json`), JSON.stringify(value));
-    return join(root, `../${name}-${root.split("/").at(-1)}.json`);
+    writeFileSync(join(fixture, `${name}.json`), JSON.stringify(value));
+    return join(fixture, `${name}.json`);
   };
   const run = (...args) => {
     const result = spawnSync(process.execPath, [TOOL, ...args], { cwd: root, encoding: "utf8" });
@@ -183,16 +186,97 @@ test("an extension-less reference counts in forms 1, 4 and 5, and its bare name 
 
 test("import and export specifiers are skipped in forms 4 and 5", (t) => {
   const r = moved(t, [
-    'import { u } from "/a/util.js";',
-    'export { u } from "/a/util.js";',
-    'const loaded = await import("/a/util.js");',
-    'const four = "/a/util.js";',
+    'import { u } from "/a/util.js";', // 1
+    'export { u } from "/a/util.js";', // 2
+    'const loaded = await import("/a/util.js");', // 3
+    'const four = "/a/util.js";', // 4
+    'import { v } from "/a/(util|other).js";', // 5
+    'export { v } from "/a/(util|other).js";', // 6
+    'const five = "/a/(util|other).js";', // 7
   ]);
   const { out } = r.run(r.base);
-  assert.deepEqual(
-    section(out, "4").map((hit) => Number(hit.split(":")[1])),
-    [4],
+  const lines = (form) => section(out, form).map((hit) => Number(hit.split(":")[1]));
+  assert.deepEqual(lines("4"), [4]);
+  assert.deepEqual(lines("5"), [7]);
+});
+
+test("the text semantics are Python's: its whitespace and strip, `.` across U+2028, a byte-order mark kept", (t) => {
+  const r = moved(t, [
+    '\uFEFFimport "/a/util.js";', // 1: U+FEFF is no whitespace to Python, so this is no specifier line: a hit
+    '\u0085import "/a/util.js";', // 2: U+0085 is, so the line is a specifier, skipped
+    '\u001Cimport "/a/util.js";', // 3: U+001C is too: skipped
+    'export {x} /*\u2028*/ from "/a/util.js";', // 4: `.` crosses U+2028: a specifier, skipped
+    '\u001C const four = "/a/util.js"; \u0085', // 5: a hit, printed stripped of U+001C and U+0085
+    '\u00A0const four = "/a/util.js";\uFEFF', // 6: a hit; U+00A0 is stripped, U+FEFF kept
+  ]);
+  const { out } = r.run(r.base);
+  assert.deepEqual(section(out, "4"), [
+    'tools/refs.mjs:1: \uFEFFimport "/a/util.js";',
+    'tools/refs.mjs:5: const four = "/a/util.js";',
+    'tools/refs.mjs:6: const four = "/a/util.js";\uFEFF',
+  ]);
+});
+
+test("a byte-order mark in a moved file's name stays in the derived map, as in a passed one", (t) => {
+  const r = repository(t);
+  r.write({ "\uFEFFold.ts": "export {};\n" });
+  const base = r.commit();
+  r.git("mv", "\uFEFFold.ts", "new.ts");
+  r.write({ "refs.mjs": 'const name = "old.ts";\nconst marked = "\uFEFFold.ts";\n' });
+  r.commit();
+  const derived = r.run(base);
+  const passed = r.run("--renames", r.json("bom", { renames: { "\uFEFFold.ts": "new.ts" } }));
+  assert.equal(derived.out, passed.out);
+  assert.equal(derived.status, passed.status);
+  assert.deepEqual(section(derived.out, "1"), ['refs.mjs:2: const marked = "\uFEFFold.ts";']);
+});
+
+test("a path named `__proto__` is a key of the map like any other: derived, passed and split", (t) => {
+  const r = repository(t);
+  // A computed key: `{ __proto__: … }` would set the literal's prototype, not make a key.
+  r.write({ ["__proto__"]: "x\n" });
+  const base = r.commit();
+  r.git("mv", "__proto__", "new");
+  r.write({ "refs.mjs": 'const x = "__proto__";\n' });
+  r.commit();
+  const expected = ['refs.mjs:1: const x = "__proto__";'];
+  const derived = r.run(base);
+  assert.equal(derived.status, 1);
+  assert.deepEqual(section(derived.out, "1"), expected);
+  const passed = r.run("--renames", r.json("proto", { renames: { ["__proto__"]: "new" } }));
+  assert.deepEqual(section(passed.out, "1"), expected);
+  const split = r.run(
+    "--renames",
+    r.json("none", { renames: { "other.ts": "o/other.ts" } }),
+    "--splits",
+    r.json("split", JSON.parse('{"renames": {"__proto__": ["new", "new2"]}}')),
   );
+  assert.deepEqual(section(split.out, "1"), expected);
+});
+
+test("on purpose unlike the Python sweep: an empty map applies no form, a quoted name is read, a link is not", (t) => {
+  const r = repository(t);
+  r.write({
+    "refs.mjs": 'const x = "/.ts";\n',
+    "caf\u00e9.mjs": 'const four = "/a/util.js";\n',
+    "target.mjs": "const y = 1;\n",
+  });
+  symlinkSync("target.mjs", join(r.root, "link.mjs"));
+  r.commit();
+  const empty = r.run("--renames", r.json("empty", { renames: {} }));
+  assert.equal(empty.status, 0);
+  for (const form of ["1", "2", "3", "4", "5", "2b"])
+    assert.deepEqual(section(empty.out, form), []);
+  // A move from `a/util.ts`: the non-ASCII-named file is read, as Git names it.
+  const moved = r.run("--renames", r.json("util", { renames: { "a/util.ts": "b/util.ts" } }));
+  assert.deepEqual(section(moved.out, "4"), ['caf\u00e9.mjs:1: const four = "/a/util.js";']);
+  // The link's blob is its target's path; the target is read under its own name, once.
+  const linked = r.run(
+    "--renames",
+    r.json("target", { renames: { "y/target.ts": "z/target.ts" } }),
+  );
+  assert.deepEqual(section(linked.out, "2b"), []);
+  assert.ok(!linked.out.includes("link.mjs"));
 });
 
 test("a declared hit passes, an undeclared one fails, and a declaration that matches nothing cannot run", (t) => {
@@ -225,10 +309,13 @@ test("the map derived from the change is the map passed for the same move", (t) 
   assert.equal(derived.out, passed.out);
 });
 
-test("a run with no BASE and no map, or an unknown option, cannot run", (t) => {
+test("--help, no BASE and no map, or an unknown option print the usage and cannot run", (t) => {
   const r = repository(t);
   r.write({ "a.ts": "export {};\n" });
   r.commit();
-  assert.equal(r.run().status, 2);
-  assert.equal(r.run("HEAD", "--nope", "x").status, 2);
+  for (const args of [["--help"], ["-h"], [], ["HEAD", "--nope", "x"]]) {
+    const { status, err } = r.run(...args);
+    assert.equal(status, 2, args.join(" "));
+    assert.match(err, /usage: node tools\/move-sweep\.mjs/u, args.join(" "));
+  }
 });
