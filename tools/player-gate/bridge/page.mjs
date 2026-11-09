@@ -5,7 +5,8 @@
 // `/gate-inputs/<name>.<route>.json` (`inputs.mjs`). With `hold`, the page waits for `window.__gateRun()`, which the
 // taps cohort calls once its taps are flowing, and stops after `prepare`'s reply; otherwise it runs at once, to
 // Continue. The result is `window.__gateBridge`: each request with its reply on both backends, by ID and op, from the
-// instrumented client (the build swaps it in, `vite.config.mjs`), and on a Worker its construction and `ready`.
+// instrumented client (the build swaps it in, `vite.config.mjs`), and on a Worker its construction and `ready`. With
+// `?tape=<file>`, the page is the replay mode instead (`replay.mjs`): its result is `window.__gateReplay`.
 import { connectBridge } from "../../../player/engine-bridge/client.ts";
 import { createInProcessBackend } from "../../../player/engine-bridge/in-process.ts";
 import { playerBuildIdentity } from "../../../player/build-identity.ts";
@@ -113,5 +114,13 @@ async function run() {
   return result;
 }
 
-if (query.has("hold")) window.__gateRun = run;
+if (query.has("tape"))
+  void import("./replay.mjs")
+    .then(({ replay }) => replay(query.get("tape"), backend, () => workerPort({})))
+    // A replay mode that fails to load is a result too, so the runner never waits for one.
+    .catch((error) => ({ tape: query.get("tape"), backend, error: String(error), done: true }))
+    .then((result) => {
+      window.__gateReplay = result;
+    });
+else if (query.has("hold")) window.__gateRun = run;
 else void run();
