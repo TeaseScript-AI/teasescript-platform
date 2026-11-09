@@ -681,6 +681,26 @@ test("a generator's id is its `id` export, else its file name: a renamed generat
         ["a.mjs", "b.mjs", "alike"],
       ],
     );
+    // a stall in its `--out`: the stall index finds its area by its file, and keeps its id in the place
+    for (const tool of ["baselines.mjs", "run-contract.mjs", "sources.mjs", "stalls.mjs"])
+      cpSync(join("tests", "families", tool), join(tree, "tests", "families", tool));
+    writeFileSync(
+      join(area, "b.mjs"),
+      `// id a.mjs: renamed from a.mjs\nexport const id = "a.mjs";\nexport const cases = [["ends", "ends"]];\n`,
+    );
+    const out = join(directory, "out.jsonl");
+    run(tree, "--out", out);
+    assert.deepEqual(
+      lines(out).map(({ generator, file, source }) => [generator, file, source]),
+      [["a.mjs", "b.mjs", "ends"]],
+    );
+    const index = spawnSync(
+      process.execPath,
+      [join(tree, "tests", "families", "stalls.mjs"), out],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(index.status, 2, index.stderr);
+    assert.match(index.stdout, /"generator":"a\.mjs"[^\n]*"source":"ends"/u);
     // (renamed without it, its sources are new ones: the stored plan is another)
     writeFileSync(join(area, "b.mjs"), cases);
     assert.equal(state(), "another plan");

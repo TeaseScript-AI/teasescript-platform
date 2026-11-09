@@ -429,7 +429,7 @@ the check and the baselines take every module in an area as a generator. A folde
 module stays outside the area folders, as `shadow-bind.mjs` does (#1786).
 
 A generator's id is its `id` export, else its file name, `.mjs` included (`generatorsOf`). A source's place in a
-baseline, its area's PLAN and every record name the generator by its id, so a renamed generator that keeps its old file
+baseline, its area's PLAN, and the runner's records and stall index name the generator by its id, so a renamed generator that keeps its old file
 name as `export const id` and names it in its header line keeps every stored line and its area's PLAN; its `--work` and
 `--out` lines add `file`, the new name, which a stored line never holds. Two generators with one id are refused.
 
