@@ -134,8 +134,8 @@ export function hiddenCapture(gate, hiddenAt, scope, baselineMs) {
 
 /**
  * A trial's outcome from its kept records alone, as the trial and the report both read it: `record` holds the
- * lifecycle and transaction records, the scope, the baseline scene time and, for `keepHandler`, the hiding time (the
- * Pixel's comes from its own `visibilitychange`); for `keepDurable`, the stored and baseline scene times. `null` when a
+ * lifecycle and transaction records (the hiding is the lifecycle's `visibilitychange` to hidden), the scope and the
+ * baseline scene time; for `keepDurable`, the stored and baseline scene times. `null` when a
  * record it needs is missing.
  */
 export function keepOutcome(trial, record) {
@@ -146,12 +146,11 @@ export function keepOutcome(trial, record) {
     return { outcome: durable ? "durable after 1 s" : "not durable after 1 s", completed: durable };
   }
   if (!Array.isArray(record.lifecycle) || !Array.isArray(record.transactions)) return null;
-  const hiddenAt =
-    trial === "keepHandler"
-      ? record.hiddenAt
-      : record.lifecycle.find(
-          (event) => event.type === "visibilitychange" && event.visibility === "hidden",
-        )?.t;
+  // The hiding is the page's own `visibilitychange` to hidden in its lifecycle records, on the desktop too (the probe's
+  // `__gateHide` dispatches it): a recorded hiding time without that event is no hiding.
+  const hiddenAt = record.lifecycle.find(
+    (event) => event.type === "visibilitychange" && event.visibility === "hidden",
+  )?.t;
   if (typeof hiddenAt !== "number")
     return { outcome: "the page never reported hidden", completed: false };
   const found = hiddenCapture(record, hiddenAt, record.scope, record.baselineMs);

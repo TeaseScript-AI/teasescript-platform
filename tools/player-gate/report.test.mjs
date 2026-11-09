@@ -265,6 +265,14 @@ test("a sample counts only with every required field that applies; missing evide
         outcome: "abort",
       }))),
     feedbackBeforeInput: (r) => (r.probe.repeat.changes = [{ t: 920, frame: 800 }]),
+    // A second turn without feedback: the median of the first would hide it (Sol code r4, R4-01).
+    missingFeedback: (r) => {
+      r.probe.repeat.inputs.push({ type: "pointerdown", t: 1000, ts: 999, trusted: true });
+      r.probe.repeat.states.push({ ...r.probe.repeat.states[2], t: 1050, frame: 1060, control: 4 });
+      r.turns.push({ turn: 1, ok: true, sentAt: 990, before: r.probe.repeat.states[2], end: null });
+    },
+    // A commit stamped before its own start (Sol code r4).
+    reversedSave: (r) => (r.probe.cold.transactions[0].end = 0),
   };
   for (const [what, change] of Object.entries(variants)) {
     const result = sessionResult();
@@ -364,7 +372,7 @@ test("a keep trial's recorded outcome must be its records' own", () => {
       hiddenAt: 100,
       scope: "s",
       baselineMs: 5,
-      lifecycle: [],
+      lifecycle: [{ type: "visibilitychange", t: 100, visibility: "hidden" }],
       transactions: [
         {
           start: 200,
@@ -379,11 +387,14 @@ test("a keep trial's recorded outcome must be its records' own", () => {
   assert.ok(
     !buildReport([trial({})], "r0", ARTIFACTS).incomplete.some((text) => text.includes(named)),
   );
-  assert.ok(
-    buildReport([trial({ transactions: [] })], "r0", ARTIFACTS).incomplete.some((text) =>
-      text.includes(named),
-    ),
-  );
+  // No transactions, or no hiding in the lifecycle records (Sol code r4): the outcome is not the records' own.
+  for (const records of [{ transactions: [] }, { lifecycle: [] }])
+    assert.ok(
+      buildReport([trial(records)], "r0", ARTIFACTS).incomplete.some((text) =>
+        text.includes(named),
+      ),
+      JSON.stringify(records),
+    );
 });
 
 test("playable is the Player's own two intervals, and a timestamp outside its boundaries is refused", () => {

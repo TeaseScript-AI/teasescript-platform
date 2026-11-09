@@ -36,7 +36,17 @@ export function playable(gate, label) {
   if (control?.frame === undefined)
     return { ok: false, reason: `no enabled control after ${label}'s input` };
   const inputToControlMs = control.frame - press.ts;
-  if (!(inputToControlMs >= 0) || !(press.ts >= enabled.t))
+  // Every endpoint finite and in order: enabled, its frame; the input after enabled; the control's frame after it.
+  const ordered = [enabled.t, enabled.frame, press.ts, control.t, control.frame].every(
+    Number.isFinite,
+  );
+  if (
+    !ordered ||
+    enabled.frame < enabled.t ||
+    press.ts < enabled.t ||
+    control.frame < control.t ||
+    inputToControlMs < 0
+  )
     return { ok: false, reason: "the input's timestamp is outside its boundaries" };
   return {
     ok: true,
@@ -127,13 +137,16 @@ export function turnTimes(gate, sentAt, before, end = null) {
     feedbackMs,
     firstScriptRowMs: row === undefined ? null : row.shownFrame - submission.ts,
   };
-  if (!(feedbackMs >= 0)) return { ok: false, reason: "no feedback after the input", ...times };
+  // `null >= 0` holds in JavaScript: a missing feedback must fail before the comparison.
+  if (!(Number.isFinite(feedbackMs) && feedbackMs >= 0))
+    return { ok: false, reason: "no feedback after the input", ...times };
   if (settledAt === null)
     return end === null
       ? { ok: false, reason: "neither settled nor ended", ...times }
       : { ok: true, end, ...times, settledMs: null };
   const settledMs = settledAt - submission.ts;
-  if (!(settledMs >= 0)) return { ok: false, reason: "settled before its input", ...times };
+  if (!(Number.isFinite(settledMs) && settledMs >= 0))
+    return { ok: false, reason: "settled before its input", ...times };
   return { ok: true, ...times, settledMs, settledBy: by };
 }
 
@@ -172,6 +185,18 @@ export function firstSave(gate, pressMs) {
       : longTasks.filter(
           (task) => task.start + task.duration > pressMs && task.start < (save.end ?? Infinity),
         );
+  // Its endpoints must be finite and in order: the press, then the transaction's start, then its commit.
+  const ordered =
+    Number.isFinite(pressMs) &&
+    Number.isFinite(save.start) &&
+    Number.isFinite(save.end) &&
+    pressMs < save.start &&
+    save.start <= save.end;
+  if (save.outcome === "complete" && !ordered)
+    return {
+      ok: false,
+      reason: "the publish's start and commit are not after the press, in order",
+    };
   return {
     ok: save.outcome === "complete",
     outcome: save.outcome,
@@ -193,6 +218,9 @@ export function firstSave(gate, pressMs) {
 export function workerStart(gate) {
   const worker = gate.workers.find((record) => record.engine);
   if (worker === undefined) return null;
+  // A `ready` before its construction is no start.
+  if (worker.ready !== null && !(worker.ready >= worker.constructed))
+    return { constructedMs: worker.constructed, readyMs: null, startMs: null };
   return {
     constructedMs: worker.constructed,
     readyMs: worker.ready,
