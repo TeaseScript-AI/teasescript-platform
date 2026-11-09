@@ -171,7 +171,6 @@ export function useExportCandidate(options: {
     const origin = options.activation.current();
     // The initial record has no failure recording: its selection is the current recording at once, with no wait.
     const failed = origin.kind === "run" ? await origin.failure.selection() : "current";
-    if (!lives(origin)) return null;
     const current = session.value;
     const host = current?.connection ?? options.bridge();
     if (host === null) return null;
@@ -182,18 +181,21 @@ export function useExportCandidate(options: {
         : failed.bridge === host
           ? { ticket: failed.ticket }
           : "none";
+    // Each capture is sent only while its activation lives and the dialog wants it, admitted right before it is sent.
     const capture = () =>
-      host.captureExport(current, recording, (reply, view) =>
-        deliver(host, origin, current, reply, view, details, wanted),
-      );
+      lives(origin) && !wanted.aborted
+        ? host.captureExport(current, recording, (reply, view) =>
+            deliver(host, origin, current, reply, view, details, wanted),
+          )
+        : Promise.resolve(null);
     let frozen: Awaited<ReturnType<typeof capture>> | null;
     try {
       frozen = await capture();
       // A stop of the run was still committing: once it shows, the capture is tried once more, while its activation
       // lives.
-      if (frozen === PENDING_CAPTURE && lives(origin)) {
+      if (frozen === PENDING_CAPTURE) {
         await stopShown(origin, wanted);
-        frozen = !wanted.aborted && lives(origin) ? await capture() : null;
+        frozen = await capture();
       }
     } catch (error) {
       // The capture of an activation that retired, or that the dialog cancelled, gives nothing, also when it failed.
