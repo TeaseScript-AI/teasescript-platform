@@ -449,7 +449,8 @@ test("#2116's declared difference under #2080: at every recorded window's edges 
           assert.equal(state, "admission", name);
           assert.ok(plan !== null, name);
           assert.ok(
-            plan.instructions.filter((i) => i.typeCheck !== undefined).length < mainChecks,
+            plan.instructions.filter((i) => "typeCheck" in i && i.typeCheck !== undefined).length <
+              mainChecks,
             name,
           );
         } else if (kind === "favourable") {
