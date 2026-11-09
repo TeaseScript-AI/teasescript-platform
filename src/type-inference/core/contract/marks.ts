@@ -776,6 +776,8 @@ function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): 
   // its own reads: each tested path below a read's key whose region holds the read (`readsAt`'s hit), the paths of
   // reads `guardedBelow` answers alike asked once (Astra r2 B3: n copies under n tests visit n paths, not n²)
   const asked = new Set<string>();
+  // (#2005: a prefix several groups' reads reach makes its states once; each candidate is still charged)
+  const inserted = new Set<string>();
   for (const read of holder.reads) {
     program.work.charge("eventSteps");
     let current = read.value;
@@ -791,8 +793,11 @@ function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): 
     if (binding === undefined || node === undefined || node === null) continue;
     const base = keyOf(binding, joinSteps(steps.reverse(), read.path));
     for (const text of guards.guardedBelowOnce(base, node, asked) ?? []) {
-      program.work.charge("eventSteps", 1 + text.length);
+      program.work.charge("eventSteps");
       automaton.prefixVisits += 1;
+      if (inserted.has(text)) continue;
+      inserted.add(text);
+      program.work.charge("eventSteps", text.length);
       automaton.states[stateAt(contract, automaton, root, splitPath(text))]!.accepting = true;
     }
   }
@@ -989,4 +994,22 @@ export function annotated(
             : item,
         );
   return entry.guarded || marksAt(contract, entry.holder, rest) ? marked(annotated) : annotated;
+}
+
+/** #2005: a compiled state of the pass's mark automaton, read only: its steps, its epsilon edges and its acceptance. */
+export function markState(
+  contract: Contract,
+  id: number,
+): {
+  readonly next: ReadonlyMap<string, number>;
+  readonly epsilon: readonly number[];
+  readonly accepting: boolean;
+} {
+  return automatonOf(contract).states[id]!;
+}
+
+/** #2005: whether a holder's mark holds at its own root, the empty rest (its automaton compiled). */
+export function rootAccepts(contract: Contract, holder: Holder): boolean {
+  const automaton = automatonOf(contract);
+  return automaton.states[compiled(contract, automaton, holder)]!.accepting;
 }
