@@ -10,8 +10,8 @@
 // An added or removed line Git does not mark as moved is admitted only as one of these forms, nothing else; each form
 // holds the whole line, by that side's blob parsed as TypeScript (TypeScript and JavaScript files; comments are the
 // parser's, so a string's or a template's text is never one):
-//   1. a line of an import or re-export statement (an import declaration, or an export declaration with a module
-//      specifier), with nothing else on it but whitespace and comments;
+//   1. a line of an import or re-export statement (an import declaration, an export declaration with a module
+//      specifier, or `import x = require()`), with nothing else on it but whitespace and comments;
 //   2. a bare `export` keyword added to a moved declaration: an added line where a top-level declaration starts with
 //      its `export` modifier, paired with a removed line where the same declaration starts without one, the rest of
 //      the two lines equal, indentation aside, each removed line paired once;
@@ -27,15 +27,34 @@
 //
 // And a pure move keeps every import's binding: over the change's files, the set of bindings before equals the set
 // after, a binding being one imported or re-exported name with its target, its local or exported name and whether it is
-// type-only (a default import's name `default`, a namespace's `*`). A relative specifier's target is the file it resolves
-// to on that side; a target the move relocated is keyed by its family, from `--renames FILE`, the move sweep's map
-// (`{ "renames": { "old": "new" | ["new", …] } }`, old and new paths joined where they share one), and the bindings
-// within one family (a split's files importing each other) are left out. A binding on one side only fails, with its file,
-// line and specifier; form 1 admits an import line's presence, this rule its content. A target the move relocates or
-// adds without a family in `--renames` fails, and the report names the flag.
+// type-only (a default import's name `default`, a namespace's `*`). A bare specifier is its target as spelled: its
+// package's maps and a config's `paths` aliases are not resolved. A relative specifier's target is the file TypeScript
+// resolves it to on that side, from that side's committed tree alone: the configuration of the nearest committed
+// `tsconfig.json` whose root files include the importer (none: NodeNext, as Node runs it, for a JavaScript file or a
+// tree with no config), its module format (`package.json`'s `type`, its extension), the specifier's own `import` or
+// `require` mode, and a folder's `package.json`; JavaScript and JSON targets resolve even where the config disables
+// them. A target the move relocated is keyed by its family, from `--renames FILE`, the move sweep's map (`{ "renames":
+// { "old": "new" | ["new", …] } }`, old and new paths joined where they share one), and the bindings within one family
+// (a split's files importing each other) are left out. A binding on one side only fails, with its file, line and
+// specifier; form 1 admits an import line's presence, this rule its content. A target the move relocates or adds
+// without a family in `--renames` fails, and the report names the flag. A relative specifier either side cannot
+// resolve, to no file or in a file whose configuration the tree does not establish (a config with an error, such as an
+// `extends` the tree does not hold, or a TypeScript file no config includes or none is above), is refused by name:
+// reported unless a declaration names its side and line, never passed; the move's compiler run is the witness for what
+// the check declines. A declared refusal, its line changed or not, is printed with the refusal reason it covers. One
+// known class is a config that `extends` an uncommitted package, which only an install supplies:
+// `player/vue/tsconfig.json` extends `@vue/tsconfig`, so every relative import in a file it owns is refused, and a move
+// there declares those lines.
 //
-// The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines and
-// the bindings differing.
+// The bindings compared are those of import, re-export and import-equals statements. Every other module reference in a
+// changed file the check parses (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`) is refused by name the
+// same way, one per line: an `import` keyword outside those statements other than `import.meta` (a dynamic or type
+// import), a `require` identifier outside them, a triple-slash reference directive, or a comment (JSDoc included)
+// holding `import(` or `@import`. A changed file of any other type, `.vue` and `.html` among them, is outside the rule:
+// the report lists it as `not compared (unparsed)`, and `vue-tsc` and the move's compiler run are its witness.
+//
+// The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines, the
+// bindings differing and the refused specifiers.
 //
 // The residual is Git's: its move detection is heuristic, and a moved block below its size threshold (20 alphanumeric
 // characters) reads as added and removed. A failure on such a block is read by a person, not overridden.
@@ -50,7 +69,9 @@ import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
 import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
 
-const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/u;
+const PARSED = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
+// the resolver's root for a committed tree's paths
+const ROOT = "/tree/";
 export const RESIDUAL =
   "Git's move detection is heuristic: a moved block below its size threshold (20 alphanumeric characters) reads as added and removed. Read such a failure; it is not overridden.";
 const FORMS = ["import", "export", "whitespace", "header comment"];
@@ -108,7 +129,9 @@ function shapeOf(file, text) {
     const start = statement.getStart(source);
     const isImport =
       ts.isImportDeclaration(statement) ||
-      (ts.isExportDeclaration(statement) && statement.moduleSpecifier !== undefined);
+      (ts.isExportDeclaration(statement) && statement.moduleSpecifier !== undefined) ||
+      (ts.isImportEqualsDeclaration(statement) &&
+        ts.isExternalModuleReference(statement.moduleReference));
     if (isImport) kind.fill(2, start, statement.getEnd());
     const modifiers = ts.canHaveModifiers(statement) ? (ts.getModifiers(statement) ?? []) : [];
     const exportFirst =
@@ -291,7 +314,8 @@ function renamesOf(path) {
 
 /**
  * The families a move's renames make: each old path with its new paths, joined where they share one (a merge), each
- * path mapped to its family's name, the family's first old path in order.
+ * path mapped to its family's name, its lexicographically smallest member (any one member would do: the comparison only
+ * needs the same name on both sides).
  */
 function familiesOf(renames) {
   const parent = new Map();
@@ -311,39 +335,197 @@ function familiesOf(renames) {
 }
 
 /**
- * A blob's bindings: `{ kind, target, name, as, typeOnly, line, specifier }`, one per imported or re-exported name (a
- * default import's name is `default`, a namespace's `*`, a side-effect import's empty), the target the specifier
- * resolved against `exists` (a relative one; a bare one is itself).
+ * TypeScript's resolution over one side's committed tree (`ref`, its files `tree`, its folders `folders`): a host that
+ * reads only that tree's blobs (cached); a file's configuration (`configOf`: `{ options }` or `{ refused: reason }`);
+ * and its implied module format (`formatOf`: `package.json`'s `type` and the file's extension). A file's configuration
+ * is that of the nearest committed `tsconfig.json` whose root files (its `files`, `include` and `exclude`, matched by
+ * TypeScript's own `matchFiles` over the tree) include it; a config matching no file is passed over, and one with any
+ * other error (an `extends` the tree does not hold) refuses the files below it by name. With none: a JavaScript file,
+ * or any file of a tree with no `tsconfig.json`, resolves as Node runs it (NodeNext); a TypeScript file is refused.
+ * JavaScript and JSON targets resolve even where a config disables them, as they load at runtime.
  */
-function bindingsOf(file, text, exists) {
+function treeResolver(ref, tree, folders, git) {
+  // a resolver path's tree path: the root as `/tree` or `/tree/`, a path below it, or `null` outside the tree
+  const inTree = (name) =>
+    name === ROOT.slice(0, -1)
+      ? ""
+      : name.startsWith(ROOT)
+        ? name.slice(ROOT.length).replace(/\/$/u, "")
+        : null;
+  const blobs = new Map();
+  const readFile = (name) => {
+    const file = inTree(name);
+    if (file === null || !tree.has(file)) return undefined;
+    if (!blobs.has(file)) blobs.set(file, git("cat-file", "blob", `${ref}:${file}`));
+    return blobs.get(file);
+  };
+  const host = {
+    fileExists: (name) => {
+      const file = inTree(name);
+      return file !== null && tree.has(file);
+    },
+    directoryExists: (name) => {
+      const folder = inTree(name);
+      return folder !== null && folders.has(folder);
+    },
+    readFile,
+    realpath: (name) => name,
+    getCurrentDirectory: () => ROOT,
+    useCaseSensitiveFileNames: true,
+  };
+  const configs = new Map();
+  const entries = new Map();
+  for (const file of tree) {
+    const dir = path.posix.dirname(file) === "." ? "" : path.posix.dirname(file);
+    if (!entries.has(dir)) entries.set(dir, { files: [], directories: [] });
+    entries.get(dir).files.push(path.posix.basename(file));
+  }
+  for (const folder of folders) {
+    if (folder === "") continue;
+    const parent = path.posix.dirname(folder) === "." ? "" : path.posix.dirname(folder);
+    if (!entries.has(parent)) entries.set(parent, { files: [], directories: [] });
+    entries.get(parent).directories.push(path.posix.basename(folder));
+  }
+  const readDirectory = (root, extensions, excludes, includes, depth) =>
+    ts.matchFiles(
+      root,
+      extensions,
+      excludes,
+      includes,
+      true,
+      ROOT,
+      depth,
+      (dir) => {
+        const at = inTree(dir);
+        return (at === null ? undefined : entries.get(at)) ?? { files: [], directories: [] };
+      },
+      (name) => name,
+    );
+  const parse = (config) => {
+    if (!configs.has(config)) {
+      const read = ts.readConfigFile(ROOT + config, readFile);
+      const parsed = ts.parseJsonConfigFileContent(
+        read.config ?? {},
+        { ...host, readDirectory },
+        ROOT + path.posix.dirname(config),
+        undefined,
+        ROOT + config,
+      );
+      // a config that matches no file says so as an error (TS18003); that is no error of its settings
+      const errors = [read.error, ...parsed.errors].filter(
+        (error) => error && error.code !== 18003,
+      );
+      configs.set(config, {
+        options: { ...parsed.options, allowJs: true, resolveJsonModule: true },
+        files: new Set(parsed.fileNames),
+        error:
+          errors.length === 0 ? null : ts.flattenDiagnosticMessageText(errors[0].messageText, " "),
+      });
+    }
+    return configs.get(config);
+  };
+  const anyConfig = [...tree].some((file) => path.posix.basename(file) === "tsconfig.json");
+  const NODE = {
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    allowJs: true,
+    resolveJsonModule: true,
+  };
+  const configOf = (file) => {
+    let dir = path.posix.dirname(file);
+    let nearest = null;
+    for (;;) {
+      const config = dir === "." ? "tsconfig.json" : `${dir}/tsconfig.json`;
+      if (tree.has(config)) {
+        nearest ??= config;
+        const parsed = parse(config);
+        if (parsed.error !== null) return { refused: `${config}: ${parsed.error}` };
+        if (parsed.files.has(ROOT + file)) return { options: parsed.options };
+      }
+      if (dir === "." || dir === "") break;
+      dir = path.posix.dirname(dir);
+    }
+    if (!anyConfig || /\.(js|mjs|cjs|jsx)$/u.test(file)) return { options: NODE };
+    return {
+      refused:
+        nearest === null
+          ? "no committed tsconfig.json is above it"
+          : `no committed tsconfig.json includes it (the nearest, ${nearest}, leaves it out)`,
+    };
+  };
+  const formatOf = (file, options) =>
+    ts.getImpliedNodeFormatForFile(ROOT + file, undefined, host, options);
+  return { host, configOf, formatOf, NODE };
+}
+
+/**
+ * A blob's bindings: `{ kind, target, name, as, typeOnly, line, specifier }`, one per imported or re-exported name (a
+ * default import's name is `default`, a namespace's `*`, `import x = require()`'s `=`; a side-effect import's, and an
+ * empty clause's (`import {} from`, `export {} from`), empty, its local name `{}` for the clause). Its target is
+ * `{ type, path }`: `bare` with the specifier itself, compared by its spelling; `file`, a relative specifier resolved by
+ * TypeScript's resolver over that side's committed tree (`resolver`: the file's configuration, its implied module format
+ * and the specifier's own usage mode, `import` or `require`); `missing`, a relative one that resolves to no file; or
+ * `refused`, a relative one in a file whose configuration the tree does not establish (`reason`). Every other module
+ * reference (outside the import, re-export and import-equals statements above) is a `reference` whose target is
+ * `refused`, one per line.
+ */
+function bindingsOf(file, text, resolver) {
   if (!PARSED.test(file)) return [];
-  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-  const resolve = (specifier) => {
-    if (!specifier.startsWith(".")) return specifier;
+  const config = resolver.configOf(file);
+  const options = config.options ?? resolver.NODE;
+  const source = ts.createSourceFile(
+    file,
+    text,
+    {
+      languageVersion: ts.ScriptTarget.Latest,
+      impliedNodeFormat: resolver.formatOf(file, options),
+    },
+    true,
+  );
+  const resolve = (node) => {
+    const specifier = node.text;
+    if (!specifier.startsWith(".")) return { type: "bare", path: specifier };
     const at = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
-    const tries = [at];
-    for (const [js, own] of [
-      [".js", [".ts", ".tsx"]],
-      [".mjs", [".mts"]],
-      [".cjs", [".cts"]],
-      [".jsx", [".tsx"]],
-    ])
-      if (at.endsWith(js)) for (const ext of own) tries.push(at.slice(0, -js.length) + ext);
-    tries.push(`${at}.ts`, `${at}.tsx`, `${at}/index.ts`, `${at}/index.js`);
-    return tries.find(exists) ?? at;
+    if (config.refused) return { type: "refused", path: at, reason: config.refused };
+    const mode = ts.getModeForUsageLocation(source, node, options);
+    const found = ts.resolveModuleName(
+      specifier,
+      ROOT + file,
+      options,
+      resolver.host,
+      undefined,
+      undefined,
+      mode,
+    ).resolvedModule;
+    if (found !== undefined && found.resolvedFileName.startsWith(ROOT))
+      return { type: "file", path: found.resolvedFileName.slice(ROOT.length) };
+    return {
+      type: "missing",
+      path: at,
+      reason: "resolves to no file under the committed configuration",
+    };
   };
   const out = [];
+  const compared = new Set();
   for (const statement of source.statements) {
     const line = source.getLineAndCharacterOfPosition(statement.getStart(source)).line + 1;
     if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+      compared.add(statement);
       const specifier = statement.moduleSpecifier.text;
-      const at = { kind: "import", target: resolve(specifier), line, specifier };
+      const at = { kind: "import", target: resolve(statement.moduleSpecifier), line, specifier };
       const clause = statement.importClause;
       if (clause === undefined) out.push({ ...at, name: "", as: "", typeOnly: false });
       else {
         if (clause.name)
           out.push({ ...at, name: "default", as: clause.name.text, typeOnly: clause.isTypeOnly });
         const bindings = clause.namedBindings;
+        if (
+          !clause.name &&
+          bindings &&
+          ts.isNamedImports(bindings) &&
+          bindings.elements.length === 0
+        )
+          out.push({ ...at, name: "", as: "{}", typeOnly: clause.isTypeOnly });
         if (bindings && ts.isNamespaceImport(bindings))
           out.push({ ...at, name: "*", as: bindings.name.text, typeOnly: clause.isTypeOnly });
         else if (bindings)
@@ -360,13 +542,16 @@ function bindingsOf(file, text, exists) {
       statement.moduleSpecifier &&
       ts.isStringLiteral(statement.moduleSpecifier)
     ) {
+      compared.add(statement);
       const specifier = statement.moduleSpecifier.text;
-      const at = { kind: "re-export", target: resolve(specifier), line, specifier };
+      const at = { kind: "re-export", target: resolve(statement.moduleSpecifier), line, specifier };
       const clause = statement.exportClause;
       if (clause === undefined)
         out.push({ ...at, name: "*", as: "*", typeOnly: statement.isTypeOnly });
       else if (ts.isNamespaceExport(clause))
         out.push({ ...at, name: "*", as: clause.name.text, typeOnly: statement.isTypeOnly });
+      else if (clause.elements.length === 0)
+        out.push({ ...at, name: "", as: "{}", typeOnly: statement.isTypeOnly });
       else
         for (const element of clause.elements)
           out.push({
@@ -375,23 +560,135 @@ function bindingsOf(file, text, exists) {
             as: element.name.text,
             typeOnly: statement.isTypeOnly || element.isTypeOnly,
           });
+    } else if (
+      ts.isImportEqualsDeclaration(statement) &&
+      ts.isExternalModuleReference(statement.moduleReference) &&
+      ts.isStringLiteral(statement.moduleReference.expression)
+    ) {
+      compared.add(statement);
+      const specifier = statement.moduleReference.expression.text;
+      out.push({
+        kind: "import",
+        target: resolve(statement.moduleReference.expression),
+        line,
+        specifier,
+        name: "=",
+        as: statement.name.text,
+        typeOnly: statement.isTypeOnly,
+      });
     }
   }
+  out.push(...otherReferencesOf(source, text, compared));
   return out;
 }
 
 /**
- * The bindings on one side only: over `files`, the set of `{ kind, target, name, as, typeOnly }` before and after, a
- * target the move relocated keyed by its family (`renames`), bindings within one family left out.
+ * Every other module reference of `source` (its `text`), refused by name, one per line, as a `reference` whose target
+ * is `refused`: an `import` keyword (not `import.meta`) or a `require` identifier outside the `compared` statements, a
+ * triple-slash reference directive, or a comment (JSDoc included) holding `import(` or `@import`.
+ */
+function otherReferencesOf(source, text, compared) {
+  const out = [];
+  const lines = new Set();
+  const refuse = (at, shown, what) => {
+    const line = source.getLineAndCharacterOfPosition(at).line + 1;
+    if (lines.has(line)) return;
+    lines.add(line);
+    const specifier = shown.split("\n")[0].slice(0, 60);
+    out.push({
+      kind: "reference",
+      target: {
+        type: "refused",
+        path: specifier,
+        reason: `${what}, a module reference the binding rule does not compare`,
+      },
+      line,
+      specifier,
+      name: "",
+      as: "",
+      typeOnly: false,
+    });
+  };
+  for (const [list, what] of [
+    [source.referencedFiles, "a `/// <reference path>`"],
+    [source.typeReferenceDirectives, "a `/// <reference types>`"],
+    [source.libReferenceDirectives, "a `/// <reference lib>`"],
+  ])
+    for (const directive of list) refuse(directive.pos, directive.fileName, what);
+  const comments = new Set();
+  // a JSDoc comment is read twice: its parsed tokens as code's, below (never within a compared statement, whose binding
+  // it is not), and its text as a comment's, from the token it precedes
+  const visit = (node, inCompared, inDoc) => {
+    const doc =
+      inDoc ||
+      (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode);
+    const within = !doc && (inCompared || compared.has(node));
+    // every child, a token's too (the end-of-file token holds the JSDoc after the last statement)
+    for (const child of node.getChildren(source)) visit(child, within, doc);
+    if (node.kind > ts.SyntaxKind.LastToken) return;
+    for (const range of doc
+      ? []
+      : [
+          ...(ts.getLeadingCommentRanges(text, node.pos) ?? []),
+          ...(ts.getTrailingCommentRanges(text, node.end) ?? []),
+        ]) {
+      if (comments.has(range.pos)) continue;
+      comments.add(range.pos);
+      const found = /import\(|@import/u.exec(text.slice(range.pos, range.end));
+      if (found !== null)
+        refuse(
+          range.pos + found.index,
+          text.slice(range.pos + found.index, range.end),
+          `a comment's \`${found[0]}\``,
+        );
+    }
+    if (within) return;
+    const parent = node.parent ?? node;
+    if (node.kind === ts.SyntaxKind.ImportKeyword && !ts.isMetaProperty(parent))
+      refuse(node.getStart(source), parent.getText(source), "an `import`");
+    else if (ts.isIdentifier(node) && node.text === "require")
+      refuse(
+        node.getStart(source),
+        (ts.isCallExpression(parent) ? parent : node).getText(source),
+        "a `require`",
+      );
+  };
+  visit(source, false, false);
+  return out;
+}
+
+/**
+ * The bindings on one side only: over `files`, the set of `{ kind, target, name, as, typeOnly }` before and after. A
+ * target is its type and path (`bare` and `file` apart), a file the move relocated keyed by its family (`renames`);
+ * bindings within one family are left out. A relative specifier either side cannot resolve (`missing`, `refused`) is
+ * no binding but a refusal, `{ side, file, line, specifier, reason }` (its side `removed` or `added`, as a
+ * declaration names it), which the check reports unless it is declared.
  */
 function bindingDifferences(mergeBase, head, files, renames, git) {
   const family = familiesOf(renames ?? {});
-  const keyOf = (target) => family.get(target) ?? target;
+  const keyOf = (target) =>
+    target.type === "file"
+      ? `file:${family.get(target.path) ?? target.path}`
+      : `${target.type}:${target.path}`;
   const listed = (ref) =>
     new Set(git("ls-tree", "-r", "--name-only", ref).split("\n").filter(Boolean));
   const trees = { before: listed(mergeBase), after: listed(head) };
+  // each side's folders, for the resolver's `directoryExists`
+  const foldersOf = (paths) => {
+    const out = new Set([""]);
+    for (const one of paths)
+      for (let at = one.lastIndexOf("/"); at > 0; at = one.lastIndexOf("/", at - 1))
+        out.add(one.slice(0, at));
+    return out;
+  };
+  const folders = { before: foldersOf(trees.before), after: foldersOf(trees.after) };
+  const resolvers = {
+    before: treeResolver(mergeBase, trees.before, folders.before, git),
+    after: treeResolver(head, trees.after, folders.after, git),
+  };
   const sides = { before: new Map(), after: new Map() };
   const relocated = new Set();
+  const refusals = new Map();
   for (const change of files) {
     if (change.binary) continue;
     for (const [side, ref, file] of [
@@ -400,17 +697,24 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
     ]) {
       if (file === null) continue;
       const text = git("cat-file", "blob", `${ref}:${file}`);
-      for (const binding of bindingsOf(file, text, (one) => trees[side].has(one))) {
+      for (const binding of bindingsOf(file, text, resolvers[side])) {
+        if (binding.target.type === "missing" || binding.target.type === "refused") {
+          const refusal = {
+            side: side === "before" ? "removed" : "added",
+            file,
+            line: binding.line,
+            specifier: binding.specifier,
+            reason: binding.target.reason,
+          };
+          refusals.set(JSON.stringify([side, file, binding.line, binding.specifier]), refusal);
+          continue;
+        }
         const target = keyOf(binding.target);
-        if (target === keyOf(file) && family.has(file)) continue;
-        // a target that is there on one side only, with no family: a relocation the renames do not name
+        if (family.has(file) && target === keyOf({ type: "file", path: file })) continue;
+        // a resolved file that is there on one side only, with no family: a relocation the renames do not name
         const other = side === "before" ? trees.after : trees.before;
-        if (
-          trees[side].has(binding.target) &&
-          !other.has(binding.target) &&
-          !family.has(binding.target)
-        )
-          relocated.add(binding.target);
+        const { type, path: at } = binding.target;
+        if (type === "file" && !other.has(at) && !family.has(at)) relocated.add(at);
         const key = JSON.stringify([
           binding.kind,
           target,
@@ -429,10 +733,14 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
   return {
     differing: [...only("before", "after"), ...only("after", "before")],
     relocated: [...relocated],
+    refusals: [...refusals.values()],
   };
 }
 
-/** The check of the change from the merge base of `base` and `HEAD`: `{ unadmitted, declared, stale, bindings, counts }`. */
+/**
+ * The check of the change from the merge base of `base` and `HEAD`: `{ mergeBase, unadmitted, declared, stale, refused,
+ * covered, unparsed, bindings, renames, counts }`.
+ */
 export function checkMove(
   base,
   { declare = null, renames = null, paths = [], cwd = process.cwd() } = {},
@@ -445,6 +753,13 @@ export function checkMove(
   if (binary.length > 0)
     throw new CannotRun(
       `pure-move-check: a binary change cannot be inspected: ${binary.map((change) => change.header).join("; ")}`,
+    );
+  const unparsed = files
+    .filter((change) => !PARSED.test(change.file ?? change.old))
+    .map((change) =>
+      change.old !== null && change.file !== null && change.old !== change.file
+        ? `${change.old} → ${change.file}`
+        : (change.file ?? change.old),
     );
   const declarations = declare === null ? [] : declarationsOf(declare);
   const used = new Set();
@@ -480,7 +795,6 @@ export function checkMove(
       unadmitted.push(at);
     } else counts[form] += 1;
   }
-  const stale = declarations.filter((_, at) => !used.has(at));
   const bindings = bindingDifferences(
     mergeBase,
     "HEAD",
@@ -488,12 +802,53 @@ export function checkMove(
     renames === null ? null : renamesOf(renames),
     git,
   );
-  return { mergeBase, unadmitted, declared, stale, bindings, renames: renames !== null, counts };
+  // a refusal is declared by a declaration of its side and line, used or not, even where the line is no changed one;
+  // each is printed with the refusal reason it covers
+  const refused = [];
+  const covered = [];
+  for (const refusal of bindings.refusals) {
+    const index = declarations.findIndex(
+      (d) => d.file === refusal.file && d.side === refusal.side && d.line === refusal.line,
+    );
+    if (index === -1) refused.push(refusal);
+    else {
+      covered.push({ ...refusal, declared: declarations[index].reason });
+      if (!used.has(index)) {
+        used.add(index);
+        counts.declared += 1;
+      }
+    }
+  }
+  counts.refused = refused.length;
+  const stale = declarations.filter((_, at) => !used.has(at));
+  return {
+    mergeBase,
+    unadmitted,
+    declared,
+    stale,
+    refused,
+    covered,
+    unparsed,
+    bindings,
+    renames: renames !== null,
+    counts,
+  };
 }
 
 /** The report's lines and exit status for `result`. */
 export function reportOf(base, result) {
-  const { mergeBase, unadmitted, declared, stale, bindings, renames, counts } = result;
+  const {
+    mergeBase,
+    unadmitted,
+    declared,
+    stale,
+    refused,
+    covered,
+    unparsed,
+    bindings,
+    renames,
+    counts,
+  } = result;
   const out = [`pure-move check of ${base}..HEAD (merge base ${mergeBase.slice(0, 12)}):`];
   for (const u of unadmitted) out.push(`  unadmitted: ${u.file}:${u.line} (${u.side}): ${u.text}`);
   for (const s of stale)
@@ -501,6 +856,15 @@ export function reportOf(base, result) {
       `  declaration matching no unmoved line: ${s.file}:${s.line} (${s.side}): ${s.reason}`,
     );
   for (const d of declared) out.push(`  declared: ${d.file}:${d.line} (${d.side}): ${d.reason}`);
+  for (const c of covered)
+    out.push(
+      `  declared refusal: ${c.file}:${c.line} (${c.side}) "${c.specifier}": ${c.reason}; declared: ${c.declared}`,
+    );
+  for (const r of refused)
+    out.push(
+      `  refused: ${r.file}:${r.line} (${r.side}) "${r.specifier}": ${r.reason}; declare it, the move's compiler run its witness`,
+    );
+  for (const name of unparsed) out.push(`  not compared (unparsed): ${name}`);
   for (const b of bindings.differing)
     out.push(
       `  binding only ${b.side}: ${b.file}:${b.line} ${b.kind} from "${b.specifier}": ${b.typeOnly ? "type " : ""}${b.name || "(side effect)"}${b.as !== b.name ? ` as ${b.as}` : ""}`,
@@ -510,9 +874,13 @@ export function reportOf(base, result) {
       `  the move relocates or adds ${bindings.relocated.join(", ")}: name its family with --renames FILE (the move sweep's map)`,
     );
   out.push(
-    `shape: moved +${counts.movedAdded} -${counts.movedRemoved}; admitted ${FORMS.map((form) => `${form} ${counts[form]}`).join(", ")}; declared ${counts.declared}; unadmitted ${counts.unadmitted}; bindings differing ${bindings.differing.length}`,
+    `shape: moved +${counts.movedAdded} -${counts.movedRemoved}; admitted ${FORMS.map((form) => `${form} ${counts[form]}`).join(", ")}; declared ${counts.declared}; unadmitted ${counts.unadmitted}; bindings differing ${bindings.differing.length}; refused ${counts.refused}`,
   );
-  const failed = unadmitted.length > 0 || stale.length > 0 || bindings.differing.length > 0;
+  const failed =
+    unadmitted.length > 0 ||
+    stale.length > 0 ||
+    bindings.differing.length > 0 ||
+    refused.length > 0;
   if (unadmitted.length > 0) out.push(RESIDUAL);
   return { lines: out, status: failed ? 1 : 0 };
 }
