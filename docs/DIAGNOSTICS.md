@@ -28,144 +28,129 @@ about it, as code only when that code compiles where the message says to put it 
 2026-10-28), in whole sentences without semicolons, and quotes source in single quotes, as in `'total / count'` (owner
 decision, 2026-10-09). It names its subject, such as the file, value, or place, instead of "it" or "this" (owner
 decision, 2026-10-27). A sentence that authors read uses no implementation terms, such as "compiler", "follow", or
-"store", unless they help the author fix the problem, and says "type", never "kind" (owner decision, 2026-10-27).
-Where a whole number is required, a value of type `number` is "a number that can have decimals", and the message names
-the line that brings them; elsewhere "a number" stays the general word (owner decision, 2026-10-27).
-A suggested fix never contains a placeholder such as `default: ...`, and what cannot be written in full is said in
-words (owner decision, 2026-10-28, #1268). A warning of a check the run makes states the rule, then what the value may be
-and what follows, as in `contains() needs text (string) or a regex for 'part', but 'v' may be a whole number (integer)
-here. If it is, the Tease stops with an error at this line.` (`may hold` and `If it does` for what a value holds), then
-its fix. For arguments, keys, iterables, and button values, a generic unknown-type warning is omitted when the same
-check already warns about a rejected known type (owner review of #1437, 2026-10-29).
+"store", unless they help the author fix the problem, and says "type", never "kind" (owner decision, 2026-10-27). Where
+a whole number is required, a value of type `number` is "a number that can have decimals", and the message names the
+line that brings them; elsewhere "a number" stays the general word (owner decision, 2026-10-27). A warning of a check
+the run makes states the rule, then what the value may be and what follows, as in `contains() needs text (string) or a
+regex for 'part', but 'v' may be a whole number (integer) here. If it is, the Tease stops with an error at this line.`
+(`may hold` and `If it does` for what a value holds), then its fix. A warning about failing a required test says `If it
+does not, the Tease stops` (2026-10-28, #1213). For arguments, keys, iterables, and button values, a generic
+unknown-type warning is omitted when the same check already warns about a rejected known type (owner review of #1437,
+2026-10-29).
 
-An operator's expansion of one unknown operand counts as one offending type, with one diagnostic and one check
-(the lead, 2026-10-23). A member access likewise gets one warning per access and check: when the property's own answer
-explains its unknown type, an unknown receiver adds no second warning there. The receiver's own absence still warns
-at its own access, and the retained warning states the cause (2026-10-30, #1481).
-A type test that holds removes types, not the read's cause: where no definition answers the narrowed read, it takes
-the untested read's context word only if that word is unique. If the untested read has several words, the narrowed
-items keep their own, never the first of those words (2026-11-08, #2074).
+An operator's expansion of one unknown operand counts as one offending type, with one diagnostic and one check (the
+lead, 2026-10-23). A member access likewise gets one warning per access and check: when the property's own answer
+explains its unknown type, an unknown receiver adds no second warning there. The receiver's own absence still warns at
+its own access, and the retained warning states the cause (2026-10-30, #1481).
 
-### Fix forms
+The branch cause says `depends on which branch runs` (2026-10-28, #1213). A type test that holds removes possible types
+without losing the read's cause. Where no definition supplies the narrowed read, use the untested read's cause only if it is unique; if the untested read has several causes, keep the narrowed value's own causes (2026-11-08, #2074).
 
-Classify literals and variable or property paths from parsed syntax. A fix quotes its subject only for a stable
-path. A random selection, call, or computed index gets advice to keep the value in a new variable, otherwise words
-alone. Removing an unsafe example keeps the advice. A join example uses only the non-text operand's own text, and a
-suggested first showable property is a plain value. A method call is not described as an assignment, a speaker's
+A suggested fix never contains a placeholder such as `default: ...`, and what cannot be written in full is said in words
+(owner decision, 2026-10-28, #1268).
+
+Classify literals and variable or property paths from syntax. A fix uses its subject directly in a code example only for
+a stable path. For a random selection, call, or computed index, advise keeping the value in a new variable, otherwise
+use words alone. Removing an unsafe example keeps the advice. A join example uses only the non-text operand's own text,
+and a suggested first showable property is a plain value. A method call is not described as an assignment, a speaker's
 method call gets the no-methods advice without a property cause, and a literal condition gets `Compare it instead.`
-The branch cause says `depends on which branch runs` (2026-10-28, #1213).
-A warning about failing a required test says `If it does not, the Tease stops` (2026-10-28, #1213).
+(2026-10-28, #1213).
 
-Every code form passes one site-validity predicate, with explicit, three-valued facts: the operand or receiver
-types, the result types the site accepts, grouping, whether the value reaches a divisor there, severity, whether
-reads are the site's own or added, and presence. Every required fact is proved, or the advice is words.
-Presence is proved only for a closed set of expression forms with their evaluated operands enumerated and proved
-non-null at every depth (2026-10-28, #1296).
-The value facts cover a fallback the fix introduces and an absence the diagnostic itself reports. A diagnosed
-missing key or property gives words. A fallback the fix writes is words where the value divides at the diagnostic's
-site, including through a calculation or member receiver. A function argument's requirement is proved too,
-including an unannotated parameter's requirement. Values the script already computes and the fix only names
-correctly keep the script's runtime behavior, as does a stored value divided on a later line (2026-10-28, #1296).
+Every code suggestion, including a type inside prose, uses the same validity rule: prove operand or receiver types,
+accepted result types, grouping, reads, and presence at the suggested position, accounting for severity and any divisor
+it reaches. An unproved fact gives words. Presence proofs cover a closed set of expression forms and every operand they
+evaluate, proved non-null at every depth (2026-10-28, #1296).
 
-After an error, or when a form adds a read at a new site or evaluates a receiver again, presence is proved or the
-advice is words. A warning's form that only wraps the diagnosed read at the same site may keep that read's runtime
-behavior (2026-10-28, #1296). A declaration form keeps the declaration's own initializer, including a call or index
-read, and a guard form gives the complete guarded statement. A type suggestion is checked at the type position
-and names the type there, without carrying the author's initializer into a replacement declaration. Every form,
-including a type inside words, uses the same predicate and states its reads. An unchecked-region mark covers its
-whole region, the stop warning itself covers none, and the diagnostic's own site is judged without its own mark.
-Fix facts are absent after a stop, so no type-test form is offered where its read itself stopped
-(2026-10-28–29, #1296, #1273).
+The proof covers a fallback the fix introduces and an absence the diagnostic reports; a diagnosed missing key or
+property gives words. A fallback the fix writes is words where the value divides at the diagnostic's site, including
+through a calculation or member receiver. A function argument's requirement is proved even for an unannotated parameter.
+Values the script already computes and the fix only names correctly keep the script's runtime behavior, as does a stored
+value divided on a later line (2026-10-28, #1296).
 
-A kept value uses `value`, else the first free `value2`, `value3`, and so on. The name is chosen once per program
-and base, only where a fix keeps a value, avoiding identifier spellings across every project file, before or after
-the use, including functions, parameters, paired names, and identifiers used only within text or property
-expressions, and host globals and built-ins. The survey retains its property-name exclusions and uses an explicit
-worklist (2026-11-04, #1715).
+After an error, or when a form adds a read at a new site or evaluates a receiver again, presence is proved or the advice
+is words. A warning's form that only wraps the diagnosed read at the same site may keep that read's runtime behavior
+(2026-10-28, #1296).
 
-When a store types an object's property but checks the value the object comes from, TSV041's advice names that
-property in words. For a proved load-default origin, it says `Give '<property>' <type> in the default of '<the load>'.`
-The proof requires a load bound once, a plain property path with no other definition at any prefix, and the
-receiver's category. A stable path gets `Check that '<path>' <test> first.` Other values get
-`Keep '<value>' in a new variable and check that '<path>' of it <test> first.` Where the path is not shown, use
-`Check that '<value>' gives '<place>' <type> first.` (2026-10-30, #1488).
-For a property below a partly external value, this advice precedes the generic whole-value test, except that a
-declared place without a type test keeps its existing advice. The subject is the narrowest expression owning the
-property's steps through object literals. Locate it through selected list elements and either `otherwise` operand
-too. Where the landing is unknown or outside the place's path, keep the value's own check (2026-11-05, #1730).
+A declaration form keeps the declaration's own initializer, including a call or index read, and a guard form gives the
+complete guarded statement. A type suggestion names the type at the type position, without carrying the author's
+initializer into a replacement declaration.
 
-For a checked element below the stored value through collections, advise testing the value's whole receiving
-type, following the root's written annotation down to the landing and retaining every optional layer. Find the
-annotation by its parsed declaration and exact span, not source text. Offer code only where the site predicate
-proves it compiles, otherwise words. An unproved layer, including a written copy or property path, gives words
-and keeps its own check. Do not offer a null fallback for the whole value, and use the property advice for a
-property step (2026-11-05, #1764).
+An unchecked-region mark covers its whole region, the stop warning itself covers none, and the diagnostic's own site is
+judged without its own mark. No type-test form is offered where the read itself stops (2026-10-28–29, #1296, #1273).
 
-### Diagnostic and check sites
+A kept value uses `value`, else the first free `value2`, `value3`, and so on. Avoid identifier spellings across every
+project file, before or after the use, including functions, parameters, paired names, identifiers within text or
+property expressions, host globals, and built-ins; property names alone do not reserve the name (2026-11-04, #1715).
 
-A member read marks the whole access, including its receiver. An operator marks its offending operand, or the
-operation once if there is no offending operand. An obligation uses its diagnostic's site (the lead, 2026-10-26).
+When an assignment types an object's property but checks the value the object comes from, TSV041's advice names the
+property and where the narrowest expression owning it gets its value, in words. Advise giving the property its type in a
+`load` default only when that type excludes null and the origin is proved: the load is bound once, the property path is
+plain with no other definition at any prefix, and the receiver's category is proved (2026-10-30, #1488). For a property
+below a partly external value, this advice precedes the generic whole-value test, except that a declared place without a
+type test keeps its existing advice. Find the owning expression through object literals, selected list elements, and
+either `otherwise` operand. Where the value's destination is unknown or outside the checked place's path, keep the
+value's own check (2026-11-05, #1730).
 
-An external-data boundary sits at the ingress expression, including inside a literal, with the destination's
-target and contract. A record literal's one record-level boundary uses the first evaluated ingress cell.
-A definite non-fitting contribution inside nested literals marks the innermost offending expression recursively
-(the lead, 2026-10-24). A stop preserves the unstopped site's choice, including an add reported at its argument
-rather than an inner literal (2026-10-28, #1063).
+For a checked element below the stored value through collections, advise testing the value's whole receiving type,
+following the root's written annotation to the stored value and retaining every optional layer. An unproved layer,
+including a written copy or property path, gives words and keeps its own check. Do not offer a null fallback for the
+whole value, and use the property advice for a property step (2026-11-05, #1764).
+
+A member read marks the whole access, including its receiver. An operator marks its offending operand, or the operation
+once if there is no offending operand. An obligation uses its diagnostic's site (the lead, 2026-10-26).
+
+An external-data boundary sits at the ingress expression, including inside a literal, with the destination's target and
+contract. A record literal's one record-level boundary uses the first evaluated ingress cell. A definite non-fitting
+contribution inside nested literals marks the innermost offending expression recursively (the lead, 2026-10-24). A stop
+preserves the unstopped site's choice (2026-10-28, #1063).
 
 For named external data in a nested literal cell, a selection, `otherwise`, `get`, or copy method has no offending
-operand: the destination's check marks the operation once, at the store's value span. Concatenation or removal
-marks the named read that brought the type. Inline host data in an `otherwise` fallback or `get` default likewise
-uses the store's value span, while typed `load` or `fromJson` defaults keep the call's site. A merged host-member
-and own-read or named-data item uses the store's value span for the destination's merged place, while the
-member's own root-place check stays at the member read (the lead, 2026-10-26).
+operand: the destination's check marks the operation once, at the assigned value's span. Concatenation or removal marks
+the named read that brought the type. Inline host data in an `otherwise` fallback or `get` default likewise uses the
+assigned value's span, while typed `load` or `fromJson` defaults keep the call's site. When host-member and own-read or named data combine, the destination's check uses the assigned value's span for the merged place, while the member's own root-place check stays at the member read (the lead, 2026-10-26).
 
-For `askChoice` with an inline external option, the boundary and a written destination's warning and copy check
-sit at that option's expression. With no destination store, the boundary sits at the consumer's operand against
-`unknown`. For options held in a variable, the boundary stays at that variable's store, targeting its element,
-and the destination's warning and check stay at the answer. The choice result adds no ingress of its own, and
-literal-only options add no boundary (the lead, 2026-10-24).
+For `askChoice` with an inline external option, the boundary and a written destination's warning and copy check sit at
+that option's expression. With no destination assignment, the boundary sits at the consumer's operand against `unknown`.
+For options held in a variable, the boundary stays at that variable's assignment, targeting its element, and the
+destination's warning and check stay at the answer. The choice result adds no ingress of its own, and literal-only
+options add no boundary (the lead, 2026-10-24).
 
-### Budget-deferred obligations
+An obligation left undecided after a stop keeps its diagnostic code as a `not checked (budget)` mark at its owning site,
+never silently dropped. When retained state decides the original diagnostic's shape, publish it with its original code
+and site; only an undecided shape permits a mark at the assignment that owes the check (2026-10-27, #1063).
 
-An obligation left undecided after a stop is published with the same diagnostic code, as a `budget.deferred` mark
-labelled `not checked (budget)`, at its owning site. It is never silently dropped. When retained state decides
-the original record's shape, publish that record with its original code and site. Only an undecided shape permits
-a mark at the store that owes the obligation (2026-10-27, #1063).
-If a store's check opens below an undecided path, its TSV041 mark names that path (2026-10-28, #1063).
-Before admission settles, the fresh pass marks every inferred store and ingress store without a written
-destination, while keeping written-store checks and boundaries. At such stops, a store's mark stands for records
-within its value span or an error brought by that store, including one reported at a later read. A mark covers
-only effects that depend on it, including a stand-in boundary formed for it (2026-10-28, #1063, #1165).
+If an assignment's check opens below an undecided path, its TSV041 mark names that path (2026-10-28, #1063). Before
+admission settles, mark every assignment into an inferred place and every external-data assignment without a written
+destination, while keeping checks and boundaries against written types. At such stops, an assignment's mark stands for
+diagnostics within its value span or an error brought by that assignment, including one reported at a later read. A mark
+covers only effects that depend on it, including a stand-in boundary formed for it (2026-10-28, #1063, #1165).
 
-The fresh pass uses admission's own written-store check, preserving grouping, sites, and collection labels from
-the written type and literal syntax. For a written store with an undecided literal part, the mark stays at the
-literal. In the fresh pass, an offending unknown type caused by budget exhaustion uses the store's value span
-even beside external unknown data. Keep the explaining item, target, receiving type and boundary check, with one
-obligation per place (2026-10-28–11-02, #1063, #1630).
+At a stop before admission settles, checks against written types keep their grouping, sites, and collection labels from
+the written type and literal syntax (2026-10-28, #1063). A written assignment with an undecided literal part keeps its
+mark at the literal. An unknown type caused by budget exhaustion uses the assigned value's span even beside external
+unknown data, keeping its explanation, target, receiving type, and boundary check, with one obligation per place
+(2026-11-02, #1630).
 
-These are diagnostic ownership rules, subject to the candidate route's publication and decline rules in
-[Resource limits](RESOURCE-LIMITS.md#coarse-type-core-bounds).
+These diagnostic ownership rules remain subject to the candidate route's publication and decline rules in [Resource
+limits](RESOURCE-LIMITS.md#coarse-type-core-bounds).
 
-### Mixed-collection descriptions
+A mixed-list error describes each element with its own type, retaining the earliest element's nullability below the
+element and the `?` of every intermediate collection layer on each side. At a value's own level, describe nullability at
+its occurrence, including narrowing. For `otherwise`, use the narrowed operand and include the fallback's null only
+where the operand may be null. Below that level, a written copy follows its source expression, another read or call
+result follows its place's accepted type, and other forms follow the values they hold. A join follows only its accepted
+operands (2026-10-28–11-06, #1213, #1764, #1789).
 
-A mixed-list error describes each element with its own type. Below the element, retain the earliest element's
-nullability and the `?` of every intermediate collection layer on each side. At a value's own level, read nullability
-at its occurrence. For `otherwise`, use the narrowed operand and include the fallback's null only where the operand
-may be null. Below that level, a written copy follows its term, another read or call result follows its place's
-admitted type, and other forms follow their items. A join follows only its admitted operands (2026-10-28–11-06,
-#1213, #1764, #1789).
-The later element keeps its own types and adds `null` only where its leaf may hold it under the same form rule,
-read one depth further. A narrowed copy's own level holds no null, while a typed host value may unless guarded
-(2026-11-06, #1819).
-For joins, describe each operand's leaf null from admission's occurrence items, while compatibility continues to
-use the decided receiving domain. A join-held binding retains its written nullability (2026-11-07, #1899).
+The later element keeps its own types and adds null only where its leaf may hold it under the same rule. A narrowed
+copy's own level holds no null, while a typed host value may unless guarded (2026-11-06, #1819). A join describes each
+operand's leaf null from the types established for that occurrence, while compatibility uses the receiving type. A
+join-held binding retains its written nullability (2026-11-07, #1899).
 
-Each side uses its own descriptive path: an `entry` layer names a dict, a `member` layer a set, otherwise a list.
-For dict descriptions, follow an `otherwise` operand only where it may hold a value at every depth, and its
-fallback where the operand may be null. Read `get`, `load`, and parse defaults as their own values, and dict layers
-below a value's own level from its contract's items. Keep the earliest element's dict layers on its entry and
-read them once per path. Dict and set facts keep separate per-pass answers. These descriptions do not change
-admission or runtime checks (2026-11-06–08, #1814, #2017).
+Each side names its own nested collections as lists, dicts, or sets. For dict descriptions, follow an `otherwise`
+operand only where it may hold a value at every depth, and its fallback where the operand may be null. Treat `get`,
+`load`, and parse defaults as their own values, and describe dict layers below a value's own level from the values its
+contract admits. These descriptions do not change which values are accepted or which runtime checks run (2026-11-06–08,
+#1814, #2017).
 
 ## Owners
 
