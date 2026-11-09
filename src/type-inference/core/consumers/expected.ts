@@ -1,4 +1,4 @@
-import { compileChild, runCompileTask, type CompileTask } from "../../../compiler/continuation.js";
+import { compileChild, runCompileTask, type CompileTask } from "../../../compile-continuation.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../../value-kinds.js";
 import type { PlaceId, SourceSite } from "../../graph.js";
 import { fits } from "../admission.js";

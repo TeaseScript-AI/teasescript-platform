@@ -10,7 +10,7 @@ import type {
 } from "../../plan/model.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
-import { compileChild, type CompileTask } from "../continuation.js";
+import { compileChild, type CompileTask } from "../../compile-continuation.js";
 import { askOperands, namedAskArguments } from "../../expression-children.js";
 import type { InstructionCompiler, LoweredExpression } from "./compiler.js";
 import {

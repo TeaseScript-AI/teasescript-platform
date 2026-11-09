@@ -1,5 +1,5 @@
 import type { FunctionDeclaration, Statement } from "../../../ast.js";
-import { compileChild, type CompileTask } from "../../../compiler/continuation.js";
+import { compileChild, type CompileTask } from "../../../compile-continuation.js";
 import {
   expressionChildren,
   handlerBlocks,

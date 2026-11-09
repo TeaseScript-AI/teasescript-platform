@@ -6,7 +6,7 @@ import type {
   CallArgumentPlan,
 } from "../../plan/model.js";
 import { boundParameterName } from "../../function-arguments.js";
-import { compileChild, type CompileTask } from "../continuation.js";
+import { compileChild, type CompileTask } from "../../compile-continuation.js";
 import type { InstructionCompiler, LoweredExpression, ControlOrigin } from "./compiler.js";
 import {
   coreCallContent,

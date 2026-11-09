@@ -15,7 +15,7 @@ import type {
   TypeAnnotation,
 } from "../ast.js";
 import { isAskImageCall, isTakePhotoCall } from "../capture-call.js";
-import { compileChild, runCompileTask, type CompileTask } from "../compiler/continuation.js";
+import { compileChild, runCompileTask, type CompileTask } from "../compile-continuation.js";
 import { isConversion } from "../conversions.js";
 import { changesEntries } from "../dict-operations.js";
 import {
