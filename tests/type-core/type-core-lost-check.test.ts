@@ -371,13 +371,12 @@ test("a reader keeps a contract it is at least as strict as, never one it is wea
     );
 });
 
-test("a settled stop's store check lists an object's properties as the natural plan's does, so a value with several misfits reads the natural message (#2215)", () => {
-  // (Sol round 13's witness on #2116: five whole stores into `root`, reads that pay for their decisions under a host
-  // condition false when the script runs, then the host value stored whole. At demand 20 in held mode 0 a decision stops
-  // and the analysis settles, and the store's check takes the receiving completion's contract, whose listings found
-  // `root`'s properties last first; the natural check lists them as the program first writes them, `f1` first. The
-  // runtime names, shows and advises on the first property that does not fit: `.f1`'s text, not `.f4.n`'s.)
-  const source = [
+test("a settled stop's store check lists an object's properties as the natural plan's does, from the records its place's contract was first asked with, so a value with several misfits reads the natural message (#2215)", () => {
+  // (Five whole stores into `root`, then reads that pay for their decisions under a host condition false when the script
+  // runs. At each case's demand in held mode 0 a decision stops and the analysis settles, and the store's check takes the
+  // receiving completion's contract, whose listings found `root`'s properties last first. The runtime names, shows and
+  // advises on the first property that does not fit.)
+  const reads = [
     "let value:integer=1",
     "let u={f1:{n:value}}",
     'u={g:"s"}',
@@ -386,10 +385,9 @@ test("a settled stop's store check lists an object's properties as the natural p
     "if hostOther is integer {",
     ...Array.from({ length: 10 }, (_, at) => `let r${at}=root.f${at % 5}.n`),
     "}",
-    "root=hostValue",
-    'say "accepted"',
-    "exit",
-  ].join("\n");
+  ];
+  const stored = (order: readonly number[]) =>
+    `root={${order.map((at) => `f${at}:hostValue`).join(",")}}`;
   const fields: readonly SerializableRuntimeValue[] = [
     null,
     "s",
@@ -397,35 +395,61 @@ test("a settled stop's store check lists an object's properties as the natural p
     1,
     createSerializableObject([{ name: "n", value: "2" }]),
   ];
-  const globals = {
-    hostValue: createSerializableObject(fields.map((value, at) => ({ name: `f${at}`, value }))),
-    hostOther: false,
-  };
+  const cases: readonly (readonly [number, readonly string[], SerializableRuntimeValue])[] = [
+    // (Sol round 13's witness on #2116: the host value stored whole. The natural check lists the properties as the
+    // program first writes them, `f1` first: `.f1`'s text, not `.f4.n`'s.)
+    [
+      20,
+      [...reads, "root=hostValue", 'say "accepted"', "exit"],
+      createSerializableObject(fields.map((value, at) => ({ name: `f${at}`, value }))),
+    ],
+    // (Codex round 1's on #2216: a checked store in the natural order, in a branch the host skips, asks first for
+    // `root`'s contract, and the natural plan keeps that order for the reversed store after it: `.f0`, not `.f4`.)
+    [
+      133,
+      [
+        ...reads,
+        "if hostOther is integer {",
+        stored([0, 1, 2, 3, 4]),
+        "}",
+        stored([4, 3, 2, 1, 0]),
+        "exit",
+      ],
+      "bad",
+    ],
+  ];
   const held = HELD_MODES[0]!;
-  const compiled = (demand: number | null) =>
-    held.run(() =>
-      demand === null
-        ? compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND)
-        : withTestDemandAllowance(demand, () =>
-            compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
-          ),
+  for (const [demand, lines, hostValue] of cases) {
+    const source = lines.join("\n");
+    const globals = { hostValue, hostOther: false };
+    const compiled = (allowance: number | null) =>
+      held.run(() =>
+        allowance === null
+          ? compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND)
+          : withTestDemandAllowance(allowance, () =>
+              compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
+            ),
+      );
+    const failure = (plan: InstructionPlan | null) => {
+      assert.ok(plan !== null);
+      const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals }));
+      const failed = result.events.find((event) => event.kind === "runtimeFailure");
+      return failed?.kind === "runtimeFailure"
+        ? [failed.code, failed.span.start.offset, failed.span.end.offset, failed.message]
+        : null;
+    };
+    const { budget } = held.run(() =>
+      withTestDemandAllowance(demand, () =>
+        analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!),
+      ),
     );
-  const failure = (plan: InstructionPlan | null) => {
-    assert.ok(plan !== null);
-    const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals }));
-    const failed = result.events.find((event) => event.kind === "runtimeFailure");
-    return failed?.kind === "runtimeFailure"
-      ? [failed.code, failed.span.start.offset, failed.span.end.offset, failed.message]
-      : null;
-  };
-  const { budget } = held.run(() =>
-    withTestDemandAllowance(20, () =>
-      analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!),
-    ),
-  );
-  assert.equal(budget.settled, true);
-  assert.ok(budget.decisions.some((decision) => decision.stopped));
-  const natural = failure(compiled(null).plan);
-  assert.equal(natural?.[0], "TSR058");
-  assert.deepEqual(failure(compiled(20).plan), natural);
+    assert.equal(budget.settled, true, `demand ${demand}`);
+    assert.ok(
+      budget.decisions.some((decision) => decision.stopped),
+      `demand ${demand}`,
+    );
+    const natural = failure(compiled(null).plan);
+    assert.equal(natural?.[0], "TSR058", `demand ${demand}`);
+    assert.deepEqual(failure(compiled(demand).plan), natural, `demand ${demand}`);
+  }
 });

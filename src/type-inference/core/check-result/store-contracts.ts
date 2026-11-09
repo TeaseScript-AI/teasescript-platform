@@ -83,6 +83,12 @@ export class Contracts {
   readonly results = new Map<Store, ContractResult>();
   /** Each store's label of the place it stores into (`destination`), once. */
   readonly #destinations = new Map<Store, string | undefined>();
+  /**
+   * Each place's levels as their contracts were first asked for (`#ask`). `ContractDescriptors` keeps a level's contract
+   * from its first ask, so these records give a natural plan's check its property order (#2215).
+   */
+  readonly #asked = new Map<PlaceId, AskedLevel>();
+  #asks = 0;
 
   public constructor(
     private readonly answers: Answers,
@@ -123,6 +129,9 @@ export class Contracts {
     const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
     const required = place === null ? null : this.answers.requirement(place.id, place.path);
     this.destination(store);
+    // (a natural compile asks for the contract of every store without a written type: no stop leaves a requirement)
+    if (place !== null && !(whole && declaration.typeAnnotation !== null))
+      this.#ask(place.id, place.path, [value]);
     const settled =
       place === null || (whole && declaration.typeAnnotation !== null) || required !== null
         ? null
@@ -150,7 +159,9 @@ export class Contracts {
     // as its listings found them: the check lists them as the natural plan's does (#2215). The recorded result, which the
     // lost-check gate reads, keeps the completion's order.)
     const type =
-      settled !== null && result !== settled ? this.#inNaturalOrder(checked, [value]) : checked;
+      settled !== null && place !== null && result !== settled
+        ? this.#inNaturalOrder(checked, place.id, place.path)
+        : checked;
     const name = [
       declaration.name.name,
       ...(whole ? [] : (place?.path ?? []).map(propertyName)),
@@ -194,15 +205,15 @@ export class Contracts {
 
   /**
    * A completion's checked type with each object's properties in the order the natural plan's check lists them: by
-   * `fieldOrder` over the literal records below the store's value, level by level, as `ContractDescriptors` fills a
+   * `fieldOrder` over the records its level was first filled from (`#firstRecords`), as `ContractDescriptors` fills a
    * decided object (#2215). A contract lists properties only where it filled a decided object, so nothing more is asked.
    */
-  #inNaturalOrder(type: TypePlan, records: readonly Expression[]): TypePlan {
+  #inNaturalOrder(type: TypePlan, id: PlaceId, path: readonly string[]): TypePlan {
     switch (type.kind) {
       case "union":
         return {
           kind: "union",
-          members: type.members.map((member) => this.#inNaturalOrder(member, records)),
+          members: type.members.map((member) => this.#inNaturalOrder(member, id, path)),
         };
       case "list":
       case "set":
@@ -211,18 +222,18 @@ export class Contracts {
           ? type
           : {
               kind: type.kind,
-              element: this.#inNaturalOrder(
-                type.element,
-                recordsBelow(records, this.#literalOf).elements,
-              ),
+              element: this.#inNaturalOrder(type.element, id, joinSteps(path, ["element"])),
             };
       case "object": {
-        const below = recordsBelow(records, this.#literalOf);
+        const below = recordsBelow(this.#firstRecords(id, path), this.#literalOf);
         const byName = new Map(type.properties.map((property) => [property.name, property]));
         const properties = fieldOrder(byName.keys(), below, this.index).map((name) => {
           // EVIDENCE: `fieldOrder` returns `byName`'s own keys, in another order.
           const property = byName.get(name)!;
-          return { name, type: this.#inNaturalOrder(property.type, below.fields.get(name) ?? []) };
+          return {
+            name,
+            type: this.#inNaturalOrder(property.type, id, joinSteps(path, [propertyStep(name)])),
+          };
         });
         return type.keepExtra === true
           ? { kind: "object", properties, keepExtra: true }
@@ -231,6 +242,51 @@ export class Contracts {
       default:
         return type;
     }
+  }
+
+  /** Records that a contract was asked for at a place's level, and with which records, where it was not asked before. */
+  #ask(id: PlaceId, path: readonly string[], records: readonly Expression[]): void {
+    let level = this.#asked.get(id);
+    if (level === undefined)
+      this.#asked.set(id, (level = { at: -1, records: null, below: new Map() }));
+    for (const step of path) {
+      let next = level.below.get(step);
+      if (next === undefined)
+        level.below.set(step, (next = { at: -1, records: null, below: new Map() }));
+      level = next;
+    }
+    if (level.records !== null) return;
+    level.records = records;
+    level.at = this.#asks++;
+  }
+
+  /**
+   * The records a level's contract was first filled from (`#ask`): the first asked level at or above it fills each level
+   * below it that a decided object or a collection reaches, from the records below its own, step by step; none where
+   * nothing was asked.
+   */
+  #firstRecords(id: PlaceId, path: readonly string[]): readonly Expression[] {
+    let level = this.#asked.get(id);
+    let first: AskedLevel | null = null;
+    let from = 0;
+    for (let depth = 0; level !== undefined; depth += 1) {
+      if (level.records !== null && (first === null || level.at < first.at)) {
+        first = level;
+        from = depth;
+      }
+      if (depth === path.length) break;
+      const step = path[depth]!;
+      // (a fill goes down an element or a property only: a level below another step is filled by its own ask)
+      if (step !== "element" && propertyStep(propertyName(step)) !== step) first = null;
+      level = level.below.get(step);
+    }
+    let records = first?.records ?? [];
+    for (let depth = from; depth < path.length; depth += 1) {
+      const step = path[depth]!;
+      const below = recordsBelow(records, this.#literalOf);
+      records = step === "element" ? below.elements : (below.fields.get(propertyName(step)) ?? []);
+    }
+    return records;
   }
 
   /**
@@ -471,6 +527,7 @@ export class Contracts {
 
   /** A place's contract at a path as the plan's check carries it (`ContractDescriptors`), for a value read from it. */
   #contract(id: PlaceId, path: readonly string[], at: Expression): TypePlan | null {
+    this.#ask(id, path, []);
     return checkedType(this.#descriptors.result(id, path, [], () => outsideStructure(at)));
   }
 
@@ -613,6 +670,13 @@ function typedDefault(node: Expression): Expression | null | undefined {
 interface RecordsBelow {
   readonly elements: readonly Expression[];
   readonly fields: ReadonlyMap<string, readonly Expression[]>;
+}
+
+/** A place's level as its contract was first asked for (`Contracts.#ask`): in which turn, with which records. */
+interface AskedLevel {
+  at: number;
+  records: readonly Expression[] | null;
+  readonly below: Map<string, AskedLevel>;
 }
 
 /** No literal data below a level. */
