@@ -118,6 +118,7 @@ export function movedLinesOf(base, head, paths = [], cwd = process.cwd()) {
     );
   const colourAt = (index) => LEADING_SGR.exec(coloured[index])?.[1] ?? "";
   const files = [];
+  const deleted = new Set();
   let file = null;
   for (let index = 0; index < lines.length; index += 1) {
     const text = lines[index];
@@ -137,6 +138,7 @@ export function movedLinesOf(base, head, paths = [], cwd = process.cwd()) {
     if (file === null)
       throw new MovedLinesUnreadable(`moved-lines: output before a file header: ${text}`);
     if (text.startsWith("new file mode ")) file.added = true;
+    else if (text.startsWith("deleted file mode ")) deleted.add(file);
     else if (text.startsWith("--- ")) file.old = nameOf(text.slice(4), "a/", text);
     else if (text.startsWith("+++ ")) file.file = nameOf(text.slice(4), "b/", text);
     else if (text.startsWith("rename from "))
@@ -184,6 +186,17 @@ export function movedLinesOf(base, head, paths = [], cwd = process.cwd()) {
         } else throw new MovedLinesUnreadable(`moved-lines: a context line in a -U0 hunk: ${body}`);
       }
     }
+  }
+  // a change with no `---`/`+++` lines (a mode change, an empty file added or deleted) names its file in its header
+  // alone, `diff --git a/NAME b/NAME`
+  for (const change of files) {
+    if (change.binary || change.old !== null || change.file !== null) continue;
+    const rest = change.header.slice("diff --git ".length);
+    const name = rest.slice(2, (rest.length - 1) / 2);
+    if (rest !== `a/${name} b/${name}`)
+      throw new MovedLinesUnreadable(`moved-lines: an unreadable file header: ${change.header}`);
+    if (!change.added) change.old = name;
+    if (!deleted.has(change)) change.file = name;
   }
   return files;
 }

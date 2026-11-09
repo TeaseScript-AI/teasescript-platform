@@ -647,7 +647,10 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
   };
 }
 
-/** The check of the change from the merge base of `base` and `HEAD`: `{ unadmitted, declared, stale, bindings, counts }`. */
+/**
+ * The check of the change from the merge base of `base` and `HEAD`: `{ mergeBase, unadmitted, declared, stale, refused,
+ * covered, bindings, renames, counts }`.
+ */
 export function checkMove(
   base,
   { declare = null, renames = null, paths = [], cwd = process.cwd() } = {},
