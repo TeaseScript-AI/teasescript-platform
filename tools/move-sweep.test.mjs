@@ -264,6 +264,9 @@ test("on purpose unlike the Python sweep: an empty map applies no form, a quoted
     "y/target.js": 'const stale = "y/target.ts";\n',
   });
   symlinkSync("y/target.js", join(r.root, "link.mjs"));
+  // A link to a file outside the repository, which Git does not track: its stale reference is not read either.
+  writeFileSync(join(r.root, "..", "outside.txt"), 'const stale = "y/target.ts";\n');
+  symlinkSync("../outside.txt", join(r.root, "linked-out.mjs"));
   r.commit();
   const empty = r.run("--renames", r.json("empty", { renames: {} }));
   assert.equal(empty.status, 0);

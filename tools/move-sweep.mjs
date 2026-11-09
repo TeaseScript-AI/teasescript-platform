@@ -37,7 +37,7 @@
 //     to U+200A, U+2028, U+2029, U+202F, U+205F and U+3000, which neither JavaScript's `\s` nor `trim` is (they take
 //     U+FEFF and leave U+001C to U+001F and U+0085); a hit's line is trimmed of it, as Python's `strip`;
 //   - any character but `\n` matches where Python's `.` does (`[^\n]`, also U+2028 and U+2029).
-// It differs from the Python sweep on purpose in four inputs, each tested:
+// It differs from the Python sweep on purpose in five inputs, each tested:
 //   - an empty map (no move): nothing is moved, so no form applies (the Python's forms 2, 4 and 5 then match an empty
 //     name, `"/.ts"`);
 //   - an old path whose list of new paths is empty, a split to nothing: a malformed map, refused (exit 2); the Python
@@ -46,7 +46,9 @@
 //     through NUL-separated names; the Python read `git ls-files`' quoted names, could not open such a file and
 //     skipped it;
 //   - a symbolic link: its committed blob is its target's path, so it is not read as a text file; the Python opened the
-//     file it pointed to, which the tree holds under its own path anyway.
+//     file it pointed to. A tracked target is read under its own path, so that changes no hit;
+//   - a tracked link to an untracked target: the target is not read, where the Python read through the link and could
+//     report a stale reference in it. A file outside the committed tree is outside what the sweep claims.
 // Beside them it prints what the Python left silent: the tracked files neither reads because they are not UTF-8 (a
 // binary or a fixture in another encoding), so that a sweep's "nothing found" says which files it read. That is an
 // output difference, not a hit difference.
