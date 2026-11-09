@@ -1294,6 +1294,8 @@ function runtimeChecks(
   const stopped = answers.budget.exhausted !== null;
   // each store's owed obligations, for the parts below its destination its own check does not reach (#1224)
   const atStore = new Map<Store, Obligation[]>();
+  // (a store's own check against `unknown` that no completed contract renders, for `undecidedChecks`)
+  const unrendered: Obligation[] = [];
   for (const { obligation, kinds, by } of owed) {
     // a boundary check against `unknown` is the runtime's validation of representable external data, which runs for
     // every plan: no plan content (S3 §4); where a stopped decision left a store's own check against `unknown` (no
@@ -1305,7 +1307,10 @@ function runtimeChecks(
           ? index.findExpressionAt(obligation.site)
           : undefined;
       const owner = at === undefined ? undefined : index.storeOf(at);
-      if (owner === undefined || !contracts.completes(owner)) continue;
+      if (owner === undefined || !contracts.completes(owner)) {
+        if (!obligation.boundary) unrendered.push(obligation);
+        continue;
+      }
     }
     const expression = index.expressionAt(obligation.site);
     const store = index.storeOf(expression);
@@ -1362,7 +1367,33 @@ function runtimeChecks(
     );
     if (parts.length > 0) core.partChecks.set(store, parts);
   }
+  undecidedChecks(answers, index, unrendered, checks, core);
   return { checks, core, contracts: contracts.results, moved: movedChecks(checks, core, owers) };
+}
+
+/**
+ * After a stop before admission settled (#2080): no registry gates the plan there (`Answers.gated`, `lostCheck`), and the
+ * fresh finishing pass marks each inferred store against `unknown` (`freshStores`). A store whose own such check the
+ * discharge gave no plan check, whole or in part, declines the program at that store (`OutsideContract`): the stopped
+ * plan would otherwise run past a check the natural plan makes (#1526 decision 2, condition 1). A boundary against
+ * `unknown`, the runtime's validation of external data, owes no plan check.
+ */
+function undecidedChecks(
+  answers: Answers,
+  index: SliceIndex,
+  unrendered: readonly Obligation[],
+  checks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
+  core: CoreRuntimeChecks,
+): void {
+  if (answers.budget.exhausted === null || answers.budget.settled) return;
+  for (const obligation of unrendered) {
+    const store = index.storeOf(index.expressionAt(obligation.site));
+    if (store === undefined || checks.has(store) || core.partChecks.has(store)) continue;
+    throw new OutsideContract(
+      store.kind === "letStatement" ? store.initializer : store.value,
+      "a store whose check an unsettled stop left undecided",
+    );
+  }
 }
 
 /**
@@ -1375,8 +1406,8 @@ function runtimeChecks(
  * (`keeps`). The first Lost obligation, in the registry's source order, declines the program at its store
  * (`OutsideContract`): the stopped plan would otherwise run past a check the natural plan makes (ADR 0021 §1.10, r4.295
  * column (2)). A program the analysis rejects has no plan and is not asked. Where admission did not settle there is no
- * registry and nothing is declined here: an unsettled stop is #1767's and #1252's. One visit per obligation of the
- * registry, whose making charged each one (r4.261).
+ * registry and nothing is declined here: an unsettled stop's stores are `undecidedChecks`'s. One visit per obligation of
+ * the registry, whose making charged each one (r4.261).
  */
 function lostCheck(
   answers: Answers,
@@ -1399,9 +1430,9 @@ function lostCheck(
     );
   }
   for (const { obligation, result } of gated) {
-    // (a stopped decision's own marks stand at every store of it, external data or not: the store's own C1 check and
-    // its C9 boundary are the checks it owes when the script runs)
-    if (obligation.epoch !== answers.epoch || obligation.slot.role === "stopped") continue;
+    // (a stopped decision's own marks too: its store's own C1 check and its C9 boundary are checks it owes when the
+    // script runs, kept only as any other obligation is, #2080)
+    if (obligation.epoch !== answers.epoch) continue;
     const store = index.storeAt(obligation.slot.site);
     if (
       store === undefined ||
