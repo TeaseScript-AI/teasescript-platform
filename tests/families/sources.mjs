@@ -1,5 +1,7 @@
 // A generator's sources as the runner (`run.mjs`) runs them and the check (`check.mjs`) compares them, and the folders
-// that hold generators, as the check and the baselines (`baselines.mjs`) find them.
+// that hold generators, as the check and the baselines (`baselines.mjs`) find them. A stored baseline's tool: the
+// families runner's test scans this file for writes and computed `import()` outside the gate (#1542), so a helper with
+// either belongs in a module of its own (`units.mjs`).
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";

@@ -38,6 +38,9 @@ import {
   withQuestionBound,
   withQuestionMemory,
 } from "./helpers/type-core-oracles.js";
+import type { InstructionPlan, TypeCheckPlan } from "../src/plan/model.js";
+import { HELD_MODES } from "./helpers/type-core-held-host.js";
+import { hostValues, stopRuns } from "./helpers/type-core-stop-oracle.js";
 import { DOUBLING } from "./helpers/type-core-work.js";
 
 /*
@@ -621,4 +624,435 @@ test("a decision record is read by its place and its exact path, never by the fi
       .map((d) => d.units),
     [7, 9],
   );
+});
+
+/** `plan` with each store type check `edit` gives back, removed where it gives `undefined` (a planted change, #2080). */
+function editedTypeChecks(
+  plan: InstructionPlan,
+  edit: (check: TypeCheckPlan) => TypeCheckPlan | undefined,
+): InstructionPlan {
+  const text = JSON.stringify(plan, (key, value: unknown) => {
+    if (key !== "typeCheck") return value;
+    // EVIDENCE: invariant: a plan's `typeCheck` is a `TypeCheckPlan`, a type and the place it is checked at.
+    const check = value as TypeCheckPlan;
+    return edit(check);
+  });
+  // EVIDENCE: invariant: a plan is JSON-safe data, so its text read back is the same plan with the edited checks.
+  return JSON.parse(text) as InstructionPlan;
+}
+
+/** `plan` without its stores' type checks, or without its first one only (a planted lost check, #2080). */
+function withoutTypeChecks(plan: InstructionPlan, firstOnly = false): InstructionPlan {
+  let removed = false;
+  return editedTypeChecks(plan, (check) => {
+    if (firstOnly && removed) return check;
+    removed = true;
+    return undefined;
+  });
+}
+
+test("a stop's runs take host data made from the source's own property names: one pool per global it reads, the same each time (#2080)", () => {
+  const files = [
+    { path: "main.tease", source: 'let a = {box: {f: hostValue}}\nsay "${a.box.f}"\nexit\n' },
+  ];
+  const values = hostValues(files, GLOBALS);
+  assert.deepEqual(hostValues(files, GLOBALS), values);
+  // (a global the source never reads stays 1)
+  assert.ok(values.every((each) => each.hostOther === 1 && each.hostInit === 1));
+  const shown = new Set(values.map((each) => JSON.stringify(each.hostValue)));
+  for (const value of [1, "s", null, { kind: "list", items: [] }])
+    assert.ok(shown.has(JSON.stringify(value)), JSON.stringify(value));
+  assert.ok(
+    shown.has(
+      JSON.stringify({
+        kind: "object",
+        properties: [
+          { name: "box", value: { kind: "object", properties: [{ name: "f", value: "s" }] } },
+        ],
+      }),
+    ),
+    "an object two properties deep, by the source's names",
+  );
+  // (a path read below a value: an object along it, three properties deep)
+  const deep = [{ path: "main.tease", source: 'say "${hostValue.a.b.c}"\nexit\n' }];
+  assert.ok(
+    hostValues(deep, GLOBALS).some(
+      (each) =>
+        JSON.stringify(each.hostValue) ===
+        JSON.stringify({
+          kind: "object",
+          properties: [
+            {
+              name: "a",
+              value: {
+                kind: "object",
+                properties: [
+                  { name: "b", value: { kind: "object", properties: [{ name: "c", value: "s" }] } },
+                ],
+              },
+            },
+          ],
+        }),
+    ),
+  );
+  // (two globals read: a smaller pool each, its scalars and collections whole, the product capped)
+  const two = [{ path: "main.tease", source: "let a = hostValue\nlet b = hostOther\nexit\n" }];
+  const both = hostValues(two, GLOBALS);
+  for (const value of [0, 2.5, { kind: "dict", entries: [] }])
+    assert.ok(
+      both.some((each) => JSON.stringify(each.hostOther) === JSON.stringify(value)),
+      JSON.stringify(value),
+    );
+  assert.ok(hostValues(two, GLOBALS, 50).length <= 50);
+});
+
+test("a stop's runs find a stopped plan that runs past a runtime failure the natural plan raises, and none in a sound one (#2080)", () => {
+  const files = [
+    { path: "main.tease", source: 'let n: integer = 1\nn = hostValue\nsay "after"\nexit\n' },
+  ];
+  for (const mode of MODES) {
+    const run = <T>(make: () => T): T => inMode(mode, make);
+    // (an allowance that stops nothing: the stopped plan is the natural one, every run alike)
+    assert.equal(
+      stopRuns(files, ["hostValue"], run, 1_000_000).kind,
+      "closed",
+      JSON.stringify(mode),
+    );
+    // (the same plan without its store's type check: the natural plan fails where it runs on)
+    const found = stopRuns(files, ["hostValue"], run, 1_000_000, (plan) => withoutTypeChecks(plan));
+    assert.equal(found.kind, "open", JSON.stringify(mode));
+    assert.equal(found.first?.natural?.failure?.code, "TSR058");
+    assert.equal(found.first?.stopped.failure, null);
+    assert.deepEqual(found.first?.stopped.said, ["after"]);
+  }
+});
+
+test("a stop's runs of a program the natural compile rejects run nothing where the stop rejects it too (#2080)", () => {
+  const files = [{ path: "main.tease", source: 'let n: integer = 1\nn = "x"\nexit\n' }];
+  const found = stopRuns(files, ["hostValue"], (make) => make(), 16);
+  assert.equal(found.kind, "no plan");
+  assert.equal(found.runs, 0);
+});
+
+test("a stop's runs report a later failure at another site, and a difference no host value exercised as unwitnessed, never closed (#2080, Codex r1 on #2142)", () => {
+  const run = <T>(make: () => T): T => make();
+  // (the first store's check only removed: the stopped plan fails at the second store, saying nothing more)
+  const later = stopRuns(
+    [
+      {
+        path: "main.tease",
+        source: 'let n: integer = hostValue\nlet m: integer = hostValue\nsay "after"\nexit\n',
+      },
+    ],
+    ["hostValue"],
+    run,
+    1_000_000,
+    (plan) => withoutTypeChecks(plan, true),
+  );
+  assert.equal(later.kind, "later");
+  assert.notEqual(later.first?.natural?.failure?.start, later.first?.stopped.failure?.start);
+  // (the store's check runs only for a duration, which the pool never offers: the plans differ, no run tells them apart)
+  const unwitnessed = stopRuns(
+    [
+      {
+        path: "main.tease",
+        source:
+          'let n: integer = 1\nif hostValue is duration {\n  n = hostOther\n}\nsay "after"\nexit\n',
+      },
+    ],
+    ["hostValue", "hostOther"],
+    run,
+    1_000_000,
+    (plan) => withoutTypeChecks(plan),
+  );
+  assert.equal(unwitnessed.kind, "unwitnessed");
+});
+
+test("a stop's runs leave a difference unwitnessed where a failure elsewhere hides it, and read an earlier stricter failure as no escape (#2080, Codex r2 on #2142)", () => {
+  const run = <T>(make: () => T): T => make();
+  // (`hidden`'s check removed, which only a duration reaches; `visible`'s check fails for many values: still undecided)
+  const hidden = stopRuns(
+    [
+      {
+        path: "main.tease",
+        source:
+          'if hostValue is integer {\n  let visible: string = hostOther\n}\nlet hidden: integer = 1\nif hostValue is duration {\n  hidden = hostOther\n}\nsay "after"\nexit\n',
+      },
+    ],
+    ["hostValue", "hostOther"],
+    run,
+    1_000_000,
+    (plan) =>
+      editedTypeChecks(plan, (check) => (check.place.includes("hidden") ? undefined : check)),
+  );
+  assert.equal(hidden.kind, "unwitnessed");
+  // (the first of two stores strengthened from number to integer: at 2.5 it fails first, where the natural plan fails at the second)
+  const stricter = stopRuns(
+    [
+      {
+        path: "main.tease",
+        source: 'let a: number = hostValue\nlet b: integer = hostValue\nsay "after"\nexit\n',
+      },
+    ],
+    ["hostValue"],
+    run,
+    1_000_000,
+    (plan) =>
+      editedTypeChecks(plan, (check) =>
+        check.type.kind === "number" ? { ...check, type: { kind: "integer" } } : check,
+      ),
+  );
+  // (no escape: stricter is not a class the oracle claims, so the differing plans stay unresolved)
+  assert.equal(stricter.kind, "unwitnessed");
+});
+
+test("a stop's runs catch the design round's controls: a false branch, a nested element, a later failure with no output, and an error site no run reaches (#2080, the design round on #2142)", () => {
+  const run = <T>(make: () => T): T => make();
+  const unit = (source: string) => [{ path: "main.tease", source }];
+  // (the false branch's store check removed: the pool's false reaches it)
+  assert.equal(
+    stopRuns(
+      unit(
+        "let flag: boolean = hostValue\nlet n: integer = 1\nif flag {} else { n = hostOther }\nexit\n",
+      ),
+      ["hostValue", "hostOther"],
+      run,
+      1_000_000,
+      (plan) =>
+        editedTypeChecks(plan, (check) => (check.place.includes("'n'") ? undefined : check)),
+    ).kind,
+    "open",
+  );
+  // (the inner element of `integer[][]` opened: values made from the checked type reach it)
+  assert.equal(
+    stopRuns(
+      unit("let n: integer[][] = hostValue\nexit\n"),
+      ["hostValue"],
+      run,
+      1_000_000,
+      (plan) =>
+        editedTypeChecks(plan, (check) => ({
+          ...check,
+          type: { kind: "list", element: { kind: "list", element: null } },
+        })),
+    ).kind,
+    "open",
+  );
+  // (the first of two stores' checks removed, nothing said on either side: the stopped plan ran past the first check)
+  assert.equal(
+    stopRuns(
+      unit("let n: integer = hostValue\nlet m: integer = hostValue\nexit\n"),
+      ["hostValue"],
+      run,
+      1_000_000,
+      (plan) => withoutTypeChecks(plan, true),
+    ).kind,
+    "later",
+  );
+  // (no natural plan; the stop's plan checked at the erring store: the false run fails there, the true run never reaches
+  // it, so no run passes it, which the oracle claimed open before the design round)
+  const planted = stopRuns(
+    unit('let flag: boolean = hostValue\nlet n = 1\nif flag {} else { n = "bad" }\nexit\n'),
+    ["hostValue"],
+    run,
+    16,
+    (plan) => ({
+      ...plan,
+      instructions: plan.instructions.map((instruction) =>
+        JSON.stringify(instruction).includes('"bad"')
+          ? { ...instruction, typeCheck: { type: { kind: "integer" }, place: "'n'" } }
+          : instruction,
+      ),
+    }),
+  );
+  assert.equal(planted.natural.plan, false);
+  // (no run passes the store, and nothing without a natural plan is ever closed)
+  assert.equal(planted.kind, "unwitnessed");
+  // (no natural plan; the erring store under a guard no pool value takes: untested, never open)
+  const unreached = stopRuns(
+    unit('let n = 1\nif hostValue is duration { n = "bad" }\nexit\n'),
+    ["hostValue"],
+    run,
+    16,
+  );
+  assert.equal(unreached.natural.plan, false);
+  assert.equal(unreached.kind, "unwitnessed");
+});
+
+test("a stop's runs read #2116's final witness closed on main at demand 64, and open with its store checks dropped, in every held mode (#2080 part 1, PR #2116's final, comment 6736629257)", () => {
+  // (`all:new-cases-2::graph/396`: the lossy stop path kept six runtime checks here on main and none on #2116's head,
+  // where `hostValue = "text"` ran past the store main checks. These tests compile main alone, so they cannot compile
+  // that head: the plan with its store checks dropped stands in for it, the same failure in the same place)
+  const files = [
+    {
+      path: "main.tease",
+      source:
+        'let typed:number=1.5\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\nif hostValue is integer {a=b}\nb=b\nb=a\na=a\nlet out=c\nexit\n',
+    },
+  ];
+  for (const mode of HELD_MODES) {
+    const run = <T>(make: () => T): T => mode.run(make);
+    assert.equal(stopRuns(files, ["hostValue"], run, 64).kind, "closed", mode.name);
+    assert.equal(
+      stopRuns(files, ["hostValue"], run, 64, (plan) => withoutTypeChecks(plan)).kind,
+      "open",
+      mode.name,
+    );
+  }
+});
+
+test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, part, cap, ancestor, file and loop cases stay unwitnessed, two genuine escapes stay open (#2080, Codex r3 on #2142)", () => {
+  const unit = (source: string) => [{ path: "main.tease", source }];
+  const loosened = (type: TypeCheckPlan["type"]): TypeCheckPlan["type"] =>
+    type.kind === "list" && type.element?.kind === "list"
+      ? { ...type, element: { kind: "list", element: null } }
+      : type.kind === "union"
+        ? { ...type, members: type.members.map(loosened) }
+        : type;
+  const props = Array.from({ length: 10 }, (_, at) => `p${at}: seed`).join(", ");
+  const cases: {
+    readonly name: string;
+    readonly files: readonly { readonly path: string; readonly source: string }[];
+    readonly globals: readonly string[];
+    readonly demand: number;
+    readonly planted?: (plan: InstructionPlan) => InstructionPlan;
+  }[] = [
+    // (a retained index check fails where the dropped store check is never reached)
+    {
+      name: "index",
+      files: unit("let n: integer = [1, 1, hostOther, 1, 1].get(hostValue, default: 1)\nexit\n"),
+      globals: ["hostValue", "hostOther"],
+      demand: 1_000_000,
+      planted: (plan) => withoutTypeChecks(plan),
+    },
+    // (a union's nested element opened, which no pool value of the union reaches)
+    {
+      name: "union",
+      files: unit("let n: integer[][]? = hostValue\nexit\n"),
+      globals: ["hostValue"],
+      demand: 1_000_000,
+      planted: (plan) =>
+        editedTypeChecks(plan, (check) => ({ ...check, type: loosened(check.type) })),
+    },
+    // (a part check dropped beside a sibling one)
+    {
+      name: "part",
+      files: unit(
+        "let seed: integer = 1\nlet copy = hostValue\nif hostOther is duration {\n copy.a = seed\n copy.xs = [{n: seed}]\n}\ncopy = hostOther\nexit\n",
+      ),
+      globals: ["hostValue", "hostOther"],
+      demand: 1_000_000,
+      planted: (plan) => ({
+        ...plan,
+        instructions: plan.instructions.map((instruction) =>
+          "partChecks" in instruction && Array.isArray(instruction.partChecks)
+            ? {
+                ...instruction,
+                partChecks: instruction.partChecks.filter(
+                  (part: { readonly path: readonly unknown[] }) =>
+                    !JSON.stringify(part.path).includes("xs"),
+                ),
+              }
+            : instruction,
+        ),
+      }),
+    },
+    // (the tenth property of an object widened, past the pool's cap)
+    {
+      name: "cap",
+      files: unit(`let seed: integer = 1\nlet n = {${props}}\nn = hostValue\nexit\n`),
+      globals: ["hostValue"],
+      demand: 1_000_000,
+      planted: (plan) =>
+        editedTypeChecks(plan, (check) =>
+          check.type.kind === "object"
+            ? {
+                ...check,
+                type: {
+                  ...check.type,
+                  properties: check.type.properties.map((property) =>
+                    property.name === "p9" ? { ...property, type: { kind: "number" } } : property,
+                  ),
+                },
+              }
+            : check,
+        ),
+    },
+    // (no natural plan; the erring store behind a check no pool value passes, inside a block the runs enter)
+    {
+      name: "ancestor",
+      files: unit(
+        'let n = 1\nif hostValue is boolean {\n  let gate: duration = hostOther\n  n = "bad"\n}\nexit\n',
+      ),
+      globals: ["hostValue", "hostOther"],
+      demand: 16,
+    },
+    // (no natural plan; the erring store in another file, at offsets of a store of the main file)
+    {
+      name: "file",
+      files: [
+        {
+          path: "main.tease",
+          source: `${" ".repeat("let n = 1\nif hostValue is duration { ".length)}let x = 1\nexit\n`,
+        },
+        {
+          path: "other.tease",
+          source: 'let n = 1\nif hostValue is duration { n = "bad" }\nexit\n',
+        },
+      ],
+      globals: ["hostValue"],
+      demand: 16,
+    },
+    // (a stricter check in a loop: the stopped plan fails in the second round, before the natural failure)
+    {
+      name: "loop",
+      files: unit(
+        "let current = hostValue\nrepeat 2 {\n let a: number = current\n let b: integer = current\n current = hostOther\n}\nexit\n",
+      ),
+      globals: ["hostValue", "hostOther"],
+      demand: 1_000_000,
+      planted: (plan) =>
+        editedTypeChecks(plan, (check) =>
+          check.type.kind === "number" ? { ...check, type: { kind: "integer" } } : check,
+        ),
+    },
+  ];
+  for (const mode of HELD_MODES)
+    for (const { name, files, globals, demand, planted } of cases)
+      assert.equal(
+        stopRuns(files, globals, (make) => mode.run(make), demand, planted).kind,
+        "unwitnessed",
+        `${name} (${mode.name})`,
+      );
+  // (the two campaign items Codex r3 confirmed as genuine escapes: a store the natural compile rejects, reached and passed)
+  const controls = [
+    {
+      mode: HELD_MODES[3]!,
+      source:
+        "let typed: list = [1]\nlet root = {h: {f: typed}}\nroot.q = root\nlet a = root.q\nlet seen = a.h.f\nexit\n",
+      globals: ["hostValue", "hostInit"],
+    },
+    {
+      mode: HELD_MODES[0]!,
+      source:
+        "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+      globals: ["hostValue", "hostOther", "hostInit"],
+    },
+  ];
+  for (const { mode, source, globals } of controls) {
+    const found = stopRuns(unit(source), globals, (make) => mode.run(make), 16);
+    assert.equal(found.natural.plan, false, source);
+    assert.equal(found.kind, "open", source);
+  }
+  // (one of the nine `later` campaign items: the stopped run passes the store the natural plan rejects and fails at the
+  // loop's own start, which takes no round)
+  const later = stopRuns(
+    unit(
+      "let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:2.5,nest:{n:2.5,keep:1},spare:1}\nlet a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n",
+    ),
+    ["hostValue", "hostOther", "hostInit"],
+    (make) => HELD_MODES[2]!.run(make),
+    64,
+  );
+  assert.equal(later.kind, "later");
 });

@@ -367,6 +367,40 @@ Exit statuses:
 - 2: a usage error, or input it cannot read.
 - 3: for `collect`, a shard did not run.
 
+## Stop runs
+
+`stop-runs.mjs` (#2080) looks, on one built tree, for a stop that lets a value through that the natural plan rejects.
+For each item it compiles the unit unstopped and at the item's demand allowance, in its mode, and runs both plans over
+host data: `stopRuns` and `hostValues` in `tests/helpers/type-core-stop-oracle.ts`, which also feed that data to
+`stopProblems` as its violating runs. The host data holds scalars and collections, objects by the unit's own property
+names and paths, and values made from every type either plan checks.
+
+It claims only what it demonstrates (#2142, under docs/DEVELOPMENT-WORKFLOW.md#review-convergence). As #2080's design
+round put it: positive escapes are the blockers; an unwitnessed cell is unresolved evidence.
+- `open`: a run where the natural plan fails at runtime and the stopped plan runs to its end. With no natural plan (a
+  compile error the stop turned into runtime checks): a run in a single-file unit that executes the error's own store
+  instruction, the innermost one holding the error's site, and passes it.
+- `later`: a run where both fail at different sites, and the stopped run executed the natural failure's exact
+  instruction and passed it, in a single-file unit with no loop round in its trace (`docs/RUNTIME.md#instruction-trace`).
+- `closed`: the two plans are equal. Nothing else is `closed`, and nothing without a natural plan ever is.
+- `unwitnessed`: every other difference, among them multi-file units, loops, an earlier failure, a failure of a sibling
+  or of another check, and a no-plan error not shown passed. It is unresolved evidence, never proof that no check is
+  owed. `untested` lists each place the plans differ that no run failed either plan inside, and with no natural plan
+  each natural error's site; it and the type-derived values find escapes and never decide `closed`.
+- `declined`, `natural declined`, `no plan`: a refusal, or nothing to run.
+
+An item is a `plans.mjs` record's `{set, name, mode, demand}` or a records row's `{files, globals, label, demand}`.
+The tool writes `rows.jsonl` and `summary.json` to `--out`, a missing unit's row marked `missing`.
+- Exit 1: any `open` or `later` item, a missing unit, or an exception.
+- Exit 2: a usage error or a bad `--shard`.
+- `unwitnessed` is counted, not failed.
+
+```sh
+sx-job submit --commit t=<tree> --shards 8 --mem 6G --campaign <T> --in <items.jsonl> \
+  -- bash -c 'node "$SX_TREE_t/tests/families/stop-runs.mjs" "$SX_TREE_t" "$SX_IN/<items.jsonl>" --shard {i}/{n} \
+  --out "$SX_OUT"'
+```
+
 ## Shadow
 
 `shadow.mjs` (S9b's interim and S11's final shadow comparison, landed by #1704 from the S11 readiness research's copy)
