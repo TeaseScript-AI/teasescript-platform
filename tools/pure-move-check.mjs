@@ -10,8 +10,8 @@
 // An added or removed line Git does not mark as moved is admitted only as one of these forms, nothing else; each form
 // holds the whole line, by that side's blob parsed as TypeScript (TypeScript and JavaScript files; comments are the
 // parser's, so a string's or a template's text is never one):
-//   1. a line of an import or re-export statement (an import declaration, or an export declaration with a module
-//      specifier), with nothing else on it but whitespace and comments;
+//   1. a line of an import or re-export statement (an import declaration, an export declaration with a module
+//      specifier, or `import x = require()`), with nothing else on it but whitespace and comments;
 //   2. a bare `export` keyword added to a moved declaration: an added line where a top-level declaration starts with
 //      its `export` modifier, paired with a removed line where the same declaration starts without one, the rest of
 //      the two lines equal, indentation aside, each removed line paired once;
@@ -51,6 +51,14 @@ import { ts } from "ts-morph";
 import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
 
 const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/u;
+// the resolver's root for a committed tree's paths, and its options: TypeScript's bundler resolution, JavaScript allowed
+const ROOT = "/tree/";
+const RESOLUTION = {
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  module: ts.ModuleKind.ESNext,
+  allowJs: true,
+  resolveJsonModule: true,
+};
 export const RESIDUAL =
   "Git's move detection is heuristic: a moved block below its size threshold (20 alphanumeric characters) reads as added and removed. Read such a failure; it is not overridden.";
 const FORMS = ["import", "export", "whitespace", "header comment"];
@@ -108,7 +116,9 @@ function shapeOf(file, text) {
     const start = statement.getStart(source);
     const isImport =
       ts.isImportDeclaration(statement) ||
-      (ts.isExportDeclaration(statement) && statement.moduleSpecifier !== undefined);
+      (ts.isExportDeclaration(statement) && statement.moduleSpecifier !== undefined) ||
+      (ts.isImportEqualsDeclaration(statement) &&
+        ts.isExternalModuleReference(statement.moduleReference));
     if (isImport) kind.fill(2, start, statement.getEnd());
     const modifiers = ts.canHaveModifiers(statement) ? (ts.getModifiers(statement) ?? []) : [];
     const exportFirst =
@@ -315,34 +325,32 @@ function familiesOf(renames) {
  * A blob's bindings: `{ kind, target, name, as, typeOnly, line, specifier }`, one per imported or re-exported name (a
  * default import's name is `default`, a namespace's `*`, `import x = require()`'s `=`; a side-effect import's, and an
  * empty clause's (`import {} from`, `export {} from`), empty, its local name `{}` for the clause). Its target is
- * `{ type, path }`: `bare` with the specifier itself; `file`, a relative specifier resolved against `exists` as
- * TypeScript resolves it (`.js` to `.ts`, `.tsx` or `.d.ts`, `.mjs` to `.mts` or `.d.mts`, `.cjs` to `.cts` or `.d.cts`,
- * an extensionless one to its file or `/index`); or `missing`, a relative one that resolves to no file, its path.
+ * `{ type, path }`: `bare` with the specifier itself; `file`, a relative specifier resolved by TypeScript's resolver
+ * (bundler resolution, JavaScript files allowed) against that side's tree (`exists`, `existsBelow` for a folder); or
+ * `missing`, a relative one that resolves to no file, its path.
  */
-function bindingsOf(file, text, exists) {
+function bindingsOf(file, text, exists, existsBelow) {
   if (!PARSED.test(file)) return [];
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  // a relative specifier resolved by TypeScript's own resolver against that side's committed tree (`exists`), so its
+  // extension precedence is TypeScript's: `./x.js` is `x.ts`, `x.tsx` or `x.d.ts` before `x.js`; `./x` the same, then
+  // `x.js`, then its `/index`
+  const host = {
+    fileExists: (name) => exists(name.slice(ROOT.length)),
+    directoryExists: (name) => existsBelow(name.slice(ROOT.length)),
+    readFile: () => undefined,
+    realpath: (name) => name,
+    getCurrentDirectory: () => ROOT,
+  };
   const resolve = (specifier) => {
     if (!specifier.startsWith(".")) return { type: "bare", path: specifier };
-    const at = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
-    const tries = [at];
-    for (const [js, own] of [
-      [".js", [".ts", ".tsx", ".d.ts"]],
-      [".mjs", [".mts", ".d.mts"]],
-      [".cjs", [".cts", ".d.cts"]],
-      [".jsx", [".tsx"]],
-    ])
-      if (at.endsWith(js)) for (const ext of own) tries.push(at.slice(0, -js.length) + ext);
-    tries.push(
-      `${at}.ts`,
-      `${at}.tsx`,
-      `${at}.d.ts`,
-      `${at}/index.ts`,
-      `${at}/index.d.ts`,
-      `${at}/index.js`,
-    );
-    const found = tries.find(exists);
-    return found === undefined ? { type: "missing", path: at } : { type: "file", path: found };
+    const found = ts.resolveModuleName(specifier, ROOT + file, RESOLUTION, host).resolvedModule;
+    if (found !== undefined && found.resolvedFileName.startsWith(ROOT))
+      return { type: "file", path: found.resolvedFileName.slice(ROOT.length) };
+    return {
+      type: "missing",
+      path: path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier)),
+    };
   };
   const out = [];
   for (const statement of source.statements) {
@@ -430,6 +438,15 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
   const listed = (ref) =>
     new Set(git("ls-tree", "-r", "--name-only", ref).split("\n").filter(Boolean));
   const trees = { before: listed(mergeBase), after: listed(head) };
+  // each side's folders, for the resolver's `directoryExists`
+  const foldersOf = (paths) => {
+    const out = new Set([""]);
+    for (const one of paths)
+      for (let at = one.lastIndexOf("/"); at > 0; at = one.lastIndexOf("/", at - 1))
+        out.add(one.slice(0, at));
+    return out;
+  };
+  const folders = { before: foldersOf(trees.before), after: foldersOf(trees.after) };
   const sides = { before: new Map(), after: new Map() };
   const relocated = new Set();
   for (const change of files) {
@@ -440,7 +457,12 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
     ]) {
       if (file === null) continue;
       const text = git("cat-file", "blob", `${ref}:${file}`);
-      for (const binding of bindingsOf(file, text, (one) => trees[side].has(one))) {
+      for (const binding of bindingsOf(
+        file,
+        text,
+        (one) => trees[side].has(one),
+        (folder) => folders[side].has(folder.replace(/\/$/u, "")),
+      )) {
         const target = keyOf(binding.target);
         if (family.has(file) && target === keyOf({ type: "file", path: file })) continue;
         // a resolved file that is there on one side only, with no family: a relocation the renames do not name
