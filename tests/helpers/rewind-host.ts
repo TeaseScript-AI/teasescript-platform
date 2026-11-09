@@ -454,7 +454,7 @@ export const shownView = (host: RewindHost): PlayerSession => published(host.ses
  *
  * This family is where "no stale failure notice after the page moved on" is proven: with the read held, each end of
  * the page's lifecycle (replacement, stop, unmount, loss), and the notice observed on the page. The source check of
- * `player-persistence-operations-source.test.ts` sees only how the read's settlement is wired, not what it says.
+ * `player-adoption-settlement-source.test.ts` sees only how the read's settlement is wired, not what it says.
  */
 export const EXIT_AXES = {
   read: ["back", "adopt"],
