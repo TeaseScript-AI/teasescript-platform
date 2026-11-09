@@ -745,8 +745,17 @@ test("`baselines.mjs state` takes a tree's commit from its `.sha`, else from the
       assert.equal(git(folder, "init", "-q").status, 0);
       const committed = git(
         folder,
-        ...["-c", "user.name=families", "-c", "user.email=families@example.invalid"],
-        ...["-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "tree"],
+        "-c",
+        "user.name=families",
+        "-c",
+        "user.email=families@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "tree",
       );
       assert.equal(committed.status, 0, committed.stderr);
       return git(folder, "rev-parse", "HEAD").stdout.trim();
