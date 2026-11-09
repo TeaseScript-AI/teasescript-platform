@@ -185,13 +185,12 @@ class or two classes take, a result outside the manifests, or a source recorded 
 the run (`gate: failed`, exit 1). An exclusion text or a changed diagnostic code that no taxonomy version decides needs
 a new version with a witness before the gate can pass. `--gate` exits 1 unless the verdict is `green`.
 
-Each adjudicated group names what it covers, its verdict, witness, evidence and, while open, what closes it; it supplies
-the verdict only for exactly bound pairs. A defect stays open until its issue is resolved and a new adjudication records
-it; a pending construction stays open until it is built and re-adjudicated. Bindings must validate every raw publication
-against the adjudicated run; re-adjudication replaces the group table and bindings together, with history by version.
-Claim gate movement only from replays; projected counts remain ceilings until replay. Before reading the switch verdict,
-add independent area sources for accepted calls, camera forms and tag predicates that neither gate sources nor converted
-units exercise.
+Each adjudicated group names what it covers, its verdict, witness, evidence and, while open, what closes it. A defect
+stays open until its issue is resolved and a new adjudication records it; a pending construction stays open until it is
+built and re-adjudicated. Bindings must validate every raw publication against the adjudicated run; re-adjudication
+replaces the group table and bindings together, with history by version. Claim gate movement only from replays;
+projected counts remain ceilings until replay. Before reading the switch verdict, add independent area sources for
+accepted calls, camera forms and tag predicates that neither gate sources nor converted units exercise.
 
 ## Checks and corpora by component
 
@@ -485,9 +484,10 @@ discourages.
 
 Derive the obligation inventory from admission's code, recording each obligation-creating site's actual published,
 marked-undecided and reasoned-decline exits, and key the fresh pass and finishing read to it. Apply the accepted
-record's entry r4-182 to the inventory guard and entry r4-165 to the question-source guard; the stop matrix measures
-present losses and does not replace either guard. Retained boundary kinds survive discharge without re-derivation from
-the destination.
+record's entry [r4-182](specifications/type-inference-accepted-record/oracles.md#r4-182) to the inventory guard and
+entry [r4-165](specifications/type-inference-accepted-record/oracles.md#r4-165) to the question-source guard; the stop
+matrix measures present losses and does not replace either guard. Retained boundary kinds survive discharge without
+re-derivation from the destination.
 
 Compare stopped diagnostic messages exactly with the unstopped message or its own words rendering from the message
 module, keeping every other field exact; never parse author text to infer equivalent wording. The extra rendering is
@@ -509,12 +509,13 @@ own span, without comparing target text. Replace one copy at a time, compare ord
 own content. Identify decisions by list, place, exact path and occurrence; preserve repeated occurrences, compare
 counts, pair in order and report repetitions separately from the verdict.
 
-Apply the accepted record's entry r4-322 with a written-leaf proof: the stopped kinds must exactly equal the written
-leaf domain reached from the label root through every recorded step. Compare every remaining record field exactly,
-except read-derived fields must equal what the proven kinds and proof route imply through the consumer's own derivation
-or be refused. Guard against drift in kind-reading obligation sites and read-derived fields; keep narrowed operand
-domains, changed fallback expectations, changed sites or boundaries and an extra property-presence sentence unpaired.
-This proof does not relax the shadow gate's wording comparison.
+Apply the accepted record's entry [r4-322](specifications/type-inference-accepted-record/oracles.md#r4-322) with a
+written-leaf proof: the stopped kinds must exactly equal the written leaf domain reached from the label root through
+every recorded step. Compare every remaining record field exactly, except read-derived fields must equal what the proven
+kinds and proof route imply through the consumer's own derivation or be refused. Guard against drift in kind-reading
+obligation sites and read-derived fields; keep narrowed operand domains, changed fallback expectations, changed sites or
+boundaries and an extra property-presence sentence unpaired. This proof does not relax the shadow gate's wording
+comparison.
 
 Attribute a shifted stop threshold to a scheduled baseline-defect issue only when charging is correct and the mechanism
 and lost check are identical, listing each moved row beside its baseline twin. A loss introduced by the construction
