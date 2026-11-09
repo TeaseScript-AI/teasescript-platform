@@ -170,19 +170,22 @@ that reads a place unless the value lands in a written scalar, and in `Contracts
 answer, or of its default's below a written `object`, that the stop left unproven; (b) after a settled stop, where the
 obligations cannot be found (`Answers.gated()` gives `null`), "a store whose required checks could not be established at
 the budget" (`lostCheck`); (c) after a settled stop, a store whose required check the published plan would not keep, "a
-store whose check was lost at the budget" (`lostCheck`); (d) after a stop before admission settled, `lostCheck` declines
-nothing. Production compiles with the legacy type checker until the switch, which none of these bounds or declines
+store whose check was lost at the budget" (`lostCheck`), a stopped decision's own marks among them (#2080): one whose
+completion result is complete owes nothing where the completion owes no check at its store (a declared claim, #2184),
+else it is kept only by a check that carries its contract, and one whose result was lost or is absent only by a complete
+store check; (d) after a stop before admission settled, `lostCheck` declines nothing. Production compiles with the legacy type checker until the switch, which none of these bounds or declines
 govern.
 
 The requirement is #1526's
 [Owner decision 2](https://github.com/TeaseScript-AI/teasescript-platform/issues/1526#issuecomment-6656976508)
 (2026-11-05, TABLE r4.390), provisional. Condition 1, no executable candidate plan that lets a value through while a
 required check is missing, is built as one gate, `lostCheck` over `Answers.gated()`, declining on unknown obligations
-and lost checks, (b) and (c) above (#1781, `1ec334b94`); that is no claim that every path to a missing check is
+and lost checks, (b) and (c) above (#1781, `1ec334b94`; a stopped decision's own marks, #2080 part 1); that is no claim that every path to a missing check is
 repaired. Condition 2, every remaining case re-assessed before V2 replaces the legacy compiler, is open; its cases open
 at the time of writing (2026-11-06) are #1832, #1845 (with #1846), the unsettled stops of option (a) (#1252; #1767,
-closed), #1838 and #1836, #1772, and #1781's conservative natural-outside declines (128 rows in 8 sources, as reported
-in PR #1781's work-stop set sweep).
+closed; #2080's unsettled side, 476 of its census's owed items), #1838 and #1836, #1772, a typed read a settled stop
+moved to `unknown` (#2183), the claim (c)'s NoCheck rests on (#2184), and #1781's conservative natural-outside declines
+(128 rows in 8 sources, as reported in PR #1781's work-stop set sweep).
 
 ### Accepted work products under the allowance
 
