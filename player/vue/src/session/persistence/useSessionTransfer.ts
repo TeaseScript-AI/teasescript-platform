@@ -196,8 +196,8 @@ export function useSessionTransfer({
     await asTransferError(
       host.client.request("reviewTransfer", {
         ticket: transfer.ticket,
-        scope: keptOwner.keptScopeNow(),
-        plan: keptOwner.scriptPlanNow(),
+        scope: keptOwner.keptScopeNow()!,
+        plan: keptOwner.scriptPlanNow()!,
       }),
     );
     const saved = new Set(storedValueReferences(transfer.entries));
@@ -240,9 +240,7 @@ export function useSessionTransfer({
     input: { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string },
   ): Promise<PlayerTransferRead> {
     const host = await bridgeReady;
-    // EVIDENCE: validation: `readTransfer` replies from the same build with what it read.
-    return (await asTransferError(host.client.request("readTransfer", input)))
-      .result as PlayerTransferRead;
+    return (await asTransferError(host.client.request("readTransfer", input))).result;
   }
   /** The tickets of the session imports under way, which `discardSessionReview` refuses. */
   const importedTickets = new Set<string>();

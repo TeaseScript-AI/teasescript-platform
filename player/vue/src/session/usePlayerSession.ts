@@ -29,8 +29,10 @@ import {
   type PlayerBridge,
   type ServiceSection,
   type SessionSection,
+  type UntypedSessionSection,
 } from "../../../runtime/player-bridge.js";
-import { RETIRED, type InputSectionHost } from "./runtime-input";
+import type { SessionOp } from "../../../engine-bridge/op-catalogue.js";
+import { RETIRED, type InputSection, type InputSectionHost } from "./runtime-input";
 import { sweepDebugHistories } from "../../../debug/debug-history-indexeddb.js";
 import type { DebugHistorySpill } from "../../../engine-bridge/history/snapshots.js";
 import type { DebugRecorder } from "../../../debug/debug-recorder.js";
@@ -556,11 +558,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   ): Promise<T | null> {
     return ownedSection(servicedSession.value, "service", (section, _owned, observed) =>
       body(
+        // EVIDENCE: invariant: `ServiceSection` pairs each op with its arguments, which this forwards as they are.
         {
           // What the services send shows as any work completing after a reply does.
-          send: (op, args, basis) =>
-            section.send(op, args, { basis, publish: (next) => void publishOwned(next) }),
-        },
+          send: (op: SessionOp, args: unknown, basis: number) =>
+            // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- EVIDENCE: invariant: the pairs `ServiceSection` made, sent on as they are.
+            (section as UntypedSessionSection).send(op, args, {
+              basis,
+              publish: (next) => void publishOwned(next),
+            }),
+        } as ServiceSection,
         observed,
       ),
     );
@@ -572,12 +579,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const inputSection: InputSectionHost = (work, body) =>
     ownedSection(session.value, work, (section, owned, observed) =>
       body(
+        // EVIDENCE: invariant: `InputSection` pairs each op with its arguments, which this forwards as they are.
         {
           owned,
-          send: async (op, args) => {
+          send: async (op: SessionOp, args: unknown) => {
             if (!owned()) return RETIRED;
             try {
-              return await section.send(op, args, { publish: (next) => void publishOwned(next) });
+              // EVIDENCE: invariant: the pairs `InputSection` made, sent on as they are.
+              return await (section as UntypedSessionSection).send(op, args, {
+                publish: (next) => void publishOwned(next),
+              });
             } catch (error) {
               if (endsQuietly(error)) return RETIRED;
               throw error;
@@ -586,7 +597,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           get session() {
             return section.session;
           },
-        },
+        } as InputSection,
         observed,
       ),
     );

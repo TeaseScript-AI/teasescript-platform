@@ -1,4 +1,4 @@
-import type { ActionCompletionOutcome, CaptureUnavailableReason } from "../../src/index.js";
+import type { CaptureUnavailableReason } from "../../src/index.js";
 import { answerRecord, dropAnswer, sendAnswer, type AnswerRecord } from "./answer-media.js";
 import type { CapturedMediaStore } from "./captured-media.js";
 import type {
@@ -449,7 +449,7 @@ export class CaptureService {
     if (!observed || activePlayerRuntimeCapture(observed.state)?.actionId !== actionId)
       return this.#settled(record.key);
     const outcome = await this.#send(record, () =>
-      section.send<ActionCompletionOutcome>(
+      section.send(
         "answerCapture",
         { actionId, answer, held: heldMedia(this.#host.capturedMedia, madePhotos(answer)) },
         observed.revision,
@@ -467,7 +467,7 @@ export class CaptureService {
     const fallback = answerRecord(record.key, record.generation, Promise.resolve(unavailable));
     this.#replace(fallback);
     await this.#send(fallback, () =>
-      section.send<ActionCompletionOutcome>(
+      section.send(
         "answerCapture",
         { actionId, answer: unavailable, held: null },
         observed.revision,

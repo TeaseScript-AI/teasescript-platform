@@ -1,5 +1,6 @@
 import type { StopArguments } from "../../../../../engine-bridge/recording/export-observation.js";
 import type { BridgeResult } from "../../../../../engine-bridge/client.js";
+import type { OpResult } from "../../../../../engine-bridge/op-catalogue.js";
 import type { RandomIntent, TracingIntent } from "../../../../../engine-bridge/player-ops.js";
 import { bridgeOf } from "../../../../../runtime/player-bridge.js";
 import type { PlayerSession } from "../../../../../runtime/runtime-view.js";
@@ -38,15 +39,15 @@ export interface SessionTarget {
   /** Gives the session up from this Player's random control, after its earlier requests; its failure is quiet. */
   releaseRandom(): void;
   /** Begins the host's recording of the session for the origin's run. */
-  beginRecording(): Promise<void>;
+  beginRecording(): Promise<OpResult<"beginRecording">>;
   /** Begins a new epoch of the host's value trace with `tracing`. */
-  restartTrace(tracing: TracingIntent): Promise<void>;
+  restartTrace(tracing: TracingIntent): Promise<OpResult<"restartTrace">>;
   /** Lets the random draw `drawId` the session is paused at go on with its natural outcome. */
-  resolveDrawNaturally(drawId: number): Promise<void>;
+  resolveDrawNaturally(drawId: number): Promise<OpResult<"resolveDraw">>;
   /** Tells the script whether Debug is on. */
-  setDebugMode(on: boolean): Promise<void>;
+  setDebugMode(on: boolean): Promise<OpResult<"setDebugMode">>;
   /** Continues the session with the click's `capture`. */
-  continueWith(capture: TemporalCapture): Promise<void>;
+  continueWith(capture: TemporalCapture): Promise<OpResult<"continue">>;
   /** Gives the session this Player's random control from its next op on: the host's reply, with the revision. */
   adoptRandom(intent: RandomIntent): Promise<BridgeResult>;
   /**
@@ -86,27 +87,23 @@ export function sessionTarget(session: PlayerSession, origin: Origin, runs: Runs
     beginRecording() {
       admit();
       if (origin.kind !== "run") throw new TypeError("The initial record has no run to record.");
-      return host.request<void>(session, "beginRecording", origin.begin);
+      return host.request(session, "beginRecording", origin.begin);
     },
     restartTrace(tracing) {
       admit();
-      return host.request<void>(session, "restartTrace", { tracing });
+      return host.request(session, "restartTrace", { tracing });
     },
     resolveDrawNaturally(drawId) {
       admit();
-      return host.request<void>(session, "resolveDraw", {
-        drawId,
-        outcome: "natural",
-        record: null,
-      });
+      return host.request(session, "resolveDraw", { drawId, outcome: "natural", record: null });
     },
     setDebugMode(on) {
       admit();
-      return host.request<void>(session, "setDebugMode", { on });
+      return host.request(session, "setDebugMode", { on });
     },
     continueWith(capture) {
       admit();
-      return host.request<void>(session, "continue", { capture });
+      return host.request(session, "continue", { capture });
     },
     adoptRandom(intent) {
       admit();
@@ -118,7 +115,7 @@ export function sessionTarget(session: PlayerSession, origin: Origin, runs: Runs
     },
     setDebugModeShown(on, publish) {
       admit();
-      return host.request<{ readonly kind: string }>(
+      return host.request(
         session,
         "setDebugMode",
         { on },

@@ -1,4 +1,5 @@
 import type { DebugAnswerInput } from "../../../debug/debug-export.js";
+import type { OpArgs, OpResult, SessionOp } from "../../../engine-bridge/op-catalogue.js";
 import type { PlayerRuntimeControlResult } from "../../../runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../../runtime/runtime-view.js";
 import type { SectionWork } from "./useRuntimeSceneClock.js";
@@ -22,7 +23,9 @@ export interface InputSection {
   /** Whether the section's session still owns the UI. */
   owned(): boolean;
   /** Posts one op of the session while it owns the UI; its publication shows as the Player's publications do. */
-  send<R>(op: string, args: unknown): Promise<R | typeof RETIRED>;
+  send<O extends SessionOp>(
+    ...call: O extends unknown ? [op: O, args: OpArgs<O>] : never
+  ): Promise<OpResult<O> | typeof RETIRED>;
   /** The session's latest publication. */
   readonly session: PlayerSession;
 }
@@ -43,18 +46,31 @@ export type InputSectionHost = <T>(
   body: (section: InputSection, observed: PlayerSession | null) => Promise<T>,
 ) => Promise<T | null>;
 
-/** What a control answers on the observed session: its op and arguments, or `null` when it answers nothing there. */
-export interface InputAnswer {
-  readonly op: string;
-  readonly args: Readonly<Record<string, unknown>>;
-  /**
-   * The main side's work between the checks and the op, such as opening a URL's tab: synchronous, after the
-   * observation, only while the session owns the UI. `false` sends nothing.
-   */
-  readonly effect?: () => boolean;
-  /** Settles what the answer took along, with the op's outcome, or `null` when it was not posted or was refused. */
-  readonly settle?: (outcome: InputOutcome | null) => void;
-}
+/** An op a control answers with: a session op that takes the presented action's `actionId`. */
+export type InputOp = {
+  [O in SessionOp]: OpArgs<O> extends { readonly actionId: number } ? O : never;
+}[SessionOp];
+
+/** An input op's arguments but the `actionId` the send inserts (`runInput`). */
+export type InputArgs<O extends InputOp> = Omit<OpArgs<O>, "actionId">;
+
+/**
+ * What a control answers on the observed session: its op and arguments but `actionId`, each op with its own; or `null`
+ * when it answers nothing there.
+ */
+export type InputAnswer<O extends InputOp = InputOp> = O extends unknown
+  ? {
+      readonly op: O;
+      readonly args: InputArgs<O>;
+      /**
+       * The main side's work between the checks and the op, such as opening a URL's tab: synchronous, after the
+       * observation, only while the session owns the UI. `false` sends nothing.
+       */
+      readonly effect?: () => boolean;
+      /** Settles what the answer took along, with the op's outcome, or `null` when it was not posted or was refused. */
+      readonly settle?: (outcome: InputOutcome | null) => void;
+    }
+  : never;
 export type InputIntent = (observed: PlayerSession) => InputAnswer | null;
 
 export type InputResult =
@@ -66,13 +82,18 @@ export type InputResult =
   | { readonly kind: "unanswered" }
   | { readonly kind: "answered"; readonly session: PlayerSession; readonly outcome: InputOutcome };
 
-/** The op `op`, with `args` read when the intent runs, after the observation, as today's operation read them. */
-const answer = (
-  op: string,
-  args: () => Readonly<Record<string, unknown>> = () => ({}),
+/**
+ * The op `op`, with `args` read when the intent runs, after the observation, as today's operation read them; `input`
+ * added when given. No `args` for an op whose arguments are only `actionId` and `input`.
+ */
+const answer = <O extends InputOp>(
+  op: O,
+  // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- EVIDENCE: invariant: the default is for an op whose arguments are only `actionId` and `input`, as each call without `args` is.
+  args: () => Omit<InputArgs<O>, "input"> = () => ({}) as Omit<InputArgs<O>, "input">,
   input?: DebugAnswerInput | null,
 ): InputIntent => {
-  return () => ({ op, args: input === undefined ? args() : { ...args(), input } });
+  // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- EVIDENCE: invariant: `op`'s arguments, which TypeScript does not see in `args()` and `input` for a generic `O`.
+  return () => ({ op, args: input === undefined ? args() : { ...args(), input } }) as InputAnswer;
 };
 
 /** The op each of the Player's controls answers with; `input` is how the player answered, which the recording keeps. */
@@ -114,7 +135,7 @@ export async function draftInput(
 ): Promise<PlayerSession | null> {
   const drafted = await section("inputDraft", async (input) => {
     if (!input.owned()) return null;
-    const outcome = await input.send<InputOutcome | null>("draftForm", { ...target, text });
+    const outcome = await input.send("draftForm", { ...target, text });
     return outcome !== RETIRED && outcome?.kind === "updated" && input.owned()
       ? input.session
       : null;
@@ -145,10 +166,11 @@ export async function runInput(
       chosen.settle?.(null);
       return { kind: "unanswered" } as const;
     }
-    const outcome = await input.send<InputOutcome | null>(chosen.op, {
-      ...chosen.args,
-      actionId: presented,
-    });
+    // `chosen` pairs its op with its arguments but `actionId` (`InputAnswer`), which TypeScript does not see once
+    // inserted. EVIDENCE: invariant: the pair `chosen` holds, with the presented action's ID.
+    const outcome = await (
+      input as { send(op: InputOp, args: unknown): Promise<InputOutcome | null | typeof RETIRED> }
+    ).send(chosen.op, { ...chosen.args, actionId: presented });
     chosen.settle?.(outcome === RETIRED ? null : outcome);
     if (outcome === RETIRED || !input.owned()) return { kind: "retired" } as const;
     if (outcome === null) return { kind: "unanswered" } as const;

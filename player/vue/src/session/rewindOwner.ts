@@ -1,7 +1,6 @@
 import { computed, ref, shallowRef } from "vue";
 import { DebugHistoryView, rewindFutureOf } from "../../../debug/debug-history.js";
 import type { HistoryDelta, HistoryTimeline } from "../../../engine-bridge/history/core.js";
-import type { HistoryOpResult } from "../../../engine-bridge/ops/history.js";
 import { endsQuietly, type PlayerBridge } from "../../../runtime/player-bridge.js";
 import {
   INITIAL_LIFECYCLE,
@@ -304,7 +303,7 @@ export function createRewindOwner(host: RewindOwnerHost) {
     if (shown === null || shown.connection !== bridge || state.inspecting) return;
     const holds = current();
     void bridge
-      .request<HistoryOpResult>(shown, "historyEnroll", { history })
+      .request(shown, "historyEnroll", { history })
       .then((enrolled) => {
         if (holds() && enrolled.kind === "done" && enrolled.delta !== null)
           made.apply(enrolled.delta);

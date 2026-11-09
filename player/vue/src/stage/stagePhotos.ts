@@ -1,6 +1,5 @@
 import { onScopeDispose, watch } from "vue";
 import type { BridgeClient } from "../../../engine-bridge/client.js";
-import type { PlanMetadata } from "../../../engine-bridge/player-ops.js";
 import { photoSwatches, type PhotoSwatches } from "../../../theme/node-vibrant/swatches.js";
 import type { StagePhotoRequest, StagePhotoResponse } from "./stagePhotoWorker";
 
@@ -399,8 +398,7 @@ export function usePlanPhotoPreload(
       if (connection === null || plan === null) return;
       connection.client.request("planMetadata", { plan }).then(
         (reply) => {
-          // EVIDENCE: validation: `planMetadata` replies from the same build with the plan's metadata, or null.
-          const metadata = reply.result as PlanMetadata | null;
+          const metadata = reply.result;
           // The one acceptance: the reply is still for what shows now, read here from the live source, whatever the
           // order of this reply and the watcher's next run. Nothing is awaited between it and the preload.
           const now = shown();
