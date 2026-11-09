@@ -346,7 +346,8 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "drops a release's refusal; nothing follows",
   "useFailureRecording.ts: useFailureRecording > settle: catch bridge.releaseRecording":
     "drops a release's refusal; nothing follows",
-  "stop.ts: stopLateStart: then starting": READMITS,
+  "stop.ts: stopLateStart: then starting":
+    "its session goes to `stopAt`, which admits the origin and the stop token before its halt, and only stops it otherwise; its failure ends the halting, then admits both before the incident",
   "stop.ts: stopAt: then acknowledged": READMITS,
   // Reached from the activation bodies through the functions they call.
   "useActivationRun.ts: useActivationRun > reply: then pending":
