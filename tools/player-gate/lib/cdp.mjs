@@ -34,9 +34,12 @@ export async function cdpReads(
     cdp.on(event, handler);
     listeners.push([event, handler]);
   };
+  // Request IDs are the browser's, one per request across targets: a Worker's script request starts on the page and
+  // finishes on the Worker's own target (probe job 1109011128be03, Chromium), so it belongs to the Worker.
   const network = (target, method, params) => {
-    const key = `${target} ${params.requestId}`;
+    const key = params.requestId;
     if (method === "Network.requestWillBeSent") {
+      if (requests.has(key)) return;
       requests.set(key, {
         target,
         url: params.request.url,
@@ -52,6 +55,7 @@ export async function cdpReads(
     }
     const request = requests.get(key);
     if (request === undefined) return;
+    if (target !== "page") request.target = target;
     if (method === "Network.responseReceived") {
       request.status = params.response.status;
       request.fromCache =

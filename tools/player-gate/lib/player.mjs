@@ -43,7 +43,7 @@ const sessions = new WeakMap();
 
 /**
  * A real tap at (`x`, `y`) through CDP touch input: the phone's own Chrome profile, attached with `noDefaults`, has no
- * Playwright touch emulation, so `page.touchscreen` refuses there.
+ * Playwright touch emulation, so Playwright's touchscreen refuses there.
  */
 async function tap(page, x, y) {
   if (!sessions.has(page)) sessions.set(page, await page.context().newCDPSession(page));
