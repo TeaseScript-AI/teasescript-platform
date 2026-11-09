@@ -616,19 +616,23 @@ function otherReferencesOf(source, text, compared) {
   ])
     for (const directive of list) refuse(directive.pos, directive.fileName, what);
   const comments = new Set();
-  const visit = (node, inCompared) => {
-    // a JSDoc node's text is a comment's, read as one below
-    if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode)
-      return;
-    const within = inCompared || compared.has(node);
+  // a JSDoc comment is read twice: its parsed tokens as code's, below (never within a compared statement, whose binding
+  // it is not), and its text as a comment's, from the token it precedes
+  const visit = (node, inCompared, inDoc) => {
+    const doc =
+      inDoc ||
+      (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode);
+    const within = !doc && (inCompared || compared.has(node));
     if (node.kind > ts.SyntaxKind.LastToken) {
-      for (const child of node.getChildren(source)) visit(child, within);
+      for (const child of node.getChildren(source)) visit(child, within, doc);
       return;
     }
-    for (const range of [
-      ...(ts.getLeadingCommentRanges(text, node.pos) ?? []),
-      ...(ts.getTrailingCommentRanges(text, node.end) ?? []),
-    ]) {
+    for (const range of doc
+      ? []
+      : [
+          ...(ts.getLeadingCommentRanges(text, node.pos) ?? []),
+          ...(ts.getTrailingCommentRanges(text, node.end) ?? []),
+        ]) {
       if (comments.has(range.pos)) continue;
       comments.add(range.pos);
       const found = /import\(|@import/u.exec(text.slice(range.pos, range.end));
@@ -640,16 +644,17 @@ function otherReferencesOf(source, text, compared) {
         );
     }
     if (within) return;
-    if (node.kind === ts.SyntaxKind.ImportKeyword && !ts.isMetaProperty(node.parent))
-      refuse(node.getStart(source), node.parent.getText(source), "an `import`");
+    const parent = node.parent ?? node;
+    if (node.kind === ts.SyntaxKind.ImportKeyword && !ts.isMetaProperty(parent))
+      refuse(node.getStart(source), parent.getText(source), "an `import`");
     else if (ts.isIdentifier(node) && node.text === "require")
       refuse(
         node.getStart(source),
-        (ts.isCallExpression(node.parent) ? node.parent : node).getText(source),
+        (ts.isCallExpression(parent) ? parent : node).getText(source),
         "a `require`",
       );
   };
-  visit(source, false);
+  visit(source, false, false);
   return out;
 }
 
