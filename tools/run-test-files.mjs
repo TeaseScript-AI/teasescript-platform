@@ -1,10 +1,11 @@
 import { writeFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { run } from "node:test";
 import { spec } from "node:test/reporters";
 import { filesAtOnce } from "./test-files-at-once.mjs";
 import { trackInFlight } from "./test-in-flight.mjs";
+import { suiteName } from "./test-shards.mjs";
 
 // Runs the test files given as arguments in that order, each in its own process, with the reporter and exit status of
 // `node --test`, whose command line sorts the files instead, and as many at once as `node --test` runs, fewer where a
@@ -43,9 +44,10 @@ const tests = run({
 trackInFlight((type, listener) => tests.on(type, listener));
 const seconds = {};
 tests.on("test:complete", (data) => {
-  // (a file's own entry is named by its path as given)
+  // (a file's own entry is named by its path as given; its seconds are kept by its path under `dist/tests/`, which for a
+  // file at the top is its name, as `suiteTestFiles` names it)
   if (data.nesting === 0 && data.file !== undefined && resolve(data.name) === data.file)
-    seconds[basename(data.file)] = data.details.duration_ms / 1000;
+    seconds[suiteName(data.file)] = data.details.duration_ms / 1000;
 });
 tests.on("test:summary", (summary) => {
   if (!summary.success) process.exitCode = 1;
