@@ -18,7 +18,7 @@ import { bridgeOf, endsQuietly, type SessionSection } from "../../../player-brid
 import { BridgeRequestError } from "../../../engine-bridge/client.js";
 import type { MediaReportOutcome } from "../../../../src/index.js";
 import { silence } from "../generatedAudio";
-import type { SectionWork, useRuntimeSceneClock } from "../useRuntimeSceneClock";
+import type { SectionWork, useRuntimeSceneClock } from "./useRuntimeSceneClock";
 import type { ActivationRun } from "./activation/useActivationRun.js";
 
 /*

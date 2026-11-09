@@ -38,7 +38,7 @@ let createInProcessBackend: typeof InProcess.createInProcessBackend;
 let heldRecording: typeof InProcess.heldRecording;
 
 before(async () => {
-  const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
+  const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   const facade = await loadPlayerModule("player/engine-bridge/in-process.ts");
   assert.equal(typeof module.usePlayerSession, "function");
   assert.equal(typeof facade.createInProcessBackend, "function");

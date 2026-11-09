@@ -4,7 +4,7 @@ import type { TracingIntent } from "../../../engine-bridge/player-ops.js";
 import type { DebugView, DebugViewRequest } from "../../../debug-view.js";
 import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../player-bridge.js";
 import type { PlayerSession } from "../../../runtime-view.js";
-import type { useRuntimeSceneClock } from "../useRuntimeSceneClock";
+import type { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 import type { ActivationRun, useActivationRun } from "./activation/useActivationRun.js";
 
 /*

@@ -10,11 +10,11 @@ import {
 import { SessionCamera, type PlayerDiagnostic } from "../../../session-camera.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotices } from "../../../notices.js";
 import { IMAGE_SKIP_TEXT } from "../../../../src/image-input.js";
-import { useCameraChoice } from "../useCameraChoice";
-import { useImageCapture } from "../useImageCapture";
-import { usePlayerTextPreference } from "../usePlayerPreference";
+import { useCameraChoice } from "../stage/useCameraChoice";
+import { useImageCapture } from "../stage/useImageCapture";
+import { usePlayerTextPreference } from "../shell/usePlayerPreference";
 import type { CapturedMediaStore } from "../../../captured-media.js";
-import type { PlayerSessionOptions } from "../usePlayerSession.js";
+import type { PlayerSessionOptions } from "./usePlayerSession.js";
 
 /*
  * The Player's cameras, moved from `usePlayerSession` unchanged: the session camera, which `takePhoto()` and the

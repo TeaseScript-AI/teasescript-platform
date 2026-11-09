@@ -40,7 +40,7 @@ let useImageCapture: (host: unknown) => Capture;
 // Load the real composable through the existing build tool: its browser-source imports use Vite resolution.
 before(async () => {
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useImageCapture.ts",
+    "player/vue/src/stage/useImageCapture.ts",
   );
   assert.equal(typeof module.useImageCapture, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested API.

@@ -201,12 +201,14 @@ let usePlayerDebug: (
 before(async () => {
   await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const rewind: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDebugRewind.ts",
+    "player/vue/src/debug/history/useDebugRewind.ts",
   );
-  const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/usePlayerDebug.ts");
+  const debug: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/debug/usePlayerDebug.ts",
+  );
   const facade: Record<string, unknown> = await loadPlayerModule(
     "player/engine-bridge/in-process.ts",
   );

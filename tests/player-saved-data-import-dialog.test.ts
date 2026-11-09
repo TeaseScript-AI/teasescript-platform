@@ -9,7 +9,7 @@ import { computed, ref, shallowRef } from "vue";
 import { coverageGaps, product } from "./helpers/family-coverage.js";
 
 /*
- * How long the import dialog (`player/vue/src/SavedDataImport.vue`) keeps a session it read in the engine host
+ * How long the import dialog (`player/vue/src/shell/SavedDataImport.vue`) keeps a session it read in the engine host
  * (L5h.2), over its lifetime table: each state the dialog can hold a session in (`STATES`), each event of its life
  * (`EVENTS`), and, for an import, each way it settles. The dialog lets go of a session exactly once, at once where it
  * shows it and the event leaves it, else once what it waits for settles; an import keeps it until it settles, and a
@@ -17,7 +17,7 @@ import { coverageGaps, product } from "./helpers/family-coverage.js";
  * given by the test. The events are every function of the script that starts a new attempt, read from its syntax tree.
  */
 
-const DIALOG = "player/vue/src/SavedDataImport.vue";
+const DIALOG = "player/vue/src/shell/SavedDataImport.vue";
 
 /** The dialog's own script, as TypeScript. */
 const scriptSource = (() => {

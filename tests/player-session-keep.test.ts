@@ -161,7 +161,7 @@ before(async () => {
   // EVIDENCE: validation: the bundle's backend factory, checked as a function above.
   createInProcessBackend = facade.createInProcessBackend as typeof createInProcessBackend;
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.

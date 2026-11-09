@@ -27,7 +27,7 @@ let compiler: typeof CompileProject;
 let adapter: typeof RuntimeAdapter;
 
 before(async () => {
-  const state = await loadPlayerModule("player/vue/src/useRandomDrawPickerState.ts");
+  const state = await loadPlayerModule("player/vue/src/debug/random/useRandomDrawPickerState.ts");
   assert.equal(typeof state.useRandomDrawPickerState, "function");
   // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
   useRandomDrawPickerState = state.useRandomDrawPickerState as typeof useRandomDrawPickerState;
@@ -155,11 +155,11 @@ for (const { replacement, kind, state, name } of CASES)
 // the picker's state take `drawKey`; only `random-draw-identity.ts` reads `drawId` itself, and `useDebugRandom` its
 // identity's.
 const PICKER_MODULES = {
-  "player/vue/src/PlayerApp.vue": [],
-  "player/vue/src/RandomDrawPicker.vue": [],
-  "player/vue/src/useRandomDrawPickerState.ts": [],
-  "player/vue/src/randomDrawPresentation.ts": [],
-  "player/vue/src/useDebugRandom.ts": [/identity\.drawId/u],
+  "player/vue/src/shell/PlayerApp.vue": [],
+  "player/vue/src/debug/random/RandomDrawPicker.vue": [],
+  "player/vue/src/debug/random/useRandomDrawPickerState.ts": [],
+  "player/vue/src/debug/random/randomDrawPresentation.ts": [],
+  "player/vue/src/debug/random/useDebugRandom.ts": [/identity\.drawId/u],
   "player/random-draw-identity.ts": [
     /readonly drawId: number;/u,
     /drawId: draw\.drawId/u,
@@ -176,7 +176,10 @@ test("every reader of a draw's ID in the picker's modules goes through its ident
         `${file}: a draw's ID read outside its identity: ${line.trim()}`,
       );
   }
-  const app = readFileSync(new URL("../../player/vue/src/PlayerApp.vue", import.meta.url), "utf8");
+  const app = readFileSync(
+    new URL("../../player/vue/src/shell/PlayerApp.vue", import.meta.url),
+    "utf8",
+  );
   const picker = /<RandomDrawPicker\b[\s\S]*?\/>/u.exec(app)?.[0] ?? "";
   assert.match(picker, /:key="randomPicker\.random\.drawKey\.value \?\? ''"/u);
   assert.match(picker, /:draw-key="randomPicker\.random\.drawKey\.value \?\? ''"/u);

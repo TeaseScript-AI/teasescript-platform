@@ -64,7 +64,7 @@ let browserSavedData: (
 // browser-source imports use Vite resolution, and error classes stay one class.
 before(async () => {
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const savedData: Record<string, unknown> = await loadPlayerModule("player/saved-data.ts");
   assert.equal(typeof session.usePlayerSession, "function");

@@ -11,9 +11,9 @@ import { createLocalScriptStorage } from "../../script-storage.js";
 import { demoSource, demoStorageScope, resolveDemoAsset } from "./demoHost";
 import { prepareHostedScript, type ScriptHost } from "./hostedScript";
 import { developmentPackageHost } from "./packageHost";
-import PlayerApp from "./PlayerApp.vue";
-import { browserStorage } from "./usePlayerPreference";
-import { usePlayerSession } from "./usePlayerSession";
+import PlayerApp from "./shell/PlayerApp.vue";
+import { browserStorage } from "./shell/usePlayerPreference";
+import { usePlayerSession } from "./session/usePlayerSession";
 import "./style.css";
 
 // Fixtures and labs live in a separate chunk: always on the development server, and in a build
@@ -37,7 +37,7 @@ const capturedMediaRepository = await openIndexedDbMediaRepository().catch(() =>
 const keptSessions = await openIndexedDbKeptSessionStore().catch(() => memoryKeptSessionStore());
 const debugRooms = await openIndexedDbKeptRoomStore().catch(() => memoryKeptRoomStore());
 const app = developmentPreview
-  ? createApp((await import("./DevelopmentPreview.vue")).default, {
+  ? createApp((await import("./development/DevelopmentPreview.vue")).default, {
       capturedMediaRepository,
       keptSessions,
       debugRooms,

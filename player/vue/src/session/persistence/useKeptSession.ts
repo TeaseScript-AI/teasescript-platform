@@ -38,9 +38,9 @@ import type {
   DebugRewoundWhileDebugging,
   DebugEditedWhileDebugging,
 } from "../../../../debug-export.js";
-import type { Problem } from "../../ProblemCard.vue";
-import type { PlayerSessionOptions, PlayerSessionStart } from "../../usePlayerSession.js";
-import type { useRuntimeSceneClock } from "../../useRuntimeSceneClock";
+import type { Problem } from "../../start-and-end/ProblemCard.vue";
+import type { PlayerSessionOptions, PlayerSessionStart } from "../usePlayerSession.js";
+import type { useRuntimeSceneClock } from "../useRuntimeSceneClock";
 import type { useStorageRoute } from "./useStorageRoute.js";
 
 /*

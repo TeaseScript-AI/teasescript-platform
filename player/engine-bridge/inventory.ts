@@ -249,13 +249,13 @@ export const RATCHET: readonly RatchetEntry[] = [
     family: "L5i",
   },
   {
-    importer: "player/vue/src/DevelopmentPreview.vue",
+    importer: "player/vue/src/development/DevelopmentPreview.vue",
     target: "player/compile-project.ts",
     name: "createPlayerRuntimeSession",
     family: "L5i",
   },
   {
-    importer: "player/vue/src/usePlayerSession.ts",
+    importer: "player/vue/src/session/usePlayerSession.ts",
     target: "player/engine-bridge/in-process.ts",
     name: "heldPlan",
     family: "L5i",
@@ -274,7 +274,7 @@ export const RATCHET: readonly RatchetEntry[] = [
   },
   // activation
   {
-    importer: "player/vue/src/usePlayerSession.ts",
+    importer: "player/vue/src/session/usePlayerSession.ts",
     target: "player/engine-bridge/in-process.ts",
     name: "createInProcessBackend",
     family: "activation",

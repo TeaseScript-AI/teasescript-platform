@@ -123,7 +123,7 @@ present even when empty.
 ## Player conditions
 
 The Player combines independent conditions rather than choosing a phone, tablet, or desktop mode. The Player exposes
-them on its shell; [`usePlayerConditions.ts`](../../player/vue/src/usePlayerConditions.ts) owns their
+them on its shell; [`usePlayerConditions.ts`](../../player/vue/src/interaction/usePlayerConditions.ts) owns their
 shared browser signals. Add a responsive rule to the condition that describes its actual constraint; do not infer device
 identity or add a separate width breakpoint for touch or rounded corners.
 

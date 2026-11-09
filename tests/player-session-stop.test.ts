@@ -92,13 +92,13 @@ let view: typeof RuntimeView;
 before(async () => {
   await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const rewind: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDebugRewind.ts",
+    "player/vue/src/debug/history/useDebugRewind.ts",
   );
   const time: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDevelopmentTime.ts",
+    "player/vue/src/debug/useDevelopmentTime.ts",
   );
   const adapter = {
     ...(await loadPlayerModule("player/runtime-adapter.ts")),

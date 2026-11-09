@@ -329,12 +329,14 @@ let usePlayerDebug: (
 before(async () => {
   await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const time: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDevelopmentTime.ts",
+    "player/vue/src/debug/useDevelopmentTime.ts",
   );
-  const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/usePlayerDebug.ts");
+  const debug: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/debug/usePlayerDebug.ts",
+  );
   assert.equal(typeof debug.usePlayerDebug, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
   usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;

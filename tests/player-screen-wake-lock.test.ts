@@ -41,10 +41,10 @@ let runtime: typeof RuntimeAdapter & typeof CompileProject;
 before(async () => {
   await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const time: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDevelopmentTime.ts",
+    "player/vue/src/debug/useDevelopmentTime.ts",
   );
   const adapter = {
     ...(await loadPlayerModule("player/runtime-adapter.ts")),

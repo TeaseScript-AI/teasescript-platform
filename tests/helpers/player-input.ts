@@ -7,7 +7,7 @@ import {
 import { loadPlayerModule } from "./player-modules.js";
 
 /*
- * The Player's input chain (`player/vue/src/runtime-input.ts`), from the bundle the composables run in, for tests that
+ * The Player's input chain (`player/vue/src/session/runtime-input.ts`), from the bundle the composables run in, for tests that
  * answer the presented interaction as one of the Player's controls does.
  */
 
@@ -56,7 +56,7 @@ let loaded: RuntimeInput | null = null;
 /** The input chain's module from the bundle (`loadPlayerModule`). */
 export async function runtimeInput(): Promise<RuntimeInput> {
   if (loaded !== null) return loaded;
-  const module = await loadPlayerModule("player/vue/src/runtime-input.ts");
+  const module = await loadPlayerModule("player/vue/src/session/runtime-input.ts");
   assert.equal(typeof module.runInput, "function");
   assert.equal(typeof module.draftInput, "function");
   assert.equal(typeof module.RETIRED, "symbol");

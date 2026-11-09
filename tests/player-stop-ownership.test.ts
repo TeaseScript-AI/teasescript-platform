@@ -75,7 +75,7 @@ let adapter: typeof RuntimeAdapter;
 let view: typeof RuntimeView;
 
 before(async () => {
-  const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
+  const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
@@ -87,7 +87,7 @@ before(async () => {
   adapter = (await loadPlayerModule("player/runtime-adapter.ts")) as typeof adapter;
   // EVIDENCE: validation: the bundle's session view module, from the same module graph.
   view = (await loadPlayerModule("player/runtime-view.ts")) as typeof view;
-  const views = await loadPlayerModule("player/vue/src/useDebugView.ts");
+  const views = await loadPlayerModule("player/vue/src/debug/useDebugView.ts");
   // EVIDENCE: validation: Vite loaded the real source module; this is its composable.
   useDebugView = views.useDebugView as typeof useDebugView;
 });

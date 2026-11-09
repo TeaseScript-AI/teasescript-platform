@@ -9,7 +9,7 @@ import { memoryKeptRoomStore } from "../../../../kept-sessions.js";
 import type { PersistenceOwnership } from "../../../../persistence-ownership.js";
 import type { ScriptStorageProvider } from "../../../../script-storage.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../../../../../src/index.js";
-import type { PlayerSessionOptions } from "../../usePlayerSession.js";
+import type { PlayerSessionOptions } from "../usePlayerSession.js";
 
 /*
  * Where the session composable's saved values and photos go, moved from `usePlayerSession` unchanged: the room shown,

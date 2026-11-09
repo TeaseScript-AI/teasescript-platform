@@ -14,7 +14,7 @@ import {
   type SessionSection,
 } from "../../../player-bridge.js";
 import type { PlayerSession } from "../../../runtime-view.js";
-import type { SectionWork, useRuntimeSceneClock } from "../useRuntimeSceneClock";
+import type { SectionWork, useRuntimeSceneClock } from "./useRuntimeSceneClock";
 import type { ActivationRun, useActivationRun } from "./activation/useActivationRun.js";
 
 /*

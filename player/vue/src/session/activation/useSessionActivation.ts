@@ -8,8 +8,8 @@ import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../../player-bri
 import type { RandomIntent, TracingIntent } from "../../../../engine-bridge/player-ops.js";
 import type { StartRandom } from "../../../../engine-bridge/ops/session.js";
 import type { TemporalContext } from "../../../../../src/index.js";
-import type { Problem } from "../../ProblemCard.vue";
-import type { PlayerSessionOptions, PlayerSessionStart } from "../../usePlayerSession.js";
+import type { Problem } from "../../start-and-end/ProblemCard.vue";
+import type { PlayerSessionOptions, PlayerSessionStart } from "../usePlayerSession.js";
 import type { useKeptSession } from "../persistence/useKeptSession.js";
 import { stopArguments, useActivationRun, type ActivationRun } from "./useActivationRun.js";
 

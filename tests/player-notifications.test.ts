@@ -29,10 +29,10 @@ let usePlayerToasts: (
 // Load the real Vue composables through the existing build tool, like the Player session host tests.
 before(async () => {
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerNotifications.ts",
+    "player/vue/src/notifications/usePlayerNotifications.ts",
   );
   const toasts: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerToasts.ts",
+    "player/vue/src/notifications/usePlayerToasts.ts",
   );
   assert.equal(typeof module.usePlayerNotifications, "function");
   assert.equal(typeof toasts.usePlayerToasts, "function");

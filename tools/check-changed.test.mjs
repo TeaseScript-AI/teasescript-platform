@@ -31,7 +31,7 @@ import {
 // A representative changed path for each project, and the projects it alone needs.
 const REPRESENTATIVES = {
   typescript: ["src/compiler.ts", ["typescript"]],
-  "player-vue": ["player/vue/src/PlayerApp.vue", ["player-vue"]],
+  "player-vue": ["player/vue/src/shell/PlayerApp.vue", ["player-vue"]],
   "oxlint-rules": ["tools/oxlint/run.mjs", ["oxlint-rules"]],
   tools: ["tools/test-shards.mjs", ["tools"]],
   "repository checks": ["tools/repository-checks/regression-cases.mjs", ["tools"]],
@@ -71,7 +71,10 @@ test(
     assert.deepEqual([...projectsFor([])], []);
     // `player/` outside `player/vue/` belongs to the TypeScript project, and `player/vue/` only to the Player's.
     assert.deepEqual([...projectsFor(["player/runtime-adapter.ts"])], ["typescript"]);
-    assert.deepEqual([...projectsFor(["player/vue/src/usePlayerSession.ts"])], ["player-vue"]);
+    assert.deepEqual(
+      [...projectsFor(["player/vue/src/session/usePlayerSession.ts"])],
+      ["player-vue"],
+    );
     // A check that several projects name runs once: `lint:design` is the Player's and the design lint's.
     const everyCheck = checksOf(projectsFor([".github/workflows/ci.yml"]));
     assert.deepEqual(everyCheck, [

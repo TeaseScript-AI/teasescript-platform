@@ -518,7 +518,7 @@ test("every session op is classified, and only adoptCatchUp reads a session past
 // random ownership (`startRandom()`); a restore takes it at its adoption. A new such call in those files fails until it
 // is classified. A new module, or an indirection under another name, needs adding here.
 const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string, string])[]>> = {
-  "player/vue/src/usePlayerSession.ts": [],
+  "player/vue/src/session/usePlayerSession.ts": [],
   "player/vue/src/session/activation/useSessionActivation.ts": [
     [
       "begin: (origin) => startedSession(create, { debugMode: debugModeOn() }, origin)",
@@ -537,8 +537,8 @@ const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string,
   "player/vue/src/session/useSessionRewind.ts": [
     ["show: (next, paused) => showRewound(next, { paused })", "restore: the rewind owner's show"],
   ],
-  "player/vue/src/useDebugRewind.ts": [],
-  "player/vue/src/rewindOwner.ts": [
+  "player/vue/src/debug/history/useDebugRewind.ts": [],
+  "player/vue/src/session/rewindOwner.ts": [
     [
       "host.show(next, paused)",
       "restore: a session Debug's rewind restored or reinstated in the host, shown by its owner",
@@ -548,7 +548,7 @@ const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string,
 
 /** The session composable's files: `usePlayerSession.ts` and the owner modules it is composed of. */
 const COMPOSABLE_FILES = [
-  "player/vue/src/usePlayerSession.ts",
+  "player/vue/src/session/usePlayerSession.ts",
   "player/vue/src/session/useRandomControl.ts",
   "player/vue/src/session/useDebugModeAndTrace.ts",
   "player/vue/src/session/useSessionMedia.ts",

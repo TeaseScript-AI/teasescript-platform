@@ -307,7 +307,7 @@ let usePlanPhotoPreload: (
 ) => void;
 
 before(async () => {
-  const module = await loadPlayerModule("player/vue/src/usePlayerSession.ts");
+  const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   // EVIDENCE: validation: Vite loaded the real source module; this is its host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
   // EVIDENCE: validation: the bundle's in-process backend, whose sessions the composable's facade reaches.
@@ -319,7 +319,7 @@ before(async () => {
   const hosted = await loadPlayerModule("player/vue/src/hostedScript.ts");
   // EVIDENCE: validation: the real module's export.
   prepareHostedScript = hosted.prepareHostedScript as typeof prepareHostedScript;
-  const photos = await loadPlayerModule("player/vue/src/stagePhotos.ts");
+  const photos = await loadPlayerModule("player/vue/src/stage/stagePhotos.ts");
   // EVIDENCE: validation: the real module's export.
   usePlanPhotoPreload = photos.usePlanPhotoPreload as typeof usePlanPhotoPreload;
 });
