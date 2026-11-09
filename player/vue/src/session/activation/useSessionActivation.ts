@@ -17,6 +17,12 @@ import {
   type Origin,
   type RunOrigin,
 } from "./useActivationRun.js";
+import { continueRestored } from "./work/continue.js";
+import { isSessionTarget, sessionOf, sessionTarget, type SessionTarget } from "./work/target.js";
+
+/** The session a begin gave, as the scheduler installs it: a Continue's target unwrapped, a Start's session as it is. */
+const sessionOfBegun = (begun: PlayerSession | SessionTarget): PlayerSession =>
+  isSessionTarget(begun) ? sessionOf(begun) : begun;
 
 /*
  * The activation under way, moved from `usePlayerSession` unchanged: its preparation as Start or Continue, the click
@@ -24,12 +30,17 @@ import {
  */
 
 /** What Start and Continue record of the player's click: the zone and presentation, and the wall clock. */
-type TemporalCapture = { temporalContext: TemporalContext; wallClockMs: number };
+export type TemporalCapture = { temporalContext: TemporalContext; wallClockMs: number };
 
 type Activation = {
   readonly kind: "start" | "continue";
-  /** Begins the session; a Start or Continue over the bridge resolves once its first publication is applied. */
-  readonly begin: (origin: RunOrigin) => PlayerSession | Promise<PlayerSession>;
+  /**
+   * Begins the session; a Start or Continue over the bridge resolves once its first publication is applied. A Start
+   * gives the bridge's session, or its promise, unchanged; a Continue gives its work's target.
+   */
+  readonly begin: (
+    origin: RunOrigin,
+  ) => PlayerSession | SessionTarget | Promise<PlayerSession | SessionTarget>;
   /** The restored session Continue goes on with. */
   readonly restored?: PlayerSession;
   /** Why Start shows instead of Continue: the kept session is of a format this Player no longer reads. */
@@ -164,7 +175,8 @@ export function useSessionActivation({
     }
     haltUntil(stop);
     void starting.then(
-      (started) => {
+      (begun) => {
+        const started = sessionOfBegun(begun);
         // A retired activation's late session is only stopped, with no incident and no capture.
         if (!activationRun.admits(origin)) {
           endHalting(stop);
@@ -239,7 +251,7 @@ export function useSessionActivation({
   // obsolete one's requests run in the host before the replacement's, which claims the recorder and trace last.
   let begunInFlight: Promise<void> | null = null;
   // The session that Start or Continue is beginning, once the host names it; an error stop stops at it.
-  let sessionBeginning: Promise<PlayerSession> | null = null;
+  let sessionBeginning: Promise<PlayerSession | SessionTarget> | null = null;
   /**
    * A new activation, preparation or end replaces the one under way: a Continue still beginning is halted in the host,
    * so its queued requests, such as starting the recording of an obsolete session, are refused without effect.
@@ -360,66 +372,23 @@ export function useSessionActivation({
     camera.release();
     activation.value = {
       kind: "continue",
-      begin: async (origin) => {
-        const host = bridgeOf(restored);
+      begin: (origin) => {
         continuing = restored;
-        // A restored session runs without Debug's random control until its kept draw went on naturally, as before: one
-        // a Start or an adoption gave this Player's control first gives it up (`adoptRandom` below takes it again).
-        if (random.issuedRandom() !== undefined)
-          void host.client
-            .request("releaseRandom", { session: restored.id }, { after: restored.id })
-            .catch(() => {});
         // Only the activation that began it goes on after each reply: a replaced one touches no trace or recorder.
         const owner = activationToken;
-        const owned = () => {
-          if (isDisposed() || owner !== activationToken || !activationRun.admits(origin))
-            throw new Error("A replaced Continue goes no further.");
-        };
-        // Continue records the zone, presentation and clock of the click (#1886), before any reply or wait. A capture
-        // that throws fails the Continue where it failed before: after its recording began, so the failure's recording
-        // is the restored session's, not the previous one's.
-        let taken: ClickSample;
-        try {
-          taken = { capture: temporalCapture() };
-        } catch (error) {
-          taken = { error };
-        }
-        // The recording of a restored session starts from the state it continues, and so does a new epoch of the
-        // host's value trace, once the Continue owns the UI. The epoch's request is not awaited: the host runs it
-        // before what follows (a draw's resume, Debug mode, Continue).
-        await host.request(restored, "beginRecording", origin.begin);
-        owned();
-        const tracing = tracingIntent();
-        if (tracing?.on)
-          void host.request(restored, "restartTrace", { tracing }).catch((error: unknown) => {
-            if (!endsQuietly(error) && !isDisposed() && !stopped.value)
-              reportActivationError(origin, error);
-          });
-        let continued: PlayerSession = host.latest(restored) ?? restored;
-        // A session kept while paused at a random draw goes on with its natural outcome first: until then, the engine
-        // takes no other input.
-        // It runs without Debug's random control until then, as before, and adopts it after (`adoptRandom` below).
-        const draw = continued.state.randomDraw;
-        if (draw !== null) {
-          await host.request(continued, "resolveDraw", {
-            drawId: draw.drawId,
-            outcome: "natural",
-            record: null,
-          });
-          owned();
-          continued = host.latest(continued) ?? continued;
-        }
-        // The script reads whether Debug is on now.
-        if (continued.state.debugMode !== debugModeOn()) {
-          await host.request(continued, "setDebugMode", { on: debugModeOn() });
-          owned();
-          continued = host.latest(continued) ?? continued;
-        }
-        adoptRandom(continued, origin);
-        if (!("capture" in taken)) throw taken.error;
-        await host.request(continued, "continue", { capture: taken.capture });
-        owned();
-        return host.latest(continued) ?? continued;
+        return continueRestored(sessionTarget(restored, origin, activationRun.admits), origin, {
+          randomIssued: () => random.issuedRandom() !== undefined,
+          owned: () => {
+            if (isDisposed() || owner !== activationToken || !activationRun.admits(origin))
+              throw new Error("A replaced Continue goes no further.");
+          },
+          capture: () => temporalCapture(),
+          tracing: () => tracingIntent(),
+          debugModeOn: () => debugModeOn(),
+          adopt: (target, run) => adoptRandom(sessionOf(target), run),
+          quiet: (error) => endsQuietly(error) || isDisposed() || stopped.value,
+          report: (run, error) => reportActivationError(run, error),
+        });
       },
       restored,
     };
@@ -539,7 +508,7 @@ export function useSessionActivation({
     hostError.value = null;
     // The activation's run begins before anything of it can fail, retiring the one before it.
     const origin = activationRun.begin(bridgeNow()!);
-    let begun: PlayerSession | Promise<PlayerSession>;
+    let begun: PlayerSession | SessionTarget | Promise<PlayerSession | SessionTarget>;
     // `begin` records the click's capture: it reads it before its first await, a Start in its factory or options.
     clicked = sample;
     try {
@@ -550,19 +519,21 @@ export function useSessionActivation({
     } finally {
       clicked = null;
     }
-    if (!(begun instanceof Promise)) return started(pending, begun, origin);
+    if (!(begun instanceof Promise)) return started(pending, sessionOfBegun(begun), origin);
     sessionBeginning = begun;
-    const settled = begun.then(
-      (next) => {
-        if (!isDisposed() && token === activationToken && activationRun.admits(origin))
-          started(pending, next, origin);
+    // Its terminal reaction: the session goes on only for its live activation, while that is still the one begun; an
+    // obsolete activation's failure stops nothing, and the session that replaced it goes on.
+    const settled = activationRun.reply(origin, begun, {
+      done: (next) => {
+        if (!isDisposed() && token === activationToken)
+          started(pending, sessionOfBegun(next), origin);
+        return undefined;
       },
-      (error: unknown) => {
-        // An obsolete activation's failure stops nothing: the session that replaced it goes on.
-        if (!isDisposed() && token === activationToken && activationRun.admits(origin))
-          reportActivationError(origin, error);
+      failed: (error) => {
+        if (!isDisposed() && token === activationToken) reportActivationError(origin, error);
+        return undefined;
       },
-    );
+    });
     begunInFlight = settled;
     void settled.finally(() => {
       if (begunInFlight === settled) begunInFlight = null;

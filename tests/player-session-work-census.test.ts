@@ -433,8 +433,10 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
   "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > prepareKept > owned:callback > commit:callback#2":
     ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
-  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > prepareRestore > begin > catch:callback#2":
-    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
+  "player/vue/src/session/activation/work/continue.ts continueRestored > catch:callback": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > pressPermanentButton": [
     "own observation",
     ["BridgeClient.request", "BridgeClient.signal"],
@@ -465,12 +467,8 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > startDebugSessionAnew > then:callback":
     ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
-  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#1":
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback":
     ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
-  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#2.1":
-    ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
-  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#2.2":
-    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > then:callback": [
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
@@ -727,7 +725,10 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/activation/useActivationRun.ts useActivationRun {report}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > report {report}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > lose {lose}",
-  "player/vue/src/usePlayerSession.ts usePlayerSession {lose}",
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession {lose}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > failed {failed}",
+  "player/vue/src/session/useRandomControl.ts useRandomControl > adoptRandom > done {done}",
+  "player/vue/src/session/useRandomControl.ts useRandomControl > adoptRandom > failed {failed}",
 ];
 
 /**

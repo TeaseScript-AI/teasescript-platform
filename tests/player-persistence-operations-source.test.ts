@@ -153,13 +153,20 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   },
   "session/activation/useSessionActivation.ts": {
     activate: SESSION,
-    "prepareRestore.begin": SESSION,
     prepareActivation: SESSION,
     startedSession: SESSION,
     reportActivationError: SESSION,
     incident: SESSION,
     stopAt: SESSION,
     supersede: SESSION,
+  },
+  "session/activation/work/target.ts": {
+    "target.releaseRandom": SESSION,
+    "target.beginRecording": SESSION,
+    "target.restartTrace": SESSION,
+    "target.resolveDrawNaturally": SESSION,
+    "target.setDebugMode": SESSION,
+    "target.continueWith": SESSION,
   },
   "session/persistence/useKeptSession.ts": {
     keptStore: RESOURCE,

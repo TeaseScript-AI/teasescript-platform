@@ -264,6 +264,9 @@ const SESSION_FILES: readonly string[] = [
 ];
 const ACTIVATION_FILES = [
   ...SESSION_FILES,
+  // The activation's work modules: activation work throughout, so every wait in them is in scope.
+  "player/vue/src/session/activation/work/continue.ts",
+  "player/vue/src/session/activation/work/target.ts",
   "player/vue/src/session/activation/useExportCandidate.ts",
   "player/vue/src/session/activation/useFailureRecording.ts",
   "player/vue/src/session/activation/useActivationRun.ts",
@@ -319,12 +322,13 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "before the activation's record begins; the click's token decides",
   "useSessionActivation.ts: useSessionActivation > startFrom: then bridgeReady":
     "before the activation's record begins; the click's token decides",
-  "useSessionActivation.ts: useSessionActivation > startFrom: then begun": READMITS,
-  "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: await host.request":
-    READMITS,
-  "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: catch host.request":
+  "continue.ts: continueRestored: await restored.beginRecording": READMITS,
+  "continue.ts: continueRestored: await continued.resolveDrawNaturally": READMITS,
+  "continue.ts: continueRestored: await continued.setDebugMode": READMITS,
+  "continue.ts: continueRestored: await continued.continueWith": READMITS,
+  "continue.ts: continueRestored: catch restored.restartTrace":
     "the trace restart's rejection, which reports with the Continue's own activation, admitted there (`reportActivationError`)",
-  "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: catch host.client.request":
+  "target.ts: sessionTarget > releaseRandom: catch host.client.request":
     "drops the random release's refusal; nothing follows",
   "useSessionActivation.ts: useSessionActivation > reportActivationError > incident: catch origin.bridge.commitIncident":
     "drops the incident's refusal; nothing follows",
@@ -381,7 +385,7 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useKeptSession.ts: useKeptSession > forgetKeptSession: then discardKeptSession": KEPT_SESSION,
 };
 /** Calls that re-admit an activation, and calls that request or act for one. */
-const ADMITS = /^(?:goesOn|lives|owned|activationRun\.admits)$/u;
+const ADMITS = /^(?:goesOn|lives|owned|work\.owned|activationRun\.admits)$/u;
 const ACTS =
   /^(?:capture|options\.readPhoto|host\.request|host\.halt|stopAt|started|startedSession|reportActivationError|origin\.bridge\.commitIncident|origin\.failure\.stopped|host\.captureExport|incident)$/u;
 

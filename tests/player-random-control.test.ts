@@ -559,6 +559,8 @@ const COMPOSABLE_FILES = [
   "player/vue/src/session/persistence/useSavedDataTransfer.ts",
   "player/vue/src/session/persistence/useSessionTransfer.ts",
   "player/vue/src/session/activation/useSessionActivation.ts",
+  "player/vue/src/session/activation/work/continue.ts",
+  "player/vue/src/session/activation/work/target.ts",
 ] as const;
 /** The text of the session composable's files, one after another. */
 function composableText(): string {
@@ -608,7 +610,7 @@ test("every random-op sender in the composable is classified as adopting or not"
       "adoptRandom: (next) => adoptRandom(next, activationRun.current()),",
       "if (!paused) adoptRandom(next, origin);",
       "if (session.value !== null) adoptRandom(session.value);",
-      "adoptRandom(continued, origin);",
+      "adopt: (target, run) => adoptRandom(sessionOf(target), run),",
     ],
   );
 });
