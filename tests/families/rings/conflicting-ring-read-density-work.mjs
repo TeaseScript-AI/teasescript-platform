@@ -1,3 +1,5 @@
+// Its id is its file name before it was renamed, which keeps its sources' places in a stored baseline.
+export const id = "1293-r3-fair-growth.mjs";
 // #1293's review r3: its fair growth, the empty and self rings of growth-shapes.mjs fed a conflicting record at 16, 32
 // and 64, unread, read once at each member, read at every field, or both
 // (desktop:~/work/evidence/1293/7d6c5fb2f/review-r3/fair-growth.mjs).

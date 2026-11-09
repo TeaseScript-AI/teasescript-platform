@@ -1,3 +1,5 @@
+// Its id is its file name before it was renamed, which keeps its sources' places in a stored baseline.
+export const id = "1293-r3-series-growth.mjs";
 // #1293's review r3: its growth shapes, a ring of k copies of a k-field record fed a conflicting record, with duplicate,
 // self, property or empty extra stores, read or not, and a fixed two-member group, at the sizes its three series runs
 // reached (submit-growth.sh, quick-growth.sh and submit-dimensions.sh; a run stops a shape at its first budget stop)

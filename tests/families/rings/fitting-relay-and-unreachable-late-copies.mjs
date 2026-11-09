@@ -1,3 +1,5 @@
+// Its id is its file name before it was renamed, which keeps its sources' places in a stored baseline.
+export const id = "1293-r3-runtime.mjs";
 // #1293's review r3: the two runtime cases it wrote itself, an exact relay that fits and a relay whose late copies are
 // unreachable (desktop:~/work/evidence/1293/7d6c5fb2f/review-r3/runtime.mjs over its runtime-cases.json). The 41 other
 // cases prepare-runtime.py copied there are review r2's sources and results, not copied.

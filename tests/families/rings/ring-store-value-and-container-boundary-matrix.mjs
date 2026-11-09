@@ -1,3 +1,5 @@
+// Its id is its file name before it was renamed, which keeps its sources' places in a stored baseline.
+export const id = "1293-r3-matrix-cases.mjs";
 // #1293's review r3 (the #1249 A2 review): its own matrix cases, seven store shapes over every ordered pair of five
 // values, rings of 2 to 5 copies at depths 0 to 2 fed at each member in six ways, and container boundaries
 // (desktop:~/work/evidence/1293/7d6c5fb2f/review-r3/make-cases.py, run by matrix.mjs). The 301 cases it copied from

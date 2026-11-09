@@ -1,3 +1,5 @@
+// Its id is its file name before it was renamed, which keeps its sources' places in a stored baseline.
+export const id = "1375-astra-sharing-props-source.mjs";
 // 1 fixed astra sharing props source input; #1375 Astra review r1
 // (R/astra-m4-g3-p1-review-evidence/builder-probe/sharing-props.mjs).
 export const cases = (() => {

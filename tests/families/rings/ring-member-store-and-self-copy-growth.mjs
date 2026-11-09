@@ -1,3 +1,5 @@
+// Its id is its file name before it was renamed, which keeps its sources' places in a stored baseline.
+export const id = "1293-sol-ring-recon.mjs";
 // #1293 A2 / G5, Sol's reconstruction (R/sol-m4-admission-design-g5-r1-evidence/recon-shapes.mjs): the ring and alias
 // shapes at the sizes its measurements recorded, the self-copy chain at 16 and 32 and the others at 64 and 128.
 const shapes = (() => {

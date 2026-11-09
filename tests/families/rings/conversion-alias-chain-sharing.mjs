@@ -1,3 +1,5 @@
+// Its id is its file name before it was renamed, which keeps its sources' places in a stored baseline.
+export const id = "1105-astra-sharing.mjs";
 // captured astra sharing input; #1105, astra-m4-i1105-review, review/builder evidence
 // (R/astra-m4-i1105-review/scripts/sharing.mjs).
 // the review compiled its two copy chains only (globals []); it analysed the third

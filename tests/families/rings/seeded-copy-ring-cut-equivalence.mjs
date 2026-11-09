@@ -1,3 +1,5 @@
+// Its id is its file name before it was renamed, which keeps its sources' places in a stored baseline.
+export const id = "g5-5a-builder-ring-families.mjs";
 // #1394 G5 5a, builder (R/astra-m4-g5-5a-review-evidence/builder-tools/g5-families.mjs): the cut-equivalence family,
 // rings of whole copies over the cut's axes, as pub.mjs ran it (families:400:cut): seeds 0 to 399, each ring 2 + seed % 5
 // long, spot.mjs's twenty among them.
