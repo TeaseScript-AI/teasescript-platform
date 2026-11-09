@@ -152,7 +152,7 @@ export function prefixLevels(contract: Contract, asked: Key, stores: PrefixStore
  * (`marksNothing`) is asked after, of a prefix every entry of which is this. Its property's answer is then the
  * literal's own there, and a property it lacks F11's `missing` with the literal's writer; any other entry is unproved.
  */
-function closedObject(contract: Contract, entry: PrefixEntry): boolean {
+export function closedObject(contract: Contract, entry: PrefixEntry): boolean {
   const { program } = contract.pass;
   const value = entry.value;
   if (
