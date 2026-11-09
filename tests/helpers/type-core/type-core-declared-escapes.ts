@@ -42,5 +42,8 @@ export function runsDigest(runs: readonly RunResult[]): string {
   );
 }
 
+/** A text's digest, as the plan's and the runs' are made: sha256, its first 16 hex digits. */
+export const textDigest = (text: string): string => digest(text);
+
 const digest = (text: string): string =>
   createHash("sha256").update(text).digest("hex").slice(0, 16);
