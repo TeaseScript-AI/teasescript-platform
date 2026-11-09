@@ -906,13 +906,6 @@ async function run(context: TestContext, c: Case, mode: Mode): Promise<Seen> {
     c.settlement === "rejection" ||
     c.transition === "loss" ||
     (facade.heldRuns(bridge).length === 0 && facade.heldTickets(bridge).length === 0);
-  if (process.env.FAMILY_DEBUG)
-    console.log(
-      mode,
-      facade.heldRuns(bridge),
-      facade.heldTickets(bridge),
-      traffic.posts.map((post) => `${post.phase}:${post.op}`).join(" "),
-    );
   const after = traffic.posts.filter((post) => post.phase > 0);
   return {
     shows,
