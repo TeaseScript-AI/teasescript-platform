@@ -960,6 +960,15 @@ Select the production host's browser-automation stack when that concrete surface
 accessibility checks, isolation boundaries, cost, and stability it must prove. The current dependency-free Chromium
 smoke does not predetermine that later tooling decision.
 
+## The L5 activation gate kit
+
+`tools/player-gate/` measures what the L5 gate's cost report needs to decide whether the Player's engine moves into its
+Worker: real browsers and the Pixel 4a, outside CI, never a threshold; it changes no product file. Its values are read
+from its retained rows without a validation claim: every cell is `measured, unvalidated` until #2122, the validation
+obligation, closes before the activation PR's R1 run. The headline, the summary and the R0 comparison hold timings and
+pass/fail only. The kit's README ([`tools/player-gate/README.md`](../tools/player-gate/README.md)) has what it
+measures, the files and how to run R0.
+
 ## Coverage and performance boundaries
 
 The repository does not use an arbitrary mandatory line-coverage threshold such as 95 percent. Coverage may later help identify untouched branches and error paths, but correctness, determinism, restore equivalence, and boundary validation are more important than maximizing a percentage.
