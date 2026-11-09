@@ -147,10 +147,11 @@ export class Contracts {
     const checked = result === null ? null : checkedType(result);
     if (checked === null) return null;
     // (where a stop left the settled pass's contract incomplete, the receiving completion's lists each object's properties
-    // as its listings found them: the check lists them as the natural plan's does (#2215). The recorded result, which the
-    // lost-check gate reads, keeps the completion's order.)
+    // as its listings found them: the check lists them by the store's own records, then as the program writes them
+    // (#2215). The settled pass's own lists them by the first asker's records, so where another store asked first the
+    // two differ (#2218). The recorded result, which the lost-check gate reads, keeps the completion's order.)
     const type =
-      settled !== null && result !== settled ? this.#inNaturalOrder(checked, [value]) : checked;
+      settled !== null && result !== settled ? this.#inRecordOrder(checked, [value]) : checked;
     const name = [
       declaration.name.name,
       ...(whole ? [] : (place?.path ?? []).map(propertyName)),
@@ -193,16 +194,16 @@ export class Contracts {
   }
 
   /**
-   * A completion's checked type with each object's properties in the order the natural plan's check lists them: by
-   * `fieldOrder` over the literal records below the store's value, level by level, as `ContractDescriptors` fills a
-   * decided object (#2215). A contract lists properties only where it filled a decided object, so nothing more is asked.
+   * A completion's checked type with each object's properties by `fieldOrder` over the literal records below the store's
+   * value, level by level, as `ContractDescriptors` fills a decided object from its first asker's records (#2215). A
+   * contract lists properties only where it filled a decided object, so nothing more is asked.
    */
-  #inNaturalOrder(type: TypePlan, records: readonly Expression[]): TypePlan {
+  #inRecordOrder(type: TypePlan, records: readonly Expression[]): TypePlan {
     switch (type.kind) {
       case "union":
         return {
           kind: "union",
-          members: type.members.map((member) => this.#inNaturalOrder(member, records)),
+          members: type.members.map((member) => this.#inRecordOrder(member, records)),
         };
       case "list":
       case "set":
@@ -211,7 +212,7 @@ export class Contracts {
           ? type
           : {
               kind: type.kind,
-              element: this.#inNaturalOrder(
+              element: this.#inRecordOrder(
                 type.element,
                 recordsBelow(records, this.#literalOf).elements,
               ),
@@ -222,7 +223,7 @@ export class Contracts {
         const properties = fieldOrder(byName.keys(), below, this.index).map((name) => {
           // EVIDENCE: `fieldOrder` returns `byName`'s own keys, in another order.
           const property = byName.get(name)!;
-          return { name, type: this.#inNaturalOrder(property.type, below.fields.get(name) ?? []) };
+          return { name, type: this.#inRecordOrder(property.type, below.fields.get(name) ?? []) };
         });
         return type.keepExtra === true
           ? { kind: "object", properties, keepExtra: true }
