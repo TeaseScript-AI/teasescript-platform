@@ -18,7 +18,7 @@ import type { SectionWork, useRuntimeSceneClock } from "./useRuntimeSceneClock";
 import type { Origin, useActivationRun } from "./activation/useActivationRun.js";
 import { adopt } from "./activation/work/adopt.js";
 import { resolveDrawFor } from "./activation/work/draw.js";
-import { RetiredActivation, sessionTarget } from "./activation/work/target.js";
+import { sessionTarget } from "./activation/work/target.js";
 
 /*
  * Debug's random control as the host holds it for this Player, moved from `usePlayerSession` unchanged: the intents it
@@ -191,7 +191,8 @@ export function useRandomControl({
     if (inspecting.value) return Promise.resolve(null);
     // Which reset the record belongs to, as it was asked: one asked for since enters nothing.
     const recorded = record ? { resetAt: lastRandom?.resetAt ?? 0 } : null;
-    // In one section of the shown session (`work/draw.ts`); its facade admits the origin at its send and publication.
+    // In one section of the shown session (`work/draw.ts`): its facade admits the origin as the body begins, which sends
+    // in the same turn; after the send, the work admits it again before the revision and the publication.
     return resolveDrawFor(drawId, outcome, recorded, origin, {
       admits: (each) => activationRun.admits(each),
       section: (body) =>
@@ -199,13 +200,9 @@ export function useRandomControl({
           if (!activationRun.admits(origin)) return null;
           return body({
             drawId: current?.state.randomDraw?.drawId ?? null,
-            send: (resolution) => {
-              if (!activationRun.admits(origin))
-                throw new RetiredActivation("The draw's activation retired.");
-              return section.send<ResolveDrawResult>("resolveDraw", resolution);
-            },
+            send: (resolution) => section.send<ResolveDrawResult>("resolveDraw", resolution),
             owned,
-            publish: () => activationRun.admits(origin) && publishOwned(section.session) !== null,
+            publish: () => publishOwned(section.session) !== null,
           });
         }),
       inspecting: () => inspecting.value,

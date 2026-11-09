@@ -33,7 +33,6 @@ const DECLARED = {
     [`${WORK}draw.ts`]: { DrawPage: "protocol", DrawSection: "protocol", resolveDrawFor: "entry" },
     [`${WORK}stop.ts`]: { StopPage: "protocol", stopAt: "entry", stopLateStart: "entry" },
     [TARGET]: {
-      RetiredActivation: "error",
       SessionSnapshot: "data",
       SessionTarget: "protocol",
       StopTarget: "protocol",

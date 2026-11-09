@@ -26,7 +26,7 @@ export interface SessionSnapshot {
 }
 
 /** A target's operation refused because its origin retired: the work goes no further. */
-export class RetiredActivation extends Error {
+class RetiredActivation extends Error {
   override readonly name = "RetiredActivation";
 }
 

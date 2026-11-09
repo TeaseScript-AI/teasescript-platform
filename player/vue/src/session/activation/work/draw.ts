@@ -3,8 +3,9 @@ import type { Origin } from "../useActivationRun.js";
 
 /*
  * The draw's resolution (session split S2): letting the random draw the session is paused at go on, for the activation
- * that shows it, in one section of the session. The section is a bound facade: its send and its publication admit the
- * origin at their action, and its revision, publication and clock rebase happen only while the origin lives.
+ * that shows it, in one section of the session. The section is a bound facade, which admits the origin as its body
+ * begins; the body sends in that turn, and after the send it admits the origin again before the revision, the
+ * publication and the clock's rebase, which happen only while the origin lives.
  */
 
 /** The section a draw resolves in, as the work holds it. */
