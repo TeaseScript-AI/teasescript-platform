@@ -146,11 +146,11 @@ export class Contracts {
     if (result !== null) this.results.set(store, result);
     const checked = result === null ? null : checkedType(result);
     if (checked === null) return null;
-    // (the receiving completion's contract lists each object's properties as its listings found them, where the stop
-    // fell: the check lists them as the natural plan's does, by `fieldOrder` (#2215). The recorded result, which the
-    // lost-check gate reads, keeps its own order.)
+    // (the receiving completion's contract, and a complete type a stop left, list each object's properties as their
+    // listings found them, where the stop fell: the check lists them as the natural plan's does, by `fieldOrder` (#2215).
+    // The recorded result, which the lost-check gate reads, keeps its own order. A written type keeps its own.)
     const type =
-      result === settled || place === null
+      result === settled || place === null || (whole && declaration.typeAnnotation !== null)
         ? checked
         : this.#inNaturalOrder(checked, place.id, place.path, [value]);
     const name = [
