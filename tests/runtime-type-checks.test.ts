@@ -378,7 +378,7 @@ test("an index or member that a value does not have names the value, its bounds,
 });
 
 test("a number that is no position of a list stays a number, so its index message is type-checked (#2019)", () => {
-  // Typed, never called: what the type check decides. A type guard's false branch would make this number `never`.
+  // Typed, never called: the original predicate made the numeric failure branch never.
   const typed = (value: SerializableRuntimeValue) => {
     if (typeof value === "number" && listHasPosition(1, value)) return;
     if (typeof value === "number") {
