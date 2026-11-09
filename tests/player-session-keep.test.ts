@@ -248,19 +248,19 @@ function planWrites(context: TestContext, ...plans: InstructionPlan[]) {
     apply(target, _self, args) {
       const value: unknown = args[0];
       if (
-        failNextSnapshot &&
+        faults.nextSnapshot &&
         typeof value === "object" &&
         value !== null &&
         "format" in value &&
         value.format === "teasescript-runtime-snapshot"
       ) {
-        failNextSnapshot = false;
+        faults.nextSnapshot = false;
         throw new RangeError("Invalid string length");
       }
       // The host holds its own plan, prepared from this plan's text: its writes count as this plan's.
       const plan = heldAs.get(args[0]) ?? args[0];
-      if (failPlanWrite !== null && plan === failPlanWrite && heldAs.has(args[0])) {
-        failPlanWrite = null;
+      if (faults.planWrite !== null && plan === faults.planWrite && heldAs.has(args[0])) {
+        faults.planWrite = null;
         throw new RangeError("Invalid string length");
       }
       if (heldAs.has(args[0])) graphWrites.set(args[0], (graphWrites.get(args[0]) ?? 0) + 1);
@@ -274,10 +274,13 @@ function planWrites(context: TestContext, ...plans: InstructionPlan[]) {
 
 /** The plans the hosts hold, each as the test's plan it was prepared from (`planWrites`). */
 const heldAs = new Map<unknown, InstructionPlan>();
-/** Whether `planWrites`'s writer fails the next snapshot, as a state too long to save does (`TSK004`). */
-let failNextSnapshot = false;
-/** The plan whose next write in a host `planWrites`'s writer fails, as one too large for the browser does. */
-let failPlanWrite: InstructionPlan | null = null;
+/** The faults `planWrites`'s writer injects, set by the tests; the writer clears each once it fires. */
+const faults: {
+  /** Whether the writer fails the next snapshot, as a state too long to save does (`TSK004`). */
+  nextSnapshot: boolean;
+  /** The plan whose next write in a host the writer fails, as one too large for the browser does. */
+  planWrite: InstructionPlan | null;
+} = { nextSnapshot: false, planWrite: null };
 /** How often each host's own plan was written while `planWrites` counted. */
 const graphWrites = new Map<unknown, number>();
 /** How often `host`'s host wrote its plan of `plan` while `planWrites` counted. */
@@ -771,8 +774,8 @@ const DRIVERS: Record<
   async preparePlanText(context, at, c) {
     const { host, scope } = await mount(context, at);
     const token = await held(host, ASKS);
-    if (c.outcome === "writeFailed") failPlanWrite = ASKS;
-    context.after(() => (failPlanWrite = null));
+    if (c.outcome === "writeFailed") faults.planWrite = ASKS;
+    context.after(() => (faults.planWrite = null));
     // Prepared without waiting: a retirement right after cancels the reservation before its task runs.
     const preparing = host.prepareScript(token, {
       plan: token,
@@ -780,7 +783,7 @@ const DRIVERS: Record<
     });
     if (c.outcome === "writeFailed") {
       await preparing;
-      await until(() => failPlanWrite === null, "the reservation's task did not try to write");
+      await until(() => faults.planWrite === null, "the reservation's task did not try to write");
     } else if (c.outcome === "materialized") {
       await preparing;
       for (let turn = 0; (await writesOn(host, ASKS)) === 0; turn++) {
@@ -883,7 +886,7 @@ const DRIVERS: Record<
   async captureKeep(context, at, c) {
     const { host, scope } = await page(context, at, ASKS);
     const reply = holdReply(context, await host.bridge, "captureKeep", (args, request) => {
-      if (c.outcome === "unkeepable") failNextSnapshot = true;
+      if (c.outcome === "unkeepable") faults.nextSnapshot = true;
       const session =
         typeof args === "object" && args !== null && "session" in args ? args.session : null;
       // A session the host no longer holds: released just before the capture runs.
@@ -1624,7 +1627,7 @@ async function keepOn(
     scope,
     plan,
     start: async () => {
-      if (first === "forget") failNextSnapshot = true;
+      if (first === "forget") faults.nextSnapshot = true;
       hide();
     },
   };
@@ -1884,8 +1887,8 @@ async function ownershipRun(
     ASKS_OTHER,
   );
   context.after(() => {
-    failNextSnapshot = false;
-    failPlanWrite = null;
+    faults.nextSnapshot = false;
+    faults.planWrite = null;
   });
   const variant: Variant = VARIANTS[name];
   const browserAt = familyBrowser(variant.route === "plain" ? "plain" : "captured");
