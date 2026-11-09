@@ -12,7 +12,11 @@ defineOptions({ inheritAttrs: false });
 <template>
   <CollapsibleTrigger as-child>
     <!-- -ms-3 takes back the button's side padding, so the chevron lines up with the text around it. -->
-    <Button v-bind="$attrs" variant="muted" class="group -ms-3 min-h-11 self-start justify-self-start">
+    <Button
+      v-bind="$attrs"
+      variant="muted"
+      class="group -ms-3 min-h-11 self-start justify-self-start"
+    >
       <ChevronRight class="group-data-[state=open]:rotate-90" aria-hidden="true" />
       <slot />
     </Button>

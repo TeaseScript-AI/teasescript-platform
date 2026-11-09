@@ -61,16 +61,30 @@ defineExpose({ focus });
         :problems="[outdated]"
         data-outdated-session
       />
-      <PlayerActionButton data-session-start @click="$emit('activate')">{{ label }}</PlayerActionButton>
+      <PlayerActionButton data-session-start @click="$emit('activate')">{{
+        label
+      }}</PlayerActionButton>
       <template v-if="debugRoom && startAnew">
         <p class="mt-4 text-center text-sm text-balance text-muted-foreground">
           Reload deletes the debug session and keeps what it saved. Reset deletes both.
         </p>
         <div class="flex flex-col gap-2 sm:flex-row">
-          <Button type="button" variant="ghost" class="min-h-11" data-debug-reload @click="$emit('reload')">
+          <Button
+            type="button"
+            variant="ghost"
+            class="min-h-11"
+            data-debug-reload
+            @click="$emit('reload')"
+          >
             Reload session
           </Button>
-          <Button type="button" variant="ghost" class="min-h-11" data-debug-reset @click="$emit('reset')">
+          <Button
+            type="button"
+            variant="ghost"
+            class="min-h-11"
+            data-debug-reset
+            @click="$emit('reset')"
+          >
             Reset session
           </Button>
         </div>
@@ -95,5 +109,7 @@ defineExpose({ focus });
   overflow-y: auto;
   pointer-events: none;
 }
-.session-activation > * { pointer-events: auto; }
+.session-activation > * {
+  pointer-events: auto;
+}
 </style>

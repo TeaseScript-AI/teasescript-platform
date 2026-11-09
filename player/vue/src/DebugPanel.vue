@@ -46,7 +46,9 @@ const nextLabels: Record<Exclude<DebugRandomNext, "ask">, string> = {
   <div class="grid gap-4 p-4 text-xs" data-debug-panel>
     <Collapsible class="grid gap-1">
       <div class="flex min-h-9 items-center justify-between gap-2">
-        <CollapsibleDisclosure class="text-xs" aria-label="About Debug">Debug</CollapsibleDisclosure>
+        <CollapsibleDisclosure class="text-xs" aria-label="About Debug"
+          >Debug</CollapsibleDisclosure
+        >
         <Switch v-model="active" aria-label="Debug" data-debug-active />
       </div>
       <CollapsibleContent class="text-muted-foreground">
@@ -169,9 +171,15 @@ const nextLabels: Record<Exclude<DebugRandomNext, "ask">, string> = {
       <!-- The tabs wrap to a second row in the narrowest panel; each keeps its own 44 px height. -->
       <TabsList class="h-auto w-full min-w-0 flex-wrap">
         <TabsTrigger value="now" class="h-auto min-h-11" data-debug-tab="now">Now</TabsTrigger>
-        <TabsTrigger value="variables" class="h-auto min-h-11" data-debug-tab="variables">Variables</TabsTrigger>
+        <TabsTrigger value="variables" class="h-auto min-h-11" data-debug-tab="variables"
+          >Variables</TabsTrigger
+        >
         <TabsTrigger value="log" class="h-auto min-h-11" data-debug-tab="log">Log</TabsTrigger>
-        <TabsTrigger v-if="$slots.storage" value="storage" class="h-auto min-h-11" data-debug-tab="storage"
+        <TabsTrigger
+          v-if="$slots.storage"
+          value="storage"
+          class="h-auto min-h-11"
+          data-debug-tab="storage"
           >Storage</TabsTrigger
         >
       </TabsList>

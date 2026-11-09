@@ -72,12 +72,18 @@ const props = defineProps<{
   savedData?: {
     readonly export: () => Promise<readonly SavedScript[]>;
     /** The session's export, with why it is unavailable now, or `null` when it is available. */
-    readonly session: { readonly unavailable: string | null; readonly read: () => Promise<SessionExport> };
+    readonly session: {
+      readonly unavailable: string | null;
+      readonly read: () => Promise<SessionExport>;
+    };
     readonly import: {
       readonly available: boolean;
       readonly sessionInProgress: boolean;
       readonly review: (bundle: StorageBundle) => Promise<SavedDataImportReview>;
-      readonly commit: (review: SavedDataImportReview, chosen: ReadonlySet<string>) => Promise<void>;
+      readonly commit: (
+        review: SavedDataImportReview,
+        chosen: ReadonlySet<string>,
+      ) => Promise<void>;
       readonly reviewSession: (transfer: SessionTransfer) => Promise<SessionImportReview>;
       readonly commitSession: (review: SessionImportReview) => Promise<void>;
     };
@@ -94,7 +100,11 @@ const debugMenu = defineModel<boolean>("debugMenu", { required: true });
 // Testing: whether the tools menu offers the A/B tests panel, a stored preference PlayerApp owns.
 const abTestsMenu = defineModel<boolean>("abTestsMenu", { required: true });
 type LabelMode = "icons" | "preview" | "labels";
-const labelMode = usePlayerPreference<LabelMode>("player-menu-label-mode", ["icons", "preview", "labels"], "icons");
+const labelMode = usePlayerPreference<LabelMode>(
+  "player-menu-label-mode",
+  ["icons", "preview", "labels"],
+  "icons",
+);
 const hoverPreview = ref(false);
 const focusPreview = ref(false);
 const menuSidebar = ref<HTMLElement | null>(null);
@@ -195,15 +205,14 @@ useResizeObserver(menuRuler, () => {
 const permanentMenuWidth = computed(() => menuWidthRem.value * remSize.value);
 // Existing provisional conversation width plus fixture margins/borders.
 const protectedPlayerWidth = computed(() => 380 + 6 * remSize.value + 4);
-const requiredDockWidth = computed(
-  () =>
-    Math.max(
-      900,
-      protectedPlayerWidth.value +
-        (labelMode.value === "labels" ? permanentMenuWidth.value : compactMenuWidth.value) +
-        toolPanelSizes.Small * remSize.value +
-        1,
-    ),
+const requiredDockWidth = computed(() =>
+  Math.max(
+    900,
+    protectedPlayerWidth.value +
+      (labelMode.value === "labels" ? permanentMenuWidth.value : compactMenuWidth.value) +
+      toolPanelSizes.Small * remSize.value +
+      1,
+  ),
 );
 const conditions = providePlayerConditions(requiredDockWidth);
 const { viewport, horizontalConstrained: narrow } = conditions;
@@ -213,7 +222,7 @@ const timerSize = computed(() => {
   if (narrow.value || conditions.verticalConstrained.value) return 96;
   return viewport.value.width >= 2240 ? 192 : 128;
 });
-const timerRailWidth = computed(() => timerSize.value === 192 ? 192 : 156);
+const timerRailWidth = computed(() => (timerSize.value === 192 ? 192 : 156));
 watch(viewport, () => {
   remSize.value = parseFloat(getComputedStyle(document.documentElement).fontSize);
 });
@@ -238,7 +247,9 @@ watch(
   [sidebarVisible, narrow],
   async ([open, isNarrow], _, onCleanup) => {
     let cancelled = false;
-    onCleanup(() => { cancelled = true; });
+    onCleanup(() => {
+      cancelled = true;
+    });
     if (open) {
       sidebarContentsPresent.value = true;
       return;
@@ -258,7 +269,8 @@ watch(
     if (cancelled) return;
     // Keep the visible surface intact until its own motion ends. Cancelling or
     // disabling a transition also settles finished; reopening cancels this cleanup.
-    const dock = toolsSurface.value?.closest('[data-slot="sidebar"]')
+    const dock = toolsSurface.value
+      ?.closest('[data-slot="sidebar"]')
       ?.querySelector<HTMLElement>(":scope > .fixed");
     await Promise.allSettled(dock?.getAnimations().map((animation) => animation.finished) ?? []);
     if (!cancelled) sidebarContentsPresent.value = false;
@@ -332,7 +344,8 @@ function closeDrawerFromTooltip(event: KeyboardEvent) {
     !narrow.value ||
     !sidebarVisible.value ||
     !document.querySelector('[data-slot="tooltip-content"]')
-  ) return;
+  )
+    return;
   event.preventDefault();
   event.stopPropagation();
   setSidebarVisible(false);
@@ -354,7 +367,9 @@ function startResize(event: PointerEvent, tool?: Tool) {
   // A capped preset must shrink from its visible edge, not the stored preset width.
   const initialWidth = tool
     ? edge.parentElement!.getBoundingClientRect().width
-    : (initialMenuMode === "icons" ? compactMenuWidth.value : initialMenuWidth * rem);
+    : initialMenuMode === "icons"
+      ? compactMenuWidth.value
+      : initialMenuWidth * rem;
   // Halfway across the unused gap keeps the minimum label width easy to select.
   const menuSnapWidth = (compactMenuWidth.value / rem + menuWidths.min) / 2;
   resizing.value = tool ?? "menu";
@@ -717,405 +732,429 @@ async function updateSidebarVisibility(open: boolean) {
       '--player-timer-rail-width': `${timerRailWidth}px`,
     }"
   >
-  <SidebarProvider
-    id="player-shell"
-    :tooltip-delay-duration="700"
-    :tooltip-skip-delay-duration="0"
-    :tooltip-ignore-non-keyboard-focus="true"
-    :data-player-horizontal="narrow ? 'constrained' : 'comfortable'"
-    :data-player-vertical="conditions.verticalConstrained.value ? 'constrained' : 'comfortable'"
-    :data-player-touch="conditions.touchAvailable.value ? 'available' : 'unavailable'"
-    :data-player-hover="conditions.hoverAvailable.value ? 'available' : 'unavailable'"
-    :data-player-fullscreen="fullscreen ? 'active' : 'inactive'"
-    :data-player-touch-edge="conditions.touchAtScreenEdge.value ? 'protected' : 'normal'"
-    :data-player-keyboard="conditions.keyboardRaised.value ? 'raised' : 'closed'"
-    :data-player-edge="conditions.edgeClearance.value ? 'protected' : 'normal'"
-    :data-sidebar-visible="sidebarVisible"
-    :data-menu-visible="narrowMenuVisible"
-    :style="{
-      '--media-aspect': mediaAspect,
-      '--active-tool-width': `${toolPanelSizes[narrowTool ? toolSize(narrowTool) : 'Medium']}rem`,
-      '--player-reserve': `${protectedPlayerWidth}px`,
-      '--tool-columns-width': `${toolColumnsWidth}rem`,
-      '--permanent-menu-width': `${menuWidthRem}rem`,
-      '--measured-menu-width': `${measuredMenuWidth}px`,
-    }"
-    :data-resizing="resizing !== null"
-    :data-labels="labelMode"
-    :data-tools-open="openTools.length > 0"
-    :data-labels-visible="labelsVisible"
-    class="player-sidebar fixed inset-x-0 min-h-0 overflow-hidden"
-    :open="sidebarVisible"
-    :responsive="false"
-    @update:open="updateSidebarVisibility"
-  >
-    <div ref="compactMenuRuler" class="player-menu-compact-ruler" aria-hidden="true" />
-    <div ref="menuRuler" class="menu-width-ruler" aria-hidden="true">
-      <span v-for="tool in tools" :key="tool.name">{{ tool.name }}</span>
-      <span>Settings</span>
-    </div>
-    <div ref="toolContentParking" hidden inert />
-    <template v-if="toolContentParking">
-      <ToolPanelBody
-        v-for="tool in visitedTools"
-        :key="tool"
-        :target="toolContentTargets[tool] ?? toolContentParking"
-        :visible="
-          sidebarVisible &&
-          openTools.includes(tool) &&
-          (!narrow || (!narrowMenuVisible && narrowTool === tool))
-        "
-      >
-        <slot name="tool" :tool="tool" :player="shellElement" />
-      </ToolPanelBody>
-    </template>
-    <!-- The local Sheet owns responsiveness; disable the provider’s independent mobile state. -->
-    <Sheet :open="narrow && sidebarVisible" @update:open="setSidebarVisible">
-      <component
-        :is="narrow ? SheetContent : Sidebar"
-        side="left"
-        variant="sidebar"
-        collapsible="offcanvas"
-        :portal-target="narrow ? '#player-shell' : undefined"
-        :class="narrow ? 'tools-drawer' : undefined"
-        @open-auto-focus="openDrawerFocus"
-        @close-auto-focus="closeDrawerFocus"
-        @keydown.esc.capture="closeDrawerFromTooltip"
-      >
-        <template v-if="narrow">
-          <SheetTitle class="sr-only">Tools Sidebar</SheetTitle>
-          <SheetDescription class="sr-only"
-            >Open, arrange and resize Player tools.</SheetDescription
-          >
-        </template>
-        <div
-          ref="toolsSurface"
-          data-tools-surface
-          :inert="!sidebarVisible"
-          class="relative flex h-full min-h-0"
-          :class="{ 'flex-col': narrow }"
+    <SidebarProvider
+      id="player-shell"
+      :tooltip-delay-duration="700"
+      :tooltip-skip-delay-duration="0"
+      :tooltip-ignore-non-keyboard-focus="true"
+      :data-player-horizontal="narrow ? 'constrained' : 'comfortable'"
+      :data-player-vertical="conditions.verticalConstrained.value ? 'constrained' : 'comfortable'"
+      :data-player-touch="conditions.touchAvailable.value ? 'available' : 'unavailable'"
+      :data-player-hover="conditions.hoverAvailable.value ? 'available' : 'unavailable'"
+      :data-player-fullscreen="fullscreen ? 'active' : 'inactive'"
+      :data-player-touch-edge="conditions.touchAtScreenEdge.value ? 'protected' : 'normal'"
+      :data-player-keyboard="conditions.keyboardRaised.value ? 'raised' : 'closed'"
+      :data-player-edge="conditions.edgeClearance.value ? 'protected' : 'normal'"
+      :data-sidebar-visible="sidebarVisible"
+      :data-menu-visible="narrowMenuVisible"
+      :style="{
+        '--media-aspect': mediaAspect,
+        '--active-tool-width': `${toolPanelSizes[narrowTool ? toolSize(narrowTool) : 'Medium']}rem`,
+        '--player-reserve': `${protectedPlayerWidth}px`,
+        '--tool-columns-width': `${toolColumnsWidth}rem`,
+        '--permanent-menu-width': `${menuWidthRem}rem`,
+        '--measured-menu-width': `${measuredMenuWidth}px`,
+      }"
+      :data-resizing="resizing !== null"
+      :data-labels="labelMode"
+      :data-tools-open="openTools.length > 0"
+      :data-labels-visible="labelsVisible"
+      class="player-sidebar fixed inset-x-0 min-h-0 overflow-hidden"
+      :open="sidebarVisible"
+      :responsive="false"
+      @update:open="updateSidebarVisibility"
+    >
+      <div ref="compactMenuRuler" class="player-menu-compact-ruler" aria-hidden="true" />
+      <div ref="menuRuler" class="menu-width-ruler" aria-hidden="true">
+        <span v-for="tool in tools" :key="tool.name">{{ tool.name }}</span>
+        <span>Settings</span>
+      </div>
+      <div ref="toolContentParking" hidden inert />
+      <template v-if="toolContentParking">
+        <ToolPanelBody
+          v-for="tool in visitedTools"
+          :key="tool"
+          :target="toolContentTargets[tool] ?? toolContentParking"
+          :visible="
+            sidebarVisible &&
+            openTools.includes(tool) &&
+            (!narrow || (!narrowMenuVisible && narrowTool === tool))
+          "
         >
-          <div v-if="narrow" class="player-drawer-header flex shrink-0 items-center gap-2 border-b">
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <SidebarTrigger
-                  data-tools-focus="toggle"
-                  class="player-control-square"
-                  aria-label="Hide sidebar"
-                />
-              </TooltipTrigger>
-              <TooltipContent side="right">Hide sidebar</TooltipContent>
-            </Tooltip>
-            <Button
-              v-if="!narrowMenuVisible"
-              data-show-tools
-              data-tools-focus="show-menu"
-              variant="ghost"
-              size="sm"
-              @click="showToolMenu"
+          <slot name="tool" :tool="tool" :player="shellElement" />
+        </ToolPanelBody>
+      </template>
+      <!-- The local Sheet owns responsiveness; disable the provider’s independent mobile state. -->
+      <Sheet :open="narrow && sidebarVisible" @update:open="setSidebarVisible">
+        <component
+          :is="narrow ? SheetContent : Sidebar"
+          side="left"
+          variant="sidebar"
+          collapsible="offcanvas"
+          :portal-target="narrow ? '#player-shell' : undefined"
+          :class="narrow ? 'tools-drawer' : undefined"
+          @open-auto-focus="openDrawerFocus"
+          @close-auto-focus="closeDrawerFocus"
+          @keydown.esc.capture="closeDrawerFromTooltip"
+        >
+          <template v-if="narrow">
+            <SheetTitle class="sr-only">Tools Sidebar</SheetTitle>
+            <SheetDescription class="sr-only"
+              >Open, arrange and resize Player tools.</SheetDescription
             >
-              <PanelLeftOpen class="size-4" /> Tools
-            </Button>
-          </div>
+          </template>
           <div
-            v-if="sidebarContentsPresent"
-            v-show="!narrow || narrowMenuVisible"
-            data-launcher-space
-            class="relative flex shrink-0 bg-sidebar"
+            ref="toolsSurface"
+            data-tools-surface
+            :inert="!sidebarVisible"
+            class="relative flex h-full min-h-0"
+            :class="{ 'flex-col': narrow }"
           >
             <div
-              ref="menuSidebar"
-              data-launcher
-              @click="clickMenuSpace"
-              @pointerenter="updateHoverPreview"
-              @pointermove="updateHoverPreview"
-              @pointerleave="leaveMenu"
-              @focusin="updateFocusPreview"
-              @focusout="updateFocusPreview"
-              class="relative flex h-full min-w-0 flex-col bg-sidebar"
-              :class="{ 'flex-1': labelMode !== 'preview', 'border-r': labelMode === 'preview' }"
+              v-if="narrow"
+              class="player-drawer-header flex shrink-0 items-center gap-2 border-b"
             >
-              <SidebarHeader v-if="!narrow" class="player-edge-padding">
-                <Tooltip>
-                  <TooltipTrigger as-child>
-                    <SidebarTrigger
-                      class="player-control-square"
-                      data-tools-focus="toggle"
-                      aria-label="Hide sidebar"
-                    />
-                  </TooltipTrigger>
-                  <TooltipContent side="right">Hide sidebar</TooltipContent>
-                </Tooltip>
-              </SidebarHeader>
-              <div v-if="narrow && narrowTool && openTools.includes(narrowTool)" class="player-edge-padding">
-                <Tooltip>
-                  <TooltipTrigger as-child>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      class="player-control-square"
-                      data-tools-focus="back-to-tool"
-                      aria-label="Back to active tool"
-                      @click="revealTool(narrowTool)"
-                    >
-                      <PanelRightOpen class="size-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">Back to active tool</TooltipContent>
-                </Tooltip>
-              </div>
-              <ScrollArea class="min-h-0" :viewport-attrs="{ 'aria-label': 'Tools' }">
-              <nav aria-label="Tools" class="player-edge-padding player-tool-menu">
-                <SidebarMenu>
-                  <SidebarMenuItem v-for="tool in tools" :key="tool.name">
-                    <MenuSidebarButton
-                      :label="tool.name"
-                      :data-tools-focus="`launcher:${tool.name}`"
-                      :is-active="narrow ? narrowTool === tool.name : openTools.includes(tool.name)"
-                      :aria-current="narrow && narrowTool === tool.name ? 'true' : undefined"
-                      @click="clickTool(tool.name, $event)"
-                      @dblclick="toggleToolPin(tool.name)"
-                    >
-                      <component :is="tool.icon" />
-                    </MenuSidebarButton>
-                  </SidebarMenuItem>
-                </SidebarMenu>
-              </nav>
-              </ScrollArea>
-              <div class="mt-auto player-edge-padding">
-                <Dialog v-model:open="playerSettingsOpen">
-                  <DialogTrigger as-child>
-                    <MenuSidebarButton
-                      label="Settings"
-                      data-tools-focus="player-settings"
-                      data-settings-trigger
-                    >
-                      <Settings />
-                    </MenuSidebarButton>
-                  </DialogTrigger>
-                  <DialogContent
-                    data-tools-context
-                    data-player-settings
-                    @close-auto-focus="closeSettingsFocus"
-                    @focusin="revealFocusedSetting"
-                  >
-                    <DialogHeader>
-                      <DialogTitle>Player Settings</DialogTitle>
-                      <DialogDescription>
-                        Preferences for the Player interface{{ savedData ? " and the saved data of the scripts you play" : "" }}.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <label class="flex flex-col gap-2 text-sm">
-                      Menu Sidebar labels
-                      <select
-                        data-tools-focus="label-mode"
-                        v-model="labelMode"
-                        class="rounded-md border bg-background p-2"
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <SidebarTrigger
+                    data-tools-focus="toggle"
+                    class="player-control-square"
+                    aria-label="Hide sidebar"
+                  />
+                </TooltipTrigger>
+                <TooltipContent side="right">Hide sidebar</TooltipContent>
+              </Tooltip>
+              <Button
+                v-if="!narrowMenuVisible"
+                data-show-tools
+                data-tools-focus="show-menu"
+                variant="ghost"
+                size="sm"
+                @click="showToolMenu"
+              >
+                <PanelLeftOpen class="size-4" /> Tools
+              </Button>
+            </div>
+            <div
+              v-if="sidebarContentsPresent"
+              v-show="!narrow || narrowMenuVisible"
+              data-launcher-space
+              class="relative flex shrink-0 bg-sidebar"
+            >
+              <div
+                ref="menuSidebar"
+                data-launcher
+                @click="clickMenuSpace"
+                @pointerenter="updateHoverPreview"
+                @pointermove="updateHoverPreview"
+                @pointerleave="leaveMenu"
+                @focusin="updateFocusPreview"
+                @focusout="updateFocusPreview"
+                class="relative flex h-full min-w-0 flex-col bg-sidebar"
+                :class="{ 'flex-1': labelMode !== 'preview', 'border-r': labelMode === 'preview' }"
+              >
+                <SidebarHeader v-if="!narrow" class="player-edge-padding">
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <SidebarTrigger
+                        class="player-control-square"
+                        data-tools-focus="toggle"
+                        aria-label="Hide sidebar"
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Hide sidebar</TooltipContent>
+                  </Tooltip>
+                </SidebarHeader>
+                <div
+                  v-if="narrow && narrowTool && openTools.includes(narrowTool)"
+                  class="player-edge-padding"
+                >
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="player-control-square"
+                        data-tools-focus="back-to-tool"
+                        aria-label="Back to active tool"
+                        @click="revealTool(narrowTool)"
                       >
-                        <option value="icons">Icons only</option>
-                        <option value="preview">Icons + preview</option>
-                        <option value="labels">Icons + labels</option>
-                      </select>
-                    </label>
-                    <label class="flex flex-col gap-2 text-sm">
-                      Contrast
-                      <select
-                        v-model="contrast"
-                        data-player-setting="contrast"
-                        class="rounded-md border bg-background p-2"
-                      >
-                        <option value="standard">Standard</option>
-                        <option value="high">High</option>
-                      </select>
-                    </label>
-                    <section class="grid gap-2 border-t pt-4 text-sm" data-player-setting="testing">
-                      <h3 class="font-medium">Testing</h3>
-                      <label class="flex min-h-11 items-center justify-between gap-4">
-                        Debug menu
-                        <Switch v-model="debugMenu" data-player-setting="debug-menu" />
-                      </label>
-                      <p class="text-muted-foreground">
-                        Adds the Debug panel to the tools menu. It shows how the script runs and may reveal what
-                        comes next.
-                      </p>
-                      <label class="flex min-h-11 items-center justify-between gap-4">
-                        A/B tests
-                        <Switch v-model="abTestsMenu" data-player-setting="ab-tests-menu" />
-                      </label>
-                      <p class="text-muted-foreground">
-                        Adds the A/B tests panel to the tools menu: variants of the Player's look that are being
-                        compared.
-                      </p>
-                      <template v-if="debugExport">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          class="min-h-11 justify-self-start"
-                          :disabled="!debugExport.available"
-                          data-player-setting="debug-export"
-                          @click="debugExport.open"
+                        <PanelRightOpen class="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Back to active tool</TooltipContent>
+                  </Tooltip>
+                </div>
+                <ScrollArea class="min-h-0" :viewport-attrs="{ 'aria-label': 'Tools' }">
+                  <nav aria-label="Tools" class="player-edge-padding player-tool-menu">
+                    <SidebarMenu>
+                      <SidebarMenuItem v-for="tool in tools" :key="tool.name">
+                        <MenuSidebarButton
+                          :label="tool.name"
+                          :data-tools-focus="`launcher:${tool.name}`"
+                          :is-active="
+                            narrow ? narrowTool === tool.name : openTools.includes(tool.name)
+                          "
+                          :aria-current="narrow && narrowTool === tool.name ? 'true' : undefined"
+                          @click="clickTool(tool.name, $event)"
+                          @dblclick="toggleToolPin(tool.name)"
                         >
-                          Download debug export…
-                        </Button>
-                        <p class="text-muted-foreground">
-                          {{
-                            debugExport.available
-                              ? "A file that helps a developer find what went wrong; you choose what it includes."
-                              : "Available once a session has started."
-                          }}
-                        </p>
-                      </template>
-                    </section>
-                    <section
-                      v-if="savedData"
-                      class="grid gap-2 border-t pt-4 text-sm"
-                      data-player-setting="saved-data"
+                          <component :is="tool.icon" />
+                        </MenuSidebarButton>
+                      </SidebarMenuItem>
+                    </SidebarMenu>
+                  </nav>
+                </ScrollArea>
+                <div class="mt-auto player-edge-padding">
+                  <Dialog v-model:open="playerSettingsOpen">
+                    <DialogTrigger as-child>
+                      <MenuSidebarButton
+                        label="Settings"
+                        data-tools-focus="player-settings"
+                        data-settings-trigger
+                      >
+                        <Settings />
+                      </MenuSidebarButton>
+                    </DialogTrigger>
+                    <DialogContent
+                      data-tools-context
+                      data-player-settings
+                      @close-auto-focus="closeSettingsFocus"
+                      @focusin="revealFocusedSetting"
                     >
-                      <h3 class="font-medium">Saved data</h3>
-                      <p>
-                        What the scripts you play saved in this browser. Export and import also move a session to
-                        another browser.
-                      </p>
-                      <div class="flex flex-wrap gap-2">
-                        <SavedDataExport :read="savedData.export" :session="savedData.session" />
-                        <SavedDataImport
-                          :available="savedData.import.available"
-                          :session-in-progress="savedData.import.sessionInProgress"
-                          :review="savedData.import.review"
-                          :commit="savedData.import.commit"
-                          :review-session="savedData.import.reviewSession"
-                          :commit-session="savedData.import.commitSession"
-                        />
-                      </div>
-                      <template v-if="savedData.clear">
-                        <template v-if="clearSavedData === 'confirm' || clearSavedData === 'clearing'">
-                          <p>Clear all saved data for this script? This cannot be undone.</p>
-                          <div ref="clearConfirmation" class="flex gap-2">
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              class="min-h-11"
-                              :disabled="clearSavedData === 'clearing'"
-                              data-clear-saved-data-confirm
-                              @click="confirmClearSavedData"
-                            >
-                              {{ clearSavedData === "clearing" ? "Clearing…" : "Clear" }}
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              class="min-h-11"
-                              :disabled="clearSavedData === 'clearing'"
-                              @click="clearSavedData = 'idle'"
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        </template>
-                        <template v-else>
+                      <DialogHeader>
+                        <DialogTitle>Player Settings</DialogTitle>
+                        <DialogDescription>
+                          Preferences for the Player interface{{
+                            savedData ? " and the saved data of the scripts you play" : ""
+                          }}.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <label class="flex flex-col gap-2 text-sm">
+                        Menu Sidebar labels
+                        <select
+                          data-tools-focus="label-mode"
+                          v-model="labelMode"
+                          class="rounded-md border bg-background p-2"
+                        >
+                          <option value="icons">Icons only</option>
+                          <option value="preview">Icons + preview</option>
+                          <option value="labels">Icons + labels</option>
+                        </select>
+                      </label>
+                      <label class="flex flex-col gap-2 text-sm">
+                        Contrast
+                        <select
+                          v-model="contrast"
+                          data-player-setting="contrast"
+                          class="rounded-md border bg-background p-2"
+                        >
+                          <option value="standard">Standard</option>
+                          <option value="high">High</option>
+                        </select>
+                      </label>
+                      <section
+                        class="grid gap-2 border-t pt-4 text-sm"
+                        data-player-setting="testing"
+                      >
+                        <h3 class="font-medium">Testing</h3>
+                        <label class="flex min-h-11 items-center justify-between gap-4">
+                          Debug menu
+                          <Switch v-model="debugMenu" data-player-setting="debug-menu" />
+                        </label>
+                        <p class="text-muted-foreground">
+                          Adds the Debug panel to the tools menu. It shows how the script runs and
+                          may reveal what comes next.
+                        </p>
+                        <label class="flex min-h-11 items-center justify-between gap-4">
+                          A/B tests
+                          <Switch v-model="abTestsMenu" data-player-setting="ab-tests-menu" />
+                        </label>
+                        <p class="text-muted-foreground">
+                          Adds the A/B tests panel to the tools menu: variants of the Player's look
+                          that are being compared.
+                        </p>
+                        <template v-if="debugExport">
                           <Button
-                            class="min-h-11 justify-self-start"
                             variant="outline"
                             size="sm"
-                            :disabled="!savedData.clear.available"
-                            data-clear-saved-data
-                            @click="askToClearSavedData"
+                            class="min-h-11 justify-self-start"
+                            :disabled="!debugExport.available"
+                            data-player-setting="debug-export"
+                            @click="debugExport.open"
                           >
-                            Clear saved script data
+                            Download debug export…
                           </Button>
-                          <p v-if="!savedData.clear.available">
-                            Clears only this script's data, before the session starts or after it ends.
+                          <p class="text-muted-foreground">
+                            {{
+                              debugExport.available
+                                ? "A file that helps a developer find what went wrong; you choose what it includes."
+                                : "Available once a session has started."
+                            }}
                           </p>
-                          <p v-if="clearSavedData === 'cleared'" role="status">Saved script data cleared.</p>
-                          <p v-if="clearSavedData === 'failed'" role="status">Could not clear saved script data.</p>
                         </template>
-                      </template>
-                    </section>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </div>
-            <ResizeHandle
-              v-if="labelMode !== 'preview' && !narrow"
-              class="menu-resize-edge"
-              role="separator"
-              tabindex="0"
-              aria-orientation="vertical"
-              :data-active="resizing === 'menu' ? '' : undefined"
-              :aria-valuemin="compactMenuWidth"
-              :aria-valuemax="Math.round(menuBounds.max)"
-              :aria-valuenow="
-                labelMode === 'icons' ? compactMenuWidth : Math.round(permanentMenuWidth)
-              "
-              :aria-valuetext="
-                labelMode === 'icons' ? 'Icons only' : `${menuWidthRem}rem, icons and labels`
-              "
-              aria-label="Menu Sidebar width"
-              aria-description="Drag to resize or switch between icons and labels. Press Enter to toggle labels."
-              @pointerdown="startResize($event)"
-              @keydown="resizeMenuKey"
-            />
-          </div>
-          <ScrollArea
-            v-if="sidebarContentsPresent"
-            v-show="!narrow || !narrowMenuVisible"
-            orientation="horizontal"
-            class="flex-1"
-            content-class="tool-panel-content flex h-full min-w-0"
-            @viewport="toolStrip = $event"
-            :viewport-attrs="{ role: 'region', 'aria-label': 'Tool Panels', tabindex: openTools.length ? 0 : -1 }"
-            viewport-class="tool-panel-strip min-w-0 overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2"
-          >
-            <section
-              v-for="tool in openTools"
-              :key="tool"
-              v-show="!narrow || tool === narrowTool"
-              :data-tool="tool"
-              :aria-label="`${tool} panel`"
-              :style="{ width: `${toolPanelSizes[toolSize(tool)]}rem` }"
-              class="relative flex min-h-0 shrink-0 bg-card"
-            >
-              <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-                <ToolPanelHeader
-                  :active="sidebarVisible"
-                  :tool="tool"
-                  :size="toolSize(tool)"
-                  :pinned="pinnedTools.includes(tool)"
-                  :can-move-left="openTools.indexOf(tool) > 0"
-                  :can-move-right="openTools.indexOf(tool) < openTools.length - 1"
-                  @restore-focus="focusToolsToggle"
-                  @resize="toolSizes[tool] = $event"
-                  @pin="setPinned(tool, $event)"
-                  @move="moveTool(tool, $event)"
-                />
-                <div :ref="(element) => setToolContentTarget(tool, element)" class="contents" />
+                      </section>
+                      <section
+                        v-if="savedData"
+                        class="grid gap-2 border-t pt-4 text-sm"
+                        data-player-setting="saved-data"
+                      >
+                        <h3 class="font-medium">Saved data</h3>
+                        <p>
+                          What the scripts you play saved in this browser. Export and import also
+                          move a session to another browser.
+                        </p>
+                        <div class="flex flex-wrap gap-2">
+                          <SavedDataExport :read="savedData.export" :session="savedData.session" />
+                          <SavedDataImport
+                            :available="savedData.import.available"
+                            :session-in-progress="savedData.import.sessionInProgress"
+                            :review="savedData.import.review"
+                            :commit="savedData.import.commit"
+                            :review-session="savedData.import.reviewSession"
+                            :commit-session="savedData.import.commitSession"
+                          />
+                        </div>
+                        <template v-if="savedData.clear">
+                          <template
+                            v-if="clearSavedData === 'confirm' || clearSavedData === 'clearing'"
+                          >
+                            <p>Clear all saved data for this script? This cannot be undone.</p>
+                            <div ref="clearConfirmation" class="flex gap-2">
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                class="min-h-11"
+                                :disabled="clearSavedData === 'clearing'"
+                                data-clear-saved-data-confirm
+                                @click="confirmClearSavedData"
+                              >
+                                {{ clearSavedData === "clearing" ? "Clearing…" : "Clear" }}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                class="min-h-11"
+                                :disabled="clearSavedData === 'clearing'"
+                                @click="clearSavedData = 'idle'"
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </template>
+                          <template v-else>
+                            <Button
+                              class="min-h-11 justify-self-start"
+                              variant="outline"
+                              size="sm"
+                              :disabled="!savedData.clear.available"
+                              data-clear-saved-data
+                              @click="askToClearSavedData"
+                            >
+                              Clear saved script data
+                            </Button>
+                            <p v-if="!savedData.clear.available">
+                              Clears only this script's data, before the session starts or after it
+                              ends.
+                            </p>
+                            <p v-if="clearSavedData === 'cleared'" role="status">
+                              Saved script data cleared.
+                            </p>
+                            <p v-if="clearSavedData === 'failed'" role="status">
+                              Could not clear saved script data.
+                            </p>
+                          </template>
+                        </template>
+                      </section>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </div>
               <ResizeHandle
-                :data-panel-resize="tool"
+                v-if="labelMode !== 'preview' && !narrow"
+                class="menu-resize-edge"
                 role="separator"
                 tabindex="0"
                 aria-orientation="vertical"
-                :aria-label="`${tool} width`"
-                :data-active="resizing === tool ? '' : undefined"
-                :aria-valuemin="toolPanelSizes.Small"
-                :aria-valuemax="toolPanelSizes['Extra Large']"
-                :aria-valuenow="toolPanelSizes[toolSize(tool)]"
-                :aria-valuetext="toolSize(tool)"
-                @pointerdown="startResize($event, tool)"
-                @keydown="resizePanelKey($event, tool)"
+                :data-active="resizing === 'menu' ? '' : undefined"
+                :aria-valuemin="compactMenuWidth"
+                :aria-valuemax="Math.round(menuBounds.max)"
+                :aria-valuenow="
+                  labelMode === 'icons' ? compactMenuWidth : Math.round(permanentMenuWidth)
+                "
+                :aria-valuetext="
+                  labelMode === 'icons' ? 'Icons only' : `${menuWidthRem}rem, icons and labels`
+                "
+                aria-label="Menu Sidebar width"
+                aria-description="Drag to resize or switch between icons and labels. Press Enter to toggle labels."
+                @pointerdown="startResize($event)"
+                @keydown="resizeMenuKey"
+              />
+            </div>
+            <ScrollArea
+              v-if="sidebarContentsPresent"
+              v-show="!narrow || !narrowMenuVisible"
+              orientation="horizontal"
+              class="flex-1"
+              content-class="tool-panel-content flex h-full min-w-0"
+              @viewport="toolStrip = $event"
+              :viewport-attrs="{
+                role: 'region',
+                'aria-label': 'Tool Panels',
+                tabindex: openTools.length ? 0 : -1,
+              }"
+              viewport-class="tool-panel-strip min-w-0 overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2"
+            >
+              <section
+                v-for="tool in openTools"
+                :key="tool"
+                v-show="!narrow || tool === narrowTool"
+                :data-tool="tool"
+                :aria-label="`${tool} panel`"
+                :style="{ width: `${toolPanelSizes[toolSize(tool)]}rem` }"
+                class="relative flex min-h-0 shrink-0 bg-card"
               >
-                <span v-if="resizing === tool" class="resize-size-label">{{
-                  toolSize(tool)
-                }}</span>
-              </ResizeHandle>
-            </section>
-          </ScrollArea>
-        </div>
-      </component>
-    </Sheet>
-    <SidebarInset class="min-h-0 min-w-0 bg-transparent">
-      <slot :sidebar-visible="sidebarVisible" />
-    </SidebarInset>
-  </SidebarProvider>
+                <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+                  <ToolPanelHeader
+                    :active="sidebarVisible"
+                    :tool="tool"
+                    :size="toolSize(tool)"
+                    :pinned="pinnedTools.includes(tool)"
+                    :can-move-left="openTools.indexOf(tool) > 0"
+                    :can-move-right="openTools.indexOf(tool) < openTools.length - 1"
+                    @restore-focus="focusToolsToggle"
+                    @resize="toolSizes[tool] = $event"
+                    @pin="setPinned(tool, $event)"
+                    @move="moveTool(tool, $event)"
+                  />
+                  <div :ref="(element) => setToolContentTarget(tool, element)" class="contents" />
+                </div>
+                <ResizeHandle
+                  :data-panel-resize="tool"
+                  role="separator"
+                  tabindex="0"
+                  aria-orientation="vertical"
+                  :aria-label="`${tool} width`"
+                  :data-active="resizing === tool ? '' : undefined"
+                  :aria-valuemin="toolPanelSizes.Small"
+                  :aria-valuemax="toolPanelSizes['Extra Large']"
+                  :aria-valuenow="toolPanelSizes[toolSize(tool)]"
+                  :aria-valuetext="toolSize(tool)"
+                  @pointerdown="startResize($event, tool)"
+                  @keydown="resizePanelKey($event, tool)"
+                >
+                  <span v-if="resizing === tool" class="resize-size-label">{{
+                    toolSize(tool)
+                  }}</span>
+                </ResizeHandle>
+              </section>
+            </ScrollArea>
+          </div>
+        </component>
+      </Sheet>
+      <SidebarInset class="min-h-0 min-w-0 bg-transparent">
+        <slot :sidebar-visible="sidebarVisible" />
+      </SidebarInset>
+    </SidebarProvider>
   </div>
 </template>
