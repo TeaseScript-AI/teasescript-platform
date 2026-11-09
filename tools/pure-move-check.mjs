@@ -7,14 +7,17 @@
 // limit it. Git's moved-line detection is read once over the whole change (`moved-lines.mjs`), so a block moved from
 // one file into another counts as moved.
 //
-// An added or removed line Git does not mark as moved is admitted only as one of these forms, nothing else:
-//   1. a line of an import or re-export statement: an import declaration, or an export declaration with a module
-//      specifier, in that side's blob (TypeScript and JavaScript files);
-//   2. a bare `export` keyword added to a moved declaration: an added line that is `export ` and then the text of a
-//      removed line Git does not mark as moved, indentation aside, each removed line paired once;
+// An added or removed line Git does not mark as moved is admitted only as one of these forms, nothing else; each form
+// holds the whole line, by that side's blob parsed as TypeScript (TypeScript and JavaScript files; comments are the
+// parser's, so a string's or a template's text is never one):
+//   1. a line of an import or re-export statement (an import declaration, or an export declaration with a module
+//      specifier), with nothing else on it but whitespace and comments;
+//   2. a bare `export` keyword added to a moved declaration: an added line where a top-level declaration starts with
+//      its `export` modifier, paired with a removed line where the same declaration starts without one, the rest of
+//      the two lines equal, indentation aside, each removed line paired once;
 //   3. a line of whitespace alone;
-//   4. a comment-only line in a file the change adds, above its first import or export statement (a comment elsewhere
-//      is a declared line or a failure);
+//   4. a line of comments and whitespace alone, in a file the change adds, above its first import or export statement
+//      (a comment elsewhere is a declared line or a failure);
 // or as a declared line: an entry of the `--declare` file, a JSON array of `{ "file", "side": "added" | "removed",
 // "line", "reason" }` (the reason one clause; the file named as it is on that side), for a path-keyed entry (a test
 // table's key, an allowance, a comment citing a moved file's path) or a line no form admits (a signature the formatter
@@ -28,7 +31,8 @@
 // characters) reads as added and removed. A failure on such a block is read by a person, not overridden.
 //
 // Exit status: 0 when every line is moved, admitted or declared; 1 when one is not (each printed with its file and
-// line); 2 when Git's output or the declarations cannot be read.
+// line); 2 when Git's output or the declarations cannot be read, a file name Git quotes, or a binary change, whose
+// content the check cannot inspect.
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -43,11 +47,37 @@ const FORMS = ["import", "export", "whitespace", "header comment"];
 /** Why the check cannot be trusted: exit 2. */
 class CannotRun extends Error {}
 
-/** The 1-based line of each offset of `text`, by Git's lines (a newline alone ends one). */
-function lineIndex(text) {
+/**
+ * A blob's shape by Git's lines (a newline alone ends one), each line's whole content classified: its import and
+ * re-export lines, holding nothing else but whitespace and comments; the lines of comments and whitespace alone above
+ * its first import or export statement; and the lines where a top-level declaration starts, each with whether it
+ * starts with its `export` modifier.
+ */
+function shapeOf(file, text) {
+  const importLines = new Set();
+  const headerComments = new Set();
+  const declarationStarts = new Map();
+  if (!PARSED.test(file)) return { importLines, headerComments, declarationStarts };
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  // each character's kind: 0 code or a string's text, 1 a comment the parser finds, 2 an import or re-export statement
+  const kind = new Uint8Array(text.length);
+  const seen = new Set();
+  const comments = (ranges) => {
+    for (const range of ranges ?? []) {
+      if (seen.has(range.pos)) continue;
+      seen.add(range.pos);
+      kind.fill(1, range.pos, range.end);
+    }
+  };
+  const visit = (node) => {
+    comments(ts.getLeadingCommentRanges(text, node.getFullStart()));
+    comments(ts.getTrailingCommentRanges(text, node.getEnd()));
+    for (const child of node.getChildren(source)) visit(child);
+  };
+  visit(source);
   const starts = [0];
   for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) starts.push(at + 1);
-  return (offset) => {
+  const lineOf = (offset) => {
     let [low, high] = [0, starts.length];
     while (low < high) {
       const middle = (low + high) >> 1;
@@ -56,61 +86,47 @@ function lineIndex(text) {
     }
     return low;
   };
-}
-
-/** A blob's import and re-export lines, and the comment-only lines above its first import or export statement. */
-function shapeOf(file, text) {
-  const importLines = new Set();
-  const headerComments = new Set();
-  if (!PARSED.test(file)) return { importLines, headerComments };
-  const lineOf = lineIndex(text);
-  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false);
   let first = null;
   for (const statement of source.statements) {
+    const start = statement.getStart(source);
     const isImport =
       ts.isImportDeclaration(statement) ||
       (ts.isExportDeclaration(statement) && statement.moduleSpecifier !== undefined);
-    if (isImport)
-      for (
-        let line = lineOf(statement.getStart(source));
-        line <= lineOf(statement.getEnd() - 1);
-        line += 1
-      )
-        importLines.add(line);
+    if (isImport) kind.fill(2, start, statement.getEnd());
+    const modifiers = ts.canHaveModifiers(statement) ? (ts.getModifiers(statement) ?? []) : [];
+    const exportFirst =
+      modifiers.length > 0 &&
+      modifiers[0].kind === ts.SyntaxKind.ExportKeyword &&
+      modifiers[0].getStart(source) === start;
+    if (
+      ts.isFunctionDeclaration(statement) ||
+      ts.isClassDeclaration(statement) ||
+      ts.isInterfaceDeclaration(statement) ||
+      ts.isTypeAliasDeclaration(statement) ||
+      ts.isEnumDeclaration(statement) ||
+      ts.isVariableStatement(statement) ||
+      ts.isModuleDeclaration(statement)
+    )
+      declarationStarts.set(lineOf(start), { exported: exportFirst });
     const exported =
       isImport ||
       ts.isExportDeclaration(statement) ||
       ts.isExportAssignment(statement) ||
-      (ts.canHaveModifiers(statement) &&
-        (ts.getModifiers(statement) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword));
-    if (first === null && exported) first = statement.getStart(source);
+      exportFirst;
+    if (first === null && exported) first = lineOf(start);
   }
-  if (first !== null) {
-    // lines before the first import or export that hold comments and whitespace alone
-    const code = new Set();
-    const comment = new Set();
-    const scanner = ts.createScanner(
-      ts.ScriptTarget.Latest,
-      false,
-      ts.LanguageVariant.Standard,
-      text,
-    );
-    for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
-      const start = scanner.getTokenStart();
-      if (start >= first) break;
-      const [from, to] = [lineOf(start), lineOf(Math.max(start, scanner.getTokenEnd() - 1))];
-      const target =
-        kind === ts.SyntaxKind.SingleLineCommentTrivia ||
-        kind === ts.SyntaxKind.MultiLineCommentTrivia
-          ? comment
-          : kind === ts.SyntaxKind.WhitespaceTrivia || kind === ts.SyntaxKind.NewLineTrivia
-            ? null
-            : code;
-      if (target !== null) for (let line = from; line <= to; line += 1) target.add(line);
+  for (let line = 1; line <= starts.length; line += 1) {
+    const [from, to] = [starts[line - 1], line < starts.length ? starts[line] - 1 : text.length];
+    let [code, comment, statement] = [false, false, false];
+    for (let at = from; at < to; at += 1) {
+      if (kind[at] === 1) comment = true;
+      else if (kind[at] === 2) statement = true;
+      else if (!/\s/u.test(text[at])) code = true;
     }
-    for (const line of comment) if (!code.has(line)) headerComments.add(line);
+    if (statement && !code) importLines.add(line);
+    if (first !== null && line < first && comment && !code && !statement) headerComments.add(line);
   }
-  return { importLines, headerComments };
+  return { importLines, headerComments, declarationStarts };
 }
 
 /** The declarations of `path`, checked. */
@@ -150,6 +166,11 @@ export function checkMove(base, { declare = null, paths = [], cwd = process.cwd(
     execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   const mergeBase = git("merge-base", base, "HEAD").trim();
   const files = movedLinesOf(mergeBase, "HEAD", paths, cwd);
+  const binary = files.filter((change) => change.binary);
+  if (binary.length > 0)
+    throw new CannotRun(
+      `pure-move-check: a binary change cannot be inspected: ${binary.map((change) => change.header).join("; ")}`,
+    );
   const declarations = declare === null ? [] : declarationsOf(declare);
   const used = new Set();
   const counts = { movedAdded: 0, movedRemoved: 0, declared: 0, unadmitted: 0 };
@@ -157,7 +178,8 @@ export function checkMove(base, { declare = null, paths = [], cwd = process.cwd(
   const unadmitted = [];
   const declared = [];
   const blob = (ref, file) => git("cat-file", "blob", `${ref}:${file}`);
-  // removed lines Git does not mark moved, by their text without indentation, for form 2's pairing
+  // removed lines Git does not mark moved where a declaration starts without `export`, by their text without
+  // indentation, for form 2's pairing
   const unpairedRemoved = new Map();
   const rows = [];
   for (const change of files) {
@@ -167,8 +189,10 @@ export function checkMove(base, { declare = null, paths = [], cwd = process.cwd(
       if (row.moved) counts.movedRemoved += 1;
       else {
         rows.push({ side: "removed", file: change.old, row, shape: before, added: false });
-        const key = row.text.trimStart();
-        unpairedRemoved.set(key, (unpairedRemoved.get(key) ?? 0) + 1);
+        if (before?.declarationStarts.get(row.line)?.exported === false) {
+          const key = row.text.trimStart();
+          unpairedRemoved.set(key, (unpairedRemoved.get(key) ?? 0) + 1);
+        }
       }
     }
     for (const row of change.addedLines) {
@@ -178,7 +202,9 @@ export function checkMove(base, { declare = null, paths = [], cwd = process.cwd(
   }
   // form 2 pairs each `export` line with one removed line; the paired removed lines are admitted with it
   const pairedRemoved = new Map();
-  const exportOf = (row) => {
+  const exportOf = (entry) => {
+    const { row } = entry;
+    if (entry.shape?.declarationStarts.get(row.line)?.exported !== true) return false;
     const text = row.text.trimStart();
     if (!text.startsWith("export ")) return false;
     const rest = text.slice("export ".length);
@@ -210,12 +236,13 @@ export function checkMove(base, { declare = null, paths = [], cwd = process.cwd(
       entry.shape?.headerComments.has(entry.row.line)
     )
       verdicts.push([entry, "header comment"]);
-    else if (entry.side === "added" && exportOf(entry.row)) verdicts.push([entry, "export"]);
+    else if (entry.side === "added" && exportOf(entry)) verdicts.push([entry, "export"]);
     else verdicts.push([entry, null]);
   }
   for (const verdict of verdicts) {
     const [entry, form] = verdict;
     if (form !== null || entry.side !== "removed") continue;
+    if (entry.shape?.declarationStarts.get(entry.row.line)?.exported !== false) continue;
     const key = entry.row.text.trimStart();
     const paired = pairedRemoved.get(key) ?? 0;
     if (paired > 0) {

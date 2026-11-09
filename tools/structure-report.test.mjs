@@ -426,3 +426,31 @@ test(
     }
   },
 );
+
+test("--moved reads a file name with spaces as Git names it", { timeout: 60_000 }, () => {
+  const root = mkdtempSync(join(tmpdir(), "structure-report-moved-space-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const report = (...args) =>
+    execFileSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+  try {
+    git("init", "-q");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    const big = longFunction("big", 400);
+    write(root, { "src/a.ts": `${big}\nexport const small = 1;\n` });
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    const base = git("rev-parse", "HEAD");
+    write(root, { "src/a.ts": "export const small = 1;\n", "src/new file.ts": `${big}\n` });
+    git("add", "-A");
+    git("commit", "-q", "-m", "move");
+    const moved = report("--diff", base, "--moved");
+    assert.match(
+      moved,
+      /suppressed \(moved\): file gaining over 300 lines: \+400 src\/new file\.ts, 400 moved discounted/u,
+    );
+    assert.doesNotMatch(moved, /^ {2}file gaining over 300 lines/mu);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

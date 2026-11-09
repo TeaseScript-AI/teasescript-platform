@@ -48,8 +48,9 @@ function moveOf(before, after) {
     });
     return { status: result.status, out: result.stdout + result.stderr };
   };
+  // (inside the fixture, so `done` removes it; untracked, so the check, which reads committed trees, never sees it)
   const declare = (entries) => {
-    const path = join(root, "..", `${root.split("/").at(-1)}-declare.json`);
+    const path = join(root, "declare.json");
     writeFileSync(path, JSON.stringify(entries));
     return path;
   };
@@ -206,6 +207,141 @@ test(
       assert.equal(declared.status, 0, declared.out);
     } finally {
       elsewhere.done();
+    }
+  },
+);
+
+test(
+  "an admitted line holds only its form: code beside an import, or a comment beside code, fails",
+  { timeout: 60_000 },
+  () => {
+    const importThen = moveOf(
+      { "a.ts": 'import { readFileSync } from "node:fs";\nexport const read = readFileSync;\n' },
+      {
+        "a.ts":
+          'import { readFileSync } from "node:fs"; process.exit(42);\nexport const read = readFileSync;\n',
+      },
+    );
+    try {
+      const { status, out } = importThen.run();
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /unadmitted: a\.ts:1 \(added\): import \{ readFileSync \} from "node:fs"; process\.exit\(42\);/u,
+      );
+    } finally {
+      importThen.done();
+    }
+    const commentThen = moveOf(
+      { "a.ts": main },
+      { ...split, "c.ts": "/* header */ export const added = 42;\n" },
+    );
+    try {
+      const { status, out } = commentThen.run();
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /unadmitted: c\.ts:1 \(added\): \/\* header \*\/ export const added = 42;/u,
+      );
+    } finally {
+      commentThen.done();
+    }
+  },
+);
+
+test(
+  "a string's or a template's text is never a declaration's export or a comment",
+  { timeout: 60_000 },
+  () => {
+    const template = (line) =>
+      `export const page = \`\n${line}\nsecond line of the page, long enough to be moved\n\`;\n`;
+    const exported = moveOf(
+      { "a.ts": template("ordinary text is not a declaration") },
+      { "a.ts": template("export ordinary text is not a declaration") },
+    );
+    try {
+      const { status, out } = exported.run();
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /unadmitted: a\.ts:2 \(added\): export ordinary text is not a declaration/u,
+      );
+    } finally {
+      exported.done();
+    }
+    // the template stands above the file's first export, where a real comment would be a header comment
+    const raw = (inner) =>
+      `const view = \`first line of the view \${1}\n${inner}last line of the view, long enough\n\`;\nexport { view };\n`;
+    const commented = moveOf(
+      { "a.ts": raw("") },
+      { "a.ts": null, "b.ts": raw("// replacement text\n") },
+    );
+    try {
+      const { status, out } = commented.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /unadmitted: b\.ts:2 \(added\): \/\/ replacement text/u);
+    } finally {
+      commented.done();
+    }
+  },
+);
+
+test(
+  "an escape sequence in a string is the line's own text, not a colour",
+  { timeout: 60_000 },
+  () => {
+    const move = moveOf(
+      { "a.ts": 'const ordinaryLongIdentifier = "message";\n' },
+      {
+        "a.ts": `export const ordinaryLongIdentifier = "${String.fromCharCode(27)}[31mmessage";\n`,
+      },
+    );
+    try {
+      const { status, out } = move.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /unadmitted: a\.ts:1 \(added\)/u);
+    } finally {
+      move.done();
+    }
+  },
+);
+
+test(
+  "a file name with spaces is read; a binary change and a quoted name stop the check",
+  { timeout: 60_000 },
+  () => {
+    const spaced = moveOf(
+      { "src/space name.ts": 'import { a } from "./x.js";\nexport const b = a;\n' },
+      { "src/space name.ts": 'import { a } from "./y.js";\nexport const b = a;\n' },
+    );
+    try {
+      const { status, out } = spaced.run();
+      assert.equal(status, 0, out);
+      assert.match(out, /admitted import 2,/u);
+    } finally {
+      spaced.done();
+    }
+    const binary = moveOf(
+      { "data.bin": Buffer.from([0, 1, 2, 3]) },
+      { "data.bin": Buffer.from([0, 9, 2, 3]) },
+    );
+    try {
+      const { status, out } = binary.run();
+      assert.equal(status, 2, out);
+      assert.match(out, /a binary change cannot be inspected/u);
+    } finally {
+      binary.done();
+    }
+    const quoted = moveOf(
+      { 'src/quote"name.ts': "export const quoted = 1;\n" },
+      { 'src/quote"name.ts': null, 'src/new"quote.ts': "export const quoted = 1;\n" },
+    );
+    try {
+      const { status, out } = quoted.run();
+      assert.equal(status, 2, out);
+      assert.match(out, /a quoted file name Git wrote is not read/u);
+    } finally {
+      quoted.done();
     }
   },
 );
