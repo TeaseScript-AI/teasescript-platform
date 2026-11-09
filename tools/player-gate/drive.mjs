@@ -187,10 +187,22 @@ async function runSample(build, cell, rectangles, reopen, index) {
   switch (scenario) {
     case "session": {
       const result = await session({ opened, origin, script, backend: build.backend });
-      // The served bytes, on their own cold page (the account pauses each Worker at its start).
-      return opened.cdp
-        ? { ...result, bytes: await coldBytes({ opened, origin, script }) }
-        : result;
+      // The served bytes, on their own cold page (the account pauses each Worker at its start). A request still open
+      // after the page's window (a Worker's script whose completion CDP reported on no target, a race of attaching)
+      // leaves the account incomplete: the page is loaded once more, cold, and the discarded attempt is kept.
+      if (!opened.cdp) return result;
+      const open = (bytes) =>
+        bytes.requests.filter((request) => !request.finished && request.failed === null);
+      let bytes = await coldBytes({ opened, origin, script });
+      const discarded = [];
+      if (open(bytes).length > 0) {
+        discarded.push({
+          open: open(bytes).map((request) => request.url),
+          requests: bytes.requests,
+        });
+        bytes = await coldBytes({ opened, origin, script });
+      }
+      return { ...result, bytes: { ...bytes, discarded } };
     }
     case "sessionInstrumented":
       return session({ opened, origin, script, backend: build.backend, instrumented: true });

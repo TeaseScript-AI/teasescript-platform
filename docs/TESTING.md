@@ -976,9 +976,11 @@ real engine Worker entry and the in-process backend below the Player. Playwright
   16 ms while the start page loads or a script is prepared, Chromium and the Pixel), `bridge`, the hidden-page keep
   (`keepHandler` on the desktop, `keepCompletion` and `keepDurable` on the Pixel) and `demo`.
 - `report.mjs --phase r0|r1 --artifacts FILE` prints the cost report. `cells.mjs` decides every cell: required, or
-  excluded with its reason. A sample counts only when every required field that applies to its cell is a number; a
-  required cell without such a sample (for `aa`, in both arms), or no artifact inventory, makes the report incomplete
-  (exit 1).
+  excluded with its reason. The kit's one completeness invariant (`derive.mjs`): every required field of a cell
+  derives from records that passed the shared validation (each required interval present and in order, lifecycle
+  evidence where a trial needs it, a counted turn's feedback present), and a sample that fails it makes its cell
+  incomplete, never a value in a median. A required cell without samples (for `aa`, without both arms) or with a
+  failing one, or no artifact inventory, makes the report incomplete (exit 1).
 - `artifacts.mjs` lists a build's files with raw, gzip and brotli sizes, eager, lazy or Worker; `inputs.mjs` writes the
   bridge page's inputs (a package's project and its plan text) from a built tree.
 

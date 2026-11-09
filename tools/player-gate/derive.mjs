@@ -5,6 +5,7 @@
 import {
   firstSave,
   playable,
+  summarize,
   requestsOf,
   turnTimes,
   workerSideOf,
@@ -21,7 +22,6 @@ const probeRecords = (gate) =>
   ["states", "inputs", "changes", "rows", "rowChanges", "transactions", "workers", "gaps"].every(
     (name) => list(gate[name]),
   );
-const onCdp = (cell) => cell.engine === "chromium" || cell.engine === "pixel";
 
 /** The fields of a session sample, derived from its probe records, its turn records, heap readings and requests. */
 function session(result, cell, problems) {
@@ -170,9 +170,345 @@ for (const trial of ["keepHandler", "keepCompletion", "keepDurable"])
     return { outcome: derived?.outcome, hiddenToCommitMs: derived?.hiddenToCommitMs ?? null };
   };
 
-/** `result`'s sample for `cell`, derived from its records, and what kept it from being derived. */
-export function deriveSample(cell, result) {
+const CDP_ENGINES = new Set(["chromium", "pixel"]);
+const LONG_TASK_ENGINES = CDP_ENGINES;
+const isWorker = (cell) => cell.backend === "worker";
+const onCdp = (cell) => CDP_ENGINES.has(cell.engine);
+
+/**
+ * The numbers each scenario reports: `[label, unit, value of one sample's result, applies(cell), required]`. A field that
+ * does not apply to a cell is left out of it, never printed as a dash; a required one that applies must be a finite
+ * number in a sample for that sample to count (`reviews/l5-gate/field-inventory.md`).
+ */
+const always = () => true;
+const PLAYABLE = (of, label) => [
+  [
+    `${of}: playable, the Player's own time (headline)`,
+    "ms",
+    (r) => r[of]?.playableMs,
+    always,
+    true,
+  ],
+  [
+    `${of}: navigation → the frame after ${label} enabled`,
+    "ms",
+    (r) => r[of]?.enabledFrameMs,
+    always,
+    true,
+  ],
+  [
+    `${of}: ${label}'s input → the frame after the first control`,
+    "ms",
+    (r) => r[of]?.inputToControlMs,
+    always,
+    true,
+  ],
+  [
+    `${of}: ${label} enabled → its input (the driver's, not in the headline)`,
+    "ms",
+    (r) => r[of]?.enabledToInputMs,
+    always,
+    true,
+  ],
+];
+const MILESTONES = [
+  ["startEnabled", "cold", "Start enabled"],
+  ["playable", "cold", "playable"],
+  ["firstSave", "cold", "the first save"],
+  ["afterTurns", "repeat", "after the turns"],
+  ["end", "repeat", "the end, after a forced GC"],
+];
+/**
+ * The byte account's numbers, the headline session's only: the cold page's served bytes, cumulative, per target (the
+ * page; every Worker together) and phase, encoded and decoded; a worker build must also show its engine Worker's own
+ * requests. The instrumented cohort runs no byte account (`drive.mjs`).
+ */
+const BYTES = [
+  ...["page", "Workers"].flatMap((target) =>
+    [
+      ["beforeStartEnabled", "before Start enabled"],
+      ["beforePlayable", "before playable"],
+      [null, "the whole cold page"],
+    ].flatMap(([phase, label]) =>
+      ["encoded", "decoded"].map((size) => [
+        `served ${label}, ${target}, ${size}`,
+        "bytes",
+        (r) => bytesOf(r, target, phase, size),
+        onCdp,
+        true,
+      ]),
+    ),
+  ),
+  [
+    "requests of the engine Worker's target",
+    "",
+    (r) =>
+      (r.bytes?.requests ?? []).filter((q) => q.target !== "page" && /engine/u.test(q.target))
+        .length || null,
+    (cell) => onCdp(cell) && isWorker(cell),
+    true,
+  ],
+];
+const NUMBERS = {
+  session: [
+    ...PLAYABLE("cold", "Start"),
+    ...PLAYABLE("repeat", "Continue"),
+    ["Worker: construction → ready", "ms", (r) => r.worker?.startMs, isWorker, true],
+    [
+      "first save: Start's input → commit (the plan JSON write included, not timed apart)",
+      "ms",
+      (r) => r.firstSave?.startToCommitMs,
+      always,
+      true,
+    ],
+    [
+      "first save: long tasks in that span",
+      "ms",
+      (r) => r.firstSave?.longTasksMs,
+      (cell) => LONG_TASK_ENGINES.has(cell.engine),
+      true,
+    ],
+    ["first save: plan JSON", "UTF-16 units", (r) => r.firstSave?.planJsonLength, always, true],
+    [
+      "turn: input → feedback frame (median of the sample's turns)",
+      "ms",
+      (r) => summarize((r.turns ?? []).map((t) => t.feedbackMs)).median,
+      always,
+      true,
+    ],
+    [
+      "turn: input → settled frame (median of the sample's settled turns)",
+      "ms",
+      (r) => summarize((r.turns ?? []).map((t) => t.settledMs)).median,
+      always,
+      false,
+    ],
+    [
+      "turns answered",
+      "",
+      (r) => (r.turns ?? []).filter((t) => t.ok !== false).length,
+      always,
+      true,
+    ],
+    [
+      "turns ended or cut, not settled",
+      "",
+      (r) => (r.turns ?? []).filter((t) => t.end).length,
+      always,
+      false,
+    ],
+    ...MILESTONES.flatMap(([at, page, label]) => [
+      [`heap, page (${page}), at ${label}`, "bytes", (r) => heapAt(r, at, "page"), onCdp, true],
+      [
+        `heap, engine Worker, at ${label}`,
+        "bytes",
+        (r) => heapAt(r, at, "engine"),
+        (cell) => onCdp(cell) && isWorker(cell),
+        true,
+      ],
+    ]),
+    ...BYTES,
+  ],
+  taps: [
+    ["taps sent in the window", "", (r) => r.sent, always, true],
+    ["taps answered", "", (r) => r.answered, always, true],
+    ["taps unanswered", "", (r) => r.unanswered, always, true],
+    ["delay, median", "ms", (r) => r.delay?.median, always, false],
+    ["delay, max", "ms", (r) => r.delay?.max, always, false],
+    ["answered within 16 ms", "", (r) => r.within16, always, true],
+    ["send cadence, median", "ms", (r) => r.cadence?.median, always, true],
+    ["clock offset uncertainty", "ms", (r) => r.clock?.uncertaintyMs, always, true],
+  ],
+  bridge: [
+    [
+      "Worker: construction → ready",
+      "ms",
+      (r) => span(r, "workerConstructed", "workerReady"),
+      isWorker,
+      true,
+    ],
+    ["prepare: request → reply", "ms", (r) => rtt(r, "prepare"), always, true],
+    [
+      "prepare: Worker receipt → reply",
+      "ms",
+      (r) => workerSide(r, "prepare", "handlingMs"),
+      isWorker,
+      true,
+    ],
+    ["prepare: post duration", "ms", (r) => request(r, "prepare")?.postMs, always, true],
+    [
+      "prepare: delivery latency",
+      "ms",
+      (r) => workerSide(r, "prepare", "deliveryMs"),
+      isWorker,
+      true,
+    ],
+    ["input", "UTF-16 units", (r) => r.inputUnits, always, true],
+    ["input", "UTF-8 bytes", (r) => r.inputBytes, always, true],
+    ["start: request → reply", "ms", (r) => rtt(r, "start"), always, true],
+    ["preparePlanText: request → reply", "ms", (r) => rtt(r, "preparePlanText"), always, true],
+    ["captureKeep: request → reply", "ms", (r) => rtt(r, "captureKeep"), always, true],
+    ["continue: request → reply", "ms", (r) => rtt(r, "continue"), always, true],
+  ],
+  keep: [
+    [
+      "completed while hidden",
+      "",
+      (r) => (r.outcome === "completed" || r.outcome === "durable after 1 s" ? 1 : 0),
+      always,
+      true,
+    ],
+    [
+      "completed after resume",
+      "",
+      (r) => (r.outcome === "completed after resume" ? 1 : 0),
+      always,
+      false,
+    ],
+    ["hidden → commit", "ms", (r) => r.hiddenToCommitMs, always, false],
+  ],
+  demo: [["errors", "", (r) => r.errors?.length, always, true]],
+  delayedSmoke: [["passed", "", (r) => (r.ok ? 1 : 0), always, true]],
+};
+NUMBERS.sessionInstrumented = [
+  ...NUMBERS.session.filter((field) => !BYTES.includes(field)),
+  [
+    "diagnostic: prepare request → reply",
+    "ms",
+    (r) => diagnosticRtt(r, "cold", "prepare"),
+    always,
+    true,
+  ],
+  [
+    "diagnostic: start request → reply",
+    "ms",
+    (r) => diagnosticRtt(r, "cold", "start"),
+    always,
+    true,
+  ],
+  [
+    "diagnostic: continue request → reply",
+    "ms",
+    (r) => diagnosticRtt(r, "repeat", "continue"),
+    always,
+    true,
+  ],
+  [
+    "diagnostic: captureKeep request → reply",
+    "ms",
+    (r) => diagnosticRtt(r, "cold", "captureKeep"),
+    always,
+    false,
+  ],
+  [
+    "diagnostic: captureKeep reply",
+    "UTF-16 units",
+    (r) => diagnosticRequest(r, "cold", "captureKeep")?.replySize,
+    always,
+    false,
+  ],
+  [
+    "diagnostic: requests per settled turn (median)",
+    "",
+    (r) => summarize((r.diagnostics?.turns ?? []).filter(Boolean).map((t) => t.length)).median,
+    always,
+    false,
+  ],
+  [
+    "diagnostic: prepare Worker handling",
+    "ms",
+    (r) => r.diagnostics?.workerSide?.cold?.find((w) => w.op === "prepare")?.handlingMs,
+    (cell) => onCdp(cell) && isWorker(cell),
+    true,
+  ],
+  [
+    "diagnostic: start delivery latency",
+    "ms",
+    (r) => r.diagnostics?.workerSide?.cold?.find((w) => w.op === "start")?.deliveryMs,
+    (cell) => onCdp(cell) && isWorker(cell),
+    true,
+  ],
+  [
+    "diagnostic: scheduling gaps over 50 ms",
+    "",
+    (r) =>
+      (r.diagnostics?.gaps?.cold?.length ?? NaN) + (r.diagnostics?.gaps?.repeat?.length ?? NaN),
+    always,
+    true,
+  ],
+];
+// The A/A run compares the cold interval only: the full probe's incremental cost beyond the shared observer.
+NUMBERS.aa = PLAYABLE("cold", "Start");
+NUMBERS.bridgeTaps = NUMBERS.taps;
+NUMBERS.keepHandler = NUMBERS.keep;
+NUMBERS.keepCompletion = NUMBERS.keep;
+NUMBERS.keepDurable = NUMBERS.keep;
+
+/**
+ * The served bytes (`encoded` or `decoded`) of `target` (`page` or `Workers`), all or those flagged `phase`: `null`
+ * while a request is still open or a finished one lacks its length; 0 for a target that requested nothing (no Worker).
+ */
+function bytesOf(result, target, phase, size) {
+  if (result.bytes?.requests === undefined) return null;
+  const requests = result.bytes.requests.filter(
+    (request) =>
+      (target === "page" ? request.target === "page" : request.target !== "page") &&
+      (phase === null || request[phase] === true),
+  );
+  if (target === "page" && requests.length === 0) return null;
+  const field = size === "encoded" ? "encodedBytes" : "decodedBytes";
+  if (
+    requests.some(
+      (request) =>
+        request.failed === null && (!request.finished || !Number.isFinite(request[field])),
+    )
+  )
+    return null;
+  return requests.reduce((sum, request) => sum + (request.failed === null ? request[field] : 0), 0);
+}
+function heapAt(result, at, target) {
+  const reading = (result.memory ?? []).find((entry) => entry.at === at);
+  if (reading === undefined) return null;
+  if (target === "page") return reading.page?.usedBytes ?? null;
+  return (
+    reading.workers?.find((worker) => worker.engine && worker.usedBytes !== undefined)?.usedBytes ??
+    null
+  );
+}
+const span = (result, from, to) =>
+  result.at?.[from] === undefined || result.at?.[to] === undefined
+    ? null
+    : result.at[to] - result.at[from];
+const request = (result, op) => (result.requests ?? []).find((entry) => entry.op === op);
+const rtt = (result, op) => {
+  const found = request(result, op);
+  return found?.replyAt == null ? null : found.replyAt - found.postAt;
+};
+const workerSide = (result, op, field) =>
+  result.workerSide?.find((entry) => entry.op === op)?.[field];
+const diagnosticRequest = (result, page, op) =>
+  result.diagnostics?.[page]?.find((entry) => entry.op === op);
+const diagnosticRtt = (result, page, op) => diagnosticRequest(result, page, op)?.rttMs;
+const finite = (value) => typeof value === "number" && Number.isFinite(value);
+
+/**
+ * The kit's one completeness invariant (`docs/TESTING.md` "The L5 activation gate kit"): every required field of a cell
+ * derives from records that passed this shared validation, each required interval present and in order, the lifecycle
+ * evidence there where a trial needs it, a counted turn's feedback present; a sample that fails it makes its cell
+ * incomplete and is never a value in a median. Returns `row`'s values for `cell`, each applicable field with its label
+ * and unit, and the problems that failed the invariant.
+ */
+export function deriveSample(cell, row) {
   const problems = [];
-  const sample = DERIVE[cell.scenario](result ?? {}, cell, problems);
-  return { sample, problems };
+  const sample = DERIVE[cell.scenario](row.result ?? {}, cell, problems);
+  // A keep trial's outcome is its measurement, whichever it is; any other failed sample fails.
+  if (!cell.scenario.startsWith("keep") && !row.ok) problems.unshift("the sample failed");
+  const values = [];
+  for (const [label, unit, read, applies, required] of NUMBERS[cell.scenario]) {
+    if (!applies(cell)) continue;
+    const value = read(sample);
+    if (required && !finite(value)) problems.push(unit === "" ? label : `${label} (${unit})`);
+    values.push({ label, unit, value: finite(value) ? value : null });
+  }
+  return { values, problems };
 }

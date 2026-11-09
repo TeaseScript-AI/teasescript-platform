@@ -231,7 +231,10 @@ test("a sample counts only with every required field that applies; missing evide
     ARTIFACTS,
   );
   const line = empty.incomplete.find((text) => text.includes(name({})));
-  assert.match(line, /0 complete; missing: the probe's records of both pages; .*cold: playable/u);
+  assert.match(
+    line,
+    /1 failing the validation; the probe's records of both pages; .*cold playable/u,
+  );
   // A missing heap milestone or an unfinished request is missing evidence too.
   const noHeap = sessionResult();
   noHeap.memory = noHeap.memory.filter((reading) => reading.at !== "startEnabled");
@@ -288,6 +291,19 @@ test("a sample counts only with every required field that applies; missing evide
       what,
     );
   }
+  // One failing sample beside good ones fails the cell: it is never left out of a median for the others to stand for it.
+  const bad = sessionResult();
+  bad.probe.cold.transactions[0].end = 0;
+  const mixed = buildReport(
+    [
+      row({ scenario: "session", engine: "chromium" }, true, sessionResult()),
+      row({ scenario: "session", engine: "chromium" }, true, bad),
+    ],
+    "r0",
+    ARTIFACTS,
+  );
+  assert.ok(!(name({}) in mixed.summary));
+  assert.ok(mixed.incomplete.some((text) => text.includes(name({})) && text.includes("1 failing")));
   // No artifact inventory: incomplete.
   assert.ok(buildReport([], "r0").incomplete.includes("- artifacts: no inventory given"));
 });
@@ -304,15 +320,16 @@ test("a worker build needs its engine Worker's start and heap; the A/A run needs
   const aa = (arm) =>
     row({ scenario: "aa", engine: "chromium" }, true, { arm, probe: pageRecords("Start") });
   const one = buildReport([aa("full"), aa("full")], "r0", ARTIFACTS);
-  assert.ok(one.incomplete.some((text) => text.includes("no complete minimal arm")));
+  assert.ok(one.incomplete.some((text) => text.includes("no minimal arm")));
   const both = buildReport([aa("full"), aa("minimal")], "r0", ARTIFACTS);
   assert.ok(!both.incomplete.some((text) => text.includes(name({ scenario: "aa" }))));
   // An A/A arm with emptied states has no playable time.
   const emptied = aa("minimal");
   emptied.result.probe.states = [];
   assert.ok(
-    buildReport([aa("full"), emptied], "r0", ARTIFACTS).incomplete.some((text) =>
-      text.includes("no complete minimal arm"),
+    buildReport([aa("full"), emptied], "r0", ARTIFACTS).incomplete.some(
+      (text) =>
+        text.includes(name({ scenario: "aa" })) && text.includes("1 failing the validation"),
     ),
   );
 });
