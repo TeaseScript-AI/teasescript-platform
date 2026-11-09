@@ -150,7 +150,7 @@ test("the failure capture's and the export capture's replies each reach one sett
 // Design round r2's page half: every place the page sends an activation's diagnostic work (its error halt's and its
 // incident's stop arguments, its incident, its failure capture) checks that activation's admission there itself, and
 // only an activation's begin and the Player's disposal begin or retire a record. Wiring only: that a retired
-// activation sends nothing is the completion-lifetime family's runtime claim (`player-session-rewind.test.ts`).
+// activation sends nothing is the completion-lifetime family's runtime claim (`player-rewind-activations.test.ts`).
 test("the page's diagnostic senders each check their activation's admission, and only Start and disposal change it", () => {
   const SESSION = "player/vue/src/session/usePlayerSession.ts usePlayerSession";
   const ACTIVATION =
