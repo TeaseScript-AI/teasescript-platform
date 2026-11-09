@@ -491,7 +491,9 @@ const NO_GLOBALS: readonly string[] = [];
  * object there: on r3-root-copies (`r_i = a.f_i` over k whole copies of one-field objects into `a`, the oracle's
  * `["element"]` question) and with the fields lists (the backend's own `[]` question, which reads their elements), the
  * bindings' questions grow with the program in every mode (3.7 a doubling at 16 → 32 before #1948: the contract's fold
- * of every copied object at the field, admission's copies of `a` tried for every field).
+ * of every copied object at the field, admission's copies of `a` tried for every field). #2065: so does the backend's
+ * `["element"]` question of each list binding, whose decision reads the copy holding the field alone (3.7 a doubling
+ * before #2065: admission's scan of every copy of `a` before it, `holdersOf`).
  */
 test("a binding's admitted type reads its copied value at its own field: the bindings' questions grow linearly (#1948)", async () => {
   const rows = (k: number, row: (i: number) => string) =>
@@ -522,6 +524,7 @@ test("a binding's admitted type reads its copied value at its own field: the bin
       ),
     },
     { name: "list fields []", path: [], sources: [...lists(16), ...lists(32)] },
+    { name: "list fields [element]", path: ["element"], sources: [...lists(16), ...lists(32)] },
   ];
   const steep: string[] = [];
   for (const { name, path, sources } of series)

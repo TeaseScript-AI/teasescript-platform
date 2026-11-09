@@ -11,6 +11,7 @@ import type {
   OpenStep,
   Stops,
 } from "../admission/model.js";
+import type { PrefixHolders } from "../admission/holders.js";
 import type { CanonicalKey } from "../contract/key-ids.js";
 import type { Definition, Key } from "../definitions.js";
 import type { Proof, ProofDemand } from "../solver.js";
@@ -155,4 +156,9 @@ export class ReceivingDomain {
   seedIndex = new Map<PlaceId, Map<string, string[]>>();
   /** The copies a live store makes, by place, path, source and strip (Astra's B2). */
   liveCopies = new Set<string>();
+  /**
+   * #2065: per prefix, its whole stores and settled stores by the first steps of the decided paths they can hold
+   * (`holdersOf`), for the admission's snapshot of them.
+   */
+  holders = new Map<Key, PrefixHolders>();
 }
