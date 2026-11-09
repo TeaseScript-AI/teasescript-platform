@@ -798,3 +798,30 @@ test(
     }
   },
 );
+
+test("--moved reads no gitlink as a file: a submodule replaced by a regular file is reported", () => {
+  const root = mkdtempSync(join(tmpdir(), "structure-report-gitlink-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  try {
+    git("init", "-q");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    write(root, { "src/a.ts": "export const kept = 1;\n" });
+    git("add", "-A");
+    git("update-index", "--add", "--cacheinfo", `160000,${"1".repeat(40)},src/sub.ts`);
+    git("commit", "-q", "-m", "base");
+    const base = git("rev-parse", "HEAD");
+    git("rm", "-q", "--cached", "src/sub.ts");
+    write(root, { "src/sub.ts": lines(400) });
+    git("add", "-A");
+    git("commit", "-q", "-m", "change");
+    const result = spawnSync(process.execPath, [tool, "--diff", base, "--moved"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /file gaining over 300 lines: \+\d+ src\/sub\.ts/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

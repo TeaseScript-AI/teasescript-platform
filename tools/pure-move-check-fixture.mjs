@@ -1,7 +1,7 @@
 // The pure-move check's test fixture, shared by `pure-move-check.test.mjs` and `pure-move-check-bindings.test.mjs`:
 // a repository committed before and after a change, the check run there, and the split both files use.
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,8 +19,8 @@ export const helper = (name, change = "") =>
   ].join("\n");
 
 /**
- * A repository at `before`, then committed at `after` (a file's text, `null` to remove it, or `{ executable: text }`);
- * `run(args)` runs the check there.
+ * A repository at `before`, then committed at `after` (a file's text, `null` to remove it, `{ executable: text }`,
+ * `{ symlink: target }`, or `{ gitlink: commit }`, a submodule entry with no checkout); `run(args)` runs the check there.
  */
 export function moveOf(before, after) {
   const root = mkdtempSync(join(tmpdir(), "pure-move-check-"));
@@ -28,22 +28,33 @@ export function moveOf(before, after) {
   const write = (files) => {
     for (const [path, text] of Object.entries(files)) {
       mkdirSync(dirname(join(root, path)), { recursive: true });
-      if (text === null) rmSync(join(root, path));
-      else if (text.executable !== undefined) {
+      if (text === null || text.gitlink !== undefined) rmSync(join(root, path), { force: true });
+      else if (text.symlink !== undefined) {
+        rmSync(join(root, path), { force: true });
+        symlinkSync(text.symlink, join(root, path));
+      } else if (text.executable !== undefined) {
         writeFileSync(join(root, path), text.executable);
         chmodSync(join(root, path), 0o755);
       } else writeFileSync(join(root, path), text);
     }
+  };
+  // a gitlink has no file to add: its entry goes into the index as it is
+  const gitlinks = (files) => {
+    for (const [path, text] of Object.entries(files))
+      if (text?.gitlink !== undefined)
+        git("update-index", "--add", "--cacheinfo", `160000,${text.gitlink},${path}`);
   };
   git("init", "-q");
   git("config", "user.email", "t@t");
   git("config", "user.name", "t");
   write(before);
   git("add", "-A");
+  gitlinks(before);
   git("commit", "-qm", "before");
   const base = git("rev-parse", "HEAD");
   write(after);
   git("add", "-A");
+  gitlinks(after);
   git("commit", "-qm", "after");
   const run = (...args) => {
     const result = spawnSync(process.execPath, [tool, base, ...args], {

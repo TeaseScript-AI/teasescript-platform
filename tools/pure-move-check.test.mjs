@@ -425,3 +425,60 @@ test(
     }
   },
 );
+
+test(
+  "a side that is no regular file is never read: a gitlink or a symbolic link is listed, its lines judged without it",
+  { timeout: 60_000 },
+  () => {
+    const run = (before, after, ...args) => {
+      const move = moveOf(before, after);
+      try {
+        return move.run(...args.map((arg) => (typeof arg === "function" ? arg(move) : arg)));
+      } finally {
+        move.done();
+      }
+    };
+    const [one, two] = ["1".repeat(40), "2".repeat(40)];
+    const kept = { "src/a.ts": "export const kept = 1;\n" };
+    const file = "export const value = 1;\n";
+    // a gitlink replaced by a regular file: the gitlink's line is unadmitted, never read as a blob
+    const toFile = run({ ...kept, "src/sub": { gitlink: one } }, { ...kept, "src/sub": file });
+    assert.equal(toFile.status, 1, toFile.out);
+    assert.match(toFile.out, /unadmitted: src\/sub:1 \(removed\): Subproject commit 1{40}/u);
+    assert.match(toFile.out, /unadmitted: src\/sub:1 \(added\): export const value = 1;/u);
+    assert.match(toFile.out, /not compared \(not a regular file\): src\/sub \(160000\)/u);
+    const reason = "the submodule becomes the file it held";
+    const declared = run(
+      { ...kept, "src/sub": { gitlink: one } },
+      { ...kept, "src/sub": file },
+      "--declare",
+      (move) =>
+        move.declare([
+          { file: "src/sub", side: "removed", line: 1, reason },
+          { file: "src/sub", side: "added", line: 1, reason },
+        ]),
+    );
+    assert.equal(declared.status, 0, declared.out);
+    // a regular file replaced by a gitlink, and a gitlink's new commit: each listed, its lines unadmitted
+    const toGitlink = run({ ...kept, "src/sub": file }, { ...kept, "src/sub": { gitlink: one } });
+    assert.equal(toGitlink.status, 1, toGitlink.out);
+    assert.match(toGitlink.out, /unadmitted: src\/sub:1 \(added\): Subproject commit 1{40}/u);
+    assert.match(toGitlink.out, /not compared \(not a regular file\): src\/sub \(160000\)/u);
+    const pointer = run(
+      { ...kept, "src/sub": { gitlink: one } },
+      { ...kept, "src/sub": { gitlink: two } },
+    );
+    assert.equal(pointer.status, 1, pointer.out);
+    assert.match(pointer.out, /unadmitted: src\/sub:1 \(added\): Subproject commit 2{40}/u);
+    assert.match(pointer.out, /not compared \(not a regular file\): src\/sub \(160000\)/u);
+    // a symbolic link named as code, retargeted: its blob, a path, is never parsed for bindings
+    const link = run(
+      { ...kept, "src/b.ts": file, "src/link.ts": { symlink: "a.ts" } },
+      { ...kept, "src/b.ts": file, "src/link.ts": { symlink: "b.ts" } },
+    );
+    assert.equal(link.status, 1, link.out);
+    assert.match(link.out, /unadmitted: src\/link\.ts:1 \(added\): b\.ts/u);
+    assert.match(link.out, /not compared \(not a regular file\): src\/link\.ts \(120000\)/u);
+    assert.match(link.out, /bindings differing 0; refused 0/u);
+  },
+);
