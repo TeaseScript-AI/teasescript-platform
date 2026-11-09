@@ -1039,8 +1039,9 @@ export function stopRuns(
     // (a compile error the stop turned into runtime checks: open only where a run executed the error's own store
     // instruction and passed it)
     // (C5c reports a store's absent property at the object that lacks it, an explanation: the error is the store's,
-    // `rule.store`, the instruction a run must pass)
-    const operations = new Map<string, SourceSite>();
+    // `rule.store`, the instruction a run must pass; several stores lacking properties of one object share its site, each
+    // its own error)
+    const operations = new Map<string, SourceSite[]>();
     for (const d of natural.answers.diagnostics)
       if (
         d.class === "compile-error" &&
@@ -1048,28 +1049,28 @@ export function stopRuns(
         d.rule.rule === "absent" &&
         d.rule.store !== null
       )
-        operations.set(`${d.code} ${siteKey(d.site)}`, d.rule.store);
-    const errors = natural.result.diagnostics
-      .filter((d) => d.severity === "error")
-      .map((d) => {
-        // (a check of the error's own file whose site holds the error's: offsets are each file's own)
-        const shown = compiledSite(d, stopped.answers);
-        const site = operations.get(`${d.code} ${siteKey(shown)}`) ?? shown;
-        const at = stopped.answers.checks.filter((c) => inSite(site, c.site));
-        const checks =
-          at.length === 0
-            ? "none"
-            : at.some((c) => !c.against.includes("unknown"))
-              ? "typed"
-              : "unknown";
-        return {
-          code: d.code,
-          site,
-          key: siteKey(site),
-          checks,
-          own: instructionHolding(got, site),
-        };
-      });
+        operations.set(`${d.code} ${siteKey(d.site)}`, [
+          ...(operations.get(`${d.code} ${siteKey(d.site)}`) ?? []),
+          d.rule.store,
+        ]);
+    // (each error once, by its code and the site it is read at: two stores of one object are two errors)
+    const unique = new Map<string, { readonly code: string; readonly site: SourceSite }>();
+    for (const d of natural.result.diagnostics.filter((each) => each.severity === "error")) {
+      // (a check of the error's own file whose site holds the error's: offsets are each file's own)
+      const shown = compiledSite(d, stopped.answers);
+      for (const site of operations.get(`${d.code} ${siteKey(shown)}`) ?? [shown])
+        unique.set(`${d.code} ${siteKey(site)}`, { code: d.code, site });
+    }
+    const errors = [...unique.values()].map(({ code, site }) => {
+      const at = stopped.answers.checks.filter((c) => inSite(site, c.site));
+      const checks =
+        at.length === 0
+          ? "none"
+          : at.some((c) => !c.against.includes("unknown"))
+            ? "typed"
+            : "unknown";
+      return { code, site, key: siteKey(site), checks, own: instructionHolding(got, site) };
+    });
     const sites = errors.map(({ code, key, checks }) => ({ code, site: key, checks }));
     if (single)
       for (const each of pool) {
