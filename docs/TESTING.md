@@ -876,8 +876,8 @@ the accepted plan states for that pull request, at each doubling rather than cum
 acceptance criterion of that pull request, not a project limit or capacity contract. Read each factor against the
 input's own growth: a factor near 4 per doubling of a linearly growing input is quadratic.
 
-A structural repair of the type core has a fixed growth bar, its growth gate, and these rules say what its gate report
-must show; the kit that measures them is outside the repository. Per-doubling growth is no greater than `main`'s at
+A structural repair of the type core has a fixed growth bar, its growth gate, and these rules define what its gate
+report must show. Per-doubling growth is no greater than `main`'s at
 every measured doubling, total work no greater than `main`'s at each family's largest measured size, and work spent on
 checks no greater than `main`'s at every size; any small-size excess is reported with its work-ledger attribution
 (#1444, 2026-10-31). This gate applies instead of requiring cost at or below `main` before other measurements (#1547,
