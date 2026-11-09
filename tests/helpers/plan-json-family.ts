@@ -5,7 +5,7 @@ import { HOST_OPS } from "./host-ops.js";
 
 /*
  * The plan JSON's lifetime family (`player/persistence/plan-json-lease.ts`), declared once for both of its witness layers: the
- * pure family (`player-plan-json-lease.test.ts`) and the composable's (`player-session-keep.test.ts`). A producer is an
+ * pure family (`player-plan-json-lease.test.ts`) and the composable's (`player-keep-producers.test.ts`). A producer is an
  * op of the host that reads or writes a plan's canonical JSON. Every op of the composed host is classified once, in
  * `host-ops.ts`; the producers' outcomes are declared here, and the coverage check compares both with the ops
  * themselves, so a new op fails until it is classified, and a producer until both layers drive it.
@@ -109,7 +109,7 @@ export const OWNERSHIP_MODES = {
 } as const satisfies Record<Operated, readonly Ownership[]>;
 
 /**
- * One way an operation runs, as the composable's family (`player-session-keep.test.ts`) drives it: its producer, its
+ * One way an operation runs, as the composable's family (`player-keep-ownership.test.ts`) drives it: its producer, its
  * route, and its trace, every call it makes in order when nothing retires it. The family records each call of the kept
  * store and its photos (`kept.`), the debug rooms (`rooms.`, with a room's saved values as `rooms.values.`), the saved
  * values' provider (`provider.`), the media store (`repository.`) and the host (`host.<op>`). It holds each call of the
