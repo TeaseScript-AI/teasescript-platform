@@ -56,7 +56,7 @@ test("W5's decisions stop at no demand allowance, in either order, and its work 
 });
 
 /**
- * W34 (TABLE §13.3, r4.33–r4.38), W44 and W45 (r4.46 (3)): every variant in the source order and with the consumers'
+ * W34, W44 and W45: every variant in the source order and with the consumers'
  * and the solver's orders reversed, its total and each counter of at least 200 units per doubling of the source. A counter is the raw count of
  * one structure's steps, so a copy walked per field or a mark set made per copy shows in its own counter where the
  * total would hide it; a counter may carry its structure's log factor (a sort, a table of jumps: 2.33 at these sizes
@@ -114,12 +114,13 @@ test("a further list of a set's members, in any order, adds contract steps linea
 });
 
 /**
- * #1466, Codex r5's F1 (TABLE r4.245): k reads of `h.p<i>` each answered by k layers holding a source on its path, so the
- * summaries' demands are the answers' own pairs P, counted from the program's holders: at k 16 and 32 in the four modes
- * the demands are exactly P less the pairs one source answers by reference (TABLE r4.251), one per pair a summary
- * answers, never repeated, never a pass-through layer's, `checks` at or under `main`'s,
- * `invSteps` growing at or under `main`'s, and the total's excess over `main` per pair not rising (r4.245's exception for
- * an output-bound family; the control keeps the total's bound). `main`'s work is the family's measured oracle.
+ * #1466, Codex r5's F1 (docs/specifications/type-inference-accepted-record.md#r4-245): k reads of `h.p<i>` each
+ * answered by k layers holding a source on its path, so the summaries' demands are the answers' own pairs P, counted
+ * from the program's holders: at k 16 and 32 in the four modes the demands are exactly P less the pairs one source
+ * answers by reference, one per pair a summary answers, never repeated, never a pass-through layer's, `checks` at or
+ * under `main`'s, `invSteps` growing at or under `main`'s, and the total's excess over `main` per pair not rising
+ * (docs/specifications/type-inference-accepted-record.md#r4-245: the exception for an output-bound family; the control
+ * keeps the total's bound). `main`'s work is the family's measured oracle.
  */
 test("summaries' demands on output-bound reads are their answers' pairs, at main's growth per pair (#1466)", () => {
   const modes = [
@@ -267,7 +268,7 @@ test("the composition of an operand's parts visits only its smaller part, its sh
  *
  * Measured per pass (steps ÷ passes), as `c1Visits`'s bound divides by `rejectPasses`: at 64 levels `out`'s decision
  * crosses its allowance (its cost is depth × copies, G6 in #1319's design-round list), and the pass that restarts it
- * (TABLE r4.180, r4.183) walks the type again.
+ * walks the type again.
  */
 test("copies of a deep written type walk the type once, not once per copy (#1194)", () => {
   const measured = (k: number): { steps: number; nodes: number } => {
@@ -345,7 +346,7 @@ test("nested selections of objects merge each level's items once, in either orde
 });
 
 /**
- * A4 through copies (the owner's reviewer's F1 on #1049, TABLE r4.80): the inherited-field families, gated above with
+ * A4 through copies (the owner's reviewer's F1 on #1049): the inherited-field families, gated above with
  * the admission families, are gated with the sharing off too, so what a copy costs never hangs on equivalent answers
  * being shared; and his budget witness, a chain of 1,024 whole copies of a root of 1,024 written-typed fields (a source
  * of 6,153 syntax nodes that reached the allowance), completes within the default allowance.
@@ -381,9 +382,10 @@ test("a chain of records over shared inputs is identified in linear space (round
 });
 
 /**
- * W34's two known products, gated known limits by the owner's decision (TABLE r4.45, PLAN §6b): a regression check on
- * the 64 → 128 growth step only, each held to its measured doubling in either order (3.37 and 2.53); not a bound at
- * larger sizes (128 → 256 grows 3.62 and 2.82), and no linearity is asserted for them.
+ * W34's two known products, gated known limits by the owner's decision
+ * (docs/specifications/type-inference-accepted-record.md#r4-45, PLAN §6b): a regression check on the 64 → 128 growth
+ * step only, each held to its measured doubling in either order (3.37 and 2.53); not a bound at larger sizes (128 → 256
+ * grows 3.62 and 2.82), and no linearity is asserted for them.
  */
 test("W34's two known products grow no faster than measured", () => {
   const steep: string[] = [];
@@ -426,7 +428,7 @@ test("every family's member visits are bounded by its output and its decided pat
 });
 
 /**
- * G3 stage 1 (TABLE r4.196): the retained wrapper pairs, one read through k wrappers by a short step and by a long one,
+ * G3 stage 1: the retained wrapper pairs, one read through k wrappers by a short step and by a long one,
  * their decided paths' keys cursors from birth (`keyLane`), never texts or arrays per prefix: their work and each
  * counter grow with the program in either order, with the sharing on and off (on `main` 2.17 and 2.96 at 16 → 32). The
  * pairs at 64 → 128 and 40 → 80, the uncharged-work probe and the reversed schedule are the PR's evidence, outside CI.

@@ -27,7 +27,7 @@ import {
 import { decisionRecords, inMode, MODES } from "./helpers/type-core-oracles.js";
 
 /*
- * The receiving closure (#1526 phase C steps 1–5, TABLE r4.308; Sol's round 2 §1 and §5): a settled pass that started
+ * The receiving closure (#1526 phase C steps 1–5; Sol's round 2 §1 and §5): a settled pass that started
  * with frozen keys registers every receiving obligation apart from the diagnostics and completes them in a completion
  * pass without those keys, each decision made where a proof first reads it and each property listing a cell the
  * frontier schedules, taken whole by a search that reaches it. Outside the candidate slice, by its syntax or its depth,

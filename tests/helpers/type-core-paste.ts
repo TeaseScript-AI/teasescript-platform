@@ -17,7 +17,7 @@ import { siteKey } from "./site-keys.js";
 import { coreRequest } from "./type-core-analysis.js";
 
 /*
- * The paste family of TABLE r4.151 (#1241): every code form a fix offers, pasted at its own position in the source it
+ * The paste family (#1241): every code form a fix offers, pasted at its own position in the source it
  * was offered for, compiles and runs. Each case is an offer's erroneous expression (`OFFERS`, with the setup its
  * receiver or list needs, the element and value kinds varied) at one site (`SITES`: a declaration, typed or not, a
  * store, an operand per operator class, an argument, a condition, an interpolation, an element, a receiver, a count, a
@@ -99,7 +99,7 @@ const OFFERS: readonly Offer[] = [
     expression: 'd["missing"].trim',
   },
   { name: "absent property's size", setup: 'let door = {a: "hello"}', expression: "door.b.size" },
-  // (a list a fix reads by a dict's key or a list's index, there or not: TABLE r4.162, Astra on #1296)
+  // (a list a fix reads by a dict's key or a list's index, there or not, Astra on #1296)
   ...[
     ["dict{found: [1]}", 'd["absent"]'],
     ["dict{found: [1]}", 'd["found"]'],
@@ -261,7 +261,7 @@ const NUMBER_SITES = [
 ];
 const NULLABLE: readonly (readonly [Offer, readonly string[]])[] = [
   // (read by an index, which may be absent: a warning's own read, which its program already performs, wrapped in
-  // place, TABLE r4.168; or a variable's)
+  // place; or a variable's)
   [{ name: "null element", setup: "let xs = [4, null]", expression: "xs[1]" }, NUMBER_SITES],
   [{ name: "null value", setup: "let x = [4, null].random", expression: "x" }, NUMBER_SITES],
   ...[
@@ -487,7 +487,7 @@ const CODE = /(?:such as|with|Use|Write|write) '([^']+)'( on a line of its own)?
 const FALLBACK = /give a fallback, as in '([^']+)'/;
 
 /**
- * The declaration a list join's fix offers whole (#1268, TABLE r4.146): its head, the name it declares, and its text
+ * The declaration a list join's fix offers whole (#1268): its head, the name it declares, and its text
  * from the `=` on, which stand in the source's own declaration, with any type it writes.
  */
 const DECLARATION =

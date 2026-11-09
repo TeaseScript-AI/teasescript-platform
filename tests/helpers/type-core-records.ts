@@ -29,7 +29,7 @@ export interface CompactDiagnostic {
   readonly site: CompactSite;
   /** `null`: not asserted. */
   readonly context: ContextWord | null;
-  /** The copy that brought a copied property's rejected kind (TABLE r4.75 (4)), where the diagnostic has one. */
+  /** The copy that brought a copied property's rejected kind, where the diagnostic has one. */
   readonly related?: CompactSite;
   /** N10's payload, where the diagnostic has one (the fixture's `requiredCheck`, `null` where it has none). */
   readonly requiredCheck?: CompactRequiredCheck;
@@ -44,7 +44,7 @@ export interface CompactCheck {
 }
 
 /**
- * A record as the expectation set is compared with an analysis (TABLE §10.5, with the check sites of the port plan's
+ * A record as the expectation set is compared with an analysis (with the check sites of the port plan's
  * §3.1): the outcome, each diagnostic's kind, class, site, context and N10 payload, and each runtime check's kind,
  * target, required kinds, whether it is a boundary check, and site. This is the form of the fixture the core's cells
  * test reads, with N10's payload where the core's record carries one (the route rule's error, AD-1).
@@ -243,7 +243,7 @@ function excess(more: readonly string[], fewer: readonly string[]): string[] {
  * How `actual` differs from `expected`: the outcome; the diagnostics as a multiset of kind, class, site and related
  * site, and each context `expected` asserts at least as often; N10's payloads as a multiset of the diagnostic's kind and
  * site with the rule, the writer's span and the missing tests in order, as the lead's comparator (`compare-r410.py`)
- * compares them; the checks as a multiset. Every site is compared whole, its start and end (TABLE §3.4, D2, r4.62).
+ * compares them; the checks as a multiset. Every site is compared whole, its start and end (D2).
  * Order never matters, multiplicity does.
  */
 export function recordDifferences(expected: CompactRecord, actual: CompactRecord): string[] {

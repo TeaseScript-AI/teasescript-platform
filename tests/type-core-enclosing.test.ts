@@ -44,10 +44,11 @@ function witness(
 
 /**
  * #1416, the owner's witnesses through the candidate's compile and run (`enclosingProblems`): where a decision below a
- * store's own path stops, the store is checked against its destination's whole type, written or the one a copy
- * decides (A4), before the next effect, a value that fits playing on, in source order. In every order the oracle holds:
- * where a decision stopping in the restarted pass stops the analysis before admission settled (TABLE r4.183), a copy's
- * store is marked with its type undecided instead, as every store into an inferred place is (r4.100, #1252).
+ * store's own path stops, the store is checked against its destination's whole type, written or the one a copy decides
+ * (A4), before the next effect, a value that fits playing on, in source order. In every order the oracle holds: where a
+ * decision stopping in the restarted pass stops the analysis before admission settled
+ * (docs/specifications/type-inference-accepted-record.md#r4-183), a copy's store is marked with its type undecided
+ * instead, as every store into an inferred place is (#1252).
  */
 test("a store above a stopped decision is checked against its destination's whole type (#1416)", () => {
   const nested = list(list("bad"));
@@ -135,7 +136,7 @@ test("every store above a stopped decision keeps its check whole or its owned ma
 });
 
 /**
- * #1440 (TABLE r4.200), `certificateFamily`'s anchors through the candidate's compile and run, at every allowance
+ * #1440, `certificateFamily`'s anchors through the candidate's compile and run, at every allowance
  * around the work of each decision of the store's binding: where the decision of a store's own destination stops, the
  * store is checked against the complete type the source proves apart from it, the one its declaration's start value
  * copies there through object literal properties (the root's own, one or two levels down, a property named `element` or

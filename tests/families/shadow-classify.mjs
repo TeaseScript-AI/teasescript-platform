@@ -735,7 +735,7 @@ export function classifier(groups = null) {
     r.witnesses.length = Math.min(r.witnesses.length, 3);
   };
   // (the control's runs that left the slice, one row a class that names a text, declined/lost check and each rule of
-  // `EXCLUSIONS`, as the pair classes match it, and one a text no rule matches; information only, r4.382)
+  // `EXCLUSIONS`, as the pair classes match it, and one a text no rule matches; information only)
   const excluded = PAIR_CLASSES.filter(
     (c) => c.id.startsWith("excluded/") || c.id === "declined/lost check",
   );

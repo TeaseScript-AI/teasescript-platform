@@ -147,7 +147,7 @@ function runSited(plan: InstructionPlan, hostValue: SerializableRuntimeValue) {
 }
 
 /**
- * The run oracle of an enforcement test (TABLE r4.59): per host value its expected failure, `CODE@start:end`, or `null`.
+ * The run oracle of an enforcement test: per host value its expected failure, `CODE@start:end`, or `null`.
  * A run without one says exactly `said` and halts at the end; a run with one ends failed with exactly it, nothing said
  * by a statement at or after the failing check's start.
  */
@@ -233,7 +233,7 @@ const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
 };
 
 /**
- * The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; TABLE r4.59; the lead's answer 3). Every
+ * The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; the lead's answer 3). Every
  * record of the positive list (the cells test's: all but those `heldBack` names) is tried on the candidate route in both
  * orders. A record the route accepts is checked in four layers, each derived from the record and its source alone:
  * - **records:** its C1 and C2 diagnostics at their whole sites, its obligations exactly (the cells test's comparison),
@@ -909,7 +909,7 @@ test("C1's copy check and C9's boundary check run where external data enters a w
   });
   assertRuns(compiled.plan, source, ["picked", "turn", "turn"], [[1.5, "TSR058@22:39"]]);
 
-  // the literal analogue of r4.29: the element's check against the written element type, `null` admitted
+  // the literal's element check against the written element type, `null` admitted
   const pool = candidate("let pool: integer?[] = [hostValue, null, 7]\nexit\n");
   assert.deepEqual(sited(pool), ["warning TSV041@24"]);
   assert.ok(pool.plan !== null);
@@ -929,13 +929,13 @@ test("C1's copy check and C9's boundary check run where external data enters a w
   assert.deepEqual(sited(compileSource(source, OPTIONS)), []);
 
   // in the core's record, one boundary check per ingress, where it lands: the whole value's place, not each place below
-  // it (TABLE §4 C9; these whole-collection shapes are outside the slice, the literal's element inside it)
+  // it (C9; these whole-collection shapes are outside the slice, the literal's element inside it)
   for (const [shape, ...boundaries] of [
     ["let pool: integer[] = hostValue\nexit\n", 'pool ["list"] @22'],
     ["let xs: integer[][] = [hostValue]\nexit\n", 'xs.element ["list"] @23'],
     ["let pool: integer?[] = [hostValue, null, 7]\nexit\n", 'pool.element ["integer","null"] @24'],
-    // two ingresses in one literal brought by one store: one check for the store, at the first (TABLE §4 C9: one per
-    // ingress store; r4.35)
+    // two ingresses in one literal brought by one store: one check for the store, at the first (C9: one per
+    // ingress store)
     ["let n: integer[] = [hostValue, hostValue]\nexit\n", 'n.element ["integer"] @20'],
     // two stores, two checks
     [
@@ -1064,7 +1064,7 @@ test("admission's decided types and C9's boundary checks compile and run on the 
         ["x", "TSR058@22:31"],
       ],
     ],
-    // C9 r4.10: a host value a consumer reads directly is checked at the read, the runtime's own validation; C2 at the use
+    // C9: a host value a consumer reads directly is checked at the read, the runtime's own validation; C2 at the use
     [
       "repeat hostValue {}\nexit\n",
       ["warning TSV011@7"],
@@ -1095,7 +1095,7 @@ test("admission's decided types and C9's boundary checks compile and run on the 
 
 test("external data a literal carries is warned and checked at its store before any later effect, read or not (the owner's F1)", () => {
   // per program C1's warning at the host expression, the store checks and, per host value, the run's messages and
-  // failure: no consumer reads the list (the first and the third program are also r4.59's sample cells, its decided list
+  // failure: no consumer reads the list (the first and the third program are also sample cells, their decided list
   // element and decided nested list element inline, checked here with its fraction too)
   for (const [source, warnings, checked, runs] of [
     [
@@ -1340,7 +1340,7 @@ test("C2's integer check warns with TSV011 at a count and TSV043 at a list index
 });
 
 /**
- * #1242 (V30 §15, ADR 0021 §1.8, TABLE C2, C12, C5b): an index or a key owes a list's whole number or a dict's text
+ * #1242 (V30 §15, ADR 0021 §1.8, C12, C5b): an index or a key owes a list's whole number or a dict's text
  * only where the receiver may be a list or a dict, and a `removeAt`, `take` or `takeLast` argument only where it may
  * have the method; any other receiver gets its own error alone, as the current checker gives it: an object indexed by
  * text, a truth value or a number, read or stored, by `get`; a whole number, true or false, text. A list's index and a
@@ -2038,7 +2038,7 @@ test("a store below an object's own first, last or random checks the property it
 });
 
 /**
- * Deep and broad list literals on the candidate route (TABLE r4.58): their indexes share one text per path and order
+ * Deep and broad list literals on the candidate route: their indexes share one text per path and order
  * their identities by path id, and the core charges what they keep. A read 64 levels into a literal, through two
  * aliases, of external data 32 levels in and of the last of 512 elements or 300 rows; and two literals 40 deep stored
  * into one place, alike, differing at their leaf's kind, or one holding an empty list at its depth: each compiles to
@@ -2247,7 +2247,7 @@ test("a place published with a kind checks the external data stored into it, nam
 /**
  * Per carrier kind, the ways a declaration gives host data through the carrier beside a known integer, each at a scalar
  * endpoint (the place's value) and at a collection one (its element): the data inside a literal operand, the whole
- * operand, the operation's own read, or the receiver whose member the runtime reads (F15, r4.60: the destination's own
+ * operand, the operation's own read, or the receiver whose member the runtime reads (F15: the destination's own
  * check beside C5's obligation on the receiver). `lists` counts the lists around the host value at each endpoint;
  * `read` names the read that brings the data into the declaration where it is not the data's (a loop variable).
  */
@@ -2349,7 +2349,7 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
       scalar: "let out = [1, D.take(1)[0]][1]",
       collection: "let out = [[1], D.take(1)][1]",
       lists: [1, 1],
-      // (the copy is what the operation reads of its receiver, the member C1 sits at: r4.60)
+      // (the copy is what the operation reads of its receiver, the member C1 sits at)
       rule: { data: "member", declares: true, member: (h) => `${h}.take(1)`, listed: true },
     },
   ],
@@ -2392,13 +2392,13 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
 };
 
 /**
- * Invariant O over the carrier table (`carriers.ts`), without exception (r4.60): each kind of `CARRIER_KINDS` has its
+ * Invariant O over the carrier table (`carriers.ts`), without exception: each kind of `CARRIER_KINDS` has its
  * shapes, each named or inline, without and with a later store, in both orders. The place is admitted an integer where
  * the data stands (published or decided), and the shape's complete multiset of C1, C9 and C10 records is what the rule
- * function owes (`type-core-rule.ts`, §5.1): named data A7's `copy-type` warning and check (r4.50 (1)) beside its source's
- * own boundary, inline data C9's boundary or C1's check (r4.12, r4.63 (1)), a member's C1 at what is read of it (r4.60),
- * data in the operation's own read the operation's boundary (C10, r4.57), every site and multiplicity (Astra r5 D2).
- * Where the candidate route reaches a shape (TABLE r4.59), its plan checks the declaration against the whole type, a
+ * function owes (`type-core-rule.ts`, §5.1): named data A7's `copy-type` warning and check beside its source's
+ * own boundary, inline data C9's boundary or C1's check, a member's C1 at what is read of it,
+ * data in the operation's own read the operation's boundary (C10), every site and multiplicity (Astra r5 D2).
+ * Where the candidate route reaches a shape, its plan checks the declaration against the whole type, a
  * fitting value says AFTER and halts, and each bad one fails at the declaration's value with nothing said; a shape
  * outside the slice is proved at the answers, the route's reason reported.
  */
@@ -2514,7 +2514,7 @@ test("every carrier kind leaves an obligation for the external data it gives a p
 });
 
 /**
- * A copy of a written binding keeps its type beside an unwritten copy of the same source (A4, TABLE r4.72, Astra r5
+ * A copy of a written binding keeps its type beside an unwritten copy of the same source (A4, Astra r5
  * B1): `let a = raw`, `let b: integer[] = raw`, then `out` takes both, and a later store brings other host data. The
  * written copy decides `out`'s element by `integer[]`, whichever copy comes first, at depths one and two: each of the
  * three stores owes its C1 against the whole written type, the host data its boundary; the plan checks every store; the
@@ -2716,7 +2716,7 @@ test("a copy of a written collection admits its written domain at every level, n
 });
 
 /**
- * AD-3 (TABLE r4.52; X1 drops flow facts, never a written type): host data stored into a written place in dead code (a
+ * AD-3 (X1 drops flow facts, never a written type): host data stored into a written place in dead code (a
  * function nothing calls, after `exit`, a branch on `false`) is checked against the written domain, as in live code,
  * never against `unknown`. Per place and dead shape, the dead program and its live form (the function called; the
  * statements live), in both orders: the admitted domain at each collection level, the one boundary against the written
@@ -2853,7 +2853,7 @@ test("a dead store of host data into a written place is checked against its writ
 });
 
 /**
- * The owner's rule (TABLE r4.59) over a sample of the cells the candidate route reaches: host data, its slice's ingress,
+ * The owner's rule over a sample of the cells the candidate route reaches: host data, its slice's ingress,
  * inline and named, into a written, a decided and a published place, at a scalar and at a collection endpoint. Each
  * program compiles alike in both orders and checks exactly the store that brings the data, against the whole type its
  * place holds there (the host value's kind at the value's position: an element's, a nested element's). A fitting host
@@ -3217,7 +3217,7 @@ test("an ordinary warning owes no check: its record, its compile, its plan and i
 });
 
 /**
- * C13's iterable (TABLE r4.81 (2)): an operand of the loop at its iterable, against the domain it tests, a list, set,
+ * C13's iterable: an operand of the loop at its iterable, against the domain it tests, a list, set,
  * dict or range, a pair loop's a dict: an error where no run can go through it; else a warning whose operand check is
  * the runtime's own check of the loop's source (TSR044), at the iterable before the body runs, so the plan holds none.
  */

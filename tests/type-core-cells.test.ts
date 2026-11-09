@@ -32,7 +32,7 @@ import {
 } from "./helpers/type-core-records.js";
 
 /**
- * The coarse core against its independent expectation set (checkpoint 9, TABLE §10.2, §10.5; the port plan's §3.1):
+ * The coarse core against its independent expectation set (checkpoint 9, §10.5; the port plan's §3.1):
  * per record the outcome, the diagnostics as (kind, class, site, asserted context) and the checks as (kind, target,
  * required kinds, boundary, site) multisets. Every record is asserted except those `heldBack` names, each by its cell or
  * its name, with its reason.
@@ -77,7 +77,7 @@ test("the core gives the expected record for every record of the cells it comple
     const differences = recordDifferences(record.expected, actual);
     return differences.length === 0 ? [] : [`${record.name}: ${differences.join("; ")}`];
   });
-  // (TABLE §3.4, D2, r4.62: every site compares whole, a member read's and an operator's included)
+  // (§3.4, D2: every site compares whole, a member read's and an operator's included)
   t.diagnostic(`${asserted.length} records compared by whole sites`);
   assert.deepEqual(failures, []);
 });
@@ -233,7 +233,7 @@ test("the record comparison the asserted records rest on reports each part: outc
 });
 
 /**
- * TABLE r4.63–r4.66's rule function as the set pins it (`cp9-cells/s6/rule-function/…`): its ten records, each compared
+ * The rule function as the set pins it (`cp9-cells/s6/rule-function/…`): its ten records, each compared
  * whole in both orders, but those `heldBack` names.
  */
 test("the core gives the expected record for every rule-function record, in both orders (r4.63–r4.66)", () => {
@@ -257,7 +257,7 @@ test("the core gives the expected record for every rule-function record, in both
 });
 
 /**
- * AD-3 (TABLE r4.52; ADR 0021 1.8: type checks apply to all code, reachable or not): in dead code a read of a declared
+ * AD-3 (ADR 0021 1.8: type checks apply to all code, reachable or not): in dead code a read of a declared
  * place keeps its contract's one known kind, so an intrinsic violation of a known type is the error its live form is,
  * at the same text; a dead call's argument meets its written parameter (F22) as a live one does, and is no definition
  * of it. The flow facts stay dropped there (X1): a kind only the read's reaching definition decides, or a call's result
@@ -764,7 +764,7 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "warning-runtime-check",
     "deferred-parameter",
   ],
-  // X6, X7 (r4.10): a helper only blocks run stores as block code does, one ordinary code runs too as a call
+  // X6, X7: a helper only blocks run stores as block code does, one ordinary code runs too as a call
   [
     "X6 a helper only a later block runs",
     'let n = 1\nfunction change { n = 1.5 }\nfunction unrelated { say "hello" }\nunrelated()\nlet shown: integer = n\nshowPermanentButton "x" { change() }',
@@ -862,7 +862,7 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "compile-error",
     "- unknown - unknown",
   ],
-  // X7, H1, G1(b) (r4.25; Astra B4): a dead call registers no handler; a live one before the read does
+  // X7, H1, G1(b) (Astra B4): a dead call registers no handler; a live one before the read does
   [
     "X7 a registration only a dead call makes before the read",
     'let n = 1\nfunction register { showPermanentButton "x" { n = 1.5 } }\nif false { register() }\nlet whole: integer = n\nregister()\nexit',
@@ -908,7 +908,7 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
   ],
 ];
 
-/** C1's warning and check for external data stored into a written place, by site (TABLE r4.43, C9 r4.29). */
+/** C1's warning and check for external data stored into a written place, by site (C9). */
 test("external data in a choice's options or in a literal is warned at its own expression", () => {
   const sited = (source: string): readonly string[] => {
     const request = coreRequest([{ path: "main.tease", source }]);
@@ -923,7 +923,7 @@ test("external data in a choice's options or in a literal is warned at its own e
         .map((check) => `${check.kind}@${check.site.offset}`),
     ];
   };
-  // r4.43 (1): an external option of a choice, as an external element of a literal
+  // an external option of a choice, as an external element of a literal
   assert.deepEqual(sited("let chosen: integer = askChoice [hostValue, 2]\nexit"), [
     "warning-runtime-check",
     "written-target@33",
@@ -991,7 +991,7 @@ test("external data in a choice's options or in a literal is warned at its own e
       "operand@63",
     ],
   );
-  // (an object as a button's value is TSV029's error at the value, and the answer holds no object to read: TABLE r4.93)
+  // (an object as a button's value is TSV029's error at the value, and the answer holds no object to read)
   assert.deepEqual(
     sited(
       "let chosen: integer = (askChoice {text: hostValue.label, value: {text: hostValue.field}}).text\nexit",
@@ -1027,7 +1027,7 @@ test("external data in a choice's options or in a literal is warned at its own e
     "null-check@39",
     "operand@39",
   ]);
-  // r4.43 (3): options held in a variable follow the copy reading: the store into the written place; the literal's
+  // options held in a variable follow the copy reading: the store into the written place; the literal's
   // host element is checked against its whole numbers where it is stored (the owner's F1)
   assert.deepEqual(sited("let opts = [hostValue, 1]\nlet answer: integer = askChoice opts\nexit"), [
     "warning-runtime-check",
@@ -1063,7 +1063,7 @@ test("a choice's option reached through index and property projections is select
       const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
       return [
         record.outcome,
-        // (C1's, and TSV029's at a button's value that is no choice value, TABLE r4.93)
+        // (C1's, and TSV029's at a button's value that is no choice value)
         ...record.diagnostics
           .filter(
             (diagnostic) => diagnostic.kind === "written-target" || diagnostic.kind === "operator",
@@ -1083,7 +1083,7 @@ test("a choice's option reached through index and property projections is select
     `copy-type@${offset}`,
   ];
   // an option inside an index or a property projection, with and without a projection of the result; an object as the
-  // button's value is TSV029's error at the option, and the answer holds no object to read (TABLE r4.93)
+  // button's value is TSV029's error at the option, and the answer holds no object to read
   const rejected = (offset: number): string[] => ["compile-error", `operator@${offset}`];
   assert.deepEqual(
     sites("(askChoice [{text: hostValue.label, value: {text: hostValue.field}}][0]).text"),
@@ -1112,7 +1112,7 @@ test("a choice's option reached through index and property projections is select
     held(60),
   );
   // a choice as another choice's option (Astra B6-r4), beside its literal analogue; a returned choice object as the
-  // outer choice's button itself, never selected again (TABLE r4.93), so a text-only one has no length
+  // outer choice's button itself, never selected again, so a text-only one has no length
   assert.deepEqual(sites("askChoice [(askChoice [hostValue.field, 1]), 2]"), at(45));
   assert.deepEqual(sites("[(askChoice [hostValue.field, 1]), 2][0]"), at(35));
   assert.deepEqual(
@@ -1194,7 +1194,7 @@ test("C1's site follows a choice's selection as its value does, over options, wr
   ])[] = [
     [(w) => `askChoice [${w}]`, (w, select) => `[${w}][0]${select}`],
     [(w) => `askChoice [(askChoice [${w}])]`, (w, select) => `[[${w}][0]${select}][0]`],
-    // (the inner choice's answer is the outer's button itself, never selected again: TABLE r4.93)
+    // (the inner choice's answer is the outer's button itself, never selected again)
     [
       (w) => `askChoice [(askChoice {text: "inner", value: ${w}})]`,
       (w) => `[{text: "inner", value: ${w}}.value][0]`,
@@ -1217,7 +1217,7 @@ test("C1's site follows a choice's selection as its value does, over options, wr
           )
             external += 1;
           // (a choice object as the inner choice's value is no choice value: TSV029's error, where its analogue's
-          // object is read; the answer holds no object, TABLE r4.93)
+          // object is read; the answer holds no object)
           if (choice === nestings[2]![0] && option.startsWith("{")) {
             const request = coreRequest([
               { path: "main.tease", source: `let chosen: integer = ${chosen}\nexit` },
@@ -1243,7 +1243,7 @@ test("C1's site follows a choice's selection as its value does, over options, wr
   assert.deepEqual(differing, []);
   assert.equal(rejected, 36);
   // every external option's analogue sites C1 at its own external expression: 4 kinds × 4 wrappers × 3 × 3, less the 20
-  // where the third nesting returns a choice object whole (TABLE r4.93): `{text: "A", value: hostValue.field}` at each
+  // where the third nesting returns a choice object whole: `{text: "A", value: hostValue.field}` at each
   // path and `{text: hostValue.label}` whole and at its length, in each wrapper
   assert.equal(external, 124);
 });
@@ -1275,7 +1275,7 @@ function summary(record: CompactRecord): string[] {
 }
 
 /**
- * TABLE r4.46 (1), (2) (#1026): a choice object gives its `value` where it has the key and its `text` where it has
+ * #1026: a choice object gives its `value` where it has the key and its `text` where it has
  * none, decided by the key and never by what the value resolves to (an empty answer is unresolved, not an absent key),
  * per alternative, on the value side and through a function's result (the contract) alike; a dict's `values` and
  * `keys` are lists of its values and of text that may hold none. Per program its record in both orders, with its sites
@@ -1485,8 +1485,8 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `empty-check dict{k: "bad"}.values [list] @${at("dict")}`,
       ],
     ],
-    // r4.47 (7), F12 with P3: an element read from an open derived list is possible, so a key is possible text, a
-    // warning with its check; §10.5, r4.46 (2): a target through a dict's list is its source text, no key of the dict
+    // F12 with P3: an element read from an open derived list is possible, so a key is possible text, a
+    // warning with its check; §10.5: a target through a dict's list is its source text, no key of the dict
     [
       "a dict's keys",
       "let d = dict{k: 1}\nrepeat d.keys.first {}\nexit",
@@ -1602,7 +1602,7 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `integer-check d.values.first [integer] @${at("d.values.first {}")}`,
       ],
     ],
-    // r4.43: C1's site at the external value among the options a dict's values give a choice
+    // C1's site at the external value among the options a dict's values give a choice
     [
       "a choice over a dict's values",
       'let n: integer = askChoice dict{a: {text: "A", value: hostValue}}.values\nexit',
@@ -1697,12 +1697,12 @@ test("a choice object's value is selected by its key, and a dict's values and ke
 });
 
 /**
- * A choice reads a written list's element as its literal analogue does (TABLE r4.42–r4.43, the lead's ruling on #1027):
- * a copied record below the list's element step takes its contract (F12 r4.7), with the read's word and the copy
+ * A choice reads a written list's element as its literal analogue does (the lead's ruling on #1027):
+ * a copied record below the list's element step takes its contract (F12), with the read's word and the copy
  * check, in both orders.
  */
 /**
- * F12 r4.7 and TABLE r4.93: a written list element's choice object whose value is an object is TSV029's error at the
+ * F12: a written list element's choice object whose value is an object is TSV029's error at the
  * value, and the answer holds no object to read below; its literal analogue reads below the list's element step.
  */
 test("a choice's written list element whose value is an object is TSV029's error, and its literal analogue reads below the element step", () => {
@@ -1743,7 +1743,7 @@ test("a choice's written list element whose value is an object is TSV029's error
 /**
  * §3.2 (review round 5 on #1027): a held choice object's button value keeps the mark of a test of the key it selects,
  * through copies, a list's element and a parameter, as the keyed read does; a test of the other key marks neither. (A
- * path below a button's value holds nothing: an object there is TSV029's error, TABLE r4.93.) Per program its record in both orders against the same program with the keyed read in its place, the
+ * path below a button's value holds nothing: an object there is TSV029's error.) Per program its record in both orders against the same program with the keyed read in its place, the
  * checks' targets aside.
  */
 test("a held choice object's button value is marked by a test of its selected key, as the keyed read is", () => {
@@ -2064,7 +2064,7 @@ test("a host list's selection keeps its empty-check under a written type or a co
 });
 
 /**
- * TABLE r4.47 (#1026's follow-up): the set's records `cp9-cells/s4/followup/…` (set `716ac7091de2b95e`) in both orders,
+ * #1026's follow-up: the set's records `cp9-cells/s4/followup/…` (set `716ac7091de2b95e`) in both orders,
  * as their outcome, diagnostics and checks with their sites: temporal fields and calendar parts by their declared
  * results (1), a selection's descendant emptiness (2), held choice options after a store below `value` or `text` (4),
  * clock reads by their declared kind with no boundary (5), and what fits a written place (6, §3.4, §10.5). Two records
@@ -2578,7 +2578,7 @@ test("a range's list holds its whole numbers, maybe none", () => {
 });
 
 /**
- * TABLE r4.47 (1), F15, §3.4 (Astra's D1 on #1028): a method without a category (a list's `union`, whose result is the
+ * F15, §3.4 (Astra's D1 on #1028): a method without a category (a list's `union`, whose result is the
  * runtime's until the result relations, S9b) answers the runtime's opaque `unknown` on a receiver of a known kind, and on
  * what the core cannot know keeps that value's own reasons, so a chain of such methods stays opaque (the word
  * `unmodelled`), with no external data and no boundary; a modelled method in the chain gives its declared result. Both
@@ -2786,7 +2786,8 @@ test("admission decides from the start value, keeps written copies, rejects ever
       `let typed: integer | string = 1\nlet xs = [${nest(300, "typed")}, ${nest(300, '"ok"')}]\nexit`,
       () => ["valid"],
       // (reversed, its deepest paths' decisions cost depth × copies past their allowance, G6 in #1319's design-round
-      // list: one restart, then a stop in it stops the analysis, TABLE r4.183; the G6 repair returns it to `valid`)
+      // list: one restart, then a stop in it stops the analysis,
+      // docs/specifications/type-inference-accepted-record.md#r4-183; the G6 repair returns it to `valid`)
       (at) => [
         "warning-runtime-check",
         `budget not-checked-budget @${at("[")}`,
@@ -2938,7 +2939,7 @@ test("admission decides from the start value, keeps written copies, rejects ever
     [
       "a choice object's selected value read below the choice",
       'let out = askChoice [{text: "a", value: {n: 1}}, {text: "b", value: {n: "x"}}]\nsay "${out.n}"\nexit',
-      // (each object as a button's value is TSV029's error too since S9b, TABLE r4.93)
+      // (each object as a button's value is TSV029's error too since S9b)
       (at) => [
         "compile-error",
         `operator compile-error @${at("{n: 1}")}`,
@@ -3153,7 +3154,7 @@ test("a supplied argument and a parameter's default never constrain each other",
 });
 
 /**
- * TABLE §3.4, F12 (r4.48 (5)): the word is the read's first failing condition; an element read fails X3 (`member`)
+ * §3.4, F12: the word is the read's first failing condition; an element read fails X3 (`member`)
  * where the contract answers it, several element-contributing sources or a literal of several elements meeting at the
  * read's element step, before a later condition's word (`branch`) and the result's own (`call`); a single exact
  * contribution keeps the read's word. A call's result with two returns and with one, a variable's literal of two
@@ -3209,8 +3210,8 @@ test("an element read the contract answers is X3's member, before a later condit
  * C9, F18 beside F21 and ADR 0021 1.5 (reviews r7 and r8 of the repairs): external data an argument brings into an
  * unannotated parameter with a default is checked against the argument's own kinds at the boundary's path, never the
  * default's decision: a parsed text against its expected text, host data against `unknown`, positionally, by name and at
- * two calls; a record that carries a parsed text or host data against its record, at the first ingress (C9 r4.34,
- * r4.35); a list's element against the element's kinds; a written parameter's boundary is its type. Both orders.
+ * two calls; a record that carries a parsed text or host data against its record, at the first ingress (C9);
+ * a list's element against the element's kinds; a written parameter's boundary is its type. Both orders.
  */
 test("an argument beside a default meets its own boundary, never the default's", () => {
   const parsed = 'fromJson("\\"hello\\"", default: "hello", files: false)';
@@ -3476,7 +3477,7 @@ test("a named collection in a literal or an add brings its elements' types to th
     ["an inline add", `let xs = [[1]]\nxs.add(["bad"])${after}`, "compile-error", [22]],
     ["inline records", `let xs = [{n: 1}, {n: "bad"}]${after}`, "compile-error", [22]],
     // a named record's field, reached only through copies, where the copy meets the literal, read or not (A2, ADR 0021
-    // rule 1.1, TABLE r4.131)
+    // rule 1.1)
     [
       "records, a field read",
       `let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, b]\nrepeat xs[0].n {}${after}`,
@@ -3713,13 +3714,14 @@ function a2Record(source: string, reversed: boolean): string[] {
 }
 
 /**
- * A2's witnesses (TABLE r4.131, r4.154), their exact records in both orders of the copy and the object and in both
- * analysis orders: per form, a place copied with its setup and an object holding another type at one property, stored
- * into one place and as a list's elements, unread. Through whole copies (Codex r1's cycle of whole copies, a cycle fed
- * from outside, a copy into a property, a projection, nested objects, a written property beside an inferred one, a
- * property that may be null) the second errs where it meets the place or the list. Through a cycle of copies that adds or
- * takes steps (Codex r2's and r3's projections and composed projections, r2's and r5's self-grafts) their meeting is
- * beyond the bound (design §2.1.2): valid unread; read, the error is at the first read and names the second.
+ * A2's witnesses (docs/specifications/type-inference-accepted-record.md#r4-154), their exact records in both orders of
+ * the copy and the object and in both analysis orders: per form, a place copied with its setup and an object holding
+ * another type at one property, stored into one place and as a list's elements, unread. Through whole copies (Codex
+ * r1's cycle of whole copies, a cycle fed from outside, a copy into a property, a projection, nested objects, a written
+ * property beside an inferred one, a property that may be null) the second errs where it meets the place or the list.
+ * Through a cycle of copies that adds or takes steps (Codex r2's and r3's projections and composed projections, r2's
+ * and r5's self-grafts) their meeting is beyond the bound (design §2.1.2): valid unread; read, the error is at the
+ * first read and names the second.
  */
 test("A2's witnesses: whole copies err where they meet the place or the list, read or not; a cycle that adds or takes steps errs where it is read, in both orders", () => {
   // per form: its setup, the place copied, the object of another type, and for a cycle beyond the bound the path read
@@ -4099,12 +4101,12 @@ test("A2's value origins: a written binding's copy errs where it meets the place
 
 test("the copied-property check grows with the program, not with its copies times its fields, in either order (A2, TABLE r4.131)", () => {
   // k copies of a record with k fields and a record of k other-typed fields, each field read: one error per field; the
-  // copies as a list's elements, as stores into one variable, and wrapped in literals of both. The gate's shapes (TABLE
-  // r4.131), unread, in both orders of the copies: k copies of the first record in one list beside a copy of one that
+  // copies as a list's elements, as stores into one variable, and wrapped in literals of both. The gate's shapes,
+  // unread, in both orders of the copies: k copies of the first record in one list beside a copy of one that
   // differs in one field (one error, or one per copy where it comes first), and k places each receiving a copy of each
   // (one error per place, at its store). k places each receiving a copy of the first record and then its own object of
   // one other-typed field (one error each). A ring of k whole copies fed the first record and then the other (one error
-  // per field, at the store bringing it: Codex r1's review of #1293), and a quiet one. Beyond the bound (r4.154),
+  // per field, at the store bringing it: Codex r1's review of #1293), and a quiet one. Beyond the bound,
   // linear: Codex r4's k independent property cycles of one object, `b_i = a.f_i`, `a.f_i = b_i`, the object then
   // copied beside another type (one error, at its own property), and r5's: those cycles beside k self-grafts
   // `a.g_i = a` (none). The written-type axis (Astra r1 N1): the elements, the stores, the places and the list with
@@ -4426,7 +4428,7 @@ test("a written expected type holds a default to its own kinds at every depth, k
       "valid",
       [],
     ],
-    // below the default, at the element (A8, r4.35)
+    // below the default, at the element (A8)
     [
       "a fraction among integers",
       integers('fromJson("bad", default: [1.5])'),
@@ -4685,15 +4687,15 @@ test("a literal's verdicts are shared only where its named elements hold the sam
  * computed and a projected list, in a literal beside the same carrier over another list (A8), stored before and after
  * its source changes (A2), and carrying host data with no consumer (C1, C9); in both orders. A carrier that gives
  * possible elements (a removal) decides nothing (A2), yet its elements are published with the literal's whole numbers,
- * so named host data it carries owes its check (A7, A8, TABLE r4.67 (1)); a choice's answer carries no list, which no
- * button returns (TSV029, TABLE r4.93); a load or a parse
+ * so named host data it carries owes its check (A7, A8); a choice's answer carries no list, which no
+ * button returns (TSV029); a load or a parse
  * typed by its default alone validates the loaded value by the default's own kinds, so host data the default holds
- * leaves the elements' kind open, C1's beside the call's boundary (TABLE r4.66 (3)).
+ * leaves the elements' kind open, C1's beside the call's boundary.
  */
 /*
  * The regressions of review rounds 11 to 17, Astra's and the external reviewer's below assert the answers layer: their
  * programs need constructs outside the candidate slice (functions, `get`, `otherwise`, the copy methods, written unions,
- * records), so their plan content and their runs wait for S7–S9b to widen the slice (TABLE r4.59); those inside it
+ * records), so their plan content and their runs wait for S7–S9b to widen the slice; those inside it
  * prove plan and run in `type-core-candidate.test.ts` (the projections of a literal, the endpoint matrix, the cell
  * sample).
  */
@@ -4780,7 +4782,7 @@ test("a value any carrier gives brings its elements' types, decided and checked 
         diagnostic.kind === "written-target" && diagnostic.class === "warning-runtime-check",
     );
     // (a removal's possible element decides nothing, F7, yet the elements are published with the
-    // literal's whole numbers, so the named host data owes its check: C9 r4.12, r4.50 (1), TABLE r4.67 (1))
+    // literal's whole numbers, so the named host data owes its check: C9)
     if (carried.outcome !== "warning-runtime-check" || !warned)
       differing.push(`${carrier}, host data: ${carried.outcome}`);
   }
@@ -4833,7 +4835,7 @@ test("a literal's own elements decide through the operations that carry it, unde
     ],
     ["takeLast", "let xs = [1, a].takeLast(1)", "warning-runtime-check", checked],
     ["toSet", "let xs = [1, a].toSet()", "warning-runtime-check", checked],
-    // (a list's `+` combines: the named read that brought the kind is C1's site, TABLE r4.63 (2))
+    // (a list's `+` combines: the named read that brought the kind is C1's site)
     [
       "+",
       "let xs = [1, a] + []",
@@ -4841,7 +4843,7 @@ test("a literal's own elements decide through the operations that carry it, unde
       ["a [unknown] B @8", "xs.element [integer] @31"],
     ],
     // (a removal's possible element decides nothing, F7, but the place is published with the literal's whole numbers,
-    // so the named host value owes its check there: C9 r4.12, r4.50 (1))
+    // so the named host value owes its check there: C9)
     [
       "removeFirst",
       "let xs = [[1, a]].removeFirst()",
@@ -5330,7 +5332,7 @@ test("named external data a carrier stores into a place published with a kind ow
   // per carrier outside the candidate's slice (its plan and its run wait for the slice): the warning where the named
   // data is read, with a `copy-type` check against the published kind; a source decided at its own stores (a list whose
   // element `1` decides) keeps its check there only; a member of host data owes C5's obligation on the receiver and,
-  // beside it, the destination's own check, where the member is read (F15, r4.60)
+  // beside it, the destination's own check, where the member is read (F15)
   const programs: readonly (readonly [string, string, string | null])[] = [
     ["otherwise", "let raw = hostValue\nlet out = raw otherwise 1\nexit", "raw otherwise"],
     ["get's default", "let raw = hostValue\nlet out = [raw].get(0, default: 1)\nexit", "raw]"],
@@ -5610,7 +5612,7 @@ test("a guarded read inside a computed child keeps its mark where literals share
 
 /**
  * S6-CARRIERS §3.3, §3.4 (Codex r20 B6, N1, N2), from the landing index: a typed `load` or `fromJson`
- * no store brings, its property never stored or its text only displayed, keeps F18's own check where it runs (r4.57); a
+ * no store brings, its property never stored or its text only displayed, keeps F18's own check where it runs; a
  * member of host data owes C1 at the member read and C9 at the host value; and a surely measured length is derived
  * (F14), never the external data of the ingress it measures. The whole record, in both orders.
  */
@@ -5699,7 +5701,7 @@ test("the landing index keeps F18's own check, sites a member's C1 at its read a
 });
 
 /**
- * C9, C1 with TABLE r4.60 (Codex r21 B3, N1): named host data a store brings beside inline host data owes the
+ * C9, C1 (Codex r21 B3, N1): named host data a store brings beside inline host data owes the
  * destination's check at its read and keeps its source's boundary, the inline value its boundary at the store; what a
  * receiver's operation (a copy) reads of host data that an add or an `addAll` brings owes C1 at that operation, C9 at
  * the host value. The whole record, in both orders.
@@ -5904,7 +5906,7 @@ test("a class decides through its earliest member no guard of the path holds, in
  * - Astra's M1 witnesses: a conditional store below the copied path before and between the copies;
  * - Astra's F3 shapes: two choice reads of `root.f` answer at their own nodes, the one after an effectful call by the
  *   call's word; an argument inside `root != null and use(root)` carries the operand's guard into its parameter;
- * - two reads of one key in one literal with a call storing to it between them are two key reads (TABLE r4.68 (1)): the
+ * - two reads of one key in one literal with a call storing to it between them are two key reads: the
  *   later one's element carries the call's kind, as the same reads in three statements do; so are two with a call
  *   between them that registers a handler storing the key (X7, H9), whose later read takes the contract, as both do
  *   after the registration.
@@ -5930,7 +5932,7 @@ test("the carrier design's witnesses give their exact records, in both orders (S
 
 /**
  * #1188's witnesses, as exact records in both orders (its design note's §2.0 and §2.4):
- * - rule (a)'s three forms (TABLE r4.121, r4.127, r4.130): a rejected value is ignored, so a list whose elements still
+ * - rule (a)'s three forms: a rejected value is ignored, so a list whose elements still
  *   disagree after it gets an error of its own (Astra's `rule-a-list`); nothing warns about or checks a rejected value
  *   (`other-written-record`, where the core warned about storing the rejected element into `result` against its type);
  *   and a later store whose live value does not fit the receiving place's decided type errs, against the surviving type
@@ -5940,7 +5942,7 @@ test("the carrier design's witnesses give their exact records, in both orders (S
  *   (Astra's recheck r3 F1); a fed cycle whose feeder's store is rejected takes none of the rejected value (her N1);
  * - a merge place deciding by its first copy, beside its second copy in a literal that decides by that copy: the
  *   literal's check, as the meeting is hot only where the literal decides (§2.4 (d));
- * - a live nested union, whose outer list now errs where its elements disagree (TABLE r4.128 (1));
+ * - a live nested union, whose outer list now errs where its elements disagree;
  * - a whole-copy ring whose members decide two properties differently, two of them in a list, with a plain or a written
  *   union decider: the list's rejection in the first pass leaves the ring's last copy a possibility, a warning and its
  *   check (Astra's review B1 of #1311: the ring's shared trie still owes its meetings to the list);

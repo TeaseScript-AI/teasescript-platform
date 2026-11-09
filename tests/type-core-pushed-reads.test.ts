@@ -39,7 +39,7 @@ import {
 } from "../src/type-inference/core/items.js";
 
 /*
- * #1655 (TABLE r4.385): a key entry below its place's root in a copy cycle through a projection (`p1 = p1.q` beside the
+ * #1655: a key entry below its place's root in a copy cycle through a projection (`p1 = p1.q` beside the
  * ring `p1 = p0`, `p0 = p1`) is read one step at a time below its writing edge (`contract/frontier.ts`), over a finite
  * producer graph of the pass, instead of as a longer key at every read. Where the native reader ends (a terminating
  * spine, a ring without its closing copy) the two publish the same; where it does not, the program now reaches its

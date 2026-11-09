@@ -149,7 +149,7 @@ function c10Record(source: string): string {
 test("C10 takes a fallback's family from its value's domain where the read cannot (r4.150)", () => {
   // (each cell's record in the four modes; the first group errs at the fallback where main ran it at runtime: a written
   // or retained `T?` of one non-null family, as for `= 1`, at a root, an element, a dict's value, a nested literal, a
-  // parameter, a copy and an `otherwise` chain, and `get`'s default; the second group: the controls r4.150 keeps)
+  // parameter, a copy and an `otherwise` chain, and `get`'s default; the second group: the controls)
   const cells: readonly (readonly [string, string, string])[] = [
     [
       "otherwise/host-one-family",
@@ -282,7 +282,7 @@ test("C10 takes a fallback's family from its value's domain where the read canno
       'let input = hostValue\nlet result = input otherwise "bad"\nsay result',
       "warning-runtime-check | written-target@35:W | copy-typeB:input[unknown] copy-type:result[string]",
     ],
-    // (Codex r1's N1 on #1824: a read the test proves only `null` takes no family, r4.106)
+    // (Codex r1's N1 on #1824: a read the test proves only `null` takes no family)
     [
       "narrowed/is-null",
       'let n: integer? = hostValue\nif n is null { say n otherwise "bad" }',
@@ -353,7 +353,7 @@ test("C10 takes a fallback's family from its value's domain where the read canno
         expected,
         `${name} ${JSON.stringify(mode)}`,
       );
-  // a stopped read keeps r4.100's warning against its contract (`budget`), never the domain's error; unstopped, the error
+  // a stopped read keeps its warning against its contract (`budget`), never the domain's error; unstopped, the error
   const stops: readonly (readonly [string, string, number, string, boolean?])[] = [
     [
       "otherwise/host-one-family",

@@ -115,10 +115,10 @@ import {
 } from "./helpers/type-core-stop-oracle.js";
 
 /*
- * The program stop through the candidate route, in its three layers (the owner's D4, option a′, TABLE r4.54; the
+ * The program stop through the candidate route, in its three layers (the owner's D4, option a′; the
  * runtime-check evidence rule of `docs/TESTING.md`): at a small test allowance the analysis stops, and the program still
  * compiles. The decision: a check that waits on the stop is moved to the runtime, with the reason its value gives (host
- * data its own, as unstopped: TABLE r4.126; a value the stop leaves undecided `budget`), one warning says so, and a
+ * data its own, as unstopped; a value the stop leaves undecided `budget`), one warning says so, and a
  * literal's error found by the finishing path stands. The plan: the moved check stands at its site. The
  * execution: a value that fits reaches the next effect; one that does not stops at the check.
  */
@@ -810,14 +810,14 @@ const host = (hostValue: SerializableRuntimeValue, hostOther: SerializableRuntim
 });
 
 /**
- * TABLE r4.90, r4.99, r4.108: what a phase settled is never discarded by a later one, and a stop changes nothing of the
+ * what a phase settled is never discarded by a later one, and a stop changes nothing of the
  * unstopped compile but the records its deferred marks name (the stop oracle, `helpers/type-core-stop-oracle.ts`). A
  * stop in a settled pass's walk or publication keeps admission's contracts (an inferred scalar's, a record's), the
  * findings (an error a copy brings, not a literal's), the quiet proofs and the whole plan (a default's check against a
  * written or written element type, Astra's B1 of round 2; an `otherwise`'s). Each mode's phases found in that mode; the
  * stop at the first unit of each settled phase and at its last, its phase asserted (the every-unit sweep runs outside
  * CI). `marked`: the code of an obligation a stop may leave undecided and the source text of its site, the first after
- * `after` (TABLE r4.100): the stop marks it at one stop at least.
+ * `after`: the stop marks it at one stop at least.
  */
 function settledPhases(
   cases: readonly (readonly [string, readonly Globals[], readonly Globals[]])[],
@@ -919,7 +919,7 @@ test("a stop after admission settled keeps its contracts, findings, quiet proofs
       [host(2, 3)],
       [host("bad", 3)],
     ],
-    // a domain is not the value's kinds (TABLE r4.105): `integer?` copied where the value is only `null` imposes no
+    // a domain is not the value's kinds: `integer?` copied where the value is only `null` imposes no
     // family on the fallback, so a text fallback still runs (Codex r9's B1)
     [
       'let v: integer? = null\nlet a = {v:v}\nlet b = a\nlet c = b.v\nsay c otherwise hostValue\nsay "AFTER"\nexit\n',
@@ -975,7 +975,7 @@ function lastUnsettled(source: string): number {
 }
 
 /**
- * The stop oracle itself (TABLE r4.108 (1)): the whole plan, a mark excusing only its own record. Changes to a compile
+ * The stop oracle itself: the whole plan, a mark excusing only its own record. Changes to a compile
  * stand in for a stop that made them: a store check's place, type or presence (Codex r8's T1), a property store's
  * guard (Astra r3's T1), alone and beside the mark of a default the stop left undecided, the diagnostics' order and a
  * coordinate of one (Codex r12's T1).
@@ -1021,7 +1021,7 @@ test("the stop oracle sees every change no mark of the stop names", () => {
   const vessel = stopRun('let vessel = hostValue\nvessel.amount = 4\nsay "AFTER"\nexit\n');
   assert.deepEqual(problems(vessel, vessel), []);
   assert.notDeepEqual(problems(vessel, edited(vessel, withoutGuard)), []);
-  // a walk stop marks the default (r4.100), which excuses its own check and not the guard; where `vessel` holds a host
+  // a walk stop marks the default, which excuses its own check and not the guard; where `vessel` holds a host
   // value, its lowest walk stop loses the vessel's check, which `{amount: "x"}` passes, and the candidate declines it
   // (#1526 decision 2), so the oracle is judged on its variant, `vessel` a typed load's, which its reader carries
   const original =
@@ -1073,7 +1073,7 @@ test("the stop oracle sees every change no mark of the stop names", () => {
 });
 
 /**
- * A fix a stop gives in words (TABLE r4.162, #1449): at a settled walk stop whose unchecked region holds a store, its
+ * A fix a stop gives in words (#1449): at a settled walk stop whose unchecked region holds a store, its
  * warning gives the fix in words where the unstopped compile shows code, and the oracle takes it for the same diagnostic:
  * the unstopped one with every fix in words. The sources cover a check, a project's second file, and a kept value whose
  * text holds the author's own: a full stop, an apostrophe, quotes and listed words in a text literal or a comment (Codex
@@ -1249,7 +1249,7 @@ test("the stop oracle takes a fix in words for the unstopped one's code, and not
 });
 
 /**
- * Before admission settled a written store's mark stands for its records within its value (TABLE r4.152 (1), r4.111): a
+ * Before admission settled a written store's mark stands for its records within its value: a
  * literal holding an element admission left undecided (`v = [kept]`) is marked at the literal, while unstopped its
  * TSV041 stands at the element; the oracle excuses that record, and the same record planted outside the value is still
  * reported.
@@ -1306,7 +1306,7 @@ test("a written store's mark stands for its records within its value, and for no
 });
 
 /**
- * C5's record where the retained state decides its receiver's shape (TABLE r4.108 (2), Astra r3's N1): a store of a
+ * C5's record where the retained state decides its receiver's shape (Astra r3's N1): a store of a
  * property no source of its receiver has is an error at the literal the receiver copies, and a stop after admission
  * settled publishes it there, not a mark at the store.
  */
@@ -1318,7 +1318,7 @@ test("a stop after admission settled keeps the error at the literal a property s
 
 /**
  * Before admission settled nothing it decided stands, so the receiver's shape is undecided: the record stands as the
- * mark of the store that owes it, the one move of a record's site the oracle accepts, and only there (TABLE r4.108 (2)).
+ * mark of the store that owes it, the one move of a record's site the oracle accepts, and only there.
  */
 test("a stop before admission settled marks a property store whose receiver's shape it leaves undecided", () => {
   const source =
@@ -1361,7 +1361,7 @@ test("a stop before admission settled marks a property store whose receiver's sh
 });
 
 /**
- * TABLE r4.99: the finishing path derives a unit's findings as the analysis does. A parameter whose `null` default
+ * the finishing path derives a unit's findings as the analysis does. A parameter whose `null` default
  * reaches a member read is an error (#1172's `defaultOf`); a walk stop before that read keeps the error, in both orders.
  * Functions are outside the candidate route: through the analysis.
  */
@@ -1421,7 +1421,7 @@ test("after a stop a read through a cycle of copies that would grow its path fin
 });
 
 /**
- * Read as the value for a fixed need, a domain says nothing of emptiness (TABLE r4.105): a copied written list that may
+ * Read as the value for a fixed need, a domain says nothing of emptiness: a copied written list that may
  * be empty keeps its selection's empty check at the settled walk's ends, in both orders. A call statement is outside
  * the candidate route: through the analysis.
  */
@@ -1457,7 +1457,7 @@ test("a stop keeps the empty check of a selection read through a copied written 
 });
 
 /**
- * The key's finished contract is a domain too (TABLE r4.106): `b.v` is only `null` at the read though `v` may hold an
+ * The key's finished contract is a domain too: `b.v` is only `null` at the read though `v` may hold an
  * integer later, so no stop gives the fallback the integer family (Codex r10's B1, a band inside the walk): at every
  * settled walk stop, in the source order, the text fallback still runs.
  */
@@ -1481,9 +1481,9 @@ test("no stop in a settled walk gives a fallback the family of its key's contrac
 
 /**
  * The same of an inferred list's default (`get`'s C10): its element type is first found by its own unit's read, so a walk
- * stop before that unit leaves the element's contract unfinished; the stores' syntax decides it (`[2, 3]`: integers,
- * TABLE r4.100), so the default keeps its check. A copied element type that admits `null` (`integer?[]`) is a domain that
- * leaves the default's family undecided (TABLE r4.105): the stop marks it "not checked (budget)" at the default.
+ * stop before that unit leaves the element's contract unfinished; the stores' syntax decides it (`[2, 3]`: integers),
+ * so the default keeps its check. A copied element type that admits `null` (`integer?[]`) is a domain that
+ * leaves the default's family undecided: the stop marks it "not checked (budget)" at the default.
  */
 test("a stop after admission settled checks an inferred list's default by its stores' syntax", () => {
   settledPhases([
@@ -1514,7 +1514,7 @@ test("a stop after admission settled marks a default whose element domain admits
 });
 
 /**
- * Source 4 decides only what every store's syntax tells (r4.122): objects with other properties leave a read of one
+ * Source 4 decides only what every store's syntax tells: objects with other properties leave a read of one
  * undecided, which may find it missing (its check and warning, marked); a copy of a written place is checked by
  * admission's A4 against the type the copy inherits, from the copied value, so its store is marked, standing for that
  * record. At a stop in the setup and at the last before admission settled, the oracle finds nothing else.
@@ -1548,7 +1548,7 @@ test("a stop before admission settled leaves to the analysis what a store's synt
 });
 
 /**
- * Before admission settled nothing it decided is read (TABLE r4.110 (3); A6: a later pass may admit a store this one
+ * Before admission settled nothing it decided is read (A6: a later pass may admit a store this one
  * rejected): a store into an inferred place is marked at its site, its type undecided, and one into a written type
  * keeps its check and its boundary; at a stop in the setup and at the last before admission settled, the oracle finds
  * nothing else, the inferred store's check moved to the runtime with its mark.
@@ -1584,12 +1584,13 @@ test("a stop before admission settled marks the stores into inferred places and 
 });
 
 /**
- * TABLE r4.135: before admission settled no syntax decision is made, so every store into an inferred place is marked at
- * its site whatever its literals give, a store the unstopped analysis rejects among them (its error stands for the
- * mark's content, r4.111); at a settled stop, as unstopped, the error stands. Disagreements of a scalar, a list, an
- * object and an object's nested field, an integer then a decimal (no error), and a later copy (`let m = n`), in both
- * orders, at a stop in the setup, the last stop before admission settled, the first after it and the last. Every stop
- * of every one in both orders, outside CI: 0 differing (13,542 analyses).
+ * (docs/specifications/type-inference-accepted-record.md#r4-135): before admission settled no syntax decision is made,
+ * so every store into an inferred place is marked at its site whatever its literals give, a store the unstopped
+ * analysis rejects among them (its error stands for the mark's content); at a settled stop, as unstopped, the error
+ * stands. Disagreements of a scalar, a list, an object and an object's nested field, an integer then a decimal (no
+ * error), and a later copy (`let m = n`), in both orders, at a stop in the setup, the last stop before admission
+ * settled, the first after it and the last. Every stop of every one in both orders, outside CI: 0 differing (13,542
+ * analyses).
  */
 test("before admission settled every store into an inferred place is marked, after it a rejection's error stands", () => {
   const tail = '\nsay n\nrepeat 2 { say "AFTER" }\nexit\n';
@@ -1694,8 +1695,8 @@ test("before admission settled every store into an inferred place is marked, aft
 
 /**
  * #1275 (Codex r7's B2 on #1310): a pass keys the stores below an own selection by the targets the pass before it gave,
- * and where its admission gives others the passes start again, so a stop before they do settles nothing (TABLE r4.110
- * (3)): its finishing path marks such a store as it marks every store into an inferred place, and the store's error
+ * and where its admission gives others the passes start again, so a stop before they do settles nothing:
+ * its finishing path marks such a store as it marks every store into an inferred place, and the store's error
  * stands as that mark. Each own selection, both orders, each end of the first pass's walk.
  */
 test("a stop before a store below an own selection takes its target settles nothing and marks the store", () => {
@@ -1888,9 +1889,9 @@ test("a store at a stopped decision's key keeps an obligation, whichever pass st
 
 /**
  * Before admission settled, a store marked with its type undecided stands for its records within its value and for the
- * errors it brought (TABLE r4.111): an object stored with host data inside it (Codex r8's copy of fields), a typed parse
- * inside a typed default, a copy whose conflict A2 finds where it meets the place (the error inside the store's value,
- * TABLE r4.131), and a copy whose conflict is reached only through a cycle of copies that adds steps (r4.154), its
+ * errors it brought: an object stored with host data inside it (Codex r8's copy of fields), a typed parse
+ * inside a typed default, a copy whose conflict A2 finds where it meets the place (the error inside the store's value),
+ * and a copy whose conflict is reached only through a cycle of copies that adds steps, its
  * error reported where it is read and naming the copy. Each rule only so far: the mark narrowed off the record, or the
  * error's store moved elsewhere, and the oracle reports the record. A2's checks run before the stop, so its records at
  * a literal of copies, a store, a relay inside a cycle of whole copies and a fed ring, and at a literal and a store of
@@ -1982,7 +1983,7 @@ test("a store a stop before admission settled marks stands for its records withi
 });
 
 /**
- * A host read's ingress is structural (TABLE r4.113, Codex r12's B1): whatever the script stores into the host global,
+ * A host read's ingress is structural (Codex r12's B1): whatever the script stores into the host global,
  * the read's external data meets its boundary check at any stop, settled or not; its kinds come from the read itself
  * only where the script stores at no path at or above it. At a stop in the setup each compile keeps every record but
  * the marks' own.
@@ -2006,9 +2007,9 @@ test("a host read keeps its boundary check at a stop whatever the script stores 
 
 /**
  * Before admission settled, a store into a written type checks each part of a collection literal the type reaches at the
- * part's own site, as A8 does (TABLE r4.117, Codex r12's final-check B2): a host read as a written list's element, a
+ * part's own site, as A8 does (Codex r12's final-check B2): a host read as a written list's element, a
  * host property the script stored, a nested list's element. A part that reads a place the stop left undecided, a
- * variable or a property of one, marks the store at its literal whatever host read beside it (TABLE r4.152 (1), #1611).
+ * variable or a property of one, marks the store at its literal whatever host read beside it (#1611).
  * At a stop in the setup and at the last before admission settled, the oracle finds nothing.
  */
 test("a stop before admission settled checks a written store's literal parts at their own sites", () => {
@@ -2461,7 +2462,7 @@ test("the stop oracle counts each check's content on both sides, a further copy 
 });
 
 /**
- * TABLE r4.162 at a stop (Astra r3 on #1273): a fix's code holds the author's text only where no other diagnostic lies
+ * At a stop (Astra r3 on #1273): a fix's code holds the author's text only where no other diagnostic lies
  * in it, nor a region the stop left unchecked, its "not checked" mark's, where the checks it moved to the runtime stand
  * unreported; and after a stop no fix fact is proved (`Consumers.withFacts`), so an error's code is words. So a stop
  * never lets through code the unstopped analysis withholds: at stops across a grid of allowances (the setup,
@@ -2560,9 +2561,9 @@ test("a stop's unchecked region gives words for a fix's code in it, never code i
 
 /**
  * Before admission settled, a written store's literal parts take their collections from the written type and their
- * parts from the literal's syntax, never from the solver (TABLE r4.120, Codex r13's S1): a set's element, a dict's value,
- * a set inside a dict; and a stop changes no site, an error inside an add's literal staying at the add's argument
- * (TABLE r4.122 (d)). At a stop in the setup and at the last before admission settled, each error, its site, its rule's
+ * parts from the literal's syntax, never from the solver (Codex r13's S1): a set's element, a dict's value,
+ * a set inside a dict; and a stop changes no site, an error inside an add's literal staying at the add's argument.
+ * At a stop in the setup and at the last before admission settled, each error, its site, its rule's
  * steps and its first sentence equal the unstopped ones (`keptErrors`; the analysis: a written set or dict is outside the
  * candidate route).
  */
@@ -2601,7 +2602,7 @@ function unsettledAnalyses(source: string): { unstopped: Answers; stopped: Answe
 
 /**
  * Every walk of a literal's children asks `literalChildren` with its path's own step, so the step that reaches a dict
- * literal's values is read in one place (TABLE r4.122, Codex r14), and a written store's checks name its parts as the
+ * literal's values is read in one place (Codex r14), and a written store's checks name its parts as the
  * written type does (`entry`, a dict's value). At a stop in the setup and at the last before admission settled (each
  * defect showed at every such stop; the every-stop sweep runs outside CI): a written dict's checks equal the unstopped
  * ones; a dict default's host data keeps its own boundary; a default's wrong text stays an error; a dict literal's value
@@ -2654,8 +2655,8 @@ test("a stop before admission settled reads a dict literal's values as its synta
 
 /**
  * After a stop a literal's composed questions (`valueAt`, `project`, `properties`) read a child its syntax leaves open as
- * the child's own read does, beside its known siblings, never `budget` where that read keeps a type (Astra r6 B1, TABLE
- * r4.144): a written child, a union's, a nullable's, at a stop before admission settled; a decided one at every settled
+ * the child's own read does, beside its known siblings, never `budget` where that read keeps a type (Astra r6 B1):
+ * a written child, a union's, a nullable's, at a stop before admission settled; a decided one at every settled
  * walk stop.
  */
 test("after a stop a literal's composed questions read a child as its own read does, beside its siblings", () => {
@@ -2718,7 +2719,7 @@ test("after a stop a literal's composed questions read a child as its own read d
 /**
  * After a stop a typed call no store takes in keeps its boundary through a named default's written type, and is marked
  * where its default's type is undecided (an inferred variable, a call's result): a missing answer never declines it
- * silently (Astra r6 B2, TABLE r4.144). A written type wider than the value is no type for it (an `integer?` may hold
+ * silently (Astra r6 B2). A written type wider than the value is no type for it (an `integer?` may hold
  * null alone, which leaves the level open; a `number` an integer; a union one member): no boundary the unstopped analysis
  * lacks, the call marked (Codex r22 B1).
  */
@@ -2778,7 +2779,7 @@ test("after a stop a typed call keeps its boundary through a named default, or i
 /**
  * An element read a stop left unsettled is no proof of an element: a selection of a typed call whose named list default
  * the finishing read leaves open at its element owes C6's empty check as unstopped, or its mark, at a stop before
- * admission settled and in the settled walk (TABLE r4.144's matrix).
+ * admission settled and in the settled walk.
  */
 test("after a stop a selection of a typed call with a named list default owes its empty check", () => {
   for (const source of [
@@ -2804,7 +2805,7 @@ test("after a stop a selection of a typed call with a named list default owes it
 
 /**
  * After a settled stop a read's answer takes the type admission gives its place as `place` does, a path admission decides
- * lazily among them (S3 §5, TABLE r4.152 (2)): at every settled walk stop, `src.first`'s `at` and `valueAt` hold the kinds
+ * lazily among them (S3 §5): at every settled walk stop, `src.first`'s `at` and `valueAt` hold the kinds
  * `place(src, ["element"])` admits, never `budget` (the matrix's 116).
  */
 test("after a settled stop a read answers its place's lazily decided type, as place does", () => {
@@ -2834,7 +2835,7 @@ test("after a settled stop a read answers its place's lazily decided type, as pl
 });
 
 /**
- * A literal's composed questions read a child through the same sources as the child's own question (TABLE r4.158): at
+ * A literal's composed questions read a child through the same sources as the child's own question: at
  * every settled walk stop of Astra r7's three, a list, two objects deep and a copy's selection in a set, the literal's
  * element or property answers the selection's lazily decided `integer`, as the selection's own read does, never `budget`.
  */
@@ -2942,8 +2943,8 @@ test("after a stop an unsettled member read owes its check; a literal's own elem
 });
 
 /**
- * A store marked with its type undecided stands for its records within its value on both sides alike (r4.111, TABLE
- * r4.122, Codex r14): a check there that the stopped analysis keeps as the unstopped one has it is that record, so a host
+ * A store marked with its type undecided stands for its records within its value on both sides alike (Codex r14):
+ * a check there that the stopped analysis keeps as the unstopped one has it is that record, so a host
  * index read below the store is no extra check, at a stop in the setup and at the last before admission settled; a
  * check there that the unstopped analysis lacks, with or without the marks, is still reported.
  */
@@ -2981,7 +2982,7 @@ test("a marked store's records within its value are compared alike on both sides
 
 /**
  * Before admission settled, a store into a written type is checked by admission's own C1, the derivation the analysis
- * runs unstopped, reading what the stop retained (TABLE r4.125, r4.126, Astra r4's B1): two wrong elements give one
+ * runs unstopped, reading what the stop retained (Astra r4's B1): two wrong elements give one
  * error, a record literal its own kind, in a list, a set, a dict and a nested list; and admission's mixed-element check
  * (ADR 0021 1.3) as it runs it, a mixed literal's grouping and an error that only it finds, written or inferred, and a
  * join of two literals' (#1272); a written
@@ -3024,7 +3025,7 @@ test("a stop before admission settled checks a written store by admission's own 
 /**
  * Before admission settled, a literal whose element needs a decision admission did not make (here a copy of an inferred
  * place) is not compared for mixed elements: the store holding it is marked at its site, its type undecided, standing for
- * its records within its value (TABLE r4.126). At a stop in the setup and at the last before admission settled the
+ * its records within its value. At a stop in the setup and at the last before admission settled the
  * mark stands.
  */
 test("a stop before admission settled marks the store of a literal whose element needs a decision", () => {
@@ -3077,7 +3078,7 @@ test("a stop before admission settled marks a list join whose operand needs a de
 });
 
 /**
- * After a settled stop a boundary's type is a read like any other (TABLE r4.126, Astra r4's B2): where admission retained
+ * After a settled stop a boundary's type is a read like any other (Astra r4's B2): where admission retained
  * no decision for `total`, its boundary takes its stored value's finished contract, `integer | number`, as the finishing
  * read answers it. At every settled stop it equals the unstopped boundary, in four modes; the quiet controls (a
  * subtraction, a multiplication, a comparison, a written `number` destination) keep theirs, in the core's order.
@@ -3146,9 +3147,9 @@ test("every settled walk stop keeps a projected fallback's own-read boundary", (
 });
 
 /**
- * #1216 (TABLE r4.110 (b)): a settled walk stop adds a redundant read check of `state.ticks`, read by its key's contract
+ * #1216: a settled walk stop adds a redundant read check of `state.ticks`, read by its key's contract
  * whose external item lost the ingress the value read keeps, so the count's consumer checks it as host data no ingress
- * store brought. The stop oracle takes it as the count's mark content (r4.213, #1448); the check is pinned by its
+ * store brought. The stop oracle takes it as the count's mark content (#1448); the check is pinned by its
  * publication, counted at every stop of the settled phases in the analysis's own order: the test fails where the count
  * moves (it goes when #1216 lands).
  */
@@ -3176,7 +3177,7 @@ test("#1216's redundant check stands at its counted stops", () => {
 });
 
 /**
- * #1432, #1415 (S3 §5; S8's mark-ownership rule; TABLE r4.113): after a settled program stop, a read the finishing walk
+ * #1432, #1415 (S3 §5; S8's mark-ownership rule): after a settled program stop, a read the finishing walk
  * answers by a domain holds the host data its key's stores hold, as the unstopped read does, so its consumer owes its
  * check (a mark carrying the unstopped obligation) and the store's boundary forms: through a dictionary's values
  * list (#1452), and where an unrestricted written type stands, whose store owes no other boundary (#1450). The anchors
@@ -3529,7 +3530,7 @@ function combinedStops(
 }
 
 /**
- * #1560, #1561 (S8's mark-ownership rule at a combined stop, TABLE r4.285): under a demand allowance that stops a
+ * #1560, #1561 (S8's mark-ownership rule at a combined stop): under a demand allowance that stops a
  * decision, a read the demand stop leaves `unknown` owes a conservative check, but after a settled program stop the
  * finishing walk answers that read itself, by structure or a domain, and owes what the natural analysis owes there: no
  * check at `1` in `x otherwise 1` where the left is a literal's projection, the natural family's at a `get`'s default,
@@ -3567,7 +3568,7 @@ test("a combined stop owes what the natural analysis owes where its finishing wa
 });
 
 /**
- * #1560 (TABLE r4.285): the finishing read's host frontier reaches through a copy whose decision stopped, as the
+ * #1560: the finishing read's host frontier reaches through a copy whose decision stopped, as the
  * demand-only run's read does, so the host data `root` holds keeps its boundary (`copy-type root against object` at
  * `hostValue`) through two copies, the first stopped whole. In four modes at every eighth settled stop under each demand
  * allowance that stops a decision.
@@ -3580,7 +3581,7 @@ test("a combined stop's finishing read reaches through a copy whose decision sto
 });
 
 /**
- * TABLE r4.285's other clauses at a combined stop, (w) as r4.290 widens it: marks at a check's target and site whose
+ * Other clauses at a combined stop, including (w): marks at a check's target and site whose
  * checks together let through exactly the kinds the reference's check does are that check in other words, whatever the
  * finishing read answered from (a written `list?` receiver's null check, an `integer?` element's count by a null check,
  * an `object`'s property read; two places copying each other, answered without a written type; a set's empty check,
@@ -3709,8 +3710,9 @@ test("a combined stop owes the reference's check in other words, or a boundary's
 });
 
 /**
- * A stop's problems split into the coarse (a) reading's counted class (TABLE r4.299) and the others: each counted check's
- * open reads' keys (its record beside it).
+ * A stop's problems split into the coarse (a) reading's counted class
+ * (docs/specifications/type-inference-accepted-record.md#r4-299) and the others: each counted check's open reads' keys
+ * (its record beside it).
  */
 function coarseClass(problems: readonly string[]): {
   readonly entries: readonly (readonly string[])[];
@@ -3930,7 +3932,7 @@ test("the stores' syntax through copies answers alike in either order of reads (
 });
 
 /**
- * TABLE r4.299: the coarse (a) reading's counted class, never a pass. Where a read of the check's reference unit that the
+ * the coarse (a) reading's counted class, never a pass. Where a read of the check's reference unit that the
  * demand stop left `unknown` is not answered at its key by the stopped analysis's run of that unit, (a) takes nothing
  * and the check is counted with that read's key:
  * - a member's kind check beside its own selection's element read (the clauses' written set);
@@ -4071,7 +4073,7 @@ const takes =
 const mainFile = (source: string): SourceFile[] => [{ path: "main.tease", source }];
 
 /**
- * TABLE r4.290's inventory at a combined stop: each predicate's controls on real stops, changed (Codex r1's and r2's on
+ * The inventory at a combined stop: each predicate's controls on real stops, changed (Codex r1's and r2's on
  * #1597), each dimension with what it must reject and what it must accept.
  * - (a)'s reference read: a recovered contract tagged `budget` (`list|null`, never `unknown`) is no read the demand stop
  *   left `unknown`, so the receiver's mark left out is rejected; the issues' witnesses (the first test) are accepted.
@@ -4354,7 +4356,7 @@ test("a combined stop's rule takes nothing the natural analysis owes, nothing wi
 });
 
 /**
- * #1448 (S8's mark-ownership rule, TABLE r4.110 (a), r4.113): after a settled walk stop, the boundaries a domain read
+ * #1448 (S8's mark-ownership rule): after a settled walk stop, the boundaries a domain read
  * brings for its key's stores are the content of the warning that owns that read there: leaving its owner out
  * (`withoutRecords`) removes them, an unrelated mark does not, a second owner keeps them, an operation a later statement
  * reads, a method call's receiver, a `get`'s default and the soft owner of an unknown receiver's `get` key are owners too,
@@ -4452,7 +4454,7 @@ test("a domain read's store boundaries are its owning mark's content (#1448)", (
     const c = { name: "written", source: written, slice: false, values: [] };
     for (const { allowance } of testedStops(heldStops(c, mode, 1)))
       assert.deepEqual(boundaries(written, mode, "all", allowance), [], `${where} ${allowance}`);
-    // a host read's own ingress beside its stores' (r4.113)
+    // a host read's own ingress beside its stores'
     const host =
       'hostValue.f0 = 2\nsay "BEFORE"\nrepeat hostValue.f0 {say "ok"}\nsay "AFTER"\nexit\n';
     assert.deepEqual(
@@ -4467,12 +4469,13 @@ test("a domain read's store boundaries are its owning mark's content (#1448)", (
 type Walked = { readonly result: Answers; readonly reads: ReadonlyMap<string, FrontierRead> };
 
 /**
- * A bounded frontier's analysis against the exact walk's at one stop (TABLE r4.208), whole, and whether a read's walk was
- * cut (`withFrontierBound` keeps a cut when the read is made again, #1509): where none was, the same reads, checks,
- * diagnostics and marks; where one was, every exact check's obligation (its kind, target, requirement, site and boundary
- * flag) kept or owned by a mark. A cut read answers its place's component's host data, a superset of what its walk
- * names, so its consumers may owe checks the exact walk does not, never fewer: those may read more, and one worded for
- * external data needs no read of its receiver (TABLE r4.208's reworded class, #1449's wording difference at a stop).
+ * A bounded frontier's analysis against the exact walk's at one stop
+ * (docs/specifications/type-inference-accepted-record.md#r4-208), whole, and whether a read's walk was cut
+ * (`withFrontierBound` keeps a cut when the read is made again, #1509): where none was, the same reads, checks,
+ * diagnostics and marks; where one was, every exact check's obligation (its kind, target, requirement, site and
+ * boundary flag) kept or owned by a mark. A cut read answers its place's component's host data, a superset of what its
+ * walk names, so its consumers may owe checks the exact walk does not, never fewer: those may read more, and one worded
+ * for external data needs no read of its receiver (#1449's wording difference at a stop).
  */
 function boundedKeepsExact(bounded: Walked, exact: Walked, where: string): boolean {
   const cut = [...bounded.reads.values()].some((read) => read.cut);
@@ -4500,12 +4503,12 @@ function boundedKeepsExact(bounded: Walked, exact: Walked, where: string): boole
 }
 
 /**
- * #1445, TABLE r4.208: after a settled stop, a domain read's host data is followed at most two copies deep and over at
- * most eight copies met (`FRONTIER_DEPTH`, `FRONTIER_COPIES`); past them the read answers its place's component's.
- * Against the exact walk (`withFrontierBound`, unbounded), read by read: the same stop guard (r4.186), the same writers
- * where a read's walk is not cut and a superset where it is; whole, `boundedKeepsExact`. The topologies at k = 4 (rings
- * and chains of own stores are cut there), two reads no place holds whose links count as copies (#1559), and six random
- * copy graphs (two with readers of two places), forward with
+ * #1445 (docs/specifications/type-inference-accepted-record.md#r4-208): after a settled stop, a domain read's host data
+ * is followed at most two copies deep and over at most eight copies met (`FRONTIER_DEPTH`, `FRONTIER_COPIES`); past
+ * them the read answers its place's component's. Against the exact walk (`withFrontierBound`, unbounded), read by read:
+ * the same stop guard, the same writers where a read's walk is not cut and a superset where it is; whole,
+ * `boundedKeepsExact`. The topologies at k = 4 (rings and chains of own stores are cut there), two reads no place holds
+ * whose links count as copies (#1559), and six random copy graphs (two with readers of two places), forward with
  * sharing and reversed without, near the first settled stop and at the last, without a demand cap and under the largest
  * that stops a decision. The same check runs at scale, in all four modes, on the workers.
  */
@@ -4623,7 +4626,7 @@ test("a read made again keeps its earlier cut in the bounded frontier's record (
 });
 
 /**
- * #1453 and TABLE r4.208: after a settled stop, a read whose walk is cut answers its place's component's host data, so it
+ * #1453: after a settled stop, a read whose walk is cut answers its place's component's host data, so it
  * keeps every check: through 257 copies of a host object (the store's record-level boundary, `copy-type root against
  * object`, which #1453 lost at 256), through 33 copies each storing its own property, and in a ring of 64 copies. In
  * each, at its first settled stop, its last and halfway between, in both orders, every check of the unstopped compile is
@@ -4698,7 +4701,7 @@ test("a read past the bounded walk keeps every check: #1453's 257 copies, copies
 });
 
 /**
- * The per-demand fallback (S3 §5, TABLE B1, ADR 0021 rule 1.10): `y` copies a number through a chain of copies, so its
+ * The per-demand fallback (S3 §5, ADR 0021 rule 1.10): `y` copies a number through a chain of copies, so its
  * read's exact path is a long demand, and a later store makes its key's contract a whole number or a number; `count`'s
  * read is short. With a demand allowance below the chain's (three quarters of the longest read's work, measured), the
  * read of `y` stops with its key's contract and the reason `budget`, so its check runs when the script runs, while
@@ -4853,7 +4856,7 @@ test("a top-level read takes the program's allowance in every file, a function's
 });
 
 /**
- * TABLE r4.100, S3 revision 21: a settled walk stop leaves a typed parse's nested paths undecided (admission decides
+ * S3 revision 21: a settled walk stop leaves a typed parse's nested paths undecided (admission decides
  * them lazily, never after a stop); source 4 decides them from its default literal's syntax, so the store's check stays
  * whole (#1165's class, a named exception of the oracle before: 984 and 1,180 stop points over four modes, the first
  * walk stop among them). At the first walk stop and one halfway through the walk.
@@ -4934,8 +4937,7 @@ test("an admission decision past its allowance stops: its key undecided, its rea
           .map((d) => `${d.class} ${"provenance" in d ? d.provenance.context : "-"}`);
       const read = text.indexOf(count ? "b\nlet count" : "b\nsay");
       // (`budget` in either order: the pass in which `b`'s decision stopped is not settled, and the next starts with `b`
-      // stopped, so `n`'s check, which reads `b` before `b` is decided in the reversed order, reads it stopped, TABLE
-      // r4.180)
+      // stopped, so `n`'s check, which reads `b` before `b` is decided in the reversed order, reads it stopped)
       assert.deepEqual(at(read), ["warning-runtime-check budget"], where);
       if (count) assert.deepEqual(at(text.indexOf("count {}")), ["compile-error -"], where);
       else {
@@ -5059,7 +5061,7 @@ test("a stopped decision stays undecided at every reader, also after a settled p
  * for the regex below each argument. Each mode's settled phase ends and its last stop before admission settled (whose
  * fresh pass reads no property names: a literal argument, which it reads as an object), without a demand allowance and
  * with the witness's
- * 257, which stops a decision below `root`; where it stops the analysis itself (TABLE r4.183, the reversed orders) there
+ * 257, which stops a decision below `root`; where it stops the analysis itself (the reversed orders) there
  * is no unstopped analysis to compare. A host value fits where the unstopped plan runs it: without sharing, 257 decides
  * the element `regex`, which C9 checks the host value against.
  */
@@ -5069,7 +5071,7 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
       "say toJson(first)\nsay toJson(second)\nsay toJson(root)\nexit\n",
     "let n = 1\nsay toJson({a: [hostValue otherwise /r/], b: n})\nexit\n",
   ];
-  // (#1526 decision 2, condition 1, TABLE r4.390: a settled stop whose plan lost the element's check, which the unstopped
+  // (#1526 decision 2, condition 1: a settled stop whose plan lost the element's check, which the unstopped
   // plan makes against a host value, is declined; where the reference run at demand 257 is such a stop, a decision's,
   // each of its stops is declined too, but an unsettled one, which has no registry: option (a), #1767, #1252)
   const declines = (error: unknown): boolean =>
@@ -5146,15 +5148,16 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
 });
 
 /**
- * TABLE r4.180: a pass in which a decision stops is not settled; the next, from the same rejections, starts with that
- * key stopped (`Contract.stop`), so no result read the key before its stop, in any order. `pair`'s stored literal holds
- * a read of `tally`; in the reversed order `pair` is decided before `tally`, and without the next pass `pair.first`
- * kept the host value `tally` held then; `count`'s error is independent of `tally` and stays. One extra pass where a
- * decision first stops, none without one, and at most one per rejected set (TABLE r4.183): in the reversed order `box`'s
- * root, which reads the values `box.n`'s stopped decision had finished, stops once `box.n` is stopped from its pass's
- * start, and that second stop stops the analysis as the work allowance does. A program stop in the pass where a
- * decision first stopped is not settled: finishing marks the stores (r4.135), and the stop oracle holds, no boundary
- * among it, as in #1194's witness below of a second stop.
+ * a pass in which a decision stops is not settled; the next, from the same rejections, starts with that key stopped
+ * (`Contract.stop`), so no result read the key before its stop, in any order. `pair`'s stored literal holds a read of
+ * `tally`; in the reversed order `pair` is decided before `tally`, and without the next pass `pair.first` kept the host
+ * value `tally` held then; `count`'s error is independent of `tally` and stays. One extra pass where a decision first
+ * stops, none without one, and at most one per rejected set
+ * (docs/specifications/type-inference-accepted-record.md#r4-183): in the reversed order `box`'s root, which reads the
+ * values `box.n`'s stopped decision had finished, stops once `box.n` is stopped from its pass's start, and that second
+ * stop stops the analysis as the work allowance does. A program stop in the pass where a decision first stopped is not
+ * settled: finishing marks the stores, and the stop oracle holds, no boundary among it, as in #1194's witness below of
+ * a second stop.
  */
 test("a pass in which a decision stops is not settled: the next starts with its key stopped (TABLE r4.180)", () => {
   const reversed = <T>(make: () => T): T =>
@@ -5218,8 +5221,9 @@ test("a pass in which a decision stops is not settled: the next starts with its 
       ["unknown/16"],
       mode,
     );
-    // (the independent error stays; in the reversed unshared mode `pair`'s element decision, longer there than `tally`'s,
-    // stops too and then again in the restarted pass, which stops the analysis (TABLE r4.183): its check is marked)
+    // (the independent error stays; in the reversed unshared mode `pair`'s element decision, longer there than
+    // `tally`'s, stops too and then again in the restarted pass, which stops the analysis
+    // (docs/specifications/type-inference-accepted-record.md#r4-183): its check is marked)
     assert.equal(passes(answers), 1, mode);
     const count = dependent.indexOf("count {}");
     if (mode === "reversed, unshared") {
@@ -5280,7 +5284,8 @@ test("a pass in which a decision stops is not settled: the next starts with its 
       mode,
     );
   }
-  // a decision stopping only in the restarted pass: the analysis stops there (TABLE r4.183)
+  // a decision stopping only in the restarted pass: the analysis stops there
+  // (docs/specifications/type-inference-accepted-record.md#r4-183)
   const property =
     [
       "let box = {n: 1}",
@@ -5306,7 +5311,7 @@ test("a pass in which a decision stops is not settled: the next starts with its 
 });
 
 /**
- * Codex c-r8 B1 on #1165 and TABLE r4.183: a narrowed read of a key whose decision stopped reads it as every read does,
+ * Codex c-r8 B1 on #1165: a narrowed read of a key whose decision stopped reads it as every read does,
  * through the one key read (`Values.#keyRead`), as unknown data with the reason `budget`, and the test narrows it as it
  * narrows host data: under `is integer` the read is the integer the test itself proves, so its reason is the test's, not
  * `budget`; under `is not integer`, and unguarded, it stays `unknown` with `budget`. Both orders.
@@ -5363,11 +5368,12 @@ test("a narrowed read of a stopped decision's key is what its test proves, ungua
 });
 
 /**
- * TABLE r4.183: a decision that stops in the restarted pass stops the analysis there, its stores marked and the stop
- * oracle holding. #1194's copies of a deep written type (64 levels and copies) are the witness: at the natural allowance
- * they are `valid` in the four modes with no restart (r4.183's recorded cost was the alias class's eligibility index,
- * charged to the first decision that asked for it, the sharing on only, #1703); at the demand allowance 1,024 the
- * reversed order's deepest decision stops, and the next path's in the restarted pass, with the sharing on and off.
+ * (docs/specifications/type-inference-accepted-record.md#r4-183): a decision that stops in the restarted pass stops the
+ * analysis there, its stores marked and the stop oracle holding. #1194's copies of a deep written type (64 levels and
+ * copies) are the witness: at the natural allowance they are `valid` in the four modes with no restart (the recorded
+ * cost was the alias class's eligibility index, charged to the first decision that asked for it, the sharing on only,
+ * #1703); at the demand allowance 1,024 the reversed order's deepest decision stops, and the next path's in the
+ * restarted pass, with the sharing on and off.
  */
 test("a decision stopping in the restarted pass stops the analysis: #1194's copies reversed (TABLE r4.183)", () => {
   const source = [
@@ -5437,7 +5443,7 @@ const stoppedItems = (items: readonly Item[]): boolean =>
   items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0);
 
 /**
- * TABLE r4.186 at a property or index read's occurrence (G3 3a): its answer kept before a key's decision stops is not
+ * At a property or index read's occurrence (G3 3a): its answer kept before a key's decision stops is not
  * read after it (`Contract.stop` forgets it), so a read of the key, or of one below it, answers `budget` from the stop
  * on, as in a pass that starts with the key stopped. Each chain is read, its key stopped at every depth of its reads'
  * paths, and read again, in both read orders, directly and through a selection and an operation, and a proof read of
@@ -5535,7 +5541,7 @@ test("a property or index read's occurrence answers its key's stop at every dept
 });
 
 /**
- * TABLE r4.186 through every answer the solver keeps (#1403): an answer kept before a key's decision stops may have
+ * Through every answer the solver keeps (#1403): an answer kept before a key's decision stops may have
  * read the key at an occurrence (a selection, an operation, a literal's read) or through a copy's contract, a call's
  * result, a receiver, a narrowed read or a default's decision, so `Contract.stop` has the solver forget them all. In
  * each shape every value is read in one pass, on the contract side and on the value side, a key is stopped (each
@@ -5933,7 +5939,7 @@ test("after a decision stops through its consumers, every read of an occurrence 
 
 /**
  * #1466, the families runner's stops area at demand allowance 256 (`1249-astra-r2-written-origins`,
- * `1249-astra-copy-and-cycle-cases`): a read one holder's source answers asks that source by reference (TABLE r4.251),
+ * `1249-astra-copy-and-cycle-cases`): a read one holder's source answers asks that source by reference,
  * so its decision costs what `main`'s does and stops where `main`'s does; a summary rebuilt from the path's record cost
  * the decision about 80 units more and stopped `c` at `next.n`, and `other` at `inner.tone`, which `main` completes.
  * Every stop set in the four modes is `main`'s (measured on 7d6c4d3d4: a regression oracle of these sources).
@@ -5987,15 +5993,16 @@ test("a read its one holder's source answers stops where main's does at a small 
 });
 
 /**
- * The owner's one accepted relabel at a combined stop (TABLE r4.322, #1595, the lead's rulings), each form accepted
- * alone and each condition alone refusing it. A stopped check under a more precise label than the reference's generic
- * one: E, the same root place with some `element` steps below it spelled `entry`; or E2, a place's own text whose path up
- * the compiler's projections is the reference's. Both labels are the compiler's own as recorded with each emitted check
- * (`labelIdentities`), never read back from a site, an expression or a name: a check at a method call names its receiver
- * (Codex r6's `xs["a"].add(...)`, `.clear()`, `xs.values[0].clear()`). The real cases are each program's first relabel
- * at a settled combined stop, proved by the natural analysis at that site and by the written type alone; the unit cases
- * change one part of a real one: the check, its location, its expected types or its words (2, 3), its label's place or
- * steps (3), its proof (1), or a label the recorder did not capture (refused and counted, never inferred).
+ * The owner's one accepted relabel at a combined stop (docs/specifications/type-inference-accepted-record.md#r4-322,
+ * #1595, the lead's rulings), each form accepted alone and each condition alone refusing it. A stopped check under a
+ * more precise label than the reference's generic one: E, the same root place with some `element` steps below it
+ * spelled `entry`; or E2, a place's own text whose path up the compiler's projections is the reference's. Both labels
+ * are the compiler's own as recorded with each emitted check (`labelIdentities`), never read back from a site, an
+ * expression or a name: a check at a method call names its receiver (Codex r6's `xs["a"].add(...)`, `.clear()`,
+ * `xs.values[0].clear()`). The real cases are each program's first relabel at a settled combined stop, proved by the
+ * natural analysis at that site and by the written type alone; the unit cases change one part of a real one: the check,
+ * its location, its expected types or its words (2, 3), its label's place or steps (3), its proof (1), or a label the
+ * recorder did not capture (refused and counted, never inferred).
  */
 test("a combined stop's more precise label is accepted only as the owner's three conditions allow (#1595)", () => {
   const mode = HELD_MODES[0]!;
@@ -7006,7 +7013,7 @@ test("a decision a pass makes twice is compared by its occurrence and listed apa
 });
 
 /**
- * #1323 (r4.371, Codex r6): a folded group's provenance reads are shared work, and a demand stop that leaves one
+ * #1323 (Codex r6): a folded group's provenance reads are shared work, and a demand stop that leaves one
  * suspended closes it (`closeShared`): with the sharing on, the stops at these demands lose no check main keeps.
  */
 test("a stop that abandons a group's provenance read loses no check, with the sharing on (#1323)", () => {
@@ -7038,7 +7045,7 @@ test("a stop that abandons a group's provenance read loses no check, with the sh
 });
 
 /**
- * TABLE r4.363 (#1708, A′): after a stop, a method receiver's words may follow a proven type (the declaration to the
+ * #1708, A′: after a stop, a method receiver's words may follow a proven type (the declaration to the
  * leaf, `xs: integer dict` → `integer`: `xs.entry has .clear()`) where the demand-only reference spells the method
  * table's kinds (`xs.element is a list, a set, or a dict with .clear()`), and the stopped record stands as the proven
  * kinds and the proof's route derive it. At every settled stop of the witness, at demands 1 and 3 in the four modes, the
@@ -7081,7 +7088,7 @@ test("a stopped receiver's words may follow the declaration to its leaf, the pai
 });
 
 /**
- * TABLE r4.363's refusals (#1708): the witness's own pair, each condition broken in turn, is refused: (1) kinds the
+ * Refusals (#1708): the witness's own pair, each condition broken in turn, is refused: (1) kinds the
  * declaration does not prove; (2) another `against`; (3) a record field the proven kinds do not imply (a `present` after
  * the stop, an extra fitting type, a context neither route explains, another rule field) or a sentence its kinds do not
  * select; and a variant missing from the table.
@@ -7191,7 +7198,7 @@ test("a stopped receiver's words are refused where a condition of r4.363 breaks 
 });
 
 /**
- * TABLE r4.363's refusal controls (#1708, Sol's): a stop that changes the check itself is no wording: an operand's
+ * Refusal controls (#1708, Sol's): a stop that changes the check itself is no wording: an operand's
  * `against` narrowed beside the receiver (`xs["a"] + hostOther`) or a fallback's expected domain (`xs["a"] otherwise
  * hostOther`) is never paired, whatever its words.
  */
@@ -7229,7 +7236,7 @@ test("a stop that changes an operand's or a fallback's expected domain is never 
 });
 
 /**
- * TABLE r4.363's drift guard (#1708, the lead's ruling on its HEAD 0): the sentence table and the derived record follow
+ * The drift guard (#1708, the lead's ruling on its HEAD 0): the sentence table and the derived record follow
  * the consumers as they are. The obligation sites whose words read kinds (a consumer's call of a word maker from the
  * messages, codes and paths apart) are the table's kind-reading entries, today `memberChecks`'s alone; and the sites
  * that set a record's read-derived fields (`fits`, `besides`, `present`, `keeps`, `provenance`) are the ones the derived
@@ -7370,7 +7377,7 @@ test("the sentence table and the derived record name every site that words or de
 });
 
 /**
- * TABLE r4.363 (#1708, Codex r1's B2 and B3 on #1759): each member form's words follow the proven leaf as its consumer
+ * #1708, Codex r1's B2 and B3 on #1759: each member form's words follow the proven leaf as its consumer
  * makes them: an element store (`has an element store`), a property store (`has a store of .p`), and a list's element
  * receiver, whose `element` label the list's own declaration proves (never an `entry`). Every 8th settled stop, four
  * modes, demand 3: the stop oracle clean.
@@ -7399,9 +7406,9 @@ test("a store's and a list receiver's words follow the proven leaf at every memb
 });
 
 /**
- * TABLE r4.363 (#1708, Codex r1's B2 on #1759): a list's element proves no dictionary entry. At a stop where the list
+ * #1708, Codex r1's B2 on #1759: a list's element proves no dictionary entry. At a stop where the list
  * receiver's words follow its leaf, the stopped check relabelled `xs.entry` (its record and recorded label with it) is
- * refused: the label's own proof (r4.322) and the leaf's `entry` step both fail.
+ * refused: the label's own proof and the leaf's `entry` step both fail.
  */
 test("a list receiver's check relabelled as a dictionary's entry is refused (#1708)", () => {
   const c: HeldCase = {

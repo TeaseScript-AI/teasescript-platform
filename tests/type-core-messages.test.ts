@@ -28,7 +28,7 @@ import { readFixture } from "./helpers/type-core-fixture.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
 /*
- * The sentences of the coarse core's diagnostics (D1–D3, TABLE r4.53, `core/messages.ts`): each consumer's and
+ * The sentences of the coarse core's diagnostics (D1–D3, `core/messages.ts`): each consumer's and
  * obligation's first sentence as an error and as a warning, with its rule's code and its fix (#1195), and each context
  * word's cause on the set's record for that word. The sentences are the owner's: a change here is a change of what an
  * author reads. The form of every sentence of the set's records is tested on the pairs' analysis of the set
@@ -125,7 +125,7 @@ test("each context word's cause says why the value may be of another type, on th
       `this line. ${OUTSIDE("value")}`,
   ]);
   const speaker = "'player' is a speaker, whose properties are known only when the script runs.";
-  // (in source order of their sites: the store's member read first, r4.86 (1))
+  // (in source order of their sites: the store's member read first)
   word("cp9-cells/F19a/direct", [
     // (a store into a speaker gives it the property: no stop, #1195 rule 3)
     "W TSV043 'player.n': 'player' may not have property 'n' here. A speaker takes the property when the script runs.",
@@ -439,7 +439,7 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
           "allow both, declare it as 'let n: (integer | string)[] = [1]'.",
       ],
     ],
-    // ADR 0021 rule 1.1 (A2, TABLE r4.131): a property only copies bring, where the copy meets the place
+    // ADR 0021 rule 1.1 (A2): a property only copies bring, where the copy meets the place
     [
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, b]\nrepeat xs[0].n {}\nexit\n',
       [
@@ -860,7 +860,7 @@ test("an open or null-only operand proves no conflict in a list join, inline as 
 });
 
 /**
- * #1272 (TABLE r4.146, Codex r2–r5 on #1310): the declaration a join's fix offers, the variable the join starts with the
+ * #1272 (Codex r2–r5 on #1310): the declaration a join's fix offers, the variable the join starts with the
  * type (#1268), holds every value the joined lists bring, at every list level, so pasted in place of the source's own it
  * takes the error away and adds nothing. Every pair of element kinds, either order (whole numbers, numbers, text, truth
  * values, objects, `null` beside a number and beside text); nested lists, optional at one level or more; a number only

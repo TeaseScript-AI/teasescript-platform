@@ -11,7 +11,7 @@ import {
 } from "./helpers/type-core-records.js";
 
 /*
- * N10's payloads in the compact records (TABLE N10, §10.5): the fixture's `requiredCheck` is read whole and compared as
+ * N10's payloads in the compact records (§10.5): the fixture's `requiredCheck` is read whole and compared as
  * the lead's comparator compares it, so a record whose writer, rule or missing tests differ fails.
  */
 

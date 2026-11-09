@@ -21,7 +21,7 @@ import {
   type StopKind,
 } from "./helpers/type-core-lost-check-matrix.js";
 
-// #1526 decision 2, condition 1 (TABLE r4.390): after any stop the candidate publishes no plan that lets through what
+// #1526 decision 2, condition 1: after any stop the candidate publishes no plan that lets through what
 // the natural plan rejects. The generated matrix (`type-core-lost-check-matrix.ts`), and the rows of Codex r4's review.
 
 test("over the matrix of destinations, value forms and stops, a stopped plan never lets through what the natural plan rejects (#1526 decision 2)", () => {

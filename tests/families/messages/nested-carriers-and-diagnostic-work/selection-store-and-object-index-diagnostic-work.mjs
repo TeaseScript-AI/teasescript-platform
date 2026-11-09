@@ -28,7 +28,7 @@ export const shapes = (() => {
       `let t = "hello"\nsay ${Array.from({ length: k }, () => "t.size").join(" + ")}\nexit\n`,
     // Astra on #1273: a null value's fallback where it divides, k divisions in one expression
     "null-divisors": (k) => `let xs = [4, null]\nsay 1${" / xs[1]".repeat(k)}\nexit\n`,
-    // Codex r7, TABLE r4.160: k reads of a variable an error decides, and k calls of a function without parameter types
+    // Codex r7: k reads of a variable an error decides, and k calls of a function without parameter types
     "variable-reads": (k) =>
       `let t = "hello"\nlet v = t.size\n${lines(k, () => "say v + 1")}\nexit\n`,
     "untyped-calls": (k) =>

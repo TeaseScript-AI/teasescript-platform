@@ -335,7 +335,7 @@ test("an indexed run's answers replay by their names, and a cycle through its te
  * Codex r1 on #1562: one closed object of k properties read k times is k reads of one binding, never k² postings, so
  * the analysis at k = 512 answers as `main` does: valid, no check owed, no decision stopped (before the repair its
  * decision at `xs.element.p2` stopped and owed two checks; the source is valid, as it compiles and runs). With the
- * sharing on the run keeps its collapse (TABLE r4.87) and is not indexed; with it off the index holds the reads.
+ * sharing on the run keeps its collapse and is not indexed; with it off the index holds the reads.
  */
 test("a closed object of k properties read k times is one binding's reads, its analysis as main's at k = 512 (#1384)", () => {
   const k = 512;

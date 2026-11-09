@@ -552,7 +552,7 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
  * The copies each decision makes of `typed` and of the places between it and the copy, in source order, each with the
  * steps it projects below `typed`'s root (`typed[0]`: one). Where `typed` starts as a host value (`hostInit`) below the
  * root of what a copy takes (`let typed: T[] = [hostInit]` copied whole, `T[][]` through `typed[0]`), the copy carries
- * that external data on and owes its runtime check where it lands, against its destination's whole type (C9 r4.50 (1));
+ * that external data on and owes its runtime check where it lands, against its destination's whole type (C9);
  * a host value at that root is checked whole where it is stored, and an `otherwise` or a `get` gives its own result.
  */
 const CARRIED: Readonly<Record<Decision, readonly (readonly [string, number])[]>> = {
@@ -639,8 +639,8 @@ const PROJECTIONS: readonly Decision[] = ["projection", "copy of a projection"];
 /**
  * Where a copied place's own written type comes from besides a whole copy at its start (Sol's round 2: the seeds; Astra's
  * F1, F2): a later store after an empty list (its copy taken before or after the host value) or after `null`, a list of
- * `null` before it, a selected `otherwise`, an empty list's `get` default; its copy keeps the place's decision (r4.75
- * (1)), the place's own `null` included.
+ * `null` before it, a selected `otherwise`, an empty list's `get` default; its copy keeps the place's decision,
+ * the place's own `null` included.
  */
 const SEEDS: readonly Decision[] = [
   "copy of an empty intermediate",
@@ -868,7 +868,7 @@ export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() =
 
 /**
  * Sol's round 1 on #1049 (B2's invariant through optionals, unions and projections): an `object`'s properties admit
- * every kind (V30 §13; r4.74 (2)) in each form that holds one, `object`, `object?`, `object | string`, and as a list's
+ * every kind (V30 §13) in each form that holds one, `object`, `object?`, `object | string`, and as a list's
  * element at depths 1 and 2, optional or in a union too × the property's contents (an integer, text, a boolean, `null`,
  * a list, the host value) × the place written, a copy of it at the end of a chain of one to three copies, a copy of the
  * property (a projection) or a copy of that copy, a copy of a place typed after a `null` start, each then taking them.
@@ -1200,7 +1200,7 @@ function suggestionOf(pair: readonly Form[]): string | null {
 }
 
 /**
- * V30 §13's union rule (TABLE r4.75 (3); the forms `f`–`p`): a union never holds a whole list, set or dict beside
+ * V30 §13's union rule (the forms `f`–`p`): a union never holds a whole list, set or dict beside
  * another type. Axes: each whole collection form (`integer[]`, `integer set`, `integer dict`, `list`, `set`, `dict`,
  * `integer[]?`, `integer?[]`) beside each type name that is no collection (at a variable all of them, elsewhere `integer`,
  * the collections' own element type as in `g`, `string` as in `h`, `object` and `range`) or beside another collection
@@ -1303,7 +1303,7 @@ export const UNION_RULE_MATRIX: readonly UnionRuleCase[] = (() => {
 /**
  * The reviewer's Q1, ruled (ADR 0021 §1.2: an unannotated `integer` "is a `number` when any of them can store a non-whole
  * number, wherever that assignment is"; §1.1: "the decided type holds wherever the place is used, also before the value
- * that decided it"; TABLE r4.28): a copy of an unannotated source has the source's whole-source type, so a fraction or a
+ * that decided it"): a copy of an unannotated source has the source's whole-source type, so a fraction or a
  * `null` stored into the source after the copy was taken widens the copy too, as it would before it. A2's value at the
  * store's node only selects the decider. Axes: a fraction or a `null` × list depths 0–2 × the copy taken before or after
  * that store × the host value direct, named or held at an index; the host value then stored into the copy.
@@ -1355,7 +1355,7 @@ export const INFERRED_COPY_MATRIX: readonly WrittenCase[] = (() => {
             executable: true,
             // (a copy taken after the `null`: its own store holds `null`, which decides nothing, and the host value
             // nothing either, so its contract's kinds are published: a host value brought inline owes its boundary
-            // only, a named one, which another store brought, its check at the store too, r4.50 (1))
+            // only, a named one, which another store brought, its check at the store too)
             warned: widening === "null" && copied === "after" && host !== "named" ? [] : [hostLine],
             boundaries:
               host === "named"
@@ -1368,7 +1368,7 @@ export const INFERRED_COPY_MATRIX: readonly WrittenCase[] = (() => {
 
 /**
  * A chain through an unannotated parameter's default (F21, ADR 0021 1.5: the default is the parameter's start value,
- * checked once at the function against the body, and an argument beside it decides nothing; r4.75 (1)): `p = typed`
+ * checked once at the function against the body, and an argument beside it decides nothing): `p = typed`
  * makes `p` a copy of the written binding, so `let out = p` in the body has its type, with a call before or after the
  * function, or two calls, each passing another kind. A function is outside the candidate slice: the decision layer only.
  */

@@ -30,7 +30,7 @@ import {
 } from "./helpers/type-core-held-host.js";
 
 /*
- * The contracts of stable admission (#1526 phase B, TABLE r4.278; #1556): once admission settled, before the walk, the
+ * The contracts of stable admission (#1526 phase B; #1556): once admission settled, before the walk, the
  * contract of each store owing a check is captured while the solver still runs, so a stop in the walk or the
  * publication keeps the store's whole check; a stop while the capture runs (`extraction`) leaves what it cut lost, with
  * the plan's check as before. Judged by what the script does: a fitting value reaches AFTER, a forbidden one fails at the
@@ -72,7 +72,7 @@ const FORBIDDEN: readonly Globals[] = [{ hostValue: L(L("x")), hostOther: 3 }];
 
 /**
  * A case's settled stops in a mode, at most four of each phase: its first, its last and two evenly between. CI judges
- * these; the sweep of every allowance in four modes, against `main` at the same work (TABLE r4.295), is the PR's queue
+ * these; the sweep of every allowance in four modes, against `main` at the same work, is the PR's queue
  * evidence.
  */
 function sampledStops(

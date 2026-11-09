@@ -22,7 +22,7 @@ import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
 /*
- * G3 stage 1, PR 2 (TABLE r4.196): a path's label is a recipe one step from its parent's (`contract/labels.ts`), its
+ * G3 stage 1, PR 2: a path's label is a recipe one step from its parent's (`contract/labels.ts`), its
  * text made once, where a diagnostic or a check shows it, charged as a key cursor's conversion. A decision's label
  * (`Admission.labelOf`) makes no text; the consumers show it where a store's warning or check publishes it.
  */

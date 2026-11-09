@@ -57,7 +57,7 @@ export interface EnclosingCase {
   readonly written: boolean;
   /**
    * Whether the source proves `form` at the destination apart from every decision, a stopped one at it included
-   * (#1440, TABLE r4.200): the binding is written, or its declaration's start value holds, through one object literal
+   * (#1440): the binding is written, or its declaration's start value holds, through one object literal
    * property per step, a read of a written binding at the destination or above it. Else a stop at or above the
    * destination leaves the store its mark, its type undecided.
    */
@@ -621,7 +621,7 @@ function spineOf(
 const LITERAL_DECIDED: ReadonlySet<Spine> = new Set(["earlier literal", "inferred copy"]);
 
 /**
- * #1440's family (TABLE r4.200): a store at a destination whose decision stops, at or below it, the destination's
+ * #1440's family: a store at a destination whose decision stops, at or below it, the destination's
  * complete type proved by the source apart from that decision (`certified`: its written type, or a read of a written
  * binding its declaration's start value holds through object literal properties, the root's own, one, two levels down,
  * a property named `element` or `entry`, one beside another, one of many, one of many stores) or not (an earlier
@@ -922,8 +922,9 @@ function marksAt(answers: Answers, site: EnclosingCase["site"], target: string):
 
 /**
  * #1440: a store at or below a stop the source leaves unproved (`EnclosingCase.certified`) keeps its mark, its type
- * undecided, beside no requirement; so does every store into an inferred place before admission settled (#1252, TABLE
- * r4.135: the fresh pass decides no inferred place). Nothing such a store owes is invented.
+ * undecided, beside no requirement; so does every store into an inferred place before admission settled (#1252,
+ * docs/specifications/type-inference-accepted-record.md#r4-135: the fresh pass decides no inferred place). Nothing such
+ * a store owes is invented.
  */
 function unprovedProblems(
   answers: Answers,

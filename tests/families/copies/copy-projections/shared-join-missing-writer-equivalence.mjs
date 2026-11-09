@@ -1,6 +1,6 @@
 // Its id is its file name before its area was grouped, which keeps its sources' places in a stored baseline.
 export const id = "1323-fold-siblings.mjs";
-// #1323 (TABLE r4.72, the lead's ruling on Sol's design round, #1323 comment 6648736650): with the sharing on, a group
+// #1323 (the lead's ruling on Sol's design round, #1323 comment 6648736650): with the sharing on, a group
 // read's F11 `missing` names what the unshared join names. Every row of Sol's family/obligation table: the original
 // shapes and HEAD 0's 21 siblings (`siblings/`), Astra r1's nested call arguments and Codex r3's list elements
 // (`nested/`), Codex r4's projections, own steps and `.get` (`cases/`), compositions, selections, references and

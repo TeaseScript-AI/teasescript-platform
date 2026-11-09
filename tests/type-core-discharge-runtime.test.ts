@@ -249,7 +249,7 @@ test("a store of a property its object may lack requires it, in three layers, in
     [unknown, "x", "x.n = 2", "x.n", object({ n: 1 }), object({ m: 1 })],
     [some, "room", "room.count = 2", "room.count", 0, 1],
   ] as const) {
-    // the whole access the store writes through (TABLE §3.4)
+    // the whole access the store writes through
     const access = at(source, target);
     const known = decision(source);
     assert.ok(known.diagnostics.includes(`warning-runtime-check member-read @${access}`), source);
@@ -513,7 +513,7 @@ test("a get's and a conversion's selected default is checked against the result'
 });
 
 test("a default named by its key path is checked where it is selected, also with no store around it, in three layers, in both orders (C10, #1538)", () => {
-  // C10 names a default as every obligation names its value (§10.5 r4.10): an element read `xs.element`, a written dict's
+  // C10 names a default as every obligation names its value (§10.5): an element read `xs.element`, a written dict's
   // entry `d.entry`, a `get`'s result by its receiver's element, never by its text; a nested default owes its own check,
   // and a default no literal holds that stands in for a collection is checked against that value's whole contract (ADR
   // 0021 7.2), whether the call's value is stored, stored into a written place (whose own check stays), or read at once
@@ -1110,7 +1110,7 @@ const PROFILE_SOURCE =
 
 /**
  * AD-2's runtime requirements (the expectation set's `runtime-observations.json` at revision `81b3a0c419ed542b`, SHA-256
- * `9553ef4a788c348d…`, TABLE r4.52): per scenario its source, the stored values before, what it says, the fields its
+ * `9553ef4a788c348d…`): per scenario its source, the stored values before, what it says, the fields its
  * warnings name (`null` for the whole value), and the stored values after, which are those before. Its runnable
  * scenarios but `repeated-load` and `record-field-destination`, which load one key twice or store into a record's
  * field, outside the candidate slice.
@@ -1542,7 +1542,7 @@ test("a typed parse's or load's expected type is the core's own answer at the ca
 });
 
 test("a typed parse's or load's contract stays the one the core decided, or its program leaves the slice, in three layers, in both orders (S7 review r4 B1, B2, N1)", () => {
-  // a default that reads a variable reads it at the call (F18, r4.81 (1)): the plan's type is the core's answer there,
+  // a default that reads a variable reads it at the call (F18): the plan's type is the core's answer there,
   // a `null` field open (any value), in both orders
   for (const [source, call, type] of [
     [

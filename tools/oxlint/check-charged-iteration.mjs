@@ -5,7 +5,7 @@ import { objectsLanguage } from "./objects-language.mjs";
 
 /**
  * Stage 3b's narrowing modules repeat work only through `charged-iteration.ts`, which charges every step to the work
- * ledger (TABLE §13.3), and every function body in them charges a unit on entry. This check guards the ordinary forms
+ * ledger, and every function body in them charges a unit on entry. This check guards the ordinary forms
  * of anything else: it is not a proof over every TypeScript execution form (an aliased constructor and a class field
  * initializer pass it; neither occurs in the modules). It reads them with their types and rejects:
  * - every loop but `for…of` over that module's `each(…)` or `steps(…)`; spreads, rest elements and parameters, the
@@ -18,7 +18,7 @@ import { objectsLanguage } from "./objects-language.mjs";
  * - any callable declared elsewhere (a library method, a core helper, a getter) that `OUTSIDE` does not list with why a
  *   call to it walks nothing uncharged; the walking collection constructors only with no argument or a table written
  *   out in full.
- * Text the modules make follows the kept-text rule (TABLE r4.58, `tests/type-core-kept.test.ts`), not this one. Calls
+ * Text the modules make follows the kept-text rule (`tests/type-core-kept.test.ts`), not this one. Calls
  * from the rest of the core into these modules are outside this check: in part 1 only `guards.ts` makes the index.
  */
 const OBJECTS_FILE = "src/type-inference/core/contract/objects.ts";
@@ -118,7 +118,7 @@ const CHARGING = [
 ];
 
 /**
- * Walks no more than the step that calls it charges (TABLE r4.58: a plain making is that step's own work): a key's or
+ * Walks no more than the step that calls it charges (a plain making is that step's own work): a key's or
  * path's text or steps, made or read where the step charges one unit per step or the text as kept (a key's text escaped
  * as its label is made, `stepLabel`); a parenthesis or sign `peel` charges; a literal's parts and text, an expression's
  * parts (`childrenOf`), an operand's items and a read's loops, each charged at the call.

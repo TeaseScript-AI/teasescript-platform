@@ -6,7 +6,7 @@ import { readCompactRecord, type CompactRecord } from "./type-core-records.js";
 
 /**
  * The expectation set of the coarse core (checkpoint 9) as its compact fixture (`tests/fixtures/type-core/`, made by
- * the port plan's step S0; its `MANIFEST.md` says how): per record its name, the TABLE cells it tests, the class it
+ * the port plan's step S0; its `MANIFEST.md` says how): per record its name, the cells it tests, the class it
  * belongs to (`owner`: `adapter` for the records the kept adapters own), its files, and its expected record.
  */
 export interface FixtureRecord {
@@ -439,10 +439,10 @@ export const HELD_S10_RECORDS: ReadonlyMap<string, S10Hold> = new Map([
  */
 export function heldBack(record: FixtureRecord): string | null {
   // Its right-hand datetime has no subtraction row: §3.4 sites that operand, not the whole pair. Keep the set
-  // unchanged until its maintainer corrects this start as well as its end (r4.62).
+  // unchanged until its maintainer corrects this start as well as its end.
   if (record.name === "cp9-cells/F16/invalid-datetime-difference")
     return "operator site awaiting set correction (TABLE §3.4, r4.62)";
-  // S9b's F18 shapes (TABLE r4.77 (2)): a copy of a written type as `fromJson`'s and `load`'s receiving context, which
+  // S9b's F18 shapes: a copy of a written type as `fromJson`'s and `load`'s receiving context, which
   // the core takes with its A4 receiving design (#1072's A2); `files: true` is outside the slice's syntax, and the text
   // operand's warning there is C13's, not F18's
   if (record.name.startsWith("cp9-cells/s9b/f18-held/copy/scalar-json-host-value/"))

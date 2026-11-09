@@ -1,9 +1,9 @@
 import type { SourceFile } from "./type-core-analysis.js";
 
 /**
- * The work families of the coarse core (checkpoint 9, TABLE §10.1's W rows), as the reference model's gate generator
+ * The work families of the coarse core (checkpoint 9), as the reference model's gate generator
  * writes them (`make-gates14.py`): per family a program of size k whose shape once made a product of two program
- * dimensions in some realization of the core. Each family names the TABLE structure whose bound it measures. The
+ * dimensions in some realization of the core. Each family names the structure whose bound it measures. The
  * harness's boolean host flag is an interaction, as the expectation set writes it: a file that reads `flagHost`
  * starts with `let flagHost = askBoolean "flag"`.
  */
@@ -13,12 +13,12 @@ export interface WorkFamily {
   readonly program: (k: number) => readonly SourceFile[];
   /**
    * Where `main` grows faster than the gate's bound: `main`'s growth per doubling at the gate's sizes, the least of the
-   * four orders and sharings, for the total and `invSteps` (TABLE r4.233: at or under `main`'s), a regression oracle of
+   * four orders and sharings, for the total and `invSteps` (at or under `main`'s), a regression oracle of
    * this family's shape, measured once.
    */
   readonly main?: { readonly total: number; readonly invSteps: number };
   /**
-   * An output-bound family's output at `k` (TABLE r4.245, r4.294): the descriptor nodes its stores' checks hold, counted
+   * An output-bound family's output at `k`: the descriptor nodes its stores' checks hold, counted
    * from the program's holders. Its work and counters grow per output unit, not per syntax node, where the stores'
    * contracts are captured inside the analysis (#1526 phase B) that `main` built uncounted after it.
    */
@@ -362,7 +362,7 @@ function w26(k: number, variant: "repeated" | "scope" | "hoisted"): string {
   );
 }
 
-/** A `goto` chain of k files each of which is also called, a registration behind it or none (r4.20). */
+/** A `goto` chain of k files each of which is also called, a registration behind it or none. */
 function w35(k: number, registration: boolean): readonly SourceFile[] {
   const tail = registration ? 'showPermanentButton "x" { n = 1.5 }\nend' : "n = 2\nend";
   return [
@@ -382,7 +382,7 @@ function w35(k: number, registration: boolean): readonly SourceFile[] {
   ];
 }
 
-/** k guarded projected aliases of one source stored into one place, read at k siblings (r4.23). */
+/** k guarded projected aliases of one source stored into one place, read at k siblings. */
 function w36(k: number, variant: "inside" | "varied" | "wrapper" | "extra-alias"): string {
   const wrapped = variant === "wrapper" || variant === "extra-alias";
   const stores = rows(k, (i) => {
@@ -464,7 +464,7 @@ function w39(k: number, registration: boolean): readonly SourceFile[] {
   ];
 }
 
-/** k callables or named files each testing a different field of one record and copying it into one place (r4.28). */
+/** k callables or named files each testing a different field of one record and copying it into one place. */
 function w40(k: number, files: boolean): readonly SourceFile[] {
   const record = fields(k, () => '"x"');
   const asks = rows(k, (i) => `say picked.f${i} + 1`);
@@ -525,7 +525,7 @@ function w40l(k: number, variant: "logical" | "operands"): string {
   );
 }
 
-/** k named files each calling the first of a chain of k global functions (r4.28). */
+/** k named files each calling the first of a chain of k global functions. */
 function w41(k: number, terminal: "return" | "exit" | "end"): readonly SourceFile[] {
   return [
     file(
@@ -935,7 +935,7 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
   },
 ];
 
-/** W45 (r4.46 (3)): a destination's second copied source is referenced, never flattened into it per destination. */
+/** W45: a destination's second copied source is referenced, never flattened into it per destination. */
 export const W45_VARIANTS: readonly WorkFamily[] = (
   ["flag", "plain", "firsts", "seconds"] as const
 ).map((variant) => ({
@@ -945,7 +945,7 @@ export const W45_VARIANTS: readonly WorkFamily[] = (
 }));
 
 /**
- * W44 (r4.46 (3)): the width axis of one root's keys under projected copies, gated in both orders as W34 is; and k
+ * W44: the width axis of one root's keys under projected copies, gated in both orders as W34 is; and k
  * copies of an object's own property named as a dict's list, read at k fields below it (#1026 review r1).
  */
 export const W44_VARIANTS: readonly WorkFamily[] = [
@@ -1064,7 +1064,7 @@ const argumentChain = (k: number, step: (index: number) => string): string =>
   );
 
 /**
- * W34 (TABLE §13.3, r4.33–r4.38) as the reference model's round-10 generators write it (`fresh.py`, `fan-probe.py`,
+ * W34 as the reference model's round-10 generators write it (`fresh.py`, `fan-probe.py`,
  * `siblings.py`): a chain of k whole copies of a k-field record read at k fields of the last copy, plain, with a test
  * on the source before each copy (of one field, of the copy's own field, guarding a read), through an alias, nested a
  * level, tested after each copy, with a conditional store below each source (tested and not); and k sibling copies of
@@ -1452,7 +1452,7 @@ const balancedSum = (lo: number, hi: number): string =>
 const record = (k: number, value: string): string => `{${fields(k, () => value)}}`;
 
 /**
- * Stage 3b's families (TABLE §13.3, W27–W34 and the tested-copy variant), as §13.3 defines them: each makes the
+ * Stage 3b's families (W27–W34 and the tested-copy variant), as §13.3 defines them: each makes the
  * narrowing index's construction or its queries a product of two program dimensions in some realization of it. They are
  * measured with every read's narrowing and route asked (`tests/helpers/type-core-narrowing.ts`), as the consumers will
  * ask them; N5's (W29 and its variants) through the analysis too, whose stored values read their narrowings (S10 part
@@ -1891,13 +1891,13 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
 ];
 
 /**
- * W34's two remaining combinations, gated known limits by the owner's decision (TABLE r4.45, PLAN §6b): more than four
- * sources tested at one path, each with more than four anchors in one tree, read there many times; and sources copied
- * from more than four shared roots, stored at one path every copy reads (review r5's generators). The gate is a
- * regression check on the 64 → 128 growth step only (3.37 and 2.53), not a bound at larger sizes: 128 → 256 already
- * grows 3.62 and 2.82. They are reconsidered when a realistic script shows both dimensions; a change to that lookup
- * re-measures them and proposes the gate with its counts, never retunes it; the linear alternative is a separate PR
- * after S4.
+ * W34's two remaining combinations, gated known limits by the owner's decision
+ * (docs/specifications/type-inference-accepted-record.md#r4-45, PLAN §6b): more than four sources tested at one path,
+ * each with more than four anchors in one tree, read there many times; and sources copied from more than four shared
+ * roots, stored at one path every copy reads (review r5's generators). The gate is a regression check on the 64 → 128
+ * growth step only (3.37 and 2.53), not a bound at larger sizes: 128 → 256 already grows 3.62 and 2.82. They are
+ * reconsidered when a realistic script shows both dimensions; a change to that lookup re-measures them and proposes the
+ * gate with its counts, never retunes it; the linear alternative is a separate PR after S4.
  */
 export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -1949,7 +1949,7 @@ const copiesOf = (k: number, form: "chain" | "fan-out"): string =>
   rows(k, (i) => `let a${i} = ${form === "chain" && i > 0 ? `a${i - 1}` : "root"}`);
 
 /**
- * A4 through copies' work (the owner's reviewer's F1 on #1049, TABLE r4.80): a root of k fields, each a copy of one
+ * A4 through copies' work (the owner's reviewer's F1 on #1049): a root of k fields, each a copy of one
  * written binding, and k whole copies of it with no field read, as a chain, a fan-out and one destination stored k
  * times; k objects with a written field, one other field of each stored into one list a copy then reads (his second
  * witness: the scan resumed, never taken again); and their controls: plain fields, one dimension fixed, one field read,
@@ -1960,7 +1960,7 @@ const copiesOf = (k: number, form: "chain" | "fan-out"): string =>
  * and reviews r5's to r7's (two roots met with a narrow projection each, a chain's last copy read at every field, a chain
  * of own fields copied beside a small record each, distinct records held in two lists), and Astra's (a copy storing its
  * plain fields with its written ones read, a copy of a copy storing below each record read whole). A copy costs its own
- * divergences, never its source's every field (r4.51, r4.86 (2)); each is gated with the sharing off too.
+ * divergences, never its source's every field; each is gated with the sharing off too.
  */
 export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   ...(["chain", "fan-out"] as const).map((form): WorkFamily => ({
@@ -2062,7 +2062,7 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
     measures:
       "r4.80's control: A4-inherited-fan-out with host data stored into one field of the root between its copies",
     // (each copy made after the host store owes a check of the whole root, an object node and its k typed fields, and the
-    // host store one of its field: output-bound, TABLE r4.294)
+    // host store one of its field: output-bound)
     output: (k) => (k - (k >> 1)) * (k + 1) + 1,
     program: (k) =>
       main(
@@ -2312,7 +2312,7 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
 ];
 
 /**
- * #1466's stack of k diamonds of copies (`topologySources`' `diamond`; TABLE r4.224, r4.227): each copies one object
+ * #1466's stack of k diamonds of copies (`topologySources`' `diamond`): each copies one object
  * into two places, stores into one of them and replaces the next place by the other, every next place read; and its
  * siblings: both places stored, the replacing order reversed, every second right place a shared ancestor, the next place
  * written `object` with a misfitting store, the reads guarded, and the branches of unequal depth (Astra's design review);
@@ -2442,7 +2442,7 @@ function listingChain(
 }
 
 /**
- * #1610's control (TABLE r4.245's output-bound shape for property names): k copies of one record, each storing one
+ * #1610's control (the output-bound shape for property names): k copies of one record, each storing one
  * shared wide object of k properties below `g` and a property of its own, joined into one place, read through it and
  * through a copy of it: a search lists the k copies once each and walks the wide object once, so the work grows with
  * the program where a set of names kept per layer would copy the wide object's k names into each of the k layers.
@@ -3148,7 +3148,7 @@ export const NESTED_OBJECT_SELECTIONS: readonly WorkFamily[] = (
 }));
 
 /**
- * Admission (TABLE §5, §10.3's admission combinations; the port plan's §3.3, M4 S6): the decided type over an empty, a
+ * Admission (§10.3's admission combinations; the port plan's §3.3, M4 S6): the decided type over an empty, a
  * populated and a later mutated snapshot, several destinations of one source with different decided types, a rejected
  * destination beside its intact source, external ingresses merged with an opaque source, A5's candidates under k whole
  * presets of a record, A2's scan past external stores, the width of a record's written copies, a literal's records and a
@@ -3156,7 +3156,7 @@ export const NESTED_OBJECT_SELECTIONS: readonly WorkFamily[] = (
  * a literal (projections of one record's lists, literals of one record's copies, or of the values operations carry of
  * it, added to a list), k method results or conversions of one class beside an object in one literal (#1078), k
  * copies of one nested preset joined into one place, each storing its own property below one step (#1078), and k
- * selections or choices nested in literals of two (r4.93, G3 2c); each at size k, linear.
+ * selections or choices nested in literals of two (G3 2c); each at size k, linear.
  */
 export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
@@ -3776,8 +3776,8 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
     },
   })),
   // Codex r24 F1, F2 and their neighbours: k distinct ingresses at k fields, each its own provenance node, asked of the
-  // store's index; and k host reads a call that stores nothing separates, one snapshot (r4.68 (1)), with the calls'
-  // results one entry as k calls of one function are (r4.15), inline and beside named data
+  // store's index; and k host reads a call that stores nothing separates, one snapshot, with the calls'
+  // results one entry as k calls of one function are, inline and beside named data
   ...(
     [
       ["fields", (k: number) => `{${fields(k, () => "hostValue")}}`],
@@ -3800,7 +3800,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   })),
-  // TABLE r4.93 (#1106): the menus a script writes, beside the nested choices (`I1106-nested-choices`): one choice
+  // #1106: the menus a script writes, beside the nested choices (`I1106-nested-choices`): one choice
   // of k choice objects, and a list of k parenthesised choices of one each, every answer read; 13,675 / 27,371 and
   // 37,542 / 75,150 units at k = 64, 128 in both orders (2.0080, 2.0066; `main` alike, the list 23 units more)
   {
@@ -3828,7 +3828,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // TABLE r4.78 (5)'s and r4.88 (1)'s product, linear since #1230 (admission's stop index keeps each operation's
+  // A product, linear since #1230 (admission's stop index keeps each operation's
   // evaluation key and chain once, a link onto the one around it): k nested own defaults, 3.94, 3.05 and 3.60 before,
   // and a sum of k terms of one list, 2.45 before
   nestedOwn("otherwise", (inner) => `null otherwise (${inner})`),
@@ -3886,11 +3886,11 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // TABLE r4.93's witnesses (#1106), known products until #1417 and G3 2c: a list literal of k choices, which nests
+  // Witnesses (#1106), known products until #1417 and G3 2c: a list literal of k choices, which nests
   // them, each the last option of the one before (28,228 / 85,185 units at k = 64, 128 in both orders, 3.0550, each
   // choice's options' class text holding the ones inside, until #1417's short class ids), and the chain of k choices
   // with each option a list of two (review r1 B1; 45,550 / 156,845, 3.461, each literal's element structure walking
-  // its nest, until G3 2c); and, G3 2c (TABLE r4.178), a selection or a choice nested k deep around one variable, each
+  // its nest, until G3 2c); and, G3 2c, a selection or a choice nested k deep around one variable, each
   // level a literal of two whose first element is the level inside; each literal's elements read their carriers'
   // transfers, each carrier's once (158,451 / 598,132 and 143,253 / 550,393 units at k = 64, 128 while each element
   // walked its whole nest)
@@ -4060,12 +4060,13 @@ function nestedOwn(variant: string, wrap: (inner: string, i: number) => string):
 
 /**
  * A6's chain of k dependent rejections (Sol's twelve-step witness at size k): each copy reads its source after the
- * source's misfit, so each rejection shows only in the pass after the one before it, k passes in all: TABLE §8's
- * passes × stores, each pass charged. A gated known limit by the owner's decision (TABLE r4.49, option A): its doubling
- * at k = 64 → 128 as measured, re-measured and proposed with its counts on a change to admission's passes, never
- * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
- * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form
- * (TABLE r4.69 (1)), and copies separated by calls storing their source, accepted in it too (r4.71).
+ * source's misfit, so each rejection shows only in the pass after the one before it, k passes in all: passes × stores,
+ * each pass charged. A gated known limit by the owner's decision
+ * (docs/specifications/type-inference-accepted-record.md#r4-49, option A): its doubling at k = 64 → 128 as measured,
+ * re-measured and proposed with its counts on a change to admission's passes, never retuned; its trigger, a realistic
+ * script reaching the allowance through cascading rejections. Beside it, copies interleaved with conditional stores
+ * below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form, and copies separated by calls storing
+ * their source, accepted in it too.
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -4092,10 +4093,10 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
     name: "A2-interleaved-conditional-copies",
     measures:
       "§4.1, condition (b): k copies of a k-field record of named host data, each after a conditional store below it",
-    // A gated known limit by the owner's decision (TABLE r4.69 (1), option A): each copy sees one more conditional
-    // store below the copied path, so each has its own signature, k classes, each answered at each of the k fields read
-    // (S6-CARRIERS §4.7's first unmerged shape; a rule beyond the class rule merges them). 377,525 / 1,357,501 units at
-    // k = 64, 128 in both orders (3.6080; 3.6222 before Codex r23's repairs, 3.6236 before TABLE r4.67); the allowance
+    // A gated known limit by the owner's decision (option A): each copy sees one more conditional store below the
+    // copied path, so each has its own signature, k classes, each answered at each of the k fields read (S6-CARRIERS
+    // §4.7's first unmerged shape; a rule beyond the class rule merges them). 377,525 / 1,357,501 units at k = 64, 128
+    // in both orders (3.6080; 3.6222 before Codex r23's repairs, 3.6236 earlier); the allowance
     // reached at k = 618; at k = 1,024 82,410,069 units under a raised test allowance, 274.7 % of its 30,000,000 (the
     // analysis itself stops at the allowance with the budget error)
     measured: 3.63,
@@ -4115,8 +4116,8 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
     name: "A2-copies-separated-by-storing-calls",
     measures:
       "§4.1, condition (b): k copies of a global another callable stores, each after a call storing it, at k fields",
-    // A gated known limit by the owner's decision (TABLE r4.71, option A): each copy reads the global after one more
-    // call that stores it, so each has its own snapshot (r4.68 (1)), k entries of the literal, each read at each of the k
+    // A gated known limit by the owner's decision (option A): each copy reads the global after one more
+    // call that stores it, so each has its own snapshot, k entries of the literal, each read at each of the k
     // fields (S6-CARRIERS §4.7's second unmerged shape, copies separated by calls while the source is owned away; a rule
     // beyond the class rule, or S6c's normalization, merges them). 190,319 / 660,474 units at k = 64, 128 in both orders
     // (3.5213; `main` 1.99, the output linear), without the narrowing index since #1251 (194,553 / 669,322 and 3.4908
@@ -4139,12 +4140,12 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
 ];
 
 /**
- * S6-CARRIERS §4.5, §4.7 and S6c (TABLE r4.61, r4.69 (2)): k adds of one record to one list, a choice of k options of one
+ * S6-CARRIERS §4.5, §4.7 and S6c: k adds of one record to one list, a choice of k options of one
  * record, and a literal of k `get`s of one list with one default, every field read; plain, and with a root of host data
  * whose fields admission reads (Astra r5 B2); the same through k stable aliases of the source (a chain whose first link
  * is a direct alias, `get`s whose alias writers cross, adds of aliases) and adds of two sources in two blocks (reviews r1, r2):
  * each class and boundary once, not every combination (the owner's test-cost rule). Adds of several
- * sources strictly in turn keep the chain's one step per add per path (TABLE §8), which the PR measures. The value side reads each class once per field (S6c: a run of adds of one
+ * sources strictly in turn keep the chain's one step per add per path, which the PR measures. The value side reads each class once per field (S6c: a run of adds of one
  * class answers as its third add, `ExactPath`; a choice's options and a literal's computed values by their classes,
  * `Contract.classOf`), so every counter grows with the program (§3.3's gate; the known-product gates of S6 are gone).
  */
@@ -4361,7 +4362,7 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
 ];
 
 /**
- * TABLE r4.85: one family per site of the value side's discovery that a class reached only by `Contract.classOf` keys,
+ * one family per site of the value side's discovery that a class reached only by `Contract.classOf` keys,
  * each of one source read at k fields (the PR's inventory; the other sites' families are `ADMISSION_SAME_SOURCES` and
  * `ADMISSION_INGRESS_PRESETS`): a choice's computed options (review r4 B1) and its literal ones, a literal's `get`s
  * whose defaults are `get`s, adds of literals of host data (the exact add chain's runs and the prefix's entries), and a
@@ -4421,7 +4422,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // TABLE r4.87: each other operation family that composes below its root, its members k values of one source in one
+  // each other operation family that composes below its root, its members k values of one source in one
   // choice of k options, every field read
   ...(
     [
@@ -4609,7 +4610,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
 
 /**
  * Product (c) of W34's class: k literals of two typed ingresses (a `load` or a parse) of one k-field record default
- * added to one list, every field read. Each literal holding an ingress is its own source (TABLE §8 r4.15), so the key's
+ * added to one list, every field read. Each literal holding an ingress is its own source, so the key's
  * contract met k entries at each of the k reads (S4's product); S6c reads the entries of one shape once per field where
  * no unknown answers there (an unknown's ingress stores are each entry's own, C9), so every counter grows with the
  * program (§3.3's gate): 90,737 / 182,712 and 92,017 / 185,016 units at k = 64, 128 (2.0181, 2.0142; `main` 3.17, 3.16).
@@ -4636,11 +4637,11 @@ export const ADMISSION_INGRESS_PRESETS: readonly WorkFamily[] = [
  * Read chains through nested literals (S6's PR, "Inherited products"; S6c): a list nested k deep read through k
  * `.first`, the same around a record read through k index steps, and a record nested k deep read through its k
  * properties. Each link reads a key one step longer, so the k keys' contracts and their texts grow with the chain's
- * depth (TABLE §8: a lookup costs the key's depth): gated known limits (TABLE r4.83 (2)) at their measured 64 → 128
- * step in r4.45's form, not a bound at larger sizes; reconsidered when a realistic chain approaches the allowance. On
- * `main` the `.first` chain grew as 2^k (each selection read its owner twice, at its step and whole, neither once: the
- * allowance at k = 20); S6c reads a selection's whole answer once per value, and a projection's path scans its member
- * steps once.
+ * depth (a lookup costs the key's depth): gated known limits
+ * (docs/specifications/type-inference-accepted-record.md#r4-83) at their measured 64 → 128 step, not a bound at larger
+ * sizes; reconsidered when a realistic chain approaches the allowance. On `main` the `.first` chain grew as 2^k (each
+ * selection read its owner twice, at its step and whole, neither once: the allowance at k = 20); S6c reads a
+ * selection's whole answer once per value, and a projection's path scans its member steps once.
  */
 export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -4696,15 +4697,15 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
 
 /**
  * Adds of several sources into one list strictly in turn (S6c's review r1, r2 B4): an add's certainty depends on the
- * state the adds before it leave, so each add of a mixed run is answered at each field read. Gated known limits (TABLE
- * r4.83 (5)) at their measured 64 → 128 step in r4.45's form (in the source order only on CI, TABLE r4.85), not a
- * bound at larger sizes; reconsidered when a
+ * state the adds before it leave, so each add of a mixed run is answered at each field read. Gated known limits at
+ * their measured 64 → 128 step (in the source order only on CI,
+ * docs/specifications/type-inference-accepted-record.md#r4-85), not a bound at larger sizes; reconsidered when a
  * realistic straight-line run of dozens of alternating adds of several sources into one list appears. A script writes
  * tens of such adds at most (a loop body is one add to the analysis); two alternating sources reach the allowance near
- * 650 adds (29,924,630 units at 647 since #1221 charges the event searches by comparison). The sound fix, an order-aware summary of a mixed run, is a redesign of the exact
- * add chain's representation that buys linear work only beyond those tens; the cheaper forms are unsound (a window of
- * several classes dropped a warning and its check, r2 B4) or share nothing (a prefix memo keyed by the class sequence
- * has k keys).
+ * 650 adds (29,924,630 units at 647 since #1221 charges the event searches by comparison). The sound fix, an
+ * order-aware summary of a mixed run, is a redesign of the exact add chain's representation that buys linear work only
+ * beyond those tens; the cheaper forms are unsound (a window of several classes dropped a warning and its check, r2 B4)
+ * or share nothing (a prefix memo keyed by the class sequence has k keys).
  */
 export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -4773,8 +4774,9 @@ export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
  * nested one, a literal index, a chain's link) beside the events its class answers through (a conditional store before
  * or between the copies, a copy under a test of its source or of a field, a store between them), literal cells beside
  * their literal's own contribution, which no alias may hold, and Astra's round-5 B1 shape (a written copy of a source
- * beside an unwritten one, at depths one and two, either first: two classes by their written types, TABLE r4.72). The
- * work test's oracle and the sharing differential run them.
+ * beside an unwritten one, at depths one and two, either first: two classes by their written types,
+ * docs/specifications/type-inference-accepted-record.md#r4-72). The work test's oracle and the sharing differential run
+ * them.
  */
 export const ORACLE_PROGRAMS: readonly {
   readonly name: string;
@@ -4884,7 +4886,7 @@ export const ORACLE_PROGRAMS: readonly {
 })();
 
 /**
- * S6c's differential programs (TABLE r4.72's standing differential, the brief's ten per shape): for each discovery S6c
+ * S6c's differential programs (the standing differential, the brief's ten per shape): for each discovery S6c
  * shares (a choice's options, a run of adds, a literal's computed values, a prefix's entries of one shape) and for the
  * selection read once per value, programs whose answers would differ were the shared key coarser than the answer:
  * options of two written domains, a storing call or a guard between reads, a read beside its projection, host data,
@@ -4896,10 +4898,10 @@ export const ORACLE_PROGRAMS: readonly {
  * chained, guarded, read in a function, of a projection or host data, beside direct reads, as `get` defaults; adds of
  * a few sources in turn, broken by a store, a test or a call, a late class, nine classes, a long run; and review r2's:
  * two families in a written union list, where an equal window of classes is no equal answer (its B4), a chain of
- * aliases one of which is taken under a test, `get`s whose receivers' and defaults' alias writers cross; and TABLE
- * r4.85's class (`Contract.classOf`) at each site: computed and literal choice options, nested and literal defaults,
+ * aliases one of which is taken under a test, `get`s whose receivers' and defaults' alias writers cross; and the
+ * class (`Contract.classOf`) at each site: computed and literal choice options, nested and literal defaults,
  * adds of literals and computed values, around a store, a guard, a differing proof, property or kind, host data and a
- * load, and warnings that name the writer a class's role minima and a literal's own role give; and TABLE r4.87's
+ * load, and warnings that name the writer a class's role minima and a literal's own role give; and the
  * families: selections, properties, lengths, calls, loads, sums, removals, copies and choices around crossing writers,
  * differing steps, names or callees, a store between calls, host data a mixed class reads each of, runs of `+` broken
  * by a writer or another term. Each of the first 49, and the class's pieces, was checked against a build with that
@@ -6608,8 +6610,8 @@ export const DIRECT_INGRESS_PROGRAMS: readonly {
 }));
 
 /**
- * S6's sharing faults (TABLE r4.83 (4)) that, with the sharing on, published their diagnostics in another order on
- * `main`: publication in source order of their sites (r4.86 (1)) makes them neutral (`type-core-sharing`'s own test).
+ * S6's sharing faults that, with the sharing on, published their diagnostics in another order on
+ * `main`: publication in source order of their sites makes them neutral (`type-core-sharing`'s own test).
  */
 export const REORDERING_SHARING_FAULTS: readonly {
   readonly name: string;
@@ -6712,7 +6714,7 @@ function sharedReads(k: number, variant: "shared" | "mixed" | "pairs", reverse =
   return [...out, "exit"].join("\n");
 }
 
-/** A family whose summaries' demands are its answers' own pairs (TABLE r4.245), with `main`'s work measured once. */
+/** A family whose summaries' demands are its answers' own pairs, with `main`'s work measured once. */
 export interface OutputBoundFamily {
   readonly name: string;
   readonly measures: string;
@@ -6720,12 +6722,15 @@ export interface OutputBoundFamily {
   /** The answers' distinct holder-layer/path pairs, counted from the program's own holders (`main`'s enumeration). */
   readonly pairs: (k: number) => number;
   /**
-   * Of those, the pairs one source answers alone, asked by reference with no summary's demand (TABLE r4.251): a holder
+   * Of those, the pairs one source answers alone, asked by reference with no summary's demand: a holder
    * layer with one own source under the path's first step and no listing layer below it, counted from the program's
    * holders (each arm's `unique<i>`, `mixed` its `h.local<i>` too; `pairs` the first arm's `unique0`).
    */
   readonly references: (k: number) => number;
-  /** Whether the pairs grow with the program's answers (r4.245's exception for its totals), or the family is a control. */
+  /**
+   * Whether the pairs grow with the program's answers (docs/specifications/type-inference-accepted-record.md#r4-245:
+   * the exception for its totals), or the family is a control.
+   */
   readonly outputBound: boolean;
   /**
    * `main`'s total, `checks` and `invSteps` at k = 16 and 32 in the four modes (source order, sharing on and off, then

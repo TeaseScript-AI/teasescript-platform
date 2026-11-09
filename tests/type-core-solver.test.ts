@@ -166,10 +166,10 @@ test("every component is solved alike from each member as the entry and in eithe
 });
 
 /**
- * #1466 (TABLE r4.225's B1, r4.227): a layer's summary is a demand named by its layer's origin and the path
- * (`protoLayer|alias|<place>||<path>`, `protoLayer|projected|<place>|<projection>|<path>` as their texts), never by a
- * number its pass allocated: Astra's B1 witness and sibling, and Sol's copy cycles through a list element, of nested
- * copies and below a projected prefix, each a component holding one.
+ * #1466 (docs/specifications/type-inference-accepted-record.md#r4-227): a layer's summary is a demand named by its
+ * layer's origin and the path (`protoLayer|alias|<place>||<path>`, `protoLayer|projected|<place>|<projection>|<path>`
+ * as their texts), never by a number its pass allocated: Astra's B1 witness and sibling, and Sol's copy cycles through
+ * a list element, of nested copies and below a projected prefix, each a component holding one.
  */
 const LAYER_CYCLES: readonly string[] = [
   "let a = {g: hostValue}\nlet b = a\nb.g = a.g\na = b\nrepeat a.g {}\nexit",
@@ -186,7 +186,7 @@ const layerRequest = (source: string): CoreAnalysisRequest => {
 };
 
 test("a layer's summary in a copy cycle is solved alike from each member as the entry and in either order (#1466)", () => {
-  // (a cycle whose read one source answers asks it by reference, no summary made (TABLE r4.251): its component is solved
+  // (a cycle whose read one source answers asks it by reference, no summary made: its component is solved
   // alike too; the others' components hold a layer's summary)
   const layered = LAYER_CYCLES.filter((source) => {
     const found = componentDifferences(source, layerRequest(source));
@@ -251,7 +251,7 @@ test("every finished layer summary is asked again in a fresh pass by its name an
 });
 
 /**
- * #1398 (TABLE r4.277 (2)): a written value read through a layer's summary keeps its spelling: the summary's items carry
+ * #1398: a written value read through a layer's summary keeps its spelling: the summary's items carry
  * it, a fresh pass asked by the summary's name and packet alone gives them again with it, and the summary that merges
  * both layers' leaves stands in the direct read's order, in the four modes. Of a written value in both copies' stores,
  * and beside a whole number it spells.
@@ -373,7 +373,7 @@ test("a default in a cycle is chosen on its completed kinds, in either order and
 });
 
 /**
- * r4.47 (1), r4.44, S3 §1 (Astra's R2-B1 on #1028): a method without a category answers per receiver alternative, and a
+ * S3 §1 (Astra's R2-B1 on #1028): a method without a category answers per receiver alternative, and a
  * receiver without items yet is a provisional bottom, no answer: the method's result stays the bottom, which the solver
  * completes, so no `external` reason enters a component from it. A chain round its own component (a self-update, a
  * record's field updated from itself, a loop, two functions) gives the same record in every order combination
@@ -443,7 +443,7 @@ test("a method chain round its own component answers alike from every entry, its
 });
 
 /**
- * #1398 (TABLE r4.277 (2), Codex r6 on #1558): an item's spelling is part of its value, so a component member whose
+ * #1398 (Codex r6 on #1558): an item's spelling is part of its value, so a component member whose
  * answer gains a spelling changes, and the members reading it run again: A merges unmarked kinds with C, B is A, C
  * merges B with a written type's. From each member as the entry, all three end with the written spelling, in its order.
  */
@@ -794,9 +794,9 @@ test("a recursive projection of a reference or a record closes its component", (
 const NARRATOR = 'speaker narrator { value: "Hello" }\n';
 
 /**
- * Programs whose receiver gains a reference kind only round its own cycle (r4.44), whose receiver holds a reference from
+ * Programs whose receiver gains a reference kind only round its own cycle, whose receiver holds a reference from
  * outside the cycle beside a record, a nested record or an external leaf round it (B2, B2-r2), and the record-only
- * control, with their diagnostics (a class `warning-runtime-check` unless written; a member's at the whole access, TABLE
+ * control, with their diagnostics (a class `warning-runtime-check` unless written; a member's at the whole access,
  * §3.4). A return that may not fit the result
  * its function's first return decides owes C1's check (A2, F23), at the result and at each path of the first return's
  * literal (A8); the record-only control's, which none of its kinds fits, is an error (ADR 0021 1.5) and is rejected, so
@@ -909,15 +909,15 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
 ];
 
 /**
- * r4.44: F19a's test of a receiver is a decision of its component, made once on the completed open solve (every
- * receiver read as a record) and held for the second, so a reference that reaches its receiver only round its own cycle
- * makes the access opaque: a warning with its runtime obligations; a reference from outside the cycle keeps its ordinary
- * answer. B2, B2-r2: the stores through a receiver are followed only for its records and collections, its unknowns
- * projected with their own reasons and ingress and its references the runtime's, so the open solve is finite whatever
- * the leaf. On `2941d76d8` the first three stopped with `budget-error` (4 to 20 s at the real allowance); on
- * `30477f011` the fourth; on `5a10f3a27` the loaded and host leaves. Here, in the two orders: 1,498 and 1,518; 1,498 and
- * 1,502; 1,412 and 1,319; 1,871 and 1,568; 669 and 643; 3,078 and 2,575; 1,987 and 1,681; 1,877 and 1,576; the
- * record-only control 1,288 and 1,255 units.
+ * (docs/specifications/type-inference-accepted-record.md#r4-44): F19a's test of a receiver is a decision of its
+ * component, made once on the completed open solve (every receiver read as a record) and held for the second, so a
+ * reference that reaches its receiver only round its own cycle makes the access opaque: a warning with its runtime
+ * obligations; a reference from outside the cycle keeps its ordinary answer. B2, B2-r2: the stores through a receiver
+ * are followed only for its records and collections, its unknowns projected with their own reasons and ingress and its
+ * references the runtime's, so the open solve is finite whatever the leaf. On `2941d76d8` the first three stopped with
+ * `budget-error` (4 to 20 s at the real allowance); on `30477f011` the fourth; on `5a10f3a27` the loaded and host
+ * leaves. Here, in the two orders: 1,498 and 1,518; 1,498 and 1,502; 1,412 and 1,319; 1,871 and 1,568; 669 and 643;
+ * 3,078 and 2,575; 1,987 and 1,681; 1,877 and 1,576; the record-only control 1,288 and 1,255 units.
  */
 test("a reference that reaches its receiver only round its own cycle is decided once, its access opaque", () => {
   const got: string[] = [];
@@ -970,7 +970,7 @@ test("an external value read below its record without a cycle keeps its reasons 
       .map((d) => `${d.kind} ${d.class} ${source.slice(d.site.start, d.site.end)}`)
       .sort();
   });
-  // (the member read at the whole access, its receiver included, TABLE §3.4)
+  // (the member read at the whole access, its receiver included)
   const want = [
     "integer-use warning-runtime-check f(true).custom.custom",
     "member-read warning-runtime-check f(true).custom.custom",
@@ -984,8 +984,9 @@ test("an external value read below its record without a cycle keeps its reasons 
 });
 
 /**
- * TABLE r4.164's proof payloads (`ProofDemand`): a proof is the solver's as a demand's items are. The tests' proofs
- * hold what was chosen (`null` for an absence), the kinds seen and a round counter; their signature is all three.
+ * Proof payloads (docs/specifications/type-inference-accepted-record.md#r4-164; `ProofDemand`): a proof is the solver's
+ * as a demand's items are. The tests' proofs hold what was chosen (`null` for an absence), the kinds seen and a round
+ * counter; their signature is all three.
  */
 interface Chosen extends Proof {
   readonly chosen: string | null;

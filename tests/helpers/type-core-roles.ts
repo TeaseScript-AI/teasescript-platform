@@ -49,7 +49,7 @@ export const ROLES: Readonly<Record<CarrierRole, Readonly<Record<Placement, Row 
       member: (h) => `${h}.inner.field`,
     },
   },
-  // (a dict list's name read on an object: its own property, r4.46 (2))
+  // (a dict list's name read on an object: its own property)
   "projection/record field": {
     "literal operand": {
       form: (k, v) => `[${k}, ({noise: 0, values: [${k}, ${v}][1]}).values][1]`,

@@ -27,7 +27,7 @@ import { inMode, MODES, stopSet } from "./helpers/type-core-oracles.js";
 import type { CompactRecord } from "./helpers/type-core-records.js";
 
 /*
- * Stage 3b's narrowing index (TABLE §13, S10's first part), asked directly, and the stored values that read it (S10
+ * Stage 3b's narrowing index (S10's first part), asked directly, and the stored values that read it (S10
  * part 2b; the other consumers read it in part 2c). Per N1 form and per N2 event a control that holds and a case that
  * changes only the premise (§13.4), taken from the expectation set's 3b shapes; G's filter on items; N5's preserving and
  * breaking stores, one location and a component; N3's route witnesses for §13's own examples.
@@ -1505,7 +1505,7 @@ test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 P
     "warning-runtime-check, integer-use warning-runtime-check, integer-check",
   );
   // the test proves a kind, never an ingress (C9, the lead's ruling (a)): external data keeps exactly one boundary
-  // check, at its ingress store or, where no store brought it, at the consumer (r4.10), through every transfer that
+  // check, at its ingress store or, where no store brought it, at the consumer, through every transfer that
   // keeps the value; a computed result brings no data in (Codex r1–r3 on #1770: the typed store, the operator, the
   // selection without an ingress are rows)
   const transfers: readonly (readonly [string, string, string, string, string])[] = [
@@ -1739,7 +1739,7 @@ test("a long `otherwise` chain's preserving store and a deep element read cost w
 });
 
 /**
- * #1398 (TABLE r4.277 (3), Codex r6 on #1558): a type test's spelling is read once per test and pass, whatever the
+ * #1398 (Codex r6 on #1558): a type test's spelling is read once per test and pass, whatever the
  * number of reads it narrows: k stored reads of host data under a test of k alternating members carry one spelling, one
  * array, `[string, integer]`, in the four modes, so the type's walks grow with the test alone.
  */
@@ -1769,7 +1769,7 @@ test("a type test's spelling is read once, for every read it narrows (#1398)", (
 });
 
 /**
- * #1398 (TABLE r4.277 (2), Codex r7 on #1558): two type tests of one kinds in two written orders narrow host data to two
+ * #1398 (Codex r7 on #1558): two type tests of one kinds in two written orders narrow host data to two
  * answers, `[string, integer]` and `[integer, string]`, and the value side tells them apart in every identity it reads:
  * their items' signatures and their exact read classes, which take the test's spelling (`Values.narrowingMark`).
  */
@@ -1804,7 +1804,7 @@ test("two type tests of one kinds in two written orders give two read classes (#
 });
 
 /**
- * #1398 (TABLE r4.277 (2), Codex r8 on #1558): the narrowing a read takes is part of every exact value class it is
+ * #1398 (Codex r8 on #1558): the narrowing a read takes is part of every exact value class it is
  * given, whichever way the class is joined: two tests of one kinds in two written orders, of a host read, a host
  * property, a host element and their local controls, give the two stored reads two value classes and two bound
  * classes, in the four modes.
@@ -1844,7 +1844,7 @@ test("two type tests of one kinds in two written orders give two value classes, 
 });
 
 /**
- * #1398 (TABLE r4.277 (3), Codex r7 on #1558): a type's written kinds are read by one walk, each node and each kind it
+ * #1398 (Codex r7 on #1558): a type's written kinds are read by one walk, each node and each kind it
  * gives once: at depths 32, 64 and 128 of unions nested to the right and to the left, and of optionals, the walk of the
  * test's type as its narrowing holds it gives one kind per name the type writes, in their written order.
  */
@@ -1914,7 +1914,7 @@ test("G's value is its input filtered by its form (N1)", () => {
       `${JSON.stringify(form)} on ${tags.join(", ")}`,
     );
   // (the kinds a type test proves of a value a stop left keep the test's spelling, as written, `string | integer`; none
-  // given, the table's order: #1398, TABLE r4.277 (3))
+  // given, the table's order: #1398)
   const stopped = [makeItem("unknown", null, { reasons: REASON.budget })];
   const tested: NarrowingForm = { kind: "is", kinds: ["integer", "string"] };
   assert.deepEqual(

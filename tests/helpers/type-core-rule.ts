@@ -11,21 +11,21 @@ import type { CompactRecord } from "./type-core-records.js";
  * matrix's are placement and endpoint classes, each shape named and inline, without and with a later store, compared in
  * both orders. Each shape's complete multiset of C1, C9 and C10 records (§5.1: every `copy-type` check, a destination's
  * own null-check, and their written-target warnings with their context words) is compared exactly with what this rule
- * function owes, §5.1's table with TABLE r4.60 and r4.63–r4.66:
+ * function owes, §5.1's table:
  * - inline whole data owes one store boundary at the host value's own span, against the type admitted there, and C1
- *   beside it at that span unless its place is published (r4.63 (1)); reached through a projection of the carrier's
+ *   beside it at that span unless its place is published; reached through a projection of the carrier's
  *   result, it is a member of the data;
  * - named data owes its source's own boundary, `parcel [unknown]` at its ingress, and C1 at the named read where the
  *   place is published, else at the store's value span below a selecting operation and at the named read below a
- *   combining or removing one (r4.63 (2));
- * - a member of host data owes C1 at the member read in any state (r4.60);
+ *   combining or removing one;
+ * - a member of host data owes C1 at the member read in any state;
  * - a `get`'s or an `otherwise`'s default owes its own read's `[unknown]` boundary, the destination's C1 at the store's
- *   value span, and C10's family check only where the direct value has a family (r4.63 (3), r4.65 (1));
+ *   value span, and C10's family check only where the direct value has a family;
  * - a `load`'s or `fromJson`'s default: the call is the ingress, its boundary against the destination, with C1 beside
  *   it where a consumer meets the loaded value; a default with definite kinds (a literal) types the call and owes no own
- *   read, a host value's own read stays an own read, and named data owes its source's boundary (r4.66 (2));
- * - a loop variable owes the boundary against its own contract and C1 beside it (r4.63 (4)); a loop over host data
- *   owes one boundary, at the host value, of the ingress landing on the loop variable (r4.64, r4.65 (2)).
+ *   read, a host value's own read stays an own read, and named data owes its source's boundary;
+ * - a loop variable owes the boundary against its own contract and C1 beside it; a loop over host data
+ *   owes one boundary, at the host value, of the ingress landing on the loop variable.
  * A place's state is S4's decision, taken as given: published by its one store, decided by the later store, or, for a
  * collection's element, decided at the declaration where the carrier passes the decision on (A2 with F7, F10, F17b).
  */
@@ -43,11 +43,11 @@ export interface RuleClass {
   readonly form: (k: string, v: string, h: string) => string;
   readonly endpoints: readonly Endpoint[];
   readonly data: Data;
-  /** The operation the data is carried through: one that selects its value, or one that combines or removes (r4.63 (2)). */
+  /** The operation the data is carried through: one that selects its value, or one that combines or removes. */
   readonly combining?: true;
   /** A collection's element is decided at the declaration: the carrier passes the decision on (A2). */
   readonly declares?: true;
-  /** A member read's text, for the host value or its name `h` and the known element `k` (r4.60). */
+  /** A member read's text, for the host value or its name `h` and the known element `k`. */
   readonly member?: (h: string, k: string) => string;
   /** The operation's own read's text (a fallback, a default), for `k`, the data `v` and `h` (C10, F18). */
   readonly own?: (k: string, v: string, h: string) => string;
@@ -93,7 +93,7 @@ function callSpan(source: string, start: number): string {
 type State = "published" | "later" | "decided";
 
 /**
- * The records `floor`'s shape owes by the rule function (§5.1 with TABLE r4.60, r4.63–r4.66), sorted: for its source,
+ * The records `floor`'s shape owes by the rule function (§5.1), sorted: for its source,
  * the named data's binding `name` where it is named (`let name = hostValue` first).
  */
 export function owed(
@@ -113,7 +113,7 @@ export function owed(
   const read = spanOf(source, host, first);
   const declaration = /let out = (.*)\n/u.exec(source);
   const value = declaration === null ? "" : spanOf(source, declaration[1]!);
-  // the operation the data is carried through, and its own read: a literal default types its call (r4.66 (2))
+  // the operation the data is carried through, and its own read: a literal default types its call
   const operation = floor.carrier.split("/")[0];
   const known = floor.kind === "string" ? '"fixed"' : collection ? "[1]" : "1";
   const ownText = floor.own?.(known, collection ? `[${host}]` : host, host) ?? "";
@@ -124,7 +124,7 @@ export function owed(
   };
   // each destination path's state: the place itself published by its one store or decided by the later one; a
   // collection's element decided at the declaration where the carrier passes the decision on (a typed default's literal
-  // does not: F18 decides the list, its element open beside host data, TABLE r4.66 (3) with A7)
+  // does not: F18 decides the list, its element open beside host data, with A7)
   const whole: State = later ? "later" : "published";
   const element: State = floor.declares === true ? "decided" : whole;
   const paths = (list: string): (readonly [string, string, State])[] => [
@@ -186,9 +186,9 @@ export function owed(
         source.indexOf(operation === "load default" ? "load(" : "fromJson("),
       );
       out.push(`B copy-type out [${collection ? "list" : kind}] ${call}`);
-      // r4.66 (2): a default types its call where its kinds are definite, a literal's; a host value's own read stays an
+      // a default types its call where its kinds are definite, a literal's; a host value's own read stays an
       // own read; named data owes its source's boundary wherever the loaded value meets a consumer, and a default that
-      // reads a member of the data is itself that consumer (C5, r4.66 (1)), whatever the place's state
+      // reads a member of the data is itself that consumer (C5), whatever the place's state
       const data = named ? name : "hostValue";
       const reads = ownText.includes(".");
       if (reads) out.push(`B copy-type ${data} [unknown] ${ingress}`);

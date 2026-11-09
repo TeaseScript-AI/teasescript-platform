@@ -10,7 +10,7 @@ import { coreRequest } from "./helpers/type-core-analysis.js";
 import { SPREAD_CASES } from "./helpers/type-core-spreads.js";
 
 /*
- * Native resilience (TABLE §8): the coarse core's answers on large flat programs stay on the heap and on the solver's
+ * Native resilience: the coarse core's answers on large flat programs stay on the heap and on the solver's
  * stack, never one call's arguments or one native frame per element, per store or per function.
  */
 
@@ -46,7 +46,7 @@ test("an element read through a chain of 2,048 returned results is answered with
 
 /**
  * Sol's round 2 on #1049 (B3): a copy at the end of a chain of 4,096 copies, each place declared before its source is
- * copied into it, keeps the written type the chain starts from (r4.75 (1)): resolved one place at a time on the heap,
+ * copied into it, keeps the written type the chain starts from: resolved one place at a time on the heap,
  * never one native frame per link.
  */
 test("a copy at the end of a chain of 4,096 copies keeps the written type within the native stack", () => {
@@ -78,7 +78,7 @@ test("a copy at the end of a chain of 4,096 copies keeps the written type within
 
 /*
  * Source-sized lists append one by one, never spread as one call's arguments: S6's (review r3, external review r6 F1,
- * Astra r6 N1) and S6c's (Astra's static list on S6, TABLE r4.73 (2); the class keys, review r6 B1). A call's arguments
+ * Astra r6 N1) and S6c's (Astra's static list on S6; the class keys, review r6 B1). A call's arguments
  * overflow near 125,000 at Node's default stack and near 12,000 under a 100 KiB stack, so each case runs in a child of
  * that stack (`--stack-size=100`) at 30,000, where its spread restored fails: the same failure at a fraction of the
  * work (the owner's test-cost rule; at 130,000 on the default stack each case took 3 to 21 s). The fifth of S6c's, the
@@ -156,7 +156,7 @@ test("a choice of written records is answered within the native stack", () => {
 });
 
 test("a choice record whose value holds host values is answered within the native stack", () => {
-  // `selectedAt`; a list as a button's value is TSV029's error since S9b, and the answer holds no list (TABLE r4.93)
+  // `selectedAt`; a list as a button's value is TSV029's error since S9b, and the answer holds no list
   assert.deepEqual(spreadCase("property"), ["compile-error", 1, 0]);
 });
 

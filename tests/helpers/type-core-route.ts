@@ -17,7 +17,7 @@ import {
   type PredictedRun,
 } from "./type-core-derived.js";
 
-// The candidate route's plan and runs as the derived oracle compares them (S6-CARRIERS §5.2, TABLE r4.59).
+// The candidate route's plan and runs as the derived oracle compares them (S6-CARRIERS §5.2).
 
 /**
  * A run of `plan` to its end with the host globals' values, and the script's stored values where given: its status, its

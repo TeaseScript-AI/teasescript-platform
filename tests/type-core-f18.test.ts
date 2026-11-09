@@ -24,7 +24,7 @@ import { shapesOf } from "./helpers/type-core-rule.js";
 import type { Expression } from "../src/ast.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 
-// #1072 (X05, A64), TABLE r4.81 (1): a typed `load` or `fromJson` reads its default at the call-site snapshot, one
+// #1072 (X05, A64): a typed `load` or `fromJson` reads its default at the call-site snapshot, one
 // domain in its four layers: the solver's answer at the call, the admitted type of the place it lands in, the per-site
 // type of the plan, and what the runtime reader keeps. The shapes of the fixture's `cp9-cells/s9b/f18-held/named/*`
 // records, a host value in place of the asked text and flag the slice's syntax leaves out, in both of `fromJson`'s

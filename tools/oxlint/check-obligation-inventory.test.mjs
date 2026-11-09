@@ -43,7 +43,7 @@ const PART_HEAD = 'import type { Admission } from "../admission.js";\n';
 /**
  * The check's messages for the repository's admission and consumers files, each changed in memory by its `edit` (a
  * scratch copy), the files `added` in memory, and the listed `reads`. The files as they are pass the check in `npm run lint`
- * (`run.mjs`); these are its negative checks (TABLE r4.143).
+ * (`run.mjs`); these are its negative checks.
  */
 function messagesWith(edits, added = {}, reads = READS) {
   const project = new Project({
@@ -217,7 +217,7 @@ test("an inherited host member that is no listed host read fails too", () => {
 });
 
 /*
- * The guard's family (TABLE r4.182; Codex r1–r3 on #1360, r4–r5 on #1369): each form, in each layout, by what the
+ * The guard's family (Codex r1–r3 on #1360, r4–r5 on #1369): each form, in each layout, by what the
  * closed list makes of it. A recognised creation must be listed; a reference to a guarded member in any other form is
  * unproved, by the name it contains, counted exactly (the files as they are have none); a name two derivations share is
  * reported; an exact forwarder is its function's.

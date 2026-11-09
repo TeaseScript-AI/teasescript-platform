@@ -141,8 +141,8 @@ test("a list's other members are found in steps of their own, whatever lists cam
  * questions after it, at one small doubling in the four modes. A listing schedules a layer's effective sources only, so
  * the searches grow with the program, where `main`'s grew 4.2 to 6.8 times per doubling (416,963 units at k = 128
  * against the analysis's 226,049). The listing chain shown holds i + 2 names at its i-th copy (`g`, and below it `z` and
- * one per copy before it), so its searches' output is quadratic: its units per name held do not rise (TABLE r4.245's
- * reading). Codex r1's projected feedback, whose sources pump at their take-ups, charges no more than the flat listing
+ * one per copy before it), so its searches' output is quadratic: its units per name held do not rise.
+ * Codex r1's projected feedback, whose sources pump at their take-ups, charges no more than the flat listing
  * (`withFlatListings`): a listing's classification charges what the flat search charges there, never its followers
  * where it pumps. The series to k = 128 is the PR's evidence, outside CI.
  */
@@ -223,7 +223,7 @@ test("a decided object's property search grows with the program in a stack of co
 });
 
 /**
- * Stage 3b's families (TABLE §13.3, W27–W34 and the tested-copy variant): the narrowing index built and every read's
+ * Stage 3b's families (W27–W34 and the tested-copy variant): the narrowing index built and every read's
  * narrowing (N2 with N5) and route (N3) asked, as S10's second part's consumers will ask them, in source order and
  * reversed with the solver's worklist; its total and each counter under the standard gate. The series to k = 1,024 is
  * the step's evidence, outside CI.
@@ -869,7 +869,7 @@ const PRODUCTS: readonly (WorkFamily & {
 
 /**
  * Each family's total and its counter in either order under the standard gates; only the named counter, since the
- * helper's parameter's k definitions are sorted and lifted (the TABLE's `n log n` structures), which measure 2.37 here,
+ * helper's parameter's k definitions are sorted and lifted (the `n log n` structures), which measure 2.37 here,
  * as they do with a written parameter, and the ring's changed elements each re-run the depth of the list's tree of
  * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256).
  */
@@ -1215,10 +1215,11 @@ test("lists of one set of choices in many orders site their host data without wa
 });
 
 /**
- * The value side's gated known limits (TABLE r4.83 (2), (5)): read chains through nested literals, each link's key one
- * step longer (`READ_CHAIN_PRODUCTS`), and adds of several sources into one list in turn (`MIXED_ADD_PRODUCTS`); a
- * regression check on the 64 → 128 step only, each held to its measured doubling in either order. On CI (GitHub
- * Actions sets `CI`) the mixed adds run in the source order only: their orders differ by at most 0.0001 (TABLE r4.85).
+ * The value side's gated known limits (docs/specifications/type-inference-accepted-record.md#r4-83): read chains
+ * through nested literals, each link's key one step longer (`READ_CHAIN_PRODUCTS`), and adds of several sources into
+ * one list in turn (`MIXED_ADD_PRODUCTS`); a regression check on the 64 → 128 step only, each held to its measured
+ * doubling in either order. On CI (GitHub Actions sets `CI`) the mixed adds run in the source order only: their orders
+ * differ by at most 0.0001.
  */
 test("read chains and mixed-source adds grow no faster than measured", () => {
   const steep: string[] = [];
@@ -1262,7 +1263,7 @@ test("a literal of 4,096 distinct records is searched in linear time", () => {
 });
 
 /**
- * A value's identity names its inputs by their own identities (TABLE §8, round 12 B4): a chain of 32 `otherwise`s, each
+ * A value's identity names its inputs by their own identities (round 12 B4): a chain of 32 `otherwise`s, each
  * of the one before twice, is a source of 32 lines, never an identity of 2^32 characters.
  */
 test("a chain of carriers over shared inputs is identified in linear space", () => {

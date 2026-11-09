@@ -49,7 +49,7 @@ const NO_DETAIL: ContextDetail = {
   receiver: null,
 };
 
-// The core's structured result (TABLE §3.4, §4, F28, §10.5): which word and which writer explain a warning, which kinds
+// The core's structured result (§3.4, §4, F28, §10.5): which word and which writer explain a warning, which kinds
 // owe their own diagnostics, how targets are named, and the record the tests compare with the expectation set.
 
 const writer = (kind: string, start: number, file = 0): Writer => ({
@@ -340,7 +340,7 @@ test("a result's record has the expectation set's shape, survives JSON, and comp
   }
   const [, external, called] = RECORDS;
   const record = coreRecord(external!.result, external!.paths);
-  // a warning's obligation is a runtime check too, every check is listed once, in source order of their sites (r4.86 (1))
+  // a warning's obligation is a runtime check too, every check is listed once, in source order of their sites
   assert.deepEqual(
     record.runtimeChecks.map(
       (check) => `${check.kind} ${check.boundary === true ? check.reason : "use"}`,
@@ -449,7 +449,7 @@ test("the comparison counts each check, compares whole sites, and asserts only t
       "extra check copy-type meter [integer|null] boundary main.tease:30-36 ×1",
     ],
   );
-  // a member read's diagnostic and its null-check compare whole too (TABLE §3.4, r4.62): the receiver's span alone differs
+  // a member read's diagnostic and its null-check compare whole too: the receiver's span alone differs
   const member: CompactRecord = {
     outcome: "warning-runtime-check",
     diagnostics: [
@@ -488,7 +488,7 @@ test("the comparison counts each check, compares whole sites, and asserts only t
       "extra check null-check value [non-null] main.tease:20-25 ×1",
     ],
   );
-  // a copied property's error compares its related copy too (TABLE r4.75 (4)), read as the fixture writes it
+  // a copied property's error compares its related copy too, read as the fixture writes it
   const copied = readCompactRecord({
     outcome: "compile-error",
     diagnostics: [

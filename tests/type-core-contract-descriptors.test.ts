@@ -16,7 +16,7 @@ import { coreRequest } from "./helpers/type-core-analysis.js";
 import { heldStops, HELD_MODES } from "./helpers/type-core-held-host.js";
 
 /*
- * The contract proof/descriptor service (#1526 phase A, TABLE r4.278): a store's required contract is one descriptor per
+ * The contract proof/descriptor service (#1526 phase A): a store's required contract is one descriptor per
  * distinct contract, shared by reference whatever the receiving place's name; built on a task stack; and a level whose
  * proof a stop cut is lost, never complete or open.
  */

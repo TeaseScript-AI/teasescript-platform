@@ -37,8 +37,8 @@ import {
 } from "../src/type-inference/core/result.js";
 
 /*
- * C13 (TABLE C13, S3 §1) for S9b's first consumers: a `for` loop's iterable, a built-in method's arguments, the elements
- * `join` and `sort` read, what `toJson` writes (Astra's G1) and what a choice's buttons return (TSV029, TABLE r4.93):
+ * C13 (S3 §1) for S9b's first consumers: a `for` loop's iterable, a built-in method's arguments, the elements
+ * `join` and `sort` read, what `toJson` writes (Astra's G1) and what a choice's buttons return (TSV029):
  * each consumer's operand, written in every form a value reaches it by, of a kind that fits, of one that does not, of
  * both possible, or unknown, gives the ordered predicate's verdict at its own site, in both orders, and a stop never
  * turns it into an error; on the candidate route each verdict's check is the runtime's own, at the use, before the next
@@ -686,7 +686,7 @@ test("toJson re-proves after each store, and that work grows linearly with the c
 });
 
 /**
- * TABLE r4.93's witness (Astra's B6-r4): k record-valued nested choices, each TSV029's error, their answer read k levels
+ * Astra's B6-r4 witness: k record-valued nested choices, each TSV029's error, their answer read k levels
  * below: no record a button holds is composed into the answer, so the chain takes less work than its literal analogue
  * (the same objects read through `.value`, a deep literal read chain, itself the accepted read-chain product), at both
  * sizes and in both orders, and without the read it grows as the accepted nested-choice product (`I1106-nested-choices`
@@ -730,7 +730,7 @@ test("record-valued nested choices compose no record: below their literal analog
  * The work of `join`'s and `sort`'s element checks does not grow with the list's width: over a list literal of k
  * elements (whose own check of one type, A8, is the literal's), the checks they add are the same at 64 and 128; and
  * `toJson`'s walk of an object k deep reads each level once, each level's path one step longer than the one above it
- * and charged as it is made: the read chain through nested literals, TABLE r4.83 (2)'s gated known limit, with each
+ * and charged as it is made: the read chain through nested literals, a gated known limit, with each
  * level's property names, whose kept paths, path index entries and pump checks the search charges since #1493 (13,877
  * / 50,131 units at k = 64, 128, 3.677 per doubling of the source; 12,437 / 41,683 and 3.412 before), the depth no real
  * script reaches.

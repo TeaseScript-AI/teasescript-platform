@@ -21,7 +21,7 @@ import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 
 /*
- * TABLE r4.47 (1), member completeness (#1026's follow-up): every built-in member the language's tables give a
+ * Member completeness (#1026's follow-up): every built-in member the language's tables give a
  * receiver kind answers through the core, by its declared result or as the runtime's opaque `unknown` whose consumers
  * keep their checks, never with no items (a member with none made `repeat d.weekday {}` silently valid). Per pair,
  * on the value side (a bound receiver) and through the contract (a function's result of two returns), in both orders:
@@ -294,7 +294,7 @@ test("every member a receiver kind has answers its declared result to a consumer
             : use.collection;
           const label = inner;
           const collection = itemsAt(inner);
-          // (the member check at the whole access, its parentheses included, TABLE §3.4)
+          // (the member check at the whole access, its parentheses included)
           if (unknown(collection))
             expected.push(`null-check ${label} [non-null] @${siteOf(use.value)}`);
           if (unknown(collection) || value.some((item) => item.tag === "empty"))

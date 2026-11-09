@@ -77,10 +77,10 @@ import {
 } from "./helpers/type-core-written.js";
 
 /*
- * The sharing differential (TABLE r4.72): S6's sharing of answers between equivalent values (alias classes and chains
+ * The sharing differential: S6's sharing of answers between equivalent values (alias classes and chains
  * of copies, S6-CARRIERS §4.1; levels by structure, §4.6; a walk's stops of one snapshot, the decider's and the named
- * data's, §3.1; a literal's entries for the reads of one key, TABLE §8) and S6c's (a choice's options, a run of adds, a
- * literal's computed values and a prefix's entries by their class, `Contract.classOf`, TABLE r4.85) is an optimization,
+ * data's, §3.1; a literal's entries for the reads of one key) and S6c's (a choice's options, a run of adds, a
+ * literal's computed values and a prefix's entries by their class, `Contract.classOf`) is an optimization,
  * so it is output-neutral: for every program below, in both orders, the published diagnostics, the owed checks, every
  * binding's admitted type at its root and its element (the decider's site with it) and the candidate route's lowered
  * plan (or its rejection) are byte-identical with the sharing on and off (`withoutSharing`; `type-core-oracles.ts`).
@@ -411,8 +411,7 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   let runs = 0;
   // (programs of one exact input, their files in order, share its outcome in each order: each is reported by its name)
   const changed = new Map<string, boolean>();
-  // (the record a program publishes, and its serialized form, is in source order of its sites, the same in both orders:
-  // r4.86 (1))
+  // (the record a program publishes, and its serialized form, is in source order of its sites, the same in both orders)
   const reordered: string[] = [];
   const unsited: string[] = [];
   for (const program of all) {
@@ -526,8 +525,8 @@ test("a projection of a host read names its ingress's leaf and publishes the sam
 });
 
 /**
- * S6's sharing faults that reordered their diagnostics on `main` (`REORDERING_SHARING_FAULTS`, TABLE r4.83 (4)): published in
- * source order of their sites (r4.86 (1)), the same with the sharing on and off, and in both orders.
+ * S6's sharing faults that reordered their diagnostics on `main` (`REORDERING_SHARING_FAULTS`): published in
+ * source order of their sites, the same with the sharing on and off, and in both orders.
  */
 test("S6's sharing faults that reordered their diagnostics are output-neutral in both orders", () => {
   const differing: string[] = [];
@@ -684,7 +683,7 @@ test("a stopped answer's items stand in the kinds' table order too, in the four 
 });
 
 /**
- * #1398 (Codex r3, r4 and r5 on #1558, TABLE r4.277): a list of a value's kinds takes its one order where it is
+ * #1398 (Codex r3, r4 and r5 on #1558): a list of a value's kinds takes its one order where it is
  * completed (`inItsOrder`): a written spelling's where exactly one spelling covers every kind but `null`, `unknown` and
  * `empty`, else the table's then `unknown`. The rows: a receiver beside its contract's reference kinds, the `besides`
  * gathered from a site's other warnings, a warning's `fits` (a fixed table of what fits, the one list the rule leaves
@@ -1285,7 +1284,7 @@ test("a further list of choices of one class adds class work independent of the 
  * its own, so no list's decision stops elsewhere than it did: two classes of choices (of `hostValue`'s and of
  * `hostOther`'s properties) read in four lists of all four bindings, and two choices of 17 properties read in three
  * lists. At the test demand allowance 256, in the four modes, the stops and exhaustion are those of each list making
- * its own (where a second decision stopping in a second pass ends the analysis, TABLE r4.183), a regression oracle of
+ * its own (where a second decision stopping in a second pass ends the analysis), a regression oracle of
  * these sources.
  */
 test("a choice's walk or check shared by its lists moves no decision's stop at 256, in the four modes (#1573)", () => {
@@ -1386,7 +1385,7 @@ test("copies of a deep written list stop no decision and publish the same in the
 });
 
 /**
- * #1712: the alias classes' eligibility index makes each prefix key once (per-level interned keys, TABLE r4.83 (2)):
+ * #1712: the alias classes' eligibility index makes each prefix key once (per-level interned keys):
  * `demandsOf` through a trie of each root's decided steps, its rests references into their decided paths, and each
  * class's prefixes of its demanded keys charged once each (`prefixChains`). Copies of a written list of depth 16, 32
  * and 64 (two copies, sharing on, source and reversed order): the index's shared build (`WorkLedger.shared`'s units)

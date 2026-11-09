@@ -15,7 +15,7 @@ import { withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { inMode, MODES } from "./helpers/type-core-oracles.js";
 import { runGlobals } from "./helpers/type-core-route.js";
 
-// #1526 decision 2, condition 1 (TABLE r4.390): while a required check is missing at a stop, the candidate publishes no
+// #1526 decision 2, condition 1: while a required check is missing at a stop, the candidate publishes no
 // plan that lets the invalid value through unchecked. Sol's #1645 and #1648 witnesses, at a settled decision stop.
 
 const GLOBALS = ["hostValue", "hostOther"];
@@ -61,7 +61,7 @@ const witness = (
   ...(storage === undefined ? {} : { storage }),
 });
 
-/** At demand 16 in four modes: a required check is Lost at a settled decision stop (the witnesses' r4.295 column (2)). */
+/** At demand 16 in four modes: a required check is Lost at a settled decision stop. */
 const DECLINED: readonly Witness[] = [
   witness(
     "1645-whole-object",

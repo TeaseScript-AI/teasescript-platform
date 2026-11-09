@@ -17,7 +17,7 @@ import { decisionsByKey } from "./type-core-oracles.js";
 import { siteKey } from "./site-keys.js";
 
 /*
- * The stop oracle (D4 a′, TABLE r4.99, r4.100, r4.108): a compile stopped at some unit against the unstopped compile,
+ * The stop oracle (D4 a′): a compile stopped at some unit against the unstopped compile,
  * whole. One function for `tests/type-core-stop.test.ts` and the every-unit sweep kept outside CI.
  */
 
@@ -48,7 +48,7 @@ export interface StopCase {
   readonly fitting: readonly Globals[];
   readonly violating: readonly Globals[];
   /**
-   * What a combined stop's rule accepts of its demand-only reference (`combinedStop`, TABLE r4.285, r4.290): records, each
+   * What a combined stop's rule accepts of its demand-only reference (`combinedStop`): records, each
    * by its code at its whole site (`code file:start:end`), excused as a mark's are, and checks (as `JSON.stringify` gives
    * them, their sites whole) owed on neither side.
    */
@@ -293,7 +293,7 @@ function inWords(d: Compiled["diagnostics"][number]): string | undefined {
 
 /**
  * Whether a stopped diagnostic is the unstopped one as a stop keeps it: every field the same, and its message the
- * unstopped one's or that one with every fix in words (`words`), as a stop's unchecked region gives a fix (TABLE r4.162).
+ * unstopped one's or that one with every fix in words (`words`), as a stop's unchecked region gives a fix.
  */
 function keeps(
   want: Compiled["diagnostics"][number],
@@ -376,12 +376,12 @@ export function repeatedDecisions(c: Pick<StopCase, "unstopped" | "stopped">): s
 }
 
 /**
- * What a stop changed of the unstopped compile that no deferred mark excuses (TABLE r4.99, r4.108–r4.111), none at a
+ * What a stop changed of the unstopped compile that no deferred mark excuses, none at a
  * sound stop, settled or not. A mark excuses the record with its code at its site and nothing else; before admission
  * settled, a store marked with its type undecided also stands for its records within its value and for the errors it
- * brought, a written store's mark for its records within its value (TABLE r4.152 (1)), and C5's error at a literal for
- * the mark of the store that owes it. The diagnostics, each whole but for a fix the stop gives in words (r4.162), and the
- * checks are compared in their published order (r4.86 (1)) besides those records, what forms only with the marks, and the
+ * brought, a written store's mark for its records within its value, and C5's error at a literal for
+ * the mark of the store that owes it. The diagnostics, each whole but for a fix the stop gives in words, and the
+ * checks are compared in their published order besides those records, what forms only with the marks, and the
  * stop's own warning. The plans are compared whole; a difference stands only inside the plan content of a mark whose
  * obligation is not the unstopped one at its code and site (one that is owes the same check), or of a marked store's
  * records: the content that leaving them out of each compile's analysis and discharge removes. The fitting runs are
@@ -407,11 +407,11 @@ export function stopProblems(c: StopCase): string[] {
     ...[...(c.excused?.records ?? [])].filter((record) => /^\S+ 0:\d+:\d+$/.test(record)),
   ]);
   const accepted = c.excused?.checks ?? new Set<string>();
-  // before admission settled no decision is read (r4.110 (3)): each store marked with its type undecided stands for its
-  // records within its value and for the errors it brought (r4.111), and C5's error at a literal may stand as the mark
-  // of the store that owes it, its receiver's shape undecided (r4.108 (2)); a written store's mark stands for its
+  // before admission settled no decision is read: each store marked with its type undecided stands for its
+  // records within its value and for the errors it brought, and C5's error at a literal may stand as the mark
+  // of the store that owes it, its receiver's shape undecided; a written store's mark stands for its
   // records within its value too (an element its literal holds that admission left undecided), never for one outside
-  // it (TABLE r4.152 (1))
+  // it
   const storeMarks = stopped.answers.budget.settled
     ? []
     : marks.filter((mark) => mark.rule.rule === "store");
@@ -440,7 +440,7 @@ export function stopProblems(c: StopCase): string[] {
         storeRecords.add(recordOf(d.code, d.site));
     }
   for (const record of storeRecords) excused.add(record);
-  // the diagnostics, in their published order, each whole but for its fix in words (r4.162): the unstopped ones in words
+  // the diagnostics, in their published order, each whole but for its fix in words: the unstopped ones in words
   // compiled once, where a message alone differs
   const shown = (each: Pick<StopRun, "result" | "answers">) =>
     each.result.diagnostics.filter(
@@ -465,10 +465,10 @@ export function stopProblems(c: StopCase): string[] {
   // lost check, on either side. A content's count on a side is its published copies less what stands for some of them:
   // its owning records there (that side's warnings and marks the stop excuses; a record whose check its side does not
   // publish is a lost check), else one the combined stop's rule accepts; on the unstopped side every copy of a marked
-  // store's record (TABLE r4.122), on the stopped side as many of those as the unstopped side has; and on the stopped
+  // store's record, on the stopped side as many of those as the unstopped side has; and on the stopped
   // side one copy of a content no record, rule or unstopped copy stands for that forms only with the marks, their
-  // content (r4.110 (a): the stopped analysis without them has fewer). The two counts of each content must be equal, and
-  // the checks left compared stand in the same published order (r4.86 (1)).
+  // content (the stopped analysis without them has fewer). The two counts of each content must be equal, and
+  // the checks left compared stand in the same published order.
   const counted = (texts: readonly string[]): Map<string, number> => {
     const counts = new Map<string, number>();
     for (const text of texts) counts.set(text, (counts.get(text) ?? 0) + 1);
