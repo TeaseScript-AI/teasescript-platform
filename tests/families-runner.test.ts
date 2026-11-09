@@ -688,8 +688,8 @@ test("a generator's id is its `id` export, else its file name: a renamed generat
     // two generators with one id are refused before any source runs
     writeFileSync(join(area, "b.mjs"), `export const id = "a.mjs";\n${cases}`);
     writeFileSync(join(area, "c.mjs"), `export const id = "a.mjs";\n${cases}`);
-    const twice = run();
-    assert.equal(twice.status, 2);
+    const twice = run(tree);
+    assert.equal(twice.status, 2, twice.stderr);
     assert.match(twice.stderr, /b\.mjs and c\.mjs have one id, a\.mjs/u);
   } finally {
     rmSync(directory, { recursive: true, force: true });
