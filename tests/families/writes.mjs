@@ -162,6 +162,24 @@ const ALLOWED = {
       },
       "`bash -c` of LOCK_HOLDER (above), with no option but `stdio`",
     ],
+    "a checkout's HEAD read": [
+      (call, { importedFrom }) => {
+        const [command, args, options] = call.arguments;
+        const elements =
+          args !== undefined && ts.isArrayLiteralExpression(args) ? args.elements : [];
+        return (
+          importedFrom(call.expression) !== undefined &&
+          literal(command) === "git" &&
+          elements.length === 4 &&
+          literal(elements[0]) === "-C" &&
+          !ts.isSpreadElement(elements[1]) &&
+          literal(elements[2]) === "rev-parse" &&
+          literal(elements[3]) === "HEAD" &&
+          onlyOptions(options, (key) => key === "encoding")
+        );
+      },
+      "`git -C <tree> rev-parse HEAD` (`state`'s commit of a checkout without `.sha`), with no option but `encoding`: it prints a commit and writes nothing",
+    ],
     "the runner's own child": [
       (call, { importedFrom }) => {
         const [command, args, options] = call.arguments;

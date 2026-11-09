@@ -47,7 +47,7 @@
 // writes into a central store (a seed's MANIFEST and PLANs, or a shard computed from it, compared where one is there),
 // `status` reads a central baseline without a tree, `stalls` lists a computed shard's stalls. Nothing here
 // removes a baseline.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
@@ -957,14 +957,30 @@ async function state(tree, root, readOnly) {
   return status;
 }
 
-/** What `state` prints (`lines`, without a tree's `src/` an error printed and none) and its exit status. */
+/** The commit of `tree`: its `.sha` (an `sx-tree` tree's), else, where `tree` is a checkout's top, its HEAD; else null. */
+function commitOf(tree) {
+  const file = path.join(tree, ".sha");
+  if (existsSync(file)) return readFileSync(file, "utf8").trim();
+  if (!existsSync(path.join(tree, ".git"))) return null;
+  const head = spawnSync("git", ["-C", tree, "rev-parse", "HEAD"], { encoding: "utf8" });
+  return head.status === 0 && /^[0-9a-f]{40}\n$/.test(head.stdout) ? head.stdout.trim() : null;
+}
+
+/**
+ * What `state` prints (`lines`, without a tree's `src/`, or a written state's tree without a commit, an error printed and
+ * none) and its exit status.
+ */
 async function stateOf(tree, root, readOnly) {
   const identity = identityOf(tree);
   if (identity.src === null) {
     console.error(`${tree}/src holds no file`);
     return { lines: [], status: 2 };
   }
-  const sha = readFileSync(path.join(tree, ".sha"), "utf8").trim();
+  const sha = readOnly ? null : commitOf(tree);
+  if (!readOnly && sha === null) {
+    console.error(`${tree} has no .sha and is no checkout's top whose HEAD names its commit`);
+    return { lines: [], status: 2 };
+  }
   const own = await owned(root, identity, readOnly ? null : `commit ${sha} ${tree}`);
   const lines = [];
   const refusal = (refused, foreign) => {
