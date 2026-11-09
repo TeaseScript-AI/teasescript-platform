@@ -226,6 +226,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     halting,
     reportActivationError,
     reportPageError,
+    lose,
     activation,
     beginning,
     lastStart,
@@ -281,7 +282,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // So did every state Debug's rewind could reinstate, and its history: its view stays, read-only, and nothing waiting
     // on it acts.
     retireRewind("loss");
-    reportPageError(error);
+    lose(error);
   }
   // Debug's value trace and Debug mode (`session/useDebugModeAndTrace.ts`).
   const debug = useDebugModeAndTrace({

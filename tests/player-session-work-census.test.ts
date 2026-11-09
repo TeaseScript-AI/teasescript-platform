@@ -723,6 +723,8 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {reportPageError}",
   "player/vue/src/session/activation/useActivationRun.ts useActivationRun {report}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > report {report}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > lose {lose}",
+  "player/vue/src/usePlayerSession.ts usePlayerSession {lose}",
 ];
 
 /**

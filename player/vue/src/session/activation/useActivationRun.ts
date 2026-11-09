@@ -110,6 +110,13 @@ export function useActivationRun({
         (error: unknown) => settle({ ok: false, error }),
       );
     },
+    /**
+     * Revokes the live record for good at the loss of its connection: its failure recording goes, and nothing of it
+     * acts from now on. The dead connection is asked nothing.
+     */
+    revoke(): void {
+      end();
+    },
     /** Retires the live record at the Player's disposal, before it gives up its bridge: the host ends its run. */
     retire(): void {
       const ended = end();

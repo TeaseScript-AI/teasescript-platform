@@ -204,6 +204,26 @@ export function useSessionActivation({
     void acknowledged.then(commit);
   }
   /**
+   * The loss of the engine's connection, in its own turn: the Player's error stop at once, with what the host last
+   * published, and no halt asked of the dead connection, nor waited for. The activation under way and every stop still
+   * committing go (their tokens), and the record is revoked: no completion of anything begun before acts afterwards.
+   */
+  function lose(error: unknown) {
+    const name = error instanceof Error ? error.name : "Error";
+    console.error("[player] host error", error);
+    activationToken += 1;
+    continuing = null;
+    beginning.value = false;
+    const target = session.value;
+    if (target !== null) {
+      const final = bridgeOf(target).latest(target);
+      if (final !== null) session.value = final;
+    }
+    hostError.value ??= name;
+    halting.value = false;
+    activationRun.revoke();
+  }
+  /**
    * The page's error reporter: an exception of the Player at a page owner's own event (its interface, the hosted
    * script, Debug's rewind, the page-wide trace and random settings), reported for the activation live at that event.
    * Activation work never takes it: it reports to its own origin (`reportActivationError`).
@@ -567,6 +587,7 @@ export function useSessionActivation({
     halting,
     reportActivationError,
     reportPageError,
+    lose,
     activation,
     beginning,
     lastStart,
