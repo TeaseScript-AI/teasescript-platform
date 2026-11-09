@@ -216,12 +216,12 @@ identify semantic leaf sets, so operation-specific transfers and certificate equ
 
 **Source.** The lead's ruling after Sol role-data design round 1 and Astra's review for #1357 and PR #1359, 2026-10-29.
 
-**Bounded by:** The lead kept semantic migration on hold after the second design round (2026-10-29): the joint
-path/support construction and exact-equality cost remain unproved, with no growth waiver. Merged PR #1417 (2026-10-29)
-applies only the interim cut: interned class ids, a class's own writer and role parts, and writer lookup only when a
-second class member arrives; residual growth remains recorded as bugs. In that cut, `KeptClass.roleParts` forwards a
-writer-less unary part to its sole child, while `classWriters` reads writers once per value and side in a pre-order walk
-bounded by returned roles.
+**Bounded by:** [r4.191](solver-and-work.md#r4-191) keeps semantic migration on hold after the second design round: the
+joint path/support construction and exact-equality cost remain unproved, with no growth waiver. Merged PR #1417
+(2026-10-29) applies only the interim cut: interned class ids, a class's own writer and role parts, and writer lookup
+only when a second class member arrives; residual growth remains recorded as bugs. In that cut, `KeptClass.roleParts`
+forwards a writer-less unary part to its sole child, while `classWriters` reads writers once per value and side in a
+pre-order walk bounded by returned roles.
 
 ### r4-251
 
