@@ -30,6 +30,8 @@ type Part = ReadonlySet<string> | string;
 interface StepPositions<T> {
   readonly list: readonly T[];
   readonly steps: ReadonlyMap<string, readonly (readonly number[])[]>;
+  /** Per step, its lists' positions counted (with duplicates), made with the index. */
+  readonly sizes: ReadonlyMap<string, number>;
   readonly any: readonly number[];
   readonly items: Map<readonly number[], readonly T[]>;
   readonly selections: Map<string, readonly T[] | null>;
@@ -235,8 +237,9 @@ export function entriesHolding(
  * A list's items at the positions of the parts holding the step and the unproved ones, in the list's order and each
  * once, made at the step's first query and kept (the walks' later queries cost their lookup alone): one list's items,
  * made once for every step it alone holds, or the lists merged, each position each round charged, then their items;
- * `null`, the whole list, where no store can be left out or the index's budget does not cover them. What the
- * selections make and keep is at most the index's construction again.
+ * `null`, the whole list, where no store can be left out or the index's budget does not cover them. A new step costs
+ * one charge to judge (its lists' sizes counted with the index, `sizes`), so what the selections make and keep is at
+ * most the index's construction again and one a step.
  */
 function selected<T>(
   admission: Admission,
@@ -246,23 +249,27 @@ function selected<T>(
   const known = index.selections.get(step);
   if (known !== undefined) return known;
   const work = admission.pass.program.work;
+  work.charge("indexSteps");
   const parts = index.steps.get(step) ?? [];
-  const all = index.any.length === 0 ? parts : [...parts, index.any];
-  work.charge("indexSteps", all.length);
-  let found: readonly T[] | null = all.length === 0 ? [] : null;
-  const single = all.length === 1 ? index.items.get(all[0]!) : undefined;
+  const lists = parts.length + (index.any.length === 0 ? 0 : 1);
+  // (the one list, where one holds the step)
+  const first = parts[0] ?? index.any;
+  let found: readonly T[] | null = lists === 0 ? [] : null;
+  const single = lists === 1 ? index.items.get(first) : undefined;
   if (single !== undefined) found = single;
-  else if (all.length > 0) {
-    let size = 0;
-    for (const at of all) size += at.length;
-    const cost = size * (all.length === 1 ? 1 : Math.ceil(Math.log2(all.length)) + 1);
+  else if (lists > 0) {
+    const size = (index.sizes.get(step) ?? 0) + index.any.length;
+    const cost = size * (lists === 1 ? 1 : Math.ceil(Math.log2(lists)) + 1);
     if (size < index.list.length && cost <= index.budget) {
       index.budget -= cost;
-      const at = all.length === 1 ? all[0]! : merged(admission, all);
+      const at =
+        lists === 1
+          ? first
+          : merged(admission, index.any.length === 0 ? parts : [...parts, index.any]);
       work.charge("indexSteps", at.length);
       keep(admission.work, at.length);
       found = at.map((position) => index.list[position]!);
-      if (all.length === 1) index.items.set(all[0]!, found);
+      if (lists === 1) index.items.set(first, found);
     }
   }
   keep(admission.work, 1);
@@ -457,6 +464,7 @@ function positions<T>(
     }
   }
   const steps = new Map<string, (readonly number[])[]>();
+  const sizes = new Map<string, number>();
   for (const [part, list] of byPart)
     for (const name of typeof part === "string" ? [part] : part) {
       work.charge("indexSteps");
@@ -466,12 +474,14 @@ function positions<T>(
         keepText(admission.work, name.length);
         steps.set(name, [list]);
       } else known.push(list);
+      sizes.set(name, (sizes.get(name) ?? 0) + list.length);
     }
-  keep(admission.work, any.length + kept);
+  keep(admission.work, any.length + kept + sizes.size);
   // (the selections' budget: this construction's charges, one a position and one a part or name it posts)
   return {
     list,
     steps,
+    sizes,
     any,
     items: new Map(),
     selections: new Map(),
