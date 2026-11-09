@@ -85,7 +85,18 @@ export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
   return {
     drawCode: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (
+        args,
+      ): args is {
+        readonly plan: string;
+        readonly path: string;
+        readonly site: {
+          readonly line: number;
+          readonly column: number;
+          readonly endLine: number;
+          readonly endColumn: number;
+        };
+      } =>
         isRecord(args) &&
         exactly(args, ["plan", "path", "site"]) &&
         typeof args.plan === "string" &&
@@ -112,7 +123,9 @@ export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
     },
     codeLines: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (
+        args,
+      ): args is { readonly texts: readonly string[]; readonly first: number } =>
         isRecord(args) &&
         exactly(args, ["texts", "first"]) &&
         isStringArray(args.texts) &&

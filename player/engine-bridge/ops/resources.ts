@@ -24,11 +24,16 @@ interface AnswerArguments<A> {
   readonly held: HeldMedia | null;
 }
 
+/** A capture answer as `isCaptureAnswer` admits it: the engine decides the reason. */
+type CaptureAnswerShape =
+  | { readonly kind: "captured"; readonly reference: string }
+  | { readonly kind: "unavailable"; readonly reason: string };
+
 /**
  * A capture answer, exactly: the adapter turns any other kind into an unavailable camera and drops other keys, so the
  * engine could not refuse it. The engine still decides which references and reasons it admits.
  */
-const isCaptureAnswer = (answer: Record<string, unknown>): boolean =>
+const isCaptureAnswer = (answer: Record<string, unknown>): answer is CaptureAnswerShape =>
   (answer.kind === "captured" &&
     exactly(answer, ["kind", "reference"]) &&
     typeof answer.reference === "string") ||
@@ -40,8 +45,8 @@ const isCaptureAnswer = (answer: Record<string, unknown>): boolean =>
  * An op that answers a pending action with `answer` and continues on success; a refusal changes nothing and keeps the
  * earlier basis accepted. File store and lock answers reach the engine as their payload, which it validates.
  */
-function answerOp<A>(
-  checkAnswer: (answer: Record<string, unknown>) => boolean,
+function answerOp<A, C extends Record<string, unknown> = Record<string, unknown>>(
+  checkAnswer: ((answer: Record<string, unknown>) => answer is C) | (() => true),
   answer: (
     session: PlayerRuntimeSession,
     actionId: number,
@@ -50,7 +55,9 @@ function answerOp<A>(
   ) => PlayerRuntimeControlResult<ActionCompletionOutcome>,
 ): BridgeOp {
   return sessionOp(
-    (args) =>
+    (
+      args,
+    ): args is { readonly actionId: number; readonly answer: C; readonly held: HeldMedia | null } =>
       isRecord(args) &&
       exactly(args, ["actionId", "answer", "held"]) &&
       typeof args.actionId === "number" &&
@@ -77,8 +84,14 @@ function answerOp<A>(
 /** The ops of family L5e (the L5 series): capture, file store and lock answers. */
 export function resourceOps(_context: PlayerOpsContext): BridgeOps {
   return {
-    answerCapture: answerOp<PlayerCaptureAnswer>(isCaptureAnswer, answerPlayerRuntimeCapture),
-    answerFileStore: answerOp<PlayerFileStoreAnswer>(() => true, answerPlayerRuntimeFileStore),
-    answerLock: answerOp<PlayerLockAnswer>(() => true, answerPlayerRuntimeLock),
+    answerCapture: answerOp<PlayerCaptureAnswer, CaptureAnswerShape>(
+      isCaptureAnswer,
+      answerPlayerRuntimeCapture,
+    ),
+    answerFileStore: answerOp<PlayerFileStoreAnswer>(
+      (): true => true,
+      answerPlayerRuntimeFileStore,
+    ),
+    answerLock: answerOp<PlayerLockAnswer>((): true => true, answerPlayerRuntimeLock),
   };
 }

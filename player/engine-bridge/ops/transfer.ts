@@ -40,7 +40,7 @@ export function transferOps(context: PlayerOpsContext): BridgeOps {
     // A file's bytes or a pasted text: saved data comes back whole; a session as plain data, its checkpoint kept here.
     readTransfer: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly bytes: Uint8Array } | { readonly text: string } =>
         isRecord(args) &&
         ((exactly(args, ["bytes"]) && args.bytes instanceof Uint8Array) ||
           (exactly(args, ["text"]) && typeof args.text === "string")),
@@ -75,7 +75,9 @@ export function transferOps(context: PlayerOpsContext): BridgeOps {
     // the reason when it cannot continue there; kept as the kept session stores it.
     reviewTransfer: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (
+        args,
+      ): args is { readonly ticket: string; readonly scope: string; readonly plan: string } =>
         isRecord(args) &&
         exactly(args, ["ticket", "scope", "plan"]) &&
         typeof args.ticket === "string" &&

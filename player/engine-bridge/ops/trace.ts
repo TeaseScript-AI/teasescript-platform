@@ -68,7 +68,8 @@ export function traceOps(context: PlayerOpsContext): BridgeOps {
     // the Player's intent (`tracing`), which the trace follows first (`alignTrace`); one older than the newest applied
     // came before a newer change and resets nothing, so it cannot clear a trace that change began.
     restartTrace: sessionOp(
-      (args) => isRecord(args) && exactly(args, ["tracing"]) && isTracingIntent(args.tracing),
+      (args): args is { readonly tracing: TracingIntent } =>
+        isRecord(args) && exactly(args, ["tracing"]) && isTracingIntent(args.tracing),
       (_held, args) => {
         // EVIDENCE: validation: checkArguments accepted `tracing` as a tracing intent.
         const { tracing } = args as { readonly tracing: TracingIntent };
@@ -80,7 +81,8 @@ export function traceOps(context: PlayerOpsContext): BridgeOps {
     ),
     // What the script's `debugMode` reads from now on, as `setPlayerRuntimeDebugMode`.
     setDebugMode: sessionOp(
-      (args) => isRecord(args) && exactly(args, ["on"]) && typeof args.on === "boolean",
+      (args): args is { readonly on: boolean } =>
+        isRecord(args) && exactly(args, ["on"]) && typeof args.on === "boolean",
       (held, args) => {
         // EVIDENCE: validation: checkArguments accepted `on` as a boolean.
         const { on } = args as { readonly on: boolean };
@@ -94,7 +96,9 @@ export function traceOps(context: PlayerOpsContext): BridgeOps {
     // Debug as the stop froze it.
     debugView: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (
+        args,
+      ): args is { readonly session: string; readonly request: DebugViewRequest } =>
         isRecord(args) &&
         exactly(args, ["session", "request"]) &&
         typeof args.session === "string" &&

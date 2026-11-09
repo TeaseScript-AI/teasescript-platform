@@ -68,15 +68,18 @@ function answered(held: HeldSession, result: Answer): OpOutcome {
  * An answer to the presented interaction `args.actionId`, with the further arguments `fields` checks. Another presented
  * action is refused as `staleAction` without effect; `input`, when given, is recorded as how the player answered.
  */
-function interactionOp(
+function interactionOp<
+  F extends Record<string, unknown> = Record<string, unknown>,
+  Answers extends boolean = true,
+>(
   fields: readonly string[],
-  checkFields: (args: Record<string, unknown>) => boolean,
+  checkFields: ((args: Record<string, unknown>) => args is F) | (() => true),
   run: (session: PlayerRuntimeSession, args: Record<string, unknown>) => Answer,
-  answers = true,
+  answers: Answers | true = true,
 ) {
   const keys = ["actionId", ...fields, ...(answers ? ["input"] : [])];
   return sessionOp(
-    (args) =>
+    (args): args is InteractionArguments<Answers> & F =>
       isRecord(args) &&
       exactly(args, keys) &&
       typeof args.actionId === "number" &&
@@ -104,13 +107,22 @@ function interactionOp(
   );
 }
 
-const none = () => true;
+/**
+ * What an interaction op's own check admits besides its fields: the action, and, for an op that answers, how the player
+ * answered.
+ */
+type InteractionArguments<Answers extends boolean> = {
+  readonly actionId: number;
+} & (Answers extends true ? { readonly input: DebugAnswerInput | null } : unknown);
+
+/** The field check of an interaction op without fields: a constant `true`, the one non-predicate a builder accepts. */
+const none = (): true => true;
 
 export function inputOps(_context: PlayerOpsContext): BridgeOps {
   return {
     submitComposer: interactionOp(
       ["text"],
-      (args) => typeof args.text === "string",
+      (args): args is { readonly text: string } => typeof args.text === "string",
       (session, args) => {
         // EVIDENCE: validation: checkFields accepted `text` as a string.
         const { text } = args as { readonly text: string };
@@ -119,7 +131,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
     ),
     selectChoice: interactionOp(
       ["optionId"],
-      (args) => typeof args.optionId === "string",
+      (args): args is { readonly optionId: string } => typeof args.optionId === "string",
       (session, args) => {
         // EVIDENCE: validation: checkFields accepted `optionId` as a string.
         const { optionId } = args as { readonly optionId: string };
@@ -129,7 +141,8 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
     activateButton: interactionOp([], none, (session) => activatePlayerRuntimeButton(session)),
     stepFormField: interactionOp(
       ["fieldId", "draft"],
-      (args) => typeof args.fieldId === "string" && isDraft(args.draft),
+      (args): args is { readonly fieldId: string; readonly draft: string | null } =>
+        typeof args.fieldId === "string" && isDraft(args.draft),
       (session, args) => {
         // EVIDENCE: validation: checkFields accepted `fieldId` as a string and `draft` as a string or null.
         const { fieldId, draft } = args as {
@@ -144,7 +157,8 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
     clearFormField: interactionOp([], none, clearPlayerRuntimeFormField, false),
     draftForm: interactionOp(
       ["fieldId", "text"],
-      (args) => typeof args.fieldId === "string" && typeof args.text === "string",
+      (args): args is { readonly fieldId: string; readonly text: string } =>
+        typeof args.fieldId === "string" && typeof args.text === "string",
       (session, args) => {
         // EVIDENCE: validation: checkArguments accepted `actionId` as a number, `fieldId` and `text` as strings.
         const { actionId, fieldId, text } = args as {
@@ -158,7 +172,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
     ),
     submitForm: interactionOp(
       ["draft"],
-      (args) => isDraft(args.draft),
+      (args): args is { readonly draft: string | null } => isDraft(args.draft),
       (session, args) => {
         // EVIDENCE: validation: checkFields accepted `draft` as a string or null.
         const { draft } = args as { readonly draft: string | null };
@@ -169,7 +183,8 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
     skipImage: interactionOp([], none, skipPlayerRuntimeImage),
     answerImage: interactionOp(
       ["reference", "held"],
-      (args) => typeof args.reference === "string" && isHeldMedia(args.held),
+      (args): args is { readonly reference: string; readonly held: HeldMedia } =>
+        typeof args.reference === "string" && isHeldMedia(args.held),
       (session, args) => {
         // EVIDENCE: validation: checkFields accepted `reference` as a string and `held` with `isHeldMedia`.
         const { reference, held } = args as {
@@ -183,7 +198,8 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
     closePopup: interactionOp([], none, closePlayerRuntimePopup),
     closeExport: interactionOp([], none, closePlayerRuntimeExport),
     pressPermanentButton: sessionOp(
-      (args) => isRecord(args) && exactly(args, ["buttonId"]) && typeof args.buttonId === "number",
+      (args): args is { readonly buttonId: number } =>
+        isRecord(args) && exactly(args, ["buttonId"]) && typeof args.buttonId === "number",
       (held, args) => {
         // EVIDENCE: validation: checkArguments accepted `buttonId` as a number.
         const { buttonId } = args as { readonly buttonId: number };
@@ -195,7 +211,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
       false,
     ),
     completeStorageWrite: sessionOp(
-      (args) =>
+      (args): args is { readonly actionId: number; readonly stored: boolean } =>
         isRecord(args) &&
         exactly(args, ["actionId", "stored"]) &&
         typeof args.actionId === "number" &&
@@ -215,7 +231,7 @@ export function inputOps(_context: PlayerOpsContext): BridgeOps {
     ),
     applyStorageEdit: sessionOp(
       // The engine validates the edit itself (`invalidEdit`), as it does today.
-      (args) =>
+      (args): args is { readonly key: string; readonly value: unknown } =>
         isRecord(args) &&
         exactly(args, ["key", "value"]) &&
         typeof args.key === "string" &&

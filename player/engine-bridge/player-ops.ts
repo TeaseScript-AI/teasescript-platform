@@ -104,7 +104,35 @@ function isProject(value: unknown): value is PlayerProject {
   );
 }
 
-function isPrepareArguments(args: unknown): args is { readonly source: PrepareSource } {
+/**
+ * A project as `isProject` admits it: `PlayerProject`'s shape, whose optional fields it also admits as `undefined`; the
+ * compiler validates the paths and contents.
+ */
+interface AdmittedProject {
+  readonly files: readonly { readonly path: string; readonly source: string }[];
+  readonly images?:
+    | readonly {
+        readonly path: string;
+        readonly keywords: readonly string[];
+        readonly tagsProblem?: string | undefined;
+      }[]
+    | undefined;
+  readonly unreadableFiles?:
+    | readonly {
+        readonly path: string;
+        readonly reason: string;
+        readonly folder?: boolean | undefined;
+      }[]
+    | undefined;
+}
+
+function isPrepareArguments(
+  args: unknown,
+): args is {
+  readonly source:
+    | { readonly kind: "source"; readonly script: string | AdmittedProject }
+    | { readonly kind: "plan"; readonly text: string };
+} {
   if (!isRecord(args) || !exactly(args, ["source"]) || !isRecord(args.source)) return false;
   const source = args.source;
   if (source.kind === "plan")
@@ -276,7 +304,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     // hold. For sessions that reach the Player in any way: started, continued, restored or transferred.
     planMetadata: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly plan: string } =>
         isRecord(args) && exactly(args, ["plan"]) && typeof args.plan === "string",
       run: (args) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
@@ -287,7 +315,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     // Lets go of what the connection holds (`releaseConnection`); the connection stays open for more work.
     teardown: {
       session: "none",
-      checkArguments: (args) => args === null,
+      checkArguments: (args): args is null => args === null,
       run: (_args, sessions) => {
         releaseConnection(context, sessions);
         return { result: null };

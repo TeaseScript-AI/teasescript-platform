@@ -43,7 +43,7 @@ startBridgeHost(
     ...playerBridgeOps(context),
     restoreForTest: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly plan: string; readonly snapshotJson: string } =>
         isRecord(args) &&
         exactly(args, ["plan", "snapshotJson"]) &&
         typeof args.plan === "string" &&
