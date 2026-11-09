@@ -49,7 +49,7 @@ import { itemScope } from "./type-core-items.js";
  * The type core's oracles, one library for the tests and for the generator corpus (`tests/families/`): the
  * diagnostics' identity a stop keeps (`stopIdentity`, `keptErrors`) and the merged stops' (`mergedIdentity`); what a
  * program publishes, exactly (`publishedAnswers`, `publishedRoute`, `publication`) and with two orders set aside
- * (`publishedUpToOrder`); the four modes they are compared in (`MODES`, `inMode`); which decisions
+ * (`publishedUpToOrder`, TABLE r4.185); the four modes they are compared in (`MODES`, `inMode`); which decisions
  * stop and when (`stopSet`); a compile's decision records, its receiving completion's included (`decisionRecords`); and a
  * stopped plan's part checks against the natural plan's (`partProblems`, #1682). A test or generator that needs another
  * projection adds it here.
@@ -57,7 +57,7 @@ import { itemScope } from "./type-core-items.js";
 
 /**
  * A diagnostic as a stop must keep it, its identity: without the facts its fix's code forms read (`expects`,
- * `present`), which a stop never proves, so a fix there may be words. The stop tests compare these.
+ * `present`), which a stop never proves, so a fix there may be words (TABLE r4.162). The stop tests compare these.
  */
 export function stopIdentity(
   diagnostic: CoreDiagnostic | CheckedDiagnostic,
@@ -74,7 +74,7 @@ export function sentences(text: string): string[] {
 
 /**
  * The errors of `source`'s analysis as a stop keeps them: each error's identity and its message's first sentence. A
- * stop proves nothing of a fix's code, so the fix after that sentence may be words.
+ * stop proves nothing of a fix's code, so the fix after that sentence may be words (TABLE r4.162).
  */
 export function keptErrors(
   answers: Answers,
@@ -87,7 +87,7 @@ export function keptErrors(
 }
 
 /**
- * The record with the route as the merged stops pin it: each diagnostic by its identity
+ * The record with the route as the merged stops pin it (TABLE r4.185): each diagnostic by its identity
  * (`stopIdentity`) without the other facts only its fix reads, the kinds its site's other diagnostics report
  * (`besides`) and its store root's declaration, and each of the route's (`publishedRoute`'s text) by its severity, code
  * and span, without its message.
@@ -161,8 +161,8 @@ function compareSites(a: readonly number[], b: readonly number[]): number {
 /**
  * One analysis's part: its answers (the outcome and diagnostics with the checks that owe the runtime nothing,
  * `checkedResult`, and the checks) and every binding's admitted types at its root and its element (`text`); the record
- * alone, its answers and the same serialized (`record`); and whether each of its lists is in source order of its sites.
- * The admitted types are the oracle's own questions (`Questions`, two cells a binding; `questions`, a
+ * alone, its answers and the same serialized (`record`); and whether each of its lists is in source order of its sites
+ * (r4.86 (1)). The admitted types are the oracle's own questions (`Questions`, two cells a binding; `questions`, a
  * publication's meter, else one of their own): where they stop, it throws `AnswersStopped`, never publishing answers
  * asked again on a stopped analysis. The answers and the checks are the backend's questions, which stop past the
  * finished analysis's allowance as the backend's do (`asked`).
@@ -529,13 +529,13 @@ export function occurrences(answers: Answers, order: (items: string[]) => string
 }
 
 /**
- * What a program publishes with two orders set aside (docs/specifications/type-inference-accepted-record.md#r4-185,
- * G5's stops whose own entries merge into one): the order of the items in an answer and of the kinds in a decided
- * admitted type. Every binding's admitted type and decider site at its root, its element and each known property two
- * levels down; every occurrence's answer (`occurrences`, its items sorted). Test-only, for small sources
- * (`type-core-oracles.test.ts`, `type-core-contract.test.ts`), never a publication the families runner reads; their
- * questions are not under the oracle's own bound (`Questions`): past the finished analysis's allowance they are asked
- * again on the stopped analysis (`asked`), so the text holds the stopped answers with no mark of the stop.
+ * What a program publishes with two orders set aside (TABLE r4.185, G5's stops whose own entries merge into one): the
+ * order of the items in an answer and of the kinds in a decided admitted type. Every binding's admitted type and
+ * decider site at its root, its element and each known property two levels down; every occurrence's answer
+ * (`occurrences`, its items sorted). Test-only, for small sources (`type-core-oracles.test.ts`,
+ * `type-core-contract.test.ts`), never a publication the families runner reads; their questions are not under the
+ * oracle's own bound (`Questions`): past the finished analysis's allowance they are asked again on the stopped analysis
+ * (`asked`), so the text holds the stopped answers with no mark of the stop.
  */
 export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[]): string {
   return asked(answers, (answers) => upToOrder(answers, bindings));
