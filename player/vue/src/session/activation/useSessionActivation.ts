@@ -11,7 +11,12 @@ import type { TemporalContext } from "../../../../../src/index.js";
 import type { Problem } from "../../start-and-end/ProblemCard.vue";
 import type { PlayerSessionOptions, PlayerSessionStart } from "../usePlayerSession.js";
 import type { useKeptSession } from "../persistence/useKeptSession.js";
-import { useActivationRun, type Origin, type RunOrigin } from "./useActivationRun.js";
+import {
+  useActivationRun,
+  type Origin,
+  type ReplyHandlers,
+  type RunOrigin,
+} from "./useActivationRun.js";
 import { continueRestored } from "./work/continue.js";
 import { stopAt, stopLateStart, type StopPage } from "./work/stop.js";
 import {
@@ -524,9 +529,9 @@ export function useSessionActivation({
     }
     if (!(begun instanceof Promise)) return started(pending, sessionOfBegun(begun), origin);
     sessionBeginning = begun;
-    // Its terminal reaction: the session goes on only for its live activation, while that is still the one begun; an
-    // obsolete activation's failure stops nothing, and the session that replaced it goes on.
-    const settled = activationRun.reply(origin, begun, {
+    // Its terminal reaction, the begin's own: the session goes on only for its live activation, while that is still the
+    // one begun; an obsolete activation's failure stops nothing, and the session that replaced it goes on.
+    const handlers: ReplyHandlers<PlayerSession | SessionTarget> = {
       done: (next) => {
         if (!isDisposed() && token === activationToken)
           started(pending, sessionOfBegun(next), origin);
@@ -536,7 +541,11 @@ export function useSessionActivation({
         if (!isDisposed() && token === activationToken) reportActivationError(origin, error);
         return undefined;
       },
-    });
+    };
+    const settled = begun.then(
+      (next) => activationRun.settle(origin, { ok: true, value: next }, handlers),
+      (error: unknown) => activationRun.settle(origin, { ok: false, error }, handlers),
+    );
     begunInFlight = settled;
     void settled.finally(() => {
       if (begunInFlight === settled) begunInFlight = null;

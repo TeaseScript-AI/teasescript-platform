@@ -71,7 +71,7 @@ const DECLARED = {
       "report",
     ),
     StopPage: operations("admits", "isCurrent", "haltUntil", "endHalting", "commit"),
-    AdoptPage: operations("admits", "reply", "adopted", "quiet", "report"),
+    AdoptPage: operations("admits", "settle", "adopted", "quiet", "report"),
     DebugModePage: operations(
       "admits",
       "publish",
@@ -93,12 +93,14 @@ const DECLARED = {
       "report",
     ),
   },
+  /** The handler objects work declares and passes to the record's `settle`: their functions are handlers. */
+  handlerObjects: ["ReplyHandlers"],
   /** The handles work holds: each bound to its origin, admitting it at each operation. */
   handles: ["SessionTarget", "StopTarget", "DrawSection"],
   /** The other carriers, each only at the positions named: the publication hook's session and the reply's handlers. */
   carriers: {
     PlayerSession: ["SessionTarget.setDebugModeShown(1)(0)", "DebugModePage.publish(0)"],
-    ReplyHandlers: ["AdoptPage.reply(2)"],
+    ReplyHandlers: ["AdoptPage.settle(2)"],
   },
 };
 
@@ -116,10 +118,14 @@ const SITES: readonly string[] = [
   `${WORK}adopt.ts adopt > failed: callback`,
   `${WORK}adopt.ts adopt > failed: page AdoptPage.quiet`,
   `${WORK}adopt.ts adopt > failed: page AdoptPage.report`,
+  `${WORK}adopt.ts adopt > then:callback#1: callback`,
+  `${WORK}adopt.ts adopt > then:callback#1: page AdoptPage.settle`,
+  `${WORK}adopt.ts adopt > then:callback#2: callback`,
+  `${WORK}adopt.ts adopt > then:callback#2: page AdoptPage.settle`,
   `${WORK}adopt.ts adopt: action SessionTarget.adoptRandom`,
   `${WORK}adopt.ts adopt: page AdoptPage.admits`,
-  `${WORK}adopt.ts adopt: page AdoptPage.reply`,
   `${WORK}adopt.ts adopt: promise resolve`,
+  `${WORK}adopt.ts adopt: reaction then`,
   `${WORK}continue.ts continueRestored > catch:callback#1: callback`,
   `${WORK}continue.ts continueRestored > catch:callback#1: page ContinueWork.quiet`,
   `${WORK}continue.ts continueRestored > catch:callback#1: page ContinueWork.report`,

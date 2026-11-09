@@ -471,14 +471,26 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/session/activation/useActivationRun.ts useActivationRun > reply > then:callback.1":
-    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
-  "player/vue/src/session/activation/useActivationRun.ts useActivationRun > reply > then:callback.2":
-    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
+  // The adoption's own reaction, which settles its reply through the record's `settle`: its success writes the
+  // history's revision, and only a handler's failure reaches the error stop; its failure is the error stop.
+  "player/vue/src/session/activation/work/adopt.ts adopt > then:callback.1": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
+  "player/vue/src/session/activation/work/adopt.ts adopt > then:callback.2": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > startDebugSessionAnew > then:callback":
     ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
-  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback":
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#1":
     ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
+  // The begin's own reaction, which settles it through the record's `settle`: its success is the creation, its
+  // failure the error stop, as at the base.
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#2.1":
+    ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#2.2":
+    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > then:callback": [
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],

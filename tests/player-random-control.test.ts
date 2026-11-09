@@ -616,7 +616,7 @@ test("every random-op sender in the composable is classified as adopting or not"
       "if (session.value !== null) adoptRandom(session.value);",
       "adopt: (target, run) => adoptRandom(sessionOf(target), run),",
       // The adoption's work and its target's operation (`work/`), which sends it.
-      "return page.reply(origin, target.adoptRandom(intent), {",
+      "return target.adoptRandom(intent).then(",
       "adoptRandom(intent: RandomIntent): Promise<BridgeResult>;",
       "adoptRandom(intent) {",
     ],

@@ -121,7 +121,7 @@ export function useRandomControl({
     // writes nothing and its failure stops nothing (`work/adopt.ts`).
     void adopt(sessionTarget(next, origin, activationRun), lastRandom, origin, {
       admits: (each) => activationRun.admits(each),
-      reply: (each, pending, handlers) => activationRun.reply(each, pending, handlers),
+      settle: (each, outcome, handlers) => activationRun.settle(each, outcome, handlers),
       adopted: (reply) => {
         if (!isDisposed()) adoptRevision(reply);
       },

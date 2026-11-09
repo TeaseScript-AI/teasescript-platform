@@ -110,28 +110,22 @@ export function useActivationRun({
       return () => void held.delete(cleanup);
     },
     /**
-     * Settles `pending` for `origin`, in the one reaction attached to it: its `done` or `failed` while `origin` lives,
-     * else its `retired` cleanup. A handler's error goes to `origin`'s error stop; a handler returns nothing, never a
-     * promise, so no later work hides in it.
+     * Settles a reply for `origin`, inside the one reaction its entry attaches to the reply (so the reaction stays the
+     * entry's own): its `done` or `failed` while `origin` lives, else its `retired` cleanup. A handler's error goes to
+     * `origin`'s error stop; a handler returns nothing, never a promise, so no later work hides in it.
      */
-    reply<T>(origin: Origin, pending: Promise<T>, handlers: ReplyHandlers<T>): Promise<void> {
-      const settle = (outcome: Settlement<T>) => {
-        try {
-          const returned: unknown =
-            live !== origin
-              ? handlers.retired?.(outcome)
-              : outcome.ok
-                ? handlers.done(outcome.value)
-                : handlers.failed(outcome.error);
-          if (returned !== undefined) throw new TypeError("A reply's handler returns nothing.");
-        } catch (error) {
-          report(origin, error);
-        }
-      };
-      return pending.then(
-        (value) => settle({ ok: true, value }),
-        (error: unknown) => settle({ ok: false, error }),
-      );
+    settle<T>(origin: Origin, outcome: Settlement<T>, handlers: ReplyHandlers<T>): void {
+      try {
+        const returned: unknown =
+          live !== origin
+            ? handlers.retired?.(outcome)
+            : outcome.ok
+              ? handlers.done(outcome.value)
+              : handlers.failed(outcome.error);
+        if (returned !== undefined) throw new TypeError("A reply's handler returns nothing.");
+      } catch (error) {
+        report(origin, error);
+      }
     },
     /**
      * Revokes the live record for good at the loss of its connection: its failure recording goes, and nothing of it

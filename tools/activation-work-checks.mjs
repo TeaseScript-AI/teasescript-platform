@@ -13,8 +13,8 @@
 // 4. Discovery: each work entry's call sites, awaits, callbacks and hooks, by the symbol each call resolves to, and
 //    those of every work helper it calls or holds (parameter defaults included), followed by symbol once per entry; a
 //    call to anything but the work's own protocol, its own functions or a promise's reactions fails.
-// 5. Callback boundaries: outside the adapter, a function value is a local `const`, or a reaction, handler or body passed
-//    to a promise or a protocol operation. (`no-floating-promises` with `ignoreVoid: false` owns the chains' ends.)
+// 5. Callback boundaries: outside the adapter, a function value is a local `const`, a handler of a declared handler
+//    object, or a reaction, handler or body passed to a promise or a protocol operation. (`no-floating-promises` with `ignoreVoid: false` owns the chains' ends.)
 //
 // These are syntax and shape rules: they do not prove what a trusted adapter does, nor when a callback runs.
 // The declarations (what is admitted) are the caller's: `tests/helpers/activation-work-checks.ts` holds them.
@@ -595,6 +595,18 @@ function callbacks({ checker, rel, declared, file, refuse }) {
         refuse("callbacks", node, "writable callback");
       return;
     }
+    // A handler of a declared handler object (`const handlers: ReplyHandlers<T> = { … }`), which the work passes to a
+    // protocol operation.
+    if (
+      ts.isPropertyAssignment(parent) &&
+      ts.isObjectLiteralExpression(parent.parent) &&
+      ts.isVariableDeclaration(parent.parent.parent) &&
+      (parent.parent.parent.parent.flags & ts.NodeFlags.Const) !== 0 &&
+      parent.parent.parent.type !== undefined &&
+      ts.isTypeReferenceNode(parent.parent.parent.type) &&
+      declared.handlerObjects.includes(parent.parent.parent.type.typeName.getText())
+    )
+      return;
     const call =
       ts.isPropertyAssignment(parent) && ts.isObjectLiteralExpression(parent.parent)
         ? parent.parent.parent

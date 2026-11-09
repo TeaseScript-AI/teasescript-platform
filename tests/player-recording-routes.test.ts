@@ -352,8 +352,12 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "its session goes to `stopAt`, which admits the origin and the stop token before its halt, and only stops it otherwise; its failure ends the halting, then admits both before the incident",
   "stop.ts: stopAt: then acknowledged": READMITS,
   // Reached from the activation bodies through the functions they call.
-  "useActivationRun.ts: useActivationRun > reply: then pending":
-    "the one settlement boundary: its handlers act on the origin's behalf only while that lives, and their errors go to that origin's error stop (`reply`)",
+  // Each entry's own reaction settles through the record's `settle`: its handlers act on the origin's behalf only while
+  // that lives, and their errors go to that origin's error stop.
+  "useSessionActivation.ts: useSessionActivation > startFrom: then begun":
+    "the begin's reaction settles through the record's `settle`, which admits the origin before either handler",
+  "adopt.ts: adopt: then target.adoptRandom":
+    "the adoption's reaction settles through the record's `settle`, which admits the origin before either handler",
   // The clock's section (#1983): its observation, then the caller's body, which re-admits first (checked below).
   "useRuntimeSceneClock.ts: useRuntimeSceneClock > section > bridgeOf(current).section:callback: await observeIn":
     "the section's observation, before the caller's body: the activation work's body re-admits as it begins (`resolveDraw`, checked below)",

@@ -1,6 +1,6 @@
 import type { BridgeResult } from "../../../../../engine-bridge/client.js";
 import type { RandomIntent } from "../../../../../engine-bridge/player-ops.js";
-import type { Origin, ReplyHandlers } from "../useActivationRun.js";
+import type { Origin, ReplyHandlers, Settlement } from "../useActivationRun.js";
 import type { SessionTarget } from "./target.js";
 
 /*
@@ -11,11 +11,8 @@ import type { SessionTarget } from "./target.js";
 /** What the adoption's work needs from the random control's owner. */
 export interface AdoptPage {
   readonly admits: (origin: Origin) => boolean;
-  readonly reply: <T>(
-    origin: Origin,
-    pending: Promise<T>,
-    handlers: ReplyHandlers<T>,
-  ) => Promise<void>;
+  /** Settles a reply for `origin`, inside the reaction this work attaches (the record's `settle`). */
+  readonly settle: <T>(origin: Origin, outcome: Settlement<T>, handlers: ReplyHandlers<T>) => void;
   /** Takes the history's revision from the adoption's reply, while the Player lives. */
   readonly adopted: (reply: BridgeResult) => void;
   /** Whether a failure is no error stop (it ends quietly, or the Player was unmounted). */
@@ -31,7 +28,7 @@ export function adopt(
   page: AdoptPage,
 ): Promise<void> {
   if (!page.admits(origin)) return Promise.resolve();
-  return page.reply(origin, target.adoptRandom(intent), {
+  const handlers: ReplyHandlers<BridgeResult> = {
     done: (reply) => {
       page.adopted(reply);
       return undefined;
@@ -40,5 +37,10 @@ export function adopt(
       if (!page.quiet(error)) page.report(origin, error);
       return undefined;
     },
-  });
+  };
+  // The adoption's own reaction, in which the record settles its reply.
+  return target.adoptRandom(intent).then(
+    (reply) => page.settle(origin, { ok: true, value: reply }, handlers),
+    (error: unknown) => page.settle(origin, { ok: false, error }, handlers),
+  );
 }
