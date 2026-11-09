@@ -5,7 +5,7 @@ import type { KeyId, PathRef, PathSteps } from "../contract/key-ids.js";
 import type { Definition, Key } from "../definitions.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
-import type { LandingTape } from "./landings.js";
+import type { LandingTape } from "./landings/inheritance.js";
 import type { CoreProgram } from "../program.js";
 import type { Touch, TouchRef } from "../touch.js";
 import { type CanonicalKey } from "../contract/key-ids.js";

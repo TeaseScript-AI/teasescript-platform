@@ -8,7 +8,7 @@ import {
   withLandingComparison,
   withLandingOps,
   type LandingOp,
-} from "../src/type-inference/core/admission/landings.js";
+} from "../src/type-inference/core/admission/landings/inheritance.js";
 import { Admission } from "../src/type-inference/core/admission.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { WorkLedger } from "../src/type-inference/core/budget.js";

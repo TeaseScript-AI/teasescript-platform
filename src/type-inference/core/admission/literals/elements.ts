@@ -30,7 +30,7 @@ import { refText, type Touch, Touches, type TouchRef } from "../../touch.js";
 import { hotSets } from "../groups.js";
 import { heldMeetings } from "../held.js";
 import { concrete, deciding, fits, NUMERIC } from "../kinds.js";
-import { inheritance, landedBelow } from "../landings.js";
+import { inheritance, landedBelow } from "../landings/inheritance.js";
 import type { OwnStructure } from "../model.js";
 import { ownOf } from "../own.js";
 import { earliestDecider } from "../scan.js";

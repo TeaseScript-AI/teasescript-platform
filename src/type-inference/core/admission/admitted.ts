@@ -9,7 +9,8 @@ import { withoutEmpty } from "../exact-path.js";
 import { kindsInItsOrder, REASON, type Item, type ItemTag } from "../items.js";
 import { drive, openAbove } from "../inherited/inherited.js";
 import { admitsNumber, concrete } from "./kinds.js";
-import { inheritance, landed } from "./landings.js";
+import { inheritance } from "./landings/inheritance.js";
+import { landed } from "./landings/landed.js";
 import { permittedAt, unrestricted } from "./permitted.js";
 import { inputsAt, scanAt } from "./scan.js";
 
