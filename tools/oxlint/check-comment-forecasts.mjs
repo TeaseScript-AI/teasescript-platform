@@ -50,7 +50,7 @@ const CORE = "src/type-inference/core/";
  * `S3 §5`) is not a label; the glossary's one row for a bare `§N` is not checked against comments.
  */
 export const LABEL =
-  /\b(?:S\d{1,2}[a-z]?|[A-Z]{1,2}\d{1,3}[a-z]?|AD-\d|PLAN|checkpoint \d+|S\d-[A-Z]+(?:-[A-Z]+)*)\b/gu;
+  /\b(?:S\d-[A-Z]+(?:-[A-Z]+)*|S\d{1,2}[a-z]?|[A-Z]{1,2}\d{1,3}[a-z]?|AD-\d|PLAN|checkpoint \d+)\b/gu;
 
 /** A reviewer's round just before an id makes it a review reference ("Codex r2's B1"), not a label. */
 const REVIEWED = /\b(?:Codex|Astra|Sol|Fable|Opus)\b[^.;]{0,30}$/u;

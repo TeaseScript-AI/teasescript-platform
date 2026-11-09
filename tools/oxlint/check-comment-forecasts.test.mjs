@@ -136,7 +136,7 @@ test("a comment's port-plan or research label is found; a review reference, a do
     labelsIn(
       "a.ts",
       [
-        "// S8c's stop marks, by C9 (AD-1) and PLAN §6b, TABLE's §3.2",
+        "// S8c's stop marks, by C9 (AD-1) and PLAN §6b (S6-CARRIERS §4.1), TABLE's §3.2",
         "/* Codex r2's B1 and Astra r1 F2 */",
         "// V30 §19",
         'const s = "C13";',
@@ -148,6 +148,7 @@ test("a comment's port-plan or research label is found; a review reference, a do
       { line: 1, label: "C9" },
       { line: 1, label: "AD-1" },
       { line: 1, label: "PLAN" },
+      { line: 1, label: "S6-CARRIERS" },
     ],
   );
 });
