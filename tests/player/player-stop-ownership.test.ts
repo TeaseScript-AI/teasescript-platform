@@ -394,12 +394,12 @@ test("a session op still awaited does not delay the halt fence: a request behind
     {
       waiting: {
         session: "existing",
-        checkArguments: () => true,
+        checkArguments: (_args): _args is unknown => true,
         run: () => new Promise((resolve) => (settle = () => resolve({ result: "done" }))),
       },
       add: {
         session: "existing",
-        checkArguments: () => true,
+        checkArguments: (_args): _args is unknown => true,
         run: () => {
           ran += 1;
           return { result: ran };

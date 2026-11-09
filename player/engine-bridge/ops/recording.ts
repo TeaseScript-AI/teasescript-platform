@@ -69,7 +69,8 @@ function recordingRunOps(context: PlayerOpsContext): BridgeOps {
     // The Player's disposal ends its run.
     retireRun: {
       session: "none",
-      checkArguments: (args) => isRecord(args) && exactly(args, ["run"]) && isRun(args.run),
+      checkArguments: (args): args is { readonly run: number } =>
+        isRecord(args) && exactly(args, ["run"]) && isRun(args.run),
       run: (args) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
         const { run } = args as { readonly run: number };
@@ -99,7 +100,7 @@ function recordingRunOps(context: PlayerOpsContext): BridgeOps {
     // The named session's recording, kept under a new ticket when the recorder records that session's engine.
     captureRecording: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly session: string } =>
         isRecord(args) && exactly(args, ["session"]) && typeof args.session === "string",
       run: (args, sessions) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
@@ -145,7 +146,12 @@ function exportCaptureOps(context: PlayerOpsContext): BridgeOps {
     // is not proved; never with another recording or state in its place.
     captureExport: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (
+        args,
+      ): args is {
+        readonly session: string | null;
+        readonly recording: "current" | "none" | { readonly ticket: string };
+      } =>
         isRecord(args) &&
         exactly(args, ["session", "recording"]) &&
         (args.session === null || typeof args.session === "string") &&
@@ -210,7 +216,7 @@ function exportCaptureOps(context: PlayerOpsContext): BridgeOps {
     // What an export ticket's file needs of the engine: its plan's hash and, with `replay`, its replay data.
     exportPrepare: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly ticket: string; readonly replay: boolean } =>
         isRecord(args) &&
         exactly(args, ["ticket", "replay"]) &&
         typeof args.ticket === "string" &&

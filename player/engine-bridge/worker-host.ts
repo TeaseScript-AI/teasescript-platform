@@ -64,7 +64,7 @@ export interface BridgeOp {
   readonly session: "none" | "existing";
   /** Whether a session op acts on what its caller saw, and so needs a basis the session accepts; yes by default. */
   readonly readsBasis?: boolean;
-  readonly checkArguments: (args: unknown) => boolean;
+  readonly checkArguments: (args: unknown) => args is unknown;
   readonly run: (
     args: unknown,
     sessions: HostSessions,
@@ -118,7 +118,7 @@ const HOST_OPS: BridgeOps = {
   release: {
     session: "existing",
     readsBasis: false,
-    checkArguments: (args) => args === null,
+    checkArguments: (args): args is null => args === null,
     run: (_args, sessions, session) => {
       sessions.delete(session!.id);
       return { result: null };

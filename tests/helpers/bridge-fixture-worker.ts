@@ -96,7 +96,7 @@ const ops: BridgeOps = {
   },
   echo: {
     session: "none",
-    checkArguments: () => true,
+    checkArguments: (_args): _args is unknown => true,
     // Its arguments come back as its result: a message of any shape both ways (`transport.ts`).
     run: (args) => ({ result: args }),
   },

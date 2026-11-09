@@ -11,7 +11,7 @@ export function mediaOps(_context: PlayerOpsContext): BridgeOps {
     // A medium loaded, or failed to. The engine checks the report against its media ID, which says what it is about,
     // so like L5c's input ops it reads no basis.
     reportMediaLoad: sessionOp(
-      (args) =>
+      (args): args is { readonly mediaId: number; readonly report: Record<string, unknown> } =>
         isRecord(args) &&
         exactly(args, ["mediaId", "report"]) &&
         typeof args.mediaId === "number" &&

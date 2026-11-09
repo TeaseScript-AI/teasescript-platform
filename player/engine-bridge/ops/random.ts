@@ -68,7 +68,7 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
     // session's next op: the host aligns to it. It gives no session to anyone (`adoptRandom` does).
     randomControl: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly intent: RandomIntent } =>
         isRecord(args) && exactly(args, ["intent"]) && isRandomIntent(args.intent),
       run: (args) => {
         // EVIDENCE: validation: checkArguments accepted the intent.
@@ -81,7 +81,7 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
     // aligns first, so the session runs with the control it was adopted under.
     adoptRandom: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly session: string; readonly intent: RandomIntent } =>
         isRecord(args) &&
         exactly(args, ["session", "intent"]) &&
         typeof args.session === "string" &&
@@ -102,7 +102,7 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
     // up until its kept draw went on naturally.
     releaseRandom: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly session: string } =>
         isRecord(args) && exactly(args, ["session"]) && typeof args.session === "string",
       run: (args, sessions) => {
         // EVIDENCE: validation: checkArguments accepted the session's ID.
@@ -115,7 +115,13 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
     // the session meets next decide from it, and comes out again exactly if the engine refuses it; a record asked for
     // before a reset since enters nothing. Least tried and records need the session's Player to hold the random state.
     resolveDraw: sessionOp(
-      (args) =>
+      (
+        args,
+      ): args is {
+        readonly drawId: number;
+        readonly outcome: DrawResolution;
+        readonly record: { readonly resetAt: number } | null;
+      } =>
         isRecord(args) &&
         exactly(args, ["drawId", "outcome", "record"]) &&
         typeof args.drawId === "number" &&
@@ -176,7 +182,7 @@ export function randomOps(context: PlayerOpsContext): BridgeOps {
     // What `site` took, for the picker: a read (`PlayerBridge.read`) of the session's Player's history.
     randomTried: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly session: string; readonly site: string } =>
         isRecord(args) &&
         exactly(args, ["session", "site"]) &&
         typeof args.session === "string" &&

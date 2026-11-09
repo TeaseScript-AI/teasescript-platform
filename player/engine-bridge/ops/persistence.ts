@@ -10,6 +10,7 @@ import { exactly, isEventLog, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
 import type { BridgeOps, HostSessions } from "../worker-host.js";
 import { isHistoryMarks, parseHistoryMarks } from "../../debug/debug-history-marks.js";
+import type { HistoryMarks } from "../../debug/debug-history-marks.js";
 import { HeldSession, introduction } from "./session.js";
 
 /*
@@ -115,7 +116,7 @@ function planTextOps(context: PlayerOpsContext): BridgeOps {
     // Writes the plan's canonical JSON in a task of its own, unless it is written or waiting.
     preparePlanText: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly plan: string } =>
         isRecord(args) && exactly(args, ["plan"]) && typeof args.plan === "string",
       run: (args) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
@@ -141,7 +142,7 @@ function planTextOps(context: PlayerOpsContext): BridgeOps {
     // Lets go of the plan's JSON, written or waiting, as a page that closes does: nothing needs it.
     releasePlanText: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly plan: string } =>
         isRecord(args) && exactly(args, ["plan"]) && typeof args.plan === "string",
       run: (args) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
@@ -153,7 +154,7 @@ function planTextOps(context: PlayerOpsContext): BridgeOps {
     // The plan's canonical JSON, read: what an import's save stores. It keeps nothing the page did not reserve.
     planText: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly plan: string } =>
         isRecord(args) && exactly(args, ["plan"]) && typeof args.plan === "string",
       run: (args) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
@@ -173,7 +174,7 @@ function keptStateOps(context: PlayerOpsContext): BridgeOps {
     // The session's state as JSON, from the trusted export, and with `plan` that plan's JSON, read.
     captureKeep: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly session: string; readonly plan: string | null } =>
         isRecord(args) &&
         exactly(args, ["session", "plan"]) &&
         isSessionId(args.session) &&
@@ -213,7 +214,7 @@ function keptStateOps(context: PlayerOpsContext): BridgeOps {
     // The session's checkpoint, as an export of the session carries it.
     captureCheckpoint: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (args): args is { readonly session: string } =>
         isRecord(args) && exactly(args, ["session"]) && isSessionId(args.session),
       run: (args, sessions) => {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
@@ -232,7 +233,15 @@ function keptStateOps(context: PlayerOpsContext): BridgeOps {
     // introduced.
     restoreKept: {
       session: "none",
-      checkArguments: (args) =>
+      checkArguments: (
+        args,
+      ): args is {
+        readonly plan: string;
+        readonly planJson: string;
+        readonly snapshotJson: string;
+        readonly events: readonly InterpreterEvent[];
+        readonly marks: HistoryMarks;
+      } =>
         isRecord(args) &&
         exactly(args, ["plan", "planJson", "snapshotJson", "events", "marks"]) &&
         typeof args.plan === "string" &&
