@@ -132,6 +132,55 @@ self-dependent receiver as a budget failure gave a false error on a 30-node prog
 
 **Source.** The stage S4 builder's question after review round 1, ruled by the lead, 2026-10-24.
 
+### r4-45
+
+**The two known products of W34's realization stay gated known limits (the owner's decision).**
+
+**Rule.** Two products of the port's tested-and-copied-source lookup stay gated known limits:
+- (a) more than four tested sources, each in more than four anchors of one tree, read many times at one path;
+- (b) sources copied from more than four shared roots, stored at one path every copy reads.
+
+The gate is a regression check on the 64 → 128 growth step only (3.37 for (a) and 2.53 for (b)), not a bound at larger
+sizes. A change to that lookup re-measures and proposes the gate with its counts, and never retunes a threshold to
+protect the margin.
+- **Trigger to reconsider:** a realistic script shows both dimensions: many tested or copied sources meeting at one
+  path, each with many anchors, read there many times.
+
+**Reason.** The owner chose option A over option B, a cross-source index per path, because B costs a lot, would create a
+bigger problem elsewhere (it moves the cost to the other axis, a source's anchors × its tested or stored paths), can be
+made linear later, and is written down so it can be reconsidered. The products reach the allowance floor only between
+k = 512 and 1,024 for (a), and beyond k ≈ 4,000 for (b). These are different shapes from the close shapes the port fixed
+first, which are linear at k = 1,024 in both orders.
+
+**Source.** The owner's decision on S4's two known products, through the orchestrator, after Astra's round-2 judgment
+and the S4 builder's estimate, 2026-10-24.
+
+**Bounded by:** option B is deferred; if it comes, it is a separate PR after S4.
+
+### r4-49
+
+**`A6-chain`, admission's passes × stores, stays a gated known limit (the owner's decision).**
+
+**Rule.** The product "admission's passes × stores (A6), charged" stays a gated known limit. Its shape is a chain of k
+places, each copied from the previous one after that one received a wrong-kind store, then given such a store itself,
+and ending in a written integer. Every link is a compile error, A6 decides in passes until stable, and the chain falls
+one link per pass, so the cost is passes × program.
+
+The gate is a regression check on the 64 → 128 growth step only, 3.92, not a bound at larger sizes. The allowance is
+reached at k = 514, where the script gets one `budget-error` instead of its k errors. A change to admission's passes
+re-measures and proposes the gate with its counts, and never retunes.
+- **Trigger to reconsider:** a realistic script reaches the allowance through cascading rejections.
+
+**Reason.** The owner chose option A. Option B is a worklist in rounds that re-examines only the stores whose evaluation
+read a store whose rejection flipped, reproducing the passes' exact sequence of rejected sets. It is 800 to 1,500 lines
+across eight core files, with a high risk of a stale answer, and needs a differential against the pass-based version.
+The reference model has the same product (k + 3 passes). Of W8's 1,888 records, all but one take at most two passes.
+
+**Source.** The owner's decision on `A6-chain`, through the orchestrator, after the S6 builder's section and the model
+builder's probe, 2026-10-25.
+
+**Bounded by:** option B is deferred to a separate PR.
+
 ### r4-72
 
 **A copied binding's written domain is part of its value class.**
@@ -625,6 +674,27 @@ fallback is the available proof.
 
 **Source.** The lead's rulings on Codex r4 B2 for PR #1597, replacing the finer reading in the 12:05 ruling, and on
 Sol's reconciliation sweep at `366a42d42`, 2026-11-02.
+
+### r4-322
+
+**A combined stop may label a key step more precisely than the demand-only reference (the owner's decision).**
+
+**Rule.** At demands 1 to 3, the demand-only reference spells a dictionary value's or derived list's key step `element`,
+because its own contract read ran out of demand. The combined stop's finishing read spells it `entry`. That finishing
+read takes `keyDomain`, the settled contract, then the written type, then the retained type at a settled stop.
+
+The stop oracle is not relaxed in general. This one difference is allowed only where all three hold:
+1. the more precise label demonstrably follows from a proven type (the settled contract or the written type);
+2. the actual check, its location and the expected types are identical;
+3. no other diagnostic difference is ignored.
+
+**Reason.** The owner chose option A: forbidding the better sentence because an analysis with less information produces
+a vaguer one is illogical. The third condition keeps a real compiler defect from hiding behind a better sentence.
+
+**Source.** The owner's decision on #1595 (construction A), 2026-11-03.
+
+**Bounded by:** the ruling's condition that demand-only runs show 0 differences stands, so the fallback is not added to
+demand-only runs.
 
 ### r4-349
 

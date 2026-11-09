@@ -310,13 +310,13 @@ test("a deep literal's decision grows with its depth, never with its square (#14
 });
 
 /**
- * Admission (TABLE §5, §10.3; the port plan's §3.3): its decisions, rejections, candidates and boundary checks, gated as
- * W34 is; A6's chain of dependent rejections, which takes a pass per link (§8's passes × stores, each pass charged), is
- * a gated known limit by the owner's decision (TABLE r4.49, option A): a regression check on the 64 → 128 step only,
- * at its measured doubling, not a bound at larger sizes; a change to admission's passes re-measures and proposes the
- * gate with its counts, never retunes it. Copies interleaved with conditional stores below their path (S6-CARRIERS
- * §4.7, condition (b)) are gated in the same form, a known limit by the owner's decision too, and so
- * are copies separated by calls storing their source.
+ * Admission (the port plan's §3.3): its decisions, rejections, candidates and boundary checks, gated as W34 is; A6's
+ * chain of dependent rejections, which takes a pass per link (§8's passes × stores, each pass charged), is a gated
+ * known limit by the owner's decision (docs/specifications/type-inference-accepted-record.md#r4-49, option A): a
+ * regression check on the 64 → 128 step only, at its measured doubling, not a bound at larger sizes; a change to
+ * admission's passes re-measures and proposes the gate with its counts, never retunes it. Copies interleaved with
+ * conditional stores below their path (S6-CARRIERS §4.7, condition (b)) are gated in the same form, a known limit by
+ * the owner's decision too, and so are copies separated by calls storing their source.
  */
 test("every admission family's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters(ADMISSION_FAMILIES), []);

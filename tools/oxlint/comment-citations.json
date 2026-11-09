@@ -1,20 +1,4 @@
 {
-  "tests/helpers/type-core-families.ts": {
-    "TABLE r4": 2
-  },
-  "tests/helpers/type-core-held-host.ts": {
-    "TABLE r4": 4
-  },
-  "tests/type-core-stop.test.ts": {
-    "TABLE r4": 1
-  },
-  "tests/type-core-work-b.test.ts": {
-    "TABLE r4": 1
-  },
-  "tests/type-core-work-c.test.ts": {
-    "TABLE r4": 1,
-    "TABLE §": 1
-  },
   "tools/oxlint/check-comment-forecasts.mjs": {
     "TABLE r4": 1,
     "TABLE §": 1,

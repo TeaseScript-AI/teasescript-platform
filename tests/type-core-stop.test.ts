@@ -5993,15 +5993,16 @@ test("a read its one holder's source answers stops where main's does at a small 
 });
 
 /**
- * The owner's one accepted relabel at a combined stop (TABLE r4.322, #1595, the lead's rulings), each form accepted
- * alone and each condition alone refusing it. A stopped check under a more precise label than the reference's generic
- * one: E, the same root place with some `element` steps below it spelled `entry`; or E2, a place's own text whose path up
- * the compiler's projections is the reference's. Both labels are the compiler's own as recorded with each emitted check
- * (`labelIdentities`), never read back from a site, an expression or a name: a check at a method call names its receiver
- * (Codex r6's `xs["a"].add(...)`, `.clear()`, `xs.values[0].clear()`). The real cases are each program's first relabel
- * at a settled combined stop, proved by the natural analysis at that site and by the written type alone; the unit cases
- * change one part of a real one: the check, its location, its expected types or its words (2, 3), its label's place or
- * steps (3), its proof (1), or a label the recorder did not capture (refused and counted, never inferred).
+ * The owner's one accepted relabel at a combined stop (docs/specifications/type-inference-accepted-record.md#r4-322,
+ * #1595, the lead's rulings), each form accepted alone and each condition alone refusing it. A stopped check under a
+ * more precise label than the reference's generic one: E, the same root place with some `element` steps below it
+ * spelled `entry`; or E2, a place's own text whose path up the compiler's projections is the reference's. Both labels
+ * are the compiler's own as recorded with each emitted check (`labelIdentities`), never read back from a site, an
+ * expression or a name: a check at a method call names its receiver (Codex r6's `xs["a"].add(...)`, `.clear()`,
+ * `xs.values[0].clear()`). The real cases are each program's first relabel at a settled combined stop, proved by the
+ * natural analysis at that site and by the written type alone; the unit cases change one part of a real one: the check,
+ * its location, its expected types or its words (2, 3), its label's place or steps (3), its proof (1), or a label the
+ * recorder did not capture (refused and counted, never inferred).
  */
 test("a combined stop's more precise label is accepted only as the owner's three conditions allow (#1595)", () => {
   const mode = HELD_MODES[0]!;

@@ -1891,13 +1891,13 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
 ];
 
 /**
- * W34's two remaining combinations, gated known limits by the owner's decision (TABLE r4.45, PLAN §6b): more than four
- * sources tested at one path, each with more than four anchors in one tree, read there many times; and sources copied
- * from more than four shared roots, stored at one path every copy reads (review r5's generators). The gate is a
- * regression check on the 64 → 128 growth step only (3.37 and 2.53), not a bound at larger sizes: 128 → 256 already
- * grows 3.62 and 2.82. They are reconsidered when a realistic script shows both dimensions; a change to that lookup
- * re-measures them and proposes the gate with its counts, never retunes it; the linear alternative is a separate PR
- * after S4.
+ * W34's two remaining combinations, gated known limits by the owner's decision
+ * (docs/specifications/type-inference-accepted-record.md#r4-45, PLAN §6b): more than four sources tested at one path,
+ * each with more than four anchors in one tree, read there many times; and sources copied from more than four shared
+ * roots, stored at one path every copy reads (review r5's generators). The gate is a regression check on the 64 → 128
+ * growth step only (3.37 and 2.53), not a bound at larger sizes: 128 → 256 already grows 3.62 and 2.82. They are
+ * reconsidered when a realistic script shows both dimensions; a change to that lookup re-measures them and proposes the
+ * gate with its counts, never retunes it; the linear alternative is a separate PR after S4.
  */
 export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -4060,12 +4060,13 @@ function nestedOwn(variant: string, wrap: (inner: string, i: number) => string):
 
 /**
  * A6's chain of k dependent rejections (Sol's twelve-step witness at size k): each copy reads its source after the
- * source's misfit, so each rejection shows only in the pass after the one before it, k passes in all:
- * passes × stores, each pass charged. A gated known limit by the owner's decision (TABLE r4.49, option A): its doubling
- * at k = 64 → 128 as measured, re-measured and proposed with its counts on a change to admission's passes, never
- * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
- * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form,
- * and copies separated by calls storing their source, accepted in it too.
+ * source's misfit, so each rejection shows only in the pass after the one before it, k passes in all: passes × stores,
+ * each pass charged. A gated known limit by the owner's decision
+ * (docs/specifications/type-inference-accepted-record.md#r4-49, option A): its doubling at k = 64 → 128 as measured,
+ * re-measured and proposed with its counts on a change to admission's passes, never retuned; its trigger, a realistic
+ * script reaching the allowance through cascading rejections. Beside it, copies interleaved with conditional stores
+ * below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form, and copies separated by calls storing
+ * their source, accepted in it too.
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {

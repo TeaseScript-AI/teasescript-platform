@@ -382,9 +382,10 @@ test("a chain of records over shared inputs is identified in linear space (round
 });
 
 /**
- * W34's two known products, gated known limits by the owner's decision (TABLE r4.45, PLAN §6b): a regression check on
- * the 64 → 128 growth step only, each held to its measured doubling in either order (3.37 and 2.53); not a bound at
- * larger sizes (128 → 256 grows 3.62 and 2.82), and no linearity is asserted for them.
+ * W34's two known products, gated known limits by the owner's decision
+ * (docs/specifications/type-inference-accepted-record.md#r4-45, PLAN §6b): a regression check on the 64 → 128 growth
+ * step only, each held to its measured doubling in either order (3.37 and 2.53); not a bound at larger sizes (128 → 256
+ * grows 3.62 and 2.82), and no linearity is asserted for them.
  */
 test("W34's two known products grow no faster than measured", () => {
   const steep: string[] = [];

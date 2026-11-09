@@ -788,7 +788,7 @@ export interface CombinedStop {
   readonly records: ReadonlyMap<string, "a" | "w" | "z">;
   /**
    * The reference's checks the stop owes by a more precise label alone, as the natural analysis spells it
-   * (`provenRelabel`, TABLE r4.322), and the records that go with them.
+   * (`provenRelabel`, docs/specifications/type-inference-accepted-record.md#r4-322), and the records that go with them.
    */
   readonly relabelled: {
     readonly checks: ReadonlySet<string>;
@@ -1526,21 +1526,20 @@ function writtenProves(
 }
 
 /**
- * The owner's one accepted difference at a combined stop (TABLE r4.322, #1595, the lead's rulings on its HEAD 0 and on
- * Q3/Q4): the stopped analysis owes the reference's check `u` under a more precise label than the reference's, which ran
- * out of demand reading the key, where all three hold for the stopped check `x`:
- * 1. the label follows from a proven type: the natural analysis (no demand, no stop) names that very value so, a check of
- *    its own at `x`'s whole site, the value read there, targeting the label or a path below it (it need not owe `x`
- *    itself: knowing more, it may owe another check there; the value, never a label's text alone nor a read beside it
- *    in the same walk unit: Codex r1's and r2's B1 on #1687), or a written type at the key proves its form
- *    (`writtenProves`, the written type the reference label's root place declares);
- * 2. the check, its location and its expected types are identical: kind, whole site, boundary and `against`;
- * 3. no other difference is ignored: the label is one of the compiler's two precise forms of the reference's
- *    (`relabelForm`), the words are `u`'s with only the label replaced, and every other part is equal.
- * Both labels are the compiler's own as recorded (`labelIdentities`: `reference` the reference's, `stopped` the stopped
- * analysis's): a check of these whose label was not recorded is refused and counted (`LabelIdentities.missing`), never
- * read back from its site, its expression or a name. The stopped check accepted, else `undefined`. `natural` is the
- * natural analysis's checks; `graph` the program's.
+ * The owner's one accepted difference at a combined stop (docs/specifications/type-inference-accepted-record.md#r4-322,
+ * #1595, the lead's rulings on its HEAD 0 and on Q3/Q4): the stopped analysis owes the reference's check `u` under a
+ * more precise label than the reference's, which ran out of demand reading the key, where all three hold for the
+ * stopped check `x`: 1. the label follows from a proven type: the natural analysis (no demand, no stop) names that very
+ * value so, a check of    its own at `x`'s whole site, the value read there, targeting the label or a path below it (it
+ * need not owe `x`    itself: knowing more, it may owe another check there; the value, never a label's text alone nor a
+ * read beside it    in the same walk unit: Codex r1's and r2's B1 on #1687), or a written type at the key proves its
+ * form    (`writtenProves`, the written type the reference label's root place declares); 2. the check, its location and
+ * its expected types are identical: kind, whole site, boundary and `against`; 3. no other difference is ignored: the
+ * label is one of the compiler's two precise forms of the reference's    (`relabelForm`), the words are `u`'s with only
+ * the label replaced, and every other part is equal. Both labels are the compiler's own as recorded (`labelIdentities`:
+ * `reference` the reference's, `stopped` the stopped analysis's): a check of these whose label was not recorded is
+ * refused and counted (`LabelIdentities.missing`), never read back from its site, its expression or a name. The stopped
+ * check accepted, else `undefined`. `natural` is the natural analysis's checks; `graph` the program's.
  */
 export function provenRelabel(
   u: Obligation,
@@ -1917,24 +1916,24 @@ export function provenRewording(
 }
 
 /**
- * A combined stop's rule (S8 and its inventory). The demand-only run is the reference, recorded with
- * its consumers' reads (`recordingReads`); each of its checks the stopped analysis neither keeps nor marks is accepted only
- * by one clause, every site whole (file and offsets), a slot a site, target, boundary and kind, a domain the kinds a check
- * lets through (`domainOf`):
- * - (a) a consumer's check, never a store's, whose reference unit (the walk's unit that emitted it) read something
- *   `unknown` with the reason `budget` (a recovered contract tagged `budget` is no such read), each such read answered at
- *   its key by the stopped analysis's last run of that unit (its finishing walk's where that ran it again): read there
- *   again, every such read settled, or left to its contract (`Consumers.skip`, the quiet path, which needs every contract
- *   it reads settled); and at whose slot the natural analysis (no demand, no stop) and the stopped one owe the same
- *   domains, the natural one not the check itself. The coarse reading: a finer one, by the consumer
- *   invocation that emitted the check, has no entry to hook, as the consumers are module functions no test can replace
- *   and a call stack names no call; where (a) is denied only by such a read, the check is the counted class (`coarse`);
- * - (w) marks at its place (site, target, boundary), of any kind, the only checks owed there, together letting through
- *   exactly its domain (their domains' intersection: checks on one value): the reference satisfied in other words;
- * - (z) a boundary against `unknown`, no plan content (S3 §4), nothing owed at its slot, where an undecided store record
- *   stands at the site of a store whose value holds the boundary's value (`holds`).
- * A record goes with its obligations, never one the natural analysis reports itself. A check the stop owes by a more
- * precise label alone, the natural analysis's, is accepted (`provenRelabel`, TABLE r4.322).
+ * A combined stop's rule (S8 and its inventory). The demand-only run is the reference, recorded with its consumers'
+ * reads (`recordingReads`); each of its checks the stopped analysis neither keeps nor marks is accepted only by one
+ * clause, every site whole (file and offsets), a slot a site, target, boundary and kind, a domain the kinds a check
+ * lets through (`domainOf`): - (a) a consumer's check, never a store's, whose reference unit (the walk's unit that
+ * emitted it) read something   `unknown` with the reason `budget` (a recovered contract tagged `budget` is no such
+ * read), each such read answered at   its key by the stopped analysis's last run of that unit (its finishing walk's
+ * where that ran it again): read there   again, every such read settled, or left to its contract (`Consumers.skip`, the
+ * quiet path, which needs every contract   it reads settled); and at whose slot the natural analysis (no demand, no
+ * stop) and the stopped one owe the same   domains, the natural one not the check itself. The coarse reading: a finer
+ * one, by the consumer   invocation that emitted the check, has no entry to hook, as the consumers are module functions
+ * no test can replace   and a call stack names no call; where (a) is denied only by such a read, the check is the
+ * counted class (`coarse`); - (w) marks at its place (site, target, boundary), of any kind, the only checks owed there,
+ * together letting through   exactly its domain (their domains' intersection: checks on one value): the reference
+ * satisfied in other words; - (z) a boundary against `unknown`, no plan content (S3 §4), nothing owed at its slot,
+ * where an undecided store record   stands at the site of a store whose value holds the boundary's value (`holds`). A
+ * record goes with its obligations, never one the natural analysis reports itself. A check the stop owes by a more
+ * precise label alone, the natural analysis's, is accepted (`provenRelabel`,
+ * docs/specifications/type-inference-accepted-record.md#r4-322).
  */
 export function combinedStop(reference: Answers, natural: Answers, stopped: Answers): CombinedStop {
   const [reads, finished] = [readsOf(reference), readsOf(stopped)];
@@ -2116,9 +2115,10 @@ export function combinedStop(reference: Answers, natural: Answers, stopped: Answ
 
 /**
  * The mark-ownership rule at the analysis (S8): every check of the unstopped analysis the stop removed is a deferred
- * mark's obligation, and every warning or error it removed is a mark's record (its code at its site). At a combined stop
- * (`rule`), what the combined stop's rule accepts is owned too (a proven relabel's checks and records among them,
- * TABLE r4.322), and the coarse (a) reading's counted class (`CombinedStop.coarse`, with its open reads' keys) is named.
+ * mark's obligation, and every warning or error it removed is a mark's record (its code at its site). At a combined
+ * stop (`rule`), what the combined stop's rule accepts is owned too (a proven relabel's checks and records among them,
+ * docs/specifications/type-inference-accepted-record.md#r4-322), and the coarse (a) reading's counted class
+ * (`CombinedStop.coarse`, with its open reads' keys) is named.
  */
 function ownership(unstopped: Answers, stopped: Answers, rule?: CombinedStop): string[] {
   const marks = stopped.budget.deferred;
