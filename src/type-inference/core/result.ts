@@ -14,7 +14,7 @@ import type { BudgetLimit } from "./budget.js";
 import { propertyName } from "./program.js";
 
 /**
- * The structured result of the coarse core (checkpoint 9, TABLE §3.4, §4, §10.5): the outcome, the diagnostics with
+ * The structured result of the coarse core (checkpoint 9, §4, §10.5): the outcome, the diagnostics with
  * their writers, context words and obligations, and the runtime checks; and the record the tests compare with the
  * expectation set. A diagnostic carries its class, kind, site, code and rule, with what its sentences name; `messages.ts`
  * composes them (D1–D3). The record the set compares holds no sentence.
@@ -35,7 +35,7 @@ export type ObligationKind =
 
 /**
  * The worst diagnostic's class, or `valid` without one: an error, then a warning with a runtime check, then a warning
- * without one; a stop of the analysis is a warning (the owner's D4, TABLE r4.54), never an outcome of its own.
+ * without one; a stop of the analysis is a warning (the owner's D4), never an outcome of its own.
  */
 export type CoreOutcome = "valid" | "compile-error" | "warning-runtime-check" | "warning";
 
@@ -102,7 +102,7 @@ export interface ContextDetail {
 export type CountUse = "repeat" | "range" | "index" | "get" | "removeAt" | "take" | "takeLast";
 
 /**
- * The rule a diagnostic's consumer applies (TABLE §4), with what its sentence names, in the source's own text (D2: the
+ * The rule a diagnostic's consumer applies, with what its sentence names, in the source's own text (D2: the
  * target names stay in the obligation): `messages.ts` gives each its code and its sentences (D1, D3).
  */
 export type DiagnosticRule =
@@ -146,7 +146,7 @@ export type DiagnosticRule =
       readonly domain: readonly ItemTag[];
       readonly operands: readonly SourceSite[];
       readonly pair: readonly ItemTag[];
-      /** An error's list operand of `+`: its elements' type's kinds, which a fix's list must hold (TABLE r4.151). */
+      /** An error's list operand of `+`: its elements' type's kinds, which a fix's list must hold. */
       readonly elements?: readonly ItemTag[];
     }
   /**
@@ -189,7 +189,7 @@ export type DiagnosticRule =
    */
   | { readonly rule: "json"; readonly holder: ItemTag | null; readonly nested: boolean }
   /**
-   * TSV029 (V30 §19, TABLE r4.93): what a button returns, a choice value (`value`), an option of `askChoice` (`option`)
+   * TSV029 (V30 §19): what a button returns, a choice value (`value`), an option of `askChoice` (`option`)
    * or an element of a list or set option (`element`).
    */
   | {
@@ -210,7 +210,7 @@ export type DiagnosticRule =
       readonly receiver: string;
       readonly member: string;
       readonly use: "read" | "call" | "store";
-      /** A list's `join` read: its elements' type's kinds, which decide whether a fix's call is valid (TABLE r4.151). */
+      /** A list's `join` read: its elements' type's kinds, which decide whether a fix's call is valid. */
       readonly elements?: readonly ItemTag[];
     }
   /**
@@ -276,12 +276,12 @@ export type DiagnosticRule =
     };
 
 /**
- * What the place a diagnosed value lands in takes (TABLE r4.151), read from the constraint that consumes it
+ * What the place a diagnosed value lands in takes, read from the constraint that consumes it
  * (`CoreProgram.consumersOf`): its kinds (`null`, any value: a place nothing restricts, or one nothing reads; none, where
  * no kind is proved), and how a value binds there (`whole`, as an operand of an operator, or as a member's receiver). A
  * value nothing consumes (a bare `say`) takes the shown kinds; a value an operator or a member consumes, only kinds whose
  * result the operator's or member's own site takes in turn. Every fact is stated, `unproved` where no fact proves it,
- * which gives words (TABLE r4.162).
+ * which gives words.
  */
 export interface SiteExpectation {
   readonly takes: readonly ItemTag[] | null;
@@ -296,7 +296,7 @@ export interface SiteExpectation {
 }
 
 /**
- * Whether every value a diagnosed expression reads is there when the script runs (TABLE r4.162, Astra on #1296): an
+ * Whether every value a diagnosed expression reads is there when the script runs (Astra on #1296): an
  * element read by its index or a dict's value by its key may be absent, which no fact proves.
  */
 export type Presence = true | "unproved";
@@ -421,9 +421,10 @@ export interface WorkPlace {
 }
 
 /**
- * The analysis stopped proving (D4, option a′, TABLE r4.54, r4.55): past the work allowance, at a read chain past its
+ * The analysis stopped proving (D4, option a′): past the work allowance, at a read chain past its
  * depth (`read-depth`), or at statements nested past the nesting limit (`nesting`). One warning, at the heaviest place
- * (the deepest nesting for `nesting`): the checks it moved to the runtime, `deferred` in number.
+ * (the deepest nesting for `nesting`): the warnings of the checks it moved to the runtime, `deferred` in number,
+ * several of which one check at a store may carry (its message counts the plan's checks, `budgetMessage`).
  */
 export interface BudgetStop {
   readonly class: "warning-runtime-check";
@@ -435,7 +436,7 @@ export interface BudgetStop {
   readonly deferred: number;
 }
 
-/** "Not checked (budget)" (TABLE r4.54): a function, or a file's top level, some of whose checks run when it runs. */
+/** "Not checked (budget)": a function, or a file's top level, some of whose checks run when it runs. */
 export interface NotChecked {
   readonly class: "not-checked-budget";
   readonly kind: "budget";
@@ -534,7 +535,7 @@ export function outcomeOf(diagnostics: readonly CheckedDiagnostic[]): CoreOutcom
 
 /**
  * The context word of a warning about `item` (§3.4): A7's `later` for a copy checked against a later decider, whatever
- * word its item carries (r4.10); else an unknown's reasons' word (`reasonContext`); any other item's own word, a null's
+ * word its item carries; else an unknown's reasons' word (`reasonContext`); any other item's own word, a null's
  * ingress word, or `unknown`.
  */
 export function contextOf(item: Item): ContextWord {
@@ -557,14 +558,14 @@ export function explainingItem(items: readonly Item[]): Item | undefined {
 export interface OffendingKind {
   /** The item that explains the kind. */
   readonly item: Item;
-  /** The kinds it stands for: its own, or each kind the rows of one unknown operand gave (§4 r4.14). */
+  /** The kinds it stands for: its own, or each kind the rows of one unknown operand gave (§4). */
   readonly kinds: readonly ItemTag[];
 }
 
 /**
  * The offending kinds of these items, one per kind in the order of its first item, since each owes its own diagnostic
  * and obligation (§4): every unknown is one kind, explained by `explainingItem`, and the items that the operator rows
- * of one unknown operand gave are one kind too (r4.14).
+ * of one unknown operand gave are one kind too.
  */
 export function offendingKinds(items: readonly Item[]): OffendingKind[] {
   const unknown = explainingItem(items.filter((item) => item.tag === "unknown"));
@@ -588,7 +589,7 @@ export function provenanceOf(item: Item, detail: ContextDetail): Provenance {
 }
 
 /**
- * The step a selection or index adds to a target (§10.5 r4.10): `entry`, a dict's value, when the receiver is a dict on
+ * The step a selection or index adds to a target (§10.5): `entry`, a dict's value, when the receiver is a dict on
  * every run; else `element`, which every list or set element, `first`, `last`, `random`, `get` and `[i]` is.
  */
 export function elementStep(receiver: readonly ItemTag[]): "element" | "entry" {
@@ -597,7 +598,7 @@ export function elementStep(receiver: readonly ItemTag[]): "element" | "entry" {
 }
 
 /**
- * A key path as an obligation's target (§10.5 r4.10): the place's label from the collector (`state`, `use.data`,
+ * A key path as an obligation's target (§10.5): the place's label from the collector (`state`, `use.data`,
  * `packet.result`) and its steps, as `state.party.element.hp`.
  */
 export function targetName(label: string, steps: readonly string[]): string {
@@ -635,7 +636,7 @@ export interface RecordDiagnostic {
   /** A written type's error: its offending union and V30's suggestion (`WrittenTypeError`). */
   readonly union?: RecordSite;
   readonly suggestion?: string | null;
-  /** The copy that brought a copied property's rejected kind (ADR 0021 rule 1.1, TABLE r4.75 (4)). */
+  /** The copy that brought a copied property's rejected kind (ADR 0021 rule 1.1). */
   readonly related?: RecordSite;
   /** N10's payload of the route rule's error (`RequiredCheck`). */
   readonly requiredCheck?: {
@@ -646,7 +647,7 @@ export interface RecordDiagnostic {
 }
 
 /**
- * A result as JSON-safe data in the shape of the expectation set's records (`disposition.md` with TABLE §10.5): sites
+ * A result as JSON-safe data in the shape of the expectation set's records (`disposition.md`): sites
  * by file path, writers as tokens, and `runtimeChecks` holding every warning's obligation, one per warning, and every
  * other check once.
  */
@@ -657,7 +658,7 @@ export interface CoreRecord {
 }
 
 /**
- * The published checks (TABLE r4.86 (1)): in source order of their sites, at one site the warnings' obligations in the
+ * The published checks: in source order of their sites, at one site the warnings' obligations in the
  * order of their diagnostics, then the other checks in their own order; the core's record keeps the same order
  * (`coreRecord`).
  */

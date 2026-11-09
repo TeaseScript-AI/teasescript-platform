@@ -10,7 +10,7 @@ import { touchesOf, touchRef } from "./touches.js";
 import { heldInput } from "./transfers.js";
 import { expand } from "./walk.js";
 
-// What a place's live stores definitely hold (A2, TABLE r4.131): its held tries, built once per pass, and where they meet.
+// What a place's live stores definitely hold (A2): its held tries, built once per pass, and where they meet.
 
 /**
  * The strongly connected components of a graph over `nodes` and the nodes they reach (`next`: a node's successors),
@@ -68,7 +68,7 @@ function keyComponents<T>(
 }
 
 /**
- * Whether what a place's stores definitely hold meets at a path (A2, TABLE r4.131): a store bringing the other type
+ * Whether what a place's stores definitely hold meets at a path (A2): a store bringing the other type
  * there errs where it meets the place, never at a later read (ADR 0021 rule 1.1).
  */
 export function atCopy(admission: Admission, root: PlaceId, path: readonly string[]): boolean {
@@ -146,13 +146,14 @@ function buildHeld(admission: Admission, root: PlaceId): void {
 }
 
 /**
- * The held tries of a component of the places live stores read (A2, TABLE r4.131 and r4.154: design §2.1.2 as
- * accepted). Its members that hold each other through whole copies (a place read whole into a place) form live
- * groups, the strongly connected components of those copies: each group one trie, its members' own points and what
- * their reads bring from outside the group, sources first; where those meet, a member owes what its own contribution
- * brings there (`groupHeld`). Every other read is by reference, its source's held trie at its path where it stands. A
- * read within the component that adds or takes steps (`a.inner = a`, `a = b.right`) closes a cycle outside that class
- * and brings nothing definite: what reaches a place only through it is found where it is read.
+ * The held tries of a component of the places live stores read (A2,
+ * docs/specifications/type-inference-accepted-record.md#r4-154: design §2.1.2 as accepted). Its members that hold each
+ * other through whole copies (a place read whole into a place) form live groups, the strongly connected components of
+ * those copies: each group one trie, its members' own points and what their reads bring from outside the group, sources
+ * first; where those meet, a member owes what its own contribution brings there (`groupHeld`). Every other read is by
+ * reference, its source's held trie at its path where it stands. A read within the component that adds or takes steps
+ * (`a.inner = a`, `a = b.right`) closes a cycle outside that class and brings nothing definite: what reaches a place
+ * only through it is found where it is read.
  */
 function finishHeld(admission: Admission, members: readonly PlaceId[]): void {
   const touches = touchesOf(admission);
@@ -310,7 +311,7 @@ function groupHeld(
 }
 
 /**
- * A2 (TABLE r4.131): the paths where what the stores into one place (`base` empty, each store at its own path) or a
+ * A2: the paths where what the stores into one place (`base` empty, each store at its own path) or a
  * literal's elements (each at `base`, its landing) definitely hold meet with two kinds or more (`copies`), relative to
  * `base`, sorted by text. Each store's or element's trie is its own points and its reads' held tries (`heldOf`), as
  * its value's carriers' transfers give them (`heldInput`: a nested carrier's once, never its element's whole walk

@@ -2,7 +2,11 @@
 // the driver's `cdp`.
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { fromBase64, openAge, x25519Identity } from "../../../dist/tests/helpers/age-keyholder.js";
+import {
+  fromBase64,
+  openAge,
+  x25519Identity,
+} from "../../../dist/tests/helpers/player/age-keyholder.js";
 import {
   assertEqual,
   clickLabelled,

@@ -26,8 +26,8 @@ import { type CanonicalKey } from "../contract/key-ids.js";
  * written expected type's kinds at every depth (ADR 1.2, 7: a whole number fits a written number, a fraction never a
  * written integer, the owner's F3), or the value lands directly in a written place whose union holds both; a direct
  * value that is only `null` or unsettled imposes none. Where the direct value's kinds are unknown, or it has a written
- * type, its domain's family stands for them (`domainFamily`, r4.150). Both definite and incompatible: an error at the fallback, below
- * it at the innermost offending element (r4.35); possible: a warning with its `copy-type`; an unknown the fallback may
+ * type, its domain's family stands for them (`domainFamily`). Both definite and incompatible: an error at the fallback, below
+ * it at the innermost offending element; possible: a warning with its `copy-type`; an unknown the fallback may
  * hold: a warning against those kinds, its host data meeting its boundary.
  */
 export function fallbackFits(
@@ -77,7 +77,7 @@ export interface Domain {
 }
 
 /**
- * C10's requirement from a domain (r4.150): the kinds the domain of a direct value at `rest` gives its fallback, the
+ * C10's requirement from a domain: the kinds the domain of a direct value at `rest` gives its fallback, the
  * join of its non-null members' families, `null` contributing none: what the value retains, its contract's kinds
  * (`quietKinds`: a written variable's, parameter's or call result's type, a copy's of one); `written` where the value
  * has a written type there (`writtenTermOf`). An `otherwise` chain's contract is its operands' joined at the path, once
@@ -118,9 +118,9 @@ function fallbackFitsAt(
   const site = program.places[value]?.site;
   if (site === null || site === undefined || !("result" in c)) return false;
   const read = directAt(rest);
-  // r4.150: the direct value's domain stands for the whole value, definite (its ingress is checked against it, C9),
-  // where its own kinds are unknown, or where a written type gives it; never for a stopped read (r4.100) nor one proved
-  // only `null` (r4.106)
+  // the direct value's domain stands for the whole value, definite (its ingress is checked against it, C9),
+  // where its own kinds are unknown, or where a written type gives it; never for a stopped read nor one proved
+  // only `null`
   const domain =
     domainAt === null ||
     read.length === 0 ||
@@ -146,13 +146,13 @@ function fallbackFitsAt(
   const directTags = [...new Set(direct.filter(concrete).map((item) => item.tag))];
   if (directTags.length === 0) {
     // a stop left the type it is checked against undecided: the check is owed against that key's contract,
-    // `unknown` with the reason `budget`, never dropped (TABLE r4.100); a `null` fallback alone owes nothing; its
-    // host data meets its boundary as unstopped (r4.109 (1)); its value read only then
+    // `unknown` with the reason `budget`, never dropped; a `null` fallback alone owes nothing; its
+    // host data meets its boundary as unstopped; its value read only then
     if (!direct.some(unsettledItem)) return false;
     const own = withoutEmpty(walk.valueItems(value, node, rest));
     if (
       !own.every((item) => item.tag === "null") &&
-      // (what the mark carries forms only with it: its content, TABLE r4.110 (a))
+      // (what the mark carries forms only with it: its content)
       storeWarning(
         walk,
         site,
@@ -250,8 +250,8 @@ function fallbackFitsAt(
     );
   }
   if (union !== null && union.has("unknown")) return false;
-  // below the fallback, a definite element of its literals none of whose kinds fits: an error at that element (A8,
-  // r4.35); else both definite and incompatible, no kind of the fallback fitting (r4.46): an error at the fallback;
+  // below the fallback, a definite element of its literals none of whose kinds fits: an error at that element (A8);
+  // else both definite and incompatible, no kind of the fallback fitting: an error at the fallback;
   // possible: one warning and check per offending kind
   const element = offendingElement(walk, value, node, rest, fitsKind);
   if (element !== null) error(walk, "written-target", element.site, rule, element.kinds);
@@ -274,7 +274,7 @@ function fallbackFitsAt(
 }
 
 /**
- * A8, r4.35: the innermost element of a fallback's literals at `rest` whose kinds are definite and none fits, in source
+ * A8: the innermost element of a fallback's literals at `rest` whose kinds are definite and none fits, in source
  * order, with its kinds; `null` at the fallback itself or where no literal holds one.
  */
 function offendingElement(

@@ -9,7 +9,7 @@ import type { FlowNode } from "../flow-graph.js";
 import { kindsInOrder, REASON, type ContextWord, type Item, type ItemTag } from "../items.js";
 import { codeOf, pathPhrase } from "../messages.js";
 import { measuresLength } from "../method-categories.js";
-import { stablePath } from "../narrowing.js";
+import { stablePath } from "../narrowing/narrowings.js";
 import { propertyName, propertyStep, siteKey, stepName } from "../program.js";
 import { propertyNames, type PropertyNamesTask } from "../property-names.js";
 import {
@@ -63,7 +63,7 @@ export function warning(
     provenance: provenanceOf(item, detail(walk, item, site, rule, receiver, read)),
     obligation,
     // (a fixed table of what fits, not a value's kinds: the table's order, the one list `inItsOrder` does not order,
-    // TABLE r4.277 D3, #1398)
+    // #1398)
     fits: kindsInOrder(new Set(fits.filter(concrete).map((found) => found.tag))),
     // (the published answers give it, from the site's other diagnostics, `withBesides`)
     besides: [],
@@ -723,7 +723,7 @@ export function shownProperty(walk: Consumers, value: PlaceId): string | null {
 
 /**
  * The steps of a store's path (`StoreStep`): an element step by the collection the contract holds above it, or, where
- * the root's written type reaches it (the finishing path's descent, TABLE r4.120), the collection written there,
+ * the root's written type reaches it (the finishing path's descent), the collection written there,
  * final at every stop and asking no solver.
  */
 export function storeSteps(

@@ -19,14 +19,14 @@ import {
 import type { Callable, FlowNode } from "./flow-graph.js";
 import type { Item } from "./items.js";
 import type { CorePass } from "./answers.js";
-import { NarrowingIndex } from "./narrowing.js";
-import { NarrowingEvents } from "./narrowing-events.js";
-import { NarrowingRoutes } from "./narrowing-routes.js";
-import type { StatementTree } from "./narrowing-statements.js";
+import { NarrowingIndex } from "./narrowing/narrowings.js";
+import { NarrowingEvents } from "./narrowing/events.js";
+import { NarrowingRoutes } from "./narrowing/routes.js";
+import type { StatementTree } from "./narrowing/statement-tree.js";
 import { siteKey, stepName, type CoreProgram } from "./program.js";
 
 /*
- * The guard index of the coarse core (checkpoint 9, TABLE §3.2 r4.6–r4.12): a read of key k is guarded inside a branch
+ * The guard index of the coarse core (checkpoint 9, §3.2): a read of key k is guarded inside a branch
  * of its own callable whose condition tests k or a path holding k (a null comparison, a type test or a comparison
  * `<`, `<=`, `>`, `>=`, at a truth position: through `and`, `or` and `not`; a `switch` on it), in the code after a
  * branch that tests it and always leaves (the way past the test is a branch entry of its own), and in the right operand
@@ -84,11 +84,11 @@ export class GuardIndex {
   readonly #branches = new Map<Key, Map<Callable | null, Regions<FlowNode>>>();
   /** Per tested key and file, the right-operand regions its tests guard. */
   readonly #operands = new Map<Key, Map<number, Regions<OperandRegion>>>();
-  /** Per tested key, the callables its operand regions stand in (W40, r4.33). */
+  /** Per tested key, the callables its operand regions stand in (W40). */
   readonly #operandCallables = new Map<Key, Set<Callable | null>>();
   /** G3 3b: the tested keys (`narrowed`), as a trie. */
   readonly #tested: KeyTrie;
-  /** The keys with a tested key strictly below them: a copy of one carries its read as a mark (§3.2 r4.15). */
+  /** The keys with a tested key strictly below them: a copy of one carries its read as a mark (§3.2). */
   readonly belowTested = new Set<Key>();
   /** Per key, the tested keys strictly below it, and the guard regions of those keys once asked (`guardedBelow`). */
   readonly #testedUnder = new Map<Key, Key[]>();
@@ -98,7 +98,7 @@ export class GuardIndex {
     Key,
     { readonly branches: Map<Callable | null, Nest>; readonly operands: Map<number, Nest> }
   >();
-  /** The tested keys q below each key, per relative path q, and the longest such path (§8 r4.23's holders). */
+  /** The tested keys q below each key, per relative path q, and the longest such path (§8). */
   #testedRelative: Map<string, Set<Key>> | null = null;
   #byPlace: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> | null = null;
   #testedLength = 0;
@@ -173,7 +173,7 @@ export class GuardIndex {
 
   /**
    * Stage 3b's narrowing definitions and invalidations (§13), built on their first read and charged then: an analysis,
-   * or a finishing pass after a stop, that reads none pays for none (TABLE r4.117); the program's, shared by every later
+   * or a finishing pass after a stop, that reads none pays for none; the program's, shared by every later
    * read, so no demand's own work (S3 §5).
    */
   public get narrowing(): NarrowingIndex {
@@ -470,7 +470,7 @@ export class GuardIndex {
   }
 
   /**
-   * §3.2 (r4.12): a test at a truth position of an `and`/`or`'s left operand guards the code after it up to the end of
+   * §3.2: a test at a truth position of an `and`/`or`'s left operand guards the code after it up to the end of
    * the outermost `and`/`or` in whose left operand it stands. One walk of each outermost logical tree, with an explicit
    * stack: a test is one region per key it tests. The operands of any other expression are no truth positions: a
    * logical below one is a tree of its own.
@@ -583,7 +583,7 @@ export class GuardIndex {
   /**
    * Whether a read of `key` at `node` is guarded (§3.2, per path): a test of the key or of a prefix guards a branch of
    * the node's own callable that dominates the node, or an operand region holds the node: a binary search per key asked,
-   * the key and each prefix (r4.12); a choice's selection step as the record key it reads.
+   * the key and each prefix; a choice's selection step as the record key it reads.
    */
   public narrowed(key: Key, node: FlowNode): boolean {
     const program = this.program;
@@ -665,7 +665,7 @@ export class GuardIndex {
   }
 
   /**
-   * Whether an operand region of a test of some key of the place holds a node (W34 r4.38: a copy read there may carry
+   * Whether an operand region of a test of some key of the place holds a node (W34: a copy read there may carry
    * a mark of its source, which `narrowed` then asks at the read's path): a binary search in the place's regions,
    * merged once from the per-key ones, never a scan of the place's tested paths.
    */
@@ -780,8 +780,9 @@ export class GuardIndex {
 }
 
 /**
- * The items of a guarded read (§3.2 r4.6): every kind possible and marked, so no consumer errs on it; a known kind the
- * exact path answered without a word of its own takes `branch`, the test's; the emptiness mark stays as it is.
+ * The items of a guarded read (docs/specifications/type-inference-accepted-record.md#section-3-2-guarded): every kind
+ * possible and marked, so no consumer errs on it; a known kind the exact path answered without a word of its own takes
+ * `branch`, the test's; the emptiness mark stays as it is.
  */
 export function marked(items: readonly Item[]): Item[] {
   return items.map((item) =>

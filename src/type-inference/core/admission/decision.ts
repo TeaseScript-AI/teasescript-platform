@@ -36,7 +36,7 @@ import {
   offending,
   SCALAR,
 } from "./kinds.js";
-import { inheritance, landedBelow } from "./landings.js";
+import { inheritance, landedBelow } from "./landings/inheritance.js";
 import type { Alias, Candidate, Decided, DecidedAt, Decision, Inputs } from "./model.js";
 import { permittedAt } from "./permitted.js";
 import { inputsAt, inputsOf, scanAt } from "./scan.js";
@@ -333,7 +333,7 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
   return {
     root,
     path,
-    // (a written path's label from its written type, final at every stop, TABLE r4.122; its text made where shown)
+    // (a written path's label from its written type, final at every stop; its text made where shown)
     label:
       at.path === null
         ? admission.labelOfKey(at.key)
@@ -470,7 +470,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
       ({ tags, nullable, byWritten, permitsNull, decider, site: deciderSite } = found);
       copied = optionalOf(found.copied, found.nullable);
     } else {
-      // C9 r4.12, r4.50 (1): where no contribution decides, but the contract holds kinds beside external data, those
+      // C9: where no contribution decides, but the contract holds kinds beside external data, those
       // kinds are the type the place is published with, so external data a store brings into it owes its check
       // there, named as well as inline (`published`)
       const kinds = withoutEmpty(admission.run(contract.contractOf(key)));
@@ -482,8 +482,8 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
     }
   }
   if (tags === null) return { ...NOTHING, ...none };
-  // the decided family (ADR 1.2): an integer decider with a number admitted at the path decides numbers (r4.28); a
-  // number possible solely through external data admits nothing (r4.36)
+  // the decided family (ADR 1.2): an integer decider with a number admitted at the path decides numbers; a
+  // number possible solely through external data admits nothing
   if (
     !tags.includes("unknown") &&
     !byWritten &&
@@ -518,7 +518,8 @@ function compareMembers(
   const report = memberOracle!.report;
   // (a member read through a chain of copies, or its class's, carries its own links' writers, provenance and not the
   // answer: that pair's answers are compared with them set aside, the published records' writers guarded apart)
-  // (and its admission: the written type A4 decides it by at the path, TABLE r4.72)
+  // (and its admission: the written type A4 decides it by at the path,
+  // docs/specifications/type-inference-accepted-record.md#r4-72)
   const answer = (
     d: Definition,
     rest: readonly string[],

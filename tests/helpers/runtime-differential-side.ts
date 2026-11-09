@@ -56,7 +56,7 @@ export interface DifferentialInput {
    * Random control through the harness's decision callback, whose calls are logged and compared: `natural` keeps each
    * natural result; `choose-natural` answers each draw with a `choose` decision of its natural outcome, an input with a
    * receipt, and a draw whose natural result is a failure with the natural decision. It covers the receipts and the
-   * control path, never another outcome: `tests/controlled-random-explorer.test.ts` chooses those. Absent leaves every
+   * control path, never another outcome: `tests/runtime/controlled-random-explorer.test.ts` chooses those. Absent leaves every
    * draw natural, without control.
    */
   readonly random?: "natural" | "choose-natural";

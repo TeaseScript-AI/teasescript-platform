@@ -54,7 +54,7 @@ import {
 } from "../player/media/captured-media.js";
 import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import type { InstructionPlan } from "../src/index.js";
-import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
+import { FakeMediaRepository } from "./helpers/player/fake-media-repository.js";
 import { readForImport } from "./helpers/transfer-read.js";
 import type { SessionTransfer } from "../player/persistence/session-transfer.js";
 import {

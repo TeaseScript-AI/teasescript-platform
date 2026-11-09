@@ -77,7 +77,7 @@ with the set's tooling as r481 published it: `convert.py` `25a3b7152cd55fe8…`,
   records of S9b's F18 shapes (TABLE r4.81 (1), r4.77 (2)), held by that prefix until S9b.
 - A diagnostic may carry `related: {file, offset, end}`, the whole copy that brought the rejected kind; the reader keeps
   it and the comparison compares it with the diagnostic (`tests/helpers/type-core-records.ts`). No other record has it.
-- Held at this revision (`heldBack`, `tests/helpers/type-core-fixture.ts`; their counts pinned in the cells test): the
+- Held at this revision (`heldBack`, `tests/helpers/type-core/type-core-fixture.ts`; their counts pinned in the cells test): the
   adapters' 9, stage 3b's 653, S9b's F18 shapes 32, and `cp9-cells/F16/invalid-datetime-difference`, whose operator
   site §3.4 puts at its right operand (r4.62); 1,318 records compare whole.
 
@@ -110,7 +110,7 @@ cp "$work/out/cells.jsonl" "$work/out/cells-deferred.jsonl" tests/fixtures/type-
   `cp9-cells/r8/get-dispatch/unknown`. AD-1's 55 metadata re-derivations leave their compact records as they were. In
   the deferred file AD-1 re-derives `cp9-cells/3b/review-late/json/constant`.
 - Every AD-1 record cites a cell of stage 3b (N1–N10), so that class holds it until S10; the tests name the held
-  classes and their counts (`heldBack`, `tests/helpers/type-core-fixture.ts`).
+  classes and their counts (`heldBack`, `tests/helpers/type-core/type-core-fixture.ts`).
 
 ## Refresh (M4 step S6)
 

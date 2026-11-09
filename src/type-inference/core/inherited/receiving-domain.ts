@@ -13,18 +13,37 @@ import type {
 } from "../admission/model.js";
 import type { CanonicalKey } from "../contract/key-ids.js";
 import type { Definition, Key } from "../definitions.js";
+import type { Proof, ProofDemand } from "../solver.js";
 
 /**
- * A4, the written type a copy of a written binding brings into an unwritten place (r4.75 (1), TABLE r4.375): its state, one
- * per pass (`CorePass.receivingDomain`), made with the pass's parts and asking nothing when made. Admission builds it
- * (`copyGraph`) and reads it (`inheritedAt`) as its client; the F18 receiving domain is read from it in a later step
- * (#1072 A2). An admission made on the pass starts it afresh (`reset`), as each admission's own state was.
+ * A4, the written type a copy of a written binding brings into an unwritten place
+ * (docs/specifications/type-inference-accepted-record.md#r4-375): its state, one per pass (`CorePass.receivingDomain`),
+ * made with the pass's parts and asking nothing when made. Admission builds it (`copyGraph`) and reads it
+ * (`inheritedAt`) as its client; F18 does not read it (#1072 A2). Each key's inherited type is a proof of the pass's
+ * solver (`inheritedProof`); what its runs found, the keys that wait on each other and the own-level bits, is the
+ * pass's too. An admission made on the pass starts the rest afresh (`reset`), as each admission's own state was.
  */
 export class ReceivingDomain {
-  /** Every field as a new domain has it: an admission made on a pass that held one before starts from none. */
+  /**
+   * Every field as a new domain has it, the proofs' findings kept with the solver that holds the proofs: an admission
+   * made on a pass that held one before starts from none.
+   */
   public reset(): void {
-    Object.assign(this, new ReceivingDomain());
+    const { cycles, cycleSizes, inheritedOwn, joins, joinsSettled } = this;
+    Object.assign(this, new ReceivingDomain(), {
+      cycles,
+      cycleSizes,
+      inheritedOwn,
+      joins,
+      joinsSettled,
+    });
   }
+
+  /**
+   * A key's inherited proof by its demand's key, as the admission made on the pass makes it (`inheritedProofOf`), for a
+   * replay of the demands the pass settled; `null` before an admission is made.
+   */
+  replayProof: ((key: string) => ProofDemand<Proof>) | null = null;
 
   a4Keys = new Set<Key>();
   /** The places `a4Keys` lands copies in, each with `openAbove`'s walk down its paths from its root. */
@@ -49,18 +68,28 @@ export class ReceivingDomain {
   a4Inherits: InheritedCopy[] = [];
   /** A4 through copies (`copyGraph`): the unwritten places a copy of a written binding reaches, copy by copy. */
   inheriting = new Set<PlaceId>();
-  /** Per unwritten place and path, the written type its own decision copies there (`inheritedAt`), or none. */
-  inherited = new Map<CanonicalKey, TypeTerm | null>();
   /**
-   * #1901: per such path, whether the copy that decides it reads its written type at its own root (a scalar copy
-   * stored at the path) rather than below it (a collection's element). Written beside `inherited`; propagated by the
-   * inheritance pass and read by both decider paths for diagnostic descriptions. Decision outcomes do not consume it.
+   * #1901: per unwritten place and path, whether the copy that decides it reads its written type at its own root (a
+   * scalar copy stored at the path) rather than below it (a collection's element): its finished proof's, as a read of it
+   * finds it (`inheritedProof`); read by both decider paths for diagnostic descriptions. Decision outcomes do not
+   * consume it.
    */
   inheritedOwn = new Map<CanonicalKey, boolean>();
-  /** The places and paths whose decisions wait on each other through copies, by cycle (`cut`): a union-find. */
+  /**
+   * The places and paths whose decisions wait on each other through copies, by cycle (`cut`): a union-find, two joined
+   * where one's proof reads the other's while their component is solved.
+   */
   cycles = new Map<CanonicalKey, CanonicalKey>();
-  /** Each cycle's size, by its root (`cycleOf`). */
+  /** Each cycle's size, by its root (`join`). */
   cycleSizes = new Map<CanonicalKey, number>();
+  /**
+   * Each join of `cycles`, with the demand key of the proof whose read made it: a join stands while that proof is
+   * finished in the solver, and `cycles` is made again from those that stand after a run stops or the solver forgets
+   * (`settleCycles`).
+   */
+  joins: { readonly reader: string; readonly a: CanonicalKey; readonly b: CanonicalKey }[] = [];
+  /** The solver's `forgets` when `cycles` was last made again from `joins`. */
+  joinsSettled = 0;
   /**
    * The deepest path a written type can reach through copies (`inheritedAt`): the written copies' landing paths with
    * their types' element levels, and every copy of an inheriting place's own landing path beside them.
@@ -68,7 +97,6 @@ export class ReceivingDomain {
   reach = 0;
   /** Per written type, its element levels (`levelsOf`). */
   termLevels = new Map<TypeTerm, readonly TypeTerm[]>();
-  resolving = false;
   /** G3 3a: per place and path id, where it lands past wrappers (`landedFrontier`); per place and step, its wrapper's. */
   landedFrontiers = new Map<string, { readonly place: PlaceId; readonly rest: number }>();
   landingHops = new Map<string, PlaceId | null>();

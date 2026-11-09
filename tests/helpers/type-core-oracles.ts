@@ -17,7 +17,7 @@ import {
 } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { BudgetExhausted, withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
-import { asked, checkedResult } from "../../src/type-inference/core/consumer.js";
+import { asked, checkedResult } from "../../src/type-inference/core/check-result/check-result.js";
 import { Consumers, withConsumerOrder } from "../../src/type-inference/core/consumers.js";
 import type { FlowNode } from "../../src/type-inference/core/flow-graph.js";
 import {
@@ -49,7 +49,7 @@ import { itemScope } from "./type-core-items.js";
  * The type core's oracles, one library for the tests and for the generator corpus (`tests/families/`): the
  * diagnostics' identity a stop keeps (`stopIdentity`, `keptErrors`) and the merged stops' (`mergedIdentity`); what a
  * program publishes, exactly (`publishedAnswers`, `publishedRoute`, `publication`) and with two orders set aside
- * (`publishedUpToOrder`, TABLE r4.185); the four modes they are compared in (`MODES`, `inMode`); which decisions
+ * (`publishedUpToOrder`); the four modes they are compared in (`MODES`, `inMode`); which decisions
  * stop and when (`stopSet`); a compile's decision records, its receiving completion's included (`decisionRecords`); and a
  * stopped plan's part checks against the natural plan's (`partProblems`, #1682). A test or generator that needs another
  * projection adds it here.
@@ -57,7 +57,7 @@ import { itemScope } from "./type-core-items.js";
 
 /**
  * A diagnostic as a stop must keep it, its identity: without the facts its fix's code forms read (`expects`,
- * `present`), which a stop never proves, so a fix there may be words (TABLE r4.162). The stop tests compare these.
+ * `present`), which a stop never proves, so a fix there may be words. The stop tests compare these.
  */
 export function stopIdentity(
   diagnostic: CoreDiagnostic | CheckedDiagnostic,
@@ -74,7 +74,7 @@ export function sentences(text: string): string[] {
 
 /**
  * The errors of `source`'s analysis as a stop keeps them: each error's identity and its message's first sentence. A
- * stop proves nothing of a fix's code, so the fix after that sentence may be words (TABLE r4.162).
+ * stop proves nothing of a fix's code, so the fix after that sentence may be words.
  */
 export function keptErrors(
   answers: Answers,
@@ -87,7 +87,7 @@ export function keptErrors(
 }
 
 /**
- * The record with the route as the merged stops pin it (TABLE r4.185): each diagnostic by its identity
+ * The record with the route as the merged stops pin it: each diagnostic by its identity
  * (`stopIdentity`) without the other facts only its fix reads, the kinds its site's other diagnostics report
  * (`besides`) and its store root's declaration, and each of the route's (`publishedRoute`'s text) by its severity, code
  * and span, without its message.
@@ -161,8 +161,8 @@ function compareSites(a: readonly number[], b: readonly number[]): number {
 /**
  * One analysis's part: its answers (the outcome and diagnostics with the checks that owe the runtime nothing,
  * `checkedResult`, and the checks) and every binding's admitted types at its root and its element (`text`); the record
- * alone, its answers and the same serialized (`record`); and whether each of its lists is in source order of its sites
- * (r4.86 (1)). The admitted types are the oracle's own questions (`Questions`, two cells a binding; `questions`, a
+ * alone, its answers and the same serialized (`record`); and whether each of its lists is in source order of its sites.
+ * The admitted types are the oracle's own questions (`Questions`, two cells a binding; `questions`, a
  * publication's meter, else one of their own): where they stop, it throws `AnswersStopped`, never publishing answers
  * asked again on a stopped analysis. The answers and the checks are the backend's questions, which stop past the
  * finished analysis's allowance as the backend's do (`asked`).
@@ -337,26 +337,50 @@ const QUESTION_HEAP_RESERVE = 1_536 * 2 ** 20;
 const QUESTION_HEAP_HEADROOM = 512 * 2 ** 20;
 
 /**
- * The questions' room in the heap, taken when a publication's meter is made, before its analysis (`Questions`): this
- * process's V8 heap limit (fixed by its `--max-old-space-size`, as the families runner sets it) less the reserve, so
- * that a stop lands at the same cell on every run. Only where the heap in use then passes the reserve and the process
- * can collect (`--expose-gc`, as the runner's child has it) is the live heap after a collection taken: where that too
- * passes the reserve, what ran before the publication still holds it, and the room is what is left beside it, less the
- * headroom, so that the run ends as `memory` instead of in V8's abort. Or a test's (`withQuestionMemory`).
+ * The collections the room makes before it reads the live heap: three. V8 keeps a finished analysis's maps, and what
+ * they reach, through two old-space collections (`--retain-maps-for-n-gc`, by default 2; #2002), so a process whose
+ * last run was that analysis still holds it after one: at `W45-conditional` k = 1,024 and 6,144 MB, a young process
+ * kept 2,796 MiB live after one collection after the base's run, and about 50 after three.
+ */
+const ROOM_COLLECTIONS = 3;
+
+/** A process's heap as the room reads it: V8's figures, and a full collection where the process can make one. */
+export interface QuestionHeap {
+  readonly statistics: () => { readonly heap_size_limit: number; readonly used_heap_size: number };
+  readonly collect: (() => void) | null;
+}
+
+/**
+ * Test-only: the questions' room in `heap` (`heapRoom`): its limit less the reserve, so that a stop lands at the same
+ * cell on every run. Only where the heap in use passes the reserve and `heap` can collect is the live heap taken, after
+ * `ROOM_COLLECTIONS` collections, so that garbage a run just before left is gone: where that too passes the reserve,
+ * what ran before the publication still holds it alive, and the room is what is left beside it, less the headroom, so
+ * that the run ends as `memory` instead of in V8's abort.
+ */
+export function questionRoomOf(heap: QuestionHeap): number {
+  const { heap_size_limit: limit, used_heap_size: used } = heap.statistics();
+  if (used <= QUESTION_HEAP_RESERVE || heap.collect === null) return limit - QUESTION_HEAP_RESERVE;
+  for (let collection = 0; collection < ROOM_COLLECTIONS; collection += 1) heap.collect();
+  const live = heap.statistics().used_heap_size;
+  return live <= QUESTION_HEAP_RESERVE
+    ? limit - QUESTION_HEAP_RESERVE
+    : limit - live - QUESTION_HEAP_HEADROOM;
+}
+
+/**
+ * The questions' room in this process's heap, taken when a publication's meter is made, before its analysis
+ * (`Questions`; `questionRoomOf`): its V8 heap limit is fixed by its `--max-old-space-size`, as the families runner sets
+ * it, and it can collect under `--expose-gc`, as the runner's child has it. Or a test's (`withQuestionMemory`).
  */
 let questionRoom: number | null = null;
 function heapRoom(): number {
   if (questionRoom !== null) return questionRoom;
-  const { heap_size_limit: limit, used_heap_size: used } = getHeapStatistics();
   // EVIDENCE: `globalThis.gc` exists only under `--expose-gc`, so its type is unknown here and is checked below.
   const collect = (globalThis as { readonly gc?: unknown }).gc;
-  if (used <= QUESTION_HEAP_RESERVE || typeof collect !== "function")
-    return limit - QUESTION_HEAP_RESERVE;
-  collect();
-  const live = getHeapStatistics().used_heap_size;
-  return live <= QUESTION_HEAP_RESERVE
-    ? limit - QUESTION_HEAP_RESERVE
-    : limit - live - QUESTION_HEAP_HEADROOM;
+  return questionRoomOf({
+    statistics: getHeapStatistics,
+    collect: typeof collect === "function" ? () => collect() : null,
+  });
 }
 
 /** Test-only: `run` with the oracle's questions given `room` bytes of heap. */
@@ -505,13 +529,13 @@ export function occurrences(answers: Answers, order: (items: string[]) => string
 }
 
 /**
- * What a program publishes with two orders set aside (TABLE r4.185, G5's stops whose own entries merge into one): the
- * order of the items in an answer and of the kinds in a decided admitted type. Every binding's admitted type and
- * decider site at its root, its element and each known property two levels down; every occurrence's answer
- * (`occurrences`, its items sorted). Test-only, for small sources (`type-core-oracles.test.ts`,
- * `type-core-contract.test.ts`), never a publication the families runner reads; their questions are not under the
- * oracle's own bound (`Questions`): past the finished analysis's allowance they are asked again on the stopped analysis
- * (`asked`), so the text holds the stopped answers with no mark of the stop.
+ * What a program publishes with two orders set aside (docs/specifications/type-inference-accepted-record.md#r4-185,
+ * G5's stops whose own entries merge into one): the order of the items in an answer and of the kinds in a decided
+ * admitted type. Every binding's admitted type and decider site at its root, its element and each known property two
+ * levels down; every occurrence's answer (`occurrences`, its items sorted). Test-only, for small sources
+ * (`type-core-oracles.test.ts`, `type-core-contract.test.ts`), never a publication the families runner reads; their
+ * questions are not under the oracle's own bound (`Questions`): past the finished analysis's allowance they are asked
+ * again on the stopped analysis (`asked`), so the text holds the stopped answers with no mark of the stop.
  */
 export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[]): string {
   return asked(answers, (answers) => upToOrder(answers, bindings));
@@ -1195,10 +1219,10 @@ export function decisionRecords(
 }
 
 /**
- * The type a store's whole check checks at `path` below it, as `reaches` in `consumer.ts` reads it: a property's type
- * where an object lists it, a collection's element type, through a union's members at any depth that can hold the step
- * (one member's type, else their union); `null` where the check reaches nothing there (an object without the property, a collection
- * with open elements, no member that holds the step).
+ * The type a store's whole check checks at `path` below it, as `reaches` in `runtime-plan.ts` reads it: a property's
+ * type where an object lists it, a collection's element type, through a union's members at any depth that can hold the
+ * step (one member's type, else their union); `null` where the check reaches nothing there (an object without the
+ * property, a collection with open elements, no member that holds the step).
  */
 function projectedType(type: TypePlan, path: readonly PartStep[]): TypePlan | null {
   // (a union's members, a nested union's at any depth, as `reaches` walks them)

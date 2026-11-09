@@ -5,10 +5,11 @@ import type { KeyId, PathRef, PathSteps } from "../contract/key-ids.js";
 import type { Definition, Key } from "../definitions.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
-import type { LandingTape } from "./landings.js";
+import type { LandingTape } from "./landings/inheritance.js";
 import type { CoreProgram } from "../program.js";
 import type { Touch, TouchRef } from "../touch.js";
 import { type CanonicalKey } from "../contract/key-ids.js";
+import type { Read, ReadAnswer } from "../inherited/reads.js";
 
 // The shapes admission's state and walks are made of.
 
@@ -138,9 +139,9 @@ export interface LiveGroup {
 }
 
 /**
- * A4 through copies' landings (`groups`, r4.75 (1)): where copies of written types land in each place, and the copies of
+ * A4 through copies' landings (`groups`): where copies of written types land in each place, and the copies of
  * inheriting places each place takes; a place's landed paths are its own, its copies' own paths and below them its
- * copies' sources' landed paths below their strips, asked of those sources, never made per copy (TABLE r4.80). A cycle
+ * copies' sources' landed paths below their strips, asked of those sources, never made per copy. A cycle
  * of copies has its members' landed paths made once, as the landing within it brings them.
  */
 export interface Inheritance {
@@ -226,9 +227,9 @@ export interface Storing {
 /**
  * A computation that may need an unwritten place's inherited type at a path first (`inheritedAt`): it yields that place
  * and path's key and is resumed with the type, so a scan that waits on another stops where it stands and goes on from
- * there, never taken again from its start.
+ * there, never taken again from its start. It yields its semantic reads too (`Read`), each resumed with its answer.
  */
-export type Inheriting<T> = Generator<CanonicalKey, T, TypeTerm | null>;
+export type Inheriting<T> = Generator<CanonicalKey | Read, T, ReadAnswer>;
 
 /** `inheritedAt`'s scan of one place and path, suspended while the key it waits on resolves. */
 /**
@@ -241,17 +242,13 @@ export interface Frontier {
   readonly rest: number;
 }
 
-export interface Waiting {
-  readonly key: CanonicalKey;
-  readonly steps: Inheriting<{
-    readonly copied: TypeTerm | null;
-    readonly nullable: boolean;
-    /** Whether the deciding copy reads its written type at its own root (`Admission.inheritedOwn`, #1901). */
-    readonly own?: boolean;
-  } | null> | null;
-  /** Its cycle of decisions when it stopped (`cycleOf`): a scan whose cycle grew meanwhile is taken again. */
-  cycle: string;
-}
+/** A key's scan's answer (`scanOf`): the copied written type and whether it holds `null`, or none. */
+export type WaitingAnswer = {
+  readonly copied: TypeTerm | null;
+  readonly nullable: boolean;
+  /** Whether the deciding copy reads its written type at its own root (`Admission.inheritedOwn`, #1901). */
+  readonly own?: boolean;
+} | null;
 
 /**
  * A path of a place in `openAbove`'s walk: the written types copies landed above it carry down to it (`permittedAt`,
@@ -285,7 +282,10 @@ export interface Alias {
   readonly source: Key;
   readonly read: FlowNode;
   readonly at: readonly string[];
-  /** The read itself: the copy whose binding's written type, A4's, its class keeps (TABLE r4.72, Astra r5 B1). */
+  /**
+   * The read itself: the copy whose binding's written type, A4's, its class keeps
+   * (docs/specifications/type-inference-accepted-record.md#r4-72, Astra r5 B1).
+   */
   readonly value: PlaceId;
   /** Whether its class is its read's chain's end (§4.1's chains): its items keep their own link's writer. */
   chained?: true;
@@ -309,7 +309,7 @@ export interface IngressStop {
   readonly path: readonly string[];
   readonly recordPath: readonly string[];
   readonly key: EvaluationKey;
-  /** The ingress's own expression, C9's site (r4.29). */
+  /** The ingress's own expression, C9's site. */
   readonly site: SourceSite;
   /** The stop's own expression (§3.4): the ingress itself where it is whole, a member read of it else. */
   readonly reads: SourceSite;
@@ -331,7 +331,7 @@ export interface LandingIndex {
 export interface Landing {
   readonly stores: Set<Definition>;
   own: boolean;
-  /** A typed `load` or `fromJson` of an inferred place whose default holds the ingress (TABLE r4.63 (3)). */
+  /** A typed `load` or `fromJson` of an inferred place whose default holds the ingress. */
   call?: PlaceId;
 }
 
@@ -472,7 +472,7 @@ export interface StoreIngresses {
 export interface Siting {
   readonly stop: Stop;
   readonly ingress: PlaceId | null;
-  /** A member of host data the store reads (r4.60): its own place's C1, no named data's. */
+  /** A member of host data the store reads: its own place's C1, no named data's. */
   readonly host?: true;
 }
 
@@ -518,8 +518,8 @@ export interface Decision {
   /** The candidates in source order (A5). */
   readonly candidates: readonly Candidate[];
   /**
-   * Decided by no contribution, the contract's kinds it is published with (C9 r4.12) beside external data: only the
-   * external data another store brought owes its check at each candidate (r4.50 (1)); data a store brings inline has
+   * Decided by no contribution, the contract's kinds it is published with (C9) beside external data: only the
+   * external data another store brought owes its check at each candidate; data a store brings inline has
    * its boundary, an opaque value C5's obligation at its access (A7).
    */
   readonly published: boolean;

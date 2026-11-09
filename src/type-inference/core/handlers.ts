@@ -3,7 +3,7 @@ import type { Callable, FlowNode } from "./flow-graph.js";
 import type { CoreProgram } from "./program.js";
 
 /*
- * The handler index of the coarse core (checkpoint 9, TABLE X7, §6.4 H1–H9, F24, §8): which keys a timer, media or
+ * The handler index of the coarse core (checkpoint 9, §6.4 H1–H9, F24, §8): which keys a timer, media or
  * button block may store (its own code and every callable it may run), and for each callable whether a block may have
  * been registered before a node runs: a registration in the callable earlier in its text, a call or file transfer
  * into a callable that registers (H9, H6), the callable entered where a block may have run, a file with a label, or a
@@ -81,7 +81,7 @@ export class HandlerIndex {
       if (into === undefined) callers.set(to, [[from, at]]);
       else into.push([from, at]);
     };
-    // only a call that can run registers (G1(b), r4.25), as only a transfer that can run does
+    // only a call that can run registers (G1(b)), as only a transfer that can run does
     for (const site of flow.sites) {
       if (site.callIn.dead) continue;
       const caller = flow.callableOf(site.caller);

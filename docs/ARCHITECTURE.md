@@ -111,7 +111,7 @@ snapshot for comparing two analyses of the same sources.
   - `analyseCore` (`core/answers.ts`) runs the analysis in admission's passes with the solver (`core/solver.ts`). It
     publishes frozen answers: per occurrence its items, route, place and obligations; per place its admitted type and
     contract; and the program's diagnostics, checks and budget.
-  - The consumer (`coreCheckResult`, `core/consumer.ts`) walks the source with those answers and makes the
+  - The consumer (`coreCheckResult`, `core/check-result/check-result.ts`) walks the source with those answers and makes the
     `TypeCheckResult` that lowering consumes.
 
   Other O4 foundations include the built-in result relations (`adapters/`, whose operand types the core reads) and

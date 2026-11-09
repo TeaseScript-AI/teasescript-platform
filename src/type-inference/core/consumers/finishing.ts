@@ -60,7 +60,7 @@ export function typedCall(
 
 /**
  * After a stop, a value's items at a node and a path as the finishing read answers them (`finishingRead`), for the
- * route's questions: one derivation with the consumers' (TABLE r4.138).
+ * route's questions: one derivation with the consumers'.
  */
 export function finishedItems(
   walk: Consumers,
@@ -72,15 +72,15 @@ export function finishedItems(
 }
 
 /**
- * A read in the finishing path (D4 a′, TABLE r4.90, r4.99; S3 §5 revision 14, r4.102), answered from the retained
+ * A read in the finishing path (D4 a′; S3 §5 revision 14), answered from the retained
  * state only, the first source that decides it winning: a leaf's own kind (`leafKind`), which no proof decides (an
  * error found there stands, a host read's boundary check forms); the read itself, then its key's contract, as the analysis had finished them before the stop (`run`:
  * the solver answers only from what had finished); the admitted type admission retained at its key's path (written,
  * decided, or a copy's through the copy forest, `Admission.retained`); what the stores' syntax decides there
- * at a settled stop (`cheapDecided`, source 4: TABLE r4.100, r4.135); `STOPPED` (`unknown` with the reason `budget`) only where
+ * at a settled stop (`cheapDecided`, source 4); `STOPPED` (`unknown` with the reason `budget`) only where
  * none of these decides it, so its consumer owes its check when the script runs. Only a leaf's kind and the
  * read's own answer are the value at the read; the key's contract, the written and the retained type are domains,
- * what the key may hold over all its stores (revisions 15, 16; r4.105, r4.106): read as the value for a fixed need,
+ * what the key may hold over all its stores (revisions 15, 16): read as the value for a fixed need,
  * possibly empty at an element; for a `requirement` that follows from the value's kinds (C10's family) only through
  * `required`.
  */
@@ -92,7 +92,7 @@ export function finishingRead(
   requirement = false,
 ): readonly Item[] {
   // (below a literal, its children's own reads, each through every source: a child no leaf kind decides keeps what the
-  // later sources give and a host read's ingress, as unstopped each child is its own value, TABLE r4.126; together in
+  // later sources give and a host read's ingress, as unstopped each child is its own value; together in
   // their one order, #1398)
   const { program } = walk.pass;
   if (rest.length > 0 && program.places[value]?.kind.kind === "value" && program.hasOf.has(value)) {
@@ -124,7 +124,7 @@ export function finishingRead(
     exact ??
     (read.length > 0 ? inItsOrder(read) : laterSources(walk, value, node, rest, requirement));
   // (a host read's ingress is structural whatever the script stores into its global: its C9 boundary forms from it,
-  // beside the kinds the later sources give, TABLE r4.113)
+  // beside the kinds the later sources give)
   const ingress = requirement ? null : hostIngress(walk, value);
   return ingress === null || items.some((item) => item.ingress !== undefined)
     ? items
@@ -170,8 +170,8 @@ function typedRead(
         chain.push(link);
       } else {
         // the default itself: its own kinds as a typed default reads them; a default no literal gives (a named one, a
-        // call's result) by its read's finished answer, else by its domain (its written, contract or retained type,
-        // TABLE r4.144) only where one kind no narrower kind refines decides it: a domain is not the value (an
+        // call's result) by its read's finished answer, else by its domain (its written, contract or retained type)
+        // only where one kind no narrower kind refines decides it: a domain is not the value (an
         // `integer?` may hold null alone, which leaves the level open; a `number` an integer), so elsewhere the type
         // stays open, `STOPPED`, and the call is marked (Codex r22 B1)
         const decision = typedDefault(path, false);
@@ -292,8 +292,8 @@ function laterSources(
     const syntax = syntaxRead(walk, value, rest);
     return required(syntax?.kinds ?? [], syntax?.spelling);
   }
-  // else, at a settled stop, the stores' syntax (source 4, TABLE r4.100, r4.135): every store's syntax decides the key
-  // together
+  // else, at a settled stop, the stores' syntax (source 4,
+  // docs/specifications/type-inference-accepted-record.md#r4-135): every store's syntax decides the key together
   const syntax =
     typedTags === null && retained.kinds.length === 0 ? syntaxRead(walk, value, rest) : null;
   const tags = typedTags ?? (retained.kinds.length > 0 ? retained.kinds : (syntax?.kinds ?? []));
@@ -324,7 +324,7 @@ function laterSources(
  * A domain's external items as a read's (#1448): what its key's stores hold, so a consumer's boundary requests for them
  * are the content of the warning that owns them (`Consumers.boundariesAt`). Each is a copy kept in `domainOwned`; a solver
  * item, which other reads share, stays as it is. A host read's stay unmarked: its own host ingress is in them, and that
- * boundary forms whatever its stores hold (TABLE r4.113).
+ * boundary forms whatever its stores hold.
  */
 function markDomain(walk: Consumers, value: PlaceId, items: readonly Item[]): readonly Item[] {
   // (each item looked at once, charged)
@@ -363,7 +363,7 @@ type Standing = CopyTask | { readonly values: HostFrontier };
  * (admission's store walk, `expand`), the node of the place's stored paths there, the copies standing there, and the
  * host data standing there or above it. What its copies hold is reached by a read's bounded walk (`explore`): the copies
  * standing at a frontier's path are its own and its owner path's, one step below. A copy's frontier holds what its stores
- * hold whatever decision of its place stopped, as the copy's value does (#1560): the stop alone (r4.186) is the read's own
+ * hold whatever decision of its place stopped, as the copy's value does (#1560): the stop alone is the read's own
  * key's (`heldIngress`).
  */
 interface HostFrontier {
@@ -428,7 +428,7 @@ function recordRead(value: PlaceId, rest: readonly string[], found: () => Fronti
 
 /** Test-only: what a read's walk found (`withFrontierBound`). */
 export interface FrontierRead {
-  /** Whether the read answered the stop alone (r4.186) before its walk. */
+  /** Whether the read answered the stop alone before its walk. */
   readonly guarded: boolean;
   /** Whether its walk was cut, so it answered its place's component's host data. */
   readonly cut: boolean;
@@ -441,7 +441,7 @@ export interface FrontierRead {
 
 /**
  * Test-only: runs `callback` with each read's walk bounded by `bound` (the exact reference: `Infinity` for both), and
- * records each read's walk (the bounded frontier's oracle, `tests/type-core-stop.test.ts`).
+ * records each read's walk (the bounded frontier's oracle, `tests/type-core/type-core-stop.test.ts`).
  */
 export function withFrontierBound<T>(
   bound: { readonly depth: number; readonly copies: number },
@@ -672,7 +672,7 @@ function locate(walk: Consumers, place: PlaceId, path: readonly string[]): HostF
  * and the host data standing at it, whatever decision of its place stopped (`locate`). At a `values`
  * step, which reads a dictionary's values list where its receiver is one and an object's own property where it is an
  * object, both: its own content and the frontier above it, standing there as a copy whose element is the
- * dictionary's (#1452). A dictionary's `keys` list holds text no store's host data reaches (TABLE r4.47).
+ * dictionary's (#1452). A dictionary's `keys` list holds text no store's host data reaches.
  */
 function stepOwn(walk: Consumers, from: HostFrontier, step: string): HostFrontier {
   const { program } = walk.pass;
@@ -922,10 +922,10 @@ function sameOf(
 }
 
 /**
- * A read's bounded walk (TABLE r4.208): the host data standing at its frontier and at the frontiers of the copies
- * standing there, breadth first, each frontier once, at most `frontierBound.depth` copies deep and `.copies` copies met.
- * Cut where a copy would lead deeper, or past the copies it may meet, to a frontier it has not met: then the read
- * answers its place's component's host data (`placeIngress`).
+ * A read's bounded walk (docs/specifications/type-inference-accepted-record.md#r4-208): the host data standing at its
+ * frontier and at the frontiers of the copies standing there, breadth first, each frontier once, at most
+ * `frontierBound.depth` copies deep and `.copies` copies met. Cut where a copy would lead deeper, or past the copies it
+ * may meet, to a frontier it has not met: then the read answers its place's component's host data (`placeIngress`).
  */
 function explore(
   walk: Consumers,
@@ -1021,9 +1021,9 @@ function valueEdges(walk: Consumers, value: Expansion, edges: Edges, owned?: Pla
 }
 
 /**
- * The host data a read whose walk is cut answers (TABLE r4.208): its place's component's (`placeIngress`), or, for a value
- * no place holds, what its expression brings (`ownIngress`). A superset of what its walk would name, never a dropped
- * check.
+ * The host data a read whose walk is cut answers (docs/specifications/type-inference-accepted-record.md#r4-208): its
+ * place's component's (`placeIngress`), or, for a value no place holds, what its expression brings (`ownIngress`). A
+ * superset of what its walk would name, never a dropped check.
  */
 function cutIngress(walk: Consumers, value: PlaceId): IngressNode | undefined {
   const place = readPlace(walk, value);
@@ -1156,7 +1156,7 @@ function placeIngress(walk: Consumers, start: PlaceId): IngressNode | undefined 
 /**
  * The host data a domain read holds after a settled stop (#1432, #1415): its own host ingress and what its bounded walk
  * meets (`explore`), and where the walk is cut its place's component's or its own value's (`cutIngress`), as one
- * external item naming those reads. Nothing below a key whose decision stopped (r4.186).
+ * external item naming those reads. Nothing below a key whose decision stopped.
  */
 function heldIngress(walk: Consumers, value: PlaceId, rest: readonly string[]): readonly Item[] {
   const { program, contract, definitions } = walk.pass;
@@ -1197,7 +1197,7 @@ function heldIngress(walk: Consumers, value: PlaceId, rest: readonly string[]): 
   if (node === undefined) return [];
   const item: Item = { ...unknownItem(REASON.external), ingress: node };
   // (what the stores bring is its mark's content, `Consumers.boundariesAt`, #1448; a host read's own ingress, in it too,
-  // forms whatever they hold, TABLE r4.113)
+  // forms whatever they hold)
   if (domain !== undefined && structural === null) {
     program.work.charge("checks");
     walk.domainOwned.add(item);
@@ -1209,12 +1209,12 @@ function heldIngress(walk: Consumers, value: PlaceId, rest: readonly string[]): 
  * A key's read in the finishing path (a store's receiver), from the same retained state as `finishingRead`: its own
  * finished answer at the node; else, domains, its finished contract and its written or retained admitted type (S3 §5
  * revisions 14, 16); `STOPPED` where none decides it. A receiver the retained state decides keeps its shape, so a store
- * into a property no source has keeps its error at the literal (TABLE r4.108).
+ * into a property no source has keeps its error at the literal.
  */
 export function finishingKeyRead(walk: Consumers, key: Key, node: FlowNode): readonly Item[] {
   const { program } = walk.pass;
   // (a host global holds its own external data where the script stores at no path at or above the key, as its reads
-  // do: `leafKind`; that data is there whatever it stores, so its C9 boundary forms, TABLE r4.113)
+  // do: `leafKind`; that data is there whatever it stores, so its C9 boundary forms)
   const host = program.isHost(keyPlace(key));
   if (host && !storedAbove(walk, keyPlace(key), keyPath(key)))
     return [unknownItem(REASON.external)];
@@ -1254,7 +1254,7 @@ function keyDomain(walk: Consumers, key: Key): readonly Item[] {
 
 /**
  * After a program stop, the kinds a label's step is spelled from where the key's contract asked then is unsettled, and
- * the proof they rest on (#1595, TABLE r4.322, the lead's ruling on its HEAD 0): the key's finished contract; else its
+ * the proof they rest on (#1595, the lead's ruling on its HEAD 0): the key's finished contract; else its
  * written type; else, at a settled stop, what admission retained where that is a decision or a written kind (A1, A2,
  * A4, a copy's source's among them), proved by the stopped analysis itself. Never an open answer (`unknown`, every kind
  * fitting) nor a path no decision retains (a stopped one's): `null` there, and the label keeps its generic step.
@@ -1290,7 +1290,7 @@ export function labelDomain(
 /**
  * A domain read for a requirement that follows from the value's kinds (C10's family; S3 §5 revisions 15, 16): every
  * value in it must give the same requirement. One family without `null` gives it, as possible kinds (a domain proves
- * nothing); `null` only gives none; any other domain leaves it undecided (`STOPPED`: r4.100's mark).
+ * nothing); `null` only gives none; any other domain leaves it undecided (`STOPPED`).
  */
 function required(tags: readonly ItemTag[], spelling: Spelling | undefined): readonly Item[] {
   if (tags.length === 0 || tags.includes("unknown")) return STOPPED;
@@ -1324,7 +1324,7 @@ function retainedRead(
 }
 
 /**
- * A leaf's own kind (S3 §5 revision 18, TABLE r4.109 (1)): a literal's own kind at the read (a scalar's, a collection
+ * A leaf's own kind (S3 §5 revision 18): a literal's own kind at the read (a scalar's, a collection
  * literal's: what its syntax is, as the stopped shapes read it), and below it its children's, or a host
  * read's own ingress, directly or through projections (`Contract.ingressOf`), where the script stores into its host
  * global at no path at or above the read's own: what the value is, known from the program's structure without solving;
@@ -1350,7 +1350,7 @@ function leafKind(
     // (the children's kinds together in their one order, #1398)
     return items.length === 0 ? null : inItsOrder(items);
   }
-  // (a host read: its kinds only where the script stores at no path at or above the read's own, TABLE r4.113)
+  // (a host read: its kinds only where the script stores at no path at or above the read's own)
   const ingress = hostIngress(walk, value);
   const key = ingress === null ? null : readKey(walk, value);
   return key !== null && !storedAbove(walk, keyPlace(key), joinSteps(keyPath(key), rest))
@@ -1360,7 +1360,7 @@ function leafKind(
 
 /**
  * A host read's ingress, directly or through projections (`Contract.ingressOf`): its external data named by its leaf,
- * known from the program's structure whatever the script stores into the global (TABLE r4.113); else `null`.
+ * known from the program's structure whatever the script stores into the global; else `null`.
  */
 function hostIngress(walk: Consumers, value: PlaceId): readonly Item[] | null {
   const { contract, program } = walk.pass;
@@ -1374,7 +1374,7 @@ function hostIngress(walk: Consumers, value: PlaceId): readonly Item[] | null {
 /**
  * The host data a value holds at every element depth of its own literals (`[hostValue]`, `[[hostValue]]`): each host
  * read's own ingress there (`leafKind`), the literals walked once by their own structure. A mark at a default stands in
- * for its check at every depth, so its host data meets its boundaries with it (TABLE r4.110 (a)).
+ * for its check at every depth, so its host data meets its boundaries with it.
  */
 export function heldHostData(walk: Consumers, value: PlaceId): Item[] {
   const { program } = walk.pass;
@@ -1394,7 +1394,7 @@ export function heldHostData(walk: Consumers, value: PlaceId): Item[] {
 
 /**
  * Whether the script stores into the host global `place` at `path` or at a path above it (a store below or beside it
- * does not replace the value read there), each global's stored paths found once (`leafKind`, TABLE r4.113).
+ * does not replace the value read there), each global's stored paths found once (`leafKind`).
  */
 function storedAbove(walk: Consumers, place: PlaceId, path: readonly string[]): boolean {
   if (walk.hostStores === null) {

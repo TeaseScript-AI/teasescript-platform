@@ -69,8 +69,8 @@ export function elementOf(
 }
 
 /**
- * A written type a fix names (TABLE r4.171): a form at a type's position, which reads nothing and holds no author's
- * text; `null` where it is none.
+ * A written type a fix names (docs/specifications/type-inference-accepted-record.md#r4-171): a form at a type's
+ * position, which reads nothing and holds no author's text; `null` where it is none.
  */
 export function typeAt(type: string, diagnosed: Diagnosed): string | null {
   return codeAt(
@@ -91,8 +91,8 @@ export function typeAt(type: string, diagnosed: Diagnosed): string | null {
 
 /**
  * How a fix declares a store's root with the type `type` at the root (`declareAs` of the current checker): its whole
- * declaration as the source writes it, with that type, where `codeAt` proves it in the declaration's place (#1268,
- * TABLE r4.146): a statement or a parameter, its text clear of the other diagnostics, its start value the author's
+ * declaration as the source writes it, with that type, where `codeAt` proves it in the declaration's place (#1268):
+ * a statement or a parameter, its text clear of the other diagnostics, its start value the author's
  * own, read where it stands; else the declaration and the type in words. `subject`, the root as the sentence names
  * it, `named` as its words name it; `null` where the type is no form (`typeAt`) or the root no declaration.
  */
@@ -120,8 +120,7 @@ export function declaration(
             code: start === -1 ? declared : `${declared} ${text.slice(start)}`,
             takes: [],
             diagnosed,
-            // (it restates the author's own declaration, its start value as written, and adds no read: TABLE r4.160,
-            // r4.168)
+            // (it restates the author's own declaration, its start value as written, and adds no read)
             reads: "none",
             holds: [root.site],
             rulesOut: null,

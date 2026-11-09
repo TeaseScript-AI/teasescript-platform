@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
@@ -122,24 +122,67 @@ test("the shards' estimated ends, the first's with the oracle comparison, the la
   ]);
 });
 
+test("the costliest files fill shard 1's slots, and the next starts in shard 2 after the pre-test checks", () => {
+  // (fixed seconds, so the rule holds apart from the measured weights: a regeneration moves those, #2010; names out of
+  // cost order and a shuffled input, so the order comes from the seconds alone)
+  const costliest = ["x.test.js", "z.test.js", "y.test.js", "w.test.js"];
+  const weights = {
+    costlyTestFiles: costliest,
+    costlyTestSeconds: { "x.test.js": 400, "z.test.js": 300, "y.test.js": 200, "w.test.js": 150 },
+    otherTestSeconds: 5,
+    pretestSeconds: 100,
+    oracleSeconds: 0,
+    testFilesAtOnce: 3,
+  };
+  const input = ["y.test.js", "w.test.js", "x.test.js", "z.test.js"];
+  assert.deepEqual(shardFiles(input, 1, 2, weights), ["x.test.js", "z.test.js", "y.test.js"]);
+  assert.deepEqual(shardFiles(input, 2, 2, weights), ["w.test.js"]);
+  assert.equal(shardSeconds(["x.test.js", "z.test.js", "y.test.js"], 1, 2, weights), 400);
+  assert.equal(shardSeconds(["w.test.js"], 2, 2, weights), 250);
+  // (pre-test checks that outlast the third file's slot send the next file to shard 1)
+  const longPretest = { ...weights, pretestSeconds: 250 };
+  assert.deepEqual(shardFiles(input, 1, 2, longPretest), costliest);
+  assert.deepEqual(shardFiles(input, 2, 2, longPretest), []);
+  // (small files take shard 1's free slots while shard 2 runs its pre-test checks: one more than its free slots, so that
+  // the last would start in shard 2 without them)
+  const small = Array.from({ length: 3 }, (_, i) => `small-${i}.test.js`);
+  assert.deepEqual(shardFiles(["x.test.js", ...small], 2, 2, weights), []);
+  assert.deepEqual(shardFiles(["x.test.js", ...small], 2, 2, { ...weights, pretestSeconds: 0 }), [
+    "small-2.test.js",
+  ]);
+});
+
 test("each shard's fixed seconds are counted where they fall: shard 1 gets fewer files for its oracle comparison", () => {
   // Equal small files, so the shards' loads can come within one file of each other: shard 1's files then fill the
-  // oracle comparison's seconds less than shard 2's fill its pre-test checks' seconds.
+  // oracle comparison's seconds less than shard 2's fill its pre-test checks' seconds. (fixed seconds, so the rule holds
+  // apart from the measured weights, as the test above)
+  const weights = {
+    costlyTestFiles: [],
+    costlyTestSeconds: {},
+    otherTestSeconds: 1.4,
+    pretestSeconds: 50,
+    oracleSeconds: 89,
+    testFilesAtOnce,
+  };
   const small = Array.from(
     { length: 300 },
     (_, i) => `small-${String(i).padStart(3, "0")}.test.js`,
   );
-  const [first, second] = [shardFiles(small, 1, 2), shardFiles(small, 2, 2)];
-  assert.ok(oracleSeconds > pretestSeconds);
+  const [first, second] = [shardFiles(small, 1, 2, weights), shardFiles(small, 2, 2, weights)];
+  assert.ok(weights.oracleSeconds > weights.pretestSeconds);
   assert.ok(first.length < second.length, `${first.length} files against ${second.length}`);
-  const [firstEnd, secondEnd] = [shardSeconds(first, 1, 2), shardSeconds(second, 2, 2)];
+  const [firstEnd, secondEnd] = [
+    shardSeconds(first, 1, 2, weights),
+    shardSeconds(second, 2, 2, weights),
+  ];
   assert.ok(
-    Math.abs(firstEnd - secondEnd) <= otherTestSeconds,
+    Math.abs(firstEnd - secondEnd) <= weights.otherTestSeconds,
     `${firstEnd} s against ${secondEnd} s`,
   );
   // Without the oracle seconds the files would split as before: shard 1 would take the extra ones.
   assert.ok(
-    shardSeconds(first, 1, 2) - oracleSeconds < shardSeconds(second, 2, 2) - pretestSeconds,
+    shardSeconds(first, 1, 2, weights) - weights.oracleSeconds <
+      shardSeconds(second, 2, 2, weights) - weights.pretestSeconds,
   );
 });
 
@@ -190,11 +233,14 @@ test("the filter's two shards run every compiled test file once between them, on
     "player/c.test.js",
   ];
   mkdirSync(join(cwd, "dist", "tests", "player"));
-  for (const name of names)
+  for (const name of names) {
+    // (a costly file's name is its path under dist/tests/, in a folder for most)
+    mkdirSync(dirname(join(cwd, "dist", "tests", name)), { recursive: true });
     writeFileSync(
       join(cwd, "dist", "tests", name),
       `import { test } from "node:test";\ntest(${JSON.stringify(`ran ${name}`)}, () => {});\n`,
     );
+  }
   const environment = { ...process.env };
   delete environment.NODE_TEST_CONTEXT;
   const run = (...args) =>

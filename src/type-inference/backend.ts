@@ -46,9 +46,9 @@ export interface TypeAnalysisBackend {
 export interface TypeAnalysisFile {
   readonly path: string;
   readonly program: Program;
-  /** The file's text, which names the operands an obligation checks (the coarse core: TABLE §10.5). */
+  /** The file's text, which names the operands an obligation checks (the coarse core). */
   readonly source?: string;
-  /** The files each glob target may start, from name checking, as the lowering takes them (TABLE G1(f)). */
+  /** The files each glob target may start, from name checking, as the lowering takes them. */
   readonly picks?: ReadonlyMap<FileTarget, readonly string[]>;
 }
 
@@ -114,7 +114,7 @@ export interface TypeCheckResult {
   readonly ways: WayFacts;
   /**
    * The statements that the check found never run once their function, block, or file runs, which its narrowing and its
-   * loop effects follow: the plan's reachability finds the same ones (tests/reachability-differential.test.ts).
+   * loop effects follow: the plan's reachability finds the same ones (tests/semantic/reachability-differential.test.ts).
    */
   readonly unreachable: ReadonlySet<Statement>;
   /** What the flow check of speaker properties needs from the check, once the project is lowered (V30 §37). */

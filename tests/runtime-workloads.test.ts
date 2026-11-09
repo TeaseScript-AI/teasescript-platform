@@ -89,7 +89,7 @@ interface ManifestCase {
   readonly tape?: string;
   readonly fresh?: FreshRuntimeOptions;
 }
-// EVIDENCE: the runner checks the manifest's shape on every run of `tests/runtime-benchmark.test.ts`.
+// EVIDENCE: the runner checks the manifest's shape on every run of `tests/runtime/runtime-benchmark.test.ts`.
 const manifest = JSON.parse(read("manifest.json")) as {
   readonly seed: number;
   readonly wallClockMs: number;
