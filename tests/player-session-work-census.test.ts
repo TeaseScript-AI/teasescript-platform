@@ -552,8 +552,11 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
   "player/vue/src/session/useCallView.ts useCallView {followCallView}": "lifecycle",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > then:callback {bridgeLost}":
     "lifecycle",
-  // The export lease's release, which the activation's retirement runs (`own`).
+  // The export lease's release, which the activation's retirement (`own`) and the dialog's cancellation run, and which
+  // the handoff takes back from the cancellation.
   "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > deliver {release}":
+    "lifecycle",
+  "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > deliver > handOver {release}":
     "lifecycle",
   "player/vue/src/session/useSessionMedia.ts useSessionMedia > watchMedia {catchUp}":
     "clock scheduling",

@@ -357,12 +357,14 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useRuntimeSceneClock.ts: useRuntimeSceneClock > observeIn: await opened.send":
     "the section's observation, which shows only its own session's publication (`owned`); the body that acts for an activation re-admits first (`resolveDraw`)",
   "draw.ts: resolveDrawFor > page.section:callback: await section.send": READMITS,
-  "draw.ts: resolveDrawFor: catch resolved": READMITS,
+  "draw.ts: resolveDrawFor: catch resolved":
+    "its failure goes only to the activation sink, which admits the origin itself",
   "useSessionActivation.ts: useSessionActivation > startFrom: finally settled":
     "clears the in-flight markers it set, only while they are still its own",
   "debugMode.ts: completeDebugMode: finally target.setDebugModeShown":
     "clears the Debug mode asked, only while it is still this request's",
-  "debugMode.ts: completeDebugMode: then target.setDebugModeShown.finally": READMITS,
+  "debugMode.ts: completeDebugMode: then target.setDebugModeShown.finally":
+    "its success re-admits first; its failure goes only to the activation sink, which admits the origin itself",
   "useSessionMedia.ts: useSessionMedia > primeAudio: catch element.play":
     "drops a blocked play; nothing follows",
   "useKeptSession.ts: useKeptSession > settlePlanJson: catch bridgeNow.client.request":
