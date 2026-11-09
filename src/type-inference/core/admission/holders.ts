@@ -84,8 +84,8 @@ function firstStep(rest: Rest): string | null {
  * stops at its decider (in source order, at about half), all for A5's offending scan, which reads every store. Each
  * index is made once those reach the construction's charges (`entriesCost`, `wholeCost`). Until its holding count a
  * prefix's state is kept uncharged, as the property index's read count is (`PrefixLevels.reads`, #1456): a prefix
- * whose index never pays costs main's work alone, so its charges move no stop. From the holding count on, its units
- * are kept and each walk's lookup is charged.
+ * that never reaches its holding count is charged exactly main's work, so its index charges move no stop. From the
+ * holding count on, its units are kept and each walk's lookup is charged, whether or not its index is then made.
  */
 function holdersOf(
   admission: Admission,
