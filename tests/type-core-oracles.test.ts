@@ -39,6 +39,7 @@ import {
   withQuestionMemory,
 } from "./helpers/type-core-oracles.js";
 import type { InstructionPlan, TypeCheckPlan } from "../src/plan/model.js";
+import { HELD_MODES } from "./helpers/type-core-held-host.js";
 import { hostValues, stopRuns } from "./helpers/type-core-stop-oracle.js";
 import { DOUBLING } from "./helpers/type-core-work.js";
 
@@ -874,4 +875,26 @@ test("a stop's runs catch the design round's controls: a false branch, a nested 
   );
   assert.equal(unreached.natural.plan, false);
   assert.equal(unreached.kind, "unwitnessed");
+});
+
+test("a stop's runs read #2116's final witness closed on main at demand 64, and open with its store checks dropped, in every held mode (#2080 part 1, PR #2116's final, comment 6736629257)", () => {
+  // (`all:new-cases-2::graph/396`: the lossy stop path kept six runtime checks here on main and none on #2116's head,
+  // where `hostValue = "text"` ran past the store main checks. These tests compile main alone, so they cannot compile
+  // that head: the plan with its store checks dropped stands in for it, the same failure in the same place)
+  const files = [
+    {
+      path: "main.tease",
+      source:
+        'let typed:number=1.5\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\nif hostValue is integer {a=b}\nb=b\nb=a\na=a\nlet out=c\nexit\n',
+    },
+  ];
+  for (const mode of HELD_MODES) {
+    const run = <T>(make: () => T): T => mode.run(make);
+    assert.equal(stopRuns(files, ["hostValue"], run, 64).kind, "closed", mode.name);
+    assert.equal(
+      stopRuns(files, ["hostValue"], run, 64, (plan) => withoutTypeChecks(plan)).kind,
+      "open",
+      mode.name,
+    );
+  }
 });
