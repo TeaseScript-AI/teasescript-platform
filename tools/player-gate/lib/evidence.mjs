@@ -33,10 +33,18 @@ export class ReversedInterval extends Error {
 const RAW = Symbol("raw record");
 const PATH = Symbol("record path");
 
+/** A value read from a record: wrapped the same way, or `MissingEvidence` when it is `undefined` or `null`. */
+function strictValue(found, field) {
+  if (found === undefined || found === null) throw new MissingEvidence(field);
+  return strictRecord(found, field);
+}
+
 /**
  * `value` read strictly: an object or array whose every property read returns the value wrapped the same way, or
- * throws `MissingEvidence` (with the field's path) when it is `undefined` or `null`. Functions (an array's methods)
- * pass through, so `records.find(…)` hands its callback wrapped elements. A primitive is returned as it is.
+ * throws `MissingEvidence` (with the field's path) when it is `undefined` or `null`. A read by reflection is read the
+ * same way (Sol code r10): a property descriptor's `value` comes back wrapped or throws (so `Object.keys`, `Object.values`
+ * and a spread of a record with a missing field throw too), and the key, `in` and prototype traps reveal no value. Functions (an array's methods) pass through, so `records.find(…)` hands its callback wrapped
+ * elements. A primitive is returned as it is.
  */
 export function strictRecord(value, path = "record") {
   if (value === null || typeof value !== "object" || value[RAW] !== undefined) return value;
@@ -46,10 +54,26 @@ export function strictRecord(value, path = "record") {
       if (key === PATH) return path;
       const found = target[key];
       if (typeof key === "symbol" || typeof found === "function") return found;
-      const field = `${path}.${String(key)}`;
-      if (found === undefined || found === null) throw new MissingEvidence(field);
-      return strictRecord(found, field);
+      return strictValue(found, `${path}.${String(key)}`);
     },
+    getOwnPropertyDescriptor(target, key) {
+      const descriptor = Object.getOwnPropertyDescriptor(target, key);
+      if (
+        descriptor === undefined ||
+        typeof key === "symbol" ||
+        !("value" in descriptor) ||
+        typeof descriptor.value === "function"
+      )
+        return descriptor;
+      return { ...descriptor, value: strictValue(descriptor.value, `${path}.${String(key)}`) };
+    },
+    // The keys, `in` and the prototype are the record's own: none of them hands out a value.
+    ownKeys: (target) => [
+      ...Object.getOwnPropertyNames(target),
+      ...Object.getOwnPropertySymbols(target),
+    ],
+    has: (target, key) => key in target,
+    getPrototypeOf: (target) => Object.getPrototypeOf(target),
   });
 }
 

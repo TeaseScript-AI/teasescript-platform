@@ -818,6 +818,16 @@ function readerViolations(
     }
     if (ts.isIdentifier(node) && ["RAW", "PATH"].includes(node.text))
       at(node, "a read past the reader");
+    // A reflective read anywhere in the derivations, whatever it is applied to (Sol code r10): a descriptor, the property
+    // names, `Reflect.*`, a serialization or a clone hands out values past the reader's traps.
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression.getText(source);
+      if (
+        (REFLECTIVE.has(callee) || callee.startsWith("Reflect.")) &&
+        !ALLOWED_REFLECTION.includes(node.getText(source))
+      )
+        at(node, `a reflective read: ${node.getText(source)}`);
+    }
     if (!ts.isFunctionDeclaration(node) || node.name?.text !== "deriveSample") return;
     roots += 1;
     const raw = node.parameters[1];
@@ -887,6 +897,16 @@ function readerViolations(
   return violations;
 }
 
+/** The reflective calls the derivations never make, and the one the page-source builder makes on a serial number. */
+const REFLECTIVE = new Set([
+  "Object.getOwnPropertyDescriptor",
+  "Object.getOwnPropertyDescriptors",
+  "Object.getOwnPropertyNames",
+  "JSON.stringify",
+  "structuredClone",
+]);
+const ALLOWED_REFLECTION = ["JSON.stringify(beforeControl)"];
+
 const DERIVATION_SOURCES = () => ({
   "validate.mjs": readFileSync(new URL("./validate.mjs", import.meta.url), "utf8"),
   "lib/measure.mjs": readFileSync(new URL("./lib/measure.mjs", import.meta.url), "utf8"),
@@ -914,6 +934,32 @@ test("the reader guard fails every raw-read form at the wrapping site, and the p
     spread: site.replace("strict.result", "{ ...row }.result"),
     in: site.replace("strict.result", '"result" in row ? strict.result : strict.result'),
   };
+  // Sol code r10's descriptor mutant: a value read past the reader's `get` trap, from the wrapped record.
+  assert.ok(
+    readerViolations(
+      original.replace(
+        site,
+        site.replace("strict.result", 'Object.getOwnPropertyDescriptor(strict, "result").value'),
+      ),
+      "validate.mjs",
+      NO_INTERVALS,
+    ).some((violation) => violation.includes("a reflective read")),
+    "the descriptor mutant passed the guard",
+  );
+  for (const reflective of [
+    'Reflect.getOwnPropertyDescriptor(strict, "result").value',
+    "JSON.parse(JSON.stringify(strict)).result",
+    "structuredClone(strict).result",
+    "Object.getOwnPropertyDescriptors(strict).result.value",
+  ])
+    assert.ok(
+      readerViolations(
+        original.replace(site, site.replace("strict.result", reflective)),
+        "validate.mjs",
+        NO_INTERVALS,
+      ).some((violation) => violation.includes("a reflective read")),
+      `the ${reflective} mutant passed the guard`,
+    );
   // Renaming the raw parameter must not switch the guard off (Sol code r9): the rename plus a bracket read.
   const renamed = original
     .replace(
@@ -1005,4 +1051,49 @@ test("nullable reads only the fields that may truly be absent", () => {
   );
   for (const reason of Object.values(NULLABLE))
     assert.ok(typeof reason === "string" && reason.length > 0);
+});
+
+test("a reflective read of a strict record reads it strictly: a descriptor's value is wrapped or throws", () => {
+  const record = strictRecord({ result: { baselineMs: null, kept: { at: 3 } } });
+  assert.throws(
+    () => Object.getOwnPropertyDescriptor(record.result, "baselineMs"),
+    MissingEvidence,
+  );
+  assert.throws(
+    () => Object.getOwnPropertyDescriptor(record, "result").value.baselineMs,
+    MissingEvidence,
+  );
+  assert.throws(() => ({ ...record.result }), MissingEvidence);
+  assert.equal(Object.getOwnPropertyDescriptor(record.result, "kept").value.at, 3);
+  assert.equal("kept" in record.result, true);
+});
+
+test("no byte number is in the headline summary: a session's byte fields are their own unvalidated cell", () => {
+  const report = buildReport(
+    [row({ scenario: "session", engine: "chromium" }, true, sessionResult())],
+    "r0",
+    ARTIFACTS,
+  );
+  const timings = report.summary[name({})];
+  assert.ok(timings !== undefined);
+  assert.ok(
+    !Object.keys(timings).some((label) => /served|byte|request/u.test(label)),
+    "a byte field in the headline summary",
+  );
+  assert.ok(
+    Object.keys(report.unvalidated[`${name({})} / bytes`]).some((label) =>
+      label.startsWith("served"),
+    ),
+  );
+  assert.match(report.text, /## Declared gaps[\s\S]*byte fields[\s\S]*R10-01/u);
+  // A byte record's failure fails the byte cell alone, never the timings.
+  const noMarks = sessionResult();
+  delete noMarks.bytes.marks;
+  const failing = buildReport(
+    [row({ scenario: "session", engine: "chromium" }, true, noMarks)],
+    "r0",
+    ARTIFACTS,
+  );
+  assert.ok(name({}) in failing.summary);
+  assert.ok(failing.incomplete.some((text) => text.startsWith(`- ${name({})} / bytes`)));
 });

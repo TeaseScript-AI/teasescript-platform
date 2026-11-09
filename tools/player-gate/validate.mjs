@@ -50,7 +50,10 @@ function session(result, cell, problems) {
     worker,
     turns,
     memory: result.memory,
-    bytes: cell.scenario === "session" && onCdp(cell) ? result.bytes : null,
+    // Read only by the byte fields, apart from the timings (`BYTE_GAP`): a byte record's absence fails the bytes alone.
+    get bytes() {
+      return cell.scenario === "session" && onCdp(cell) ? result.bytes : null;
+    },
   };
 }
 
@@ -520,6 +523,14 @@ const diagnosticRequest = (sample, page, op) =>
 const diagnosticRtt = (sample, page, op) => diagnosticRequest(sample, page, op)?.rttMs;
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
+/**
+ * The byte cells, outside the invariant like `UNVALIDATED` (orchestrator 2's bound after Sol code r10): every session
+ * cell's byte fields (`BYTES`) are reported apart, as their own `unvalidated` cell, out of the headline and the R0
+ * comparison, which are timings only.
+ */
+export const BYTE_GAP =
+  "R10-01: byte phases compare request starts with the page's marks without validating them as finite and ordered";
+
 /** The scenarios whose result is pass or fail: a measured failure is their cell's value, never an incomplete cell. */
 export const PASS_FAIL = new Set(["demo", "delayedSmoke"]);
 
@@ -549,22 +560,39 @@ export const UNVALIDATED = {
 export function deriveSample(cell, row) {
   const problems = [];
   const values = [];
+  const fields = NUMBERS[cell.scenario].filter(([, , , applies]) => applies(cell));
+  const timings = fields.filter((field) => !BYTES.includes(field));
+  const byteFields = fields.filter((field) => BYTES.includes(field));
+  const bytes = { values: [], problems: [] };
+  /** Reads `list`'s fields from `sample` into `into`, a required one that is not a number into `failed`. */
+  const readFields = (list, sample, into, failed) => {
+    for (const [label, unit, read, , required] of list) {
+      const value = read(sample);
+      if (required && !finite(value)) failed.push(unit === "" ? label : `${label} (${unit})`);
+      into.push({ label, unit, value: finite(value) ? value : null });
+    }
+  };
+  let sample = null;
   try {
     // The one place a row's records are wrapped: every derivation below reads them strictly.
     const strict = strictRecord(row, "row");
-    const sample = DERIVE[cell.scenario](strict.result, cell, problems);
+    sample = DERIVE[cell.scenario](strict.result, cell, problems);
     // A keep trial's outcome and a pass/fail scenario's result are their measurement; any other failed sample fails.
     if (!cell.scenario.startsWith("keep") && !PASS_FAIL.has(cell.scenario) && strict.ok !== true)
       problems.unshift("the sample failed");
-    for (const [label, unit, read, applies, required] of NUMBERS[cell.scenario]) {
-      if (!applies(cell)) continue;
-      const value = read(sample);
-      if (required && !finite(value)) problems.push(unit === "" ? label : `${label} (${unit})`);
-      values.push({ label, unit, value: finite(value) ? value : null });
-    }
+    readFields(timings, sample, values, problems);
   } catch (error) {
     if (!isEvidenceError(error)) throw error;
     problems.push(error.message);
   }
-  return { values, problems };
+  // The byte fields, outside the invariant (`BYTE_GAP`): their failures fail their own cell, never the timings'.
+  if (byteFields.length > 0)
+    try {
+      if (sample === null) bytes.problems.push("the sample's records gave no derivation");
+      else readFields(byteFields, sample, bytes.values, bytes.problems);
+    } catch (error) {
+      if (!isEvidenceError(error)) throw error;
+      bytes.problems.push(error.message);
+    }
+  return { values, problems, bytes: byteFields.length > 0 ? bytes : null };
 }

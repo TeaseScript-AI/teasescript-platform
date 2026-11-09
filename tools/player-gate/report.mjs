@@ -6,7 +6,7 @@
 //   node tools/player-gate/report.mjs --phase r0|r1 [--json FILE] [--artifacts FILE]... RESULTS.jsonl...
 import { readFileSync, writeFileSync } from "node:fs";
 import { allCells, cellName, classify } from "./cells.mjs";
-import { deriveSample, PASS_FAIL, UNVALIDATED } from "./validate.mjs";
+import { BYTE_GAP, deriveSample, PASS_FAIL, UNVALIDATED } from "./validate.mjs";
 import { summarize } from "./lib/measure.mjs";
 
 const format = ({ n, median, min, max }) =>
@@ -84,7 +84,7 @@ const NOTES = {
  * file counted once.
  */
 function artifactLines(inventories) {
-  const lines = ["## Artifacts (files, every engine)", ""];
+  const lines = ["## Artifacts (files, every engine; byte evidence, outside the headline)", ""];
   if (inventories.length === 0)
     return { lines: [...lines, "No inventory given.", ""], complete: false };
   for (const inventory of inventories) {
@@ -188,17 +188,46 @@ export function buildReport(rows, phase, artifacts = []) {
         table[named] = value;
         out.push(`| ${named} | ${format(value)} | ${unit} |`);
       }
-    // The byte page's retries, where the bytes are: how many attempts the cell discarded in all.
-    const retry = derived[0].values.findIndex(({ label }) =>
-      label.startsWith("byte pages discarded"),
-    );
-    if (retry !== -1) {
-      const total = derived.reduce((sum, sample) => sum + (sample.values[retry].value ?? 0), 0);
-      table["byte pages discarded, in all"] = total;
-      out.push(
-        "",
-        `Byte pages discarded and loaded again: ${total} over ${derived.length} samples.`,
-      );
+    // The cell's byte fields: their own `unvalidated` cell (`BYTE_GAP`), never in the timings' table or summary.
+    if (derived[0].bytes !== null) {
+      const bytesName = `${name} / bytes`;
+      const failingBytes = derived.filter((sample) => sample.bytes.problems.length > 0);
+      if (failingBytes.length > 0)
+        incomplete.push(
+          `- ${bytesName}: ${derived.length} samples, ${failingBytes.length} failing; ${[...new Set(failingBytes.flatMap((sample) => sample.bytes.problems))].join("; ")}`,
+        );
+      else {
+        const byteTable = (unvalidated[bytesName] = {});
+        unvalidatedLines.push(
+          `## ${bytesName} (unvalidated)`,
+          "",
+          `${derived.length} samples, outside the invariant (${BYTE_GAP}).`,
+          "",
+          "| Number | Value | Unit |",
+          "| --- | --- | --- |",
+        );
+        for (const [index, { label, unit }] of derived[0].bytes.values.entries()) {
+          const value = summarize(derived.map((sample) => sample.bytes.values[index].value));
+          byteTable[label] = value;
+          unvalidatedLines.push(`| ${label} | ${format(value)} | ${unit} |`);
+        }
+        // The byte page's retries, where the bytes are: how many attempts the cell discarded in all.
+        const retry = derived[0].bytes.values.findIndex(({ label }) =>
+          label.startsWith("byte pages discarded"),
+        );
+        if (retry !== -1) {
+          const total = derived.reduce(
+            (sum, sample) => sum + (sample.bytes.values[retry].value ?? 0),
+            0,
+          );
+          byteTable["byte pages discarded, in all"] = total;
+          unvalidatedLines.push(
+            "",
+            `Byte pages discarded and loaded again: ${total} over ${derived.length} samples.`,
+          );
+        }
+        unvalidatedLines.push("");
+      }
     }
     out.push("");
   }
@@ -206,17 +235,24 @@ export function buildReport(rows, phase, artifacts = []) {
   lines.push(
     "## Unvalidated cells",
     "",
-    "Outside the headline and the R0 comparison (the declared gaps below).",
+    "Outside the headline and the R0 comparison, which are timings only (the declared gaps below).",
     "",
     ...(unvalidatedLines.length === 0 ? ["None with samples.", ""] : unvalidatedLines),
     "## Declared gaps",
     "",
-    ...Object.entries(UNVALIDATED).map(
-      ([scenario, gap]) =>
-        `- \`${scenario}\` (every required cell): ${gap}. ${GAP_ISSUE}: the label is lifted (these derivations validated under the kit's invariant in docs/TESTING.md) before the activation PR's R1 run, since the gate's decision is R1's.`,
+    ...[
+      ...Object.entries(UNVALIDATED).map(([scenario, gap]) => [
+        `\`${scenario}\` (every required cell)`,
+        gap,
+      ]),
+      ["every session cell's byte fields (`/ bytes`)", BYTE_GAP],
+    ].map(
+      ([what, gap]) =>
+        `- ${what}: ${gap}. ${GAP_ISSUE}: the label is lifted (these derivations validated under the kit's invariant in docs/TESTING.md) before the activation PR's R1 run, since the gate's decision is R1's.`,
     ),
     "",
   );
+  // The build's files and their sizes: byte evidence too, outside the headline, which is timings only.
   const files = artifactLines(artifacts);
   lines.push(...files.lines);
   if (!files.complete) incomplete.push("- artifacts: no inventory given");

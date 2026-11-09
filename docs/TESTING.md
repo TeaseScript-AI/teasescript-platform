@@ -965,8 +965,8 @@ smoke does not predetermine that later tooling decision.
 `tools/player-gate/` measures what the L5 gate's cost report needs to decide whether the Player's engine moves into its
 Worker: real browsers and the Pixel 4a, outside CI, never a threshold; it changes no product file. Its completeness
 invariant: every required field of a cell derives from records that passed the shared validation in `validate.mjs`,
-read through the strict reader, and a sample that fails it makes its cell incomplete. The scenarios outside it are
-labelled `unvalidated` (#2122). The kit's README ([`tools/player-gate/README.md`](../tools/player-gate/README.md)) has
+read through the strict reader, and a sample that fails it makes its cell incomplete. The scenarios outside it and the
+byte evidence are labelled `unvalidated` (#2122), so the headline and the R0 comparison are timings only. The kit's README ([`tools/player-gate/README.md`](../tools/player-gate/README.md)) has
 the two sets, the reader rule, the files and how to run R0.
 
 ## Coverage and performance boundaries

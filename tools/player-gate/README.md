@@ -22,13 +22,19 @@ exits 2.
   A sample that fails the validation makes its cell incomplete; it is never a value in a median.
 
 - **The two sets.**
-  - The invariant holds for `session`, `aa`, `keepDurable`, `demo` and `delayedSmoke`.
+  - The invariant holds for the timings of `session`, `aa`, `keepDurable`, `demo` and `delayedSmoke`. The headline and
+    the R0 comparison are timings only: playable, A/A, keep timings, and the demo's and the smoke's pass or fail.
   - The scenarios in `UNVALIDATED` (`bridge`, `sessionInstrumented`, `taps`, `bridgeTaps`, `keepHandler`,
     `keepCompletion`) are labelled `unvalidated`. The report prints them apart from the headline and the R0
     comparison and lists them as declared gaps (#2122). They are validated before the activation PR's R1 run.
+  - Every session cell's byte fields (`BYTES`: served bytes per phase, encoded and decoded, the engine Worker's
+    request count, the discarded byte pages) are their own `unvalidated` cell (`<cell> / bytes`), and so is the
+    artifact inventory: outside the headline, the summary and the R0 comparison (#2122, R10-01). A byte record's
+    failure fails the byte cell alone.
   - A measured failure is a value (`cells.mjs`): a pass/fail scenario's failing run is its result, with its finding.
 - **The reader rule (`lib/evidence.mjs`).** The derivations read a row's records only through `strictRecord`:
-  - a read of a missing value throws `MissingEvidence`;
+  - a read of a missing value throws `MissingEvidence`, by a property read or by reflection (a descriptor's value,
+    `Object.values`, a spread);
   - a value that may truly be absent is read with `nullable`, by name, and only a field on its closed list
     (`NULLABLE`, each with why it may be absent); a classification or a required field is never on it;
   - `span(from, to)` is the only subtraction over timestamps, and it requires both ends present and in order;
