@@ -687,11 +687,12 @@ test("a decided path reads its prefix's stores that may hold its first step, the
  * program's diagnostics, by code, severity and line, are `main`'s in every held mode, and so are the decision of `a.p`
  * (kinds, decider, inherited, what it holds) and, where its holders store lists, of its element. Each witness keeps
  * one part of the selection: a whole copy of a terminal place, its literal's names (Sol's copied-source witness); a
- * source's own store below its root, a layer no settled store shows (#1466), which offends; a holder whose element is
- * `null` alone beside a written list, which decides nothing and leaves its element nullable; two holders of different
- * kinds; a host value's store and a copy of a place of two stores, each unproved, which hold every step; a copy of a
- * written binding, whose written type decides; a store the first pass rejects (A6), so the next pass's admission lists
- * the stores without it and decides afresh.
+ * source's own store below its root, a layer no settled store shows (#1466), after the decider, where it offends, and
+ * before it, where it decides; a holder whose element is `null` alone beside a written list, which decides nothing and
+ * leaves its element nullable; two holders of different kinds; a host value's store and a copy of a place of two
+ * stores, each unproved, which hold every step; a copy of a written binding, whose written type decides; stores the
+ * first pass rejects (A6) before the path's holder, so the next pass's admission lists the stores without them and
+ * decides afresh, where a state kept from the first misreads.
  */
 test("a decided path past the decision index's first bound decides as the full scan does (#2065)", () => {
   const irrelevant = ["let a={x0:1}", ...Array.from({ length: 15 }, (_, i) => `a={x${i + 1}:1}`)];
@@ -715,6 +716,11 @@ test("a decided path past the decision index's first bound decides as the full s
       source: program(["let s={q:1}", 's.p="wrong"'], ["a={p:1}", "a=s"], ["repeat a.p {}"]),
       diagnostics: ["TSV043 error L0", "TSV041 error L19"],
       decided: ["integer by 1 L18, holds integer|unknown"],
+    },
+    {
+      source: program(["let s={q:1}", 's.p="wrong"'], ["a=s", "a={p:1}"], ["repeat a.p {}"]),
+      diagnostics: ["TSV043 error L0", "TSV041 error L19", "TSV011 error L36"],
+      decided: ["string by s L18, holds string|unknown"],
     },
     {
       source: program(
@@ -755,11 +761,16 @@ test("a decided path past the decision index's first bound decides as the full s
     {
       source: program(
         [],
-        ["a={p:1}", 'a={p:"wrong"}', "a={q:1}"],
-        ["repeat a.p {}", "repeat a.q {}"],
+        ["a={q:1}", 'a={q:"wrong"}', "a={p:1}", 'a={p:"text"}'],
+        ["repeat a.q {}", "repeat a.p {}"],
       ),
-      diagnostics: ["TSV041 error L17", "TSV011 warning L35", "TSV043 warning L35"],
-      decided: ["integer by 1 L16, holds integer|unknown"],
+      diagnostics: [
+        "TSV041 error L17",
+        "TSV041 error L19",
+        "TSV011 warning L36",
+        "TSV043 warning L36",
+      ],
+      decided: ["integer by 1 L18, holds integer|unknown"],
     },
   ];
   const lineOf = (text: string) => Number(text.slice(text.lastIndexOf("L") + 1));
