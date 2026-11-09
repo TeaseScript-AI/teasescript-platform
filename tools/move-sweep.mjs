@@ -33,7 +33,7 @@
 //   - a word character is a Unicode letter, digit or underscore, `[\p{L}\p{N}_]`: Python's `\w` for text, exactly, for
 //     every character Unicode 15.1 assigns (Python 3.13's database; a character a later Unicode adds counts here too),
 //     and each of its word boundaries is the same class's lookaround;
-//   - whitespace is Python's (`str.isspace`, its `\s`): `\t` to `\r`, U+001C to U+0020, U+0085, U+00A0, U+1680, U+2000
+//   - whitespace is Python's (str.isspace, its `\s`): `\t` to `\r`, U+001C to U+0020, U+0085, U+00A0, U+1680, U+2000
 //     to U+200A, U+2028, U+2029, U+202F, U+205F and U+3000, which neither JavaScript's `\s` nor `trim` is (they take
 //     U+FEFF and leave U+001C to U+001F and U+0085); a hit's line is trimmed of it, as Python's `strip`;
 //   - any character but `\n` matches where Python's `.` does (`[^\n]`, also U+2028 and U+2029).
@@ -71,7 +71,7 @@ const refuse = (message) => {
 };
 
 const WORD = String.raw`\p{L}\p{N}_`;
-// Python's whitespace (`str.isspace`, its `\s` for text), and its `strip`.
+// Python's whitespace (str.isspace, its `\s` for text), and its `strip`.
 const SPACE = String.raw`[\t\n\v\f\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]`;
 const STRIP_SPACE = new RegExp(String.raw`^${SPACE}+|${SPACE}+$`, "gu");
 const notWordBefore = String.raw`(?<![${WORD}])`;
