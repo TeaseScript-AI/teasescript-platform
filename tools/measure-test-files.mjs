@@ -4,7 +4,7 @@ import { availableParallelism, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { run } from "node:test";
 import { filesAtOnce } from "./test-files-at-once.mjs";
-import { shardFiles } from "./test-shards.mjs";
+import { isTypeCoreTestFile, shardFiles, suiteName, suiteTestFiles } from "./test-shards.mjs";
 
 // Measures what `tools/costly-test-files.mjs` records: each compiled test file's seconds, from its process's start to its
 // end, and the seconds of the checks CI's last test job runs before its tests (`npm run check:pretest`). `--write`
@@ -105,9 +105,9 @@ let measured;
 if (fromCi !== null) {
   const runs = ciRuns(fromCi);
   // (the suite as the checkout has it: a file no run measured is refused, one the checkout lost is left out)
-  const suite = readdirSync(new URL("../tests/", import.meta.url))
-    .filter((file) => file.endsWith(".test.ts"))
-    .map((file) => file.replace(/\.ts$/, ".js"));
+  const suite = suiteTestFiles(join(import.meta.dirname, "../tests"), ".test.ts").map((file) =>
+    file.replace(/\.ts$/, ".js"),
+  );
   const unmeasured = suite.filter((file) =>
     runs.every((found) => found.seconds[file] === undefined),
   );
@@ -127,7 +127,7 @@ if (fromCi !== null) {
 } else {
   process.env.NODE_COMPILE_CACHE ??= mkdtempSync(join(tmpdir(), "measure-test-files-cache-"));
   if (timed("npm", ["run", "build"], { BUILD_SOURCEMAPS: "0" }) === null) process.exit(1);
-  const names = readdirSync("dist/tests").filter((file) => file.endsWith(".test.js"));
+  const names = suiteTestFiles("dist/tests", ".test.js");
   const paths = shardFiles(names, 1, 1).map((file) => resolve("dist/tests", file));
   const fileSeconds = {};
   const testSeconds = {};
@@ -135,7 +135,7 @@ if (fromCi !== null) {
   const atOnce = filesAtOnce();
   for await (const event of run({ files: paths, concurrency: atOnce, isolation: "process" })) {
     if (event.data?.nesting !== 0 || event.data.file === undefined) continue;
-    const file = event.data.file.slice(event.data.file.lastIndexOf("/") + 1);
+    const file = suiteName(event.data.file);
     if (event.type === "test:fail") failed.push(`${file}: ${event.data.name}`);
     if (event.type !== "test:complete") continue;
     const seconds = event.data.details.duration_ms / 1000;
@@ -164,7 +164,7 @@ const sorted = Object.entries(measured.fileSeconds).sort(
   ([a, x], [b, y]) => y - x || (a < b ? -1 : 1),
 );
 const listed = sorted.filter(
-  ([file, seconds]) => file.startsWith("type-core-") || seconds >= listedSeconds,
+  ([file, seconds]) => isTypeCoreTestFile(file) || seconds >= listedSeconds,
 );
 const others = sorted.filter((entry) => !listed.includes(entry));
 const mean = others.reduce((sum, [, seconds]) => sum + seconds, 0) / Math.max(others.length, 1);

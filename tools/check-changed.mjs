@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { costlyTestSeconds } from "./costly-test-files.mjs";
+import { isSuiteTestPath, isTypeCoreTestFile } from "./test-shards.mjs";
 
 // Runs, before a push, the checks CI fails on for what changed since a base, in parallel, and prints one line per check
 // with its verdict and seconds, and the full output of a check that failed:
@@ -128,7 +129,9 @@ export const UNKNOWN_TO_COSTLY =
 export function unknownToCostly(paths) {
   return paths.filter(
     (path) =>
-      /^tests\/type-core-[^/]+\.test\.ts$/u.test(path) &&
+      path.startsWith("tests/") &&
+      isSuiteTestPath(path.slice("tests/".length), ".test.ts") &&
+      isTypeCoreTestFile(path) &&
       costlyTestSeconds[path.slice("tests/".length).replace(/\.ts$/u, ".js")] === undefined,
   );
 }

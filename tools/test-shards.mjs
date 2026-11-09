@@ -1,3 +1,5 @@
+import { readdirSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 import {
   costlyTestFiles,
   costlyTestSeconds,
@@ -54,6 +56,50 @@ export function shardSeconds(files, index, count) {
   const slots = Array(testFilesAtOnce).fill(startSeconds(index, count));
   for (const file of files) slots[slots.indexOf(Math.min(...slots))] += seconds(file);
   return Math.max(...slots);
+}
+
+/** The folders under `tests/` that hold no test files, so the suite reads none of them: a closed list. */
+const NOT_TEST_FOLDERS = new Set(["fixtures", "helpers"]);
+
+/**
+ * Whether `name`, a path under `tests/` or `dist/tests/` with `/` between folders, is where the suite reads a test file
+ * ending in `suffix`: at the top, or in a folder one level down other than `fixtures/` and `helpers/`
+ * (`NOT_TEST_FOLDERS`), as `player/x.test.js`.
+ */
+export function isSuiteTestPath(name, suffix) {
+  const parts = name.split("/");
+  return (
+    name.endsWith(suffix) &&
+    (parts.length === 1 || (parts.length === 2 && !NOT_TEST_FOLDERS.has(parts[0])))
+  );
+}
+
+/**
+ * The suite's files under `folder` (`tests/` or `dist/tests/`) whose names end in `suffix`, by their path under it
+ * (`isSuiteTestPath`); only regular files count, not links. A file at the top is named by its name alone, as the suite
+ * named every file before it had folders, so the costly table's keys, the shard order and the kept seconds stay those
+ * of a flat suite.
+ */
+export function suiteTestFiles(folder, suffix) {
+  const files = [];
+  for (const entry of readdirSync(folder, { withFileTypes: true }))
+    if (entry.isFile()) {
+      if (isSuiteTestPath(entry.name, suffix)) files.push(entry.name);
+    } else if (entry.isDirectory())
+      for (const inner of readdirSync(join(folder, entry.name), { withFileTypes: true }))
+        if (inner.isFile() && isSuiteTestPath(`${entry.name}/${inner.name}`, suffix))
+          files.push(`${entry.name}/${inner.name}`);
+  return files.sort();
+}
+
+/** A compiled test file's name, as `suiteTestFiles` gives it: its path under `dist/tests/`, with `/` between folders. */
+export function suiteName(file) {
+  return relative(resolve("dist/tests"), file).split(sep).join("/");
+}
+
+/** Whether a test file, by its path under `tests/` or `dist/tests/`, is a type-core one: its own name says so. */
+export function isTypeCoreTestFile(name) {
+  return name.split("/").at(-1).startsWith("type-core-");
 }
 
 /** `--shard=i/N`'s shard, or `null` for any other argument; a malformed one throws. */
