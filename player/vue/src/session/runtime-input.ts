@@ -11,7 +11,7 @@ import type { SectionWork } from "./useRuntimeSceneClock.js";
  * replaced, stopped or unmounted session never opens its tab or receives its answer.
  */
 
-/** What an input op replies: the catalogue's result of the input ops, so no second list of outcomes. */
+/** The catalogue's non-null input-op outcomes; `null` means the op answered nothing. */
 export type InputOutcome = NonNullable<OpResult<InputOp>>;
 
 /** What `send` resolves with when the section's session no longer owns the UI, or the host refused it as stopped. */

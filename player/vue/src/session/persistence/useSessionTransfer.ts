@@ -196,6 +196,8 @@ export function useSessionTransfer({
     await asTransferError(
       host.client.request("reviewTransfer", {
         ticket: transfer.ticket,
+        // EVIDENCE: invariant: both were checked non-null above, and `useKeptSession` never clears its scope or a
+        // prepared plan, so the await between cannot make either null.
         scope: keptOwner.keptScopeNow()!,
         plan: keptOwner.scriptPlanNow()!,
       }),
