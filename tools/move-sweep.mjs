@@ -37,9 +37,11 @@
 //     to U+200A, U+2028, U+2029, U+202F, U+205F and U+3000, which neither JavaScript's `\s` nor `trim` is (they take
 //     U+FEFF and leave U+001C to U+001F and U+0085); a hit's line is trimmed of it, as Python's `strip`;
 //   - any character but `\n` matches where Python's `.` does (`[^\n]`, also U+2028 and U+2029).
-// It differs from the Python sweep on purpose in three inputs, each tested:
+// It differs from the Python sweep on purpose in four inputs, each tested:
 //   - an empty map (no move): nothing is moved, so no form applies (the Python's forms 2, 4 and 5 then match an empty
 //     name, `"/.ts"`);
+//   - an old path whose list of new paths is empty, a split to nothing: a malformed map, refused (exit 2); the Python
+//     kept such a path, with no new path, and swept it, which its loop did by accident rather than by rule;
 //   - a file name Git quotes (one with a non-ASCII character, a tab, a quote or a backslash): read here as it is,
 //     through NUL-separated names; the Python read `git ls-files`' quoted names, could not open such a file and
 //     skipped it;

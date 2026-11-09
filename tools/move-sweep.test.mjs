@@ -306,6 +306,25 @@ test("a map or declaration file that is not UTF-8 cannot be read: exit 2", (t) =
   assert.match(refused.err, /cannot read the declarations/u);
 });
 
+test("a map of the wrong shape cannot run: no renames object, an empty list of new paths, a path that is no string", (t) => {
+  const r = moved(t, ['const fixture = "/a/util.js";']);
+  for (const [name, value, message] of [
+    ["no-renames", { moves: {} }, /has no "renames" object/u],
+    // A split to nothing: the Python swept such an old path; here the map is malformed.
+    ["empty-list", { renames: { "src/a/util.ts": [] } }, /gives src\/a\/util\.ts no new path/u],
+    [
+      "not-a-string",
+      { renames: { "src/a/util.ts": ["src/b/util.ts", 5] } },
+      /gives src\/a\/util\.ts no new path/u,
+    ],
+  ]) {
+    const { status, out, err } = r.run("--renames", r.json(name, value));
+    assert.equal(status, 2, name);
+    assert.match(err, message, name);
+    assert.equal(out, "", name);
+  }
+});
+
 test("a tracked file that is not UTF-8 is not read and is listed last, and the exit status stays the hits'", (t) => {
   const r = repository(t);
   r.write({
