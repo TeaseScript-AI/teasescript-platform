@@ -1040,19 +1040,15 @@ export function stopRuns(
     // instruction and passed it)
     // (C5c reports a store's absent property at the object that lacks it, an explanation: the error is the store's,
     // `rule.store`, the instruction a run must pass; several stores lacking properties of one object share its site, each
-    // its own error)
+    // its own error; another error of the same code at that site is read at it too)
     const operations = new Map<string, SourceSite[]>();
-    for (const d of natural.answers.diagnostics)
-      if (
-        d.class === "compile-error" &&
-        "rule" in d &&
-        d.rule.rule === "absent" &&
-        d.rule.store !== null
-      )
-        operations.set(`${d.code} ${siteKey(d.site)}`, [
-          ...(operations.get(`${d.code} ${siteKey(d.site)}`) ?? []),
-          d.rule.store,
-        ]);
+    for (const d of natural.answers.diagnostics) {
+      if (d.class !== "compile-error") continue;
+      const key = `${d.code} ${siteKey(d.site)}`;
+      const at =
+        "rule" in d && d.rule.rule === "absent" && d.rule.store !== null ? d.rule.store : d.site;
+      operations.set(key, [...(operations.get(key) ?? []), at]);
+    }
     // (each error once, by its code and the site it is read at: two stores of one object are two errors)
     const unique = new Map<string, { readonly code: string; readonly site: SourceSite }>();
     for (const d of natural.result.diagnostics.filter((each) => each.severity === "error")) {
