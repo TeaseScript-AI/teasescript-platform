@@ -1621,7 +1621,7 @@ function labelProved(
  * #1708, A′: the 17 diagnostic rule variants (`DiagnosticRule`) and, for each, whether its consumer
  * builds the obligation's words from the kinds it read. Only `member`'s does (`memberChecks`: a lacking kind `has`, an
  * unknown the method table's takers, a null `is not null`); every other variant's words are its rule's and label's,
- * compared exactly. A variant missing from this table is refused. `tests/type-core-stop.test.ts` holds the table to the
+ * compared exactly. A variant missing from this table is refused. `tests/type-core/type-core-stop.test.ts` holds the table to the
  * consumers (its kind-reading sites, the drift guard).
  */
 export const SENTENCE_VARIANTS: Readonly<Record<string, "memberChecks" | null>> = {
@@ -2645,7 +2645,7 @@ const FIRST_SETTLED: readonly string[] = ["extraction", "walk"];
  * and every finishing counter within 2.35. The other shapes' admission and contract work and decision-stop bookkeeping
  * (`readerRecords`, `stopAsks`) grow faster on `main` already (#1456, #1464). Each problem as a line.
  *
- * @public (the worker-side probe runs it at the larger size pair, beside `tests/type-core-budget.test.ts`'s smaller one)
+ * @public (the worker-side probe runs it at the larger size pair, beside `tests/type-core/type-core-budget.test.ts`'s smaller one)
  */
 export function frontierGrowthProblems(
   sizes: (shape: string) => readonly [number, number],

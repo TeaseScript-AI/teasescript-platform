@@ -2,7 +2,7 @@
 export const id = "1241-astra-r2-paste.mjs";
 // the forms #1241 r2's paste run pasted, each compiled and analysed; #1241, Astra r2 (R/astra-m4-i1241-review-r2/paste.mjs
 // over the head's paste family). The cases it read from the repository's paste family (`pasteCases`,
-// `tests/helpers/type-core-paste.ts`) are not copied; the programs it pasted from them are, as its `paste.json` records them.
+// `tests/helpers/type-core/type-core-paste.ts`) are not copied; the programs it pasted from them are, as its `paste.json` records them.
 export const cases = [
   ["text size at say/t.length", 'let t = "hello"\nsay t.length\nexit\n'],
   ["text size at declaration/t.length", 'let t = "hello"\nlet v = t.length\nsay v\nexit\n'],

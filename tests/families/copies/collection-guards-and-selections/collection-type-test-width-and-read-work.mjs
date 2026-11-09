@@ -2,7 +2,7 @@
 export const id = "s10-u4a-opus-series-own.mjs";
 // S10 U4a, Opus builder (R/opus-m4-s10-u4a/series.mjs): the seven families the series defines itself, as its quick run
 // (quick-families.txt, at 8, 16 and 32) and its long run (long-families.txt, 64 to 1,024) compiled them. The runs also
-// compiled the repository's exported work families (tests/helpers/type-core-families), which the corpus does not copy.
+// compiled the repository's exported work families (tests/helpers/type-core/type-core-families), which the corpus does not copy.
 const rows = (k, f, sep = "\n") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
 const sel = (i) => ["first", "last", "random"][i % 3];
 const _balancedSum = (lo, hi) =>

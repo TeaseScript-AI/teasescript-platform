@@ -7,7 +7,7 @@ import { crc32, deflateSync, gunzipSync, inflateSync } from "node:zlib";
 import Color from "colorjs.io";
 import { createPlaygroundServer } from "../dist/playground/server.js";
 import { findChromium } from "./find-chromium.mjs";
-import { fromBase64, openAge, x25519Identity } from "../dist/tests/helpers/age-keyholder.js";
+import { fromBase64, openAge, x25519Identity } from "../dist/tests/helpers/player/age-keyholder.js";
 
 // An image request's preview on the Stage, once it shows.
 const decodedPreview = `(() => { const image = document.querySelector('[data-stage-preview]'); return !!image && image.complete && image.naturalWidth > 0; })()`;

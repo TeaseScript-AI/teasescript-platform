@@ -1,0 +1,299 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { RuntimeDebugContext } from "../../src/index.js";
+import { playerDebugImageOrigin } from "../../player/debug-variables.js";
+import { debugStageImageStatus } from "../../player/presentation.js";
+import {
+  activatePlayerRuntimeButton,
+  advancePlayerRuntimeTime,
+  createPlayerRuntimeRestorePoint,
+  createPlayerRuntimeSession,
+  observePlayerRuntimeTime,
+  playerRuntimeCalls,
+  playerRuntimeDebugNow,
+  reportPlayerRuntimeMediaLoad,
+  restorePlayerRuntimeSession,
+  submitPlayerRuntimeComposer,
+  withPlayerRuntimeDebugTrace,
+  type PlayerRuntimeSession,
+  playerRuntimeSnapshot,
+} from "../../player/runtime-adapter.js";
+
+// Player Debug's Now view (DEBUGGER.md "Player Debug") locates the session from canonical state: package paths with
+// every folder, one-based lines of the authored source, calls innermost first, and every timer, hidden ones included.
+
+function observe(session: PlayerRuntimeSession, atMs: number): PlayerRuntimeSession {
+  const observed = observePlayerRuntimeTime(session, atMs);
+  assert.equal(observed.outcome.kind, "observed");
+  return observed.session;
+}
+
+function press(session: PlayerRuntimeSession): PlayerRuntimeSession {
+  const pressed = activatePlayerRuntimeButton(session);
+  assert.equal(pressed?.outcome.kind, "completed");
+  return pressed.session;
+}
+
+const location = (path: string, line: number) => ({ path, line });
+
+// The shape of the Domme3 case: the entry script goes to a nested folder, which calls another file and a function.
+const project = {
+  files: [
+    { path: "main.tease", source: 'goto "Domme3/maintenance.tease"\n' },
+    {
+      path: "Domme3/maintenance.tease",
+      source:
+        'say "Maintenance", instant\ncall "Domme3/spanking.tease"\nlet done = showButton "Done"\nexit\n',
+    },
+    {
+      path: "Domme3/spanking.tease",
+      source: [
+        "function punish {",
+        '  showImage "Domme/Domme43.jpg"',
+        '  let first = showButton "Next"',
+        "}",
+        "timer async hidden 600 s",
+        "punish()",
+        "wait 5 s",
+        "end",
+        "",
+      ].join("\n"),
+    },
+  ],
+};
+
+test("Now names the next statement, the wait's statement, and the calls across nested files", () => {
+  let session = createPlayerRuntimeSession(project);
+  let now = playerRuntimeDebugNow(session, 0);
+  assert.deepEqual(now.next, location("Domme3/spanking.tease", 3));
+  assert.deepEqual(now.waitingAt, { kind: "button", at: location("Domme3/spanking.tease", 3) });
+  assert.deepEqual(now.calls, [
+    { kind: "function", name: "punish", from: location("Domme3/spanking.tease", 6) },
+    { kind: "file", name: "Domme3/spanking.tease", from: location("Domme3/maintenance.tease", 2) },
+  ]);
+  // The hidden async timer is listed, with its remaining time at the display estimate.
+  assert.deepEqual(
+    now.timers.map(({ blocking, display, state, remainingMs, startedAt }) => ({
+      blocking,
+      display,
+      state,
+      remainingMs,
+      startedAt,
+    })),
+    [
+      {
+        blocking: false,
+        display: "hidden",
+        state: "running",
+        remainingMs: 600_000,
+        startedAt: location("Domme3/spanking.tease", 5),
+      },
+    ],
+  );
+  assert.equal(playerRuntimeDebugNow(session, 1_500).timers[0]?.remainingMs, 598_500);
+
+  session = press(session);
+  now = playerRuntimeDebugNow(session, 0);
+  assert.deepEqual(now.waitingAt, { kind: "wait", at: location("Domme3/spanking.tease", 7) });
+  assert.deepEqual(
+    now.calls.map((call) => call.kind),
+    ["file"],
+  );
+
+  session = press(observe(session, 5_000));
+  assert.equal(session.state.status, "halted");
+  now = playerRuntimeDebugNow(session, 6_000);
+  assert.deepEqual(now, { next: null, waitingAt: null, calls: [], timers: [], media: [] });
+});
+
+test("Now lists blocking, suspended and paused timers and the block that interrupted the script", () => {
+  let session = createPlayerRuntimeSession(
+    [
+      'let paused = timer(duration: 30 s, async: true, label: "Paused")',
+      "paused.pause()",
+      "timer async 1 s {",
+      "  wait 5 s",
+      "}",
+      'timer(duration: 10 s, display: "visible", label: "Blocking")',
+      "exit",
+    ].join("\n"),
+  );
+  let now = playerRuntimeDebugNow(session, 0);
+  assert.deepEqual(
+    now.timers.map(({ label, blocking, state }) => ({ label, blocking, state })),
+    [
+      { label: "Paused", blocking: false, state: "paused" },
+      { label: null, blocking: false, state: "running" },
+      { label: "Blocking", blocking: true, state: "running" },
+    ],
+  );
+  assert.deepEqual(now.waitingAt, { kind: "timer", at: location("main.tease", 6) });
+
+  session = observe(session, 1_000);
+  now = playerRuntimeDebugNow(session, 1_000);
+  assert.deepEqual(now.waitingAt, { kind: "wait", at: location("main.tease", 4) });
+  assert.equal(now.calls[0]?.kind, "timer");
+  assert.deepEqual(now.calls[0]?.from, location("main.tease", 6));
+  assert.deepEqual(
+    now.timers.map(({ label, state, remainingMs }) => ({ label, state, remainingMs })),
+    [
+      { label: "Paused", state: "paused", remainingMs: 30_000 },
+      { label: "Blocking", state: "suspended", remainingMs: 9_000 },
+    ],
+  );
+});
+
+test("the Stage image state follows the resolved source and what the Stage reports for it", () => {
+  const stage = {
+    image: "a.png",
+    source: "/a.png",
+    overridden: false,
+    covered: false,
+    loaded: null,
+    failed: null,
+  };
+  assert.equal(debugStageImageStatus({ ...stage, image: null, source: null }), "hidden");
+  assert.equal(debugStageImageStatus({ ...stage, source: null }), "unresolved");
+  assert.equal(debugStageImageStatus(stage), "loading");
+  assert.equal(debugStageImageStatus({ ...stage, loaded: "/a.png" }), "displayed");
+  assert.equal(debugStageImageStatus({ ...stage, failed: "/a.png" }), "failed");
+  // A report about another source, such as the image this one replaced, does not count.
+  assert.equal(debugStageImageStatus({ ...stage, loaded: "/old.png" }), "loading");
+  assert.equal(debugStageImageStatus({ ...stage, loaded: "/a.png", covered: true }), "covered");
+  // A development Stage fixture shows instead: its own load says nothing about the session's image.
+  assert.equal(debugStageImageStatus({ ...stage, overridden: true }), "overridden");
+});
+
+test("the Stage image names the statement that set it, or why the trace does not know it", () => {
+  const source = [
+    'showImage "a.png"',
+    'let name = askText "Name?"',
+    'let greeting = "Hi ${name}"',
+    'say "${greeting}"',
+    'let ready = askText "Ready?"',
+    'showImage "b.png"',
+    'let done = askText "Done?"',
+    "exit",
+  ].join("\n");
+  const origin = (trace: RuntimeDebugContext) => {
+    const found = playerDebugImageOrigin(trace);
+    if (found.kind === "unavailable") return found.reason;
+    const location = trace.record(found.id)!.location!;
+    return `Set by ${location.path}:${location.line}`;
+  };
+  // Answers the question, then lets the next message's pacing pass.
+  const answer = (session: PlayerRuntimeSession, text: string) => {
+    const answered = submitPlayerRuntimeComposer(session, text)!.session;
+    return advancePlayerRuntimeTime(answered, answered.state.currentSessionTimeMs + 60_000);
+  };
+
+  // Recorded from Start: the statement that set it.
+  const trace = new RuntimeDebugContext();
+  const started = advancePlayerRuntimeTime(
+    createPlayerRuntimeSession(source, { debugTrace: trace }),
+    60_000,
+  );
+  assert.equal(origin(trace), "Set by main.tease:1");
+
+  // Continue from a saved point: the image came with the saved point, until the script sets another.
+  const restored = restorePlayerRuntimeSession(
+    createPlayerRuntimeRestorePoint(started),
+    null,
+    trace,
+  );
+  assert.equal(origin(trace), "Set before Continue: a saved point keeps no history");
+  const greeted = answer(restored, "Bo");
+  assert.equal(origin(trace), "Set before Continue: a saved point keeps no history");
+  answer(greeted, "yes");
+  assert.equal(origin(trace), "Set by main.tease:6");
+
+  // Debug turned on after the image was set, also once later records have been dropped.
+  const late = new RuntimeDebugContext({ maxRecords: 2 });
+  const waiting = advancePlayerRuntimeTime(createPlayerRuntimeSession(source), 60_000);
+  answer(withPlayerRuntimeDebugTrace(waiting, late), "Bo");
+  assert.ok(late.status().truncated);
+  assert.equal(origin(late), "Set before Debug was turned on");
+
+  // A long history dropped the record of the statement that set it.
+  const small = new RuntimeDebugContext({ maxRecords: 2 });
+  answer(
+    advancePlayerRuntimeTime(createPlayerRuntimeSession(source, { debugTrace: small }), 60_000),
+    "Bo",
+  );
+  assert.equal(origin(small), "Expired: older history was dropped");
+  // So did a byte budget smaller than that record alone.
+  const tiny = new RuntimeDebugContext({ maxAccountedBytes: 128 });
+  createPlayerRuntimeSession(source, { debugTrace: tiny });
+  assert.equal(origin(tiny), "Expired: older history was dropped");
+});
+
+test("Now lists each active sound with the statement that started it", () => {
+  let session = createPlayerRuntimeSession({
+    files: [
+      {
+        path: "main.tease",
+        source: 'call "rooms/hall.tease"\nlet done = showButton "Done"\nexit\n',
+      },
+      {
+        path: "rooms/hall.tease",
+        source:
+          'playAudio(file: "sounds/a.wav", async: true, repeat: true)\nplayAudio(file: "sounds/b.wav", async: true)\nend\n',
+      },
+    ],
+  });
+  const sounds = () =>
+    playerRuntimeDebugNow(session, 0).media.map(({ source, loaded, startedAt }) => ({
+      source,
+      loaded,
+      startedAt,
+    }));
+  // An async play waits for its load before the next statement runs.
+  assert.deepEqual(sounds(), [
+    { source: "sounds/a.wav", loaded: false, startedAt: location("rooms/hall.tease", 1) },
+  ]);
+  const loaded = reportPlayerRuntimeMediaLoad(
+    session,
+    playerRuntimeSnapshot(session).nextMediaId - 1,
+    { kind: "loaded", durationMs: 10_000 },
+  );
+  assert.equal(loaded.outcome.kind, "accepted");
+  session = loaded.session;
+  assert.deepEqual(sounds(), [
+    { source: "sounds/a.wav", loaded: true, startedAt: location("rooms/hall.tease", 1) },
+    { source: "sounds/b.wav", loaded: false, startedAt: location("rooms/hall.tease", 2) },
+  ]);
+});
+
+test("a failed session keeps the calls its error happened in, which the error dialog lists", () => {
+  let session = createPlayerRuntimeSession({
+    files: [
+      {
+        path: "main.tease",
+        source: ["timer async 1 s {", "    punish(2)", "}", "wait 5 s", "exit", ""].join("\n"),
+      },
+      {
+        path: "rules.tease",
+        source: [
+          "global function punish(count: number) {",
+          "    let zero = count - count",
+          "    let rounds = count / zero",
+          "}",
+          "",
+        ].join("\n"),
+      },
+    ],
+  });
+  session = observe(session, 1_000);
+  assert.equal(session.state.failure?.path, "rules.tease");
+  assert.deepEqual(
+    playerRuntimeCalls(session).map(({ kind, from }) => ({ kind, from })),
+    [
+      { kind: "function", from: location("main.tease", 2) },
+      { kind: "timer", from: location("main.tease", 4) },
+    ],
+  );
+  assert.equal(playerRuntimeCalls(session)[0]?.name, "punish");
+  // Debug's Now lists calls only while the session runs or waits.
+  assert.deepEqual(playerRuntimeDebugNow(session, 1_000).calls, []);
+});

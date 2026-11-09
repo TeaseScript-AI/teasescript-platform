@@ -2,7 +2,7 @@
 export const id = "1765-mixed-growth.mjs";
 // #1765's generated mixed-list family, its work (#1789; the lead's family rule after Codex r9–r14 and the owner's
 // test-cost rule): one shape per composition dimension the walk's work must stay bounded over main at, each scaled from
-// one size so that the three sizes are two doublings. `tests/type-core-mixed-family.test.ts` runs the first doubling of
+// one size so that the three sizes are two doublings. `tests/type-core/type-core-mixed-family.test.ts` runs the first doubling of
 // each shape; the queue runs all three against main, the head's work over main's flat (the lead's transport bar).
 const CARRIERS = {
   take: (value) => `(${value}).take(9)`,

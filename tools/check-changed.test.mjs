@@ -374,14 +374,14 @@ test(
     assert.deepEqual(
       unknownToCostly([
         "tests/type-core-unlisted.test.ts",
-        "tests/type-core-cells.test.ts",
+        "tests/type-core/type-core-cells.test.ts",
         "tests/unlisted-other.test.ts",
         "tests/helpers/type-core-unlisted.ts",
         "src/type-inference/core/type-core-unlisted.test.ts",
       ]),
       ["tests/type-core-unlisted.test.ts"],
     );
-    for (const file of ["tests/type-core-unlisted.test.ts", "tests/type-core-cells.test.ts"]) {
+    for (const file of ["tests/type-core-unlisted.test.ts", "tests/type-core/type-core-cells.test.ts"]) {
       const { directory } = repository({ passing: true });
       try {
         mkdirSync(join(directory, "tests"), { recursive: true });

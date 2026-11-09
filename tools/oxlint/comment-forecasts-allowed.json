@@ -5,27 +5,27 @@
     "text": "until stage 3b"
   },
   {
-    "file": "tests/helpers/type-core-contract-knowledge.ts",
+    "file": "tests/helpers/type-core/type-core-contract-knowledge.ts",
     "form": "until #N",
     "text": "until #1597"
   },
   {
-    "file": "tests/helpers/type-core-families.ts",
+    "file": "tests/helpers/type-core/type-core-families.ts",
     "form": "until #N",
     "text": "until #1417"
   },
   {
-    "file": "tests/helpers/type-core-families.ts",
+    "file": "tests/helpers/type-core/type-core-families.ts",
     "form": "until #N",
     "text": "until #1417"
   },
   {
-    "file": "tests/helpers/type-core-paste.ts",
+    "file": "tests/helpers/type-core/type-core-paste.ts",
     "form": "once #N",
     "text": "once #1413"
   },
   {
-    "file": "tests/type-core-stop.test.ts",
+    "file": "tests/type-core/type-core-stop.test.ts",
     "form": "when or after #N lands or merges",
     "text": "when #1216 lands"
   }
