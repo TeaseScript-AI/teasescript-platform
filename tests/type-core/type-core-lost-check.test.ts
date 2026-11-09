@@ -61,7 +61,11 @@ const witness = (
   ...(storage === undefined ? {} : { storage }),
 });
 
-/** At demand 16 in four modes: a required check is Lost at a settled decision stop. */
+/**
+ * At demand 16 in four modes: a required check is Lost at a settled decision stop. Where a rejection or a retarget lost
+ * the completion's results, the decline names the first stopped mark it lost, often the place's first literal, before the
+ * host store (#2080 part 1).
+ */
 const DECLINED: readonly Witness[] = [
   witness(
     "1645-whole-object",
@@ -90,23 +94,33 @@ const DECLINED: readonly Witness[] = [
     "{first: {n: [[1]]}}\nbox = {first: {n: [[0]]}}",
   ),
   // (a rejection's lost obligation: the stopped plan fails at an earlier store, but its check at the host store is lost)
-  witness("1648-rejection", reject(16), { hostValue: "x" }),
-  witness("1648-rejection-projection", copied('b.f = "s"', "let c = b.f\nc = hostValue")),
-  witness("1648-rejection-wrapper", copied('b.f = "s"', "let c = {q: b}\nc.q = hostValue"), {
-    hostValue: object({ f: nested("x"), first: object({ n: nested("x") }) }),
-  }),
+  witness("1648-rejection", reject(16), { hostValue: "x" }, "{f0: 1}\nb = {f0: 0}"),
+  witness(
+    "1648-rejection-projection",
+    copied('b.f = "s"', "let c = b.f\nc = hostValue"),
+    undefined,
+    "{f: [[1]], first: {n: [[1]]}}\nb = {f: [[0]]",
+  ),
+  witness(
+    "1648-rejection-wrapper",
+    copied('b.f = "s"', "let c = {q: b}\nc.q = hostValue"),
+    { hostValue: object({ f: nested("x"), first: object({ n: nested("x") }) }) },
+    "{f: [[1]], first: {n: [[1]]}}\nb = {f: [[0]]",
+  ),
   witness(
     "1648-r2-escaping-wrapper",
     "let b = {first: {n: null}}\nb.first.n = [[1]]\nlet c = {q: b}\nc.q = hostValue",
     { hostValue: object({ first: object({ n: nested("x") }) }) },
+    "{first: {n: null}}",
   ),
   // (a store role's obligation, internal data: the natural compile rejects `combined={v:wide}`, the stop moves that to a
-  // check against bare `unknown` at `let combined=base`)
+  // check against bare `unknown` at `let combined=base`; the rejection lost every completion result, so the decline
+  // names `let base`'s, the first)
   witness(
     "store-role-moved-error",
     'let wide:number=53\nlet narrow:string="s"\nlet base={v:narrow}\nlet combined=base\ncombined={v:wide}\nlet outcome=[base,combined]',
     {},
-    "base\ncombined",
+    "{v:narrow}",
   ),
   // (Codex r1: a boundary the stop checks against bare `unknown`, no store, reader or part check carrying its contract)
   witness(
@@ -144,11 +158,12 @@ const DECLINED: readonly Witness[] = [
     { hostValue: '{"n":[["x"]]}' },
     "fromJson",
   ),
-  // (declined at the first Lost store in source order: the retarget's, before the independent store's)
+  // (declined at the first Lost store in source order: the retarget's `let box`, before the independent store's)
   witness(
     "1648-independent-beside-retarget",
     `${retarget(4)}\nlet independent = {value: [[1]]}\nindependent.value = hostOther`,
     { hostValue: nested(2), hostOther: nested("x") },
+    "{first: {n: [[1]]}}\nbox = {first: {n: [[0]]}}",
   ),
 ];
 
