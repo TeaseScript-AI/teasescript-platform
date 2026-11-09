@@ -4,6 +4,7 @@ import test from "node:test";
 import type { BridgeClient, SectionSend } from "../../player/engine-bridge/client.js";
 import type { OpArgs, OpCall } from "../../player/engine-bridge/op-catalogue.js";
 import type { CheckpointCapture } from "../../player/engine-bridge/ops/persistence.js";
+import type { ReadCall, ReadOps } from "../../player/engine-bridge/session-protocol.js";
 import type { PlanMetadata } from "../../player/engine-bridge/plan-facts.js";
 import type {
   PlayerBridge,
@@ -11,7 +12,11 @@ import type {
   SessionSection,
 } from "../../player/runtime/player-bridge.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
-import type { InputOutcome, InputSection } from "../../player/vue/src/session/runtime-input.js";
+import type {
+  AnswerCall,
+  InputOutcome,
+  InputSection,
+} from "../../player/vue/src/session/runtime-input.js";
 import type { TemporalContext, TimeObservationOutcome } from "../../src/playback.js";
 
 /*
@@ -34,6 +39,10 @@ export async function senderRows(
   time: OpCall<"observeTime" | "stepTime">,
   timeOp: "observeTime" | "stepTime",
   step: OpArgs<"stepTime">,
+  readCall: ReadCall<"debugView" | "captureCheckpoint">,
+  readOp: "debugView" | "captureCheckpoint",
+  view: ReadOps["debugView"]["args"],
+  answerOp: "submitComposer" | "selectChoice",
 ): Promise<void> {
   const observed = { atMs: 0, media: [] };
 
@@ -168,12 +177,43 @@ export async function senderRows(
   // @ts-expect-error -- no `CaptureUnavailableReason`.
   await bridge.request(session, "answerCapture", cameraBogus);
 
+  // `read`, a projection without `session`: each op with its own arguments, a union only as a correlated call.
+  await bridge.read(session, "captureCheckpoint");
+  await bridge.read(session, "debugView", view);
+  await bridge.read(session, ...readCall);
+  // @ts-expect-error -- an op of the union with arguments of neither.
+  await bridge.read(session, readOp, {});
+
+  // `answer`'s call (`AnswerCall`), a projection without `actionId`: `args` and `input` where the op requires them, and
+  // an op paired with its own.
+  const composer: AnswerCall<"submitComposer"> = ["submitComposer", () => ({ text: "x" }), null];
+  // @ts-expect-error -- `submitComposer` requires `input`.
+  const composerWithoutInput: AnswerCall<"submitComposer"> = [
+    "submitComposer",
+    () => ({ text: "x" }),
+  ];
+  // @ts-expect-error -- `submitComposer` requires `args`.
+  const composerWithoutArgs: AnswerCall<"submitComposer"> = ["submitComposer", undefined, null];
+  const choice: AnswerCall<"submitComposer" | "selectChoice"> = [
+    "selectChoice",
+    () => ({ optionId: "o" }),
+    null,
+  ];
+  // @ts-expect-error -- an op of the union with the arguments of one of them.
+  const unpaired: AnswerCall<"submitComposer" | "selectChoice"> = [
+    answerOp,
+    () => ({ text: "x" }),
+    null,
+  ];
+  const dismiss: AnswerCall<"dismissFormField"> = ["dismissFormField"];
+
   // `InputOutcome` is the catalogue's input result: an input op's outcome assigns (the control), another does not.
   const stale: InputOutcome = { kind: "staleAction", actionId: 1 };
   // @ts-expect-error -- no input op's outcome.
   const foreign: InputOutcome = { kind: "notAnOutcome" };
 
   void [metadata, unrelated, sent, sentNumber, outcome, outcomeNumber, checkpoint, stale, foreign];
+  void [composer, composerWithoutInput, composerWithoutArgs, choice, unpaired, dismiss];
   void [checkpointNumber, sectionOutcome, serviced, servicedNumber];
 }
 

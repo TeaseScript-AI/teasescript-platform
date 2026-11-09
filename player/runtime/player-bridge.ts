@@ -16,6 +16,7 @@ import type {
   Introduction,
   Publication,
   ReadOp,
+  ReadCall,
   ReadOps,
   ExportCaptureReply,
   ExportIdentity,
@@ -245,10 +246,14 @@ export class PlayerBridge {
    * Reads `session` in the host with the op `op` on the Worker itself, which names the session in its arguments, after
    * the session's earlier requests (`ops/persistence.ts`). It changes no publication, so its reply applies nothing.
    */
+  read<O extends ReadOp>(
+    session: PlayerSession,
+    ...call: ReadCall<O>
+  ): Promise<ReadOps[O]["result"]>;
   async read<O extends ReadOp>(
     session: PlayerSession,
     op: O,
-    ...[args]: ReadOps[O]["args"] extends Record<string, never> ? [] : [ReadOps[O]["args"]]
+    ...[args]: [] | [ReadOps[O]["args"]]
   ): Promise<ReadOps[O]["result"]> {
     this.#own(session);
     const reply = await this.#client.request<ReadOp>(

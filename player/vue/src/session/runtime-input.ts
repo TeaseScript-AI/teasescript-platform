@@ -81,20 +81,31 @@ export type InputResult =
   | { readonly kind: "unanswered" }
   | { readonly kind: "answered"; readonly session: PlayerSession; readonly outcome: InputOutcome };
 
-/** `answer`'s arguments after `op`: `args` for an op with arguments besides `actionId` and `input`, else none. */
-type AnswerRest<O extends InputOp> =
-  Record<never, never> extends Omit<InputArgs<O>, "input">
-    ? [args?: undefined, input?: DebugAnswerInput | null]
-    : [args: () => Omit<InputArgs<O>, "input">, input?: DebugAnswerInput | null];
+/** The fields of an input op's arguments that `answer`'s `args` gives: all but `actionId` and `input`. */
+type AnswerFields<O extends InputOp> = Omit<InputArgs<O>, "input">;
+
+/**
+ * `answer`'s call for each input op, distributed so that an op and its arguments stay paired: `args` where the op has
+ * fields besides `actionId` and `input`, and `input` where its arguments require one.
+ */
+export type AnswerCall<O extends InputOp> = O extends unknown
+  ? Record<never, never> extends AnswerFields<O>
+    ? InputArgs<O> extends { readonly input: unknown }
+      ? [op: O, args: undefined, input: InputArgs<O>["input"]]
+      : [op: O, args?: undefined]
+    : InputArgs<O> extends { readonly input: unknown }
+      ? [op: O, args: () => AnswerFields<O>, input: InputArgs<O>["input"]]
+      : [op: O, args: () => AnswerFields<O>]
+  : never;
 
 /**
  * The op `op`, with `args` read when the intent runs, after the observation, as today's operation read them; `input`
- * added when given. An op with arguments besides `actionId` and `input` requires `args`; one without takes none.
+ * added when given. The call (`AnswerCall`) requires `args` and `input` where the op's arguments do.
  */
-const answer = <O extends InputOp>(op: O, ...[args, input]: AnswerRest<O>): InputIntent => {
+const answer = <O extends InputOp>(...[op, args, input]: AnswerCall<O>): InputIntent => {
   return () => {
     const fields = args === undefined ? {} : args();
-    // EVIDENCE: invariant: `op`'s arguments, which TypeScript does not see in `args()` and `input` for a generic `O`.
+    // EVIDENCE: invariant: `op`'s arguments, paired by `AnswerCall`, unseen in `args()` and `input` for a generic `O`.
     return { op, args: input === undefined ? fields : { ...fields, input } } as InputAnswer;
   };
 };

@@ -153,3 +153,12 @@ export type ReadOps = {
     readonly result: OpResult<O>;
   };
 };
+/**
+ * `read`'s call after the session for each read op, distributed so that an op and its arguments stay paired: no
+ * arguments for a read whose only argument is the session.
+ */
+export type ReadCall<O extends ReadOp> = O extends unknown
+  ? ReadOps[O]["args"] extends Record<string, never>
+    ? [op: O]
+    : [op: O, args: ReadOps[O]["args"]]
+  : never;
