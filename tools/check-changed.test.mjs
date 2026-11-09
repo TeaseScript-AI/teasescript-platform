@@ -387,7 +387,7 @@ test(
     ]) {
       const { directory } = repository({ passing: true });
       try {
-        mkdirSync(join(directory, "tests"), { recursive: true });
+        mkdirSync(dirname(join(directory, file)), { recursive: true });
         writeFileSync(join(directory, file), "\n");
         const result = spawnSync(process.execPath, [tool, "--base", "main"], {
           cwd: directory,

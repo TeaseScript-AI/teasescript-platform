@@ -652,6 +652,11 @@ test("the core keeps no text a plain twin made uncharged but the listed ones", (
     .filter((name) => name.endsWith(".ts") && name !== "budget.ts")
     .sort()
     .map((file) => [file, readFileSync(new URL(file, CORE), "utf8")] as const);
+  // (a member of the folder, so a root that names another folder fails here)
+  assert.ok(
+    sources.some(([file]) => file === "exact-path.ts"),
+    "src/type-inference/core/exact-path.ts",
+  );
   // the members whose return value is made plain, through the calls between them, to a fixed point
   let returning = new Set<string>();
   for (let size = -1; returning.size !== size;) {
@@ -677,9 +682,12 @@ test("the core keeps no text a plain twin made uncharged but the listed ones", (
 
 test("the core makes no path or key past its helpers but the listed ones", () => {
   const found = new Map<string, string[]>();
-  for (const file of readdirSync(CORE, { encoding: "utf8", recursive: true })
+  const files = readdirSync(CORE, { encoding: "utf8", recursive: true })
     .filter((name) => name.endsWith(".ts") && name !== "budget.ts")
-    .sort())
+    .sort();
+  // (a member of the folder, so a root that names another folder fails here)
+  assert.ok(files.includes("exact-path.ts"), "src/type-inference/core/exact-path.ts");
+  for (const file of files)
     for (const [key, lines] of constructions(file, readFileSync(new URL(file, CORE), "utf8")))
       found.set(key, lines);
   const differences = [...new Set([...found.keys(), ...Object.keys(LISTED)])]

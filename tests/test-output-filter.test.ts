@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -222,6 +222,8 @@ test("the full suite runs every file once, each in its own process, with the cos
   delete environment.NODE_TEST_CONTEXT;
   mkdirSync(resolve(directory, "dist/tests"), { recursive: true });
   for (const file of files) {
+    // (a costly file's name is its path under dist/tests/, in a folder for most)
+    mkdirSync(dirname(resolve(directory, "dist/tests", file)), { recursive: true });
     // A file that ran in the process of another would find its mark.
     writeFileSync(
       resolve(directory, "dist/tests", file),

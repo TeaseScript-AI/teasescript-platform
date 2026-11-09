@@ -181,6 +181,17 @@ async function fixturePlans(): Promise<
       add(`${directory}/${file}`, [{ path: "main.tease", source }]);
     }
   }
+  // (a member of each scanned folder, so a root that names another folder fails here)
+  for (const name of [
+    "package house",
+    "tests/fixtures/timers/blocking-timer.tease",
+    "examples/playground/basic.tease",
+    "examples/demo/demo.tease",
+  ])
+    assert.ok(
+      plans.some((each) => each.name === name),
+      name,
+    );
   return plans;
 }
 
