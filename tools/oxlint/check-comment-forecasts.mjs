@@ -5,9 +5,11 @@ import { checkedFiles, fileComments } from "./comments.mjs";
 // A comment says what the code does now and never forecasts later work (IMPLEMENTATION-AND-REVIEW.md "Code that does
 // not mislead", #1977). This check reads comments only, never strings or code, in the linted files and in `.vue`
 // files' `<script>` blocks. A citation of a repository record matches no form: a bare `#N`, a completed stage, `PR N`,
-// "(as) before #N". `TABLE r4` and `TABLE §` are no citations, as TABLE is not in the repository (#1977): each file's
-// exact count of them in comments is in `comment-citations.json`, which may only fall. `comment-forecasts-allowed.json`
-// lists the forecasts this check accepts, and every entry must still be found.
+// "(as) before #N". `TABLE r4`, `TABLE §`, a bare `r4.N` and `TABLE` with another id are no citations, as TABLE is not
+// in the repository (#1977): each file's exact count of them in comments is in `comment-citations.json`, which may only
+// fall. A comment that points at the accepted record (`docs/specifications/type-inference-accepted-record.md#<anchor>`,
+// #2089) names one of its headings; the doc-links check reads Markdown only and never sees a comment.
+// `comment-forecasts-allowed.json` lists the forecasts this check accepts, and every entry must still be found.
 
 /** The forms of a forecast, #1977's list, each one pattern over a comment's text. */
 export const FORECASTS = [
@@ -26,8 +28,16 @@ export const FORECASTS = [
   { form: "TODO", pattern: /\bTODO\b/u },
 ];
 
-/** The citations whose count per file may only shrink. */
-const COUNTED_CITATIONS = ["TABLE r4", "TABLE §"];
+/** The citations whose count per file may only shrink, each by its pattern over a comment's text. */
+const COUNTED_CITATIONS = {
+  "TABLE r4": /TABLE r4/gu,
+  "TABLE §": /TABLE §/gu,
+  "bare r4.N": /(?<!TABLE )\br4\.\d+/gu,
+  "other TABLE": /\bTABLE\b(?!\s*(?:r4|§))/gu,
+};
+
+/** The accepted record, which a comment may point at by a heading's anchor. */
+const RECORD = "docs/specifications/type-inference-accepted-record.md";
 
 /** The forecasts in `text`'s comments: each comment line's form and text. */
 export function forecastsIn(fileName, text) {
@@ -49,11 +59,34 @@ export function forecastsIn(fileName, text) {
 export function citationCounts(fileName, text) {
   const counts = {};
   for (const comment of fileComments(fileName, text))
-    for (const citation of COUNTED_CITATIONS) {
-      const n = comment.text.split(citation).length - 1;
+    for (const [citation, pattern] of Object.entries(COUNTED_CITATIONS)) {
+      const n = comment.text.match(pattern)?.length ?? 0;
       if (n > 0) counts[citation] = (counts[citation] ?? 0) + n;
     }
   return counts;
+}
+
+/** The anchors of `page`'s headings, as Markdown renderers make them: lower case, punctuation dropped, spaces as `-`. */
+export function recordAnchors(page) {
+  return new Set(
+    [...page.matchAll(/^#{1,6}\s+(.+?)\s*#*\s*$/gmu)].map(([, heading]) =>
+      heading
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+        .replace(/\s/gu, "-"),
+    ),
+  );
+}
+
+/** Each pointer at the accepted record in `text`'s comments whose anchor is no heading of `page`, with its line. */
+export function unresolvedPointers(fileName, text, page) {
+  const anchors = recordAnchors(page);
+  const pointer = new RegExp(`${RECORD.replaceAll(".", "\\.")}#([\\w-]+)`, "gu");
+  const found = [];
+  for (const comment of fileComments(fileName, text))
+    for (const [, anchor] of comment.text.matchAll(pointer))
+      if (!anchors.has(anchor)) found.push({ line: comment.line, anchor });
+  return found;
 }
 
 /**", "dist/**"] }),
@@ -69,6 +102,7 @@ export function checkCommentForecasts(root) {
   const read = (name) => JSON.parse(readFileSync(new URL(name, import.meta.url), "utf8"));
   const allowed = read("./comment-forecasts-allowed.json");
   const recorded = read("./comment-citations.json");
+  const page = readFileSync(resolve(root, RECORD), "utf8");
   const diagnostics = [];
   const used = new Set();
   const counted = {};
@@ -91,6 +125,13 @@ export function checkCommentForecasts(root) {
           message: `a comment forecasts later work ("${forecast.text}", form "${forecast.form}"): say what holds now, and keep the plan in its issue`,
         });
     }
+    for (const { line, anchor } of unresolvedPointers(file, text, page))
+      diagnostics.push({
+        fileName: file,
+        line,
+        column: 1,
+        message: `a comment points at ${RECORD}#${anchor}, which is no heading of the accepted record`,
+      });
     const counts = citationCounts(file, text);
     if (Object.keys(counts).length > 0) counted[file] = counts;
   }
@@ -103,7 +144,7 @@ export function checkCommentForecasts(root) {
         message: `${item.file}: the allowed forecast "${item.text}" is no longer found; remove its entry`,
       });
   for (const file of new Set([...Object.keys(recorded), ...Object.keys(counted)]))
-    for (const citation of COUNTED_CITATIONS) {
+    for (const citation of Object.keys(COUNTED_CITATIONS)) {
       const [was, now] = [recorded[file]?.[citation] ?? 0, counted[file]?.[citation] ?? 0];
       if (now > was)
         diagnostics.push({
