@@ -26,6 +26,7 @@ import { marked } from "../guards.js";
 import { ingressLeaves, writerKey, type Item, type ItemTag } from "../items.js";
 import { addRest, aliasKeyAt, covers } from "./classes.js";
 import { hostRead, takeable, wholeOf } from "./eligibility.js";
+import { entriesHolding, holdsNothing } from "./holders.js";
 import { drive, inheritedAt, openAbove, openAboveKey, optionalOf } from "../inherited/inherited.js";
 import {
   admitsNumber,
@@ -290,9 +291,17 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
       work.charge("checks", adds.length);
       for (const d of adds) take(d);
     };
-    for (const entry of stored.list) {
+    // (#2065: below an ordinary property, where the prefix's index is made, only the stores that may hold it and those
+    // unproved (`entriesHolding`); until then each store holding nothing there is counted, a read the index saves. The
+    // layers below read every store, as before)
+    const holding = entriesHolding(admission, prefix, rest, stored);
+    const holders =
+      holding === null ? (admission.pass.receivingDomain.holders.get(prefix) ?? null) : null;
+    for (const entry of holding ?? stored.list) {
       work.charge("checks");
-      if (offends(admission.run(contract.entryAt(entry, rest)))) takeAll(entry.ds);
+      const items = admission.run(contract.entryAt(entry, rest));
+      if (holders !== null && holdsNothing(items)) holders.wasted += 1;
+      if (offends(items)) takeAll(entry.ds);
     }
     // (the prefix's layers' summaries: an offending item in one is an offending source of it, whose layer's stores
     // are the candidates, #1466; each source by itself where a summary declines)

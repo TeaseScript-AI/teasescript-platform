@@ -25,6 +25,7 @@ import {
 } from "../definitions.js";
 import type { Callable } from "../flow-graph.js";
 import { addRest, aliasKeyAt, covers, grouped, tested } from "./classes.js";
+import { wholeHolding } from "./holders.js";
 
 // §4.3's eligibility: a class's earliest member no test of its read's path holds, and the whole stores A2 reads.
 
@@ -62,15 +63,19 @@ export function wholeOf(admission: Admission, key: Key, add: boolean): Definitio
 /**
  * A prefix's whole stores as A2's scan reads them at a rest (S6-CARRIERS §4.2, §4.3): each class's representative,
  * and where a guard of the path holds it, its class's earliest eligible member too, which stands where it is in source
- * order and decides with its own answer (a guard marks a read possible, so it decides nothing).
+ * order and decides with its own answer (a guard marks a read possible, so it decides nothing). #2065: below an
+ * ordinary property, where the prefix's index is made, only the classes that may hold the property and those unproved
+ * (`wholeHolding`), before their members are asked: a class whose every member lacks it reads F11's `missing` alone
+ * there, which decides nothing.
  */
 export function eligibleOf(
   admission: Admission,
   prefix: Key,
   below: Rest,
   add = false,
-): Definition[] {
-  const list = wholeOf(admission, prefix, add);
+): readonly Definition[] {
+  const whole = wholeOf(admission, prefix, add);
+  const list = (add ? null : wholeHolding(admission, prefix, below, whole)) ?? whole;
   let out: Definition[] | null = null;
   for (const [index, representative] of list.entries()) {
     const members = admission.members.get(representative);

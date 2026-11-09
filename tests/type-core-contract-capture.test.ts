@@ -574,8 +574,10 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   assert.equal(budget.exhausted, null);
   assert.equal(budget.stoppedIn, null);
   assert.deepEqual(contracts, []);
-  // (16 units more since #1073 PR 4: the route rule asks a possible null's route at its use, AD-1)
-  assert.equal(budget.total, 22_962_591);
+  // (16 units more since #1073 PR 4: the route rule asks a possible null's route at its use, AD-1; 35 more since #2065:
+  // 17 decided paths below a property look up their prefix's decision index, whose state keeps 14 units, and one
+  // prefix counts its two settled stores' names, 4: `holdersOf`)
+  assert.equal(budget.total, 22_962_626);
 });
 
 test("each analysis's captured contracts are its own final pass's", () => {
