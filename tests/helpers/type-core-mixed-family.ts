@@ -5,9 +5,10 @@ import { coreRequest } from "./type-core-analysis.js";
 import { inMode, MODES, sentences } from "./type-core-oracles.js";
 
 /**
- * #1765's generated mixed-list family (`tests/families/messages/1765-mixed-family.mjs`): a case's dimensions, its
- * comparison with the current checker, and the inherited classes a difference may be, each exactly its issue's
- * (Codex r12 on #1789: a class predicate alone hid an unrelated difference).
+ * #1765's generated mixed-list family
+ * (`tests/families/messages/nested-carriers-and-diagnostic-work/nested-mixed-list-null-and-position-product.mjs`): a
+ * case's dimensions, its comparison with the current checker, and the inherited classes a difference may be, each
+ * exactly its issue's (Codex r12 on #1789: a class predicate alone hid an unrelated difference).
  */
 export interface MixedDimensions {
   readonly depth: number;

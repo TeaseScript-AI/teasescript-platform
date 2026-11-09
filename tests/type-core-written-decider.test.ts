@@ -205,7 +205,12 @@ const OWN: readonly string[] = [
 test("the summary and the scan agree on a copy's own level across the regressions and the sampled family (#1901)", async () => {
   // EVIDENCE: the family modules export `cases` (name and source) and `axes`, the families' module contract.
   const { cases, axes } = (await import(
-    pathToFileURL(resolve(process.cwd(), "tests/families/messages/1765-mixed-family.mjs")).href
+    pathToFileURL(
+      resolve(
+        process.cwd(),
+        "tests/families/messages/nested-carriers-and-diagnostic-work/nested-mixed-list-null-and-position-product.mjs",
+      ),
+    ).href
   )) as {
     cases: readonly (readonly [string, string])[];
     axes: readonly (readonly [string, unknown])[];

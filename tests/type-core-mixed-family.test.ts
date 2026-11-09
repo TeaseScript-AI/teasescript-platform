@@ -17,24 +17,22 @@ import { inMode, MODES } from "./helpers/type-core-oracles.js";
 
 /**
  * #1765's invariant (the lead's family rule on #1789, after Codex r9–r11 and Astra r2), sampled as the owner's
- * test-cost rule asks. The full product is `tests/families/messages/1765-mixed-family.mjs` (run on the queue):
- * - a whole-number side two or three lists deep against its text twin;
- * - its `null` at no layer, at a layer or at the leaf;
- * - at the element or a layer its value carried, or a copy (narrowed, maybe null, held, typed host values tested or
- *   not, an `otherwise` of a copy);
- * - the pair as elements, properties or `+` operands, joined again with a second disagreeing side, or the whole-number
- *   side a `+` of two whose nulls are at different layers;
- * - both orders.
- * Here, each kind at every position with every relation of its carried layer to the null (`RELATIONS`: the null one
- * and two layers below it, inside and at the leaf, three below at the leaf, at its layer, none), the order turned
+ * test-cost rule asks. The full product is
+ * `tests/families/messages/nested-carriers-and-diagnostic-work/nested-mixed-list-null-and-position-product.mjs` (run on
+ * the queue): - a whole-number side two or three lists deep against its text twin; - its `null` at no layer, at a layer
+ * or at the leaf; - at the element or a layer its value carried, or a copy (narrowed, maybe null, held, typed host
+ * values tested or   not, an `otherwise` of a copy); - the pair as elements, properties or `+` operands, joined again
+ * with a second disagreeing side, or the whole-number   side a `+` of two whose nulls are at different layers; - both
+ * orders. Here, each kind at every position with every relation of its carried layer to the null (`RELATIONS`: the null
+ * one and two layers below it, inside and at the leaf, three below at the leaf, at its layer, none), the order turned
  * through them, and the two joined positions (`ONE`: the twin's join in both orders of its answers) in both orders;
- * then each case that brings a class the sample lacks (`classes`, the coverage invariant); in four modes. The modes agree. Where both checkers report the error, the first sentences are equal, except
- * the inherited classes, each its issue's work:
- * - an element's own `or null` (a copy at the element that may be null, by flow or from the host), #1843;
- * - a typed host value under `!= null`, which leaves no mark on its unknown items, #1847;
- * - the leaf `?` of an `otherwise` of a typed host value with a `null` fallback, on the earliest side, #1858.
- * Each class is exactly its issue's change of the checker's sentence (`mixedExplained`, Codex r12 on #1789). A source
- * only one checker reports on is outside the candidate slice there and is not compared.
+ * then each case that brings a class the sample lacks (`classes`, the coverage invariant); in four modes. The modes
+ * agree. Where both checkers report the error, the first sentences are equal, except the inherited classes, each its
+ * issue's work: - an element's own `or null` (a copy at the element that may be null, by flow or from the host), #1843;
+ * - a typed host value under `!= null`, which leaves no mark on its unknown items, #1847; - the leaf `?` of an
+ * `otherwise` of a typed host value with a `null` fallback, on the earliest side, #1858. Each class is exactly its
+ * issue's change of the checker's sentence (`mixedExplained`, Codex r12 on #1789). A source only one checker reports on
+ * is outside the candidate slice there and is not compared.
  */
 
 /** The family modules (the families' module contract), read where the tests run. */
@@ -251,7 +249,10 @@ async function pure(
   direct: unknown,
   record: { readonly sha256: string; readonly keys: string },
 ): Promise<void> {
-  const file = resolve(process.cwd(), "tests/families/messages/1765-mixed-family.mjs");
+  const file = resolve(
+    process.cwd(),
+    "tests/families/messages/nested-carriers-and-diagnostic-work/nested-mixed-list-null-and-position-product.mjs",
+  );
   // EVIDENCE: `tests/families/sources.mjs` exports `sourcesOf`, `sourceKey` and `setKey` (the families' source identity).
   const lib = (await import(
     pathToFileURL(resolve(process.cwd(), "tests/families/sources.mjs")).href
@@ -449,7 +450,7 @@ test("a mixed-list error's type text equals the current checker's across the sam
     cases: readonly (readonly [string, string])[];
     axes: readonly (readonly [string, unknown])[];
     recorded: { readonly sha256: string; readonly keys: string };
-  }>("1765-mixed-family.mjs");
+  }>("nested-carriers-and-diagnostic-work/nested-mixed-list-null-and-position-product.mjs");
   await pure(generator, generator.recorded);
   const { cases, axes } = generator;
   const differing: string[] = [];
@@ -475,16 +476,16 @@ test("a mixed-list error's type text equals the current checker's across the sam
 
 /**
  * #1765's invariant, its work (the lead's family rule): each composition dimension of
- * `tests/families/messages/1765-mixed-growth.mjs` (nest depth, join width, the otherwise chain, index chains, null
- * density, each carrier kind deep, wide and at every depth) at its first doubling, in one mode. The queue runs both
- * doublings in four modes against main, the head's work over main's flat (#1857 names the shapes main itself grows
- * past their bound on).
+ * `tests/families/messages/nested-carriers-and-diagnostic-work/nested-mixed-list-composition-work.mjs` (nest depth,
+ * join width, the otherwise chain, index chains, null density, each carrier kind deep, wide and at every depth) at its
+ * first doubling, in one mode. The queue runs both doublings in four modes against main, the head's work over main's
+ * flat (#1857 names the shapes main itself grows past their bound on).
  */
 test("a mixed-list error's work grows as its dimensions do (#1765)", async () => {
   const { shapes, sizes } = await family<{
     shapes: Record<string, (size: number) => string>;
     sizes: readonly number[];
-  }>("1765-mixed-growth.mjs");
+  }>("nested-carriers-and-diagnostic-work/nested-mixed-list-composition-work.mjs");
   const total = (source: string): number => {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
