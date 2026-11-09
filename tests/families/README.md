@@ -385,8 +385,8 @@ round put it: positive escapes are the blockers; an unwitnessed cell is unresolv
 - `closed`: the two plans are equal. Nothing else is `closed`, and nothing without a natural plan ever is.
 - `unwitnessed`: every other difference, among them multi-file units, loops, an earlier failure, a failure of a sibling
   or of another check, and a no-plan error not shown passed. It is unresolved evidence, never proof that no check is
-  owed. `untested` lists the places no run reached; those witnesses and the type-derived values find escapes and never
-  decide `closed`.
+  owed. `untested` lists each place the plans differ that no run failed either plan inside, and with no natural plan
+  each natural error's site; it and the type-derived values find escapes and never decide `closed`.
 - `declined`, `natural declined`, `no plan`: a refusal, or nothing to run.
 
 An item is a `plans.mjs` record's `{set, name, mode, demand}` or a records row's `{files, globals, label, demand}`.

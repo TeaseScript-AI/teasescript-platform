@@ -923,8 +923,8 @@ export interface StopRunSide {
  * - `closed`: the two plans are equal. Nothing else is `closed`, and nothing without a natural plan ever is;
  * - `unwitnessed`: plans that differ with no `open` or `later` run: multi-file units, loops, an earlier or stricter
  *   failure, a failure of a sibling or of another check, a no-plan error not shown passed. Unresolved evidence, never
- *   proof that no check is owed; `untested` lists the places the pool never reached, which the type-derived values and
- *   the per-place witnesses serve to find escapes, never to decide `closed`;
+ *   proof that no check is owed; `untested` (below) and the type-derived values serve to find escapes, never to decide
+ *   `closed`;
  * - `declined`: the stop's compile declined (a refusal, never a missing check);
  * - `natural declined`, `no plan`: nothing to run.
  */
@@ -1121,7 +1121,7 @@ export function stopRuns(
       };
   }
   if (found !== null) return found;
-  // (plans apart with no escape shown: unresolved, the places no run reached listed)
+  // (plans apart with no escape shown: unresolved, the places no run failed inside listed)
   const untested = differences.filter(
     ({ node }) => node === null || !failures.some((failure) => within(failure, node)),
   );
