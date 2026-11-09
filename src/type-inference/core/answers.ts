@@ -36,7 +36,7 @@ import {
 } from "./contract/key-ids.js";
 import { labelText } from "./contract/labels.js";
 import { keyObjects, objectsAt } from "./contract/objects.js";
-import { replayLayer } from "./contract/prefix-index.js";
+import { replayLayer } from "./contract/prefix-index/summaries.js";
 import { selectLanes } from "./contract/lanes.js";
 import {
   Contract,

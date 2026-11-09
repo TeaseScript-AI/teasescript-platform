@@ -2317,10 +2317,11 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
  * siblings: both places stored, the replacing order reversed, every second right place a shared ancestor, the next place
  * written `object` with a misfitting store, the reads guarded, and the branches of unequal depth (Astra's design review);
  * and (`read`, #1610) each next place shown, written by `toJson` or read at a property no layer stores instead.
- * A read below the shared layers is answered once per layer and path from the layers below it (`prefix-index.ts`), so
- * each grows as k log k where `main` grew as k³. Beside them, Codex r1's B1 dimension: k copies of one record, each
- * storing its own property below one step, joined into one place and read at each property, directly and through a
- * copy of the place, so each read asks only the layer that holds its property (#1078).
+ * A read below the shared layers is answered once per layer and path from the layers below it
+ * (`prefix-index/summaries.ts`), so each grows as k log k where `main` grew as k³. Beside them, Codex r1's B1
+ * dimension: k copies of one record, each storing its own property below one step, joined into one place and read at
+ * each property, directly and through a copy of the place, so each read asks only the layer that holds its property
+ * (#1078).
  */
 function diamonds(
   k: number,

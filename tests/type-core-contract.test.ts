@@ -16,7 +16,7 @@ import {
   summaryCount,
   summaryItems,
   summaryPresence,
-} from "../src/type-inference/core/contract/prefix-index.js";
+} from "../src/type-inference/core/contract/prefix-index/summaries.js";
 import {
   exportNames,
   PathSteps,
