@@ -1038,11 +1038,23 @@ export function stopRuns(
   if (want === null) {
     // (a compile error the stop turned into runtime checks: open only where a run executed the error's own store
     // instruction and passed it)
+    // (C5c reports a store's absent property at the object that lacks it, an explanation: the error is the store's,
+    // `rule.store`, the instruction a run must pass)
+    const operations = new Map<string, SourceSite>();
+    for (const d of natural.answers.diagnostics)
+      if (
+        d.class === "compile-error" &&
+        "rule" in d &&
+        d.rule.rule === "absent" &&
+        d.rule.store !== null
+      )
+        operations.set(`${d.code} ${siteKey(d.site)}`, d.rule.store);
     const errors = natural.result.diagnostics
       .filter((d) => d.severity === "error")
       .map((d) => {
         // (a check of the error's own file whose site holds the error's: offsets are each file's own)
-        const site = compiledSite(d, stopped.answers);
+        const shown = compiledSite(d, stopped.answers);
+        const site = operations.get(`${d.code} ${siteKey(shown)}`) ?? shown;
         const at = stopped.answers.checks.filter((c) => inSite(site, c.site));
         const checks =
           at.length === 0
