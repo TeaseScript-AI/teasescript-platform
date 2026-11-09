@@ -22,8 +22,9 @@ export interface StopPage {
 
 /**
  * Stops at `target` in `origin`'s run: once its store froze at the host's acknowledgement, its last publication is the
- * shown session, which the recording and export hold, and the stop renders. A later activation or unmount supersedes
- * it; a retired `origin` stops nothing.
+ * shown session, which the recording and export hold, and the stop renders. A later activation, preparation or unmount
+ * supersedes it: a retired `origin` or a replaced `stop` stops nothing, and the halt and capture are not sent
+ * (`false`).
  */
 export function stopAt(
   target: StopTarget,
@@ -31,8 +32,11 @@ export function stopAt(
   stop: number,
   origin: Origin,
   page: StopPage,
-): void {
-  if (!page.admits(origin)) return page.endHalting(stop);
+): boolean {
+  if (!page.admits(origin) || !page.isCurrent(stop)) {
+    page.endHalting(stop);
+    return false;
+  }
   const acknowledged = target.halt(name, stop);
   target.captureFailure();
   const commit = () => {
@@ -42,15 +46,21 @@ export function stopAt(
     page.commit(target, name);
     page.endHalting(stop);
   };
-  if (target.frozen()) return commit();
+  if (target.frozen()) {
+    commit();
+    return true;
+  }
   page.haltUntil(stop);
   // The halt resolves once the store froze; were it to reject, the store froze too (`PlayerBridge.halt`).
   void acknowledged.then(commit, commit);
+  return true;
 }
 
 /**
  * The stop of a Start still beginning when its Player error came: at its session once the host names it, or the
- * run's incident when it fails. A retired activation's late session is only stopped, with no incident and no capture.
+ * run's incident when it fails, while its activation lives and the stop is still current. A late session the stop no
+ * longer claims (its activation retired, or a later activation, preparation or end replaced the stop) is only stopped,
+ * with no incident and no capture.
  */
 export function stopLateStart<T>(
   starting: Promise<T>,
@@ -60,7 +70,7 @@ export function stopLateStart<T>(
   page: StopPage & {
     /** A target of the late session for `origin`. */
     readonly target: (begun: T) => StopTarget;
-    /** Plain-halts the late session of a retired activation: resource-bound cleanup, no incident or capture. */
+    /** Plain-halts a late session the stop no longer claims: resource-bound cleanup, no incident or capture. */
     readonly haltObsolete: (begun: T) => void;
     /** Shows the error `name` without a session (the first error stays), and commits the run's incident. */
     readonly incident: () => void;
@@ -69,11 +79,8 @@ export function stopLateStart<T>(
   page.haltUntil(stop);
   void starting.then(
     (begun) => {
-      if (!page.admits(origin)) {
-        page.endHalting(stop);
-        return page.haltObsolete(begun);
-      }
-      stopAt(page.target(begun), name, stop, origin, page);
+      // A late session the stop no longer claims is only stopped.
+      if (!stopAt(page.target(begun), name, stop, origin, page)) page.haltObsolete(begun);
     },
     () => {
       page.endHalting(stop);

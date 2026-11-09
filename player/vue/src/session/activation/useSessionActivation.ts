@@ -165,8 +165,10 @@ export function useSessionActivation({
     const shown = session.value ?? restoring;
     // A Continue still beginning beside a shown session runs nothing more either: plain-halted, resource-bound cleanup.
     if (restoring !== null && restoring !== shown) void bridgeOf(restoring).halt(restoring);
-    if (shown !== null)
-      return stopAt(stopTarget(shown, origin, activationRun), name, stop, origin, stopPage);
+    if (shown !== null) {
+      stopAt(stopTarget(shown, origin, activationRun), name, stop, origin, stopPage);
+      return;
+    }
     // Without a session to stop, the run's incident is committed by itself.
     if (starting === null) {
       hostError.value = name;
