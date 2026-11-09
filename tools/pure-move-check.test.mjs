@@ -594,7 +594,7 @@ test(
     assert.equal(missing.status, 1, missing.out);
     assert.match(
       missing.out,
-      /binding only after: src\/b\.js:1 import from "\.\/old\.js": value as selectedValue/u,
+      /refused: src\/b\.js:1 \(added\) "\.\/old\.js": resolves to no file under the committed configuration/u,
     );
     // a package's module and a repository file of the same path are different targets
     const bare = run(
@@ -739,7 +739,10 @@ test(
       { "src/old.ts": "src/new.ts" },
     );
     assert.equal(extensionless.status, 1, extensionless.out);
-    assert.match(extensionless.out, /bindings differing 2/u);
+    assert.match(
+      extensionless.out,
+      /refused: src\/a\.ts:1 \(added\) "\.\/new": resolves to no file/u,
+    );
     // a CommonJS require of a folder follows its package.json's main; with the entry moved away, it reaches index.ts
     const required =
       'import dependencyWithLongIdentifier = require("./dep");\nexport const resultWithLongIdentifier = dependencyWithLongIdentifier.value;\n';
@@ -787,5 +790,97 @@ test(
     );
     assert.equal(renamed.status, 0, renamed.out);
     assert.match(renamed.out, /bindings differing 0/u);
+  },
+);
+
+test(
+  "a configuration the tree does not establish refuses by name; a nearer config that leaves the file out does not apply",
+  { timeout: 60_000 },
+  () => {
+    const run = (before, after, ...args) => {
+      const move = moveOf(before, after);
+      try {
+        return move.run(...args.map((arg) => (typeof arg === "function" ? arg(move) : arg)));
+      } finally {
+        move.done();
+      }
+    };
+    const importer = (from) =>
+      `import { value as selectedValue } from "${from}";\nexport const resultWithLongIdentifier = selectedValue;\n`;
+    const value = "export const value = 1234567890;\n";
+    const esm = '{ "type": "module" }\n';
+    const nodeNext = (include) =>
+      `{ "compilerOptions": { "module": "NodeNext", "moduleResolution": "NodeNext" }, "include": ${JSON.stringify(include)} }\n`;
+    // a nearer config whose include leaves the importer out: the root's NodeNext applies, and `./new` resolves to nothing
+    const nearer = {
+      "package.json": esm,
+      "tsconfig.json": nodeNext(["src/**/*"]),
+      "src/lib/tsconfig.json":
+        '{ "compilerOptions": { "module": "ESNext", "moduleResolution": "Bundler" }, "include": ["unrelated/**/*"] }\n',
+    };
+    const notOwned = run(
+      { ...nearer, "src/lib/a.ts": importer("./old.js"), "src/lib/old.ts": value },
+      {
+        ...nearer,
+        "src/lib/a.ts": importer("./new"),
+        "src/lib/old.ts": null,
+        "src/lib/new.ts": value,
+      },
+      "--renames",
+      (move) => move.renames({ "src/lib/old.ts": "src/lib/new.ts" }),
+    );
+    assert.equal(notOwned.status, 1, notOwned.out);
+    assert.match(
+      notOwned.out,
+      /refused: src\/lib\/a\.ts:1 \(added\) "\.\/new": resolves to no file/u,
+    );
+    // an `extends` the committed tree does not hold: refused by name on both sides, passed only when declared
+    const inherited = {
+      "package.json": esm,
+      "tsconfig.json": '{ "extends": "@fixture/config/base.json", "include": ["src/**/*.ts"] }\n',
+    };
+    const before = { ...inherited, "src/a.ts": importer("./old.js"), "src/old.ts": value };
+    const after = {
+      ...inherited,
+      "src/a.ts": importer("./new"),
+      "src/old.ts": null,
+      "src/new.ts": value,
+    };
+    const map = (move) => move.renames({ "src/old.ts": "src/new.ts" });
+    const unestablished = run(before, after, "--renames", map);
+    assert.equal(unestablished.status, 1, unestablished.out);
+    assert.match(
+      unestablished.out,
+      /refused: src\/a\.ts:1 \(removed\) "\.\/old\.js": tsconfig\.json: /u,
+    );
+    assert.match(unestablished.out, /refused: src\/a\.ts:1 \(added\) "\.\/new": tsconfig\.json: /u);
+    const reason =
+      "the configuration extends an installed package; the move's compiler run resolves it";
+    const declared = run(before, after, "--renames", map, "--declare", (move) =>
+      move.declare([
+        { file: "src/a.ts", side: "removed", line: 1, reason },
+        { file: "src/a.ts", side: "added", line: 1, reason },
+      ]),
+    );
+    assert.equal(declared.status, 0, declared.out);
+    assert.match(declared.out, /refused 0/u);
+    // a TypeScript file no committed config includes is refused by name
+    const outside = { "tsconfig.json": nodeNext(["src/**/*"]) };
+    const uncovered = run(
+      { ...outside, "tools/a.ts": importer("./old.js"), "tools/old.ts": value },
+      {
+        ...outside,
+        "tools/a.ts": importer("./new.js"),
+        "tools/old.ts": null,
+        "tools/new.ts": value,
+      },
+      "--renames",
+      (move) => move.renames({ "tools/old.ts": "tools/new.ts" }),
+    );
+    assert.equal(uncovered.status, 1, uncovered.out);
+    assert.match(
+      uncovered.out,
+      /refused: tools\/a\.ts:1 \(added\) "\.\/new\.js": no committed tsconfig\.json includes it/u,
+    );
   },
 );

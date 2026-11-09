@@ -27,18 +27,24 @@
 //
 // And a pure move keeps every import's binding: over the change's files, the set of bindings before equals the set
 // after, a binding being one imported or re-exported name with its target, its local or exported name and whether it is
-// type-only (a default import's name `default`, a namespace's `*`). A relative specifier's target is the file
-// TypeScript resolves it to on that side, from that side's committed tree alone: the importer's nearest `tsconfig.json`
-// (else NodeNext), its module format (`package.json`'s `type`, its extension), the specifier's own `import` or
-// `require` mode, and a folder's `package.json` as the compiler reads it. A target the move relocated is keyed by its
-// family, from `--renames FILE`, the move sweep's map (`{ "renames": { "old": "new" | ["new", …] } }`, old and new
-// paths joined where they share one), and the bindings within one family (a split's files importing each other) are
-// left out. A binding on one side only fails, with its file, line and specifier; form 1 admits an import line's
-// presence, this rule its content. A target the move relocates or adds without a family in `--renames` fails, and the
-// report names the flag.
+// type-only (a default import's name `default`, a namespace's `*`). A bare specifier is its target as spelled: its
+// package's maps and a config's `paths` aliases are not resolved. A relative specifier's target is the file TypeScript
+// resolves it to on that side, from that side's committed tree alone: the configuration of the nearest committed
+// `tsconfig.json` whose root files include the importer (none: NodeNext, as Node runs it, for a JavaScript file or a
+// tree with no config), its module format (`package.json`'s `type`, its extension), the specifier's own `import` or
+// `require` mode, and a folder's `package.json`; JavaScript and JSON targets resolve even where the config disables
+// them. A target the move relocated is keyed by its family, from `--renames FILE`, the move sweep's map (`{ "renames":
+// { "old": "new" | ["new", …] } }`, old and new paths joined where they share one), and the bindings within one family
+// (a split's files importing each other) are left out. A binding on one side only fails, with its file, line and
+// specifier; form 1 admits an import line's presence, this rule its content. A target the move relocates or adds
+// without a family in `--renames` fails, and the report names the flag. A relative specifier either side cannot
+// resolve, to no file or in a file whose configuration the tree does not establish (a config with an error, such as an
+// `extends` the tree does not hold, or a TypeScript file no config includes), is refused by name: reported unless a
+// declaration names its side and line, never passed; the move's compiler run is the witness for what the check
+// declines.
 //
-// The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines and
-// the bindings differing.
+// The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines, the
+// bindings differing and the refused specifiers.
 //
 // The residual is Git's: its move detection is heuristic, and a moved block below its size threshold (20 alphanumeric
 // characters) reads as added and removed. A failure on such a block is read by a person, not overridden.
@@ -320,9 +326,13 @@ function familiesOf(renames) {
 
 /**
  * TypeScript's resolution over one side's committed tree (`ref`, its files `tree`, its folders `folders`): a host that
- * reads only that tree's blobs (cached), the compiler options for a file (`optionsFor`: its nearest committed
- * `tsconfig.json`, `extends` followed, or NodeNext where none is; JavaScript and JSON files resolvable, as they load at
- * runtime), and the implied module format of a file (`formatOf`: `package.json`'s `type` and the file's extension).
+ * reads only that tree's blobs (cached); a file's configuration (`configOf`: `{ options }` or `{ refused: reason }`);
+ * and its implied module format (`formatOf`: `package.json`'s `type` and the file's extension). A file's configuration
+ * is that of the nearest committed `tsconfig.json` whose root files (its `files`, `include` and `exclude`, matched by
+ * TypeScript's own `matchFiles` over the tree) include it; a config matching no file is passed over, and one with any
+ * other error (an `extends` the tree does not hold) refuses the files below it by name. With none: a JavaScript file,
+ * or any file of a tree with no `tsconfig.json`, resolves as Node runs it (NodeNext); a TypeScript file is refused.
+ * JavaScript and JSON targets resolve even where a config disables them, as they load at runtime.
  */
 function treeResolver(ref, tree, folders, git) {
   // a resolver path's tree path: the root as `/tree` or `/tree/`, a path below it, or `null` outside the tree
@@ -354,50 +364,96 @@ function treeResolver(ref, tree, folders, git) {
     useCaseSensitiveFileNames: true,
   };
   const configs = new Map();
-  const optionsFor = (file) => {
+  const entries = new Map();
+  for (const file of tree) {
+    const dir = path.posix.dirname(file) === "." ? "" : path.posix.dirname(file);
+    if (!entries.has(dir)) entries.set(dir, { files: [], directories: [] });
+    entries.get(dir).files.push(path.posix.basename(file));
+  }
+  for (const folder of folders) {
+    if (folder === "") continue;
+    const parent = path.posix.dirname(folder) === "." ? "" : path.posix.dirname(folder);
+    if (!entries.has(parent)) entries.set(parent, { files: [], directories: [] });
+    entries.get(parent).directories.push(path.posix.basename(folder));
+  }
+  const readDirectory = (root, extensions, excludes, includes, depth) =>
+    ts.matchFiles(
+      root,
+      extensions,
+      excludes,
+      includes,
+      true,
+      ROOT,
+      depth,
+      (dir) => {
+        const at = inTree(dir);
+        return (at === null ? undefined : entries.get(at)) ?? { files: [], directories: [] };
+      },
+      (name) => name,
+    );
+  const parse = (config) => {
+    if (!configs.has(config)) {
+      const read = ts.readConfigFile(ROOT + config, readFile);
+      const parsed = ts.parseJsonConfigFileContent(
+        read.config ?? {},
+        { ...host, readDirectory },
+        ROOT + path.posix.dirname(config),
+        undefined,
+        ROOT + config,
+      );
+      // a config that matches no file says so as an error (TS18003); that is no error of its settings
+      const errors = [read.error, ...parsed.errors].filter(
+        (error) => error && error.code !== 18003,
+      );
+      configs.set(config, {
+        options: { ...parsed.options, allowJs: true, resolveJsonModule: true },
+        files: new Set(parsed.fileNames),
+        error:
+          errors.length === 0 ? null : ts.flattenDiagnosticMessageText(errors[0].messageText, " "),
+      });
+    }
+    return configs.get(config);
+  };
+  const anyConfig = [...tree].some((file) => path.posix.basename(file) === "tsconfig.json");
+  const NODE = {
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    allowJs: true,
+    resolveJsonModule: true,
+  };
+  const configOf = (file) => {
     let dir = path.posix.dirname(file);
     for (;;) {
       const config = dir === "." ? "tsconfig.json" : `${dir}/tsconfig.json`;
       if (tree.has(config)) {
-        if (!configs.has(config)) {
-          const json = ts.readConfigFile(ROOT + config, readFile).config ?? {};
-          const parsed = ts.parseJsonConfigFileContent(
-            json,
-            { ...host, readDirectory: () => [] },
-            ROOT + path.posix.dirname(config),
-            undefined,
-            ROOT + config,
-          );
-          configs.set(config, { ...parsed.options, allowJs: true, resolveJsonModule: true });
-        }
-        return configs.get(config);
+        const parsed = parse(config);
+        if (parsed.error !== null) return { refused: `${config}: ${parsed.error}` };
+        if (parsed.files.has(ROOT + file)) return { options: parsed.options };
       }
       if (dir === "." || dir === "") break;
       dir = path.posix.dirname(dir);
     }
-    return {
-      module: ts.ModuleKind.NodeNext,
-      moduleResolution: ts.ModuleResolutionKind.NodeNext,
-      allowJs: true,
-      resolveJsonModule: true,
-    };
+    if (!anyConfig || /\.(js|mjs|cjs|jsx)$/u.test(file)) return { options: NODE };
+    return { refused: "no committed tsconfig.json includes it" };
   };
   const formatOf = (file, options) =>
     ts.getImpliedNodeFormatForFile(ROOT + file, undefined, host, options);
-  return { host, optionsFor, formatOf };
+  return { host, configOf, formatOf, NODE };
 }
 
 /**
  * A blob's bindings: `{ kind, target, name, as, typeOnly, line, specifier }`, one per imported or re-exported name (a
  * default import's name is `default`, a namespace's `*`, `import x = require()`'s `=`; a side-effect import's, and an
  * empty clause's (`import {} from`, `export {} from`), empty, its local name `{}` for the clause). Its target is
- * `{ type, path }`: `bare` with the specifier itself; `file`, a relative specifier resolved by TypeScript's resolver over
- * that side's committed tree (`resolver`: the file's compiler options, its implied module format and the specifier's own
- * usage mode, `import` or `require`); or `missing`, a relative one that resolves to no file, its path.
+ * `{ type, path }`: `bare` with the specifier itself, compared by its spelling; `file`, a relative specifier resolved by
+ * TypeScript's resolver over that side's committed tree (`resolver`: the file's configuration, its implied module format
+ * and the specifier's own usage mode, `import` or `require`); `missing`, a relative one that resolves to no file; or
+ * `refused`, a relative one in a file whose configuration the tree does not establish (`reason`).
  */
 function bindingsOf(file, text, resolver) {
   if (!PARSED.test(file)) return [];
-  const options = resolver.optionsFor(file);
+  const config = resolver.configOf(file);
+  const options = config.options ?? resolver.NODE;
   const source = ts.createSourceFile(
     file,
     text,
@@ -410,6 +466,8 @@ function bindingsOf(file, text, resolver) {
   const resolve = (node) => {
     const specifier = node.text;
     if (!specifier.startsWith(".")) return { type: "bare", path: specifier };
+    const at = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
+    if (config.refused) return { type: "refused", path: at, reason: config.refused };
     const mode = ts.getModeForUsageLocation(source, node, options);
     const found = ts.resolveModuleName(
       specifier,
@@ -424,7 +482,8 @@ function bindingsOf(file, text, resolver) {
       return { type: "file", path: found.resolvedFileName.slice(ROOT.length) };
     return {
       type: "missing",
-      path: path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier)),
+      path: at,
+      reason: "resolves to no file under the committed configuration",
     };
   };
   const out = [];
@@ -501,8 +560,10 @@ function bindingsOf(file, text, resolver) {
 
 /**
  * The bindings on one side only: over `files`, the set of `{ kind, target, name, as, typeOnly }` before and after. A
- * target is its type and path (`bare`, `file`, `missing` apart), a file the move relocated keyed by its family
- * (`renames`); bindings within one family are left out.
+ * target is its type and path (`bare` and `file` apart), a file the move relocated keyed by its family (`renames`);
+ * bindings within one family are left out. A relative specifier either side cannot resolve (`missing`, `refused`) is
+ * no binding but a refusal, `{ side, file, line, specifier, reason }` (its side `removed` or `added`, as a
+ * declaration names it), which the check reports unless it is declared.
  */
 function bindingDifferences(mergeBase, head, files, renames, git) {
   const family = familiesOf(renames ?? {});
@@ -528,6 +589,7 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
   };
   const sides = { before: new Map(), after: new Map() };
   const relocated = new Set();
+  const refusals = new Map();
   for (const change of files) {
     if (change.binary) continue;
     for (const [side, ref, file] of [
@@ -537,6 +599,17 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
       if (file === null) continue;
       const text = git("cat-file", "blob", `${ref}:${file}`);
       for (const binding of bindingsOf(file, text, resolvers[side])) {
+        if (binding.target.type === "missing" || binding.target.type === "refused") {
+          const refusal = {
+            side: side === "before" ? "removed" : "added",
+            file,
+            line: binding.line,
+            specifier: binding.specifier,
+            reason: binding.target.reason,
+          };
+          refusals.set(JSON.stringify([side, file, binding.line, binding.specifier]), refusal);
+          continue;
+        }
         const target = keyOf(binding.target);
         if (family.has(file) && target === keyOf({ type: "file", path: file })) continue;
         // a resolved file that is there on one side only, with no family: a relocation the renames do not name
@@ -561,6 +634,7 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
   return {
     differing: [...only("before", "after"), ...only("after", "before")],
     relocated: [...relocated],
+    refusals: [...refusals.values()],
   };
 }
 
@@ -612,7 +686,6 @@ export function checkMove(
       unadmitted.push(at);
     } else counts[form] += 1;
   }
-  const stale = declarations.filter((_, at) => !used.has(at));
   const bindings = bindingDifferences(
     mergeBase,
     "HEAD",
@@ -620,12 +693,38 @@ export function checkMove(
     renames === null ? null : renamesOf(renames),
     git,
   );
-  return { mergeBase, unadmitted, declared, stale, bindings, renames: renames !== null, counts };
+  // a refusal is declared by a declaration of its side and line, used or not, even where the line is no changed one
+  const refused = [];
+  for (const refusal of bindings.refusals) {
+    const index = declarations.findIndex(
+      (d) => d.file === refusal.file && d.side === refusal.side && d.line === refusal.line,
+    );
+    if (index === -1) refused.push(refusal);
+    else {
+      if (!used.has(index)) {
+        used.add(index);
+        counts.declared += 1;
+        declared.push({ ...refusal, reason: declarations[index].reason });
+      }
+    }
+  }
+  counts.refused = refused.length;
+  const stale = declarations.filter((_, at) => !used.has(at));
+  return {
+    mergeBase,
+    unadmitted,
+    declared,
+    stale,
+    refused,
+    bindings,
+    renames: renames !== null,
+    counts,
+  };
 }
 
 /** The report's lines and exit status for `result`. */
 export function reportOf(base, result) {
-  const { mergeBase, unadmitted, declared, stale, bindings, renames, counts } = result;
+  const { mergeBase, unadmitted, declared, stale, refused, bindings, renames, counts } = result;
   const out = [`pure-move check of ${base}..HEAD (merge base ${mergeBase.slice(0, 12)}):`];
   for (const u of unadmitted) out.push(`  unadmitted: ${u.file}:${u.line} (${u.side}): ${u.text}`);
   for (const s of stale)
@@ -633,6 +732,10 @@ export function reportOf(base, result) {
       `  declaration matching no unmoved line: ${s.file}:${s.line} (${s.side}): ${s.reason}`,
     );
   for (const d of declared) out.push(`  declared: ${d.file}:${d.line} (${d.side}): ${d.reason}`);
+  for (const r of refused)
+    out.push(
+      `  refused: ${r.file}:${r.line} (${r.side}) "${r.specifier}": ${r.reason}; declare it, the move's compiler run its witness`,
+    );
   for (const b of bindings.differing)
     out.push(
       `  binding only ${b.side}: ${b.file}:${b.line} ${b.kind} from "${b.specifier}": ${b.typeOnly ? "type " : ""}${b.name || "(side effect)"}${b.as !== b.name ? ` as ${b.as}` : ""}`,
@@ -642,9 +745,13 @@ export function reportOf(base, result) {
       `  the move relocates or adds ${bindings.relocated.join(", ")}: name its family with --renames FILE (the move sweep's map)`,
     );
   out.push(
-    `shape: moved +${counts.movedAdded} -${counts.movedRemoved}; admitted ${FORMS.map((form) => `${form} ${counts[form]}`).join(", ")}; declared ${counts.declared}; unadmitted ${counts.unadmitted}; bindings differing ${bindings.differing.length}`,
+    `shape: moved +${counts.movedAdded} -${counts.movedRemoved}; admitted ${FORMS.map((form) => `${form} ${counts[form]}`).join(", ")}; declared ${counts.declared}; unadmitted ${counts.unadmitted}; bindings differing ${bindings.differing.length}; refused ${counts.refused}`,
   );
-  const failed = unadmitted.length > 0 || stale.length > 0 || bindings.differing.length > 0;
+  const failed =
+    unadmitted.length > 0 ||
+    stale.length > 0 ||
+    bindings.differing.length > 0 ||
+    refused.length > 0;
   if (unadmitted.length > 0) out.push(RESIDUAL);
   return { lines: out, status: failed ? 1 : 0 };
 }
