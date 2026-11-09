@@ -10,7 +10,7 @@ import type { PlayerBridge } from "../player/player-bridge.js";
 import { OWNERSHIP_MODES, type Operated, type Ownership } from "./helpers/plan-json-family.js";
 
 /*
- * The persistence operations of the Player's session host (`player/vue/src/usePlayerSession.ts`: keep, the kept
+ * The persistence operations of the Player's session host (`player/vue/src/session/persistence/`: keep, the kept
  * session's restore, the session import, the saved-data import) reach the page's stores and the host only through their
  * ownership's handles (`player/persistence-ownership.ts`), so a stale operation's call is refused wherever it is made.
  * This check reads the syntax tree of every module of the host (`HOST_MODULES`). One recognizer (`useAt`) finds each use

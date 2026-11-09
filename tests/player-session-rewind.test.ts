@@ -1595,7 +1595,7 @@ const plain = <T extends Readonly<Record<string, unknown>>>(value: T): string =>
   JSON.stringify(value, null, 1);
 const lifecycleRun: Coordinates[] = [];
 
-/** The rewind owner's methods a caller mutant replaces: each is called through the owner (`usePlayerSession.ts`). */
+/** The rewind owner's methods a caller mutant replaces: each is called through the owner (`session/useSessionRewind.ts`). */
 interface MutableOwner {
   adoptionBegun: () => boolean;
   adoptionSettled: (succeeded: boolean) => boolean;
