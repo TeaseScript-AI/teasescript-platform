@@ -30,7 +30,8 @@ decision, 2026-10-09). It names its subject, such as the file, value, or place, 
 decision, 2026-10-27). A sentence that authors read uses no implementation terms, such as "compiler", "follow", or
 "store", unless they help the author fix the problem, and says "type", never "kind" (owner decision, 2026-10-27). Where
 a whole number is required, a value of type `number` is "a number that can have decimals", and the message names the
-line that brings them; elsewhere "a number" stays the general word (owner decision, 2026-10-27). A warning of a check
+line that brings them; elsewhere "a number" stays the general word (owner decision, 2026-10-27). A warning says its
+consequence, true for the case it reports, and how to fix it (owner decision, 2026-10-27, #1195). A warning of a check
 the run makes states the rule, then what the value may be and what follows, as in `contains() needs text (string) or a
 regex for 'part', but 'v' may be a whole number (integer) here. If it is, the Tease stops with an error at this line.`
 (`may hold` and `If it does` for what a value holds), then its fix. A warning about failing a required test says `If it
