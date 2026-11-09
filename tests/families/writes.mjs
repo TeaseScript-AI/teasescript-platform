@@ -121,7 +121,7 @@ const ALLOWED = {
   },
   processes: {
     "the heap probe": [
-      (call, { importedFrom }) => {
+      (call, { importedFrom, name }) => {
         const [command, args, options] = call.arguments;
         const elements =
           args !== undefined && ts.isArrayLiteralExpression(args) ? args.elements : [];
@@ -130,6 +130,7 @@ const ALLOWED = {
         const heap = elements.length === 3 ? [elements[0]] : [];
         return (
           importedFrom(call.expression) !== undefined &&
+          name === "spawnSync" &&
           command !== undefined &&
           command.getText() === "process.execPath" &&
           (elements.length === 2 || elements.length === 3) &&
@@ -143,15 +144,16 @@ const ALLOWED = {
           )
         );
       },
-      "a Node process that prints V8's heap limit and ends (the runner's `heapLimitWith`, #1956), in this process's environment or that without `NODE_OPTIONS`: it writes nothing",
+      "`spawnSync` of a Node process that prints V8's heap limit and ends (the runner's `heapLimitWith`, #1956), in this process's environment or that without `NODE_OPTIONS`: it writes nothing",
     ],
     "the gate's lock holder": [
-      (call, { importedFrom }) => {
+      (call, { importedFrom, name }) => {
         const [command, args, options] = call.arguments;
         const elements =
           args !== undefined && ts.isArrayLiteralExpression(args) ? args.elements : [];
         return (
           importedFrom(call.expression) !== undefined &&
+          name === "spawn" &&
           literal(command) === "bash" &&
           elements.length === 3 &&
           literal(elements[0]) === "-c" &&
@@ -160,7 +162,7 @@ const ALLOWED = {
           onlyOptions(options, (key) => key === "stdio")
         );
       },
-      "`bash -c` of LOCK_HOLDER (above), with no option but `stdio`",
+      "`spawn` of `bash -c` of LOCK_HOLDER (above), with no option but `stdio`",
     ],
     "a checkout's HEAD read": [
       (call, { importedFrom, name }) => {
@@ -182,12 +184,13 @@ const ALLOWED = {
       "`spawnSync` of `git -C <tree> rev-parse HEAD` (`state`'s commit of a checkout without `.sha`), with no option but `encoding`: it prints a commit and writes nothing",
     ],
     "the runner's own child": [
-      (call, { importedFrom }) => {
+      (call, { importedFrom, name }) => {
         const [command, args, options] = call.arguments;
         const self = command === undefined ? undefined : strip(command);
         const elements =
           args !== undefined && ts.isArrayLiteralExpression(args) ? args.elements : [];
         return (
+          name === "fork" &&
           self !== undefined &&
           ts.isCallExpression(self) &&
           ts.isIdentifier(self.expression) &&
@@ -210,7 +213,7 @@ const ALLOWED = {
           )
         );
       },
-      "the runner's own module (`--child`), whose writes are this module's and so listed, with a heap limit and `--expose-gc` (which lets it collect, writing nothing, #1837) as its only `execArgv`",
+      "`fork` of the runner's own module (`--child`), whose writes are this module's and so listed, with a heap limit and `--expose-gc` (which lets it collect, writing nothing, #1837) as its only `execArgv`",
     ],
   },
   loads: {
