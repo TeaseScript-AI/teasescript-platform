@@ -285,6 +285,17 @@ const ROWS = {
           options: { temporalContext: "x" },
           recording: false,
         },
+        // The declaration admits any `object` here (`ContinueAdmitted`); the check refuses an array.
+        "a temporal context of an array": {
+          plan: "p1",
+          options: { temporalContext: [] },
+          recording: false,
+        },
+        "a storage entry of an array": {
+          plan: "p1",
+          options: { scriptStorage: [[]] },
+          recording: false,
+        },
         "stored files of numbers": { plan: "p1", options: { storedFiles: [1] }, recording: false },
         "a debug mode of text": { plan: "p1", options: { debugMode: "yes" }, recording: false },
         "persistent storage of a number": {
@@ -332,6 +343,8 @@ const ROWS = {
           capture: { wallClockMs: 0, temporalContext: {}, extra: 1 },
         },
         "a temporal context of text": { capture: { wallClockMs: 0, temporalContext: "x" } },
+        // The declaration admits any `object` here (`ContinueAdmitted`); the check refuses an array.
+        "a temporal context of an array": { capture: { wallClockMs: 0, temporalContext: [] } },
       },
     },
   ),

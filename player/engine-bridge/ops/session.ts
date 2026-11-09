@@ -370,7 +370,7 @@ const START_OPTIONS = [
 /**
  * What `start`'s check admits (`isStartOptions`, `isStartRandom`, `isRunBegin`): the options' shape only, each optional
  * field also as `undefined`, and the storage entries, temporal context and profile as records, which the engine
- * validates as it starts the session. The entries and temporal context are `object`s, as `ContinueAdmitted`'s.
+ * validates as it starts the session. The entries and temporal context are `object`, for `ContinueAdmitted`'s reason.
  */
 export interface StartArguments {
   readonly plan: string;
@@ -391,7 +391,8 @@ export interface StartArguments {
 
 /**
  * What `continue`'s check admits: the capture's temporal context as any record, which the engine validates. `object`,
- * as TypeScript gives an interface such as `TemporalContext`, which callers send, no `Record<string, unknown>`.
+ * not `Record<string, unknown>`: an interface such as `TemporalContext` has no index signature and does not assign to
+ * one; the check still refuses arrays (`isRecord`).
  */
 export interface ContinueAdmitted {
   readonly capture: { readonly wallClockMs: number; readonly temporalContext: object };
