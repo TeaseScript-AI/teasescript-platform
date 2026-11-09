@@ -1018,6 +1018,7 @@ test(
         "export const load = () => null;",
         '/** @type {import\t("./dep.js").RecordType} */',
         'export { other } from "./other.js";',
+        '/** @typedef {import ("./dep.js").RecordType} RecordType */',
         "",
       ].join("\n"),
     });
@@ -1025,6 +1026,8 @@ test(
     refusedAt(spaced.out, "a.js", 1, "an `import`");
     refusedAt(spaced.out, "a.js", 4, "an `import`");
     refusedAt(spaced.out, "a.js", 8, "an `import`");
+    // after the last statement, held by the end-of-file token (Codex r7)
+    refusedAt(spaced.out, "a.js", 10, "an `import`");
     // a `.jsx` file is parsed
     const jsx = run({
       "a.jsx": 'export const element = <div>{await import("./dep.cjs")}</div>;\n',
