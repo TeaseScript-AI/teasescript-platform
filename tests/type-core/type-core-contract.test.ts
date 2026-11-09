@@ -10,7 +10,11 @@ import {
   type Answers,
   type CorePass,
 } from "../../src/type-inference/core/answers.js";
-import type { Contract, ContractFacts, PrefixStores } from "../../src/type-inference/core/contract.js";
+import type {
+  Contract,
+  ContractFacts,
+  PrefixStores,
+} from "../../src/type-inference/core/contract.js";
 import {
   offendingStores,
   summaryCount,
@@ -38,7 +42,10 @@ import { coreRecord } from "../../src/type-inference/core/result.js";
 import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import type { Solver, Work } from "../../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
-import { PAY_RULE_FAMILIES, PROPERTY_STORE_FAMILIES } from "../helpers/type-core/type-core-families.js";
+import {
+  PAY_RULE_FAMILIES,
+  PROPERTY_STORE_FAMILIES,
+} from "../helpers/type-core/type-core-families.js";
 import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
 import { DOUBLING } from "../helpers/type-core/type-core-work.js";
 import {

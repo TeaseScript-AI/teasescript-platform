@@ -9,7 +9,10 @@ import {
   type Answers,
   type DecisionWork,
 } from "../../src/type-inference/core/answers.js";
-import { withTestAllowance, withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../../src/type-inference/core/program.js";
 import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";

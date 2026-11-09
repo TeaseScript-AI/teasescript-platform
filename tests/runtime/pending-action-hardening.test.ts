@@ -10,7 +10,12 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
 } from "../../src/runtime/snapshot/checkpoint.js";
-import { executeInstruction, run, RuntimeDataError, stepToEvent } from "../../src/runtime/engine.js";
+import {
+  executeInstruction,
+  run,
+  RuntimeDataError,
+  stepToEvent,
+} from "../../src/runtime/engine.js";
 import { completeAction } from "../../src/runtime/operations/complete-action.js";
 import { reportMediaLoad } from "../../src/runtime/operations/media-reports.js";
 import { observeTime } from "../../src/runtime/operations/observe-time.js";

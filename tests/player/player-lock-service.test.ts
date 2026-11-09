@@ -18,7 +18,12 @@ import {
 } from "../../player/runtime-adapter.js";
 import { bytesFromBase64 } from "../../player/stored-files.js";
 import type { SerializableRuntimeValue } from "../../src/index.js";
-import { fromBase64, openAge, sshIdentity, x25519Identity } from "../helpers/player/age-keyholder.js";
+import {
+  fromBase64,
+  openAge,
+  sshIdentity,
+  x25519Identity,
+} from "../helpers/player/age-keyholder.js";
 
 /*
  * The Player's lock service (V30 §13): it answers each lock step with real locks, presents the lock and unlock dialogs,

@@ -87,7 +87,11 @@ test("module specifier scanning finds executable imports but not erased types or
 });
 
 test("runtime and playground startup graphs do not import TypeScript tooling", () => {
-  for (const entry of ["../../src/index.js", "../../playground/browser.js", "../../playground/server.js"]) {
+  for (const entry of [
+    "../../src/index.js",
+    "../../playground/browser.js",
+    "../../playground/server.js",
+  ]) {
     assert.ok(assertNoTypeScriptToolingInModuleGraph(entry).size > 1, entry);
   }
 });

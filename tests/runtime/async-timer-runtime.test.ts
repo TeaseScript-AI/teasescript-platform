@@ -3,7 +3,11 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { compileSource } from "../../src/compiler.js";
-import type { InstructionPlan, StartTimerInstruction, WaitInstruction } from "../../src/plan/model.js";
+import type {
+  InstructionPlan,
+  StartTimerInstruction,
+  WaitInstruction,
+} from "../../src/plan/model.js";
 import type { RuntimeTimerActionSnapshot } from "../../src/runtime/actions/model.js";
 import {
   CheckpointError,

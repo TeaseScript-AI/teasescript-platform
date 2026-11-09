@@ -5,7 +5,11 @@ import type { Statement } from "../../src/ast.js";
 import { parse } from "../../src/parser.js";
 import { someNode } from "../../src/project-globals.js";
 import { compileAndRunVariants, type FlowKnob } from "../helpers/flow-differential.js";
-import { filesOf, flowDifferences, markerLiveness } from "../helpers/type-core/type-core-flow-oracle.js";
+import {
+  filesOf,
+  flowDifferences,
+  markerLiveness,
+} from "../helpers/type-core/type-core-flow-oracle.js";
 import { FLOW_PROGRAMS, HOST_GLOBALS } from "../helpers/type-core/type-core-flow-programs.js";
 
 /*

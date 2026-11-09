@@ -381,7 +381,10 @@ test(
       ]),
       ["tests/type-core-unlisted.test.ts"],
     );
-    for (const file of ["tests/type-core-unlisted.test.ts", "tests/type-core/type-core-cells.test.ts"]) {
+    for (const file of [
+      "tests/type-core-unlisted.test.ts",
+      "tests/type-core/type-core-cells.test.ts",
+    ]) {
       const { directory } = repository({ passing: true });
       try {
         mkdirSync(join(directory, "tests"), { recursive: true });

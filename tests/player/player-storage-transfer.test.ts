@@ -23,7 +23,10 @@ import {
   StorageTransferError,
   type StorageBundle,
 } from "../../player/storage-transfer.js";
-import type { RuntimeScriptStorageEntrySnapshot, SerializableRuntimeValue } from "../../src/index.js";
+import type {
+  RuntimeScriptStorageEntrySnapshot,
+  SerializableRuntimeValue,
+} from "../../src/index.js";
 import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
 
 const photo = "captured-media:11111111-1111-4111-8111-111111111111:1";
