@@ -168,7 +168,7 @@ export async function senderRows(
   // @ts-expect-error -- no `CaptureUnavailableReason`.
   await bridge.request(session, "answerCapture", cameraBogus);
 
-  // An input op's outcome is the catalogue's: `staleAction` too, which an input op returns for another action.
+  // `InputOutcome` is the catalogue's input result: an input op's outcome assigns (the control), another does not.
   const stale: InputOutcome = { kind: "staleAction", actionId: 1 };
   // @ts-expect-error -- no input op's outcome.
   const foreign: InputOutcome = { kind: "notAnOutcome" };
