@@ -82,7 +82,10 @@ function firstStep(rest: Rest): string | null {
  * contributions, each name's holders among the settled stores are counted (`countHolding`); from then on each walk
  * adds the reads its path's first step would have saved, the stores without it: half of them for A2's scan, which
  * stops at its decider (in source order, at about half), all for A5's offending scan, which reads every store. Each
- * index is made once those reach the construction's charges (`entriesCost`, `wholeCost`).
+ * index is made once those reach the construction's charges (`entriesCost`, `wholeCost`). Until its holding count a
+ * prefix's state is kept uncharged, as the property index's read count is (`PrefixLevels.reads`, #1456): a prefix
+ * whose index never pays costs main's work alone, so its charges move no stop. From the holding count on, its units
+ * are kept and each walk's lookup is charged.
  */
 function holdersOf(
   admission: Admission,
@@ -97,15 +100,12 @@ function holdersOf(
   if (size < 3) return null;
   const { contract, receivingDomain: domain, program } = admission.pass;
   const work = program.work;
-  work.charge("checks");
   let state = domain.holders.get(prefix);
   if (
     state === undefined ||
     (list !== null && state.list !== null && state.list !== list) ||
     (stores !== null && state.stores !== null && state.stores !== stores)
   ) {
-    keepText(admission.work, prefix.length);
-    keep(admission.work, 6);
     domain.holders.set(
       prefix,
       (state = {
@@ -127,12 +127,15 @@ function holdersOf(
   }
   state.list ??= list;
   state.stores ??= stores;
-  if (state.entries !== null && (state.list === null || state.whole !== null)) return state;
   if (state.supports === null) {
     const count = (state.list?.length ?? 0) + (state.stores?.list.length ?? 0);
     if (state.wasted < 2 * count) return state;
+    keepText(admission.work, prefix.length);
+    keep(admission.work, 6);
     countHolding(admission, (state.stores ??= contract.prefixStores(prefix)), state);
   }
+  work.charge("checks");
+  if (state.entries !== null && (state.list === null || state.whole !== null)) return state;
   if (state.list !== null && !state.costsWhole) {
     state.costsWhole = true;
     state.cost += 2 * wholeCost(admission, state);
