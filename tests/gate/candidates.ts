@@ -14,6 +14,7 @@ import {
 } from "../../player/runtime-view.js";
 import type { RuntimePendingActionSnapshot } from "../../src/runtime/actions/model.js";
 import type { MediaLoadReport } from "../../src/runtime/operations/media-reports.js";
+import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type {
   PlayerCaptureAnswer,
   PlayerFileStoreAnswer,
@@ -74,6 +75,9 @@ interface CandidateArgs {
   };
   readonly reportMediaLoad: { readonly mediaId: number; readonly report: MediaLoadReport };
   readonly stepTime: { readonly targetMs: number };
+  // Only a gate fixture's host proposes these (`hosts.ts`); no row of the table does.
+  readonly skipPacing: { readonly actionId: number };
+  readonly applyStorageEdit: { readonly key: string; readonly value: SerializableRuntimeValue };
 }
 export type CandidateOp = keyof CandidateArgs;
 
@@ -96,6 +100,8 @@ const OPS = {
   answerLock: true,
   reportMediaLoad: true,
   stepTime: true,
+  skipPacing: true,
+  applyStorageEdit: true,
 } as const satisfies Record<CandidateOp, true>;
 // EVIDENCE: validation: `OPS` has exactly the keys of `CandidateArgs` (`satisfies Record<CandidateOp, true>`).
 export const CANDIDATE_OPS = Object.keys(OPS) as readonly CandidateOp[];

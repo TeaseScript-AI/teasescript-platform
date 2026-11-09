@@ -1,0 +1,7 @@
+// The gate's stopped-media fixture: a blocking play that a timer's block stops after 1 s.
+timer async 1 s {
+    stopAudio
+}
+playAudio "a.mp3"
+say "After the sound", instant
+exit

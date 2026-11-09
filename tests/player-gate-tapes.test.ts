@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import { BridgeRequestError, connectBridge } from "../player/engine-bridge/client.js";
@@ -14,6 +15,7 @@ import {
   type CandidateOp,
 } from "./gate/candidates.js";
 import { driveTape, isComplete, type TapeRun } from "./gate/driver.js";
+import { fixtureHost } from "./gate/hosts.js";
 import { inventoryOf, MECHANISMS, POLICY_RESIDUALS } from "./gate/inventory.js";
 import { judgeTape } from "./gate/oracle.js";
 import { OUTCOMES } from "./gate/outcomes.js";
@@ -450,6 +452,14 @@ test("the table, the outcomes and the oracle cover the same ops", () => {
     assert.ok(Object.hasOwn(oracle, op), `'${op}' has no oracle path`);
   for (const residual of Object.keys(POLICY_RESIDUALS))
     assert.ok(MECHANISMS.includes(residual), `the residual '${residual}' is no inventory key`);
+});
+
+test("every gate fixture names a known host or none", () => {
+  const folder = new URL("../../tests/gate/fixtures/", import.meta.url);
+  const fixtures = readdirSync(folder).filter((name) => name.endsWith(".tease"));
+  assert.ok(fixtures.length > 0);
+  for (const name of fixtures) fixtureHost(readFileSync(new URL(name, folder), "utf8"));
+  assert.throws(() => fixtureHost("// gate-host: nobody\nexit"), /unknown host/u);
 });
 
 test("the witnesses are exactly the declared axis values, each alone and behind a timer", () => {

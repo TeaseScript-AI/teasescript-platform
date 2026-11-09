@@ -150,31 +150,38 @@ export const MECHANISMS: readonly string[] = [
 ];
 
 /**
- * What this policy cannot meet, with its reason (the tape plan §5, and what the gate fixtures showed): the census
- * names these beside its computed gaps, and they stay named coverage residuals, never claims that a state is unreachable.
+ * What this policy cannot meet, with its reason (the tape plan §5 and orchestrator 2's disposition): the census names
+ * these beside its computed gaps, and they stay named coverage residuals, never claims that a state is unreachable. The
+ * gate fixtures and their hosts (`fixtures/`, `hosts.ts`) meet the rest.
  */
 export const POLICY_RESIDUALS: Readonly<Record<string, string>> = {
-  "accepted answerImage": "no candidate answers an image in this policy",
-  "settlement capture:completed:captured": "the table answers a capture unavailable only",
+  // Accepted as named gaps (orchestrator 2's disposition, 2026-11-09).
+  "accepted answerImage":
+    "policy scope (design r2 DR2-05): the table answers no image; the op is L5e's (`tests/player-bridge-resources.test.ts`)",
+  "host openUrl tab": "a host side effect, not a bridge op; the op's dismissal is exercised",
   ...Object.fromEntries(
     CAPTURE_UNAVAILABLE_REASONS.filter((reason) => reason !== "unconfigured").map((reason) => [
       `settlement capture:completed:unavailable:${reason}`,
-      "the table answers a capture unavailable as unconfigured only",
+      "a payload variant of an op the tapes send with one reason; the transport differential does not depend on it",
     ]),
   ),
-  "host openUrl tab": "the tab an `openUrl` opens is a host effect outside the bridge",
-  "settlement fileStore:completed:stored": "the table answers a file store failed only",
-  "settlement fileStore:completed:read": "the table answers a file store failed only",
-  "settlement fileStore:completed:hashed": "the table answers a file store failed only",
-  "settlement lock:completed:locked": "the table answers a lock's work failed only",
-  "settlement lock:completed:opened": "the table answers a lock's work failed only",
-  "settlement lock:completed:notOpened": "the table answers a lock's work failed only",
-  "settlement lock:completed:unreadable": "the table answers a lock's work failed only",
-  "settlement chatPacingGate:skipped": "pacing is time only in this policy; no candidate skips it",
-  "settlement interaction:timedOut": "the table answers a timed interaction before time moves",
-  "settlement storageWrite:completed:failed": "the table completes a storage write as stored only",
-  "settlement mediaPlayback:completed:failed": "the table reports a medium loaded only",
-  "event scriptStorageEdited": "an external storage edit is no op the tapes send",
+  "settlement lock:completed:notOpened":
+    "a payload variant of the lock-failure op the bounded witnesses exercise",
+  "settlement lock:completed:unreadable":
+    "a payload variant of the lock-failure op the bounded witnesses exercise",
+  // The table's answers never reach these; L5e's both-backends test answers them.
+  "settlement capture:completed:captured":
+    "the table answers a capture unavailable only (L5e: other evidence)",
+  "settlement fileStore:completed:stored":
+    "the table answers a file store failed only (L5e: other evidence)",
+  "settlement fileStore:completed:read":
+    "the table answers a file store failed only (L5e: other evidence)",
+  "settlement fileStore:completed:hashed":
+    "the table answers a file store failed only (L5e: other evidence)",
+  "settlement lock:completed:locked":
+    "the table answers a lock's work failed only (L5e: other evidence)",
+  "settlement lock:completed:opened":
+    "the table answers a lock's work failed only (L5e: other evidence)",
 };
 
 const shownKind = (action: RuntimePendingActionSnapshot): ShownKind => {

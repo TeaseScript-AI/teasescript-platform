@@ -2,6 +2,7 @@ import type { ActionCompletionOutcome } from "../../src/runtime/operations/model
 import type { MediaReportOutcome } from "../../src/runtime/operations/media-reports.js";
 import type { PermanentButtonPressOutcome } from "../../src/runtime/operations/press-permanent-button.js";
 import type { InteractionUpdateOutcome } from "../../src/runtime/operations/update-interaction.js";
+import type { ExternalStorageEditOutcome } from "../../src/runtime/operations/external-storage-edit.js";
 import type { CandidateOp } from "./candidates.js";
 
 /*
@@ -59,6 +60,14 @@ const MEDIA = {
   randomDrawPending: "declined",
 } as const satisfies Classes<MediaReportOutcome>;
 
+const STORAGE_EDIT = {
+  applied: "accepted",
+  invalidEdit: "declined",
+  invalidState: "declined",
+  storageWritePending: "declined",
+  randomDrawPending: "declined",
+} as const satisfies Classes<ExternalStorageEditOutcome>;
+
 /** Reads `result.kind` against `classes`; `null` is a decline, an unclassified kind a harness error. */
 function byKind(classes: Readonly<Record<string, "accepted" | "declined">>) {
   return (result: unknown): Reading => {
@@ -91,6 +100,8 @@ export const OUTCOMES: { readonly [O in CandidateOp]: (result: unknown) => Readi
   answerFileStore: interactionAnswer,
   answerLock: interactionAnswer,
   reportMediaLoad: byKind(MEDIA),
+  skipPacing: interactionAnswer,
+  applyStorageEdit: byKind(STORAGE_EDIT),
   stepTime: (result) => {
     if (
       typeof result === "object" &&

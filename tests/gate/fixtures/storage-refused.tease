@@ -1,0 +1,5 @@
+// gate-host: refusesStorage
+// The gate's refused-storage fixture: a save whose write the host refuses.
+save 1 as "kept"
+say "After the save", instant
+exit

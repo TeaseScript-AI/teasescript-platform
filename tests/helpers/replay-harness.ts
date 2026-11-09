@@ -7,6 +7,7 @@ import type { PlayerBridge, PublishHook } from "../../player/runtime/player-brid
 import {
   activatePlayerRuntimeButton,
   answeredByPlayerInput,
+  applyPlayerRuntimeStorageEdit,
   answerPlayerRuntimeCapture,
   answerPlayerRuntimeFileStore,
   answerPlayerRuntimeLock,
@@ -23,6 +24,7 @@ import {
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimeImage,
+  skipPlayerRuntimePacing,
   stepPlayerRuntimeTime,
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
@@ -31,7 +33,11 @@ import {
   type PlayerLockAnswer,
   type PlayerRuntimeSession,
 } from "../../player/runtime-adapter.js";
-import { activePlayerRuntimeInteraction } from "../../player/runtime-view.js";
+import {
+  activePlayerRuntimeInteraction,
+  playerRuntimePacingGate,
+} from "../../player/runtime-view.js";
+import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type { MediaLoadReport } from "../../src/runtime/operations/media-reports.js";
 import type { DebugAnswerInput } from "../../player/debug-export.js";
 import type { MediaProgressReport } from "../../src/playback.js";
@@ -388,6 +394,16 @@ export const ADAPTER_OPS = {
     // EVIDENCE: validation: the host accepted `report` as a record; the engine validates it.
     const report = args["report"] as MediaLoadReport;
     return reportPlayerRuntimeMediaLoad(session, mediaId, report);
+  },
+  // As `ops/session.ts`: a skip of another gate than the one shown does nothing.
+  skipPacing: (session, args) =>
+    playerRuntimePacingGate(session)?.actionId === args["actionId"]
+      ? skipPlayerRuntimePacing(session)
+      : null,
+  applyStorageEdit: (session, args) => {
+    // EVIDENCE: validation: the host accepted `key` as a string; the engine validates the value.
+    const edit = args as { readonly key: string; readonly value: SerializableRuntimeValue };
+    return applyPlayerRuntimeStorageEdit(session, edit);
   },
   stepTime: (session, args) => {
     // EVIDENCE: validation: the host accepted `targetMs` as a scene time.

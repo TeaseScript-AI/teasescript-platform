@@ -36,6 +36,7 @@ const { judgeTape } = await load("tests/gate/oracle.js");
 const { replayTape } = await load("tests/gate/tape.js");
 const { TAPE_START } = await load("tests/gate/start.js");
 const { inventoryOf } = await load("tests/gate/inventory.js");
+const { fixtureHost } = await load("tests/gate/hosts.js");
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
 const WORKER = pathToFileURL(join(dist, "player/engine-bridge/node-worker.js"));
 
@@ -80,6 +81,8 @@ if (values.fixtures)
       project: async () => ({
         files: [{ path: "main.tease", source: readFileSync(join(values.fixtures, file), "utf8") }],
       }),
+      // A fixture may name its host (`tests/gate/hosts.ts`) in its first line.
+      host: () => fixtureHost(readFileSync(join(values.fixtures, file), "utf8")),
     });
 const [shard, shards] = values.shard.split("/").map(Number);
 const mine = packages.filter((_, index) => index % shards === shard - 1);
@@ -95,7 +98,13 @@ for (const entry of mine) {
   const host = createInProcessBackend(BUILD);
   let run;
   try {
-    run = await driveTape(host, { kind: "source", script: project }, TAPE_START);
+    const candidates = entry.host?.();
+    run = await driveTape(
+      host,
+      { kind: "source", script: project },
+      TAPE_START,
+      candidates === undefined ? {} : { candidates },
+    );
   } finally {
     host.client.terminate();
   }
