@@ -200,9 +200,10 @@ size; it need not equal that work, and the 10 % ceiling is relative to `main`'s 
 size. Per-doubling growth and work spent on checks still meet the gate in every mode. A size where both runs stop
 establishes nothing about this gate.
 
-An exactly linear count with a fixed intercept passes when its later doubling ratios fit the gate's tolerance
-around total charged work's doubling ratio (#1466, 2026-10-31). Its smallest-doubling excess is the intercept,
-not growth. A site that fails at the largest doubling fails.
+The gate's count term is read across the measured doublings (#1466, 2026-10-31). A site whose count is exactly
+linear with a fixed intercept passes when, at each doubling after the smallest, its doubling ratio exceeds total
+charged work's by no more than that fixed intercept accounts for; its excess at the smallest doubling is the
+intercept, not growth. A site that exceeds at the largest doubling fails.
 
 A candidate at or below `main` at every measured size passes the growth clause when the saving comes from the
 accepted representation change and does not shrink in absolute terms over the last doubling, whatever its shape
