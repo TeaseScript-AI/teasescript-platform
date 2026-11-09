@@ -393,6 +393,38 @@ test("each image request that allows only the camera is reported as a Player not
   await until(() => !keys().includes("image-needs-camera"), "the notice was not withdrawn");
 });
 
+test("audio that loaded and then fails while it plays is a 'could not be played' warning, and the script goes on", async (context) => {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() =>
+    usePlayerSession({
+      resolveAsset: (path) => (path === "sounds/chime.wav" ? `/files/${path}` : null),
+      decodeImage: async () => ({ width: 1, height: 1 }),
+    }),
+  );
+  assert.ok(host);
+  context.after(() => scope.stop());
+  host.prepare(() => createPlayerRuntimeSession('playAudio "sounds/chime.wav"\nsay "after"\nexit'));
+  await host.activate();
+  const chime = () => audioElements.find((element) => element.src.endsWith("sounds/chime.wav"));
+  await until(() => chime() !== undefined, "the chime did not play");
+  // The source loads, then its output fails during playback, as headless Firefox's audio sink does (#2113).
+  Object.assign(chime()!, { duration: 10, currentTime: 0 });
+  chime()!.dispatchEvent(new Event("loadedmetadata"));
+  chime()!.dispatchEvent(new Event("error"));
+  await until(
+    () =>
+      host.session.value?.transcriptEntries.some(
+        (entry) => entry.kind === "message" && entry.text === "after",
+      ) === true,
+    "the blocking play did not end",
+  );
+  assert.deepEqual(
+    host.notices.value.map((notice) => notice.message),
+    ["Audio could not be played: sounds/chime.wav (main.tease, line 1)"],
+  );
+});
+
 test("media the script refers to but the Player cannot use is a warning, once per session and path", async (context) => {
   stubBrowser(context);
   const packageFiles = new Set(["sounds/broken.wav", "videos/intro.mp4"]);

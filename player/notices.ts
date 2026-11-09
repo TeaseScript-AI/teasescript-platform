@@ -64,6 +64,12 @@ export const playerNoticeKeys = {
 } as const;
 
 const mediaNames = { image: "Image", audio: "Audio", video: "Video" } as const;
+/** How each unusable-media problem reads: a source that loaded and then could not be played is not one that never loaded. */
+const unusable = {
+  missing: "not found",
+  failed: "could not be loaded",
+  unplayable: "could not be played",
+} as const;
 
 /**
  * The Player's fixed wording for each condition it reports. To report a new condition, add an entry here and publish it
@@ -120,19 +126,20 @@ export const playerNotices = {
     action: { label: "Details", run: showDetails },
   }),
   /**
-   * A media file the script refers to is not in the package (`missing`), or the browser cannot load or decode it
-   * (`failed`). The notice names the authored path, and the script file and line when the Player knows them.
+   * A media file the script refers to is not in the package (`missing`), the browser cannot load or decode it
+   * (`failed`), or it loaded and then could not be played (`unplayable`). The notice names the authored path, and the
+   * script file and line when the Player knows them.
    */
   unusableMedia: (
     media: "image" | "audio" | "video",
     path: string,
-    problem: "missing" | "failed",
+    problem: "missing" | "failed" | "unplayable",
     location?: { readonly path: string; readonly line: number },
   ): PlayerNotice => ({
     key: `unusable-media:${path}`,
     level: "warning",
     message:
-      `${mediaNames[media]} ${problem === "missing" ? "not found" : "could not be loaded"}: ${path}` +
+      `${mediaNames[media]} ${unusable[problem]}: ${path}` +
       (location === undefined ? "" : ` (${location.path}, line ${location.line})`),
   }),
 } as const;

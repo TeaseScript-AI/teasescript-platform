@@ -33,10 +33,10 @@ export interface MediaDeviceHost {
   /** Maps an authored, package-relative media reference to a playable URL, or `null` when it is not available. */
   resolveSource(source: string): string | null;
   /**
-   * Forwards a load report to the runtime: one initial report per media instance, and after a `loaded` one at most one
-   * later `failed`, when the element fails during playback.
+   * Forwards a load report to the runtime: one initial report per media instance (`phase` `"load"`), and after a
+   * `loaded` one at most one later `failed` (`phase` `"playback"`), when the element fails during playback.
    */
-  reportLoad(mediaId: number, report: MediaLoadReport): void;
+  reportLoad(mediaId: number, report: MediaLoadReport, phase: "load" | "playback"): void;
   /** Asks for a prompt time observation, for example after a range end. */
   requestObservation(): void;
   /** Called whenever the browser refuses or allows audible playback for any instance. */
@@ -219,7 +219,11 @@ export class MediaDevice {
         this.#reportLoad(entry, { kind: "failed", message: LOAD_FAILED_MESSAGE });
       else if (!entry.failureReported) {
         entry.failureReported = true;
-        this.#host.reportLoad(entry.mediaId, { kind: "failed", message: PLAYBACK_FAILED_MESSAGE });
+        this.#host.reportLoad(
+          entry.mediaId,
+          { kind: "failed", message: PLAYBACK_FAILED_MESSAGE },
+          "playback",
+        );
       }
     });
     listen("seeked", () => {
@@ -255,7 +259,7 @@ export class MediaDevice {
     if (entry.loadReported) return;
     entry.loadReported = true;
     if (report.kind === "failed") entry.failureReported = true;
-    this.#host.reportLoad(entry.mediaId, report);
+    this.#host.reportLoad(entry.mediaId, report, "load");
   }
 
   #apply(entry: Entry): void {
