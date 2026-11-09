@@ -647,3 +647,71 @@ test(
     assert.match(renamed.out, /bindings differing 0/u);
   },
 );
+
+test(
+  "a target resolves as TypeScript resolves it, and a correct import-equals update is an import line",
+  { timeout: 60_000 },
+  () => {
+    const run = (before, after, map) => {
+      const move = moveOf(before, after);
+      try {
+        return move.run("--renames", move.renames(map));
+      } finally {
+        move.done();
+      }
+    };
+    const importer = (from) =>
+      `import { value as selectedValue } from "${from}";\nexport const resultWithLongIdentifier = selectedValue;\n`;
+    const [ts1, js1, js2] = [
+      "export const value = 1234567890;\n",
+      "export const value = 9876543210;\n",
+      "export const value = 5555555555;\n",
+    ];
+    // `./old.js` is `old.ts` before; with `old.ts` renamed away it is `old.js` after: a changed binding
+    const switched = run(
+      { "src/a.ts": importer("./old.js"), "src/old.ts": ts1, "src/old.js": js1 },
+      {
+        "src/a.ts": null,
+        "src/b.ts": importer("./old.js"),
+        "src/old.ts": null,
+        "src/new.ts": ts1,
+        "src/old.js": js1,
+      },
+      { "src/a.ts": "src/b.ts", "src/old.ts": "src/new.ts" },
+    );
+    assert.equal(switched.status, 1, switched.out);
+    assert.match(switched.out, /bindings differing 2/u);
+    // the `.ts` renamed beside unrelated `.js` files of both names, its import updated: the same binding
+    const beside = run(
+      { "src/a.ts": importer("./old.js"), "src/old.ts": ts1, "src/old.js": js1, "src/new.js": js2 },
+      {
+        "src/a.ts": importer("./new.js"),
+        "src/new.ts": ts1,
+        "src/old.js": js1,
+        "src/new.js": js2,
+        "src/old.ts": null,
+      },
+      { "src/old.ts": "src/new.ts" },
+    );
+    assert.equal(beside.status, 0, beside.out);
+    // an extensionless specifier resolves to its JavaScript file
+    const bare = run(
+      { "src/a.ts": importer("./old"), "src/old.js": js1 },
+      { "src/a.ts": importer("./new"), "src/old.js": null, "src/new.js": js1 },
+      { "src/old.js": "src/new.js" },
+    );
+    assert.equal(bare.status, 0, bare.out);
+    // `import x = require()` and `export import x = require()`, their specifier updated with the rename: import lines
+    for (const keyword of ["import", "export import"]) {
+      const required = (from) =>
+        `${keyword} dependencyWithLongIdentifier = require("${from}");\nexport const resultWithLongIdentifier = dependencyWithLongIdentifier.value;\n`;
+      const updated = run(
+        { "src/a.ts": required("./old.js"), "src/old.ts": ts1 },
+        { "src/a.ts": required("./new.js"), "src/old.ts": null, "src/new.ts": ts1 },
+        { "src/old.ts": "src/new.ts" },
+      );
+      assert.equal(updated.status, 0, `${keyword}: ${updated.out}`);
+      assert.match(updated.out, /admitted import 2,/u);
+    }
+  },
+);
