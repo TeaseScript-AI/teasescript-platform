@@ -597,6 +597,31 @@ test(
           false,
         ),
       );
+      // --summary without its file stops the report; without --diff, its block says why
+      const valueless = spawnSync(process.execPath, [tool, "--diff", quiet.base, "--summary"], {
+        cwd: quiet.root,
+        encoding: "utf8",
+      });
+      assert.equal(valueless.status, 2);
+      assert.equal(valueless.stderr, "structure-report: --summary needs a file\n");
+      const alone = join(quiet.root, "alone.md");
+      const undiffed = spawnSync(process.execPath, [tool, "--summary", alone], {
+        cwd: quiet.root,
+        encoding: "utf8",
+      });
+      assert.equal(undiffed.status, 2);
+      const reasoned = [
+        "### Structure signals: files",
+        "",
+        "`node tools/structure-report.mjs`",
+        "",
+        "```text",
+        "structure report could not run: structure-report: --summary needs --diff",
+        "```",
+        "",
+      ].join("\n");
+      assert.equal(readFileSync(alone, "utf8"), reasoned);
+      assert.equal(undiffed.stdout, `\n${reasoned}`);
     } finally {
       for (const { root } of [signalled, quiet, refused])
         rmSync(root, { recursive: true, force: true });

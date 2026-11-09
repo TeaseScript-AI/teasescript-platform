@@ -47,8 +47,8 @@
 // `, M moved discounted` under --moved); `no file signalled` when there is none, and `structure report could not run:
 // <reason>` on exit 2. The rows are read from the report's own signals; every other signal is in the report only.
 //
-// Exit status: 0 when the report is printed, 2 when --diff cannot read the change as Git wrote it or --summary has no
-// --diff.
+// Exit status: 0 when the report is printed, 2 when --diff cannot read the change as Git wrote it, or --summary has no
+// file or no --diff.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -80,6 +80,7 @@ const top = Number(option("--top") ?? 10);
 const jsonOut = option("--json");
 const compareWith = option("--compare");
 const diffBase = option("--diff");
+const summaryGiven = args.includes("--summary");
 const summaryOut = option("--summary");
 const movedAt = args.indexOf("--moved");
 const discountMoved = movedAt !== -1;
@@ -547,15 +548,21 @@ function writeSummary(block) {
 
 /** The report the command line asks for. */
 function main() {
+  if (summaryGiven && (summaryOut === undefined || summaryOut.startsWith("--"))) {
+    console.error("structure-report: --summary needs a file");
+    process.exit(2);
+  }
+  const command = [
+    "node tools/structure-report.mjs",
+    ...given.filter((_, i) => given[i] !== "--summary" && given[i - 1] !== "--summary"),
+  ].join(" ");
   if (summaryOut !== undefined && !diffBase) {
-    console.error("structure-report: --summary needs --diff");
+    const reason = "structure-report: --summary needs --diff";
+    console.error(reason);
+    writeSummary(summaryBlock(command, undefined, [`structure report could not run: ${reason}`]));
     process.exit(2);
   }
   if (diffBase) {
-    const command = [
-      "node tools/structure-report.mjs",
-      ...given.filter((_, i) => given[i] !== "--summary" && given[i - 1] !== "--summary"),
-    ].join(" ");
     let mergeBase, found;
     try {
       ({ mergeBase, found } = changeSignals(diffBase));
