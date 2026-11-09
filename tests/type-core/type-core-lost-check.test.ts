@@ -238,6 +238,23 @@ test("a stopped program whose checks its complete store check or a typed reader 
       assert.ok(inMode(mode, () => compiled(source, demand)).plan !== null, JSON.stringify(mode));
 });
 
+test("a stopped mark is kept by its part checks only where each carries the completed contract there: a weaker element declines (#2080)", () => {
+  // (in source order with sharing, demand 16: the completion completes `{f: list<integer>, g: string}` at the store and
+  // owes it there, and the published part checks are `.f` against an open list and `.g` against `string`; the weaker one
+  // carries nothing, so the program declines at the store, where accepting any one part would run `["x"]` through)
+  const source = 'let a = {f: [1], g: "s"}\na = {f: hostValue, g: hostOther}\nsay "AFTER"\nexit\n';
+  const forbidden = { hostValue: list(["x"]), hostOther: "t" };
+  const natural = inMode(MODES[0]!, () => compiled(source, null));
+  assert.equal(said(runGlobals(natural.plan!, forbidden)), false);
+  assert.throws(
+    () => inMode(MODES[0]!, () => compiled(source, 16)),
+    (error) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === LOST &&
+      error.site.start === source.indexOf("{f: hostValue"),
+  );
+});
+
 test("a stopped mark whose completion result a rejection lost declines at its store: a typed-copy cycle (#2080)", () => {
   // (at demand 64 in source order without sharing, every completion result is lost by the rejection, the stopped marks'
   // too, and none of them has a complete store check: the program declines at its first, `m1`'s literal; a certificate
