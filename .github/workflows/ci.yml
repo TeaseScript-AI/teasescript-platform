@@ -125,12 +125,13 @@ jobs:
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
         run: npm run check:pretest
-      # The structure signals the change adds to, against the merge's first parent (`tools/structure-report.mjs`,
-      # IMPLEMENTATION-AND-REVIEW.md "Code structure"): printed for the plan and the review to answer, never failing.
-      # It runs in the job that runs `check:pretest`, after it.
+      # The structure signals the change adds to, against the merge's first parent, without Git's moved lines
+      # (`tools/structure-report.mjs`, IMPLEMENTATION-AND-REVIEW.md "Code structure"): the report in the log, and the
+      # files over 1000 lines or gaining over 300 in the job summary, one row each, for the plan, the review and the
+      # merge check to answer; never failing. It runs in the job that runs `check:pretest`, after it.
       - name: Structure signals (advisory)
         continue-on-error: true
-        run: node tools/structure-report.mjs --diff HEAD^1
+        run: node tools/structure-report.mjs --diff HEAD^1 --moved --summary "$GITHUB_STEP_SUMMARY"
       - name: Build and run tests, shard 3 of 3
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
