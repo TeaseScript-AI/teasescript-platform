@@ -54,8 +54,10 @@ export function useDebugExport(
   const gzip = gzipSupported();
   // Each opening and each preparation has its own number; a later one discards the results of earlier ones.
   let generation = 0;
-  // Each opening's own number: a candidate is wanted only by the opening that asked for it.
+  // Each opening's own number: a candidate is wanted only by the opening that asked for it, which aborts its
+  // cancellation (`wanted`) when it ends.
   let opening = 0;
+  let wanted = new AbortController();
   /** Lets go of the candidate, and of what the host holds for it. */
   function retire() {
     candidate.value?.release();
@@ -70,12 +72,14 @@ export function useDebugExport(
   watch(open, async (isOpen) => {
     ++generation;
     const opened = ++opening;
+    wanted.abort();
+    const asked = (wanted = new AbortController());
     release();
     retire();
     choices.value = NO_PERSONAL_CONTENT;
     if (!isOpen) return;
     try {
-      const frozen = await player.debugExportCandidate(details, () => opened === opening);
+      const frozen = await player.debugExportCandidate(details, asked.signal);
       if (opened !== opening) frozen?.release();
       else if (frozen === null) prepared.value = "failed";
       else candidate.value = frozen;
@@ -111,6 +115,7 @@ export function useDebugExport(
   onScopeDispose(() => {
     generation++;
     opening++;
+    wanted.abort();
     release();
     retire();
   });

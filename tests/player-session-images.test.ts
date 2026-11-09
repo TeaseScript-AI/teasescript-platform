@@ -70,7 +70,7 @@ interface ImageHost {
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   debugExportCandidate(
     details: () => Pick<DebugExportCandidate, "player" | "host">,
-    live: () => boolean,
+    wanted: AbortSignal,
   ): Promise<DebugExportCandidate>;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
@@ -241,7 +241,7 @@ test("a debug export candidate is the state when it was asked for, while play co
       player: {},
       host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
     }),
-    () => true,
+    new AbortController().signal,
   );
   // The capture is delivered; the player answers while the candidate reads the photo the session used.
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -318,7 +318,7 @@ test("after a reload, Continue's debug export offers the photo its state holds, 
       player: {},
       host: { stage: { status: "loaded", path: null }, media: [], notices: [], debugLog: null },
     }),
-    () => true,
+    new AbortController().signal,
   );
   assert.deepEqual(
     candidate.photos.map((each) => [each.reference, each.usedBy, each.byteLength]),
@@ -668,7 +668,7 @@ test("a debug export whose photo read waits while a new Start retires its activa
       player: {},
       host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
     }),
-    () => true,
+    new AbortController().signal,
   );
   await until(() => state.reached, "the candidate reads its first photo");
   assert.deepEqual(heldTickets(bridge), ["r1"]);

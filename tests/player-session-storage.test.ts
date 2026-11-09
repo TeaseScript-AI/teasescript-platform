@@ -76,7 +76,7 @@ interface StorageHost {
   readonly debugEdits: Readonly<Ref<{ firstEditSceneTimeMs: number; editCount: number } | null>>;
   debugExportCandidate(
     details: () => Record<string, never>,
-    live: () => boolean,
+    wanted: AbortSignal,
   ): Promise<{
     readonly editedWhileDebugging: { firstEditSceneTimeMs: number; editCount: number } | null;
   }>;
@@ -727,12 +727,8 @@ test("a Debug edit is stored first, and the running session's next load returns 
   assert.deepEqual(host.debugEdits.value, { firstEditSceneTimeMs: 0, editCount: 1 });
   // A debug export of this session carries the mark.
   assert.deepEqual(
-    (
-      await host.debugExportCandidate(
-        () => ({}),
-        () => true,
-      )
-    ).editedWhileDebugging,
+    (await host.debugExportCandidate(() => ({}), new AbortController().signal))
+      .editedWhileDebugging,
     { firstEditSceneTimeMs: 0, editCount: 1 },
   );
   host.update(activatePlayerRuntimeButton(host.session.value!)!.session);

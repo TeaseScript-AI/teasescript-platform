@@ -55,7 +55,7 @@ interface StopHost {
   debugRecording(): DebugRecording | null;
   debugExportCandidate(
     details: () => Pick<DebugExportCandidate, "player" | "host">,
-    live: () => boolean,
+    wanted: AbortSignal,
   ): Promise<DebugExportCandidate>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): RuntimeAdapter.PlayerRuntimeSessionOptions;
@@ -625,12 +625,7 @@ test("after a Player error, a debug export keeps the recording up to the error t
   assert.equal(await backTo(rewind, 0), true);
   assert.deepEqual(host.debugRecording(), atError);
   assert.deepEqual(
-    (
-      await host.debugExportCandidate(
-        () => shown,
-        () => true,
-      )
-    ).recording,
+    (await host.debugExportCandidate(() => shown, new AbortController().signal)).recording,
     atError,
   );
   // A new Start records its own session.
@@ -662,10 +657,7 @@ test("a debug export of a failed state the session cannot export names the failu
   );
   await host.activate();
   assert.equal(host.session.value?.state.status, "failed");
-  const candidate = await host.debugExportCandidate(
-    () => shown,
-    () => true,
-  );
+  const candidate = await host.debugExportCandidate(() => shown, new AbortController().signal);
   context.mock.restoreAll();
   let choices = NO_PERSONAL_CONTENT;
   for (const category of ["savedValues", "answers", "sessionText", "replay"] as const)
@@ -747,10 +739,7 @@ test("a debug export offers a photo only the replay saves, also after a Player e
   );
   // The candidate's photos with their uses, and the file with every category and the photo chosen, read back.
   const exported = async () => {
-    const candidate = await host.debugExportCandidate(
-      () => shown,
-      () => true,
-    );
+    const candidate = await host.debugExportCandidate(() => shown, new AbortController().signal);
     let choices = NO_PERSONAL_CONTENT;
     for (const category of ["savedValues", "answers", "sessionText", "replay", "photos"] as const)
       choices = chooseDebugCategory(choices, candidate, category, true);

@@ -121,12 +121,9 @@ const SHOWN = {
 test("a candidate whose construction fails releases its ticket, whether its details or its photo reads fail", async () => {
   const throwing = ownerOver(async () => null);
   await assert.rejects(
-    throwing.owner.debugExportCandidate(
-      () => {
-        throw new TypeError("The details could not be read.");
-      },
-      () => true,
-    ),
+    throwing.owner.debugExportCandidate(() => {
+      throw new TypeError("The details could not be read.");
+    }, new AbortController().signal),
     TypeError,
   );
   assert.deepEqual(throwing.released, ["r7"], "a details getter that throws");
@@ -134,17 +131,14 @@ test("a candidate whose construction fails releases its ticket, whether its deta
     throw new Error("The photo store failed.");
   });
   await assert.rejects(
-    unreadable.owner.debugExportCandidate(
-      () => SHOWN,
-      () => true,
-    ),
+    unreadable.owner.debugExportCandidate(() => SHOWN, new AbortController().signal),
   );
   assert.deepEqual(unreadable.released, ["r7"], "a photo read that rejects");
   // A construction that succeeds hands its ticket to the dialog: nothing is released here.
   const fine = ownerOver(async () => null);
   const candidate = await fine.owner.debugExportCandidate(
     () => SHOWN,
-    () => true,
+    new AbortController().signal,
   );
   assert.ok(candidate !== null);
   assert.deepEqual(fine.released, []);
@@ -277,10 +271,7 @@ test("a candidate whose activation retires while it is built hands nothing over,
         return record;
       },
     });
-    const pending = owner.debugExportCandidate(
-      () => SHOWN,
-      () => true,
-    );
+    const pending = owner.debugExportCandidate(() => SHOWN, new AbortController().signal);
     await Promise.resolve();
     if (c.retirement === "capture") retire();
     resolveCapture();
@@ -360,10 +351,7 @@ for (const retiring of ["the initial record", "an activation's run"] as const)
     });
     let settled = false;
     void owner
-      .debugExportCandidate(
-        () => SHOWN,
-        () => true,
-      )
+      .debugExportCandidate(() => SHOWN, new AbortController().signal)
       .then(() => (settled = true));
     for (let turn = 0; turn < 10 && !reading; turn += 1) await Promise.resolve();
     assert.ok(reading, "the candidate waits for its photo");
@@ -412,10 +400,7 @@ test("an export waiting for its activation's stop to show settles when the activ
   });
   const outcome: { value: string } = { value: "pending" };
   void owner
-    .debugExportCandidate(
-      () => SHOWN,
-      () => true,
-    )
+    .debugExportCandidate(() => SHOWN, new AbortController().signal)
     .then((candidate) => (outcome.value = candidate === null ? "null" : "candidate"));
   for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
   assert.deepEqual([outcome.value, counts.captures], ["pending", 1], "it waits for the stop");
