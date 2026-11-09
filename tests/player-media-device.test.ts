@@ -250,19 +250,71 @@ test("a stall reports unchanged progress, so a nearby cue waits for actual playb
   assert.deepEqual(player.texts(), ["cue"]);
 });
 
-test("an element error after loading stalls progress instead of inventing playback or a second load report", () => {
-  const player = harness('let music = playAudio async "music.mp3"\nwait 30 s\nexit');
+test("an element error after loading reports one playback failure, invents no progress, and ends a blocking play (#2113)", () => {
+  const player = harness('playAudio "music.mp3"\nsay "after"\nexit');
   player.start();
   const [element] = player.elements;
   element!.metadata(10);
   player.tick(500);
+  assert.deepEqual(player.device.sample(), [{ mediaId: 1, segment: 1, progressMs: 500 }]);
+  element!.emit("error");
+  element!.emit("ended");
   element!.emit("error");
   assert.equal(element!.paused, true);
-  // Later updates must not resume the broken element.
-  player.tick(2000);
-  player.tick(1000);
-  assert.deepEqual(player.device.sample(), [{ mediaId: 1, segment: 1, progressMs: 500 }]);
-  assert.equal(player.loads.length, 1);
+  assert.deepEqual(
+    player.loads.map(([, report]) => report),
+    [
+      { kind: "loaded", durationMs: 10_000 },
+      { kind: "failed", message: "The Player could not play this media source." },
+    ],
+  );
+  assert.deepEqual(player.phases, ["load", "playback"]);
+  // The runtime stopped the media: reconciliation released it, and the script went on.
+  assert.deepEqual(player.device.sample(), []);
+  assert.deepEqual(player.texts(), ["after"]);
+});
+
+test("restored media that was loaded already reports an element error as a playback failure, once", () => {
+  const source = 'playAudio "music.mp3"\nsay "after"\nexit';
+  const original = harness(source);
+  original.start();
+  original.elements[0]!.metadata(10);
+  original.tick(1000);
+  const player = harness(source);
+  player.replace(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(original.session)));
+  const [element] = player.elements;
+  element!.metadata(10);
+  assert.equal(player.loads.length, 0, "restored media is already loaded");
+  element!.emit("error");
+  element!.emit("error");
+  assert.deepEqual(
+    player.loads.map(([, report]) => report),
+    [{ kind: "failed", message: "The Player could not play this media source." }],
+  );
+  assert.deepEqual(player.phases, ["playback"]);
+  assert.deepEqual(player.texts(), ["after"]);
+});
+
+test("an element error between the loaded report and its publication is still reported, once", () => {
+  const player = harness('playAudio "music.mp3"\nsay "after"\nexit');
+  player.start();
+  const [element] = player.elements;
+  // The loaded report is sent, but the error comes before its publication reaches the device.
+  const { device } = player;
+  const reconcile = device.reconcile.bind(device);
+  const deferred: Array<Parameters<typeof reconcile>[0]> = [];
+  device.reconcile = (media) => void deferred.push(media);
+  element!.metadata(10);
+  // Twice, before either publication: the device's own flag keeps it to one report.
+  element!.emit("error");
+  element!.emit("error");
+  device.reconcile = reconcile;
+  for (const media of deferred) reconcile(media);
+  assert.deepEqual(
+    player.loads.map(([, report]) => report.kind),
+    ["loaded", "failed"],
+  );
+  assert.deepEqual(player.texts(), ["after"]);
 });
 
 test("a media error clears the refused-playback state it can no longer retry", async () => {

@@ -811,11 +811,15 @@ each active unloaded media with `reportMediaLoad(plan, snapshot, mediaId, report
 records the source duration and starts the first playback segment when the effective range is non-empty; an empty
 range reports `TSW013` and stops without cues or `finish`, keeping the duration readable. `{ kind: "failed",
 message? }` reports `TSW013`, stops the media without cues or `finish`, and releases any wait; its handle reads `null`
-for `duration` and `remaining`. Like host input, a load result applies at the observed time: while scene time is
-behind it or a due block can run, the report is `executionPending` without changing anything, and the Player runs the
-engine and retries. Reports for loaded or settled media are `ignored`, unissued IDs are `unknownMedia`, and malformed
-input is `invalidReport`. The runtime defines no load timeout and no post-load playback failure; a Player
-that gives up before loading reports `failed`.
+for `duration` and `remaining`. After a `loaded` report, the Player reports at most one more: `{ kind: "failed" }` when
+playback fails, as when the browser's audio output errors. It reports `TSW013` and stops the active media as a stop
+does: events due before the observed time commit, cue blocks not yet started are dropped, a cue block already running
+completes, the media and a blocking wait settle `stopped`, and its handle keeps the duration and reads `0` for
+`remaining`. Like host input, a load result applies at the observed time: while scene time is behind it or a due block
+can run, the report is `executionPending` without changing anything, and the Player runs the engine and retries. A
+second `loaded` report, a report for settled media, and a second failure are `ignored`; unissued IDs are
+`unknownMedia`, and malformed input is `invalidReport`. The runtime defines no load timeout; a Player that gives up
+before loading reports `failed`.
 
 **Progress observations.** Playback progress enters only through validated observations:
 `observeTime(plan, snapshot, nowMs, [{ mediaId, segment, progressMs }])`, where `progressMs` is the active playback

@@ -96,6 +96,8 @@ export function harness(
   const elements: FakeElement[] = [];
   const released: FakeElement[] = [];
   const loads: Array<[number, MediaLoadReport]> = [];
+  /** The phase of each load report, in order (`MediaDeviceHost.reportLoad`). */
+  const phases: Array<"load" | "playback"> = [];
   let blocked = false;
   let session: PlayerRuntimeSession = createPlayerRuntimeSession(source);
   let now = 0;
@@ -112,8 +114,9 @@ export function harness(
       if (fake !== undefined) released.push(fake);
     },
     resolveSource: resolve,
-    reportLoad: (mediaId, report) => {
+    reportLoad: (mediaId, report, phase) => {
       loads.push([mediaId, report]);
+      phases.push(phase);
       const result = reportPlayerRuntimeMediaLoad(session, mediaId, report);
       if (result.outcome.kind === "accepted") publish(result.session);
     },
@@ -127,6 +130,7 @@ export function harness(
   return {
     elements,
     loads,
+    phases,
     device,
     get session() {
       return session;

@@ -3921,8 +3921,9 @@ image, the camera view, and timers are unaffected. Without a running or paused s
 
 ### Failures, cleanup, and restore
 
-- When the Player cannot load a source, or the source leaves an empty playback range, the runtime reports developer
-  warning `TSW013`, the media becomes `stopped` without cues or `finish`, and the script continues. A `null` file plays
+- When the Player cannot load or play a source, or the source leaves an empty playback range, the runtime reports developer
+  warning `TSW013`, the media becomes `stopped`, and the script continues: no further cue block or `finish` starts, and a
+  cue block already running completes. A `null` file plays
   nothing, continues at once, and reports `TSW011`.
 - `exit` and the end of the session stop all media; the last Stage image stays. `goto`, `call`, and `end` do not stop
   media.

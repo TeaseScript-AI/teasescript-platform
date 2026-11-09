@@ -643,7 +643,10 @@ cannot load or decode, leaves the Stage empty. The Player plays audio; a `playVi
 load ("Video playback is not supported by this Player yet."), so the script continues with the runtime's warning. Each
 such package file is a warning [player notice](#player-notices), once per session and authored path, for example
 "Image not found: images/hall.jpg" or "Audio could not be loaded: sounds/bell.wav (main.tease, line 4)"; audio and
-video also name the file and line of the play that started them. A video that does resolve gets no notice, since only
+video also name the file and line of the play that started them. Audio that loaded and then fails while it plays, as
+when the browser's audio output errors, reads "Audio could not be played: …" instead, and the script goes on as after a
+failed load: a source that loaded and then could not be played is a different event from one that never loaded (the
+owner's decision of 2026-11-09). A video that does resolve gets no notice, since only
 video playback itself is missing; captured photos, chosen images, and stored files are no package files and are never
 reported. A stored file that is not an image, such as SVG or HTML from `fileFromBase64`, is never shown, and stored audio
 and video are not played ([stored files](../RUNTIME.md#stored-files)). An

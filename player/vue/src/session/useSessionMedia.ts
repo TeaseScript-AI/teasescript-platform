@@ -84,7 +84,8 @@ export function useSessionMedia({
     reportedMedia.add(path);
     notices.publish(notice);
   }
-  function reportFailedMedia(mediaId: number) {
+  /** Reports media the Player could not load (`load`) or could not go on playing after it loaded (`playback`). */
+  function reportFailedMedia(mediaId: number, phase: "load" | "playback") {
     const shown = session.value;
     if (shown === null) return;
     // As a call through the facade did: the session's replies still in transit apply first, so a medium an observation
@@ -101,7 +102,7 @@ export function useSessionMedia({
       playerNotices.unusableMedia(
         origin.media,
         origin.source,
-        missing ? "missing" : "failed",
+        missing ? "missing" : phase === "playback" ? "unplayable" : "failed",
         origin.location,
       ),
     );
@@ -152,8 +153,8 @@ export function useSessionMedia({
     createElement: () => audioElements.pop() ?? new Audio(),
     releaseElement: (element) => audioElements.push(element),
     resolveSource: resolveAsset,
-    reportLoad: (mediaId, report) => {
-      if (report.kind === "failed") reportFailedMedia(mediaId);
+    reportLoad: (mediaId, report, phase) => {
+      if (report.kind === "failed") reportFailedMedia(mediaId, phase);
       loads.add(mediaId, report);
       pendingLoadCount.value = loads.size;
     },

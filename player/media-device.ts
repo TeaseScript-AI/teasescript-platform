@@ -32,8 +32,11 @@ export interface MediaDeviceHost {
   releaseElement?(element: MediaDeviceElement): void;
   /** Maps an authored, package-relative media reference to a playable URL, or `null` when it is not available. */
   resolveSource(source: string): string | null;
-  /** Forwards a load report to the runtime; the device sends at most one per media instance. */
-  reportLoad(mediaId: number, report: MediaLoadReport): void;
+  /**
+   * Forwards a load report to the runtime: one initial report per media instance (`phase` `"load"`), and after a
+   * `loaded` one at most one later `failed` (`phase` `"playback"`), when the element fails during playback.
+   */
+  reportLoad(mediaId: number, report: MediaLoadReport, phase: "load" | "playback"): void;
   /** Asks for a prompt time observation, for example after a range end. */
   requestObservation(): void;
   /** Called whenever the browser refuses or allows audible playback for any instance. */
@@ -43,6 +46,7 @@ export interface MediaDeviceHost {
 export const VIDEO_UNSUPPORTED_MESSAGE = "Video playback is not supported by this Player yet.";
 export const SOURCE_UNAVAILABLE_MESSAGE = "This media source is not available to the Player.";
 const LOAD_FAILED_MESSAGE = "The Player could not load this media source.";
+const PLAYBACK_FAILED_MESSAGE = "The Player could not play this media source.";
 /**
  * Positions this close count as equal. At the range end, progress this close to the terminal counts as reached:
  * measured progress sums many floating-point steps, so it can end a fraction of a millisecond short, which must not
@@ -64,6 +68,8 @@ interface Entry {
   pendingPositionMs: number | null;
   metadata: boolean;
   loadReported: boolean;
+  /** Whether a `failed` report was sent, initial or after load: the runtime takes one failure per media instance. */
+  failureReported: boolean;
   failed: boolean;
   blocked: boolean;
   finished: boolean;
@@ -178,6 +184,7 @@ export class MediaDevice {
       pendingPositionMs: null,
       metadata: false,
       loadReported: false,
+      failureReported: false,
       failed: false,
       blocked: false,
       finished: false,
@@ -201,14 +208,24 @@ export class MediaDevice {
     listen("loadedmetadata", () => this.#loadedMetadata(entry, element));
     listen("error", () => {
       if (this.#entries.get(entry.mediaId) !== entry) return;
-      // Before loading this is the canonical failure; after it no protocol exists, so progress simply stalls.
       entry.failed = true;
       element.pause();
       // A failed element cannot be retried, so it no longer counts as refused playback.
       entry.blocked = false;
       this.#updateBlocked();
-      if (!entry.projection.loaded)
+      // Before the media loaded this is the load failure. Once it loaded, by a `loaded` report sent or already published,
+      // or as restored media that was loaded already, it is a playback failure, reported once: the runtime stops the
+      // media and releases its wait. Progress stays as measured.
+      if (!entry.loadReported && !entry.projection.loaded)
         this.#reportLoad(entry, { kind: "failed", message: LOAD_FAILED_MESSAGE });
+      else if (!entry.failureReported) {
+        entry.failureReported = true;
+        this.#host.reportLoad(
+          entry.mediaId,
+          { kind: "failed", message: PLAYBACK_FAILED_MESSAGE },
+          "playback",
+        );
+      }
     });
     listen("seeked", () => {
       // Only a seek whose target the element did not report at once is measured from where it landed. Otherwise the
@@ -242,7 +259,8 @@ export class MediaDevice {
   #reportLoad(entry: Entry, report: MediaLoadReport): void {
     if (entry.loadReported) return;
     entry.loadReported = true;
-    this.#host.reportLoad(entry.mediaId, report);
+    if (report.kind === "failed") entry.failureReported = true;
+    this.#host.reportLoad(entry.mediaId, report, "load");
   }
 
   #apply(entry: Entry): void {
