@@ -23,6 +23,7 @@ import type { Item, ItemTag } from "../items.js";
 import { sharing } from "../sharing.js";
 import { addRest } from "./classes.js";
 import { eligibleOf } from "./eligibility.js";
+import { holdsNothing, type PrefixHolders } from "./holders.js";
 import { deciding } from "./kinds.js";
 import { chooses, live, snapshotOf } from "./links.js";
 import type {
@@ -141,17 +142,29 @@ export function* scanAt(
   );
   own.sort((a, b) => admission.sourceOrder(a.d) - admission.sourceOrder(b.d));
   work.charge("checks", direct.length + sortCost(own.length));
-  const scans: { readonly ds: readonly Definition[]; readonly at: (index: number) => Rest }[] = [
-    { ds: own.map((candidate) => candidate.d), at: (index) => stepsRest(own[index]!.at) },
+  const scans: {
+    readonly ds: readonly Definition[];
+    readonly at: (index: number) => Rest;
+    /** #2065: its prefix's state until the prefix's index is made, which counts the stores read holding nothing. */
+    readonly holders: PrefixHolders | null;
+  }[] = [
+    {
+      ds: own.map((candidate) => candidate.d),
+      at: (index) => stepsRest(own[index]!.at),
+      holders: null,
+    },
   ];
   // (a prefix's rest as its prefix reads it: an array where the path was one, a record's steps, a cursor's span else)
   const restOf = (rest: PathRef): Rest => (rest.kind === "span" ? rest : stepsRest(rest.steps()));
-  for (const { key: prefix, rest } of prefixes)
-    scans.push({ ds: yield* eligibleOf(admission, prefix, restOf(rest)), at: () => restOf(rest) });
+  for (const { key: prefix, rest } of prefixes) {
+    const ds = yield* eligibleOf(admission, prefix, restOf(rest));
+    const holders = admission.pass.receivingDomain.holders.get(prefix) ?? null;
+    scans.push({ ds, at: () => restOf(rest), holders: holders?.whole === null ? holders : null });
+  }
   for (const { key: prefix, rest } of prefixes)
     if (rest.length > 0 && rest.at(0) === "element") {
       const adds = yield* eligibleOf(admission, prefix, restOf(rest), true);
-      scans.push({ ds: adds, at: (index) => addRest(adds[index]!, restOf(rest)) });
+      scans.push({ ds: adds, at: (index) => addRest(adds[index]!, restOf(rest)), holders: null });
     }
   const positions = scans.map(() => 0);
   let sawNull = false;
@@ -200,6 +213,9 @@ export function* scanAt(
     // an unknown beside a kind does not decide, unless a literal's own element decides beside it; a null beside one
     // does (A8)
     const items = yield* evaluate(d, at);
+    // (#2065: a store holding nothing at the path, which the prefix's index, once made, does not read)
+    const holders = scans[best]!.holders;
+    if (holders !== null && first === null && holdsNothing(items)) holders.wasted += 1;
     const definite =
       first === null && items.some((item) => item.tag === "unknown") ? [] : deciding(items);
     sawNull ||= items.some((item) => item.tag === "null");
