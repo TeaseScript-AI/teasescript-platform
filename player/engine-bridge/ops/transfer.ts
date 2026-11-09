@@ -1,6 +1,6 @@
 import { serializeValidatedRuntimeJson } from "../../../src/runtime/snapshot/checkpoint-json.js";
 import { playerRuntimeSnapshotJson } from "../../runtime/runtime-adapter.js";
-import type { SessionTransfer } from "../../persistence/session-transfer.js";
+import type { PlayerTransfer, SessionTransfer } from "../../persistence/session-transfer.js";
 import {
   readPlayerTransferFile,
   readPlayerTransferText,
@@ -8,7 +8,7 @@ import {
 } from "../../persistence/session-transfer-read.js";
 import { exactly, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
-import type { BridgeOps } from "../worker-host.js";
+import type { BridgeOp, BridgeOps } from "../worker-host.js";
 import { readPlanText } from "./persistence.js";
 
 /*
@@ -24,6 +24,17 @@ export interface TransferTicket {
   snapshotJson: string | null;
 }
 
+/**
+ * What `readTransfer` replies: saved data whole, or a session as plain data, whose checkpoint the host keeps under
+ * `ticket`.
+ */
+export type TransferRead =
+  | Extract<PlayerTransfer, { readonly kind: "savedData" }>
+  | ({ readonly kind: "session"; readonly ticket: string } & Pick<
+      SessionTransfer,
+      "scope" | "name" | "entries" | "media"
+    > & { readonly events: SessionTransfer["session"]["events"] });
+
 const isTicket = (args: unknown): args is { readonly ticket: string } =>
   isRecord(args) && exactly(args, ["ticket"]) && typeof args.ticket === "string";
 
@@ -35,7 +46,7 @@ function ticketOf(context: PlayerOpsContext, ticket: string): TransferTicket {
   return held;
 }
 
-export function transferOps(context: PlayerOpsContext): BridgeOps {
+export function transferOps(context: PlayerOpsContext) {
   return {
     // A file's bytes or a pasted text: saved data comes back whole; a session as plain data, its checkpoint kept here.
     readTransfer: {
@@ -45,12 +56,11 @@ export function transferOps(context: PlayerOpsContext): BridgeOps {
         ((exactly(args, ["bytes"]) && args.bytes instanceof Uint8Array) ||
           (exactly(args, ["text"]) && typeof args.text === "string")),
       run: async (args) => {
-        // EVIDENCE: validation: checkArguments accepted bytes or a text.
-        const input = args as
-          { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string };
+        const input = args;
+        // EVIDENCE: validation: the check admits any `Uint8Array`, not only one over an `ArrayBuffer` (#2211).
         const read =
           "bytes" in input
-            ? await readPlayerTransferFile(input.bytes)
+            ? await readPlayerTransferFile(input.bytes as Uint8Array<ArrayBuffer>)
             : await readPlayerTransferText(input.text);
         if (read.kind === "savedData") return { result: read };
         const { session: transfer } = read;
@@ -70,7 +80,11 @@ export function transferOps(context: PlayerOpsContext): BridgeOps {
           },
         };
       },
-    },
+    } satisfies BridgeOp<
+      { readonly bytes: Uint8Array } | { readonly text: string },
+      TransferRead,
+      "none"
+    >,
     // The ticket's session restored against the held plan `plan` of the script of storage scope `scope`: refused with
     // the reason when it cannot continue there; kept as the kept session stores it.
     reviewTransfer: {
@@ -84,25 +98,23 @@ export function transferOps(context: PlayerOpsContext): BridgeOps {
         typeof args.scope === "string" &&
         typeof args.plan === "string",
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { ticket, scope, plan } = args as {
-          readonly ticket: string;
-          readonly scope: string;
-          readonly plan: string;
-        };
+        const { ticket, scope, plan } = args;
         const held = ticketOf(context, ticket);
         const restored = restoreSessionTransfer(held.transfer, scope, readPlanText(context, plan));
         held.snapshotJson = playerRuntimeSnapshotJson(restored);
         return { result: null };
       },
-    },
+    } satisfies BridgeOp<
+      { readonly ticket: string; readonly scope: string; readonly plan: string },
+      null,
+      "none"
+    >,
     // What the kept session of a reviewed import stores: its state, and its events as the engine writes them.
     transferCommit: {
       session: "none",
       checkArguments: isTicket,
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted a ticket.
-        const held = ticketOf(context, (args as { readonly ticket: string }).ticket);
+        const held = ticketOf(context, args.ticket);
         if (held.snapshotJson === null)
           throw new Error("This session was not reviewed for an import.");
         return {
@@ -112,16 +124,19 @@ export function transferOps(context: PlayerOpsContext): BridgeOps {
           },
         };
       },
-    },
+    } satisfies BridgeOp<
+      { readonly ticket: string },
+      { readonly snapshotJson: string; readonly eventsJson: readonly string[] },
+      "none"
+    >,
     // Lets go of a ticket: the review was cancelled, replaced or committed.
     releaseTransfer: {
       session: "none",
       checkArguments: isTicket,
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted a ticket.
-        context.transfers.delete((args as { readonly ticket: string }).ticket);
+        context.transfers.delete(args.ticket);
         return { result: null };
       },
-    },
-  };
+    } satisfies BridgeOp<{ readonly ticket: string }, null, "none">,
+  } satisfies BridgeOps;
 }

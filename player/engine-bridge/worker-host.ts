@@ -37,8 +37,8 @@ export interface HostSession {
 export type StopPayload = OpOutcome["result"];
 
 /** What an op returns: its result, and for a session op the session's revision and view after it. */
-export interface OpOutcome {
-  readonly result: unknown;
+export interface OpOutcome<R = unknown> {
+  readonly result: R;
   /** The session an op on the Worker created, which the reply names. */
   readonly session?: string;
   readonly eventsThrough?: number | null;
@@ -58,18 +58,29 @@ export interface HostSessions {
 
 /**
  * One op: whether it works on a session (and then reads a basis), how its arguments are checked, and what it does. A
- * session op receives its session; an op on the Worker itself receives `null`.
+ * session op receives its session; an op on the Worker itself receives `null`. `checkArguments` admits `A`, which `run`
+ * receives, and `run` gives `R`. `Sent`, `A` by default, is what a caller sends: narrower where the engine validates
+ * what the check admits only in shape, never wider, as `Sent extends A` is checked where an op names it.
  */
-export interface BridgeOp {
-  readonly session: "none" | "existing";
+export interface BridgeOp<
+  A = unknown,
+  R = unknown,
+  S extends "none" | "existing" = "none" | "existing",
+  Sent extends A = A,
+> {
+  readonly session: S;
   /** Whether a session op acts on what its caller saw, and so needs a basis the session accepts; yes by default. */
   readonly readsBasis?: boolean;
-  readonly checkArguments: (args: unknown) => args is unknown;
-  readonly run: (
-    args: unknown,
+  readonly checkArguments: (args: unknown) => args is A;
+  /**
+   * A method, so that an op of any arguments is also a `BridgeOp` of unknown ones, as the host's table holds it
+   * (`BridgeOps`): the host passes it only arguments its `checkArguments` admitted.
+   */
+  run(
+    args: A,
     sessions: HostSessions,
     session: { readonly id: string; readonly value: HostSession } | null,
-  ) => OpOutcome | Promise<OpOutcome>;
+  ): OpOutcome<R> | Promise<OpOutcome<R>>;
   /** Whether an error the op threw ends its session, which the host then deletes; never by default. */
   readonly ends?: (error: unknown) => boolean;
   /**
@@ -77,8 +88,11 @@ export interface BridgeOp {
    * session, which can still recover; `ends` decides by default.
    */
   readonly ended?: (error: unknown, session: HostSession | null) => boolean;
+  /** Type only, never set: what a caller sends (`Sent`), which `op-catalogue.ts` reads. */
+  readonly sends?: Sent;
 }
 
+/** Ops by name, as the host's table holds them: each of its own arguments, which its `checkArguments` admits. */
 export type BridgeOps = Readonly<Record<string, BridgeOp>>;
 
 /** A reply's fields after its envelope: a success with its data, or an error. */
@@ -114,7 +128,7 @@ function engineError(error: unknown, ended: boolean): BridgeError {
 }
 
 /** The ops every host has: releasing a session the client no longer holds. */
-const HOST_OPS: BridgeOps = {
+const HOST_OPS = {
   release: {
     session: "existing",
     readsBasis: false,
@@ -123,8 +137,11 @@ const HOST_OPS: BridgeOps = {
       sessions.delete(session!.id);
       return { result: null };
     },
-  },
-};
+  } satisfies BridgeOp<null, null, "existing">,
+} satisfies BridgeOps;
+
+/** The ops every host has, by name (`HOST_OPS`). */
+export type HostOps = typeof HOST_OPS;
 
 /**
  * Serves `ops` on `port`: announces `ready`, then handles requests one at a time in arrival order. A synchronous op runs

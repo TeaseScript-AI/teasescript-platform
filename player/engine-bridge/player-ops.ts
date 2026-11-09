@@ -27,7 +27,7 @@ import { HistoryRegistry } from "./history/registry.js";
 import { ExportObservation } from "./recording/export-observation.js";
 import type { DebugHistorySpill } from "./history/snapshots.js";
 import { openDebugHistorySpill } from "../debug/debug-history-indexeddb.js";
-import type { BridgeOps, HostSessions } from "./worker-host.js";
+import type { BridgeOp, BridgeOps, HostSessions } from "./worker-host.js";
 import type { RandomState } from "./connection-state.js";
 
 // These live in their leaves (`plan-facts.ts`, `connection-state.ts`); new imports, especially from `ops/`, take
@@ -126,13 +126,14 @@ interface AdmittedProject {
     | undefined;
 }
 
-function isPrepareArguments(
-  args: unknown,
-): args is {
+/** What `prepare`'s check admits: a source whose project is an `AdmittedProject`, or plan text. */
+interface PrepareArguments {
   readonly source:
     | { readonly kind: "source"; readonly script: string | AdmittedProject }
     | { readonly kind: "plan"; readonly text: string };
-} {
+}
+
+function isPrepareArguments(args: unknown): args is PrepareArguments {
   if (!isRecord(args) || !exactly(args, ["source"]) || !isRecord(args.source)) return false;
   const source = args.source;
   if (source.kind === "plan")
@@ -249,7 +250,7 @@ export function playerOpsContext(
  * the compiler loads only then, so a Worker that loads published plans never loads it. Each family of the L5 series
  * adds its ops in a module of its own under `ops/`.
  */
-export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()): BridgeOps {
+export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()) {
   const { plans, hold } = context;
   /** A published plan's result, or why it is none; read at once, so the requests after it wait for nothing. */
   const loadPlan = (text: string): PrepareResult => {
@@ -293,13 +294,13 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
       session: "none",
       checkArguments: isPrepareArguments,
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
+        // EVIDENCE: validation: `isProject` declares `PlayerProject` but admits optional fields as `undefined` (#2211).
         const { source } = args as { readonly source: PrepareSource };
         return source.kind === "plan"
           ? { result: loadPlan(source.text) }
           : compile(source.script).then((result) => ({ result }));
       },
-    },
+    } satisfies BridgeOp<PrepareArguments, PrepareResult, "none">,
     // What the Player reads of a plan the host holds, by its token, as `prepare` gave it; `null` for a token it does not
     // hold. For sessions that reach the Player in any way: started, continued, restored or transferred.
     planMetadata: {
@@ -307,11 +308,10 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
       checkArguments: (args): args is { readonly plan: string } =>
         isRecord(args) && exactly(args, ["plan"]) && typeof args.plan === "string",
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const plan = plans.get((args as { readonly plan: string }).plan);
+        const plan = plans.get(args.plan);
         return { result: plan === undefined ? null : planMetadata(plan) };
       },
-    },
+    } satisfies BridgeOp<{ readonly plan: string }, PlanMetadata | null, "none">,
     // Lets go of what the connection holds (`releaseConnection`); the connection stays open for more work.
     teardown: {
       session: "none",
@@ -320,7 +320,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
         releaseConnection(context, sessions);
         return { result: null };
       },
-    },
+    } satisfies BridgeOp<null, null, "none">,
     ...sessionOps(context),
     ...sourceViewOps(context),
     ...inputOps(context),
@@ -332,7 +332,7 @@ export function playerBridgeOps(context: PlayerOpsContext = playerOpsContext()):
     ...historyOps(context),
     ...traceOps(context),
     ...randomOps(context),
-  };
+  } satisfies BridgeOps;
 }
 
 /**

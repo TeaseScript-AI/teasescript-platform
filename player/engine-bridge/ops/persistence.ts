@@ -8,7 +8,7 @@ import {
 } from "../../runtime/runtime-adapter.js";
 import { exactly, isEventLog, isRecord } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
-import type { BridgeOps, HostSessions } from "../worker-host.js";
+import type { BridgeOp, BridgeOps, HostSessions } from "../worker-host.js";
 import { isHistoryMarks, parseHistoryMarks } from "../../debug/debug-history-marks.js";
 import type { HistoryMarks } from "../../debug/debug-history-marks.js";
 import { HeldSession, introduction } from "./session.js";
@@ -61,6 +61,15 @@ export interface CheckpointCapture {
 export type KeptRestore =
   { readonly kind: "restored" } | { readonly kind: "otherPlan" } | { readonly kind: "ended" };
 
+/** What `restoreKept`'s check admits: the kept state's shape, each event, and its marks. */
+export interface RestoreKeptArguments {
+  readonly plan: string;
+  readonly planJson: string;
+  readonly snapshotJson: string;
+  readonly events: readonly InterpreterEvent[];
+  readonly marks: HistoryMarks;
+}
+
 const isSessionId = (value: unknown): value is string => typeof value === "string";
 
 /** A read of a session the host no longer holds, such as one released meanwhile: there is nothing to read. */
@@ -101,12 +110,12 @@ export function readPlanText(context: PlayerOpsContext, token: string): string {
   return materialize(context, slot, token);
 }
 
-export function persistenceOps(context: PlayerOpsContext): BridgeOps {
-  return { ...planTextOps(context), ...keptStateOps(context) };
+export function persistenceOps(context: PlayerOpsContext) {
+  return { ...planTextOps(context), ...keptStateOps(context) } satisfies BridgeOps;
 }
 
 /** The plan's canonical JSON: written in a task of its own, let go, and read. */
-function planTextOps(context: PlayerOpsContext): BridgeOps {
+function planTextOps(context: PlayerOpsContext) {
   const slots = context.planTexts;
   const planOf = (token: string) => heldPlan(context, token);
   const planText = (token: string): string => readPlanText(context, token);
@@ -119,8 +128,7 @@ function planTextOps(context: PlayerOpsContext): BridgeOps {
       checkArguments: (args): args is { readonly plan: string } =>
         isRecord(args) && exactly(args, ["plan"]) && typeof args.plan === "string",
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { plan } = args as { readonly plan: string };
+        const { plan } = args;
         planOf(plan);
         if (slots.has(plan)) return { result: null };
         const slot: PlanTextSlot = { json: null, timer: null };
@@ -138,35 +146,33 @@ function planTextOps(context: PlayerOpsContext): BridgeOps {
         }, 0);
         return { result: null };
       },
-    },
+    } satisfies BridgeOp<{ readonly plan: string }, null, "none">,
     // Lets go of the plan's JSON, written or waiting, as a page that closes does: nothing needs it.
     releasePlanText: {
       session: "none",
       checkArguments: (args): args is { readonly plan: string } =>
         isRecord(args) && exactly(args, ["plan"]) && typeof args.plan === "string",
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { plan } = args as { readonly plan: string };
+        const { plan } = args;
         dropPlanText(plan);
         return { result: null };
       },
-    },
+    } satisfies BridgeOp<{ readonly plan: string }, null, "none">,
     // The plan's canonical JSON, read: what an import's save stores. It keeps nothing the page did not reserve.
     planText: {
       session: "none",
       checkArguments: (args): args is { readonly plan: string } =>
         isRecord(args) && exactly(args, ["plan"]) && typeof args.plan === "string",
       run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { plan } = args as { readonly plan: string };
+        const { plan } = args;
         return { result: planText(plan) };
       },
-    },
-  };
+    } satisfies BridgeOp<{ readonly plan: string }, string, "none">,
+  } satisfies BridgeOps;
 }
 
 /** A session's kept state: its keep and checkpoint captured, and a kept session restored. */
-function keptStateOps(context: PlayerOpsContext): BridgeOps {
+function keptStateOps(context: PlayerOpsContext) {
   const slots = context.planTexts;
   const planOf = (token: string) => heldPlan(context, token);
   const planText = (token: string): string => readPlanText(context, token);
@@ -180,11 +186,7 @@ function keptStateOps(context: PlayerOpsContext): BridgeOps {
         isSessionId(args.session) &&
         (args.plan === null || typeof args.plan === "string"),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { session, plan } = args as {
-          readonly session: string;
-          readonly plan: string | null;
-        };
+        const { session, plan } = args;
         // A capture asked for the plan's JSON reads it; the slot stays the page's (`plan-json-lease.ts`).
         const held = sessions.get(session);
         if (!(held instanceof HeldSession)) {
@@ -210,15 +212,18 @@ function keptStateOps(context: PlayerOpsContext): BridgeOps {
         };
         return { result };
       },
-    },
+    } satisfies BridgeOp<
+      { readonly session: string; readonly plan: string | null },
+      KeepCapture,
+      "none"
+    >,
     // The session's checkpoint, as an export of the session carries it.
     captureCheckpoint: {
       session: "none",
       checkArguments: (args): args is { readonly session: string } =>
         isRecord(args) && exactly(args, ["session"]) && isSessionId(args.session),
       run: (args, sessions) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const held = heldSession(sessions, (args as { readonly session: string }).session);
+        const held = heldSession(sessions, args.session);
         const current = held.sessionForOperation();
         const result: CheckpointCapture = {
           revision: current.revision,
@@ -227,21 +232,13 @@ function keptStateOps(context: PlayerOpsContext): BridgeOps {
         };
         return { result };
       },
-    },
+    } satisfies BridgeOp<{ readonly session: string }, CheckpointCapture, "none">,
     // A kept session, restored against the held plan `plan` when the plan JSON it was kept with is that plan's; nothing
     // runs. A state the engine refuses is the reply's error, with its class, code and details. An ended one is not
     // introduced.
     restoreKept: {
       session: "none",
-      checkArguments: (
-        args,
-      ): args is {
-        readonly plan: string;
-        readonly planJson: string;
-        readonly snapshotJson: string;
-        readonly events: readonly InterpreterEvent[];
-        readonly marks: HistoryMarks;
-      } =>
+      checkArguments: (args): args is RestoreKeptArguments =>
         isRecord(args) &&
         exactly(args, ["plan", "planJson", "snapshotJson", "events", "marks"]) &&
         typeof args.plan === "string" &&
@@ -251,14 +248,7 @@ function keptStateOps(context: PlayerOpsContext): BridgeOps {
         isHistoryMarks(args.marks),
       run: (args, sessions) => {
         // The engine validates the kept state as it restores it.
-        // EVIDENCE: validation: checkArguments accepted the shape and each event (`isEventLog`).
-        const { plan, planJson, snapshotJson, events, marks } = args as {
-          readonly plan: string;
-          readonly planJson: string;
-          readonly snapshotJson: string;
-          readonly events: readonly InterpreterEvent[];
-          readonly marks: unknown;
-        };
+        const { plan, planJson, snapshotJson, events, marks } = args;
         if (planText(plan) !== planJson) {
           const result: KeptRestore = { kind: "otherPlan" };
           return { result };
@@ -275,6 +265,6 @@ function keptStateOps(context: PlayerOpsContext): BridgeOps {
         const result: KeptRestore = { kind: "restored" };
         return { result, session: id, eventsThrough: view.eventsThrough, view };
       },
-    },
-  };
+    } satisfies BridgeOp<RestoreKeptArguments, KeptRestore, "none">,
+  } satisfies BridgeOps;
 }

@@ -5,11 +5,11 @@ import {
   type SourceDebugSidecar,
 } from "../../../src/runtime/debug/source-sidecar.js";
 import type { FileCode } from "../../debug/random-draw-code.js";
-import type { DrawCode } from "../../debug/draw-code.js";
+import type { CodeLine, DrawCode } from "../../debug/draw-code.js";
 import { exactly, isRecord, isStringArray } from "../argument-checks.js";
 import type { PlayerOpsContext } from "../player-ops.js";
 import { type DeliveryOwner, OwnedCell, OwnedMap } from "../delivery.js";
-import type { BridgeOps } from "../worker-host.js";
+import type { BridgeOp, BridgeOps } from "../worker-host.js";
 
 /*
  * The ops of family L5i (the L5 series) for Debug's source views: the code of a random draw's file, and earlier outcomes
@@ -42,7 +42,19 @@ export class SourceViewCaches {
   }
 }
 
-export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
+/** What `drawCode`'s check admits: the plan, the file's path, and the site's place in it. */
+export interface DrawCodeArguments {
+  readonly plan: string;
+  readonly path: string;
+  readonly site: {
+    readonly line: number;
+    readonly column: number;
+    readonly endLine: number;
+    readonly endColumn: number;
+  };
+}
+
+export function sourceViewOps(context: PlayerOpsContext) {
   const caches = context.sourceViews;
   const textOf = (token: string): Promise<string | null> | null => {
     const files = context.sources.get(token);
@@ -85,30 +97,14 @@ export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
   return {
     drawCode: {
       session: "none",
-      checkArguments: (
-        args,
-      ): args is {
-        readonly plan: string;
-        readonly path: string;
-        readonly site: {
-          readonly line: number;
-          readonly column: number;
-          readonly endLine: number;
-          readonly endColumn: number;
-        };
-      } =>
+      checkArguments: (args): args is DrawCodeArguments =>
         isRecord(args) &&
         exactly(args, ["plan", "path", "site"]) &&
         typeof args.plan === "string" &&
         typeof args.path === "string" &&
         isSite(args.site),
       run: async (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { plan, path, site } = args as {
-          readonly plan: string;
-          readonly path: string;
-          readonly site: RandomSite;
-        };
+        const { plan, path, site } = args;
         const held = context.plans.get(plan);
         const sidecar = await sidecarOf(plan);
         const file: SourceDebugFile | undefined = sidecar?.files.find((each) => each.path === path);
@@ -117,10 +113,11 @@ export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
         // A teardown during the import leaves nothing to keep.
         if (context.plans.get(plan) !== held) return { result: null };
         if (caches.latestFile.value?.file !== file) caches.latestFile.set(fileCode(file));
-        const code: DrawCode | null = drawCode(caches.latestFile.value!, site);
+        // EVIDENCE: validation: `isSite` checks the place only, not a `RandomSite`'s `id`, `path` and `kinds` (#2211).
+        const code: DrawCode | null = drawCode(caches.latestFile.value!, site as RandomSite);
         return { result: code };
       },
-    },
+    } satisfies BridgeOp<DrawCodeArguments, DrawCode | null, "none">,
     codeLines: {
       session: "none",
       checkArguments: (
@@ -132,18 +129,18 @@ export function sourceViewOps(context: PlayerOpsContext): BridgeOps {
         typeof args.first === "number" &&
         Number.isSafeInteger(args.first),
       run: async (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        const { texts, first } = args as {
-          readonly texts: readonly string[];
-          readonly first: number;
-        };
+        const { texts, first } = args;
         // Nothing to classify loads no tooling.
         if (texts.length === 0) return { result: [] };
         const { outcomeLines } = await import("../../debug/random-draw-code.js");
         return { result: outcomeLines(texts, first) };
       },
-    },
-  };
+    } satisfies BridgeOp<
+      { readonly texts: readonly string[]; readonly first: number },
+      readonly CodeLine[],
+      "none"
+    >,
+  } satisfies BridgeOps;
 }
 
 const isPosition = (value: unknown) =>
