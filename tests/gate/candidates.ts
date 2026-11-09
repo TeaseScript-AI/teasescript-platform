@@ -81,7 +81,11 @@ interface CandidateArgs {
 }
 export type CandidateOp = keyof CandidateArgs;
 
-/** Every op a candidate can be, and so every op the tapes send besides `start` (one entry per `CandidateArgs` op). */
+/**
+ * Every op a candidate can be: one entry per `CandidateArgs` op. The tapes also send `prepare`, `start` and
+ * `captureCheckpoint`, which the driver sends outside the table; `ADAPTER_OPS` also holds `observeTime`, the Player's
+ * time observation, which no tape sends (a tape steps time with `stepTime`).
+ */
 const OPS = {
   submitComposer: true,
   selectChoice: true,

@@ -445,7 +445,7 @@ async function assertJudged(source: string, run: TapeRun) {
   assert.equal(await replayedInWorker(run.entries), null);
 }
 
-test("the table, the outcomes and the oracle cover the same ops", () => {
+test("the outcomes read exactly the table's candidate ops, and the oracle has a path for each", () => {
   assert.deepEqual(Object.keys(OUTCOMES).sort(), [...CANDIDATE_OPS].sort());
   const oracle: Readonly<Record<CandidateOp, unknown>> = ADAPTER_OPS;
   for (const op of CANDIDATE_OPS)

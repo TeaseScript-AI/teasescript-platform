@@ -668,8 +668,9 @@ policy, each closed by a final capture) or incomplete, reported as such (`notPre
 (`oracle.ts`) judges every tape against the adapter, keeping its own revision and event cursor, and the fixed tape
 replays on every backend, failing at its first differing entry. Coverage is what the tapes ran, never what they could reach.
 
-`tests/player-gate-tapes.test.ts` holds the structural claim (the table, the outcome readings and `ADAPTER_OPS` cover
-the same ops) and bounded runtime witnesses generated from the engine's guards, with their controls' mutants. The
+`tests/player-gate-tapes.test.ts` holds the structural claim (the outcome readings cover exactly the table's candidate
+ops, and `ADAPTER_OPS` has a path for each; `prepare`, `start` and `captureCheckpoint` are the driver's own requests)
+and bounded runtime witnesses generated from the engine's guards, with their controls' mutants. The
 workload runs outside CI on a queue worker: `node tools/player-gate/tapes/record.mjs --out DIR --f DIR --k DIR
 --fixtures tests/gate/fixtures [--shard I/N]` in a built tree records, judges and replays every F and K package and
 the gate's fixtures (one small source per mechanism group the corpus never meets), preparation-only ones included, and
