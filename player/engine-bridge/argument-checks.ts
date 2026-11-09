@@ -29,7 +29,7 @@ export const exactly = (
 
 /**
  * Whether `value` has no own `key`, or one whose value passes `test`: an optional field. A clone keeps an own `undefined`,
- * which this refuses unless `test` admits it, as the field's type does under `exactOptionalPropertyTypes`.
+ * which this refuses unless `test` admits it, as the field's optional type does.
  */
 export const absentOr = (
   value: Record<string, unknown>,
