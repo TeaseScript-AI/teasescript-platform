@@ -10,6 +10,7 @@ import {
   compileProject,
   compileProjectWithBackend,
   compileSourceWithBackend,
+  type CompilationResult,
   type ProjectDiagnostic,
 } from "../../src/compiler.js";
 import type { Expression } from "../../src/ast.js";
@@ -1824,10 +1825,17 @@ test("a store at a stopped decision's key keeps an obligation, whichever pass st
               demand === null ? make() : withTestDemandAllowance(demand, make);
             return work === null ? demanded() : withTestAllowance(work, demanded);
           });
-        const both = () => ({
-          result: compileSourceWithBackend(source, options, CORE_BACKEND),
-          answers: analyseCore(request),
-        });
+        // (#2080: a stop whose stopped mark's completion result was lost declines, no plan; its obligations stand)
+        const both = () => {
+          let result: Pick<CompilationResult, "diagnostics" | "plan">;
+          try {
+            result = compileSourceWithBackend(source, options, CORE_BACKEND);
+          } catch (error) {
+            if (!(error instanceof CandidateOutsideSlice)) throw error;
+            result = { diagnostics: [], plan: null };
+          }
+          return { result, answers: analyseCore(request) };
+        };
         return { ...allowed(both), without: (omit) => allowed(() => withoutRecords(omit, both)) };
       };
       const unbounded = runAt(null, null);
@@ -4303,7 +4311,11 @@ test("a combined stop's rule takes nothing the natural analysis owes, nothing wi
   const bad = 'forbidden {"hostValue":2,"hostOther":"bad"} said ["BEFORE","AFTER"]';
   const defaultAt = written.source.indexOf("hostOther");
   let removed = 0;
-  for (const { allowance } of heldStops(written, mode, 8, writtenDemand)) {
+  // (#2080 part 1: at its held stops, after admission settled, the completion is capped and keeps no result, and the
+  // stopped marks decline; before the first, the analysis stops unsettled, where the settled gate does not apply and the
+  // stopped plan publishes)
+  const first = heldStops(written, mode, 8, writtenDemand)[0]!.allowance;
+  for (let allowance = 1; allowance < first; allowance += 104) {
     const stopped = heldRun(written, mode, allowance, writtenDemand);
     if (stopped.result.plan === null || runProblems(written, stopped).length > 0) continue;
     const owner = [...stopped.answers.diagnostics, ...stopped.answers.budget.deferred].find(
