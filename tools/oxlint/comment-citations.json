@@ -68,7 +68,7 @@
     "TABLE r4": 4
   },
   "src/type-inference/core/answers.ts": {
-    "TABLE r4": 16
+    "TABLE r4": 15
   },
   "src/type-inference/core/budget.ts": {
     "TABLE r4": 6,
@@ -282,6 +282,9 @@
   "src/type-inference/core/solver.ts": {
     "TABLE r4": 4,
     "TABLE §": 1
+  },
+  "src/type-inference/core/stop-diagnostics.ts": {
+    "TABLE r4": 1
   },
   "src/type-inference/core/values.ts": {
     "TABLE §": 1,
