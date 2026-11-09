@@ -59,6 +59,11 @@ function heldTicket<K extends HeldTicket["kind"]>(
 }
 
 export function recordingOps(context: PlayerOpsContext): BridgeOps {
+  return { ...recordingRunOps(context), ...exportCaptureOps(context) };
+}
+
+/** The run and its recordings: the run retired, an incident committed, a recording captured, a ticket released. */
+function recordingRunOps(context: PlayerOpsContext): BridgeOps {
   const owner = context.exportObservation;
   return {
     // The Player's disposal ends its run.
@@ -117,6 +122,23 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
         return { result };
       },
     },
+    // Lets go of a ticket of any kind; releasing one already released, or unknown, changes nothing.
+    releaseRecording: {
+      session: "none",
+      checkArguments: isTicketArgs,
+      run: (args) => {
+        // EVIDENCE: validation: checkArguments accepted these arguments before run.
+        context.recordings.delete((args as { readonly ticket: string }).ticket);
+        return { result: null };
+      },
+    },
+  };
+}
+
+/** A debug export: its capture, and what its file needs of the engine. */
+function exportCaptureOps(context: PlayerOpsContext): BridgeOps {
+  const owner = context.exportObservation;
+  return {
     // A debug export's capture of the named session, or of none, with the recording `current` (the session's own, by its
     // engine), `none` (no recording: what a Player error's capture that settled unavailable selects), or one held under a
     // recording ticket. Refused when a stop of the run is still committing (retry) or the current recording's provenance
@@ -197,16 +219,6 @@ export function recordingOps(context: PlayerOpsContext): BridgeOps {
         // EVIDENCE: validation: checkArguments accepted these arguments before run.
         const { ticket, replay } = args as { readonly ticket: string; readonly replay: boolean };
         return { result: await prepareExport(heldTicket(context, ticket, "export"), replay) };
-      },
-    },
-    // Lets go of a ticket of any kind; releasing one already released, or unknown, changes nothing.
-    releaseRecording: {
-      session: "none",
-      checkArguments: isTicketArgs,
-      run: (args) => {
-        // EVIDENCE: validation: checkArguments accepted these arguments before run.
-        context.recordings.delete((args as { readonly ticket: string }).ticket);
-        return { result: null };
       },
     },
   };

@@ -101,6 +101,11 @@ export function readPlanText(context: PlayerOpsContext, token: string): string {
 }
 
 export function persistenceOps(context: PlayerOpsContext): BridgeOps {
+  return { ...planTextOps(context), ...keptStateOps(context) };
+}
+
+/** The plan's canonical JSON: written in a task of its own, let go, and read. */
+function planTextOps(context: PlayerOpsContext): BridgeOps {
   const slots = context.planTexts;
   const planOf = (token: string) => heldPlan(context, token);
   const planText = (token: string): string => readPlanText(context, token);
@@ -156,6 +161,15 @@ export function persistenceOps(context: PlayerOpsContext): BridgeOps {
         return { result: planText(plan) };
       },
     },
+  };
+}
+
+/** A session's kept state: its keep and checkpoint captured, and a kept session restored. */
+function keptStateOps(context: PlayerOpsContext): BridgeOps {
+  const slots = context.planTexts;
+  const planOf = (token: string) => heldPlan(context, token);
+  const planText = (token: string): string => readPlanText(context, token);
+  return {
     // The session's state as JSON, from the trusted export, and with `plan` that plan's JSON, read.
     captureKeep: {
       session: "none",
