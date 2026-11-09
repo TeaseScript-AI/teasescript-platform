@@ -19,7 +19,6 @@ export const costlyTestSeconds = {
   "runtime-differential.test.js": 76,
   "type-core-closure.test.js": 63,
   "type-core-candidate.test.js": 59,
-  "player-session-keep.test.js": 59,
   "type-core-native.test.js": 55,
   "deep-literal-scale.test.js": 52,
   "type-core-cells.test.js": 52,
