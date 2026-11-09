@@ -454,3 +454,50 @@ test("--moved reads a file name with spaces as Git names it", { timeout: 60_000 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test(
+  "--moved suppresses a file over 1,000 lines whose added lines are all a move's admitted forms",
+  { timeout: 60_000 },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "structure-report-admitted-"));
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const report = (...args) =>
+      execFileSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+    try {
+      git("init", "-q");
+      git("config", "user.email", "t@t");
+      git("config", "user.name", "t");
+      const importer = (from, extra = "") =>
+        `import { f } from "${from}";\n${lines(1001)}\n${extra}`;
+      write(root, { "src/big.ts": importer("./a.js"), "src/a.ts": "export const f = 1;\n" });
+      git("add", "-A");
+      git("commit", "-q", "-m", "base");
+      const base = git("rev-parse", "HEAD");
+      // the module moves; the importer's only edit is its import line
+      rmSync(join(root, "src/a.ts"));
+      write(root, { "src/big.ts": importer("./b.js"), "src/b.ts": "export const f = 1;\n" });
+      git("add", "-A");
+      git("commit", "-q", "-m", "move");
+      const moved = report("--diff", base, "--moved");
+      assert.match(
+        moved,
+        /suppressed \(moved\): file over 1000 lines that the change adds to: src\/big\.ts \(1002, was 1002\), 1 admitted lines/u,
+      );
+      assert.doesNotMatch(
+        moved,
+        /^ {2}file over 1000 lines that the change adds to: src\/big\.ts/mu,
+      );
+      // one added statement beside the import edit keeps the signal
+      write(root, { "src/big.ts": importer("./b.js", "export const added = 2;\n") });
+      git("add", "-A");
+      git("commit", "-q", "-m", "and a statement");
+      const added = report("--diff", base, "--moved");
+      assert.match(
+        added,
+        /^ {2}file over 1000 lines that the change adds to: src\/big\.ts \(1003, was 1002\)$/mu,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
