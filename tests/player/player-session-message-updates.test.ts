@@ -6,7 +6,7 @@ import type * as Adapter from "../../player/runtime/runtime-adapter.js";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { loadHostFacade, onHostAll } from "../helpers/host-sessions.js";
+import { loadHostFacade, onHostAll } from "../helpers/player/host-sessions.js";
 
 /*
  * The Player speaks messages changed in place from a status region (PLAYER-UI.md "Message presentation and provenance"):

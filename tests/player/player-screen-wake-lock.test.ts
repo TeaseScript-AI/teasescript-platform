@@ -7,7 +7,7 @@ import type * as RuntimeAdapter from "../../player/runtime/runtime-adapter.js";
 import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
 import type { RandomDrawResolutionOutcome } from "../../src/index.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { loadHostFacade, onHostAll } from "../helpers/host-sessions.js";
+import { loadHostFacade, onHostAll } from "../helpers/player/host-sessions.js";
 
 // The Player keeps the screen on while a session plays (PLAYER-UI "Session start and user activation"): from the Start
 // click until the script exits, ends with an error, or a Player error stops it. These tests fake the browser's screen

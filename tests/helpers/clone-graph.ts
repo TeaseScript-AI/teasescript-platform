@@ -8,7 +8,7 @@ type CloneKind = ContentKind | "array" | "record" | "unsupported";
 
 /**
  * What native clone carries an object as, for each predicate of `node:util`'s `types` that is true for it: a kind this
- * comparator compares, or `unsupported`. `tests/player-engine-bridge-transport.test.ts` checks that it names every
+ * comparator compares, or `unsupported`. `tests/bridge/player-engine-bridge-transport.test.ts` checks that it names every
  * predicate the running Node has; a predicate it does not name counts as `unsupported`.
  */
 export const KIND_OF_TYPE: Readonly<Record<string, ContentKind | "unsupported">> = {
@@ -74,7 +74,7 @@ const OWNERS = {
 /**
  * Every slot of a built-in object the comparator compares: its owner prototype and the key of the getter or method there
  * that reads it. Each is read through that getter or method (`intrinsic`), never as a property of the object, so an own
- * property cannot shadow it. `tests/player-engine-bridge-transport.test.ts` shadows each on both sides, and every other
+ * property cannot shadow it. `tests/bridge/player-engine-bridge-transport.test.ts` shadows each on both sides, and every other
  * own key of the admitted kinds' prototype chains but `constructor`.
  */
 export const INTRINSIC_READS = {
@@ -216,7 +216,7 @@ function primitiveText(
 /**
  * How a compared value reads in a difference: a primitive by `primitiveText`, a function or object by its kind alone
  * (`cloneKind`, a view by its intrinsic type), never coerced. The only place the comparator turns a compared value into
- * text. `tests/player-engine-bridge-transport.test.ts` checks statically that its body uses its `value` binding only in
+ * text. `tests/bridge/player-engine-bridge-transport.test.ts` checks statically that its body uses its `value` binding only in
  * these forms, and does not use `arguments`; that is not a data-flow proof (#1967).
  */
 function describe(value: unknown, classes: readonly RecordClass[]): string {

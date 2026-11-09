@@ -39,7 +39,7 @@ import {
   type MediaProgressReport,
 } from "../../src/index.js";
 import type { RandomDecision } from "../../src/runtime/random/random-control.js";
-import { exportedRecording, replay } from "../helpers/debug-recorder-replay.js";
+import { exportedRecording, replay } from "../helpers/player/debug-recorder-replay.js";
 
 const reference = "captured-media:11111111-1111-4111-8111-111111111111:1";
 

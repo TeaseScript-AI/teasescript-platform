@@ -40,7 +40,7 @@ import { drawCode, fileCode, outcomeLines } from "../../player/debug/random-draw
 import { loadSourceDebugSidecar } from "../../src/runtime/debug/source-sidecar.js";
 import { createSourceDebugSidecar } from "../../src/index.js";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
-import { loadHostFacade, onHost } from "../helpers/host-sessions.js";
+import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 
 // The button press on a session the composable's host holds (`OnHost`).

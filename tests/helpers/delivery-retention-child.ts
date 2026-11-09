@@ -28,7 +28,7 @@ import { createPlayerRuntimeRestorePoint } from "../../player/runtime/runtime-ad
 import { sessionTransferText } from "../../player/persistence/session-transfer.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
 import { childCases, markerOf, reach, snapshotForRetention } from "./retention-child.js";
-import { markedProject, planText } from "./source-ops-project.js";
+import { markedProject, planText } from "./bridge/source-ops-project.js";
 
 /*
  * The retention child of the delivery invariant (`player-bridge-delivery-retention.test.ts`; see

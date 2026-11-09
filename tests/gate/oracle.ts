@@ -8,13 +8,13 @@ import {
   restorePlayerRuntimeSessionAt,
   type PlayerRuntimeSession,
 } from "../../player/runtime/runtime-adapter.js";
-import { adapterCall } from "../helpers/replay-harness.js";
+import { adapterCall } from "../helpers/bridge/replay-harness.js";
 import type { TapeEntry, TapeReply } from "./tape.js";
 
 /*
  * The tapes' oracle: the adapter, independent of the bridge's dispatch, transport and publication. It compiles the
  * tape's project itself, starts its own session from the same Start options, and gives it every request the tape sent,
- * declines and `null` included, through `ADAPTER_OPS` (`tests/helpers/replay-harness.ts`). One invariant holds every
+ * declines and `null` included, through `ADAPTER_OPS` (`tests/helpers/bridge/replay-harness.ts`). One invariant holds every
  * reply: the oracle keeps its own revision and event cursor, so a request that changed the adapter's session must
  * publish exactly that change (its revision, its events from the cursor on, its state) and one that did not must
  * publish nothing at the current revision. `prepare` must match the oracle's compile, its diagnostics included, and

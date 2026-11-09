@@ -30,12 +30,12 @@ import {
   type SerializableRuntimeValue,
 } from "../../src/index.js";
 import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
-import { readForImport, type SessionRead } from "../helpers/transfer-read.js";
+import { readForImport, type SessionRead } from "../helpers/player/transfer-read.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { answerWith, type Intent } from "../helpers/player-input.js";
-import { loadHostFacade, onHost } from "../helpers/host-sessions.js";
+import { answerWith, type Intent } from "../helpers/player/player-input.js";
+import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 
-// The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
 const submitPlayerRuntimeComposer = onHost(rawSubmitPlayerRuntimeComposer);
 

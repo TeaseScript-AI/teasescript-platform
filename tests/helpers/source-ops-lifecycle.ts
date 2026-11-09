@@ -10,7 +10,7 @@ import {
   snapshotForRetention,
   stillHeld,
 } from "./retention-child.js";
-import { deliveredRun } from "./delivered-run.js";
+import { deliveredRun } from "./bridge/delivered-run.js";
 
 /*
  * The retention child of the lifecycle invariant in `player-bridge-debug-source.test.ts` (see `retention-witness.ts`):
@@ -58,7 +58,7 @@ registerHooks({
 
 const { playerBridgeOps, playerOpsContext } =
   await import("../../player/engine-bridge/player-ops.js");
-const { markedProject, planText } = await import("./source-ops-project.js");
+const { markedProject, planText } = await import("./bridge/source-ops-project.js");
 const sessions: HostSessions = {
   get: () => undefined,
   add: () => {

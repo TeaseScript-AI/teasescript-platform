@@ -254,7 +254,7 @@ its ops until the end. After the teardown:
 - a torn-down connection reaches no more objects than a fresh one;
 - nothing the connection reached before stays alive elsewhere.
 
-`tests/retention-witness.test.ts` holds its positive controls: each holder kind found on a path through its own edge,
+`tests/bridge/retention-witness.test.ts` holds its positive controls: each holder kind found on a path through its own edge,
 and each string representation with the marker cut at every position. Its limits, named in the helper: copies of
 marker-free data; marker-free objects in private fields, closure environments, `WeakMap` entries or promise results;
 bytes the connection never held; and unmarked returned scalars. A route that keeps bytes brings its own evidence of
@@ -586,13 +586,13 @@ attribution is best effort for synchronous adapters (#1923). The campaign CLI ex
 for identity, an unsupported route, or a pair censored at the step limit; 1 for a decided difference, a one-sided
 rejection included; 2 for a harness failure or an unknown verdict.
 
-`tests/runtime-differential.test.ts` runs this build against itself over the regressions in
+`tests/runtime/runtime-differential.test.ts` runs this build against itself over the regressions in
 `tools/runtime-differential/regressions/` (with their independent expectations) and a seeded sample covering every
 generator tag. It also runs 10,000-level host values (a list, and lists, objects, dicts and sets nested in turn) and
 the sensitivity controls, each a `discrepancy` at its own path; `FUZZ_ACCEPTANCE=1` adds a 10,000-level chain of sets. `node tools/runtime-differential/run.mjs --seed S --count N [--route core] [--shrink]` runs larger campaigns
 after `npm run build`; run them as background jobs.
 
-Each side sits behind a port (`tests/helpers/runtime-differential-side.ts`): this build in this process, or a root's
+Each side sits behind a port (`tests/helpers/runtime/runtime-differential-side.ts`): this build in this process, or a root's
 runner (`tools/runtime-differential/run-root.mjs`) in its own process, called synchronously over a pair of named pipes.
 One lockstep loop decides for both. `tests/runtime-differential-oracle.oracle.ts` (in `npm run oracle:test`) runs the
 pinned oracle root of the runtime pipeline oracle (left) against this build (right), each behind that oracle's guard:
@@ -612,13 +612,13 @@ pinned oracle root of the runtime pipeline oracle (left) against this build (rig
 With `FUZZ_ACCEPTANCE=1` it also runs `tools/runtime-differential/acceptance.json`, every pair of which must be
 `equivalent`, a larger nested-set family and a deeper chain pair. Run both on-demand parts after a build with
 `FUZZ_ACCEPTANCE=1 npm run oracle:test` and `FUZZ_ACCEPTANCE=1 node tools/test-output-filter.mjs
-dist/tests/runtime-differential.test.js`. `run.mjs --oracle [--manifest FILE]` runs a campaign the same way, each line naming the oracle's commit and
+dist/tests/runtime/runtime-differential.test.js`. `run.mjs --oracle [--manifest FILE]` runs a campaign the same way, each line naming the oracle's commit and
 the candidate's closure digest. A runner that never answers, or fails before it opens its pipes, is bounded only by the
 job's deadline. A behaviour changed after the pin shows as a difference, which only a new seal removes.
 
 ## Replay through the bridge
 
-`tests/helpers/replay-harness.ts` is the L5 gate's shared replay harness (#1919). `tests/player-bridge-recording.test.ts`
+`tests/helpers/bridge/replay-harness.ts` is the L5 gate's shared replay harness (#1919). `tests/bridge/player-bridge-recording.test.ts`
 uses it for the replay family: successful replay, frozen failure replay and live recovery, each in-process, in a Node
 Worker, and in the composable on its in-process engine. It has these parts:
 
@@ -673,7 +673,7 @@ policy, each closed by a final capture) or incomplete, reported as such (`notPre
 (`oracle.ts`) judges every tape against the adapter, keeping its own revision and event cursor, and the fixed tape
 replays on every backend, failing at its first differing entry. Coverage is what the tapes ran, never what they could reach.
 
-`tests/player-gate-tapes.test.ts` holds the structural claim (the outcome readings cover exactly the table's candidate
+`tests/player/player-gate-tapes.test.ts` holds the structural claim (the outcome readings cover exactly the table's candidate
 ops, and `ADAPTER_OPS` has a path for each; `prepare`, `start` and `captureCheckpoint` are the driver's own requests)
 and bounded runtime witnesses generated from the engine's guards, with their controls' mutants. The
 workload runs outside CI on a queue worker: `node tools/player-gate/tapes/record.mjs --out DIR --f DIR --k DIR

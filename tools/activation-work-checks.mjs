@@ -17,7 +17,7 @@
 //    object, or a reaction, handler or body passed to a promise or a protocol operation. (`no-floating-promises` with `ignoreVoid: false` owns the chains' ends.)
 //
 // These are syntax and shape rules: they do not prove what a trusted adapter does, nor when a callback runs.
-// The declarations (what is admitted) are the caller's: `tests/helpers/activation-work-checks.ts` holds them.
+// The declarations (what is admitted) are the caller's: `tests/helpers/player/activation-work-checks.ts` holds them.
 
 import { relative } from "node:path";
 import ts from "typescript";

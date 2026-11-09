@@ -1,5 +1,5 @@
 // The playback entry: loading, running, saving, restoring and inspecting a compiled plan. It loads no compiler, parser,
-// lexer or language-tooling module (`tests/playback-entry.test.ts`); `index.ts`, the authoring entry, adds those.
+// lexer or language-tooling module (`tests/player/playback-entry.test.ts`); `index.ts`, the authoring entry, adds those.
 export {
   cloneMessageMarkup,
   escapeMarkup,

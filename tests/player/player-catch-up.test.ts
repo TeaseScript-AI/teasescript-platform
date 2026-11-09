@@ -19,9 +19,9 @@ import { pendingPlayerRuntimeStorageWrite } from "../../player/runtime/runtime-v
 import type { DebugRecorder, DebugRecording } from "../../player/debug/debug-recorder.js";
 import { rebuildRecordedSession } from "../../player/debug/debug-export.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { loadHostFacade, onHost } from "../helpers/host-sessions.js";
+import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 
-// The adapter's functions, also on the sessions the composables' host holds (`helpers/host-sessions.ts`).
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
 const adoptPlayerRuntimeCatchUp = onHost(rawAdoptPlayerRuntimeCatchUp);
 const beginPlayerRuntimeCatchUp = onHost(rawBeginPlayerRuntimeCatchUp);
