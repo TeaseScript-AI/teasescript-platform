@@ -4,7 +4,13 @@ import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } fr
 import type { SourceSite } from "../graph.js";
 import { analyseCore, type Answers } from "./answers.js";
 import { asked, coreCheckResult, coreFacts } from "./check-result/check-result.js";
-import { nodeOf, SliceIndex, OutsideContract, SLICE_DEPTH } from "./check-result/slice-index.js";
+import {
+  LIMIT_REASONS,
+  nodeOf,
+  SliceIndex,
+  OutsideContract,
+  SLICE_DEPTH,
+} from "./check-result/slice-index.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
 
@@ -33,10 +39,11 @@ import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
  * C13, S9b), and lists nested `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a
  * route to the use has no check, else a warning whose use the runtime checks.
  * Refused during it: a value whose structure the slice does not follow, at the store whose capture established it
- * (`leftSlice`), the analysis ended there; nothing is refused at a stop or a work count. A stop compiles with its
- * warning and its checks at runtime (D4 a′), but where admission settled and a store's required check is not carried by
- * the published plan, the program is declined: "a store whose check was lost at the budget" (#1526 decision 2,
- * condition 1, `check-result/runtime-plan.ts` `lostCheck`).
+ * (`leftSlice`), the analysis ended there. A stop compiles with its warning and its checks at runtime (D4 a′), but a
+ * store whose check the stop leaves uncarried declines the program (#1526 decision 2, condition 1,
+ * `check-result/runtime-plan.ts` `lostCheck`): where admission settled, "a store whose check was lost at the budget";
+ * where it had not, "a store whose check was left undecided at the budget" (#2080). These and the other declines a
+ * limit causes carry `limit` (`LIMIT_REASONS`).
  */
 
 /** Test-only: a program outside the candidate's slice, at the first refusal the route establishes (see above). */
@@ -53,7 +60,10 @@ export class CandidateOutsideSlice extends Error {
       `The candidate type analysis does not cover ${what} yet (${path}, offset ${site.start}).`,
     );
     this.name = "CandidateOutsideSlice";
+    this.limit = LIMIT_REASONS.includes(what);
   }
+  /** Whether a limit of the analysis caused it, not the slice (`LIMIT_REASONS`, #2080). */
+  readonly limit: boolean;
 }
 
 /** The coarse core's backend, for the stated slice (see above). */

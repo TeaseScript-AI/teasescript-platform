@@ -466,13 +466,37 @@ export function unwrap(expression: Expression): Expression {
  * load's default a stop left open (#1767). The candidate route rejects its program, at `expression`, rather than check
  * less than the core decided.
  */
+/** A typed parse's or load's default whose level a stop left unproven (#1767). */
+export const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
+/** After a settled stop, obligations the analysis cannot find (`lostCheck`). */
+export const UNESTABLISHED_AT_BUDGET =
+  "a store whose required checks could not be established at the budget";
+/** After a settled stop, a required check the published plan does not keep (`lostCheck`). */
+export const LOST_AT_BUDGET = "a store whose check was lost at the budget";
+/** After a stop before admission settled, a store's own mark against `unknown` no complete store check carries (#2080). */
+export const UNDECIDED_AT_BUDGET = "a store whose check was left undecided at the budget";
+
+/**
+ * The declines a limit of the analysis causes, apart from what the slice does not cover yet (#2080, the owner's go,
+ * 2026-11-10): tests count them by `limit`, which reads this list, so no site marks one without its reason.
+ */
+export const LIMIT_REASONS: readonly string[] = [
+  OPEN_BY_STOP,
+  UNESTABLISHED_AT_BUDGET,
+  LOST_AT_BUDGET,
+  UNDECIDED_AT_BUDGET,
+];
+
 export class OutsideContract extends Error {
+  /** Whether a limit of the analysis caused it (`LIMIT_REASONS`). */
+  readonly limit: boolean;
   public constructor(
     readonly expression: Expression,
     readonly what: string,
   ) {
     super(`The slice does not follow ${what}.`);
     this.name = "OutsideContract";
+    this.limit = LIMIT_REASONS.includes(what);
   }
 }
 
