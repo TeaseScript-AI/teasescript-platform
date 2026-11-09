@@ -21,8 +21,8 @@
 // or as a declared line: an entry of the `--declare` file, a JSON array of `{ "file", "side": "added" | "removed",
 // "line", "reason" }` (the reason one clause; the file named as it is on that side), for a path-keyed entry (a test
 // table's key, an allowance, a comment citing a moved file's path) or a line no form admits (a signature the formatter
-// rewrapped after `export` was added). A declared line must be in the change and not marked moved, and every
-// declaration must match one; each is printed with its reason. Declarations come from that file alone, and no flag
+// rewrapped after `export` was added). A declared line must be in the change and not marked moved (a line of a side
+// that is no regular file, below, counts as unmoved), and every declaration must match one; each is printed with its reason. Declarations come from that file alone, and no flag
 // admits a line class.
 //
 // And a pure move keeps every import's binding: over the change's files, the set of bindings before equals the set
@@ -214,8 +214,9 @@ function declarationsOf(path) {
 
 /**
  * Each added or removed line of `files` (the changes `movedLinesOf` reads for `mergeBase`..`head`) that Git does not
- * mark moved, with the form that admits it or `null`: `[entry, form, reason]`, `entry` `{ side, file, row, shape,
- * added }`. `declaredFor(entry)` gives a declared line's reason, which comes before the forms. Also the moved lines'
+ * mark moved, and each line of a side that is no regular file whether Git marks it moved or not, with the form that
+ * admits it or `null` (only a declaration admits the latter): `[entry, form, reason]`, `entry` `{ side, file, row,
+ * shape, added, irregular }`. `declaredFor(entry)` gives a declared line's reason, which comes before the forms. Also the moved lines'
  * counts. Shared with `structure-report.mjs --moved`, so the forms have one home.
  */
 export function verdictsOf(
