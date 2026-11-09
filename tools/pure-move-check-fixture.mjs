@@ -1,7 +1,15 @@
 // The pure-move check's test fixture, shared by `pure-move-check.test.mjs` and `pure-move-check-bindings.test.mjs`:
 // a repository committed before and after a change, the check run there, and the split both files use.
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +36,9 @@ export function moveOf(before, after) {
   const write = (files) => {
     for (const [path, text] of Object.entries(files)) {
       mkdirSync(dirname(join(root, path)), { recursive: true });
+      // a symbolic link replaced by a file is unlinked first: writing would go through it to its target
+      if (lstatSync(join(root, path), { throwIfNoEntry: false })?.isSymbolicLink())
+        rmSync(join(root, path));
       if (text === null || text.gitlink !== undefined) rmSync(join(root, path), { force: true });
       else if (text.symlink !== undefined) {
         rmSync(join(root, path), { force: true });

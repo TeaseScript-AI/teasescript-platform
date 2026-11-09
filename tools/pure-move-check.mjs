@@ -53,8 +53,9 @@
 // holding `import(` or `@import`. A changed file of any other type, `.vue` and `.html` among them, is outside the rule:
 // the report lists it as `not compared (unparsed)`, and `vue-tsc` and the move's compiler run are its witness. A side
 // that is no regular file (a gitlink, mode 160000, or a symbolic link, 120000), whose content is no file's text, is
-// never read: it gives no bindings, its added or removed lines are judged without its shape (so unadmitted unless
-// declared: a submodule's new commit is no move), and the report lists it as `not compared (not a regular file)`.
+// never read: it gives no bindings, the resolver sees no such file (a linked `tsconfig.json` or `package.json` is
+// none), each of its added or removed lines is unadmitted unless declared, whether Git marks it moved or it is
+// whitespace (a submodule's new commit is no move), and the report lists it as `not compared (not a regular file)`.
 //
 // The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines, the
 // bindings differing and the refused specifiers.
@@ -242,8 +243,15 @@ export function verdictsOf(
     const after = regular(change.file, change.newMode)
       ? shapeOf(change.file, blob(head, change.file))
       : null;
+    // a side that is no regular file: each of its lines is judged, moved or not, and only a declaration admits it
+    const irregular = {
+      removed: change.old !== null && !regular(change.old, change.oldMode),
+      added: change.file !== null && !regular(change.file, change.newMode),
+    };
     for (const row of change.removedLines) {
-      if (row.moved) moved.removed += 1;
+      if (irregular.removed)
+        rows.push({ side: "removed", file: change.old, row, shape: null, irregular: true });
+      else if (row.moved) moved.removed += 1;
       else {
         rows.push({ side: "removed", file: change.old, row, shape: before, added: false });
         if (before?.declarationStarts.get(row.line)?.exported === false) {
@@ -253,7 +261,9 @@ export function verdictsOf(
       }
     }
     for (const row of change.addedLines) {
-      if (row.moved) moved.added += 1;
+      if (irregular.added)
+        rows.push({ side: "added", file: change.file, row, shape: null, irregular: true });
+      else if (row.moved) moved.added += 1;
       else rows.push({ side: "added", file: change.file, row, shape: after, added: change.added });
     }
   }
@@ -275,6 +285,7 @@ export function verdictsOf(
   for (const entry of rows) {
     const reason = declaredFor(entry);
     if (reason !== null) verdicts.push([entry, "declared", reason]);
+    else if (entry.irregular) verdicts.push([entry, null]);
     else if (entry.shape?.importLines.has(entry.row.line)) verdicts.push([entry, "import"]);
     else if (entry.row.text.trim() === "") verdicts.push([entry, "whitespace"]);
     else if (
@@ -680,12 +691,13 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
     target.type === "file"
       ? `file:${family.get(target.path) ?? target.path}`
       : `${target.type}:${target.path}`;
-  // a side's files: its tree's entries but its gitlinks, which are no files
+  // a side's files: its tree's regular files, the only ones the resolver reads (a symbolic link's blob is a path, a
+  // gitlink names a commit)
   const listed = (ref) =>
     new Set(
       git("ls-tree", "-r", "-z", "--full-tree", ref)
         .split("\0")
-        .filter((entry) => entry !== "" && !entry.startsWith("160000 "))
+        .filter((entry) => regular(entry, entry.slice(0, entry.indexOf(" "))))
         .map((entry) => entry.slice(entry.indexOf("\t") + 1)),
     );
   const trees = { before: listed(mergeBase), after: listed(head) };
