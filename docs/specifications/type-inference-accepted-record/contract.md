@@ -1,0 +1,259 @@
+# The accepted record: contract
+
+Part of [the type inference's accepted record](README.md): what a key's contract holds and how a read answers: value
+kinds, operations, projections, presence of properties, narrowing and guards.
+
+## Rules of the design's tables
+
+### section-2-f12
+
+**A read below an element step follows the literal's own structure only.**
+
+**Rule.** An element read (`xs.first`, `xs.last`, `xs.random`, `xs[i]`, `d[key]`, and a path through them) projects
+through the element step over the literal's own structure only:
+- an element that is a literal contributes its own kind (`[1.5, 2.5].first` is a definite number;
+  `[{v: 1}, {v: 2}].first.v` a definite integer);
+- an element that is a read (a copy, an alias) is not followed below its own kinds: a path below it takes the
+  contract's answer.
+
+Admission still reads the literal's own elements as deciders, so `let xs = [1, 2]; xs.add("bad")` errs.
+
+**Reason.** Projecting k copies at k demanded paths was a k × k product on a linear source. Sharing the copies'
+snapshots needs a proof the handler model cannot give cheaply. The loss is a warning where k snapshots inside a literal
+would have proved a kind.
+
+**Source.** Checkpoint 9's design, §2's operation table (F12), as amended by revision 4.7, 2026-10-23.
+
+### section-3-2-guarded
+
+**A guarded read's items are marked, so no consumer errs on them.**
+
+**Rule.** A read is guarded when it lies inside a branch whose condition tests the read's path (`!= null`, `== null`,
+`is T`, `is not T`, a comparison), or after a branch that tests it and always leaves (`if n is not integer { exit }`).
+Its items carry the mark `guarded`, every kind possible, so no consumer errs on them. The mark travels with the value
+through copies, literals, projections, arithmetic, argument bindings and function results, and through a written
+parameter or result too: a written type fixes the kinds a value may have, but never removes its mark or raises its
+certainty.
+
+**Reason.** Without the mark, guard dependence was lost through function results and after early exits, and valid
+guarded code got false errors. With `function relay(x: number) { return x }` and a guarded argument,
+`let whole: integer = relay(n)` under `if n is integer` warns, never errs.
+
+**Source.** Checkpoint 9's design, §3.2, from the blind model check of revision 4.6 (Astra, Sol), 2026-10-23.
+
+## Revisions
+
+### r4-129
+
+**A stored stable-path read takes its narrowing where it holds.**
+
+**Rule.** A read of a stable path inside a stored value takes its narrowing where it holds: a nearer definition after G
+supersedes it, and one before G is filtered. N5's preserving stores solve as one solver component starting from every
+store preserving, and publish only when stable; the events module has no separate evaluator. A loop-local test takes its
+input from the key's contract. A lost fact reruns only the nodes above its store, the union per location and loop, and
+the readers of each changed node.
+
+**Reason.** The preserving-store answer is published only after the joint solver component stabilises, replacing the
+events module's separate evaluator.
+
+**Source.** S10 part 2b, merged PR #1228, 2026-10-28.
+
+### r4-162
+
+**A site fact not proved gives words, never a code form.**
+
+**Rule.** The facts a fix's validity predicate reads are three-valued: proved, disproved, or not proved. A code form is
+offered only where every site fact is proved at the site. A fact that is not proved is never read as holding; the fix is
+given in words.
+
+**Reason.** Ten review rounds each found a new path by which a value reaches a site (an inline literal's element, an
+interpolation's result), and each lost fact let an invalid form be offered. With three values, a path the traversal does
+not follow can only under-offer, never offer an invalid form.
+
+**Source.** The lead's ruling on Codex round 10 of PR #1296 (#1241), 2026-10-28.
+
+### r4-171
+
+**A type suggestion is a type at the type position.**
+
+**Rule.** A suggested type is proved as a form at the type position, so `(integer | string)[]` must parse there. The
+message names the type ("declare it with the type '(integer | string)[]'"), never a whole declaration carrying the
+author's start value.
+
+**Reason.** V30 §13's example suggests `(integer | string)[]` for `let h: integer | string[] = 1`, but a declaration
+with that start value does not compile. The start value is the author's own and keeps its own behaviour.
+
+**Source.** The lead's ruling on Codex round 5 of PR #1273 (#1268), 2026-10-28.
+
+### r4-215
+
+**An unrestricted written domain's `unknown` carries the opaque reason.**
+
+**Rule.** A value read from an unrestricted written domain (a `list` element, say) is `unknown` with the opaque reason,
+set at the one producer, `keyContract`. Every consumer then owes its receiving check by its existing rules.
+
+**Reason.** The domain's `unknown` had no reason, so every consumer that owes a check only for opaque or external items
+owed nothing. `let xs: list = [hostValue, 4]`, `let carrier = [xs]` and `let result: integer = carrier[0][0]` printed
+`"bad"` with no diagnostic and no check (#1501). The opaque reason is true for an internal value ("known only when the
+script runs"); external would invent provenance. One bit at one producer was chosen over teaching every consumer to
+recognise a reasonless unknown, which would need a marker carried through merges, copies and finishing.
+
+**Source.** The lead's decision on #1501, after Sol's design round 1, 2026-10-30.
+
+### r4-249
+
+**A filtered property fold stays outside the ordinary complete memo.**
+
+**Rule.** Classify sparse-property eligibility in `prefixLevels`' existing charged entry loop before any sparse list
+exists: a whole, unguarded, ingress-free closed object literal whose holder marks nothing. Typed and open values inside
+keep their ordinary path, and unproved prefixes and deeper paths fall back. A filtered fold neither reads nor writes
+`Contract.levelGroups`; retain the complete memo for recursive fallback, let the existing contract demand own the
+filtered answer and use existing prefix, path and property identities.
+
+**Reason.** Isolating filtered and ordinary folds preserves the complete memo for recursive fallback and avoids the
+parent/deeper cache defect exposed by the first prototype.
+
+**Source.** The lead's build decision after Sol prototype round 2 for #1456, 2026-11-01.
+
+**Bounded by:** Merged PR #1549 (2026-11-02) applies one predicate to every prefix entry, requiring at least two whole
+closed objects and excluding projections, copied keys, elements, cells, guards and ingress, with nonmarking holders and
+level membership when sharing. It answers one-step properties through a per-pass property index, choosing the earliest
+literal writer for F11 `missing` and the first-stored alike group when sharing; it originally built only after property
+reads spent more than the prefix's size. [r4.450](#r4-450) extends deeper reads and changes that pay rule.
+
+### r4-277
+
+**A value's kinds keep their written spelling where one spelling covers them.**
+
+**Rule.** An item made from a written type carries its spelling (`Item.spelling`, the written kinds in written order).
+Only the producers where a written type becomes items set it. Marks form a lattice, joined by `mergePair`: unmarked,
+then one spelling, then mixed. One rule, `inItsOrder`, orders every list of kinds:
+- the written spelling, where exactly one spelling covers every concrete kind in the list;
+- the table order otherwise.
+
+One list is outside the rule: a warning's `fits` stays in fixed table order.
+
+The spelling survives every transport where items are compared, replayed or restored.
+
+**Reason.** Four review rounds each found a sibling of one family: a list of kinds put in table order where a written
+spelling had to be kept, or the reverse. Ordering at publication could not tell the two classes apart, because the
+publication sites read both. A mark carried from the producer can.
+
+**Source.** The lead's ruling on PR #1558's design for #1398, after Codex round 5, 2026-11-02.
+
+### r4-300
+
+**Canonical kind order exempts null, unknown and empty from spelling coverage.**
+
+**Rule.** This extends [r4.277](#r4-277): use the written spelling where exactly one spelling covers every kind except
+`null`, `unknown` and `empty`; otherwise use the value-kinds table order, then `unknown`, then `empty`. Written-type
+items, their copies, a type test's written type and the stores' syntax by one carry `spelling`; `joinSpelling` is
+commutative and associative, with `MIXED` absorbing. Apply the idempotent `inItsOrder` when making lists in merges,
+stopped answers, finishing reads and compositions, and again at publication; fixed tables such as a warning's `fits` and
+lists carrying no spelling keep table order. Include spelling in `itemsSignature` and `Values.narrowingMark`, read once
+per form; append it in `classed` only where `readClass` supplied none, so no class charges it twice. `annotationTags`
+walks each written type once per form and pass; sorting at most one item per kind is bounded by the entries already
+charged and has no separate charge.
+
+**Reason.** First-discovery order made answers, suggestions, checks and decided types depend on consumer order, solver
+order and sharing.
+
+**Source.** Merged PR #1558 for #1398 and #1299, including the repair after Codex round 10, 2026-11-02.
+
+### r4-386
+
+**Non-own object reads need a solver-managed objects query before fold integration.**
+
+**Rule.** `objectsAt(value, q)` returns the objects held by a member's completed read at prefix q, with tokens, names
+and a step's absence support, through solver-managed proofs obeying provisional, reset and forget rules. This read-layer
+service neighbours [r4.375](admission.md#r4-375)'s A4 service and remains separate from it. Keep
+[r4.371](sharing.md#r4-371)'s declined fold until the query is proved; integrate with one shared absence scan per
+members, q and lacking class, retaining `absenceClass` for the own-object class. The missing writer equals the unshared
+join's, provenance work is shared and no decision stop moves. The fold integration must be linear in each of #1736's
+four families.
+
+**Reason.** The objects query supplies the missing and absence facts required to integrate folds through non-own reads
+without changing the unshared missing writer or the asking decision's stop.
+
+**Source.** The lead's rulings on Sol's design for #1747, 2026-11-05.
+
+### r4-396
+
+**A pushed projection read solves a finite producer graph from empty sets.**
+
+**Rule.** Below a key entry's writing edge in a copy cycle through a projection, or a store's writing edge whose value
+is such a binding's property-read chain, join the leaves reached over `contract/frontier.ts`'s finite producer graph.
+Nodes are binding positions, with one root per whole-copy cycle, literal-index nodes and leaves; `Sum(node, step)` is
+the least solution from empty sets and cycles close only through producer edges. A pushed read is an ordinary `pr|` or
+`pv|` demand forgotten at any stop, and the graph is shared work under [r4.349](solver-and-work.md#r4-349). Otherwise
+use the native reader: exclude written bindings, guarded or marked copies or host reads, ingress, cursors, wrappers,
+alias layers, selection, index or member steps, collection elements, host data at an element step, values stepped below
+a push and stops on held places. Every settled slot and publication equals the native reader on finite controls in all
+four modes.
+
+**Reason.** The finite producer graph lets a whole-copy ring read through a projection reach consumers instead of
+exhausting setup.
+
+**Source.** Merged PR #1768 for #1655 under the lead's accepted [r4.385](sharing.md#r4-385) design, 2026-11-05.
+
+**Bounded by:** [r4.432](sharing.md#r4-432) extends pushed reads through marking routes using compiled mark states.
+
+### r4-403
+
+**Read the nearest narrowing at the read node and retain ingress provenance.**
+
+**Rule.** This changes [section-3-2-guarded](#section-3-2-guarded): each read takes its nearest narrowing G at its own
+node through `Values.#narrowingOf`, and a definition after G's entry that reaches the read answers it. A consumer's
+descendant demand takes the G of its whole path through one charged `NarrowingIndex.nearestAt` walk, for consumers only,
+leaving alias-class answers unchanged. `fromExternal` travels through value-keeping `marksOf` transfers, is dropped by
+`computedMarks` results and is attached by `entered` at ingress as to an external unknown. Both C9 predicates use
+`isExternal || fromExternal`, and a stopped ingress read keeps its provenance.
+
+**Reason.** A type test proves a kind, never an ingress; a reaching assignment after the test must not be hidden by the
+earlier narrowing.
+
+**Source.** The lead's ruling (a), applied by merged PR #1770 for #1073 PR 2 phase 1, 2026-11-05.
+
+### r4-444
+
+**Route certificates prove producers conservatively and refuse unavailable arm evidence.**
+
+**Rule.** AD-1's `#valueProduces` certifies a read by what the producer's value holds: a literal, any default, lookup,
+parse, void exit or written type; a never-selected fallback certifies nothing. Null that another callable or handler may
+store and a use tested against the same producer stay warning cases. Answer whole-copy descendants by value rather than
+one route per field; a called function's written union proves itself at its use, with C1's copy rule applied at a store.
+`NarrowingRoutes.#checked` alone decides the closed tested-producer set: N1 tests under and/or/not, uses in guarded
+arms, later conjuncts and uses after passed statements with no intervening label. A guard held inside a loop or switch
+does not propagate past it; a `while` whose false condition proves the test and that no `break` leaves can pass. An
+unproved exit kind or arm shape counts as not tested, including the under-offers of a loop holding a guard and a guard
+followed by a label. Promote through the certificate only where no live arm of an admitted callable is infeasible by
+entry narrowing; a stopped decision, nonexternal `unknown` or empty answer is unavailable and blocks promotion, while
+external `unknown` is an answer. U5's word comes from the failing event, naming a collection's invalidation `member`.
+
+**Reason.** Per-arm and per-callable guards failed under whole copies, nesting and transitively reached callables; the
+program default prevents those false required-check errors. An unavailable stopped input cannot justify promotion to an
+error.
+
+**Source.** Merged PR #1937 for #1073 PR 4, including the lead's F2 rulings and the final three-outcome `#infeasible`
+repair, 2026-11-07.
+
+### r4-450
+
+**Read closed-object property descendants from holders and pay for indexing by saved folds.**
+
+**Rule.** `propertyItems` accepts a rest starting with a property unless any step is `SELECTED_VALUE` or
+`SELECTED_TEXT`; selection paths read every entry separately. Otherwise fold only that property's holders at any depth;
+keep the fold once per path below a deeper read inside the property index, never in `Contract.levelGroups`. Below a
+property every source holds, and wherever holders cover every source the levels path answers; the equivalence lasts for
+the pass's property index. For `landed`, index each copy path's copies by the first step past their strips taken by
+their sources' seeds; prove a source only when `landedOwn` answers from its seeds alone, and take every other copy for
+every step. Change #1456's pay rule as applied in [r4.249](#r4-249): build the index once the folds its reads would save
+reach its construction cost, counting names once and holders once per name with integers. Per counter, permit only the
+declared terms: once-per-prefix, source-linear pay bookkeeping, exactly the sources' name count added to unshared
+`structureSteps` and under 1.5 times the baseline on that counter for `shared-past`'s quadratic case; plus pre-pay folds
+on `none-below` and `none-at`.
+
+**Reason.** A nonholder's read below is F11 `missing`, and fold keys hold the root's property names; seed-only proof
+makes excluding a landed copy fail closed.
+
+**Source.** The lead's design rulings 1–6, applied by merged PR #2064 for #1948 and #1585, 2026-11-08.

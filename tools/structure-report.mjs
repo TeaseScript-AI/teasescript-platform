@@ -16,11 +16,16 @@
 // earlier --json.
 //
 // With --diff BASE: only the signals the change from the merge base (`git merge-base BASE HEAD`) to `HEAD` adds to,
-// each against the merge base's tree: a file over 1000 lines that it adds lines to, a function over 150 lines whose
-// lines include one it adds, a folder over 20 files or a top level over 12 that it adds a file to (one Git lists as
-// added: a symlink or submodule turned into a regular file is not), a pair of names a letter apart that the merge base did not have, and a file gaining over 300 lines. A change adds to a signal whether
-// it crosses the line or the base was already over it. Both sides are Git's committed trees, never the working tree:
-// commit first. Only the changed files are parsed. --json writes those lines too, for a READY to quote.
+// each against the merge base's tree: a file over 1000 lines that it grows, a function over 150 lines whose lines
+// include one it adds, a folder over 20 files or a top level over 12 that it adds a file to (one Git lists as added: a
+// symlink or submodule turned into a regular file is not), a pair of names a letter apart that the merge base did not
+// have, and a file gaining over 300 lines. A change adds to a signal whether it crosses the line or the base was
+// already over it. Without --moved, a file's growth is its added lines minus its removed lines, whatever those are.
+// With --moved, it is its added lines less those Git marks as moved and those `pure-move-check.mjs` admits, minus its
+// removed lines less those it admits, and at most its lines at HEAD minus its lines at the merge base, so that a file
+// that did not grow never fires. A file over 1000 lines fires when its growth is above 0. A file gaining over 300 lines
+// fires when its growth is above 300. Both sides are Git's committed trees, never the working tree: commit first. Only
+// the changed files are parsed. --json writes those lines too, for a READY to quote.
 //
 // What the change is, is Git's. Its files, their modes and status, and their names at the merge base come from `git
 // diff -z -M --raw` over the whole tree, so a file moved in from outside the roots is a move; only regular files (modes
@@ -38,19 +43,20 @@
 // count; rename detection's similarity threshold (50% by default) and its limit decide what a move is, so an edited
 // move below them counts as a deletion and an addition; and attributes can make a file binary, which adds no lines.
 //
-// With --moved, the lines Git's moved-line detection marks as moved (`moved-lines.mjs`, read once over the whole change)
-// are left out of the lines behind two signals, a file gaining over 300 lines and a function over 150 lines that the
-// change writes into, and each signal this suppresses is printed with the moved lines it discounted; a file over 1,000
-// lines whose added lines are all moved or admitted by `pure-move-check.mjs`'s forms 1-3 (an import or re-export line, a
-// bare `export` on a moved declaration, whitespace: its classification, imported) is printed as suppressed with its
-// admitted lines; every other signal is as without it. Git's detection is heuristic (a moved block below its threshold reads as added).
+// With --moved, the lines Git's moved-line detection marks as moved (`moved-lines.mjs`, read once over the whole
+// change) are left out of a function over 150 lines that the change writes into, and out of a file's growth, with the
+// added and removed lines `pure-move-check.mjs`'s forms 1-3 admit (an import or re-export line, a bare `export` on a
+// moved declaration, whitespace: its classification, imported). Each file signal this suppresses is printed with its
+// growth and its moved, admitted and removed lines, and the function signal with its moved lines; every other signal
+// is as without it. Git's detection is heuristic (a moved block below its threshold reads as added).
 //
-// With --summary FILE, the files behind two signals, a file over 1000 lines that the change adds to and a file gaining
+// With --summary FILE, the files behind two signals, a file over 1000 lines that the change grows and a file gaining
 // over 300 lines, are appended to FILE (CI passes its job summary file) and printed after the report: a heading, the
 // command and the merge base's short sha, then a `text` block of one row per file, sorted by name,
-// `<file> | <lines at the merge base> → <lines at HEAD> | <signals>`, the signals `over 1000` and `gaining N` (with
-// `, M moved discounted` under --moved); `no file signalled` when there is none, and `structure report could not run:
-// <reason>` on exit 2. The rows are read from the report's own signals; every other signal is in the report only.
+// `<file> | <lines at the merge base> → <lines at HEAD> | <signals>`, the signals `over 1000` and `gaining N`, N the
+// growth (with `, M moved discounted` under --moved); `no file signalled` when there is none, and `structure report
+// could not run: <reason>` on exit 2. The rows are read from the report's own signals; every other signal is in the
+// report only.
 //
 // Options: each of --top, --json, --compare, --diff and --summary takes a value, as the next argument or after `=`
 // (`--json=FILE`); --top's is a whole number; --moved takes none. Every other argument is a root; one that starts with
@@ -347,37 +353,43 @@ function regularFilesAt(ref) {
 }
 
 /**
- * Git's own count of each file's added lines (`-` for a binary file), the check on the hunks `changeSignals` reads, at
- * their context: `<added>\t<deleted>\t<name>`, or for a move `<added>\t<deleted>\t` and then its two names, each a field
- * of its own.
+ * Git's own count of each file's added lines (`-` for a binary file), the check on the hunks `changeSignals` reads, and
+ * of its removed lines, which count against its growth, at those hunks' context: `<added>\t<deleted>\t<name>`, or for
+ * a move `<added>\t<deleted>\t` and then its two names, each a field of its own.
  */
-function gitAddedLines(mergeBase) {
+function gitLineCounts(mergeBase) {
   const numstat = fieldsOf(
     gitDiff("-M", "-U0", "--inter-hunk-context=0", "--numstat", "-z", mergeBase, "HEAD"),
   );
-  const gitAdded = new Map();
+  const [added, removed] = [new Map(), new Map()];
   for (let i = 0; i < numstat.length;) {
     const record = numstat[i];
     const firstTab = record.indexOf(9);
-    const nameStart = record.indexOf(9, firstTab + 1) + 1;
-    const added = record.subarray(0, firstTab).toString("latin1");
+    const secondTab = record.indexOf(9, firstTab + 1);
+    const nameStart = secondTab + 1;
+    const addedCount = record.subarray(0, firstTab).toString("latin1");
+    const removedCount = record.subarray(firstTab + 1, secondTab).toString("latin1");
+    let file;
     if (nameStart === record.length) {
-      gitAdded.set(nameOf(numstat[i + 2]), added);
+      file = nameOf(numstat[i + 2]);
       i += 3;
     } else {
-      gitAdded.set(nameOf(record.subarray(nameStart)), added);
+      file = nameOf(record.subarray(nameStart));
       i += 1;
     }
+    added.set(file, addedCount);
+    removed.set(file, removedCount === "-" ? 0 : Number(removedCount));
   }
-  return gitAdded;
+  return { added, removed };
 }
 
 /**
  * The signals `file`'s added lines raise (its `HEAD` blob `text`, its added lines `added` in order): a function over
- * the signal's length that they write into, and the file gaining over the signal's lines. With --moved, the lines Git
- * marks as moved (`moved`) are left out, and each signal that leaves out is printed as suppressed with its count.
+ * the signal's length that they write into, and the file gaining over the signal's lines, by its `growth` (`growthOf`).
+ * With --moved, the lines Git marks as moved (`moved`) are left out, and each signal that leaves out is printed as
+ * suppressed with its counts.
  */
-function addedLinesSignals(file, text, added, moved) {
+function addedLinesSignals(file, text, added, moved, growth) {
   const found = [];
   const counted = added.filter((line) => !moved.has(line));
   const discounted = (from, to) =>
@@ -393,43 +405,76 @@ function addedLinesSignals(file, text, added, moved) {
           line: `suppressed (moved): ${what}, ${discounted(fn.line, end)} moved lines discounted`,
         });
     }
-  const movedCount = added.length - counted.length;
-  if (counted.length > SIGNALS.addedLines)
+  if (growth.growth > SIGNALS.addedLines)
     found.push({
       signal: "added",
       file,
-      counted: counted.length,
-      moved: movedCount,
-      line: `file gaining over ${SIGNALS.addedLines} lines: +${counted.length} ${shown(file)}${movedCount > 0 ? `, ${movedCount} moved discounted` : ""}`,
+      counted: growth.growth,
+      moved: growth.moved,
+      line: `file gaining over ${SIGNALS.addedLines} lines: +${growth.growth} ${shown(file)}${growth.moved > 0 ? `, ${growth.moved} moved discounted` : ""}`,
     });
-  else if (added.length > SIGNALS.addedLines)
+  else if (discountMoved && added.length > SIGNALS.addedLines)
     found.push({
       signal: "suppressed",
-      line: `suppressed (moved): file gaining over ${SIGNALS.addedLines} lines: +${added.length} ${shown(file)}, ${movedCount} moved discounted`,
+      line: `suppressed (moved): file gaining over ${SIGNALS.addedLines} lines: +${added.length} ${shown(file)}, ${countsOf(growth)}`,
     });
   return found;
 }
 
 /**
+ * A file's growth, which both file signals decide by: its added lines (`added`, their line numbers) less those Git
+ * marks as moved (`moved`) and those the pure-move check admits (`admitted`), minus the number of lines it removes
+ * (`removed`) less the admitted ones among them (`admittedRemoved`), at most its line delta (`delta`, its lines at
+ * `HEAD` minus at the merge base). The sets and `admittedRemoved` are empty without --moved. A line both moved and
+ * admitted counts once, as moved.
+ */
+function growthOf(added, removed, moved, admitted, admittedRemoved, delta) {
+  const movedCount = added.filter((line) => moved.has(line)).length;
+  const admittedCount = added.filter((line) => !moved.has(line) && admitted.has(line)).length;
+  const counted = added.length - movedCount - admittedCount - (removed - admittedRemoved);
+  return {
+    moved: movedCount,
+    admitted: admittedCount,
+    removed,
+    admittedRemoved,
+    // the cap: a file whose lines did not grow never grows, whatever its admitted removals
+    growth: Math.min(counted, delta),
+  };
+}
+/** The counts behind a growth, as a suppressed signal prints them. */
+const countsOf = ({ growth, moved, admitted, removed, admittedRemoved }) =>
+  `growth ${growth}: ${moved} moved, ${admitted} admitted, ${removed} removed (${admittedRemoved} admitted)`;
+
+/**
  * With --moved, each file's added lines Git marks as moved (`moved`), and those the pure-move check admits by its forms
  * 1-3 (an import or re-export line, a bare `export` on a moved declaration, whitespace: `admitted`), by their line in
- * `HEAD`'s blob.
+ * `HEAD`'s blob; and the number of its removed lines the check admits by the same forms (`admittedRemoved`), by the
+ * file's name at `HEAD`.
  */
 function movedAndAdmitted(mergeBase) {
-  const [moved, admitted] = [new Map(), new Map()];
+  const [moved, admitted, admittedRemoved] = [new Map(), new Map(), new Map()];
   const moves = movedLinesOf(mergeBase, "HEAD");
+  // a removed line's verdict names its file at the merge base
+  const headName = new Map();
   for (const change of moves)
-    if (change.file !== null)
+    if (change.file !== null) {
       moved.set(
         change.file,
         new Set(change.addedLines.filter((row) => row.moved).map((row) => row.line)),
       );
-  for (const [entry, form] of verdictsOf(mergeBase, "HEAD", moves).verdicts)
-    if (entry.side === "added" && ["import", "export", "whitespace"].includes(form)) {
+      if (change.old !== null) headName.set(change.old, change.file);
+    }
+  for (const [entry, form] of verdictsOf(mergeBase, "HEAD", moves).verdicts) {
+    if (!["import", "export", "whitespace"].includes(form)) continue;
+    if (entry.side === "added") {
       if (!admitted.has(entry.file)) admitted.set(entry.file, new Set());
       admitted.get(entry.file).add(entry.row.line);
+    } else if (headName.has(entry.file)) {
+      const file = headName.get(entry.file);
+      admittedRemoved.set(file, (admittedRemoved.get(file) ?? 0) + 1);
     }
-  return { moved, admitted };
+  }
+  return { moved, admitted, admittedRemoved };
 }
 
 /**
@@ -464,7 +509,7 @@ function changeSignals(base) {
       i += 2;
     }
   }
-  const gitAdded = gitAddedLines(mergeBase);
+  const { added: gitAdded, removed: gitRemoved } = gitLineCounts(mergeBase);
   /**
    * The line numbers `change` adds to its file, from its own patch, checked against `--numstat`: `{ lines }`, or
    * `{ unread }` with the reason when the two disagree or a hunk ends before its counts, so the file is reported as not
@@ -497,9 +542,13 @@ function changeSignals(base) {
   };
   const blob = (ref, file) => git("cat-file", "blob", `${ref}:${file}`);
 
-  const { moved: movedAdded, admitted: admittedAdded } = discountMoved
+  const {
+    moved: movedAdded,
+    admitted: admittedAdded,
+    admittedRemoved,
+  } = discountMoved
     ? movedAndAdmitted(mergeBase)
-    : { moved: new Map(), admitted: new Map() };
+    : { moved: new Map(), admitted: new Map(), admittedRemoved: new Map() };
 
   const found = [];
   const relevant = changes
@@ -525,19 +574,26 @@ function changeSignals(base) {
         change.old === null || !REGULAR.has(change.oldMode)
           ? 0
           : lineCount(blob(mergeBase, change.old)));
+    const moved = movedAdded.get(file) ?? new Set();
+    const growth = growthOf(
+      added,
+      gitRemoved.get(file),
+      moved,
+      admittedAdded.get(file) ?? new Set(),
+      admittedRemoved.get(file) ?? 0,
+      lines - before(),
+    );
     if (lines > SIGNALS.fileLines) {
       const what = `file over ${SIGNALS.fileLines} lines that the change adds to: ${shown(file)} (${lines}, was ${before()})`;
-      // with --moved, a file whose added lines are all moved or admitted by the pure-move check's forms 1-3
-      const [moved, admitted] = [movedAdded.get(file), admittedAdded.get(file)];
-      const discounted = added.filter((line) => moved?.has(line) || admitted?.has(line)).length;
-      if (discountMoved && discounted === added.length)
+      if (growth.growth > 0)
+        found.push({ signal: "file", file, before: before(), after: lines, line: what });
+      else if (discountMoved)
         found.push({
           signal: "suppressed",
-          line: `suppressed (moved): ${what}, ${added.filter((line) => admitted?.has(line)).length} admitted lines`,
+          line: `suppressed (moved): ${what}, ${countsOf(growth)}`,
         });
-      else found.push({ signal: "file", file, before: before(), after: lines, line: what });
     }
-    for (const signal of addedLinesSignals(file, text, added, movedAdded.get(file) ?? new Set()))
+    for (const signal of addedLinesSignals(file, text, added, moved, growth))
       found.push(
         signal.signal === "added" ? { ...signal, before: before(), after: lines } : signal,
       );

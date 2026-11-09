@@ -1,5 +1,5 @@
 import type { Expression } from "../../../ast.js";
-import { compileChild, runCompileTask, type CompileTask } from "../../../compiler/continuation.js";
+import { compileChild, runCompileTask, type CompileTask } from "../../../compile-continuation.js";
 import { isEmptyLiteral, isNonEmptyLiteral, staticNumber } from "../../../static-evaluation.js";
 import { conditionShape } from "../../narrowing-shapes.js";
 

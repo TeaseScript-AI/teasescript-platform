@@ -793,8 +793,8 @@ export class Contract {
 
   /**
    * A chain of property reads' root (`positions.ts`'s `chainOf`), from the pass's memoised index: its making is shared
-   * work (docs/specifications/type-inference-accepted-record.md#r4-349), counted to the total and to no demand's
-   * allowance, whichever reader asks first.
+   * work (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-349), counted to the total and to no
+   * demand's allowance, whichever reader asks first.
    */
   public chainOf(value: PlaceId): ChainRoot | null {
     return this.work.shared(() => chainOf(this, value));

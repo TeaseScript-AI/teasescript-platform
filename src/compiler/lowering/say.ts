@@ -1,6 +1,6 @@
 import type { SayParts } from "../../ast.js";
 import type { SayInstruction } from "../../plan/model.js";
-import { compileChild, type CompileTask } from "../continuation.js";
+import { compileChild, type CompileTask } from "../../compile-continuation.js";
 import type { InstructionCompiler, LoweredExpression } from "./compiler.js";
 import { lowerInteractionPayloadTask } from "./interactions.js";
 import { planSpan } from "./expression-plans.js";

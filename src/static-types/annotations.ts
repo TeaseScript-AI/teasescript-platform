@@ -1,5 +1,5 @@
 import type { TypeAnnotation, TypeName } from "../ast.js";
-import { compileChild, runCompileTask, type CompileTask } from "../compiler/continuation.js";
+import { compileChild, runCompileTask, type CompileTask } from "../compile-continuation.js";
 import {
   ANY_OBJECT_TYPE,
   isScalarKind,

@@ -26,8 +26,8 @@ import { selectionOf, selectionPieces } from "./selections.js";
 
 /**
  * A literal's items at a path from its index: the value side (`exact`: F12,
- * docs/specifications/type-inference-accepted-record.md#section-2-f12, a read below an element step is not followed
- * below its own kinds but takes its contract), else the contract.
+ * docs/specifications/type-inference-accepted-record/contract.md#section-2-f12, a read below an element step is not
+ * followed below its own kinds but takes its contract), else the contract.
  */
 export function* indexItems(
   contract: Contract,

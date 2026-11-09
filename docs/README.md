@@ -5,7 +5,7 @@
 - `../README-FIRST.md`: authority and conflict-routing rules.
 - `specifications/accepted-syntaxes-v30.md`: accepted consolidated syntax baseline.
 - `specifications/message-markup.md`: accepted authored Standard-chat `say` presentation markup and escaping contract.
-- `specifications/type-inference-accepted-record.md`: accepted rules of the V2 type inference whose reasons code comments cite.
+- `specifications/type-inference-accepted-record/`: accepted implementation rules of the V2 type inference, one page per topic.
 - `decisions/`: accepted and proposed ADRs; each file states its status.
 - `../CURRENT-DESIGN.md`: stable cross-component architecture and implementation boundaries.
 - `../PHASE-STATUS.md`: current phase, gate, and high-level implemented-capability status.

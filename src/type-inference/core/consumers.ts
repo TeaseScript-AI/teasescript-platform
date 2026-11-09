@@ -256,7 +256,7 @@ export class Consumers {
   decisionStopped = false;
   /**
    * Whether this pass restarted one whose decision stopped: a decision stopping here stops the analysis
-   * (docs/specifications/type-inference-accepted-record.md#r4-183).
+   * (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183).
    */
   readonly restarted: boolean;
   #readingNode: FlowNode | null = null;
@@ -651,7 +651,7 @@ export class Consumers {
       this.admission.joinElements(this.order, (found) => mixedJoin(this, found));
       // (a pass whose admission gives the stores below a selection other targets starts the passes again, #1275; one in
       // which a decision stopped is not settled either: the next starts with its key stopped,
-      // docs/specifications/type-inference-accepted-record.md#r4-180)
+      // docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-180)
       const own = this.#ownTargets(this.admission, (root, path) => {
         decide(this, { root, path }, true);
       });

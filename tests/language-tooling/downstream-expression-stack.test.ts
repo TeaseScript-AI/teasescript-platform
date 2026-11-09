@@ -1,4 +1,4 @@
-import { compileChild, runCompileTask, type CompileTask } from "../../src/compiler/continuation.js";
+import { compileChild, runCompileTask, type CompileTask } from "../../src/compile-continuation.js";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";

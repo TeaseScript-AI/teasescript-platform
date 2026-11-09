@@ -1584,13 +1584,13 @@ test("a stop before admission settled marks the stores into inferred places and 
 });
 
 /**
- * (docs/specifications/type-inference-accepted-record.md#r4-135): before admission settled no syntax decision is made,
- * so every store into an inferred place is marked at its site whatever its literals give, a store the unstopped
- * analysis rejects among them (its error stands for the mark's content); at a settled stop, as unstopped, the error
- * stands. Disagreements of a scalar, a list, an object and an object's nested field, an integer then a decimal (no
- * error), and a later copy (`let m = n`), in both orders, at a stop in the setup, the last stop before admission
- * settled, the first after it and the last. Every stop of every one in both orders, outside CI: 0 differing (13,542
- * analyses).
+ * (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-135): before admission settled no
+ * syntax decision is made, so every store into an inferred place is marked at its site whatever its literals give, a
+ * store the unstopped analysis rejects among them (its error stands for the mark's content); at a settled stop, as
+ * unstopped, the error stands. Disagreements of a scalar, a list, an object and an object's nested field, an integer
+ * then a decimal (no error), and a later copy (`let m = n`), in both orders, at a stop in the setup, the last stop
+ * before admission settled, the first after it and the last. Every stop of every one in both orders, outside CI: 0
+ * differing (13,542 analyses).
  */
 test("before admission settled every store into an inferred place is marked, after it a rejection's error stands", () => {
   const tail = '\nsay n\nrepeat 2 { say "AFTER" }\nexit\n';
@@ -3711,8 +3711,8 @@ test("a combined stop owes the reference's check in other words, or a boundary's
 
 /**
  * A stop's problems split into the coarse (a) reading's counted class
- * (docs/specifications/type-inference-accepted-record.md#r4-299) and the others: each counted check's open reads' keys
- * (its record beside it).
+ * (docs/specifications/type-inference-accepted-record/oracles.md#r4-299) and the others: each counted check's open
+ * reads' keys (its record beside it).
  */
 function coarseClass(problems: readonly string[]): {
   readonly entries: readonly (readonly string[])[];
@@ -4470,8 +4470,8 @@ type Walked = { readonly result: Answers; readonly reads: ReadonlyMap<string, Fr
 
 /**
  * A bounded frontier's analysis against the exact walk's at one stop
- * (docs/specifications/type-inference-accepted-record.md#r4-208), whole, and whether a read's walk was cut
- * (`withFrontierBound` keeps a cut when the read is made again, #1509): where none was, the same reads, checks,
+ * (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-208), whole, and whether a read's walk
+ * was cut (`withFrontierBound` keeps a cut when the read is made again, #1509): where none was, the same reads, checks,
  * diagnostics and marks; where one was, every exact check's obligation (its kind, target, requirement, site and
  * boundary flag) kept or owned by a mark. A cut read answers its place's component's host data, a superset of what its
  * walk names, so its consumers may owe checks the exact walk does not, never fewer: those may read more, and one worded
@@ -4503,14 +4503,14 @@ function boundedKeepsExact(bounded: Walked, exact: Walked, where: string): boole
 }
 
 /**
- * #1445 (docs/specifications/type-inference-accepted-record.md#r4-208): after a settled stop, a domain read's host data
- * is followed at most two copies deep and over at most eight copies met (`FRONTIER_DEPTH`, `FRONTIER_COPIES`); past
- * them the read answers its place's component's. Against the exact walk (`withFrontierBound`, unbounded), read by read:
- * the same stop guard, the same writers where a read's walk is not cut and a superset where it is; whole,
- * `boundedKeepsExact`. The topologies at k = 4 (rings and chains of own stores are cut there), two reads no place holds
- * whose links count as copies (#1559), and six random copy graphs (two with readers of two places), forward with
- * sharing and reversed without, near the first settled stop and at the last, without a demand cap and under the largest
- * that stops a decision. The same check runs at scale, in all four modes, on the workers.
+ * #1445 (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-208): after a settled stop, a
+ * domain read's host data is followed at most two copies deep and over at most eight copies met (`FRONTIER_DEPTH`,
+ * `FRONTIER_COPIES`); past them the read answers its place's component's. Against the exact walk (`withFrontierBound`,
+ * unbounded), read by read: the same stop guard, the same writers where a read's walk is not cut and a superset where
+ * it is; whole, `boundedKeepsExact`. The topologies at k = 4 (rings and chains of own stores are cut there), two reads
+ * no place holds whose links count as copies (#1559), and six random copy graphs (two with readers of two places),
+ * forward with sharing and reversed without, near the first settled stop and at the last, without a demand cap and
+ * under the largest that stops a decision. The same check runs at scale, in all four modes, on the workers.
  */
 test("after a settled stop a read's bounded host frontier names its exact writers, or more where it is cut (#1445)", () => {
   const sources = [
@@ -5153,11 +5153,11 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
  * `tally`; in the reversed order `pair` is decided before `tally`, and without the next pass `pair.first` kept the host
  * value `tally` held then; `count`'s error is independent of `tally` and stays. One extra pass where a decision first
  * stops, none without one, and at most one per rejected set
- * (docs/specifications/type-inference-accepted-record.md#r4-183): in the reversed order `box`'s root, which reads the
- * values `box.n`'s stopped decision had finished, stops once `box.n` is stopped from its pass's start, and that second
- * stop stops the analysis as the work allowance does. A program stop in the pass where a decision first stopped is not
- * settled: finishing marks the stores, and the stop oracle holds, no boundary among it, as in #1194's witness below of
- * a second stop.
+ * (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183): in the reversed order `box`'s
+ * root, which reads the values `box.n`'s stopped decision had finished, stops once `box.n` is stopped from its pass's
+ * start, and that second stop stops the analysis as the work allowance does. A program stop in the pass where a
+ * decision first stopped is not settled: finishing marks the stores, and the stop oracle holds, no boundary among it,
+ * as in #1194's witness below of a second stop.
  */
 test("a pass in which a decision stops is not settled: the next starts with its key stopped (TABLE r4.180)", () => {
   const reversed = <T>(make: () => T): T =>
@@ -5223,7 +5223,7 @@ test("a pass in which a decision stops is not settled: the next starts with its 
     );
     // (the independent error stays; in the reversed unshared mode `pair`'s element decision, longer there than
     // `tally`'s, stops too and then again in the restarted pass, which stops the analysis
-    // (docs/specifications/type-inference-accepted-record.md#r4-183): its check is marked)
+    // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183): its check is marked)
     assert.equal(passes(answers), 1, mode);
     const count = dependent.indexOf("count {}");
     if (mode === "reversed, unshared") {
@@ -5285,7 +5285,7 @@ test("a pass in which a decision stops is not settled: the next starts with its 
     );
   }
   // a decision stopping only in the restarted pass: the analysis stops there
-  // (docs/specifications/type-inference-accepted-record.md#r4-183)
+  // (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183)
   const property =
     [
       "let box = {n: 1}",
@@ -5368,12 +5368,12 @@ test("a narrowed read of a stopped decision's key is what its test proves, ungua
 });
 
 /**
- * (docs/specifications/type-inference-accepted-record.md#r4-183): a decision that stops in the restarted pass stops the
- * analysis there, its stores marked and the stop oracle holding. #1194's copies of a deep written type (64 levels and
- * copies) are the witness: at the natural allowance they are `valid` in the four modes with no restart (the recorded
- * cost was the alias class's eligibility index, charged to the first decision that asked for it, the sharing on only,
- * #1703); at the demand allowance 1,024 the reversed order's deepest decision stops, and the next path's in the
- * restarted pass, with the sharing on and off.
+ * (docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183): a decision that stops in the
+ * restarted pass stops the analysis there, its stores marked and the stop oracle holding. #1194's copies of a deep
+ * written type (64 levels and copies) are the witness: at the natural allowance they are `valid` in the four modes with
+ * no restart (the recorded cost was the alias class's eligibility index, charged to the first decision that asked for
+ * it, the sharing on only, #1703); at the demand allowance 1,024 the reversed order's deepest decision stops, and the
+ * next path's in the restarted pass, with the sharing on and off.
  */
 test("a decision stopping in the restarted pass stops the analysis: #1194's copies reversed (TABLE r4.183)", () => {
   const source = [
@@ -5993,16 +5993,17 @@ test("a read its one holder's source answers stops where main's does at a small 
 });
 
 /**
- * The owner's one accepted relabel at a combined stop (docs/specifications/type-inference-accepted-record.md#r4-322,
- * #1595, the lead's rulings), each form accepted alone and each condition alone refusing it. A stopped check under a
- * more precise label than the reference's generic one: E, the same root place with some `element` steps below it
- * spelled `entry`; or E2, a place's own text whose path up the compiler's projections is the reference's. Both labels
- * are the compiler's own as recorded with each emitted check (`labelIdentities`), never read back from a site, an
- * expression or a name: a check at a method call names its receiver (Codex r6's `xs["a"].add(...)`, `.clear()`,
- * `xs.values[0].clear()`). The real cases are each program's first relabel at a settled combined stop, proved by the
- * natural analysis at that site and by the written type alone; the unit cases change one part of a real one: the check,
- * its location, its expected types or its words (2, 3), its label's place or steps (3), its proof (1), or a label the
- * recorder did not capture (refused and counted, never inferred).
+ * The owner's one accepted relabel at a combined stop
+ * (docs/specifications/type-inference-accepted-record/oracles.md#r4-322, #1595, the lead's rulings), each form accepted
+ * alone and each condition alone refusing it. A stopped check under a more precise label than the reference's generic
+ * one: E, the same root place with some `element` steps below it spelled `entry`; or E2, a place's own text whose path
+ * up the compiler's projections is the reference's. Both labels are the compiler's own as recorded with each emitted
+ * check (`labelIdentities`), never read back from a site, an expression or a name: a check at a method call names its
+ * receiver (Codex r6's `xs["a"].add(...)`, `.clear()`, `xs.values[0].clear()`). The real cases are each program's first
+ * relabel at a settled combined stop, proved by the natural analysis at that site and by the written type alone; the
+ * unit cases change one part of a real one: the check, its location, its expected types or its words (2, 3), its
+ * label's place or steps (3), its proof (1), or a label the recorder did not capture (refused and counted, never
+ * inferred).
  */
 test("a combined stop's more precise label is accepted only as the owner's three conditions allow (#1595)", () => {
   const mode = HELD_MODES[0]!;

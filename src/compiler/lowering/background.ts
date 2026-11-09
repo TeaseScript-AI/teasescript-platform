@@ -7,7 +7,7 @@ import type {
 } from "../../ast.js";
 import { createSourceSpan } from "../../source.js";
 import type { ExpressionPlan, DelayDisplay, MediaCuePlan } from "../../plan/model.js";
-import { compileChild, type CompileTask } from "../continuation.js";
+import { compileChild, type CompileTask } from "../../compile-continuation.js";
 import { mediaHandlerBlocks, mediaOperands, timerOperands } from "../../expression-children.js";
 import type { InstructionCompiler, LoweredExpression } from "./compiler.js";
 import { planSpan } from "./expression-plans.js";

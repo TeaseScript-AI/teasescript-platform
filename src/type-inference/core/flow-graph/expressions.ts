@@ -1,5 +1,5 @@
 import type { Expression } from "../../../ast.js";
-import { compileChild, type CompileTask } from "../../../compiler/continuation.js";
+import { compileChild, type CompileTask } from "../../../compile-continuation.js";
 import { expressionParts, handlerBlocks, unwrap } from "../../../expression-children.js";
 import { lazyDefaultArgument } from "../../../lazy-defaults.js";
 import { listHasPosition } from "../../../runtime/values/collection-operations.js";

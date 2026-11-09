@@ -171,10 +171,10 @@ test("a forwarder that is not exact names its function as a reference (the split
 });
 
 /*
- * Identity (Codex r1–r3 on #1371; docs/specifications/type-inference-accepted-record.md#r4-182: the closed forms): a
- * function's owner and a forwarder's target are proved only as a top-level declaration of their file, or an unrenamed
- * import from the file declaring it; nothing further is followed. Each case changes the clean split layout on one axis:
- * the reports it must give (a file, or a message's start), or none.
+ * Identity (Codex r1–r3 on #1371; docs/specifications/type-inference-accepted-record/oracles.md#r4-182: the closed
+ * forms): a function's owner and a forwarder's target are proved only as a top-level declaration of their file, or an
+ * unrenamed import from the file declaring it; nothing further is followed. Each case changes the clean split layout on
+ * one axis: the reports it must give (a file, or a message's start), or none.
  */
 const withoutTypedRead = SPLIT_PART.replace(
   "export function typedRead(walk: Consumers): number {\n  return finishingRead(walk, 0);\n}\n",

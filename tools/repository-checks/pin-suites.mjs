@@ -93,7 +93,7 @@ export const NOT_PINS = [
     file: "tests/families-runner/families-baseline-fill.test.ts",
     is: "a runner's fixture timings",
   },
-  { file: "tests/runtime/list-functions.test.ts", is: "random seeds" },
+  { file: "tests/semantic/list-function-checks.test.ts", is: "random seeds" },
   { file: "tests/runtime/message-markup.test.ts", is: "character codes" },
   { file: "tests/runtime/runtime-random.test.ts", is: "a generator's expected states" },
   { file: "tests/type-core/type-core-message-parity.test.ts", is: "random seeds" },
