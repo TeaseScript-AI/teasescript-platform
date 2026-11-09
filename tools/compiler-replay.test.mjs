@@ -588,6 +588,8 @@ test("rerun-shard submits submit's own shard, its index written in and its recor
       .split("\n")
       .map((line) => JSON.parse(line));
     assert.equal(call[call.indexOf("--host") + 1], "laptop");
+    // (a prefix this clone cannot resolve goes as the recorded commit it names, never for the queue to read again)
+    assert.equal(call[call.indexOf(`base=${"b".repeat(40)}`)], `base=${"b".repeat(40)}`);
     assert.equal(call.at(-1), `: replaces ${jobId("a", 5)}; ${expanded.at(-1)}`);
     job(expanded.at(-1).replace("--shard 5/16", "--shard 6/16"));
     assert.equal(rerun("h".repeat(40)).status, 2);

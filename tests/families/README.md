@@ -362,7 +362,8 @@ set and every area above, in 16 shards each. Each step's inputs, in order:
   submission with the shard written in. Its `bash -c` script opens with `: replaces <job>;`, so that the rerun's record
   (`meta.json`'s `command`, kept verbatim) names the job it replaces; `collect` refuses a record naming a job outside
   its shard. `<job>` may itself be a rerun. It is refused when `<job>` ran another script or trees. `<base>` and
-  `<head>` go to the queue as the SHAs this clone resolves them to. `--host` pins the worker.
+  `<head>` go to the queue as full SHAs: what this clone resolves each to, else the job's recorded commit it is a
+  hexadecimal prefix of. `--host` pins the worker.
 - **`rerun-stalls <prefix> <base> <head> --owner <owner> [--memory <MB>] [--host <host>]`:** the standing attempts'
   work records. It reruns their stalled sources on both trees in one job (`<prefix>-rerun`), at 12,288 MB unless given.
   A work record `stalls.mjs` refuses is exit 2, never "no stalled source".
