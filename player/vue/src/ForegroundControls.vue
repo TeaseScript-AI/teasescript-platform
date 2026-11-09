@@ -74,15 +74,18 @@ function syncChoiceRows() {
 }
 
 useResizeObserver(group, syncChoiceRows);
-watch(() => props.foreground, async () => {
-  balanceLastRow.value = false;
-  await nextTick();
-  syncChoiceRows();
-}, { immediate: true });
+watch(
+  () => props.foreground,
+  async () => {
+    balanceLastRow.value = false;
+    await nextTick();
+    syncChoiceRows();
+  },
+  { immediate: true },
+);
 
 const steps = computed(
-  (): ImageControls =>
-    props.image ?? { phase: "choose", camera: false, file: false, ready: false },
+  (): ImageControls => props.image ?? { phase: "choose", camera: false, file: false, ready: false },
 );
 // "Use image" stays focusable while there is no image yet: pointing at it, focusing it from the keyboard, or pressing it
 // shows why it does not answer, and its description tells a screen reader.
@@ -138,7 +141,11 @@ function focusOut(event: FocusEvent) {
     @focusout="focusOut"
   >
     <template v-if="foreground.kind === 'choose'">
-      <div v-for="(row, index) in choiceRows" :key="index" class="flex w-full min-w-0 flex-wrap justify-center gap-2">
+      <div
+        v-for="(row, index) in choiceRows"
+        :key="index"
+        class="flex w-full min-w-0 flex-wrap justify-center gap-2"
+      >
         <PlayerActionButton
           v-for="option in row"
           :key="option.id"

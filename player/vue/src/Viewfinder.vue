@@ -114,5 +114,7 @@ onBeforeUnmount(() => {
   /* The window's corners: Firefox does not clip a transformed video to them. */
   border-radius: var(--viewfinder-video-radius, 0);
 }
-.viewfinder-mirrored { transform: scaleX(-1); }
+.viewfinder-mirrored {
+  transform: scaleX(-1);
+}
 </style>

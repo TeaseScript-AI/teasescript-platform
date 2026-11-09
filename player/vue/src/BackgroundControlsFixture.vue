@@ -10,7 +10,9 @@ const enabled = ref(false);
   <div class="background-controls-fixture">
     <PlayerActionButton>Repeat</PlayerActionButton>
     <PlayerActionButton :aria-pressed="enabled" @click="enabled = !enabled">
-      <span>Extra challenge <span class="block font-normal">{{ enabled ? 'On' : 'Off' }}</span></span>
+      <span
+        >Extra challenge <span class="block font-normal">{{ enabled ? "On" : "Off" }}</span></span
+      >
       <Check class="size-4 shrink-0" :class="{ invisible: !enabled }" aria-hidden="true" />
     </PlayerActionButton>
     <PlayerActionButton>Give me a hint</PlayerActionButton>

@@ -131,10 +131,18 @@ const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ??
       <div class="flex min-w-0 flex-wrap items-center gap-2" data-debug-trace-status>
         <span class="text-muted-foreground">{{ origins[status.origin] }}</span>
         <!-- Tags and actions are plain elements that wrap in the narrowest panel. -->
-        <span v-if="status.truncated" class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere" data-debug-trace-truncated>
+        <span
+          v-if="status.truncated"
+          class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere"
+          data-debug-trace-truncated
+        >
           Earlier history unavailable
         </span>
-        <span v-if="!status.recording" class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere text-destructive">Recording stopped</span>
+        <span
+          v-if="!status.recording"
+          class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere text-destructive"
+          >Recording stopped</span
+        >
         <span v-if="!status.recording" class="min-w-0 text-muted-foreground wrap-anywhere">{{
           status.failure
         }}</span>
@@ -215,7 +223,11 @@ const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ??
           data-debug-background-toggle
         >
           <span class="min-w-0 wrap-anywhere">Background / all live variables</span>
-          <component :is="open ? ChevronUp : ChevronDown" class="size-4 shrink-0" aria-hidden="true" />
+          <component
+            :is="open ? ChevronUp : ChevronDown"
+            class="size-4 shrink-0"
+            aria-hidden="true"
+          />
         </CollapsibleTrigger>
         <CollapsibleContent class="grid gap-3">
           <Input
@@ -270,9 +282,7 @@ const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ??
               @click="groupPages.set(group.key, (groupPages.get(group.key) ?? 1) + 1)"
             >
               Show
-              {{
-                Math.min(group.total - shown(group.key), PLAYER_DEBUG_TRACE_PAGE)
-              }}
+              {{ Math.min(group.total - shown(group.key), PLAYER_DEBUG_TRACE_PAGE) }}
               more
             </button>
           </section>

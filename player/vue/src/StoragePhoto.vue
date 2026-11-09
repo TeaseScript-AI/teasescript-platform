@@ -18,8 +18,20 @@ const photo = computed(() =>
 </script>
 
 <template>
-  <span ref="root" class="inline-flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted" data-storage-photo :data-state="photo.state">
-    <img v-if="photo.state === 'ready'" :src="photo.url" alt="Saved photo" class="size-full object-cover" />
-    <span v-else class="p-1 text-center text-muted-foreground">{{ photo.state === "missing" ? "No saved photo" : "…" }}</span>
+  <span
+    ref="root"
+    class="inline-flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted"
+    data-storage-photo
+    :data-state="photo.state"
+  >
+    <img
+      v-if="photo.state === 'ready'"
+      :src="photo.url"
+      alt="Saved photo"
+      class="size-full object-cover"
+    />
+    <span v-else class="p-1 text-center text-muted-foreground">{{
+      photo.state === "missing" ? "No saved photo" : "…"
+    }}</span>
   </span>
 </template>

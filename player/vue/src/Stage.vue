@@ -99,8 +99,25 @@ function cameraMeasured(ratio: number) {
 <template>
   <section class="player-stage" aria-label="Primary stage">
     <div class="stage-media-frame">
-      <img v-if="media" v-show="failedSource === null && !preview" ref="imageElement" :src="media.src" :alt="media.alt" :data-stage-source="media.source" class="stage-media" @load="mediaLoaded" @error="mediaFailed" />
-      <img v-if="preview" :src="preview.src" :alt="preview.alt" class="stage-media" data-stage-preview @load="previewLoaded" />
+      <img
+        v-if="media"
+        v-show="failedSource === null && !preview"
+        ref="imageElement"
+        :src="media.src"
+        :alt="media.alt"
+        :data-stage-source="media.source"
+        class="stage-media"
+        @load="mediaLoaded"
+        @error="mediaFailed"
+      />
+      <img
+        v-if="preview"
+        :src="preview.src"
+        :alt="preview.alt"
+        class="stage-media"
+        data-stage-preview
+        @load="previewLoaded"
+      />
       <div
         v-else-if="camera || $slots.camera"
         class="stage-camera"
@@ -137,14 +154,25 @@ function cameraMeasured(ratio: number) {
   container: player-stage / size;
 }
 .stage-media-frame {
-  position: absolute; top: 0; bottom: 0;
-  left: var(--content-offset); width: var(--content-width);
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--content-offset);
+  width: var(--content-width);
 }
-.stage-media { display: block; width: 100%; height: 100%; object-fit: contain; }
+.stage-media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
 /* Over the image, at the camera's aspect, as large as the Stage allows. */
 .stage-camera {
-  position: absolute; inset: 0; margin: auto;
-  width: min(100%, 100cqh * var(--viewfinder-ratio)); max-height: 100%;
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: min(100%, 100cqh * var(--viewfinder-ratio));
+  max-height: 100%;
   /* Its own height, so the margins centre it like the image underneath. */
   aspect-ratio: var(--viewfinder-ratio);
 }

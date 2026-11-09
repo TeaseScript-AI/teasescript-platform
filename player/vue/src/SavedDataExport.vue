@@ -48,7 +48,9 @@ const gzip = gzipSupported();
 const scripts = shallowRef<readonly SavedScript[] | "reading" | "failed">("reading");
 const listed = computed(() => (typeof scripts.value === "object" ? scripts.value : []));
 const chosen = shallowRef<ReadonlySet<string>>(new Set());
-const chosenScripts = computed(() => listed.value.filter((saved) => chosen.value.has(saved.script.scope)));
+const chosenScripts = computed(() =>
+  listed.value.filter((saved) => chosen.value.has(saved.script.scope)),
+);
 type Prepared = {
   readonly url: string;
   readonly size: number;
@@ -124,7 +126,10 @@ async function prepare() {
     state.value = {
       url: URL.createObjectURL(file),
       size: file.size,
-      fileName: storageTransferFileName(saved.length === 1 ? label(saved[0]!) : "teasescript", gzip),
+      fileName: storageTransferFileName(
+        saved.length === 1 ? label(saved[0]!) : "teasescript",
+        gzip,
+      ),
       text: () => storageTransferText(bundle, gzip),
     };
   } catch {
@@ -134,7 +139,8 @@ async function prepare() {
 // The preparation whose text is being encoded, so switching tabs meanwhile does not encode it again.
 let encoding = -1;
 watch([tab, prepared], async ([selected, ready]) => {
-  if (selected !== "text" || ready === null || text.value !== null || encoding === preparation) return;
+  if (selected !== "text" || ready === null || text.value !== null || encoding === preparation)
+    return;
   const current = (encoding = preparation);
   const result = await ready.text().catch(() => null);
   if (current !== preparation) return;
@@ -205,7 +211,8 @@ async function copyText() {
 function label(saved: SavedScript): string {
   return saved.script.name ?? saved.script.scope;
 }
-const count = (amount: number, one: string, many: string) => `${amount} ${amount === 1 ? one : many}`;
+const count = (amount: number, one: string, many: string) =>
+  `${amount} ${amount === 1 ? one : many}`;
 function formatSize(bytes: number): string {
   if (bytes < 1024) return count(bytes, "byte", "bytes");
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -238,12 +245,21 @@ function sessionContents(read: SessionExport): string {
     <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto" data-saved-data-export>
       <DialogHeader>
         <DialogTitle>Export</DialogTitle>
-        <DialogDescription>Takes saved data, or the session you play, to another browser or device.</DialogDescription>
+        <DialogDescription
+          >Takes saved data, or the session you play, to another browser or
+          device.</DialogDescription
+        >
       </DialogHeader>
       <fieldset class="grid gap-1 text-sm" data-export-kind>
         <legend class="sr-only">What to export</legend>
         <label class="flex min-h-11 items-start gap-3 rounded-md px-2 py-2">
-          <input v-model="kind" type="radio" name="export-kind" value="savedData" class="mt-1 size-4" />
+          <input
+            v-model="kind"
+            type="radio"
+            name="export-kind"
+            value="savedData"
+            class="mt-1 size-4"
+          />
           <span class="min-w-0">
             <span class="block font-medium">Saved data</span>
             <span class="block text-muted-foreground">
@@ -287,12 +303,26 @@ function sessionContents(read: SessionExport): string {
           <fieldset class="grid gap-2 text-sm">
             <legend class="sr-only">Scripts to export</legend>
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <p data-export-summary>{{ chosenScripts.length }} of {{ count(listed.length, "script", "scripts") }}</p>
+              <p data-export-summary>
+                {{ chosenScripts.length }} of {{ count(listed.length, "script", "scripts") }}
+              </p>
               <div class="flex gap-2">
-                <Button variant="outline" size="sm" class="min-h-11" data-export-all @click="chooseAll(true)">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="min-h-11"
+                  data-export-all
+                  @click="chooseAll(true)"
+                >
                   Select all
                 </Button>
-                <Button variant="outline" size="sm" class="min-h-11" data-export-none @click="chooseAll(false)">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="min-h-11"
+                  data-export-none
+                  @click="chooseAll(false)"
+                >
                   Select none
                 </Button>
               </div>
@@ -315,7 +345,8 @@ function sessionContents(read: SessionExport): string {
                       </span>
                       <span class="block text-muted-foreground">
                         {{ count(saved.script.entries.length, "value", "values") }} ·
-                        {{ count(saved.photos.length, "photo", "photos") }} · {{ formatSize(saved.size) }}
+                        {{ count(saved.photos.length, "photo", "photos") }} ·
+                        {{ formatSize(saved.size) }}
                       </span>
                     </span>
                   </label>
@@ -323,13 +354,19 @@ function sessionContents(read: SessionExport): string {
               </ul>
             </ScrollArea>
             <p v-if="missingPhotos > 0">
-              {{ count(missingPhotos, "saved photo reference has", "saved photo references have") }} no stored photo;
-              the export keeps them as text.
+              {{ count(missingPhotos, "saved photo reference has", "saved photo references have") }}
+              no stored photo; the export keeps them as text.
             </p>
-            <p class="text-muted-foreground">The export can contain private photos; anyone who has it can see them.</p>
+            <p class="text-muted-foreground">
+              The export can contain private photos; anyone who has it can see them.
+            </p>
           </fieldset>
-          <p v-if="chosenScripts.length === 0" class="text-sm">Tick at least one script to export.</p>
-          <p v-else-if="state === 'preparing'" role="status" class="text-sm">Preparing the export…</p>
+          <p v-if="chosenScripts.length === 0" class="text-sm">
+            Tick at least one script to export.
+          </p>
+          <p v-else-if="state === 'preparing'" role="status" class="text-sm">
+            Preparing the export…
+          </p>
           <Alert v-else-if="state === 'failed'" variant="destructive">
             <AlertDescription>Could not prepare the export of these scripts.</AlertDescription>
           </Alert>
@@ -338,7 +375,9 @@ function sessionContents(read: SessionExport): string {
       <template v-else>
         <p v-if="state === 'preparing'" role="status" class="text-sm">Preparing the export…</p>
         <Alert v-else-if="state === 'failed'" variant="destructive" data-export-session-problem>
-          <AlertDescription>{{ problem ?? "Could not prepare the export of this session." }}</AlertDescription>
+          <AlertDescription>{{
+            problem ?? "Could not prepare the export of this session."
+          }}</AlertDescription>
         </Alert>
         <div v-else-if="exportedSession" class="grid gap-2 text-sm" data-export-session>
           <p>
@@ -355,8 +394,8 @@ function sessionContents(read: SessionExport): string {
             }}
           </p>
           <p class="text-muted-foreground">
-            The export contains the session's messages and answers and can contain private photos. Anyone who has it can
-            see them.
+            The export contains the session's messages and answers and can contain private photos.
+            Anyone who has it can see them.
           </p>
         </div>
       </template>
@@ -368,9 +407,12 @@ function sessionContents(read: SessionExport): string {
         <TabsContent value="file">
           <div class="grid gap-3 text-sm">
             <p v-if="kind === 'session'">
-              Open this script in the other browser, import this file in Settings, then press Continue.
+              Open this script in the other browser, import this file in Settings, then press
+              Continue.
             </p>
-            <p v-else>One file with the values and photos. Import it in the Settings of the other Player.</p>
+            <p v-else>
+              One file with the values and photos. Import it in the Settings of the other Player.
+            </p>
             <Button as-child class="min-h-11 justify-self-start">
               <a :href="prepared.url" :download="prepared.fileName" data-export-download>
                 <Download />
@@ -387,12 +429,12 @@ function sessionContents(read: SessionExport): string {
         <TabsContent value="text">
           <div class="grid gap-3 text-sm">
             <p v-if="kind === 'session'">
-              Open this script in the other browser, paste this text into Import in Settings, then press Continue. With
-              many photos, a file is easier to move.
+              Open this script in the other browser, paste this text into Import in Settings, then
+              press Continue. With many photos, a file is easier to move.
             </p>
             <p v-else>
-              Copy this text and paste it into Import in the Settings of the other Player. With many photos, a file is
-              easier to move.
+              Copy this text and paste it into Import in the Settings of the other Player. With many
+              photos, a file is easier to move.
             </p>
             <p v-if="text === null" role="status">Preparing the text…</p>
             <template v-else>
@@ -401,7 +443,9 @@ function sessionContents(read: SessionExport): string {
                 :model-value="text"
                 readonly
                 rows="6"
-                :aria-label="kind === 'session' ? 'Exported session as text' : 'Exported saved data as text'"
+                :aria-label="
+                  kind === 'session' ? 'Exported session as text' : 'Exported saved data as text'
+                "
                 class="max-h-48 break-all"
                 data-export-text
                 @focus="selectText"

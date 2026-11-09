@@ -83,7 +83,9 @@ const material = computed(() =>
     :data-accent="accent ? '' : undefined"
     :aria-keyshortcuts="preselected ? playerKeys.preselectedButton.name : undefined"
   >
-    <span v-if="props.label !== undefined" ref="labelElement" class="player-action-label">{{ props.label }}</span>
+    <span v-if="props.label !== undefined" ref="labelElement" class="player-action-label">{{
+      props.label
+    }}</span>
     <slot v-else />
   </Button>
 </template>
@@ -109,7 +111,10 @@ const material = computed(() =>
   border-radius: 9px;
   color: var(--story-choice-ink);
   background: linear-gradient(var(--story-choice-top), var(--story-choice-bottom));
-  box-shadow: var(--player-action-ring), inset 0 1px 0 #ffffff24, 0 1px 0 var(--story-choice-depth),
+  box-shadow:
+    var(--player-action-ring),
+    inset 0 1px 0 #ffffff24,
+    0 1px 0 var(--story-choice-depth),
     0 2px 3px #00000020;
   transition: box-shadow 100ms;
 }
@@ -136,13 +141,19 @@ const material = computed(() =>
 .player-action-button:hover:not(:disabled, [aria-disabled="true"]) {
   border-color: var(--story-choice-rim);
   background: linear-gradient(var(--story-choice-hover-top), var(--story-choice-hover-bottom));
-  box-shadow: var(--player-action-ring), inset 0 1px 0 #ffffff35, 0 1px 0 var(--story-choice-depth),
+  box-shadow:
+    var(--player-action-ring),
+    inset 0 1px 0 #ffffff35,
+    0 1px 0 var(--story-choice-depth),
     0 3px 5px #00000024;
 }
 .player-action-button:active:not(:disabled, [aria-disabled="true"]) {
   border-color: var(--story-choice-rim);
   background: var(--story-choice-pressed);
-  box-shadow: var(--player-action-ring), inset 0 1px 2px #00000022, 0 1px 0 var(--story-choice-depth);
+  box-shadow:
+    var(--player-action-ring),
+    inset 0 1px 2px #00000022,
+    0 1px 0 var(--story-choice-depth);
 }
 /* Disabled actions use the shared theme roles, not opacity over an arbitrary background. */
 .player-action-button:disabled,
@@ -163,6 +174,8 @@ const material = computed(() =>
   outline-offset: calc(1px + var(--player-focus-offset));
 }
 @media (prefers-reduced-motion: reduce) {
-  .player-action-button { transition: none; }
+  .player-action-button {
+    transition: none;
+  }
 }
 </style>

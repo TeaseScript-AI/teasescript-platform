@@ -4,7 +4,6 @@ import {
   lstatSync,
   mkdtempSync,
   readFileSync,
-  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
@@ -38,13 +37,11 @@ import { costlyTestSeconds } from "./costly-test-files.mjs";
 // end, also on SIGINT, SIGTERM and SIGHUP; only killing this process outright (`kill -9`) leaves it, for `git worktree
 // prune` and the temporary folder's cleanup.
 //
+// Without `node_modules`, which it never installs, it links main's: that of the checkout `TEASESCRIPT_MAIN` names
+// (unset or empty, `/opt/teasescript-agents/teasescript-main/current`), as `linkMainNodeModules` says.
+//
 // Exit status: 0 when every check passed, 1 when one failed, 2 when the checks cannot run (no base, a merge conflict,
-// a leftover it may not remove, or no `node_modules`, which it never installs: it names the fix). The fix it names is
-// a command that links main's `node_modules` in the checkout `TEASESCRIPT_MAIN` names (by default
-// `/opt/teasescript-agents/teasescript-main/current`) when that folder has one, by the absolute path the system opens
-// for it (`mainLinkCommand`): run as printed, it links that very folder. Over a stale link (`staleLink`: one whose
-// target is confirmed gone, not one it may not read) it says so and names the command that replaces only that link.
-// Else it names the merge-base's tree from `sx-tree`, or `npm ci`.
+// a leftover it may not remove, or no `node_modules` it can link).
 
 /** The projects a changed path can belong to, each with the npm scripts or commands that check it. */
 export const PROJECTS = {
@@ -137,7 +134,7 @@ export function unknownToCostly(paths) {
 }
 
 /** The extensions `npm run format:check` covers. */
-const FORMATTED = /\.(?:ts|tsx|cts|mts|js|jsx|cjs|mjs)$/u;
+const FORMATTED = /\.(?:ts|tsx|cts|mts|js|jsx|cjs|mjs|vue)$/u;
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
 
@@ -172,45 +169,42 @@ const TEMPORARY_PREFIX = join(tmpdir(), "check-changed-merged-");
 export const MAIN_CHECKOUT = "/opt/teasescript-agents/teasescript-main/current";
 
 /**
- * Whether `cwd`'s `node_modules` is a link whose target is confirmed gone: `lstat` finds a link, and opening it fails
- * because a part of its target does not exist (`ENOENT`, `ENOTDIR`). A target it may not read (`EACCES`), a loop, or
- * any other failure is not confirmed, so the link is not stale.
+ * Links main's `node_modules` into `cwd` and says what it linked: the `node_modules` folder of the checkout
+ * `TEASESCRIPT_MAIN` names in `env` (relative to `cwd`; unset or empty, `fallback`), as the system opens it. A link
+ * already there whose target is gone (`ENOENT`, `ENOTDIR`) it replaces. Anything else there, or no such folder, it
+ * refuses with why and the two fixes, and leaves as it is.
  */
-export function staleLink(cwd) {
-  try {
-    if (!lstatSync(`${cwd}/node_modules`).isSymbolicLink()) return false;
-  } catch {
-    return false;
-  }
-  try {
-    statSync(`${cwd}/node_modules`);
-    return false;
-  } catch (error) {
-    return error.code === "ENOENT" || error.code === "ENOTDIR";
-  }
-}
-
-/**
- * The command that links main's `node_modules` into `cwd`, or `null` when there is none: in the checkout
- * `TEASESCRIPT_MAIN` names in `env` (relative to `cwd`), unset or empty `fallback`. The folder is named by the path the
- * system opens for the configured one (`realpath`, which follows a link before a `..` after it), absolute, so `ln`
- * reads it as its target and never as an option, and as one shell word. Over a stale link (`staleLink`) the command
- * replaces that link (`ln -sfn`); it never replaces anything else.
- */
-export function mainLinkCommand(env, cwd, fallback = MAIN_CHECKOUT) {
+export function linkMainNodeModules(env, cwd, fallback = MAIN_CHECKOUT) {
   const main = env.TEASESCRIPT_MAIN || fallback;
-  let real;
+  const refuse = (why) =>
+    cannotRun(
+      `no node_modules, and ${why}: run \`npm ci\`, or set TEASESCRIPT_MAIN to a checkout of main that has node_modules`,
+    );
+  const target = join(cwd, "node_modules");
+  let there = null;
   try {
-    real = realpathSync.native(`${isAbsolute(main) ? "" : `${cwd}/`}${main}/node_modules`);
-  } catch {
-    return null;
+    there = lstatSync(target);
+  } catch {}
+  if (there !== null) {
+    let gone = false;
+    try {
+      if (there.isSymbolicLink()) statSync(target);
+    } catch (error) {
+      gone = error.code === "ENOENT" || error.code === "ENOTDIR";
+    }
+    if (!gone)
+      refuse("node_modules is there but is no link whose target is gone, so it is left as it is");
   }
-  return `ln ${staleLink(cwd) ? "-sfn" : "-s"} ${shellWord(real)} node_modules`;
-}
-
-/** `text` as one shell word: as it is when it holds only safe characters, else in single quotes. */
-export function shellWord(text) {
-  return /^[\w./@%+=:,-]+$/u.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`;
+  let source;
+  try {
+    source = realpathSync.native(`${isAbsolute(main) ? "" : `${cwd}/`}${main}/node_modules`);
+    if (!statSync(source).isDirectory()) throw Object.assign(new Error(), { code: "not a folder" });
+  } catch (error) {
+    refuse(`${main} has no node_modules folder (${error.code})`);
+  }
+  if (there !== null) rmSync(target);
+  symlinkSync(source, target);
+  return `${there === null ? "linked" : "replaced a stale link with"} node_modules from ${source}`;
 }
 
 /**
@@ -334,15 +328,7 @@ function enterMerge(ref, cleanups) {
 async function check(cleanups) {
   const { merged, ref } = options(process.argv.slice(2));
   if (!existsSync("node_modules")) {
-    const link = mainLinkCommand(process.env, process.cwd());
-    const stale = staleLink(process.cwd())
-      ? `node_modules is a stale link (to ${readlinkSync("node_modules")}): `
-      : "";
-    cannotRun(
-      link !== null
-        ? `no node_modules: ${stale}${stale === "" ? "link it" : "replace it"} with \`${link}\``
-        : `no node_modules: ${stale}${stale === "" ? "" : "remove it, then "}link \`$(sx-tree ${spawnSync("git", ["merge-base", "HEAD", ref], { encoding: "utf8" }).stdout.trim() || "<merge-base SHA>"})/node_modules\`, or run \`npm ci\``,
-    );
+    process.stdout.write(`check-changed: ${linkMainNodeModules(process.env, process.cwd())}\n`);
   }
   let mergeBase;
   if (merged) mergeBase = enterMerge(ref, cleanups);

@@ -45,10 +45,11 @@ function timerLabel(timer: PlayerTimerPresentation, index: number): string | nul
   gap: 1rem;
 }
 
-
 .stage-timer-enter-active,
 .stage-timer-leave-active {
-  transition: opacity 260ms ease, scale 260ms ease;
+  transition:
+    opacity 260ms ease,
+    scale 260ms ease;
 }
 
 .stage-timer-enter-from,
@@ -59,8 +60,12 @@ function timerLabel(timer: PlayerTimerPresentation, index: number): string | nul
 
 @media (prefers-reduced-motion: reduce) {
   .stage-timer-enter-active,
-  .stage-timer-leave-active { transition: opacity 160ms linear; }
+  .stage-timer-leave-active {
+    transition: opacity 160ms linear;
+  }
   .stage-timer-enter-from,
-  .stage-timer-leave-to { scale: 1; }
+  .stage-timer-leave-to {
+    scale: 1;
+  }
 }
 </style>

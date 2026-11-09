@@ -37,5 +37,7 @@ defineProps<{ failure: ScriptFailure }>();
   padding: var(--player-header-size) var(--player-edge-space);
   pointer-events: none;
 }
-.script-failure > * { pointer-events: auto; }
+.script-failure > * {
+  pointer-events: auto;
+}
 </style>
