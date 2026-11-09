@@ -111,7 +111,7 @@ its safety net has run out (#1498). After the kill the runner waits for the proc
 descendant holding its stderr delays the next source (no compiler or oracle code spawns one). A run that throws on
 either tree is an exception, never compared, because identical exceptions on both trees are not agreement (#1439): the
 runner prints it on stderr with its source, mode and check, writes it with each stack to `--out` and counts it apart
-from stalls, in a source that stalls later too (`tests/families-runner.test.ts`, in CI). A publication is had only up to
+from stalls, in a source that stalls later too (`tests/families-runner-compare.test.ts`, in CI). A publication is had only up to
 the oracle's own stop. Its own questions (each binding's admitted types, then the occurrences) run apart from the
 analysis's allowance and stop after the one whose units pass the program's allowance plus 64 per cell returned (an
 occurrence's answer, its element's and each property's; two a binding), where 640 bytes per cell returned pass
