@@ -200,8 +200,11 @@ export function setDifference({ base: b, head: h, same }) {
   return b.questions !== h.questions ? "questions" : "work";
 }
 
-/** The report of a replay's campaigns under `results`. */
-export function report(prefix, results) {
+/**
+ * The report of a replay's campaigns under `results`. `expected` names the areas `submit` queued (this tree's, as
+ * `areasOf` takes them): an area with no shard in the results is not run, never equal.
+ */
+export function report(prefix, results, expected = areasOf(ROOT).map((a) => a.name)) {
   const areas = new Map();
   const notRun = [];
   const work = [];
@@ -255,7 +258,7 @@ export function report(prefix, results) {
           .map((f) => path.join(out, "rerun", f))
       : [],
   );
-  const stalls = { stalled: 0, candidate: 0, unknown: 0, unavailable: 0 };
+  const stalls = { stalled: 0, candidate: 0, unknown: 0, unavailable: 0, unread: null };
   if (work.length > 0) {
     const run = spawnSync(
       process.execPath,
@@ -271,11 +274,17 @@ export function report(prefix, results) {
       .filter((l) => l.startsWith("{"))
       .map((l) => JSON.parse(l))
       .find((l) => l.total === true);
-    for (const key of Object.keys(stalls)) stalls[key] = total?.[key] ?? 0;
+    // (`stalls.mjs` refuses records it cannot read or merge, a rerun of another configuration among them: no verdict)
+    if (total === undefined || run.status === 2)
+      stalls.unread = (run.stderr.trim() || run.stdout.trim()).split("\n").at(-1) ?? "no total";
+    else
+      for (const key of ["stalled", "candidate", "unknown", "unavailable"])
+        stalls[key] = total[key] ?? 0;
   }
   const aside = jobsOf(results, `${prefix}-aside`).flatMap(({ out }) =>
     lines(path.join(out, "aside.jsonl")),
   );
+  for (const name of expected) if (!areas.has(name)) notRun.push(`${name}: 0 of ${SHARDS}`);
   for (const [name, { shards }] of areas)
     if (shards < SHARDS && !notRun.some((job) => job.startsWith(`${name}-`)))
       notRun.push(`${name}: ${shards} of ${SHARDS}`);
@@ -302,6 +311,7 @@ export function verdict(r) {
       if (a[key] > 0) reasons.push(`${name}: ${a[key]} ${key}`);
   if (r.set.stalled + r.set.uncharged > 0)
     reasons.push(`set: ${r.set.stalled} stalled, ${r.set.uncharged} uncharged`);
+  if (r.stalls.unread !== null) reasons.push(`stalls: not judged (${r.stalls.unread})`);
   if (r.stalls.candidate + r.stalls.unknown + r.stalls.unavailable > 0)
     reasons.push(
       `stalls: ${r.stalls.candidate} candidate, ${r.stalls.unknown} unknown, ${r.stalls.unavailable} uncompared`,
@@ -408,7 +418,12 @@ const MODE_OF = {
 
 /** A declaration file's patterns: each `{ pattern, reason }`, compiled; a malformed one is a usage error. */
 export function declarations(text) {
-  const list = JSON.parse(text);
+  let list;
+  try {
+    list = JSON.parse(text);
+  } catch (error) {
+    throw new Usage(`the declaration file is no JSON: ${error.message}`);
+  }
   if (!Array.isArray(list) || list.length === 0)
     throw new Usage("the declaration file is a non-empty JSON list");
   return list.map((entry) => {
@@ -422,6 +437,17 @@ export function declarations(text) {
   });
 }
 
+/** The declaration file at `file`; one it cannot read or parse is a usage error. */
+function declarationsOf(file) {
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (error) {
+    throw new Usage(`the declaration file cannot be read: ${error.message}`);
+  }
+  return declarations(text);
+}
+
 /** `text` with every declared pattern removed. */
 export const setAside = (text, declared) =>
   declared.reduce((t, { regex }) => t.replace(regex, ""), text);
@@ -429,7 +455,7 @@ export const setAside = (text, declared) =>
 function aside({ positional: [prefix, base, head], options }) {
   if (head === undefined || options.owner === undefined || options.declare === undefined)
     throw new Usage(USAGE);
-  const declared = declarations(readFileSync(options.declare, "utf8"));
+  const declared = declarationsOf(options.declare);
   const r = report(
     prefix,
     options.results ?? path.join(homedir(), "jobs", "results", options.owner),
@@ -487,7 +513,7 @@ function aside({ positional: [prefix, base, head], options }) {
 
 /** On a queue worker: each row compiled on both built trees (`aside`'s job). */
 async function asideRun({ positional: [base, head, rows, declare, out] }) {
-  const declared = declarations(readFileSync(declare, "utf8"));
+  const declared = declarationsOf(declare);
   const load = async (tree) =>
     import(pathToFileURL(path.join(tree, "dist/tests/helpers/type-core-oracles.js")).href);
   const [b, h] = [await load(base), await load(head)];

@@ -102,6 +102,7 @@ function results(prefix, shard) {
         { area: "rings", sources: 2, runs: 8, differences: area.differences?.length ?? 0 },
       ]);
     write(join(a, "rings.differences.jsonl"), area.differences ?? []);
+    if (area.work !== undefined) write(join(a, "rings.work.jsonl"), area.work);
     const s = job("set", `set-${i}of16`);
     if (set.ran !== false)
       write(join(s, "plans.log"), [
@@ -119,8 +120,8 @@ test("collect: every shard ran and nothing differs is equal; a shard with no sum
   const equal = results("p", () => ({}));
   const missing = results("p", (i) => (i === 5 ? { area: { ran: false } } : {}));
   try {
-    assert.deepEqual(verdict(report("p", equal)), { status: 0, reasons: [] });
-    const { status, reasons } = verdict(report("p", missing));
+    assert.deepEqual(verdict(report("p", equal, ["rings"])), { status: 0, reasons: [] });
+    const { status, reasons } = verdict(report("p", missing, ["rings"]));
     assert.equal(status, 3);
     assert.deepEqual(reasons, ["not run: rings-5of16"]);
   } finally {
@@ -145,7 +146,7 @@ test("collect: a route-only difference stands until aside agrees; an earlier par
     i === 0 ? { area: { differences: [route, earlier, stall] } } : {},
   );
   try {
-    const r = report("p", root);
+    const r = report("p", root, ["rings"]);
     assert.deepEqual(
       r.differences.map((d) => [d.source, d.routeOnly]),
       [
@@ -192,7 +193,7 @@ test("collect: a set mode differing in its diagnostics alone stands until aside 
   ];
   const root = results("p", (i) => (i === 0 ? { set: { records } } : {}));
   try {
-    const r = report("p", root);
+    const r = report("p", root, ["rings"]);
     assert.deepEqual(r.set.differences, [{ name: "n", mode: 1, what: "diagnostics only" }]);
     assert.equal(verdict(r).status, 1);
     // (the set's mode 1 is the reversed shared one, `HELD_MODES`' order)
@@ -234,5 +235,118 @@ test("a step the tool does not have, or one missing its arguments, is a usage er
   for (const args of [[], ["replay"], ["submit", "b"], ["collect", "p"]]) {
     const run = spawnSync(process.execPath, [tool, ...args], { encoding: "utf8" });
     assert.equal(run.status, 2, args.join(" "));
+  }
+});
+
+test("collect: an area with no shard, a stall verdict stalls.mjs refuses, an uncompared stall and a plan apart are never equal", () => {
+  const root = results("p", (i) =>
+    i === 0 ? { area: { work: [{ work: { area: "rings", roots: [] } }] } } : {},
+  );
+  try {
+    // (an area `submit` queued that left no shard at all: not run)
+    assert.deepEqual(
+      verdict(report("p", root, ["rings", "property"])).reasons.includes(
+        "not run: property: 0 of 16",
+      ),
+      true,
+    );
+    // (a record stalls.mjs refuses, as a rerun of another configuration: no verdict, never zero stalls)
+    const r = report("p", root, ["rings"]);
+    assert.notEqual(r.stalls.unread, null);
+    assert.equal(verdict(r).status, 1);
+    assert.match(verdict(r).reasons.join("\n"), /stalls: not judged/u);
+    const judged = {
+      ...r,
+      stalls: { stalled: 2, candidate: 0, unknown: 0, unavailable: 2, unread: null },
+    };
+    assert.deepEqual(verdict(judged).reasons, ["stalls: 0 candidate, 0 unknown, 2 uncompared"]);
+    const plan = {
+      ...r,
+      stalls: { ...judged.stalls, stalled: 0, unavailable: 0 },
+      aside: [{ source: "s", mode: "rev-on", planEqual: false, asideEqual: true }],
+    };
+    assert.deepEqual(verdict(plan).reasons, ["aside s rev-on: plan ≠, text = aside"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("aside's job compares each row's plan byte for byte and its route with the declared text set aside, on two built trees", () => {
+  // (two stand-in built trees: the base's route says "60 checks", the head's "1 check"; the row `plan` differs in its plan)
+  const trees = mkdtempSync(join(tmpdir(), "compiler-replay-trees-"));
+  const tree = (name, count) => {
+    const helpers = join(trees, name, "dist", "tests", "helpers");
+    mkdirSync(helpers, { recursive: true });
+    writeFileSync(
+      join(helpers, "type-core-oracles.js"),
+      `export const inMode = (mode, run) => run();\nexport const jsonText = (value) => JSON.stringify(value);\n` +
+        `export const publishedRoute = (files) => ({ plan: { typeCheck: files[0].source === "plan" ? "${name}" : "t" }, ` +
+        `text: "Too large. ${count} while it plays instead. Most" });\n`,
+    );
+    writeFileSync(
+      join(helpers, "plan-checks.js"),
+      "export const planChecks = (plan) => Object.keys(plan).length;\n",
+    );
+    return join(trees, name);
+  };
+  const [base, head] = [tree("base", "60 checks run"), tree("head", "1 check runs")];
+  const rows = join(trees, "rows.jsonl");
+  writeFileSync(
+    rows,
+    [
+      { source: "text", mode: "rev-on", files: [{ path: "main.tease", source: "text" }] },
+      { source: "plan", mode: "rev-off", files: [{ path: "main.tease", source: "plan" }] },
+    ]
+      .map((row) => JSON.stringify(row))
+      .join("\n"),
+  );
+  const declare = join(trees, "declare.json");
+  writeFileSync(
+    declare,
+    JSON.stringify([{ pattern: " \\d+ checks? runs? while it plays instead\\.", reason: "#2081" }]),
+  );
+  const out = join(trees, "aside.jsonl");
+  try {
+    const run = spawnSync(process.execPath, [tool, "aside-run", base, head, rows, declare, out], {
+      encoding: "utf8",
+    });
+    assert.equal(run.status, 0, run.stderr);
+    const written = readFileSync(out, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      written.map(({ source, planEqual, textEqual, asideEqual, checks }) => ({
+        source,
+        planEqual,
+        textEqual,
+        asideEqual,
+        checks,
+      })),
+      [
+        { source: "text", planEqual: true, textEqual: false, asideEqual: true, checks: [1, 1] },
+        { source: "plan", planEqual: false, textEqual: false, asideEqual: true, checks: [1, 1] },
+      ],
+    );
+  } finally {
+    rmSync(trees, { recursive: true, force: true });
+  }
+});
+
+test("a declaration file the tool cannot read or parse is a usage error, exit 2", () => {
+  const folder = mkdtempSync(join(tmpdir(), "compiler-replay-declare-"));
+  writeFileSync(join(folder, "bad.json"), "not json");
+  try {
+    for (const file of [join(folder, "missing.json"), join(folder, "bad.json")]) {
+      const run = spawnSync(
+        process.execPath,
+        [tool, "aside", "p", "b", "h", "--owner", "o", "--declare", file],
+        { encoding: "utf8" },
+      );
+      assert.equal(run.status, 2, file);
+      assert.match(run.stderr, /the declaration file/u);
+    }
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
   }
 });

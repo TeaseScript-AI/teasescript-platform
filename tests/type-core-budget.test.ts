@@ -828,6 +828,11 @@ test("the stop's warning counts the plan's checks only the stop owes, not the wa
     }),
     5,
   );
+  // (a plan wider than a spread or a recursive walk can follow, #2132's Codex r1)
+  assert.equal(
+    planChecks({ instructions: Array.from({ length: 150_002 }, () => ({ typeCheck: {} })) }),
+    150_002,
+  );
   const stops = (source: string, allowance: number | null = null): string[] =>
     MODES.map((mode) =>
       inMode(mode, () => {

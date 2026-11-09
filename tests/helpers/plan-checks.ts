@@ -19,7 +19,7 @@ export function planChecks(plan: unknown): number {
   const pending: unknown[] = [plan];
   while (pending.length > 0) {
     const value = pending.pop();
-    if (Array.isArray(value)) pending.push(...value);
+    if (Array.isArray(value)) for (const each of value) pending.push(each);
     else if (typeof value === "object" && value !== null)
       for (const [key, each] of Object.entries(value)) {
         if (CHECK_FIELDS.has(key) && each !== undefined && each !== false)
