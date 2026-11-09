@@ -1,0 +1,407 @@
+// Whether a committed tree still names a moved file by its old location: the lines of HEAD's tracked text files that
+// name an old path of a rename map, in five string forms that a move's other proofs do not read (`git diff -M`,
+// `pure-move-check.mjs`, tsc, `check:imports`, knip and equal test names see imports and moved lines, not a path that
+// code composes or writes in another syntax). It is pure-move-check.mjs's complement: that one judges the lines a move
+// writes, this one what the tree still says. The forms:
+//   1. root path: the old repository path, with its `.js` and `dist/` forms, or without its extension;
+//   2. bare quoted name: a moved file's name alone between quotes in code (`"x.ts"`); the name without its extension
+//      (`"x"`), mostly a word that is no path, prints last, as 2b;
+//   3. renamed name: the old name of a file whose name changes, anywhere, prose included;
+//   4. name after a slash: in a string, URL or regex, plain or regex-escaped, when its last folder and name no longer
+//      name a tracked file or folder;
+//   5. regex alternation: a moved name inside a group after a slash, checked as in form 4.
+// Forms 1, 4 and 5 are findings; 2 and 3 are candidates for a reader. Not stale: a reference naming a tracked file
+// without its extension, or a tracked folder (the one a split's files went into), and an import or export specifier
+// in forms 4 and 5, which the typecheck resolves. The residuals: a name built at runtime from parts names no moved file
+// as text, so no form sees it; and the map is Git's, `git diff -M` at its default similarity of 50 %, so a moved file
+// edited past that reads as a deletion and an addition and is missing from a derived map (pass it with --renames).
+//
+//   node tools/move-sweep.mjs [BASE] [--renames FILE] [--splits FILE] [--declare FILE] [--forms 1,2,3,4,5]
+//
+// The map: by default each rename of `git diff -z -M --name-status` from `git merge-base BASE HEAD` to `HEAD`, old path
+// to new path. --splits FILE merges in a JSON `{"renames": {old: [new, …]}}` for a split, one old path into several,
+// which Git does not report as a rename; --renames FILE replaces the whole map (and BASE is then not needed). A hit
+// counts as rewritten when it names any of an old path's new paths: an old path that is also one of its own new paths
+// (a split that keeps the original file) is not stale in form 1, and form 3 lists an old name only when none of its
+// new files keeps that name.
+//
+// The tree is HEAD's committed tree (commit first): its tracked files with a text extension, outside `node_modules/` and
+// `dist/`, read as UTF-8 (a file that is not is skipped), each line ended by `\n`, `\r\n` or `\r`. The forms are those of
+// the reference sweep this tool replaces (the notes' `shared/move-sweep/move-sweep.py`), which ran in Python: a word
+// character is a Unicode letter, digit or underscore (`[\p{L}\p{N}_]`, Python's `\w` for text), written so in every
+// pattern, and each of its word boundaries is the same class's lookaround, so the two agree by construction.
+//
+// --declare FILE: a JSON array of `{ "file", "line", "reason" }`, a hit of form 1, 4 or 5 the reader states is not stale
+// (a test fixture's invented path), printed with its reason; every declaration must match such a hit.
+//
+// Output: each form's section, `== <form>. <title>: <count>` and its hits, `<file>:<line>: <the line, trimmed, its first
+// 150 characters>`, in the order 1, 2, 3, 4, 5, then 2b; then the declared hits.
+//
+// Exit status: 0 when forms 1, 4 and 5 find nothing undeclared (forms 2 and 3 are listed, never failing); 1 when one
+// does; 2 when it cannot run: an unknown or valueless option, no BASE and no --renames, a map or declaration file that
+// cannot be read or has the wrong shape, a declaration that matches no hit, or a file name Git reports that is not
+// UTF-8.
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const USAGE =
+  "usage: node tools/move-sweep.mjs [BASE] [--renames FILE] [--splits FILE] [--declare FILE] [--forms 1,2,3,4,5]";
+
+/** A run that cannot go on: its message and exit status 2. */
+export class SweepError extends Error {}
+const refuse = (message) => {
+  throw new SweepError(message);
+};
+
+const WORD = String.raw`\p{L}\p{N}_`;
+const notWordBefore = String.raw`(?<![${WORD}])`;
+const notWordAfter = String.raw`(?![${WORD}])`;
+const TEXT = /\.(ts|mts|cts|tsx|js|mjs|cjs|vue|json|ya?ml|html|md|css)$/u;
+const CODE = /\.(ts|mts|cts|tsx|js|mjs|cjs|vue|json)$/u;
+const STRIP = /\.(ts|js|vue|mjs|mts|cjs)$/u;
+const EXT = String.raw`(?:\\\.|\.)(?:ts|js|vue|mjs|mts|cjs)${notWordAfter}`;
+const SEP = String.raw`(?:\\/|/)`;
+// A quote, a backtick, or one of them or `$` where a string or regex ends right after a name.
+const QUOTE = "[\"'`]";
+const QUOTE_OR_END = "[\"'`$]";
+const END = String.raw`(?:${EXT}|(?=${QUOTE_OR_END}))`;
+const SPECIFIER = new RegExp(
+  String.raw`^\s*(${notWordBefore}import${notWordAfter}|${notWordBefore}export${notWordAfter}.*${notWordBefore}from${notWordAfter}|\}\s*from${notWordAfter}|${notWordBefore}from${notWordAfter})|${notWordBefore}import\(|${notWordBefore}require\(`,
+  "u",
+);
+const PATH = new Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-");
+const TITLES = {
+  1: "root path",
+  2: "bare quoted name (classify)",
+  3: "renamed name (classify)",
+  4: "name after a slash",
+  5: "regex alternation",
+  "2b": "bare names without extension, mostly words",
+};
+
+// The characters a `u` pattern lets one escape outside a class: its syntax characters and `/` (not `-`, which paths hold).
+const escape = (text) => text.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&");
+const byLengthDown = (a, b) => b.length - a.length;
+const stem = (file) => file.split("/").at(-1).replace(STRIP, "");
+const decoder = new TextDecoder("utf-8", { fatal: true });
+
+/** Git's output as bytes, from the repository at `cwd`. */
+const gitBytes = (cwd, args, input) =>
+  execFileSync("git", args, { cwd, input, maxBuffer: 1024 * 1024 * 1024 });
+/** NUL-separated names, each checked to be UTF-8. */
+function namesOf(bytes) {
+  const names = [];
+  let start = 0;
+  for (let at = bytes.indexOf(0); at !== -1; start = at + 1, at = bytes.indexOf(0, start)) {
+    try {
+      names.push(decoder.decode(bytes.subarray(start, at)));
+    } catch {
+      refuse("a file name Git reports is not UTF-8");
+    }
+  }
+  return names;
+}
+
+/** The renames of the change from `git merge-base base HEAD` to HEAD: each old path to its one new path. */
+export function derivedRenames(cwd, base) {
+  const mergeBase = gitBytes(cwd, ["merge-base", base, "HEAD"]).toString("utf8").trim();
+  const fields = namesOf(
+    gitBytes(cwd, ["diff", "-z", "-M", "--name-status", "--no-ext-diff", mergeBase, "HEAD"]),
+  );
+  const renames = {};
+  for (let i = 0; i < fields.length;) {
+    const status = fields[i];
+    if (status.startsWith("R")) {
+      renames[fields[i + 1]] = [fields[i + 2]];
+      i += 3;
+    } else i += status.startsWith("C") ? 3 : 2;
+  }
+  return renames;
+}
+
+/** A map file's renames, each old path to its list of new paths. */
+function renamesFile(file) {
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    refuse(`cannot read the map ${file}: ${error.message}`);
+  }
+  if (
+    typeof parsed?.renames !== "object" ||
+    parsed.renames === null ||
+    Array.isArray(parsed.renames)
+  )
+    refuse(`the map ${file} has no "renames" object`);
+  const renames = {};
+  for (const [old, next] of Object.entries(parsed.renames)) {
+    const list = Array.isArray(next) ? next : [next];
+    if (list.length === 0 || !list.every((item) => typeof item === "string"))
+      refuse(`the map ${file} gives ${old} no new path`);
+    renames[old] = list;
+  }
+  return renames;
+}
+
+/** HEAD's tracked text files, each with its lines, in Git's order. */
+function treeOf(cwd) {
+  const entries = namesOf(gitBytes(cwd, ["ls-tree", "-r", "-z", "--full-tree", "HEAD"]));
+  const files = [];
+  const tracked = [];
+  for (const entry of entries) {
+    const tab = entry.indexOf("\t");
+    const [mode, type, object] = entry.slice(0, tab).split(" ");
+    const file = entry.slice(tab + 1);
+    tracked.push(file);
+    if (
+      type === "blob" &&
+      (mode === "100644" || mode === "100755") &&
+      TEXT.test(file) &&
+      !file.startsWith("node_modules/") &&
+      !file.startsWith("dist/")
+    )
+      files.push({ file, object });
+  }
+  const contents = gitBytes(
+    cwd,
+    ["cat-file", "--batch"],
+    files.map((f) => f.object).join("\n") + "\n",
+  );
+  let at = 0;
+  for (const entry of files) {
+    const headerEnd = contents.indexOf(10, at);
+    const size = Number(contents.subarray(at, headerEnd).toString("latin1").split(" ")[2]);
+    const body = contents.subarray(headerEnd + 1, headerEnd + 1 + size);
+    at = headerEnd + 1 + size + 1;
+    try {
+      entry.lines = decoder.decode(body).replace(/\r\n?/gu, "\n").split("\n");
+    } catch {
+      entry.lines = null;
+    }
+  }
+  return { tracked, files: files.filter((f) => f.lines !== null) };
+}
+
+/** The path text before the separator at `slash`, with regex escaping undone (`\/` read as `/`). */
+function pathBefore(line, slash) {
+  let start = slash;
+  while (
+    start > 0 &&
+    (PATH.has(line[start - 1]) || line[start - 1] === "/" || line[start - 1] === "\\")
+  )
+    start -= 1;
+  return line
+    .slice(start, slash)
+    .replaceAll("\\/", "/")
+    .replaceAll("\\.", ".")
+    .replace(/\\+$/u, "");
+}
+
+/** The hits of every form in `forms` over HEAD's tree at `cwd`, for `renames` (each old path to its new paths). */
+export function sweep(cwd, renames, forms = new Set(["1", "2", "3", "4", "5"])) {
+  const { tracked, files } = treeOf(cwd);
+  const moved = new Set(Object.keys(renames).map(stem));
+  const names = [...moved].map(escape).sort(byLengthDown).join("|");
+  const present = new Set(
+    tracked.map((f) => `${f.includes("/") ? f.split("/").at(-2) : ""}\0${stem(f)}`),
+  );
+  const stems = new Set(tracked.map((f) => f.replace(STRIP, "")));
+  const folders = new Set();
+  for (const f of tracked) {
+    const parts = f.split("/");
+    for (let i = 1; i < parts.length; i += 1) folders.add(parts.slice(0, i).join("/"));
+  }
+  for (const d of folders)
+    present.add(`${d.includes("/") ? d.split("/").at(-2) : ""}\0${d.split("/").at(-1)}`);
+  const resolvable = new Set([...stems, ...folders]);
+
+  const roots = [];
+  for (const [old, next] of Object.entries(renames)) {
+    if (next.includes(old)) continue;
+    roots.push(old);
+    if (old.endsWith(".ts")) roots.push(`${old.slice(0, -3)}.js`, `dist/${old.slice(0, -3)}.js`);
+  }
+  const rootSet = new Set(roots);
+  const bareRoots = [...new Set(roots.map((r) => r.replace(STRIP, "")))]
+    .filter((r) => !rootSet.has(r))
+    .sort(byLengthDown);
+  const alternation = (list) => list.map(escape).join("|");
+  const form1 =
+    roots.length > 0
+      ? new RegExp(
+          String.raw`(?<![${WORD}.\-])(${alternation([...roots].sort(byLengthDown))})(?![${WORD}\-])`,
+          "u",
+        )
+      : null;
+  const form1Bare =
+    bareRoots.length > 0
+      ? new RegExp(
+          String.raw`(?<![${WORD}.\-])(${alternation(bareRoots)})(?![${WORD}\-/.\\])`,
+          "gu",
+        )
+      : null;
+  const form2 = names ? new RegExp(String.raw`${QUOTE}(?:${names})${EXT}${QUOTE}`, "u") : null;
+  const form2Bare = names ? new RegExp(String.raw`${QUOTE}(?:${names})${QUOTE}`, "u") : null;
+  const renamedNames = [
+    ...new Set(
+      Object.entries(renames)
+        .filter(([old, next]) => !next.map(stem).includes(stem(old)))
+        .map(([old]) => stem(old)),
+    ),
+  ].sort(byLengthDown);
+  const form3 =
+    renamedNames.length > 0
+      ? new RegExp(String.raw`(?<![${WORD}\-])(${alternation(renamedNames)})${EXT}`, "u")
+      : null;
+  const form4 = names ? new RegExp(String.raw`${SEP}(?<name>${names})${END}`, "gu") : null;
+  const form5 = names
+    ? new RegExp(
+        String.raw`${SEP}\((?<group>(?:[${WORD}-]+\|)*(?:${names})(?:\|[${WORD}-]+)*)\)${END}`,
+        "gu",
+      )
+    : null;
+
+  /** Whether `before/name` names a tracked file: a path starting with `.` is relative to `file`'s folder, or to its
+   * compiled copy under `dist/`; any other path is checked by its last folder and the name. */
+  const namesAFile = (file, before, name) => {
+    if (before.startsWith(".")) {
+      for (const base of [path.posix.dirname(file), `dist/${path.posix.dirname(file)}`]) {
+        let target = path.posix.normalize(path.posix.join(base, before, name)).replace(/\/+$/u, "");
+        if (target === "") target = ".";
+        if (
+          resolvable.has(target) ||
+          resolvable.has(target.startsWith("dist/") ? target.slice(5) : target)
+        )
+          return true;
+      }
+      return false;
+    }
+    return present.has(`${before.split("/").at(-1)}\0${name}`);
+  };
+
+  const hits = { 1: [], 2: [], "2b": [], 3: [], 4: [], 5: [] };
+  for (const { file, lines } of files) {
+    for (const [index, line] of lines.entries()) {
+      const number = index + 1;
+      const hit = { file, line: number, text: [...line.trim()].slice(0, 150).join("") };
+      if (
+        forms.has("1") &&
+        ((form1 && form1.test(line)) ||
+          (form1Bare && [...line.matchAll(form1Bare)].some((m) => !resolvable.has(m[1]))))
+      )
+        hits[1].push(hit);
+      if (forms.has("2") && CODE.test(file) && form2) {
+        if (form2.test(line)) hits[2].push(hit);
+        else if (form2Bare.test(line)) hits["2b"].push(hit);
+      }
+      if (forms.has("3") && form3 && form3.test(line)) hits[3].push(hit);
+      if (SPECIFIER.test(line)) continue;
+      if (forms.has("4") && form4)
+        for (const m of line.matchAll(form4))
+          if (!namesAFile(file, pathBefore(line, m.index), m.groups.name)) {
+            hits[4].push(hit);
+            break;
+          }
+      if (forms.has("5") && form5)
+        for (const m of line.matchAll(form5)) {
+          const before = pathBefore(line, m.index);
+          if (
+            m.groups.group
+              .split("|")
+              .some((name) => moved.has(name) && !namesAFile(file, before, name))
+          ) {
+            hits[5].push(hit);
+            break;
+          }
+        }
+    }
+  }
+  return hits;
+}
+
+/** The declarations of `file`, each `{ file, line, reason }`. */
+function declarationsOf(file) {
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    refuse(`cannot read the declarations ${file}: ${error.message}`);
+  }
+  const valid = (d) =>
+    typeof d?.file === "string" &&
+    Number.isInteger(d.line) &&
+    d.line > 0 &&
+    typeof d.reason === "string" &&
+    d.reason !== "";
+  if (!Array.isArray(parsed) || !parsed.every(valid))
+    refuse(`the declarations ${file} are not an array of { file, line, reason }`);
+  return parsed;
+}
+
+/** The command line, read once: each option takes its value as the next argument or after `=`; the rest is BASE. */
+function argumentsOf(argv) {
+  const options = new Map();
+  const rest = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (!arg.startsWith("-")) {
+      rest.push(arg);
+      continue;
+    }
+    const equals = arg.indexOf("=");
+    const name = equals < 0 ? arg : arg.slice(0, equals);
+    if (!["--renames", "--splits", "--declare", "--forms"].includes(name))
+      refuse(`unknown option ${name}\n${USAGE}`);
+    const value = equals < 0 ? argv[++i] : arg.slice(equals + 1);
+    if (value === undefined || value === "" || (equals < 0 && value.startsWith("-")))
+      refuse(`${name} takes a value\n${USAGE}`);
+    if (options.has(name)) refuse(`${name} is given twice\n${USAGE}`);
+    options.set(name, value);
+  }
+  if (rest.length > 1) refuse(`one BASE at most\n${USAGE}`);
+  return { base: rest[0], options };
+}
+
+/** Runs the sweep for `argv` in `cwd`, printing through `print`; resolves with the exit status. */
+export function main(argv, cwd = process.cwd(), print = console.log) {
+  const { base, options } = argumentsOf(argv);
+  let renames;
+  if (options.has("--renames")) renames = renamesFile(options.get("--renames"));
+  else if (base === undefined) refuse(`no BASE and no --renames\n${USAGE}`);
+  else renames = derivedRenames(cwd, base);
+  if (options.has("--splits")) Object.assign(renames, renamesFile(options.get("--splits")));
+  const forms = new Set((options.get("--forms") ?? "1,2,3,4,5").split(","));
+  for (const form of forms)
+    if (!["1", "2", "3", "4", "5"].includes(form)) refuse(`--forms names no form ${form}`);
+  const declarations = options.has("--declare") ? declarationsOf(options.get("--declare")) : [];
+  const hits = sweep(cwd, renames, forms);
+
+  const findings = ["1", "4", "5"].flatMap((form) => hits[form]);
+  const key = (h) => `${h.file}\0${h.line}`;
+  const declared = new Map(declarations.map((d) => [key(d), d]));
+  for (const d of declarations)
+    if (!findings.some((h) => key(h) === key(d)))
+      refuse(`the declaration ${d.file}:${d.line} matches no hit of form 1, 4 or 5`);
+  const order = [...forms].sort();
+  if (forms.has("2")) order.push("2b");
+  for (const form of order) {
+    print(`== ${form}. ${TITLES[form]}: ${hits[form].length}`);
+    for (const h of hits[form]) print(`${h.file}:${h.line}: ${h.text}`);
+  }
+  for (const d of declarations) print(`declared: ${d.file}:${d.line}: ${d.reason}`);
+  return findings.some((h) => !declared.has(key(h))) ? 1 : 0;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    process.exitCode = main(process.argv.slice(2));
+  } catch (error) {
+    if (!(error instanceof SweepError) && error?.status === undefined) throw error;
+    console.error(
+      `move-sweep: ${error instanceof SweepError ? error.message : String(error.message ?? error)}`,
+    );
+    process.exitCode = 2;
+  }
+}
