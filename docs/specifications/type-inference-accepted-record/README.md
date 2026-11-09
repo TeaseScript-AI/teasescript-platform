@@ -46,8 +46,8 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's F1") is a review reference, 
 | `G2` | preserve assignment targets in suggested fixes; never replace a store destination with a temporary value |
 | `S2` | the port’s item and result shapes, including shared ingress cells in solver components |
 | `G3` | admission’s shared-query work family for cursors, carrier transfers, and positioned proof frontiers ([r4-164](sharing.md#r4-164)) |
-| `S3` | the port’s design note defining answer queries, surviving checks, discharge, and budget fallback |
-| `S4` | a possible null requires a null check at each consumer; also the port plan's step S4, the first core build |
+| `S3` | the port plan's S3 design, a document outside the repository; it defines the answer queries, surviving checks, discharge and budget fallback the core still follows |
+| `S4` | a possible null requires a null check at each consumer; also, historical, the port plan's step S4, the first core build |
 | `G5` | cut whole-copy cycles finitely with distinct member ports; separately, retain a written spelling covering every concrete kind ([r4-181](admission.md#r4-181)) |
 | `S5` | historical port step introducing the candidate backend and its first integrated language slice |
 | `S6` | the admission and boundary carrier design for shared transfers, landings, and source identities |
@@ -57,7 +57,7 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's F1") is a review reference, 
 | `S8` | the message and budget-fallback work family, including fresh finishing and warning-owned boundary requests ([r4-226](stops-and-finishing.md#r4-226)) |
 | `S8c` | historical port step implementing number-to-integer checks and rounding advice |
 | `S8d` | historical port step restoring existing fix sentences and reviewing their source-preserving forms |
-| `S9b` | the consumer-completion work family covering surviving checks, signatures, storage, and side outputs |
+| `S9b` | the port plan's step S9b, the consumer completion: surviving checks, signatures, storage and side outputs; its design is a document outside the repository |
 | `checkpoint 9` | historical research checkpoint that established the coarse core’s design tables and port baseline |
 | `S10` | the port work family implementing narrowing, preserving loops, and required-check route errors |
 | `A1` | a written type decides the place’s domain and checks every store |
@@ -87,9 +87,10 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's F1") is a review reference, 
 | `C11` | interpolation requires showable values and showable list elements |
 | `C12` | dictionary keys must be strings |
 | `C13` | built-in signatures check receiver, argument, iterable, and content suitability with certainty |
-| `F1` | declaration initializers contribute facts; inherited-field admission tracks named contents and finite copy-cycle landings |
+| `F1` | declaration initializers contribute facts; inherited-field admission tracks named contents and finite copy-cycle landings; as "the owner's F1", the owner's review finding that a boundary check is owed where external data lands in an admitted place, read or not |
 | `F1a` | a global default creates distinct startup and executable definitions |
 | `F2` | written declarations fix contracts; admission indexes values’ and source keys’ own fields, elements, depths, and shared source identities |
+| `F3` | as "the owner's F3", the owner's review finding that a fallback's default fits the expected type at every depth (ADR 0021 rules 1.2 and 7) |
 | `F4` | an uncertain-receiver store contributes to the contract but never becomes an exact definition |
 | `F5` | add and addAll contribute elements; an exact add also proves non-emptiness |
 | `F5a` | a guaranteed loop ending in an unconditional add proves the collection non-empty afterward |
@@ -155,7 +156,7 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's F1") is a review reference, 
 | `W40` | the work family indexing tested paths by callable or file instead of scanning contributions |
 | `B1` | per-demand and program work budgets defer unproved checks to runtime ([r4-23](sharing.md#r4-23)) |
 | `B2` | rejected copies contribute no contents in the next pass, but retain their landings |
-| `D1` | diagnostic sentences name the consumer, its context, the problem, and the fix; also, in the receiving checks, the extent of a store's receiving obligation (a review finding's id) |
+| `D1` | diagnostic sentences name the consumer, its context, the problem, and the fix; also, in the receiving checks, that a receiving check validates the full destination contract and only ancestor shapes (a review finding's id) |
 | `D2` | diagnostic sites and names use the relevant expression’s source text |
 | `D3` | each diagnostic rule keeps one code across error and warning severities |
 | `D4` | exhaustion stops proving, preserves findings, and moves undecided checks to runtime |

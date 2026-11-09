@@ -53,12 +53,12 @@ const LABEL =
   /\b(?:S\d-[A-Z]+(?:-[A-Z]+)*|S\d{1,2}[a-z]?|[A-Z]{1,2}\d{1,3}[a-z]?|AD-\d|PLAN|checkpoint \d+)\b/gu;
 
 /**
- * A reviewer, a round (`r2's`, `round 10`) or a pull request (`#1422`) just before an id makes it a review
- * reference ("Codex r2's B1", "r1's and r2's B1", "#1422 B1", "the owner's F1", "the merged S6's B1"),
- * not a label.
+ * A reviewer, a round (`r2's`, `round 10`), a pull request (`#1422`), the owner's review or a step's review right
+ * before an id makes it a review reference ("Codex r2's B1", "r1's and r2's B1", "#1027's B1", "the owner's reviewer's
+ * F1", "the merged S6's B1"), not a label; an id further on ("#1027's B1, F12") or a decision ("the owner's D4") is one.
  */
 const REVIEWED =
-  /(?:\b(?:Codex|Astra|Sol|Fable|Opus)\b[^.;]{0,30}|(?:\br\d+(?:'s)?|\bround \d+|#\d+(?:'s)?|\bowner's(?: reviewer's)?(?: review)?|\bS\d{1,2}[a-z]?'s)(?:\s+(?:and\s+)?[A-Z]{1,2}\d{1,3}[a-z]?,?)*\s+)$/u;
+  /(?:\b(?:Codex|Astra|Sol|Fable|Opus)(?:'s)?(?:\s+(?:r\d+(?:[–-]r\d+)?|round \d+|review))?(?:'s)?|\br\d+(?:'s)?|\bround \d+|#\d+(?:'s)?|\bowner's (?:reviewer's|review)|\bS\d{1,2}[a-z]?'s)\s+(?:[A-Z]{1,2}\d{1,3}[a-z]?(?:\/| and ))*$/u;
 
 /** A reviewer's review just after an id ("B1 of Astra's review") makes it a review reference too. */
 const REVIEWED_AFTER = /^ of (?:Codex|Astra|Sol|Fable|Opus)'s review/u;
