@@ -17,7 +17,9 @@ import {
   itemsSignature,
   mergeItems,
 } from "../src/type-inference/core/items.js";
+import { compileSourceWithBackend } from "../src/compiler.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
+import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withLabelRecords } from "../src/type-inference/core/contract/labels.js";
 import { Consumers, withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { operationItems } from "../src/type-inference/core/operator-table.js";
@@ -805,4 +807,98 @@ test("a count's check and an expected site's question each charge their own site
   for (const k of [1, 2, 3])
     assert.equal(checks(`${"repeat [] {}\n".repeat(k)}exit\n`, "integerOnly"), k, `${k} counts`);
   assert.equal(checks("say true - 1\nexit\n", "expectedTask"), 2);
+});
+
+/**
+ * #2081: the stop's warning counts the plan's checks only the stop owes, not the warnings it deferred, several of which
+ * one check at a store carries: one deep typed store defers a warning per element depth and the plan checks it once. A
+ * check a boundary also owes runs whether or not the analysis stops, so it is not counted. Each program through the
+ * candidate route in the four modes (source order, then reversed; shared, then unshared): no stop, or the count the
+ * warning names ("none" without the sentence) against the plan's checks.
+ */
+test("the stop's warning counts the plan's checks only the stop owes, not the warnings it deferred, in four modes (#2081)", () => {
+  const FIELDS = new Set([
+    "typeCheck",
+    "indexCheck",
+    "fallbackCheck",
+    "expected",
+    "repair",
+    "requireExisting",
+    "partChecks",
+  ]);
+  // (every check field of the plan once, a part check each: what runs while the script plays)
+  const planChecks = (plan: unknown): number => {
+    let count = 0;
+    const walk = (value: unknown): void => {
+      if (Array.isArray(value)) for (const each of value) walk(each);
+      else if (typeof value === "object" && value !== null)
+        for (const [key, each] of Object.entries(value)) {
+          if (FIELDS.has(key) && each !== undefined && each !== false)
+            count += Array.isArray(each) ? each.length : 1;
+          walk(each);
+        }
+    };
+    walk(plan);
+    return count;
+  };
+  const stops = (source: string, allowance: number | null = null): string[] =>
+    MODES.map((mode) =>
+      inMode(mode, () => {
+        const compile = () =>
+          compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND);
+        const { plan, diagnostics } =
+          allowance === null ? compile() : withTestAllowance(allowance, compile);
+        const stop = diagnostics.find((d) => d.code === "TSV076" && d.severity === "warning");
+        if (stop === undefined) return "no stop";
+        const count = /(\d+) checks? runs? while it plays instead/u.exec(stop.message)?.[1];
+        return `${count ?? "none"} of ${planChecks(plan)}`;
+      }),
+    );
+  const typed = (n: number) => `integer${"[]".repeat(n)}`;
+  const copy = (n: number, ...more: string[]) =>
+    [`let typed:${typed(n)}=[]`, "let out=typed", ...more, "exit", ""].join("\n");
+  // the invariant: without a boundary or a published warning, the count is every check of the plan, in every mode
+  for (const [name, source, expected] of [
+    // the issue's witness, the #1405 copies' `typed-empty-copy@64`: 60 and 62 warnings at one store before (#2081)
+    ["one deep typed store and its copy", copy(64), ["no stop", "no stop", "1 of 1", "1 of 1"]],
+    [
+      "three deep typed stores and their copies",
+      [
+        ...["a", "b", "c"].map((name) => `let ${name}:${typed(64)}=[]`),
+        "let o1=a",
+        "let o2=b",
+        "let o3=c",
+        "exit",
+        "",
+      ].join("\n"),
+      ["no stop", "no stop", "3 of 3", "3 of 3"],
+    ],
+    ["a natural run that does not stop", copy(8), ["no stop", "no stop", "no stop", "no stop"]],
+  ] as const)
+    assert.deepEqual(stops(source), expected, name);
+  // deferred warnings that the plan checks nowhere: the index reads of host data are the runtime's own checks, and its
+  // boundary runs anyway (the #1241 shadow-classify witness's 1,025 at its natural stop), so the warning names no count
+  const reads = `let v = hostValue\nsay v${"[0]".repeat(64)}\nexit\n`;
+  const request = coreRequest([{ path: "main.tease", source: reads }]);
+  assert.ok(request !== null);
+  const total = analyseCore(request).budget.total;
+  const half = Math.floor(total / 2);
+  assert.ok(withTestAllowance(half, () => analyseCore(request)).budget.deferred.length > 0);
+  assert.deepEqual(stops(reads, half), ["none of 0", "none of 0", "none of 0", "none of 0"]);
+  // a check a boundary also owes is not one the stop moved: at the deep typed store itself, and at another store
+  const host = `let typed:${typed(64)}=hostValue\nlet out=typed\nexit\n`;
+  assert.deepEqual(stops(host), ["no stop", "no stop", "none of 1", "none of 1"]);
+  const at = host.indexOf("hostValue");
+  const reversed = MODES.at(-1)!;
+  const answers = inMode(reversed, () =>
+    analyseCore(coreRequest([{ path: "main.tease", source: host }])!),
+  );
+  assert.ok(answers.checks.some((check) => check.boundary && check.site.start === at));
+  assert.ok(answers.budget.deferred.some((d) => d.obligation.site.start === at));
+  assert.deepEqual(stops(copy(64, `let m:integer=hostValue`)), [
+    "no stop",
+    "no stop",
+    "1 of 2",
+    "1 of 2",
+  ]);
 });
