@@ -474,7 +474,7 @@ test("each candidate mutation is a discrepancy in the uninterrupted run against 
     },
     {
       name: "the core integer[] part check deleted",
-      file: "dist/src/type-inference/core/consumer.js",
+      file: "dist/src/type-inference/core/check-result/runtime-plan.js",
       edit: (text) =>
         text.replace(/if \(parts\.length > 0\)\s*core\.partChecks\.set\(store, parts\);/u, ""),
       input: single(
