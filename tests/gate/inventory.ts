@@ -156,6 +156,12 @@ export const MECHANISMS: readonly string[] = [
 export const POLICY_RESIDUALS: Readonly<Record<string, string>> = {
   "accepted answerImage": "no candidate answers an image in this policy",
   "settlement capture:completed:captured": "the table answers a capture unavailable only",
+  ...Object.fromEntries(
+    CAPTURE_UNAVAILABLE_REASONS.filter((reason) => reason !== "unconfigured").map((reason) => [
+      `settlement capture:completed:unavailable:${reason}`,
+      "the table answers a capture unavailable as unconfigured only",
+    ]),
+  ),
   "host openUrl tab": "the tab an `openUrl` opens is a host effect outside the bridge",
   "settlement fileStore:completed:stored": "the table answers a file store failed only",
   "settlement fileStore:completed:read": "the table answers a file store failed only",
