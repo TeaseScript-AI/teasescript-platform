@@ -626,3 +626,44 @@ test("an unvalidated cell's numbers stay out of the headline summary, and its ga
     /## Declared gaps[\s\S]*`keepHandler` \(every required cell\): R5-02.*#2122.*before the activation PR's R1 run/u,
   );
 });
+
+test("a measured failure is a value: the delayed smoke failing at 50 and 250 ms is a complete cell with its findings", () => {
+  const smoke = (delayMs, ok) => ({
+    scenario: "delayedSmoke",
+    script: "smoke",
+    route: "source",
+    backend: "main",
+    engine: "chromium",
+    delayMs,
+    version: null,
+    build: `delayed ${delayMs} ms`,
+    commit: null,
+    ok,
+    result: { ok, exit: ok ? 0 : 1 },
+  });
+  const report = buildReport(
+    [smoke(0, true), smoke(50, false), smoke(250, false)],
+    "r0",
+    ARTIFACTS,
+  );
+  const named = cellName({
+    scenario: "delayedSmoke",
+    script: "smoke",
+    route: "source",
+    backend: "main",
+    engine: "chromium",
+  });
+  assert.ok(named in report.summary);
+  assert.match(
+    report.text,
+    /Result: passes at 0 ms; fails at 50 ms \(the smoke's own wait, #2125\) and at 250 ms \(the Player's scene clock, the stutter track, #2126\)\./u,
+  );
+  // A missing exit status is a record that fails, not a measured failure.
+  const broken = smoke(50, false);
+  delete broken.result.exit;
+  assert.ok(
+    buildReport([smoke(0, true), broken, smoke(250, false)], "r0", ARTIFACTS).incomplete.some(
+      (text) => text.includes(named),
+    ),
+  );
+});

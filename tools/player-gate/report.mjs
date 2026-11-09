@@ -6,7 +6,7 @@
 //   node tools/player-gate/report.mjs --phase r0|r1 [--json FILE] [--artifacts FILE]... RESULTS.jsonl...
 import { readFileSync, writeFileSync } from "node:fs";
 import { allCells, cellName, classify } from "./cells.mjs";
-import { deriveSample, UNVALIDATED } from "./derive.mjs";
+import { deriveSample, PASS_FAIL, UNVALIDATED } from "./derive.mjs";
 import { summarize } from "./lib/measure.mjs";
 
 const format = ({ n, median, min, max }) =>
@@ -15,6 +15,34 @@ const round = (value) => (Math.abs(value) >= 100 ? Math.round(value) : Math.roun
 
 /** The issue that holds the declared gaps (`UNVALIDATED`) until they are validated. */
 const GAP_ISSUE = "#2122";
+
+/**
+ * The known measured failures of the pass/fail scenarios, each with its finding and issue; a failure not listed here is
+ * reported as unexplained, a finding still to be made.
+ */
+const FINDINGS = {
+  delayedSmoke: (row) =>
+    ({
+      50: "the smoke's own wait, #2125",
+      250: "the Player's scene clock, the stutter track, #2126",
+    })[row.delayMs] ?? "unexplained",
+  demo: (row) =>
+    row.engine === "firefox"
+      ? "#2113, fixed on runtime-v2 in c8a1af3df after this R0"
+      : "unexplained",
+};
+
+/** A pass/fail cell's result as one line: what passed, and each failure with its finding. */
+function resultLine(scenario, rows) {
+  const failed = rows.filter((row) => !row.ok);
+  if (failed.length === 0) return `Result: passes (${rows.length} of ${rows.length}).`;
+  if (scenario === "delayedSmoke") {
+    const passed = rows.filter((row) => row.ok).map((row) => `${row.delayMs} ms`);
+    const fails = failed.map((row) => `at ${row.delayMs} ms (${FINDINGS.delayedSmoke(row)})`);
+    return `Result: ${passed.length > 0 ? `passes at ${passed.join(", ")}; ` : ""}fails ${fails.join(" and ")}.`;
+  }
+  return `Result: fails in ${failed.length} of ${rows.length} samples (${[...new Set(failed.map(FINDINGS[scenario]))].join("; ")}).`;
+}
 
 /** What a reader needs beside a scenario's numbers. */
 const NOTES = {
@@ -118,6 +146,7 @@ export function buildReport(rows, phase, artifacts = []) {
       "",
     );
     if (NOTES[cell.scenario]) out.push(NOTES[cell.scenario], "");
+    if (PASS_FAIL.has(cell.scenario)) out.push(resultLine(cell.scenario, data), "");
     out.push("| Number | Value | Unit |", "| --- | --- | --- |");
     for (const arm of arms)
       for (const [index, { label, unit }] of derived[0].values.entries()) {

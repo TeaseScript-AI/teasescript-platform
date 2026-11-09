@@ -152,11 +152,16 @@ const DERIVE = {
       problems.push(`${counts.outside} taps off their grid point`);
     return { ...counts, clock: result.clock };
   },
+  // Pass or fail is these scenarios' measurement (`PASS_FAIL`): their records must be intact, their failure is a value.
   demo: (result, cell, problems) => {
-    if (!list(result.errors)) problems.push("the error records");
-    return { errors: result.errors };
+    if (!list(result.errors) || typeof result.turns !== "number")
+      problems.push("the demo's error and turn records");
+    return { passed: result.ok === true ? 1 : 0, errors: result.errors, turns: result.turns };
   },
-  delayedSmoke: (result) => result,
+  delayedSmoke: (result, cell, problems) => {
+    if (typeof result.exit !== "number") problems.push("the smoke's exit status");
+    return { passed: result.ok === true ? 1 : 0 };
+  },
 };
 DERIVE.bridgeTaps = DERIVE.taps;
 for (const trial of ["keepHandler", "keepCompletion", "keepDurable"])
@@ -375,8 +380,12 @@ const NUMBERS = {
     ],
     ["hidden → commit", "ms", (r) => r.hiddenToCommitMs, always, false],
   ],
-  demo: [["errors", "", (r) => r.errors?.length, always, true]],
-  delayedSmoke: [["passed", "", (r) => (r.ok ? 1 : 0), always, true]],
+  demo: [
+    ["passed", "", (r) => r.passed, always, true],
+    ["errors", "", (r) => r.errors?.length, always, true],
+    ["turns", "", (r) => r.turns, always, true],
+  ],
+  delayedSmoke: [["passed", "", (r) => r.passed, always, true]],
 };
 NUMBERS.sessionInstrumented = [
   ...NUMBERS.session.filter((field) => !BYTES.includes(field)),
@@ -499,6 +508,9 @@ const diagnosticRequest = (result, page, op) =>
 const diagnosticRtt = (result, page, op) => diagnosticRequest(result, page, op)?.rttMs;
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
+/** The scenarios whose result is pass or fail: a measured failure is their cell's value, never an incomplete cell. */
+export const PASS_FAIL = new Set(["demo", "delayedSmoke"]);
+
 /**
  * The scenarios whose cells the invariant does not cover (orchestrator 2's bound after Sol code r5): their intervals
  * or lifecycle outcomes are derived without the endpoint or evidence validation the invariant requires. Their cells are
@@ -526,7 +538,9 @@ export function deriveSample(cell, row) {
   const problems = [];
   const sample = DERIVE[cell.scenario](row.result ?? {}, cell, problems);
   // A keep trial's outcome is its measurement, whichever it is; any other failed sample fails.
-  if (!cell.scenario.startsWith("keep") && !row.ok) problems.unshift("the sample failed");
+  // A keep trial's outcome and a pass/fail scenario's result are their measurement; any other failed sample fails.
+  if (!cell.scenario.startsWith("keep") && !PASS_FAIL.has(cell.scenario) && !row.ok)
+    problems.unshift("the sample failed");
   const values = [];
   for (const [label, unit, read, applies, required] of NUMBERS[cell.scenario]) {
     if (!applies(cell)) continue;

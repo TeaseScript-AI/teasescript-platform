@@ -1,7 +1,8 @@
 // The cost report's cells and the one function that decides each one (HEAD 0 "Rules over an open set": every number
 // names its route). A cell is one value of each axis; `classify` gives it either `required` or an exclusion with its
 // reason, by the first rule that matches, and throws for a value outside the axes. The report requires data for every
-// required cell and names every excluded one.
+// required cell and names every excluded one. A measured failure is a value: a pass/fail scenario's failing run is its
+// cell's result, not an incomplete cell; incomplete is for a required record missing or failing validation.
 
 export const AXES = {
   scenario: [
