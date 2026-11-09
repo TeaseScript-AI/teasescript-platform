@@ -291,7 +291,8 @@ function renamesOf(path) {
 
 /**
  * The families a move's renames make: each old path with its new paths, joined where they share one (a merge), each
- * path mapped to its family's name, the family's first old path in order.
+ * path mapped to its family's name, its lexicographically smallest member (any one member would do: the comparison only
+ * needs the same name on both sides).
  */
 function familiesOf(renames) {
   const parent = new Map();
@@ -312,25 +313,36 @@ function familiesOf(renames) {
 
 /**
  * A blob's bindings: `{ kind, target, name, as, typeOnly, line, specifier }`, one per imported or re-exported name (a
- * default import's name is `default`, a namespace's `*`, a side-effect import's empty), the target the specifier
- * resolved against `exists` (a relative one; a bare one is itself).
+ * default import's name is `default`, a namespace's `*`, `import x = require()`'s `=`; a side-effect import's, and an
+ * empty clause's (`import {} from`, `export {} from`), empty, its local name `{}` for the clause). Its target is
+ * `{ type, path }`: `bare` with the specifier itself; `file`, a relative specifier resolved against `exists` as
+ * TypeScript resolves it (`.js` to `.ts`, `.tsx` or `.d.ts`, `.mjs` to `.mts` or `.d.mts`, `.cjs` to `.cts` or `.d.cts`,
+ * an extensionless one to its file or `/index`); or `missing`, a relative one that resolves to no file, its path.
  */
 function bindingsOf(file, text, exists) {
   if (!PARSED.test(file)) return [];
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const resolve = (specifier) => {
-    if (!specifier.startsWith(".")) return specifier;
+    if (!specifier.startsWith(".")) return { type: "bare", path: specifier };
     const at = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
     const tries = [at];
     for (const [js, own] of [
-      [".js", [".ts", ".tsx"]],
-      [".mjs", [".mts"]],
-      [".cjs", [".cts"]],
+      [".js", [".ts", ".tsx", ".d.ts"]],
+      [".mjs", [".mts", ".d.mts"]],
+      [".cjs", [".cts", ".d.cts"]],
       [".jsx", [".tsx"]],
     ])
       if (at.endsWith(js)) for (const ext of own) tries.push(at.slice(0, -js.length) + ext);
-    tries.push(`${at}.ts`, `${at}.tsx`, `${at}/index.ts`, `${at}/index.js`);
-    return tries.find(exists) ?? at;
+    tries.push(
+      `${at}.ts`,
+      `${at}.tsx`,
+      `${at}.d.ts`,
+      `${at}/index.ts`,
+      `${at}/index.d.ts`,
+      `${at}/index.js`,
+    );
+    const found = tries.find(exists);
+    return found === undefined ? { type: "missing", path: at } : { type: "file", path: found };
   };
   const out = [];
   for (const statement of source.statements) {
@@ -344,6 +356,13 @@ function bindingsOf(file, text, exists) {
         if (clause.name)
           out.push({ ...at, name: "default", as: clause.name.text, typeOnly: clause.isTypeOnly });
         const bindings = clause.namedBindings;
+        if (
+          !clause.name &&
+          bindings &&
+          ts.isNamedImports(bindings) &&
+          bindings.elements.length === 0
+        )
+          out.push({ ...at, name: "", as: "{}", typeOnly: clause.isTypeOnly });
         if (bindings && ts.isNamespaceImport(bindings))
           out.push({ ...at, name: "*", as: bindings.name.text, typeOnly: clause.isTypeOnly });
         else if (bindings)
@@ -367,6 +386,8 @@ function bindingsOf(file, text, exists) {
         out.push({ ...at, name: "*", as: "*", typeOnly: statement.isTypeOnly });
       else if (ts.isNamespaceExport(clause))
         out.push({ ...at, name: "*", as: clause.name.text, typeOnly: statement.isTypeOnly });
+      else if (clause.elements.length === 0)
+        out.push({ ...at, name: "", as: "{}", typeOnly: statement.isTypeOnly });
       else
         for (const element of clause.elements)
           out.push({
@@ -375,18 +396,37 @@ function bindingsOf(file, text, exists) {
             as: element.name.text,
             typeOnly: statement.isTypeOnly || element.isTypeOnly,
           });
+    } else if (
+      ts.isImportEqualsDeclaration(statement) &&
+      ts.isExternalModuleReference(statement.moduleReference) &&
+      ts.isStringLiteral(statement.moduleReference.expression)
+    ) {
+      const specifier = statement.moduleReference.expression.text;
+      out.push({
+        kind: "import",
+        target: resolve(specifier),
+        line,
+        specifier,
+        name: "=",
+        as: statement.name.text,
+        typeOnly: statement.isTypeOnly,
+      });
     }
   }
   return out;
 }
 
 /**
- * The bindings on one side only: over `files`, the set of `{ kind, target, name, as, typeOnly }` before and after, a
- * target the move relocated keyed by its family (`renames`), bindings within one family left out.
+ * The bindings on one side only: over `files`, the set of `{ kind, target, name, as, typeOnly }` before and after. A
+ * target is its type and path (`bare`, `file`, `missing` apart), a file the move relocated keyed by its family
+ * (`renames`); bindings within one family are left out.
  */
 function bindingDifferences(mergeBase, head, files, renames, git) {
   const family = familiesOf(renames ?? {});
-  const keyOf = (target) => family.get(target) ?? target;
+  const keyOf = (target) =>
+    target.type === "file"
+      ? `file:${family.get(target.path) ?? target.path}`
+      : `${target.type}:${target.path}`;
   const listed = (ref) =>
     new Set(git("ls-tree", "-r", "--name-only", ref).split("\n").filter(Boolean));
   const trees = { before: listed(mergeBase), after: listed(head) };
@@ -402,15 +442,11 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
       const text = git("cat-file", "blob", `${ref}:${file}`);
       for (const binding of bindingsOf(file, text, (one) => trees[side].has(one))) {
         const target = keyOf(binding.target);
-        if (target === keyOf(file) && family.has(file)) continue;
-        // a target that is there on one side only, with no family: a relocation the renames do not name
+        if (family.has(file) && target === keyOf({ type: "file", path: file })) continue;
+        // a resolved file that is there on one side only, with no family: a relocation the renames do not name
         const other = side === "before" ? trees.after : trees.before;
-        if (
-          trees[side].has(binding.target) &&
-          !other.has(binding.target) &&
-          !family.has(binding.target)
-        )
-          relocated.add(binding.target);
+        const { type, path: at } = binding.target;
+        if (type === "file" && !other.has(at) && !family.has(at)) relocated.add(at);
         const key = JSON.stringify([
           binding.kind,
           target,

@@ -564,3 +564,86 @@ test(
     }
   },
 );
+
+test(
+  "a binding's target is the file it resolves to, a bare module or a missing one, in every static form",
+  { timeout: 60_000 },
+  () => {
+    const run = (before, after, map) => {
+      const move = moveOf(before, after);
+      try {
+        return map === undefined ? move.run() : move.run("--renames", move.renames(map));
+      } finally {
+        move.done();
+      }
+    };
+    const importer = (from) =>
+      `import { value as selectedValue } from "${from}";\nexport const resultWithLongIdentifier = selectedValue;\n`;
+    const exporter = "export const value = 1234567890;\n";
+    // both files renamed, the import left pointing at the old, now missing, module
+    const missing = run(
+      { "src/a.js": importer("./old.js"), "src/old.js": exporter },
+      {
+        "src/a.js": null,
+        "src/b.js": importer("./old.js"),
+        "src/old.js": null,
+        "src/new.js": exporter,
+      },
+      { "src/a.js": "src/b.js", "src/old.js": "src/new.js" },
+    );
+    assert.equal(missing.status, 1, missing.out);
+    assert.match(
+      missing.out,
+      /binding only after: src\/b\.js:1 import from "\.\/old\.js": value as selectedValue/u,
+    );
+    // a package's module and a repository file of the same path are different targets
+    const bare = run(
+      { "a.mjs": importer("pkg/x.js"), "pkg/x.js": exporter },
+      { "a.mjs": importer("./pkg/x.js"), "pkg/x.js": exporter },
+    );
+    assert.equal(bare.status, 1, bare.out);
+    assert.match(bare.out, /binding only before: a\.mjs:1 import from "pkg\/x\.js"/u);
+    // `import x = require()` and an empty clause name their target too
+    const required =
+      'import dependencyWithLongIdentifier = require("./dep.js");\nexport const resultWithLongIdentifier = dependencyWithLongIdentifier.value;\n';
+    const equals = run(
+      { "src/a.ts": required, "src/dep.ts": exporter, "src/nested/dep.ts": exporter },
+      {
+        "src/a.ts": null,
+        "src/nested/a.ts": required,
+        "src/dep.ts": exporter,
+        "src/nested/dep.ts": exporter,
+      },
+      { "src/a.ts": "src/nested/a.ts" },
+    );
+    assert.equal(equals.status, 1, equals.out);
+    assert.match(
+      equals.out,
+      /binding only after: src\/nested\/a\.ts:1 import from "\.\/dep\.js": = as dependencyWithLongIdentifier/u,
+    );
+    const empty = run(
+      { "a.mjs": 'import {} from "./first.mjs";\n', "first.mjs": exporter, "second.mjs": exporter },
+      {
+        "a.mjs": 'import {} from "./second.mjs";\n',
+        "first.mjs": exporter,
+        "second.mjs": exporter,
+      },
+    );
+    assert.equal(empty.status, 1, empty.out);
+    assert.match(
+      empty.out,
+      /binding only after: a\.mjs:1 import from "\.\/second\.mjs": \(side effect\) as \{\}/u,
+    );
+    // a declaration file renamed with its map is a pure rename
+    const declarations = "export interface SomeType {\n  readonly value: number;\n}\n";
+    const typed = (from) =>
+      `import type { SomeType } from "${from}";\nexport const typedWithLongIdentifier: SomeType = { value: 1 };\n`;
+    const renamed = run(
+      { "src/a.ts": typed("./old.js"), "src/old.d.ts": declarations },
+      { "src/a.ts": typed("./new.js"), "src/old.d.ts": null, "src/new.d.ts": declarations },
+      { "src/old.d.ts": "src/new.d.ts" },
+    );
+    assert.equal(renamed.status, 0, renamed.out);
+    assert.match(renamed.out, /bindings differing 0/u);
+  },
+);
