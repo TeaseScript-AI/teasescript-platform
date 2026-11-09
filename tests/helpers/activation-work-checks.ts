@@ -107,7 +107,10 @@ function operations(...names: readonly string[]): Record<string, "operation"> {
   return Object.fromEntries(names.map((name) => [name, "operation" as const]));
 }
 
-/** What the checks find in each work entry: its callbacks, awaits and calls, each by what it resolves to. */
+/**
+ * What the checks find in each work entry, through the work helpers it calls or holds: its callbacks, awaits, calls and
+ * hooks, each by what it resolves to.
+ */
 const SITES: readonly string[] = [
   `${WORK}adopt.ts adopt > done: callback`,
   `${WORK}adopt.ts adopt > done: page AdoptPage.adopted`,
@@ -145,7 +148,6 @@ const SITES: readonly string[] = [
   `${WORK}debugMode.ts completeDebugMode > then:callback#1: page DebugModePage.keep`,
   `${WORK}debugMode.ts completeDebugMode > then:callback#1: page DebugModePage.stillShown`,
   `${WORK}debugMode.ts completeDebugMode > then:callback#2: callback`,
-  `${WORK}debugMode.ts completeDebugMode > then:callback#2: page DebugModePage.admits`,
   `${WORK}debugMode.ts completeDebugMode > then:callback#2: page DebugModePage.quiet`,
   `${WORK}debugMode.ts completeDebugMode > then:callback#2: page DebugModePage.report`,
   `${WORK}debugMode.ts completeDebugMode > then:callback#2: page DebugModePage.reportable`,
@@ -155,7 +157,6 @@ const SITES: readonly string[] = [
   `${WORK}debugMode.ts completeDebugMode: reaction finally`,
   `${WORK}debugMode.ts completeDebugMode: reaction then`,
   `${WORK}draw.ts resolveDrawFor > catch:callback#1: callback`,
-  `${WORK}draw.ts resolveDrawFor > catch:callback#1: page DrawPage.admits`,
   `${WORK}draw.ts resolveDrawFor > catch:callback#1: page DrawPage.quiet`,
   `${WORK}draw.ts resolveDrawFor > catch:callback#1: page DrawPage.report`,
   `${WORK}draw.ts resolveDrawFor > section:callback#1: action DrawSection.owned`,
@@ -183,10 +184,24 @@ const SITES: readonly string[] = [
   `${WORK}stop.ts stopAt: page StopPage.admits`,
   `${WORK}stop.ts stopAt: page StopPage.endHalting`,
   `${WORK}stop.ts stopAt: page StopPage.haltUntil`,
+  `${WORK}stop.ts stopAt: page StopPage.isCurrent`,
   `${WORK}stop.ts stopAt: reaction then`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt > commit: callback`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt > commit: page StopPage.admits`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt > commit: page StopPage.commit`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt > commit: page StopPage.endHalting`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt > commit: page StopPage.isCurrent`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt: action StopTarget.captureFailure`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt: action StopTarget.frozen`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt: action StopTarget.halt`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt: hook commit`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt: local commit`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt: page StopPage.admits`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt: page StopPage.endHalting`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt: page StopPage.haltUntil`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt: page StopPage.isCurrent`,
+  `${WORK}stop.ts stopLateStart > then:callback#1 > stopAt: reaction then`,
   `${WORK}stop.ts stopLateStart > then:callback#1: callback`,
-  `${WORK}stop.ts stopLateStart > then:callback#1: page StopPage.admits`,
-  `${WORK}stop.ts stopLateStart > then:callback#1: page StopPage.endHalting`,
   `${WORK}stop.ts stopLateStart > then:callback#1: page stopLateStart:page.haltObsolete`,
   `${WORK}stop.ts stopLateStart > then:callback#1: page stopLateStart:page.target`,
   `${WORK}stop.ts stopLateStart > then:callback#1: work stopAt`,
@@ -288,11 +303,15 @@ export function registerActivationWorkChecks(census: () => Shared): void {
           ],
         ]),
         patched("stop.ts", [
-          [STOP, `let calls = 0;\nvoid import("./target.js");\n${STOP}`],
+          [
+            STOP,
+            `let calls = 0;\nvoid import("./target.js");\n` +
+              `function stamp(): number {\n  return Date.now();\n}\n${STOP}`,
+          ],
           [
             "  page.haltUntil(stop);\n  // The halt",
             "  calls += 1;\n  queueMicrotask(commit);\n  setTimeout(() => page.endHalting(stop));\n" +
-              "  page.haltUntil(stop);\n  // The halt",
+              "  void stamp();\n  page.haltUntil(stop);\n  // The halt",
           ],
         ]),
         patched("target.ts", [
@@ -302,7 +321,8 @@ export function registerActivationWorkChecks(census: () => Shared): void {
           ],
           [
             SNAPSHOT,
-            "  readonly debugMode: boolean;\n  readonly stop: () => void;\n  get shown(): string;\n}",
+            "  readonly debugMode: boolean;\n  readonly stop: () => void;\n  get shown(): string;\n" +
+              "  readonly extras?: { readonly [key: string]: () => void };\n}",
           ],
         ]),
         patched("continue.ts", [
@@ -334,9 +354,12 @@ export function registerActivationWorkChecks(census: () => Shared): void {
       ["stop.ts", "unknown edge queueMicrotask"],
       ["stop.ts", "unknown edge setTimeout"],
       ["stop.ts", "callback boundary"],
+      // A helper the entry calls is walked as the entry's own.
+      ["stop.ts", "unknown edge Date.now"],
       ["target.ts", "value import PlayerBridge from player/runtime/player-bridge.ts"],
       ["target.ts", "module initialization"],
       ["target.ts", "callable in data: SessionSnapshot.stop"],
+      ["target.ts", "callable in data: SessionSnapshot.extras[string]"],
       ["target.ts", "accessor"],
       ["continue.ts", "protocol member ContinueWork.session (operation)"],
     ];

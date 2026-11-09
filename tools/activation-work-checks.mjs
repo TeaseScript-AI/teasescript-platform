@@ -8,10 +8,11 @@
 //    resolved call, or read in the trusted adapter. Returned, boxed or stored records, reassigned formals, a getter of
 //    records, unresolved calls, reflection, assertions, `any` and unclassified exports are refused.
 // 3. Shapes: each protocol interface has exactly its declared operations and data; the types its operations and the
-//    entries take and give hold no raw bridge, session, ref, callable or accessor in a data position, and no carrier
-//    the declarations do not name.
-// 4. Discovery: each work entry's call sites, awaits and callbacks, by the symbol each call resolves to; a call to
-//    anything but the work's own protocol, its own functions or a promise's reactions fails.
+//    entries take and give hold no raw bridge, session, ref, callable or accessor in a data position (index-signature
+//    values included), and no carrier the declarations do not name.
+// 4. Discovery: each work entry's call sites, awaits, callbacks and hooks, by the symbol each call resolves to, and
+//    those of every work helper it calls or holds, followed by symbol once per entry; a call to anything but the
+//    work's own protocol, its own functions or a promise's reactions fails.
 // 5. Callback boundaries: outside the adapter, a function value is a local `const`, or a reaction, handler or body passed
 //    to a promise or a protocol operation. (`no-floating-promises` with `ignoreVoid: false` owns the chains' ends.)
 //
@@ -419,6 +420,9 @@ function typeWalk(checker, declared, refuse) {
       }
       data(checker.getTypeOfSymbolAtLocation(property, node), `${at}.${property.name}`, node, seen);
     }
+    // An index signature's values are data too.
+    for (const info of checker.getIndexInfosOfType(type))
+      data(info.type, `${at}[${checker.typeToString(info.keyType)}]`, node, seen);
   }
   return { operation, carrier, data };
 }
@@ -431,45 +435,67 @@ function named(type) {
   return name.startsWith("__") ? null : name;
 }
 
-// 4. Discovery: each work entry's sites, by the symbol each call resolves to.
+// 4. Discovery: each work entry's sites, by the symbol each call resolves to, through the work's own helpers.
 function discover({ checker, rel, path, file, declared, refuse }, sites) {
   const roles = declared.exports[path] ?? {};
   for (const statement of file.statements) {
     if (!ts.isFunctionDeclaration(statement) || statement.name === undefined) continue;
     const entry = statement.name.text;
     if (roles[entry] !== "entry") continue;
-    const site = (node, kind, name = "") =>
-      sites.add(
-        `${path} ${entry}${label(node, statement)}: ${kind}${name === "" ? "" : ` ${name}`}`,
-      );
-    visit(statement.body, (node) => {
-      if (ts.isAwaitExpression(node))
-        site(node, "await", node.expression.getText(file).split("(")[0]);
-      if (isFunction(node)) site(node, "callback");
-      // A function passed or held as a value, not called here: a hook, which its holder may call later.
-      if (
-        (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node)) &&
-        isValue(ts.isPropertyAccessExpression(node) ? node.name : node, true) &&
-        !isCallee(node) &&
-        checker.getTypeAtLocation(node).getCallSignatures().length > 0
-      ) {
-        const symbol = checker.getSymbolAtLocation(
-          ts.isPropertyAccessExpression(node) ? node.name : node,
+    // A helper the entry calls or holds, in a work module, is walked as the entry's own, once per entry.
+    const walked = new Set([statement]);
+    const walk = (fn, prefix) => {
+      const site = (node, kind, name = "") =>
+        sites.add(
+          `${path} ${entry}${prefix}${label(node, fn)}: ${kind}${name === "" ? "" : ` ${name}`}`,
         );
-        const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
-        const held =
-          declaration === undefined ? null : classify(rel, declared, hookOf(declaration));
-        if (held === null) refuse("discovery", node, `unknown hook ${node.getText(file)}`);
-        else site(node, "hook", held.name);
-      }
-      if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return;
-      const declaration = callee(checker, node);
-      const kind = declaration === undefined ? null : classify(rel, declared, declaration);
-      if (kind === null)
-        return refuse("discovery", node, `unknown edge ${node.expression.getText(file)}`);
-      site(node, kind.kind, kind.name);
-    });
+      const follow = (node, declaration, name) => {
+        const helper = helperOf(declaration);
+        if (helper === null || walked.has(helper) || hasAncestor(helper, statement)) return;
+        walked.add(helper);
+        walk(helper, `${prefix}${label(node, fn)} > ${name}`);
+      };
+      visit(fn.body, (node) => {
+        if (ts.isAwaitExpression(node))
+          site(node, "await", node.expression.getText(file).split("(")[0]);
+        if (isFunction(node)) site(node, "callback");
+        // A function passed or held as a value, not called here: a hook, which its holder may call later.
+        if (
+          (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node)) &&
+          isValue(ts.isPropertyAccessExpression(node) ? node.name : node, true) &&
+          !isCallee(node) &&
+          checker.getTypeAtLocation(node).getCallSignatures().length > 0
+        ) {
+          const symbol = checker.getSymbolAtLocation(
+            ts.isPropertyAccessExpression(node) ? node.name : node,
+          );
+          const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+          const held =
+            declaration === undefined ? null : classify(rel, declared, hookOf(declaration));
+          if (held === null) refuse("discovery", node, `unknown hook ${node.getText(file)}`);
+          else {
+            site(node, "hook", held.name);
+            follow(node, hookOf(declaration), held.name);
+          }
+        }
+        if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return;
+        const declaration = callee(checker, node);
+        const kind = declaration === undefined ? null : classify(rel, declared, declaration);
+        if (kind === null)
+          return refuse("discovery", node, `unknown edge ${node.expression.getText(file)}`);
+        site(node, kind.kind, kind.name);
+        if (kind.kind === "work" || kind.kind === "local") follow(node, declaration, kind.name);
+      });
+    };
+    walk(statement, "");
   }
+}
+
+/** The function a work or local call names, whose body discovery walks, or `null` (a declaration without one). */
+function helperOf(declaration) {
+  if (ts.isFunctionDeclaration(declaration) && declaration.body !== undefined) return declaration;
+  if (isFunction(declaration) && declaration.body !== undefined) return declaration;
+  return null;
 }
 
 /** Whether `node` is the callee of a call, or the object of a member access. */
@@ -586,4 +612,9 @@ const isFunction = (node) =>
 function visit(node, fn) {
   fn(node);
   ts.forEachChild(node, (child) => visit(child, fn));
+}
+
+function hasAncestor(node, ancestor) {
+  for (let at = node.parent; at !== undefined; at = at.parent) if (at === ancestor) return true;
+  return false;
 }
