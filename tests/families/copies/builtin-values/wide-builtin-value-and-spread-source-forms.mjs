@@ -1,7 +1,7 @@
 // Its id is its file name before its area was grouped, which keeps its sources' places in a stored baseline.
 export const id = "s6c-astra-native.mjs";
 // S6c's review (Astra): six of the repository's spread regressions at 30,000 (`SPREAD_CASES` of
-// tests/helpers/type-core-spreads.ts at 8a7e4de1d), each changed by the review so the width route does not match an
+// tests/helpers/type-core/type-core-spreads.ts at 8a7e4de1d), each changed by the review so the width route does not match an
 // expected tuple: `"A"` to `"Review"`, `text: 1` to `text: 2`, `root` to `recordRoot`
 // (R/astra-m4-s6c-review-evidence/native.mjs). The programs the review derived are kept; the helper's are not copied.
 const many = (size, text, separator) => Array.from({ length: size }, () => text).join(separator);

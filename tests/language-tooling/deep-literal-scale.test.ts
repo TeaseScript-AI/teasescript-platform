@@ -1,0 +1,263 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import test from "node:test";
+
+/*
+ * Scale regressions of deep literals (TABLE r4.56, r4.58): before the core charged the work its literal indexes keep,
+ * the candidate route's analysis of a list literal nested 1,024 deep, and the core's of any literal nested 1,024 deep
+ * with one read of it, grew until the process died (V8's heap abort, or a 2 GiB scope's OOM kill). Now the program's
+ * work allowance stops them first. Per literal kind, a child process with a capped V8 heap compiles `let value =` the
+ * literal nested 1,024 and 4,097 deep on the candidate route (`compileSourceWithBackend(…, CORE_BACKEND)`;
+ * after the switch, production `compileSource(source)` in its place) and analyses the same literal with one read of it
+ * in the core. Each must end with a plan, the stopped analysis's included (the allowance's stop is a warning, D4 a′),
+ * or the candidate's structured rejection (the slice it does not cover yet: records and dicts, lists deeper than its
+ * facts follow), and with the core's outcome; a signal exit (134, 137), an uncaught exception or the timeout fails the
+ * test.
+ * 4,097 is one beyond the deepest depth measured (4,096): scale regressions, not a supported maximum, since none
+ * exists.
+ */
+
+const DEPTHS = [1_024, 4_097];
+
+/** Per literal kind: its opening and closing text around the leaf, and a read of its first level. */
+const KINDS: readonly (readonly [string, string, string, string])[] = [
+  ["list", "[", "]", "value[0]"],
+  ["record", "{x:", "}", "value.x"],
+  ["dict", "dict{x:", "}", 'value["x"]'],
+];
+
+/** The heap a child may use: about the deepest case's need with a margin, far below what the uncharged work took. */
+const HEAP_MIB = 1_536;
+
+const url = (path: string): string => JSON.stringify(new URL(path, import.meta.url).href);
+
+/**
+ * The lines `script` prints in a child with the capped heap and a timeout, each the depth, tab-separated from what it
+ * reports there; a signal, an error, a non-zero exit or the timeout fails `name`.
+ */
+function childLines(name: string, script: string): string[] {
+  const child = spawnSync(
+    process.execPath,
+    [`--max-old-space-size=${HEAP_MIB}`, "--input-type=module", "--eval", script],
+    { encoding: "utf8", timeout: 120_000, maxBuffer: 256 * 1024 },
+  );
+  const lines = child.stdout.trim().split("\n").filter(Boolean);
+  const reached = `after depth ${lines.at(-1)?.split("\t")[0] ?? "none"}`;
+  assert.equal(child.error, undefined, `${name}: ${child.error?.message} ${reached}`);
+  assert.equal(child.signal, null, `${name}: killed by ${child.signal} ${reached}`);
+  assert.equal(
+    child.status,
+    0,
+    `${name}: exit ${child.status} ${reached}\n${child.stderr.slice(-2_000)}`,
+  );
+  return lines;
+}
+
+for (const [kind, open, close, read] of KINDS)
+  test(`a ${kind} literal nested ${DEPTHS.join(", ")} deep compiles or stops within the allowance, never crashing`, () => {
+    const script = `
+      import {compileSourceWithBackend} from ${url("../../src/compiler.js")};
+      import {CandidateOutsideSlice, CORE_BACKEND} from ${url("../../src/type-inference/core/backend.js")};
+      import {analyseCore} from ${url("../../src/type-inference/core/answers.js")};
+      import {coreRequest} from ${url("../helpers/type-core-analysis.js")};
+      for (const depth of ${JSON.stringify(DEPTHS)}) {
+        const literal = ${JSON.stringify(open)}.repeat(depth) + "1" + ${JSON.stringify(close)}.repeat(depth);
+        let candidate;
+        try {
+          candidate = compileSourceWithBackend("let value = " + literal + "\\nexit\\n", {}, CORE_BACKEND).plan === null ? "no plan" : "plan";
+        } catch (error) {
+          if (!(error instanceof CandidateOutsideSlice)) throw error;
+          candidate = "outside: " + error.what;
+        }
+        const request = coreRequest([{path: "main.tease", source: "let value = " + literal + "\\nlet n: integer = " + ${JSON.stringify(read)} + "\\nexit\\n"}]);
+        console.log(depth + "\\t" + candidate + "\\t" + analyseCore(request).outcome);
+      }
+    `;
+    // (a line per depth: the depth, the candidate's result and the core's outcome)
+    const lines = childLines(kind, script);
+    assert.deepEqual(
+      lines.map((line) => Number(line.split("\t")[0])),
+      DEPTHS,
+    );
+    for (const line of lines)
+      assert.match(
+        line,
+        /^\d+\t(plan|outside: [^\t]+)\t(valid|warning-runtime-check|compile-error)$/,
+        `${kind}: ${line}`,
+      );
+  });
+
+/**
+ * A record nested 2,048 deep whose property names are each over 1,024 characters long, never read: admission kept the
+ * text of its paths uncharged, and the analysis died at 5 % of the allowance (the deep-literal review's witness). The
+ * core analyses it at that depth in a child with the same heap; it must end with its outcome.
+ */
+test("a record nested 2,048 deep with long property names stops within the allowance, never crashing", () => {
+  const depths = [2_048];
+  const script = `
+    import {analyseCore} from ${url("../../src/type-inference/core/answers.js")};
+    import {coreRequest} from ${url("../helpers/type-core-analysis.js")};
+    for (const depth of ${JSON.stringify(depths)}) {
+      const names = Array.from({length: depth}, (_, i) => "field" + i + "_" + "q".repeat(1024));
+      const source = "let value = " + names.map((name) => "{" + name + ":").join("") + "1" + "}".repeat(depth) + "\\nexit\\n";
+      console.log(depth + "\\t" + analyseCore(coreRequest([{path: "main.tease", source}])).outcome);
+    }
+  `;
+  const lines = childLines("long names", script);
+  assert.deepEqual(
+    lines.map((line) => Number(line.split("\t")[0])),
+    depths,
+  );
+  for (const line of lines)
+    assert.match(line, /^\d+\t(valid|warning-runtime-check|compile-error)$/, line);
+});
+
+/**
+ * A typed leaf referenced 16,384 times at the bottom of a list nested 4,096 deep, never read: admission's discovery of
+ * typed copies kept a path per reference uncharged, and the analysis died at 32 % of the allowance (the deep-literal
+ * review's round-2 witness). Beside it: the same in the reversed orders; that literal 2,048 deep copied through 16
+ * variables and read at its bottom; and a copy at every depth, 2,048 levels each a list of the one below twice, read at
+ * its bottom. Each must end with its outcome in a child with the same heap.
+ */
+test("typed copies of a list nested 4,096 deep with 16,384 references stop within the allowance, never crashing", () => {
+  const script = `
+    import {analyseCore} from ${url("../../src/type-inference/core/answers.js")};
+    import {withConsumerOrder} from ${url("../../src/type-inference/core/consumers.js")};
+    import {withSolverSeam} from ${url("../../src/type-inference/core/solver.js")};
+    import {coreRequest} from ${url("../helpers/type-core-analysis.js")};
+    const leaves = Array(16384).fill("leaf").join(",");
+    const deep = (depth) => "let value = " + "[".repeat(depth) + leaves + "]".repeat(depth);
+    const below = (depth) => "[0]".repeat(depth);
+    const chain = Array.from({length: 16}, (_, i) => "let c" + (i + 1) + " = " + (i === 0 ? "value" : "c" + i));
+    const levels = Array.from({length: 2047}, (_, i) => "let x" + (i + 2) + " = [x" + (i + 1) + ", x" + (i + 1) + "]");
+    const cases = [
+      [4096, "fanout", false, [deep(4096)]],
+      [4096, "fanout", true, [deep(4096)]],
+      [2048, "chain", false, [deep(2048), ...chain, "let n: integer = c16" + below(2048)]],
+      [2048, "levels", false, ["let x1 = [" + leaves.split(",").slice(0, 16).join(",") + "]", ...levels, "let n: integer = x2048" + below(2048)]],
+    ];
+    for (const [depth, shape, reversed, lines] of cases) {
+      const request = coreRequest([{path: "main.tease", source: ["let leaf: integer = 1", ...lines, "exit"].join("\\n") + "\\n"}]);
+      const run = () => analyseCore(request).outcome;
+      const outcome = reversed
+        ? withConsumerOrder((list) => [...list].reverse(), () => withSolverSeam({reverseWorklist: true}, run))
+        : run();
+      console.log(depth + "\\t" + shape + (reversed ? " reversed" : "") + "\\t" + outcome);
+    }
+  `;
+  const lines = childLines("typed copies", script);
+  assert.deepEqual(
+    lines.map((line) => line.split("\t").slice(0, 2).join(" ")),
+    ["4096 fanout", "4096 fanout reversed", "2048 chain", "2048 levels"],
+  );
+  for (const line of lines)
+    assert.match(line, /\t(valid|warning-runtime-check|compile-error)$/, line);
+});
+
+/**
+ * 8,192 and 10,000 nested defaults around a host value (`null otherwise (null otherwise (… hostValue …))`, the family
+ * `C9-nested-own-otherwise`): each carrier kept an evaluation key and a chain of operations one entry longer than the
+ * one around it, uncharged, so the analysis held about 1.4 GB of heap at 8,192 with under 4 % of the allowance charged
+ * and died on the heap at 10,000, at 8,192 in the source order (the deep-literal review's round-3 witness). In both
+ * orders, in a child with the same heap, each must end with its outcome.
+ */
+test("8,192 and 10,000 nested defaults around a host value stop within the allowance in either order, never crashing", () => {
+  const script = `
+    import {analyseCore} from ${url("../../src/type-inference/core/answers.js")};
+    import {withConsumerOrder} from ${url("../../src/type-inference/core/consumers.js")};
+    import {withSolverSeam} from ${url("../../src/type-inference/core/solver.js")};
+    import {coreRequest} from ${url("../helpers/type-core-analysis.js")};
+    for (const depth of [8192, 10000])
+      for (const reversed of [false, true]) {
+        const value = "null otherwise (".repeat(depth) + "hostValue" + ")".repeat(depth);
+        const request = coreRequest([{path: "main.tease", source: "let out = " + value + "\\nrepeat out {}\\nexit\\n"}]);
+        const run = () => analyseCore(request).outcome;
+        const outcome = reversed
+          ? withConsumerOrder((list) => [...list].reverse(), () => withSolverSeam({reverseWorklist: true}, run))
+          : run();
+        console.log(depth + "\\t" + (reversed ? "reversed" : "forward") + "\\t" + outcome);
+      }
+  `;
+  const lines = childLines("nested defaults", script);
+  assert.deepEqual(
+    lines.map((line) => line.split("\t").slice(0, 2).join(" ")),
+    ["8192 forward", "8192 reversed", "10000 forward", "10000 reversed"],
+  );
+  for (const line of lines)
+    assert.match(line, /\t(valid|warning-runtime-check|compile-error)$/, line);
+});
+
+/**
+ * A read 3,000 and 4,097 index steps deep of a one-element list (`value[0][0]…`): each step is read by a generator inside
+ * the one before, and the native stack overflowed (`RangeError`) at about 2,450 levels. The core's read-depth guard
+ * stops it cleanly; on the candidate route and in the core, in a child with the same heap, it must end with a result.
+ */
+test("a read 3,000 and 4,097 index steps deep stops cleanly, never overflowing the native stack", () => {
+  const depths = [3_000, 4_097];
+  const script = `
+    import {compileSourceWithBackend} from ${url("../../src/compiler.js")};
+    import {CandidateOutsideSlice, CORE_BACKEND} from ${url("../../src/type-inference/core/backend.js")};
+    import {analyseCore} from ${url("../../src/type-inference/core/answers.js")};
+    import {coreRequest} from ${url("../helpers/type-core-analysis.js")};
+    for (const depth of ${JSON.stringify(depths)}) {
+      const source = "let value = [1]\\nlet n: integer = value" + "[0]".repeat(depth) + "\\nexit\\n";
+      let candidate;
+      try {
+        candidate = compileSourceWithBackend(source, {}, CORE_BACKEND).plan === null ? "no plan" : "plan";
+      } catch (error) {
+        if (!(error instanceof CandidateOutsideSlice)) throw error;
+        candidate = "outside: " + error.what;
+      }
+      console.log(depth + "\\t" + candidate + "\\t" + analyseCore(coreRequest([{path: "main.tease", source}])).outcome);
+    }
+  `;
+  const lines = childLines("deep read", script);
+  assert.deepEqual(
+    lines.map((line) => Number(line.split("\t")[0])),
+    depths,
+  );
+  for (const line of lines)
+    assert.match(
+      line,
+      /^\d+\t(plan|no plan|outside: [^\t]+)\t(valid|warning-runtime-check|compile-error)$/,
+      line,
+    );
+});
+
+/**
+ * #1572: a list join of 1,100 terms (`o + [{p0: 1}] + o + …`) and a list `otherwise` chain of 1,100
+ * (`hostValue.l0 otherwise … otherwise o`), each read below its elements. Each operation's answer at a path runs inline
+ * on its frame's explicit stack, so the chain deepens neither the native stack per term (read by `yield*`, a fresh
+ * process overflowed at about 900 terms) nor the read chain (1,024 levels, `READ_DEPTH_LIMIT`). In a child, in the four modes, each is answered
+ * without a stop, as the same chain of 8 terms is; the deep chain runs first, before anything warms the code.
+ */
+test("a join and an otherwise chain of 1,100 lists read below their elements are answered in the four modes (#1572)", () => {
+  const chain = (terms: number, term: (i: number) => string, last: string): string =>
+    `let o = [{q: 1}]\nlet xs = ${Array.from({ length: terms - 1 }, (_, i) => term(i)).join("")}${last}\nsay "\${xs[0].q}"\nexit\n`;
+  const forms = {
+    join: (terms: number) => chain(terms, (i) => (i % 2 === 0 ? "o + " : `[{p${i}: 1}] + `), "o"),
+    otherwise: (terms: number) => chain(terms, (i) => `hostValue.l${i} otherwise `, "o"),
+  };
+  const sources = Object.entries(forms).flatMap(([name, form]) =>
+    [1_100, 8].map((terms) => [name, terms, form(terms)] as const),
+  );
+  const script = `
+    import {analyseCore} from ${url("../../src/type-inference/core/answers.js")};
+    import {coreRequest} from ${url("../helpers/type-core-analysis.js")};
+    import {HELD_MODES} from ${url("../helpers/type-core-held-host.js")};
+    for (const [name, terms, source] of ${JSON.stringify(sources)})
+      for (const mode of HELD_MODES) {
+        const answers = mode.run(() => analyseCore(coreRequest([{path: "main.tease", source}], ["hostValue"])));
+        console.log([terms, name, mode.name, answers.outcome, answers.budget.exhausted].join("\\t"));
+      }
+  `;
+  const lines = childLines("deep chains", script).map((line) => line.split("\t"));
+  assert.equal(lines.length, 16);
+  for (const [terms, name, mode, outcome, exhausted] of lines.filter(
+    ([terms]) => terms === "1100",
+  )) {
+    assert.equal(exhausted, "", `${name} of ${terms} in ${mode}: stopped (${exhausted})`);
+    const small = lines.find((line) => line[0] === "8" && line[1] === name && line[2] === mode);
+    assert.equal(outcome, small?.[3], `${name} of ${terms} in ${mode}`);
+  }
+});

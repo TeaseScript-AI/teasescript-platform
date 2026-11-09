@@ -6,7 +6,7 @@ the section that explains it. A rule that is an error where the compiler proves 
 script checks it when it runs keeps one code with both severities, shown as `error or warning`. The new checker's stop
 (`TSV076`) warns once and marks each function or file top level it did not check completely with an information
 (`info`), which the editor shows at its information level and which never stops a compile. Code that reports a
-diagnostic takes the registry's code types, so an unregistered code does not compile. `tests/diagnostic-codes.test.ts`
+diagnostic takes the registry's code types, so an unregistered code does not compile. `tests/semantic/diagnostic-codes.test.ts`
 checks that every code in `src/` is registered and reported only by its owners, and that every registered code is still
 reported or marked as retired. A retired code stays registered, so that it is never given to another problem.
 
