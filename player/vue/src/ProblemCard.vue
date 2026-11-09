@@ -42,9 +42,13 @@ function location(problem: Problem): string {
       <CollapsibleContent class="min-h-0 overflow-y-auto">
         <ol class="flex flex-col gap-2 text-xs wrap-anywhere" data-problem-technical>
           <li v-for="(problem, index) in problems" :key="index" class="flex flex-col gap-0.5">
-            <span v-if="problem.path" class="font-mono text-muted-foreground">{{ location(problem) }}</span>
+            <span v-if="problem.path" class="font-mono text-muted-foreground">{{
+              location(problem)
+            }}</span>
             <span
-              ><template v-if="problem.code"><code class="font-mono">{{ problem.code }}</code>: </template
+              ><template v-if="problem.code"
+                ><code class="font-mono">{{ problem.code }}</code
+                >: </template
               >{{ problem.message }}</span
             >
           </li>

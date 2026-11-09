@@ -342,12 +342,7 @@ watch(copyTooltipOpen, (open) => {
       <Tooltip>
         <TooltipTrigger as-child>
           <span class="inline-flex">
-            <Toggle
-              v-model="wrap"
-              size="sm"
-              aria-label="Wrap long lines"
-              data-code-block-wrap
-            >
+            <Toggle v-model="wrap" size="sm" aria-label="Wrap long lines" data-code-block-wrap>
               <TextWrap />
             </Toggle>
           </span>

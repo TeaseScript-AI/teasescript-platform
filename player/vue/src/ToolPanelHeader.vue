@@ -33,9 +33,12 @@ const emit = defineEmits<{
 }>();
 const panelSizeNames = Object.keys(toolPanelSizes) as ToolPanelSize[];
 const settingsOpen = ref(false);
-watch(() => props.active, (active) => {
-  if (!active) settingsOpen.value = false;
-});
+watch(
+  () => props.active,
+  (active) => {
+    if (!active) settingsOpen.value = false;
+  },
+);
 function closeSettingsFocus(event: Event) {
   if (props.active) return;
   event.preventDefault();
@@ -147,7 +150,11 @@ onBeforeUnmount(() => observer?.disconnect());
                   <Ellipsis class="panel-settings-compact size-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent data-tools-context align="end" @close-auto-focus="closeSettingsFocus">
+              <DropdownMenuContent
+                data-tools-context
+                align="end"
+                @close-auto-focus="closeSettingsFocus"
+              >
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>Width</DropdownMenuSubTrigger>
                   <DropdownMenuSubContent data-tools-context>

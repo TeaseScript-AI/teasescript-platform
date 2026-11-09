@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { definedProps } from "@/lib/definedProps";
-import type { CheckboxRootEmits, CheckboxRootProps } from "reka-ui"
-import type { HTMLAttributes } from "vue"
-import { Check } from "@lucide/vue"
-import { reactiveOmit } from "@vueuse/core"
-import { CheckboxIndicator, CheckboxRoot, useForwardPropsEmits } from "reka-ui"
-import { cn } from "@/lib/utils"
+import type { CheckboxRootEmits, CheckboxRootProps } from "reka-ui";
+import type { HTMLAttributes } from "vue";
+import { Check } from "@lucide/vue";
+import { reactiveOmit } from "@vueuse/core";
+import { CheckboxIndicator, CheckboxRoot, useForwardPropsEmits } from "reka-ui";
+import { cn } from "@/lib/utils";
 
-const props = defineProps<CheckboxRootProps & { class?: HTMLAttributes["class"] }>()
-const emits = defineEmits<CheckboxRootEmits>()
+const props = defineProps<CheckboxRootProps & { class?: HTMLAttributes["class"] }>();
+const emits = defineEmits<CheckboxRootEmits>();
 
-const delegatedProps = reactiveOmit(props, "class")
+const delegatedProps = reactiveOmit(props, "class");
 
-const forwarded = useForwardPropsEmits(delegatedProps, emits)
+const forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>
 
 <template>
@@ -21,8 +21,11 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     data-slot="checkbox"
     v-bind="definedProps(forwarded)"
     :class="
-      cn('peer border-input data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground data-[state=checked]:border-primary focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:border-destructive size-4 shrink-0 rounded-sm border shadow-xs transition-shadow outline-none focus-visible:ring-2 disabled:cursor-not-allowed',
-         props.class)"
+      cn(
+        'peer border-input data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground data-[state=checked]:border-primary focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:border-destructive size-4 shrink-0 rounded-sm border shadow-xs transition-shadow outline-none focus-visible:ring-2 disabled:cursor-not-allowed',
+        props.class,
+      )
+    "
   >
     <CheckboxIndicator
       data-slot="checkbox-indicator"

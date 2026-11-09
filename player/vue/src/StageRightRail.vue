@@ -24,7 +24,9 @@ function layout() {
   // The reading column includes its scrollbar gutter, which equals the conversation inset.
   const columnRight = column.value
     ? column.value.getBoundingClientRect().right +
-      (Number.parseFloat(getComputedStyle(column.value).getPropertyValue("--conversation-inline-inset")) || 0)
+      (Number.parseFloat(
+        getComputedStyle(column.value).getPropertyValue("--conversation-inline-inset"),
+      ) || 0)
     : -Infinity;
   fullHeight.value = columnRight <= railElement.getBoundingClientRect().left;
   const paneElement = pane.value?.$el as HTMLElement | undefined;
@@ -43,7 +45,13 @@ function layout() {
 }
 
 useResizeObserver(
-  () => [player.value, column.value, rail.value, pane.value?.$el as HTMLElement | undefined, group.value],
+  () => [
+    player.value,
+    column.value,
+    rail.value,
+    pane.value?.$el as HTMLElement | undefined,
+    group.value,
+  ],
   layout,
 );
 </script>
@@ -67,7 +75,11 @@ useResizeObserver(
       role="group"
       aria-label="Background controls and status"
     >
-      <div ref="group" class="stage-right-rail-group" :style="{ marginBlockStart: `${groupOffset}px` }">
+      <div
+        ref="group"
+        class="stage-right-rail-group"
+        :style="{ marginBlockStart: `${groupOffset}px` }"
+      >
         <slot name="controls" />
       </div>
     </ScrollArea>

@@ -99,7 +99,12 @@ const indent = (depth: number) => ({ paddingInlineStart: `${Math.min(depth, 6) *
             <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <!-- Every part wraps anywhere: names, statements and notes may be one long word. -->
               <span class="min-w-0 font-medium wrap-anywhere">{{ row.text.title }}</span>
-              <span v-if="row.text.unknown" class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere" data-trace-unknown>Unknown origin</span>
+              <span
+                v-if="row.text.unknown"
+                class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere"
+                data-trace-unknown
+                >Unknown origin</span
+              >
               <span v-if="row.text.note" class="min-w-0 text-muted-foreground wrap-anywhere">{{
                 row.text.note
               }}</span>
@@ -154,7 +159,10 @@ const indent = (depth: number) => ({ paddingInlineStart: `${Math.min(depth, 6) *
         class="flex min-h-11 items-center gap-2 ps-12"
         data-trace-expired
       >
-        <span class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere">Expired</span>
+        <span
+          class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere"
+          >Expired</span
+        >
         <span class="min-w-0 text-muted-foreground wrap-anywhere">Older history was dropped</span>
       </div>
       <p
@@ -164,7 +172,12 @@ const indent = (depth: number) => ({ paddingInlineStart: `${Math.min(depth, 6) *
         {{ row.count }} more {{ row.count === 1 ? "cause was" : "causes were" }} not kept
       </p>
       <div v-else class="flex min-w-0 ps-12">
-        <button type="button" class="min-h-11 max-w-full rounded-md px-2 text-start text-sm font-medium wrap-anywhere hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" data-trace-more @click="showMore(row)">
+        <button
+          type="button"
+          class="min-h-11 max-w-full rounded-md px-2 text-start text-sm font-medium wrap-anywhere hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          data-trace-more
+          @click="showMore(row)"
+        >
           Show {{ Math.min(row.remaining, 20) }} more
         </button>
       </div>

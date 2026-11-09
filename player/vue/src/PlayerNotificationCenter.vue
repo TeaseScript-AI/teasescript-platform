@@ -69,7 +69,12 @@ function clearAll() {
             <Button data-notification-bell variant="ghost" size="icon" :aria-label="bellLabel">
               <span class="player-notification-bell">
                 <Bell class="size-4" />
-                <span v-if="attentionLevel" class="player-notification-dot" :data-notice-level="attentionLevel" aria-hidden="true" />
+                <span
+                  v-if="attentionLevel"
+                  class="player-notification-dot"
+                  :data-notice-level="attentionLevel"
+                  aria-hidden="true"
+                />
               </span>
             </Button>
           </PopoverTrigger>
@@ -83,9 +88,18 @@ function clearAll() {
             <div ref="panel">
               <div class="player-notification-head">
                 <h2>Notifications</h2>
-                <Button v-if="dismissible.length" variant="ghost" size="sm" data-notifications-clear @click="clearAll">Clear all</Button>
+                <Button
+                  v-if="dismissible.length"
+                  variant="ghost"
+                  size="sm"
+                  data-notifications-clear
+                  @click="clearAll"
+                  >Clear all</Button
+                >
               </div>
-              <p v-if="!notifications.length" class="player-notification-empty">No notifications.</p>
+              <p v-if="!notifications.length" class="player-notification-empty">
+                No notifications.
+              </p>
               <ul v-else class="player-notification-list">
                 <li
                   v-for="entry in notifications"
@@ -94,20 +108,32 @@ function clearAll() {
                   :data-player-notice="entry.notice.key"
                   :data-notice-level="entry.notice.level"
                 >
-                  <component :is="icons[entry.notice.level]" class="player-notification-icon size-4" aria-hidden="true" />
+                  <component
+                    :is="icons[entry.notice.level]"
+                    class="player-notification-icon size-4"
+                    aria-hidden="true"
+                  />
                   <div class="player-notification-body">
                     <p>
-                      <span class="sr-only">{{ levelLabels[entry.notice.level] }}: </span>{{ entry.notice.message }}
+                      <span class="sr-only">{{ levelLabels[entry.notice.level] }}: </span
+                      >{{ entry.notice.message }}
                     </p>
                     <p class="player-notification-meta">
                       <template v-if="entry.notice.dismissible === false">
                         <span class="player-notification-needs-action">Needs action</span>
                         <span aria-hidden="true">·</span>
                       </template>
-                      <time :datetime="new Date(entry.publishedAt).toISOString()">{{ age(entry.publishedAt) }}</time>
+                      <time :datetime="new Date(entry.publishedAt).toISOString()">{{
+                        age(entry.publishedAt)
+                      }}</time>
                     </p>
                     <span v-if="entry.notice.action" class="player-notification-action">
-                      <Button variant="outline" size="sm" :data-notice-action="entry.notice.key" @click="entry.notice.action.run()">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        :data-notice-action="entry.notice.key"
+                        @click="entry.notice.action.run()"
+                      >
                         {{ entry.notice.action.label }}
                       </Button>
                     </span>

@@ -1,16 +1,13 @@
 <script setup lang="ts">
 import { definedProps } from "@/lib/definedProps";
-import type { DialogTriggerProps } from "reka-ui"
-import { DialogTrigger } from "reka-ui"
+import type { DialogTriggerProps } from "reka-ui";
+import { DialogTrigger } from "reka-ui";
 
-const props = defineProps<DialogTriggerProps>()
+const props = defineProps<DialogTriggerProps>();
 </script>
 
 <template>
-  <DialogTrigger
-    data-slot="dialog-trigger"
-    v-bind="definedProps(props)"
-  >
+  <DialogTrigger data-slot="dialog-trigger" v-bind="definedProps(props)">
     <slot />
   </DialogTrigger>
 </template>

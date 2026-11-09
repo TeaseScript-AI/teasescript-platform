@@ -49,12 +49,20 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
         /></template>
       </component>
       <component :is="block.ordered ? 'ol' : 'ul'" v-else>
-        <li v-for="(item, li) in block.items" :key="li" :value="item.ordinal ?? undefined"
-          :data-backed="cover !== null || undefined">
+        <li
+          v-for="(item, li) in block.items"
+          :key="li"
+          :value="item.ordinal ?? undefined"
+          :data-backed="cover !== null || undefined"
+        >
           <!-- Native markers cannot paint a background. Keep their numbering and
                list semantics, with an aria-hidden painted copy only when needed. -->
-          <span v-if="cover !== null" aria-hidden="true" class="markup-list-marker markup-scrim"
-            :style="{ backgroundColor: cover }" />
+          <span
+            v-if="cover !== null"
+            aria-hidden="true"
+            class="markup-list-marker markup-scrim"
+            :style="{ backgroundColor: cover }"
+          />
           <TranscriptLine
             :pieces="item.line.pieces"
             :backdrop="backdrop"

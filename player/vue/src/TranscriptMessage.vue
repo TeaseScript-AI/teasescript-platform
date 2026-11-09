@@ -27,7 +27,8 @@ const avatarImage = speaker?.avatarImage === undefined ? null : resolveAvatar(sp
 // An avatar image the browser cannot load is reported, like a Stage image, while the glyph stays.
 const reportAvatarFailure = inject(speakerAvatarFailure, () => {});
 function avatarLoadingStatus(status: string) {
-  if (status === "error" && speaker?.avatarImage !== undefined) reportAvatarFailure(speaker.avatarImage);
+  if (status === "error" && speaker?.avatarImage !== undefined)
+    reportAvatarFailure(speaker.avatarImage);
 }
 // The first message of a group names its speaker; a removed message before it can start a group or join one (#836).
 const name = computed(() =>
@@ -154,11 +155,14 @@ const avatarStyle = computed(() => ({
                 v-for="(line, index) in entry.formSummary"
                 :key="index"
                 class="flex items-center gap-2"
-                :data-form-summary-line="line.kind === 'toggle' ? (line.on ? 'on' : 'off') : 'value'"
+                :data-form-summary-line="
+                  line.kind === 'toggle' ? (line.on ? 'on' : 'off') : 'value'
+                "
                 ><template v-if="line.kind === 'toggle'"
                   ><Check v-if="line.on" class="size-4 shrink-0" /><Square
                     v-else
-                    class="size-4 shrink-0" /><span>{{ line.label }}</span></template
+                    class="size-4 shrink-0"
+                  /><span>{{ line.label }}</span></template
                 ><template v-else>{{ line.label }}: {{ line.value }}</template></span
               ></span
             ></template
@@ -169,8 +173,9 @@ const avatarStyle = computed(() => ({
               class="choice-marker"
               aria-hidden="true"
               >&rsaquo; </span
-            ><span v-if="entry.kind === 'message' && entry.responseKind" class="sr-only"
-              >{{ entry.responseKind === "form" ? "Submitted form: " : "Selected option: " }}</span
+            ><span v-if="entry.kind === 'message' && entry.responseKind" class="sr-only">{{
+              entry.responseKind === "form" ? "Submitted form: " : "Selected option: "
+            }}</span
             >{{ entry.text }}</template
           >
         </BubbleContent>

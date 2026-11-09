@@ -28,7 +28,9 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>();
         <DialogDescription>{{ description }}</DialogDescription>
       </DialogHeader>
       <div class="flex flex-wrap justify-end gap-2">
-        <Button type="button" variant="outline" class="min-h-11" @click="emit('cancel')">Cancel</Button>
+        <Button type="button" variant="outline" class="min-h-11" @click="emit('cancel')"
+          >Cancel</Button
+        >
         <Button
           type="button"
           :variant="destructive ? 'destructive' : 'default'"

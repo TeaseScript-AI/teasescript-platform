@@ -453,9 +453,16 @@ its second round. There is no route beyond full; a family there follows the step
 ### The plan
 
 On the light route, a short plan goes in the pull-request description; it needs no acceptance, so the builder proceeds,
-and the coordinator may redirect at any review. On the full route, the plan is a document in the
-coordinators' repository that the pull request links, and the coordinator accepts it before code. Anything a later
-reader needs from it, or from the reports it links, is summarised in the pull request. A full-route plan states:
+and the coordinator may redirect at any review. On the full route, the plan is a document in the coordinators'
+repository that the pull request links, and the coordinator accepts it before code. On either route, the plan names
+every tool, check, proof or generator the change builds whose verdict an acceptance claim rests on, wherever it lives,
+an evidence folder included: what it decides, the maintained tool that already does that job (the language's own parser
+or compiler, an existing checker, differ or test runner, a helper under `shared/`) and the reason the plan does not use
+it; such a tool lives under the script boundary in [Report what cost a wrong
+turn](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#report-what-cost-a-wrong-turn) (a shared helper with its header
+until a rule names its output, then a repository tool with tests), never loose in an evidence folder. A probe that only
+collects figures an existing tool prints needs no entry. Anything a later reader needs from it, or from the reports it
+links, is summarised in the pull request. A full-route plan states:
 
 - the files and the expected size of each change (lines changed per file), and where new code goes: its module and
   folder, per [Code structure](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-structure);

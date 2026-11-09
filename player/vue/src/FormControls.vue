@@ -19,7 +19,13 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div data-foreground-controls data-form-controls role="group" :aria-label="accessibleName" class="flex min-w-0 flex-col items-center">
+  <div
+    data-foreground-controls
+    data-form-controls
+    role="group"
+    :aria-label="accessibleName"
+    class="flex min-w-0 flex-col items-center"
+  >
     <!-- Room inside the scroll region for the buttons' shadows, which it would otherwise clip; the negative margin keeps
          the layout as it was. -->
     <ScrollArea data-form-fields class="-my-1.5 w-full">
@@ -33,7 +39,11 @@ const emit = defineEmits<{
             :disabled="disabled"
             @update:model-value="emit('step', field.id)"
           >
-            <PlayerActionButton :data-form-field="field.id" :authored-fill="field.authoredFill" :disabled="disabled">
+            <PlayerActionButton
+              :data-form-field="field.id"
+              :authored-fill="field.authoredFill"
+              :disabled="disabled"
+            >
               <template v-if="field.state === null"
                 ><span aria-hidden="true">{{ field.pressed ? "✓ " : "✗ " }}</span
                 >{{ field.label }}</template
@@ -79,7 +89,12 @@ const emit = defineEmits<{
     <div class="flex w-full min-w-0 flex-wrap items-center justify-center gap-2" data-form-actions>
       <template v-if="form.editor">
         <PlayerActionButton :disabled="disabled" label="Back" @click="emit('dismiss')" />
-        <PlayerActionButton v-if="form.editor.optional" :disabled="disabled" label="Clear" @click="emit('clear')" />
+        <PlayerActionButton
+          v-if="form.editor.optional"
+          :disabled="disabled"
+          label="Clear"
+          @click="emit('clear')"
+        />
       </template>
       <PlayerActionButton
         :authored-fill="form.submit.authoredFill"
