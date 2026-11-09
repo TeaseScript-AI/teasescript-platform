@@ -1,6 +1,6 @@
 /*
- * The list functions' compile-time checks and the run that confirms each: a statistic's, `take`'s, `get`'s,
- * `linearRegression`'s or `randomWeighted`'s verdict, and the same failure when the compiler cannot see the value.
+ * List-function typing and validation alongside execution: each function's compile-time checks with its runs,
+ * successful outcomes and the matching run-time failure when the compiler cannot see the value.
  */
 
 import assert from "node:assert/strict";
