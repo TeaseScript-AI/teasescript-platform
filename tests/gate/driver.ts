@@ -50,7 +50,7 @@ const count = (counts: Record<string, number>, key: string) =>
 /**
  * Records one tape on `bridge`, a fresh host: `source` as `prepare` takes it, then a Start with `options`. Its census
  * counts accepted inputs by op, declines by op and reason, and the rows that proposed accepted inputs. `candidates` and
- * `outcomes` replace the table and its readings, for the tests' negative probes and mutants only.
+ * `outcomes` replace the table and its readings, for fixture hosts and the tests' negative probes and mutants.
  */
 export async function driveTape(
   bridge: PlayerBridge,
