@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import test, { before, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { registerActivationWorkChecks } from "./helpers/activation-work-checks.js";
 
 /*
  * L5i.5, R3: the census of session work (`tools/session-work-census.mjs`). The tool derives the sending boundary from
@@ -54,6 +55,7 @@ interface Census {
   setOverrides(next: Readonly<Record<string, string>>): void;
   run(surfaces: readonly Surface[], options?: { readonly within?: string }): Walk;
   uses(targets: readonly { readonly file: string; readonly path: string }[]): readonly Use[];
+  program(): { readonly program: unknown; readonly root: string };
 }
 
 let census: Census;
@@ -65,6 +67,8 @@ before(async () => {
   // EVIDENCE: validation: the census module's export, checked callable above; `Census` is its documented API.
   census = (tool.createSessionWorkCensus as (root: string) => Census)(process.cwd());
 });
+// Session split S2's checks of activation work, over this census's program (`tests/helpers/activation-work-checks.ts`).
+registerActivationWorkChecks(() => census);
 
 const CLIENT = "player/engine-bridge/client.ts";
 const FACADE = "player/engine-bridge/in-process.ts";

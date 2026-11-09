@@ -103,6 +103,12 @@ export function createSessionWorkCensus(root) {
       if (program === undefined) throw new Error("The census has no program.");
       return usesOf(service, program, base, rel, targets);
     },
+    /** The program the census reads, with the overrides as they are now, and its root; for other checks to share. */
+    program() {
+      const program = service.getProgram();
+      if (program === undefined) throw new Error("The census has no program.");
+      return { program, root: base };
+    },
   };
 }
 
