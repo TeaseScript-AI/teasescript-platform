@@ -44,7 +44,8 @@ explains its unknown type, an unknown receiver adds no second warning there. The
 its own access, and the retained warning states the cause (2026-10-30, #1481).
 
 The branch cause says `depends on which branch runs` (2026-10-28, #1213). A type test that holds removes possible types
-without losing the read's cause. Where no definition supplies the narrowed read, use the untested read's cause only if it is unique; if the untested read has several causes, keep the narrowed value's own causes (2026-11-08, #2074).
+without losing the read's cause. Where no definition supplies the narrowed read, use the untested read's cause only if
+it is unique; if the untested read has several causes, keep the narrowed value's own causes (2026-11-08, #2074).
 
 A suggested fix never contains a placeholder such as `default: ...`, and what cannot be written in full is said in words
 (owner decision, 2026-10-28, #1268).
@@ -107,7 +108,9 @@ preserves the unstopped site's choice (2026-10-28, #1063).
 For named external data in a nested literal cell, a selection, `otherwise`, `get`, or copy method has no offending
 operand: the destination's check marks the operation once, at the assigned value's span. Concatenation or removal marks
 the named read that brought the type. Inline host data in an `otherwise` fallback or `get` default likewise uses the
-assigned value's span, while typed `load` or `fromJson` defaults keep the call's site. When host-member and own-read or named data combine, the destination's check uses the assigned value's span for the merged place, while the member's own root-place check stays at the member read (the lead, 2026-10-26).
+assigned value's span, while typed `load` or `fromJson` defaults keep the call's site. When host-member and own-read or
+named data combine, the destination's check uses the assigned value's span for the merged place, while the member's own
+root-place check stays at the member read (the lead, 2026-10-26).
 
 For `askChoice` with an inline external option, the boundary and a written destination's warning and copy check sit at
 that option's expression. With no destination assignment, the boundary sits at the consumer's operand against `unknown`.
