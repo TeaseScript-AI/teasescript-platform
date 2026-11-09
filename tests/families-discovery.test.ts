@@ -36,7 +36,8 @@ const area = (root: string, name: string, files: Record<string, string>) => {
 const withRoot = async (run: (root: string, s: Sources) => Promise<void>) => {
   const root = mkdtempSync(join(tmpdir(), "families-discovery-"));
   try {
-    await run(root, (await import(sources)) as Sources);
+    const loaded: Sources = await import(sources);
+    await run(root, loaded);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -86,16 +87,15 @@ test("an area with a top-level generator reads none of its subfolders, as proper
     );
   });
   // the property area itself: its one generator, never its tool modules under lib/, bin/, test/, adapters/, families/
-  const { generatorFiles } = (await import(sources)) as Sources;
+  const { generatorFiles }: Sources = await import(sources);
   assert.deepEqual(generatorFiles(resolve(process.cwd(), "tests/families/property")), [
     "s8-stores.mjs",
   ]);
 });
 
 test("a generator moved into a group keeps its sources' places and its area's PLAN, renamed too where its id keeps the old name", async () => {
-  const { planOf } = (await import(baselines)) as {
-    planOf: (area: string, generators: Generator[], shards: number) => string;
-  };
+  const { planOf }: { planOf: (area: string, generators: Generator[], shards: number) => string } =
+    await import(baselines);
   await withRoot(async (root, { generatorsOf }) => {
     const flat = area(root, "flat/area", {
       "one.mjs": generator(["a", "b"]),
