@@ -133,10 +133,11 @@ first review:
   could admit until a row admits it, and it never admits what the function has not proved.
 - The rule is written as the closed set of forms it admits, never as a list of forms it rejects: a reject-list fails
   open on every form it did not name, and each unnamed form becomes a sibling. For ordinary object-contract edits, the
-  charging lint uses closed enumerations for whole-type mutually assignable widening (with reviewed trivial exceptions), sorted candidates
-  and uses, local callable export declarations, mixed-element checks on every walked or written collection, and
-  value-position `any`/`unknown` checks. Runtime provenance through carriers remains a reviewed residual, which the lint
-  does not prove; support the charging invariant with mutants, the family growth bar and area comparisons including work.
+  charging lint uses closed enumerations for whole-type mutually assignable widening (with reviewed trivial exceptions),
+  sorted candidates and uses, local callable export declarations, mixed-element checks on every walked or written
+  collection, and value-position `any`/`unknown` checks. Runtime provenance through carriers remains a reviewed
+  residual, which the lint does not prove; support the charging invariant with mutants, the family growth bar and area
+  comparisons including work.
 - A generated test family covers the rule's axes (for example sites × forms × kinds, in both orders), with a check
   that every combination is covered.
 
