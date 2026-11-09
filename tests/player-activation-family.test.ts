@@ -1041,7 +1041,8 @@ test("a Debug mode reply clears only its own request's marker, so a later change
   host.prepare(factory(SCRIPT));
   await host.activate();
   await settle();
-  const [on, off] = [traffic.arm("setDebugMode"), traffic.arm("setDebugMode")];
+  // The second change's reply waits with its application: what shows meanwhile is the first's.
+  const [on, off] = [traffic.arm("setDebugMode"), traffic.arm("setDebugMode", { hook: true })];
   host.setDebugMode(true);
   host.setDebugMode(false);
   await until(() => on.held() && off.held(), "both changes are in the host");
