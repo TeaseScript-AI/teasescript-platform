@@ -8,7 +8,11 @@ import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
 import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
-import { planDigest, type RunResult, runsDigest } from "../helpers/type-core-declared-escapes.js";
+import {
+  planDigest,
+  type RunResult,
+  runsDigest,
+} from "../helpers/type-core/type-core-declared-escapes.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { hostValues } from "../helpers/type-core-stop-oracle.js";
 
