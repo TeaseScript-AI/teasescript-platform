@@ -75,7 +75,14 @@ const DECLINED: readonly Witness[] = [
     { hostValue: nested("x"), hostOther: list(["t"]) },
     "{a: hostOther, z: hostValue}",
   ),
-  witness("1648-retarget-exact", retarget(4)),
+  // (#2080: every completion result here is lost by the retarget, the stopped marks' too, so the program declines at its
+  // first store, `let box`'s, which the gate reads before the host store)
+  witness(
+    "1648-retarget-exact",
+    retarget(4),
+    undefined,
+    "{first: {n: [[1]]}}\nbox = {first: {n: [[0]]}}",
+  ),
   witness("1648-retarget-whole", retarget(16)),
   // (a rejection's lost obligation: the stopped plan fails at an earlier store, but its check at the host store is lost)
   witness("1648-rejection", reject(16), { hostValue: "x" }),
@@ -202,19 +209,28 @@ test("a stopped program whose required checks are all published with their contr
 });
 
 test("a stopped program whose checks its complete store check or a typed reader keeps compiles (#1526 decision 2, condition 1)", () => {
-  // (from the set: a cycle of stores whose settled contract the store check carries whole, at demand 64 in source order
-  // without sharing; a typed parse whose reader carries its default's contract, at demand 16)
+  // (from the set: a typed parse whose reader carries its default's contract, at demand 16)
   const kept: readonly (readonly [string, number, readonly (typeof MODES)[number][]])[] = [
-    [
-      'let vi:integer=23\nlet vs:string="s"\nlet m0={f:vs,g:0}\nlet m1={f:vi,g:0}\nlet m2={f:vi,g:0}\nm1=m0\nm2=m1\nm0=m2\nlet final=[m0,m1]\nexit\n',
-      64,
-      [MODES[1]!],
-    ],
     ['let x = fromJson("{}", default: {n: 1})\nsay x\nexit\n', 16, MODES],
   ];
   for (const [source, demand, modes] of kept)
     for (const mode of modes)
       assert.ok(inMode(mode, () => compiled(source, demand)).plan !== null, JSON.stringify(mode));
+});
+
+test("a stopped mark whose completion result a rejection lost declines at its store: a typed-copy cycle (#2080)", () => {
+  // (at demand 64 in source order without sharing, every completion result is lost by the rejection, the stopped marks'
+  // too, and none of them has a complete store check: the program declines at its first, `m1`'s literal; a certificate
+  // that a copy of a checked place owes nothing would let it publish, #2131)
+  const source =
+    'let vi:integer=23\nlet vs:string="s"\nlet m0={f:vs,g:0}\nlet m1={f:vi,g:0}\nlet m2={f:vi,g:0}\nm1=m0\nm2=m1\nm0=m2\nlet final=[m0,m1]\nexit\n';
+  assert.throws(
+    () => inMode(MODES[1]!, () => compiled(source, 64)),
+    (error) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === LOST &&
+      error.site.start === source.indexOf("{f:vi,g:0}"),
+  );
 });
 
 test("a program whose receiving completion reached its allowance keeps a check only by its complete store check (Codex r2)", () => {
