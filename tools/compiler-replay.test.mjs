@@ -8,10 +8,13 @@ import { fileURLToPath } from "node:url";
 import {
   areasOf,
   declarations,
+  ranOut,
   report,
   routeOnly,
   setAside,
   setDifference,
+  shardSubmission,
+  stallsSubmission,
   submissions,
   verdict,
 } from "./compiler-replay.mjs";
@@ -82,28 +85,57 @@ test("submit hands each submission to the queue and prints the ids it returns", 
   }
 });
 
+const write = (file, rows) => {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+};
+
+/** A queue record that ran out: `done`, on desktop; `fields` override it. */
+const ran = (name, fields = {}) => ({
+  name,
+  exit: 0,
+  outcome: "done",
+  oom: [],
+  timed_out: false,
+  lost_test_files: null,
+  worker: "desktop",
+  ...fields,
+});
+const killed = { exit: 143, outcome: "killed at its memory cap", oom: ["x"], worker: "truenas" };
+
+/**
+ * One attempt of an area shard `rings-<i>of16` in `root`'s `p-areas`, its job `id`: its record (`ran`'s, with `record`),
+ * and unless `ran` is false its summary, with its differences and work records.
+ */
+function areaAttempt(
+  root,
+  id,
+  i,
+  { record = {}, ran: summary = true, differences = [], work } = {},
+) {
+  const folder = join(root, "p-areas", id);
+  write(join(folder, "meta.json"), [ran(`rings-${i}of16`, record)]);
+  const out = join(folder, "out");
+  if (summary)
+    write(join(out, "rings.log"), [
+      { area: "rings", sources: 2, runs: 8, differences: differences.length },
+    ]);
+  write(join(out, "rings.differences.jsonl"), differences);
+  if (work !== undefined) write(join(out, "rings.work.jsonl"), work);
+}
+
+/** A job id of the stand-in queue: `n`'s 14 hexadecimal digits after `tag`. */
+const jobId = (tag, n) => `${tag}${n.toString(16).padStart(13, "0")}`;
+
 /** A results folder of `prefix`'s campaigns: one area's and the set's 16 shards, each as `shard(i)` makes it. */
 function results(prefix, shard) {
   const root = mkdtempSync(join(tmpdir(), "compiler-replay-results-"));
-  const write = (file, rows) => {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
-  };
   for (let i = 0; i < 16; i += 1) {
     const { area = {}, set = {} } = shard(i);
-    const job = (campaign, name) => {
-      const folder = join(root, `${prefix}-${campaign}`, `${campaign}${i}`);
-      write(join(folder, "meta.json"), [{ name }]);
-      return join(folder, "out");
-    };
-    const a = job("areas", `rings-${i}of16`);
-    if (area.ran !== false)
-      write(join(a, "rings.log"), [
-        { area: "rings", sources: 2, runs: 8, differences: area.differences?.length ?? 0 },
-      ]);
-    write(join(a, "rings.differences.jsonl"), area.differences ?? []);
-    if (area.work !== undefined) write(join(a, "rings.work.jsonl"), area.work);
-    const s = job("set", `set-${i}of16`);
+    areaAttempt(root, jobId("a", i), i, area);
+    const folder = join(root, `${prefix}-set`, jobId("b", i));
+    write(join(folder, "meta.json"), [ran(`set-${i}of16`)]);
+    const s = join(folder, "out");
     if (set.ran !== false)
       write(join(s, "plans.log"), [
         { set: "corpus", sources: 1, runs: 4, stalled: 0, uncharged: 0 },
@@ -348,5 +380,347 @@ test("a declaration file the tool cannot read or parse is a usage error, exit 2"
     }
   } finally {
     rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("collect: an attempt stands only when its record shows its runner's own ending; a killed or stopped one with a summary does not", () => {
+  assert.ok(ranOut(ran("n"), [0, 1]));
+  // (a runner's own exit 1 or 3, as when something differs or the head alone crashed: it ran out)
+  assert.ok(ranOut(ran("n", { exit: 1, outcome: "exit 1" }), [0, 1]));
+  assert.ok(ranOut(ran("n", { exit: 3, outcome: "exit 3" }), [0, 1, 3]));
+  assert.ok(!ranOut(ran("n", { exit: 3, outcome: "exit 3" }), [0, 1]));
+  for (const fields of [
+    killed,
+    { exit: 0, outcome: "stopped by sx-job stop" },
+    { exit: 124, outcome: "timed out", timed_out: true },
+    { exit: 1, outcome: "exit 1", lost_test_files: ["f"] },
+    { exit: 1, outcome: "exit 1", oom: ["x"] },
+    { exit: undefined, outcome: undefined },
+  ])
+    assert.ok(!ranOut(ran("n", fields), [0, 1, 3]), JSON.stringify(fields));
+  // (killed after it wrote its summary, alone: not run; with a rerun the rerun stands, the killed attempt replaced)
+  const root = results("p", () => ({}));
+  try {
+    const rerun = jobId("c", 5);
+    rmSync(join(root, "p-areas", jobId("a", 5)), { recursive: true });
+    areaAttempt(root, jobId("a", 5), 5, { record: killed, differences: [{ mode: "src-on" }] });
+    assert.deepEqual(verdict(report("p", root, ["rings"])).reasons, ["not run: rings-5of16"]);
+    areaAttempt(root, rerun, 5, { record: { exit: 1, outcome: "exit 1" } });
+    const r = report("p", root, ["rings"]);
+    assert.deepEqual(verdict(r), { status: 0, reasons: [] });
+    assert.deepEqual(r.attempts, [
+      {
+        shard: "rings-5of16",
+        attempts: [
+          {
+            id: jobId("a", 5),
+            host: "truenas",
+            outcome: killed.outcome,
+            summary: true,
+            stands: false,
+          },
+          { id: rerun, host: "desktop", outcome: "exit 1", summary: true, stands: true },
+        ],
+      },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("collect: a failed shard's rerun stands in its place, and the failed job's differences and work records are never read", () => {
+  // (the failed attempt killed after it wrote a difference and a work record stalls.mjs refuses)
+  const root = results("p", (i) =>
+    i === 3
+      ? {
+          area: {
+            record: killed,
+            differences: [{ generator: "g", source: "s", mode: "src-on", part: 1, parts: [2, 2] }],
+            work: [{ work: { area: "rings", roots: [] } }],
+          },
+        }
+      : {},
+  );
+  try {
+    assert.equal(verdict(report("p", root, ["rings"])).status, 3);
+    areaAttempt(root, jobId("c", 3), 3, {
+      record: { command: ["bash", "-c", `: replaces ${jobId("a", 3)}; run`] },
+    });
+    const r = report("p", root, ["rings"]);
+    assert.deepEqual(verdict(r), { status: 0, reasons: [] });
+    assert.equal(r.areas.rings.shards, 16);
+    assert.deepEqual(r.differences, []);
+    assert.equal(r.stalls.unread, null);
+    assert.deepEqual(
+      r.attempts[0].attempts.map((a) => [a.id, a.stands]),
+      [
+        [jobId("a", 3), false],
+        [jobId("c", 3), true],
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("collect: two attempts that both ran out are refused until one replaces the other, then read as one shard", () => {
+  const root = results("p", () => ({}));
+  const [first, second] = [jobId("a", 7), jobId("c", 7)];
+  try {
+    areaAttempt(root, second, 7);
+    assert.throws(() => report("p", root, ["rings"]), /rings-7of16: .* --replace/u);
+    const r = report("p", root, ["rings"], [[first, second]]);
+    assert.equal(r.areas.rings.shards, 16);
+    assert.equal(verdict(r).status, 0);
+    // (through the command line: refused with exit 2, then read)
+    const cli = (...extra) =>
+      spawnSync(process.execPath, [tool, "collect", "p", "--results", root, ...extra], {
+        encoding: "utf8",
+      });
+    assert.equal(cli().status, 2);
+    const replaced = cli("--replace", `${first}=${second}`);
+    assert.match(
+      replaced.stdout,
+      new RegExp(
+        `rings-7of16: ${first} on desktop, done \\(replaced\\); ${second} on desktop, done \\(stands\\)`,
+        "u",
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("collect: a replacement outside the campaign, across shards or by a rerun that cannot stand is refused", () => {
+  const root = results("p", () => ({}));
+  const rerun = jobId("c", 2);
+  try {
+    areaAttempt(root, rerun, 2);
+    for (const pair of [
+      [jobId("a", 2), jobId("f", 2)],
+      [jobId("f", 2), rerun],
+      [jobId("a", 4), rerun],
+      [jobId("b", 2), rerun],
+    ])
+      assert.throws(() => report("p", root, ["rings"], [pair]), /replace/u, pair.join("="));
+    // (a rerun's record naming another shard's job)
+    areaAttempt(root, rerun, 2, {
+      record: { command: ["bash", "-c", `: replaces ${jobId("a", 4)}; run`] },
+    });
+    assert.throws(() => report("p", root, ["rings"]), /not an attempt of its shard/u);
+    // (a rerun killed without its summary cannot stand for the shard)
+    areaAttempt(root, rerun, 2, { record: killed, ran: false });
+    assert.throws(
+      () => report("p", root, ["rings"], [[jobId("a", 2), rerun]]),
+      /cannot stand|did not run out/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rerun-shard submits submit's own shard, its index written in and its record naming the job it replaces; --host pins it", () => {
+  const all = submissions("b".repeat(40), "h".repeat(40), { owner: "o", prefix: "p" });
+  const [area] = areasOf(ROOT);
+  const args = shardSubmission(all, "p-areas", `${area.name}-5of16`, jobId("a", 5), "desktop");
+  const template = all.find((a) => a[1] === `${area.name}-{i}of{n}`);
+  const expanded = template.map((a) => a.replaceAll("{i}", "5").replaceAll("{n}", "16"));
+  assert.deepEqual(
+    args.slice(0, args.indexOf("--host")),
+    expanded
+      .slice(0, expanded.indexOf("--shards"))
+      .concat(expanded.slice(expanded.indexOf("--shards") + 2, expanded.indexOf("--"))),
+  );
+  assert.deepEqual(args.slice(args.indexOf("--host"), args.indexOf("--") + 1), [
+    "--host",
+    "desktop",
+    "--",
+  ]);
+  assert.equal(args.at(-1), `: replaces ${jobId("a", 5)}; ${expanded.at(-1)}`);
+  assert.match(args.at(-1), /--shard 5\/16 /u);
+  assert.throws(() => shardSubmission(all, "p-areas", "nowhere-5of16", jobId("a", 5)), /no shard/u);
+  assert.throws(
+    () => shardSubmission(all, "p-set", `${area.name}-5of16`, jobId("a", 5)),
+    /no shard/u,
+  );
+
+  // (through the stand-in queue: refused unless the job ran this script on these trees)
+  const root = mkdtempSync(join(tmpdir(), "compiler-replay-results-"));
+  const bin = mkdtempSync(join(tmpdir(), "compiler-replay-bin-"));
+  const log = join(bin, "calls.jsonl");
+  writeFileSync(
+    join(bin, "sx-job"),
+    `#!/bin/sh\nnode -e 'require("fs").appendFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)) + "\\n")' "${log}" "$@"\necho 22222222222222\n`,
+  );
+  chmodSync(join(bin, "sx-job"), 0o755);
+  const commits = { base: "b".repeat(40), head: "h".repeat(40) };
+  const job = (command) =>
+    write(join(root, "p-areas", jobId("a", 5), "meta.json"), [
+      ran(`${area.name}-5of16`, { ...killed, commits, command: ["bash", "-c", command] }),
+    ]);
+  const rerun = (head) =>
+    spawnSync(
+      process.execPath,
+      [
+        tool,
+        "rerun-shard",
+        "p",
+        "b".repeat(9),
+        head,
+        jobId("a", 5),
+        "--owner",
+        "o",
+        "--results",
+        root,
+        "--host",
+        "laptop",
+      ],
+      { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } },
+    );
+  try {
+    job(expanded.at(-1));
+    assert.equal(rerun("x".repeat(40)).status, 2);
+    const submitted = rerun("h".repeat(40));
+    assert.equal(submitted.status, 0, submitted.stderr);
+    assert.equal(submitted.stdout.trim(), "22222222222222");
+    const [call] = readFileSync(log, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(call[call.indexOf("--host") + 1], "laptop");
+    // (a prefix this clone cannot resolve goes as the recorded commit it names, never for the queue to read again)
+    assert.equal(call[call.indexOf(`base=${"b".repeat(40)}`)], `base=${"b".repeat(40)}`);
+    assert.equal(call.at(-1), `: replaces ${jobId("a", 5)}; ${expanded.at(-1)}`);
+    job(expanded.at(-1).replace("--shard 5/16", "--shard 6/16"));
+    assert.equal(rerun("h".repeat(40)).status, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+test("rerun-stalls passes --host to the queue, and none without it", () => {
+  const pinned = stallsSubmission("p", "b", "h", "/i.json", {
+    owner: "o",
+    memory: "12288",
+    host: "desktop",
+  });
+  assert.deepEqual(pinned.slice(pinned.indexOf("--host"), pinned.indexOf("--") + 1), [
+    "--host",
+    "desktop",
+    "--",
+  ]);
+  assert.ok(
+    !stallsSubmission("p", "b", "h", "/i.json", { owner: "o", memory: "12288" }).includes("--host"),
+  );
+});
+
+test("collect reads a replacement only from a `bash -c` script's opening, and a killed attempt's cut-off log is no summary", () => {
+  const root = results("p", () => ({}));
+  const [first, second] = [jobId("a", 6), jobId("c", 6)];
+  try {
+    // (the marker as Bash's `$0`, not the script: no replacement, so two attempts stand and are refused)
+    areaAttempt(root, second, 6, {
+      record: { command: ["bash", "-c", "run", `: replaces ${first}; `] },
+    });
+    assert.throws(() => report("p", root, ["rings"]), /rings-6of16: .* --replace/u);
+    // (killed while writing its summary, with a clean rerun: the rerun stands)
+    rmSync(join(root, "p-areas", second), { recursive: true });
+    rmSync(join(root, "p-areas", first), { recursive: true });
+    areaAttempt(root, first, 6, { record: killed, ran: false });
+    writeFileSync(join(root, "p-areas", first, "out", "rings.log"), '{"generator":"g","sources":');
+    areaAttempt(root, second, 6, {
+      record: { command: ["bash", "-c", `: replaces ${first}; run`] },
+    });
+    const r = report("p", root, ["rings"]);
+    assert.deepEqual(verdict(r), { status: 0, reasons: [] });
+    assert.deepEqual(
+      r.attempts[0].attempts.map((a) => [a.id, a.summary, a.stands]),
+      [
+        [first, false, false],
+        [second, true, true],
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rerun-shard reruns a rerun and takes any name of the recorded commits; another command's shape is refused", () => {
+  const commit = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  }).stdout.trim();
+  const [area] = areasOf(ROOT);
+  const [script] = submissions(commit, commit, { owner: "o", prefix: "p" })
+    .filter((a) => a[1] === `${area.name}-{i}of{n}`)
+    .map((a) => a.at(-1).replaceAll("{i}", "5").replaceAll("{n}", "16"));
+  const root = mkdtempSync(join(tmpdir(), "compiler-replay-results-"));
+  const job = (command) =>
+    write(join(root, "p-areas", jobId("c", 5), "meta.json"), [
+      ran(`${area.name}-5of16`, { ...killed, commits: { base: commit, head: commit }, command }),
+    ]);
+  const rerun = (ref) =>
+    spawnSync(
+      process.execPath,
+      [
+        tool,
+        "rerun-shard",
+        "p",
+        ref,
+        ref,
+        jobId("c", 5),
+        "--owner",
+        "o",
+        "--results",
+        root,
+        "--dry",
+      ],
+      { encoding: "utf8" },
+    );
+  try {
+    // (a killed rerun `rerun-shard` made, named by `<sha>^0`: its rerun replaces it)
+    job(["bash", "-c", `: replaces ${jobId("a", 5)}; ${script}`]);
+    const again = rerun(`${commit}^0`);
+    assert.equal(again.status, 0, again.stderr);
+    assert.equal(JSON.parse(again.stdout).at(-2), `: replaces ${jobId("c", 5)}; ${script}`);
+    // (a name is submitted as the commit it was checked as, never for the queue's clone to read again)
+    const named = rerun("HEAD");
+    assert.equal(named.status, 0, named.stderr);
+    assert.ok(JSON.parse(named.stdout).includes(`head=${commit}`), named.stdout);
+    assert.ok(JSON.parse(named.stdout).includes(`base=${commit}`), named.stdout);
+    // (the script given beside another one that ran, as Bash's `$0`: refused)
+    job(["bash", "-c", "exit 1", script]);
+    assert.equal(rerun(commit).status, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rerun-stalls reads the standing attempts' work records only, and a record stalls.mjs refuses is no index", () => {
+  const unreadable = [{ work: { area: "rings", roots: [] } }];
+  const root = results("p", (i) => (i === 3 ? { area: { record: killed, work: unreadable } } : {}));
+  const stalls = () =>
+    spawnSync(
+      process.execPath,
+      [tool, "rerun-stalls", "p", "b", "h", "--owner", "o", "--results", root],
+      { encoding: "utf8" },
+    );
+  try {
+    areaAttempt(root, jobId("c", 3), 3, {
+      record: { command: ["bash", "-c", `: replaces ${jobId("a", 3)}; run`] },
+    });
+    const replaced = stalls();
+    assert.equal(replaced.status, 0, replaced.stderr);
+    assert.equal(replaced.stdout, "no stalled source\n");
+    areaAttempt(root, jobId("c", 3), 3, {
+      record: { command: ["bash", "-c", `: replaces ${jobId("a", 3)}; run`] },
+      work: unreadable,
+    });
+    const refused = stalls();
+    assert.equal(refused.status, 2);
+    assert.match(refused.stderr, /stalls\.mjs refused the work records/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

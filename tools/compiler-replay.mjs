@@ -5,11 +5,12 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { generatorFolders, holdsGenerators } from "../tests/families/sources.mjs";
 
-// A compiler pull request's replay of its base against its head, through the queue, in five steps:
+// A compiler pull request's replay of its base against its head, through the queue, in these steps:
 //
 //   node tools/compiler-replay.mjs submit <base> <head> --owner <owner> [--campaign <prefix>] [--baseline] [--dry]
-//   node tools/compiler-replay.mjs collect <prefix> --owner <owner> [--results <folder>] [--json <file>]
-//   node tools/compiler-replay.mjs rerun-stalls <prefix> <base> <head> --owner <owner> [--memory <MB>]
+//   node tools/compiler-replay.mjs collect <prefix> --owner <owner> [--results <folder>] [--json <file>] [--replace <job>=<job>]...
+//   node tools/compiler-replay.mjs rerun-shard <prefix> <base> <head> <job> --owner <owner> [--baseline] [--host <host>] [--dry]
+//   node tools/compiler-replay.mjs rerun-stalls <prefix> <base> <head> --owner <owner> [--memory <MB>] [--host <host>]
 //   node tools/compiler-replay.mjs aside <prefix> <base> <head> --owner <owner> --declare <file>
 //   node tools/compiler-replay.mjs plan-checks <plan.json>...
 //
@@ -24,11 +25,25 @@ import { generatorFolders, holdsGenerators } from "../tests/families/sources.mjs
 // shards, sources, runs, differences and what did not compare; the set's records; the stall verdicts of
 // `tests/families/stalls.mjs` over the areas' work records, with `<prefix>-rerun`'s records where `rerun-stalls` ran;
 // each area difference by its first differing part ("route only": the last part, both trees with as many parts); each
-// set difference by what differs; and `<prefix>-aside`'s rows where `aside` ran. A shard whose job left no summary line
-// is "not run", never equal. It prints a table and, with `--json`, writes the report.
+// set difference by what differs; and `<prefix>-aside`'s rows where `aside` ran. A shard is its job name, and of its
+// attempts one is read: the one that left a summary line and whose queue record (`meta.json`) shows its runner's own
+// ending (`ranOut`: exit 0 or 1, 3 as well for an area job, with the queue's outcome for that exit, no OOM kill, no
+// timeout, no lost test file). Any other attempt is listed, with its host and outcome, as replaced and never read; a
+// shard none of whose attempts stands is "not run", never equal. Several attempts that could stand are refused (exit 2)
+// unless all but one are replaced: by a rerun's record (`rerun-shard`) or by `--replace <failed>=<rerun>`, which is
+// refused when the jobs are not one shard's attempts or the rerun cannot stand. It prints a table and, with `--json`,
+// writes the report.
 //
-// `rerun-stalls` reruns the areas' stalled sources on both trees in one queue job (`stalls.mjs --index`, then `stalls.mjs
-// rerun`, at `--memory`, 12,288 MB unless given) as `<prefix>-rerun`.
+// `rerun-shard` submits one shard again into its campaign, `submit`'s own submission with the shard written in, as the
+// rerun of `<job>`: its `bash -c` script opens with `: replaces <job>;`, which `collect` reads from the rerun's record
+// (`meta.json`'s `command`, kept verbatim), refusing one that names a job outside its shard. `<job>` may itself be a
+// rerun; it is refused when `<job>` is not in the campaigns or ran another script or trees. `<base>` and `<head>` go
+// to the queue as full SHAs: what this clone resolves each to, else the job's recorded commit it is a hexadecimal
+// prefix of. `--host` pins the worker.
+//
+// `rerun-stalls` reruns the standing area attempts' stalled sources on both trees in one queue job (`stalls.mjs --index`,
+// then `stalls.mjs rerun`, at `--memory`, 12,288 MB unless given) as `<prefix>-rerun`; `--host` pins the worker. A work
+// record `stalls.mjs` refuses is a usage error, never "no stalled source".
 //
 // `aside` compiles each route-only area difference and each differing set source, in each mode, through the candidate
 // route (`publishedRoute`) on both trees in one queue job as `<prefix>-aside`: a row agrees where the plan's JSON text
@@ -41,26 +56,33 @@ import { generatorFolders, holdsGenerators } from "../tests/families/sources.mjs
 //
 // Exit status: 0 when the step did what it says and, for `collect`, every shard ran and nothing differs, stalls or
 // stays uncompared, or what differs is only route text that `aside`'s rows set aside; 1 when something differs, stalls
-// or fails to compare (listed); 2 on a usage error or input it cannot read; 3 for `collect` when a shard did not run.
+// or fails to compare (listed); 2 on a usage error, a refused replacement or input it cannot read; 3 for `collect` when
+// a shard did not run.
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SHARDS = 16;
 const CASES = path.join(homedir(), "work", "o4-m4-g3", "cases.json");
 const USAGE =
-  "usage: node tools/compiler-replay.mjs submit|collect|rerun-stalls|aside|plan-checks … (its header)";
+  "usage: node tools/compiler-replay.mjs submit|collect|rerun-shard|rerun-stalls|aside|plan-checks … (its header)";
 
 class Usage extends Error {}
 
-/** The positional arguments and `--name value` options of `argv`; `--dry` and `--baseline` are flags. */
+/**
+ * The positional arguments and `--name value` options of `argv`; `--dry` and `--baseline` are flags, and each
+ * `--replace <failed>=<rerun>` adds a pair to `options.replace`.
+ */
 function parse(argv) {
   const positional = [];
-  const options = {};
+  const options = { replace: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const argument = argv[i];
     if (argument === "--dry" || argument === "--baseline") options[argument.slice(2)] = true;
     else if (argument.startsWith("--")) {
       if (i + 1 >= argv.length) throw new Usage(`${argument} needs a value`);
-      options[argument.slice(2)] = argv[(i += 1)];
+      const value = argv[(i += 1)];
+      if (argument !== "--replace") options[argument.slice(2)] = value;
+      else if (/^[0-9a-f]{14}=[0-9a-f]{14}$/u.test(value)) options.replace.push(value.split("="));
+      else throw new Usage(`--replace takes <failed job>=<rerun job>, not ${value}`);
     } else positional.push(argument);
   }
   return { positional, options };
@@ -175,14 +197,123 @@ const lines = (file) =>
         .map((line) => JSON.parse(line))
     : [];
 
-/** A campaign's jobs: each `{ name, out }`, its name from the queue's record (`meta.json`). */
+/** A campaign's jobs in their ids' order: each `{ id, name, out, record }`, its name from its queue record (`meta.json`). */
 function jobsOf(results, campaign) {
   const folder = path.join(results, campaign);
   if (!existsSync(folder)) return [];
-  return readdirSync(folder).map((id) => {
-    const meta = path.join(folder, id, "meta.json");
-    const name = existsSync(meta) ? JSON.parse(readFileSync(meta, "utf8")).name : id;
-    return { name, out: path.join(folder, id, "out") };
+  return readdirSync(folder)
+    .sort()
+    .map((id) => {
+      const meta = path.join(folder, id, "meta.json");
+      const record = existsSync(meta) ? JSON.parse(readFileSync(meta, "utf8")) : {};
+      return { id, name: record.name ?? id, out: path.join(folder, id, "out"), record };
+    });
+}
+
+/** A job's script, where its record keeps the command `submit` makes, `bash -c <script>`: else `null`. */
+const scriptOf = ({ command: c }) =>
+  Array.isArray(c) && c.length === 3 && c[0] === "bash" && c[1] === "-c" && typeof c[2] === "string"
+    ? c[2]
+    : null;
+
+/** `rerun-shard`'s opening of a rerun's script, naming the job it replaces. */
+const REPLACES = /^: replaces ([0-9a-f]{14}); /u;
+
+/** The job a rerun's record says it replaces (`REPLACES`), or `null`. */
+const replacesOf = (record) => REPLACES.exec(scriptOf(record) ?? "")?.[1] ?? null;
+
+/**
+ * The last JSON line of `file`, a runner's summary: `undefined` where there is none or it does not parse, as when the
+ * attempt was killed while writing it.
+ */
+function lastLine(file) {
+  if (!existsSync(file)) return undefined;
+  const last = readFileSync(file, "utf8")
+    .split("\n")
+    .filter((line) => line.startsWith("{"))
+    .at(-1);
+  try {
+    return last === undefined ? undefined : JSON.parse(last);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether a job's record shows its runner's own ending: one of the runner's `exits` (`run.mjs` 0, 1 or 3, `plans.mjs` 0
+ * or 1), the queue's outcome for it ("done" or "exit <n>", not a stop), no OOM kill, no timeout, no lost test file.
+ */
+export const ranOut = (record, exits) =>
+  exits.includes(record.exit) &&
+  record.outcome === (record.exit === 0 ? "done" : `exit ${record.exit}`) &&
+  (record.oom ?? []).length === 0 &&
+  record.timed_out !== true &&
+  (record.lost_test_files ?? null) === null;
+
+/**
+ * A campaign's shards, by job name: each `{ name, read, attempts }`, `read` the standing attempt's `{ out, summary }`
+ * (`null`: not run) and each attempt `{ id, host, outcome, summary, stands }`. An attempt can stand when it left a summary (`summaryOf`) and ran out
+ * (`ranOut`); of several, one stands when the others are replaced, by a rerun's record (`replacesOf`) or by `replace`
+ * (`[failed, rerun]` pairs, `--replace`). A replacement outside its shard, or several attempts left standing, is refused.
+ */
+export function shardsOf(jobs, summaryOf, exits, replace = []) {
+  const byId = new Map(jobs.map((job) => [job.id, job]));
+  const pairs = [
+    ...jobs.flatMap((job) => {
+      const replaced = replacesOf(job.record);
+      return replaced === null ? [] : [[replaced, job.id, "its record"]];
+    }),
+    ...replace.filter(([, rerun]) => byId.has(rerun)).map(([a, b]) => [a, b, "--replace"]),
+  ];
+  for (const [replaced, rerun, by] of pairs)
+    if (byId.get(replaced)?.name !== byId.get(rerun).name)
+      throw new Usage(
+        `${rerun} (${byId.get(rerun).name}) replaces ${replaced} by ${by}, which is not an attempt of its shard`,
+      );
+  const shards = new Map();
+  for (const job of jobs) {
+    const summary = summaryOf(job);
+    const attempt = {
+      id: job.id,
+      host: job.record.worker ?? job.record.host ?? "unknown host",
+      outcome: job.record.outcome ?? "no record",
+      summary: summary !== undefined,
+      stands: false,
+      job,
+      summaryLine: summary,
+      can: summary !== undefined && ranOut(job.record, exits),
+    };
+    shards.set(job.name, [...(shards.get(job.name) ?? []), attempt]);
+  }
+  return [...shards].map(([name, attempts]) => {
+    const can = attempts.filter((a) => a.can);
+    for (const [, rerun, by] of pairs)
+      if (by === "--replace" && attempts.some((a) => a.id === rerun && !a.can))
+        throw new Usage(
+          `--replace names ${rerun} (${name}), which left no summary or did not run out`,
+        );
+    const replaced = new Set(
+      pairs.filter(([, rerun]) => can.some((a) => a.id === rerun)).map(([failed]) => failed),
+    );
+    const left = can.filter((a) => !replaced.has(a.id));
+    if (left.length !== Math.min(can.length, 1))
+      throw new Usage(
+        `${name}: ${can.map((a) => a.id).join(", ")} ran out with a summary and ` +
+          `${left.length === 0 ? "replace each other" : "more than one is left standing"}; --replace <job>=<job> names the one that stands`,
+      );
+    const stands = left[0];
+    if (stands !== undefined) stands.stands = true;
+    return {
+      name,
+      read: stands === undefined ? null : { out: stands.job.out, summary: stands.summaryLine },
+      attempts: attempts.map(({ id, host, outcome, summary, stands: s }) => ({
+        id,
+        host,
+        outcome,
+        summary,
+        stands: s,
+      })),
+    };
   });
 }
 
@@ -200,18 +331,51 @@ export function setDifference({ base: b, head: h, same }) {
   return b.questions !== h.questions ? "questions" : "work";
 }
 
+/** The areas' and the set's shards of `prefix`'s campaigns under `results` (`shardsOf`), with `--replace`'s pairs. */
+function shardsRead(prefix, results, replace = []) {
+  const areaJobs = jobsOf(results, `${prefix}-areas`);
+  const setJobs = jobsOf(results, `${prefix}-set`);
+  for (const [failed, rerun] of replace)
+    if (![...areaJobs, ...setJobs].some((job) => job.id === rerun))
+      throw new Usage(
+        `--replace ${failed}=${rerun}: ${rerun} is not a job of ${prefix}'s campaigns`,
+      );
+  const areaShards = shardsOf(
+    areaJobs,
+    ({ name, out }) => {
+      const summary = lastLine(path.join(out, `${areaOf(name)}.log`));
+      return summary?.area === undefined ? undefined : summary;
+    },
+    [0, 1, 3],
+    replace,
+  );
+  const setShards = shardsOf(
+    setJobs,
+    ({ out }) => {
+      const summary = lastLine(path.join(out, "plans.log"));
+      return summary?.set === undefined ? undefined : summary;
+    },
+    [0, 1],
+    replace,
+  );
+  return { areaShards, setShards };
+}
+
+/** An area job's area: its name without the shard. */
+const areaOf = (name) => name.replace(/-\d+of\d+$/u, "");
+
 /**
  * The report of a replay's campaigns under `results`. `expected` names the areas `submit` queued (this tree's, as
  * `areasOf` takes them): an area with no shard in the results is not run, never equal.
  */
-export function report(prefix, results, expected = areasOf(ROOT).map((a) => a.name)) {
+export function report(prefix, results, expected = areasOf(ROOT).map((a) => a.name), replace = []) {
   const areas = new Map();
   const notRun = [];
   const work = [];
   const differences = [];
-  for (const { name, out } of jobsOf(results, `${prefix}-areas`)) {
-    const area = name.replace(/-\d+of\d+$/u, "");
-    const summary = lines(path.join(out, `${area}.log`)).at(-1);
+  const { areaShards, setShards } = shardsRead(prefix, results, replace);
+  for (const { name, read } of areaShards) {
+    const area = areaOf(name);
     const row = areas.get(area) ?? {
       shards: 0,
       sources: 0,
@@ -225,10 +389,11 @@ export function report(prefix, results, expected = areasOf(ROOT).map((a) => a.na
       uncharged: 0,
     };
     areas.set(area, row);
-    if (summary?.area === undefined) {
+    if (read === null) {
       notRun.push(name);
       continue;
     }
+    const { out, summary } = read;
     row.shards += 1;
     for (const key of Object.keys(row)) if (key !== "shards") row[key] += summary[key] ?? 0;
     if (existsSync(path.join(out, `${area}.work.jsonl`)))
@@ -237,12 +402,12 @@ export function report(prefix, results, expected = areasOf(ROOT).map((a) => a.na
       if (d.mode !== undefined) differences.push({ area, ...d, routeOnly: routeOnly(d) });
   }
   const set = { shards: 0, sources: 0, runs: 0, stalled: 0, uncharged: 0, differences: [] };
-  for (const { name, out } of jobsOf(results, `${prefix}-set`)) {
-    const summary = lines(path.join(out, "plans.log")).at(-1);
-    if (summary?.set === undefined) {
+  for (const { name, read } of setShards) {
+    if (read === null) {
       notRun.push(name);
       continue;
     }
+    const { out, summary } = read;
     set.shards += 1;
     for (const key of ["sources", "runs", "stalled", "uncharged"]) set[key] += summary[key] ?? 0;
     for (const r of lines(path.join(out, "plans.jsonl")))
@@ -299,6 +464,9 @@ export function report(prefix, results, expected = areasOf(ROOT).map((a) => a.na
     differences,
     aside,
     notRun,
+    attempts: [...areaShards, ...setShards]
+      .filter(({ attempts }) => attempts.length > 1 || !attempts[0].stands)
+      .map(({ name, attempts }) => ({ shard: name, attempts })),
   };
 }
 
@@ -339,8 +507,17 @@ function collect({ positional: [prefix], options }) {
   if (prefix === undefined || (options.owner === undefined && options.results === undefined))
     throw new Usage(USAGE);
   const results = options.results ?? path.join(homedir(), "jobs", "results", options.owner);
-  const r = report(prefix, results);
+  const r = report(prefix, results, undefined, options.replace);
   const { status, reasons } = verdict(r);
+  for (const { shard, attempts } of r.attempts)
+    process.stdout.write(
+      `${shard}: ${attempts
+        .map(
+          (a) =>
+            `${a.id} on ${a.host}, ${a.outcome}${a.summary ? "" : ", no summary"} (${a.stands ? "stands" : "replaced"})`,
+        )
+        .join("; ")}\n`,
+    );
   for (const [name, a] of Object.entries(r.areas))
     process.stdout.write(
       `${name.padEnd(10)} ${a.shards}/${SHARDS} shards ${a.sources} sources ${a.runs} runs ${a.differences} differences ${a.stalled} stalled\n`,
@@ -358,33 +535,13 @@ function collect({ positional: [prefix], options }) {
   return status;
 }
 
-function rerunStalls({ positional: [prefix, base, head], options }) {
-  if (head === undefined || options.owner === undefined) throw new Usage(USAGE);
-  const results = options.results ?? path.join(homedir(), "jobs", "results", options.owner);
-  const work = jobsOf(results, `${prefix}-areas`).flatMap(({ out }) =>
-    existsSync(out)
-      ? readdirSync(out)
-          .filter((f) => f.endsWith(".work.jsonl"))
-          .map((f) => path.join(out, f))
-      : [],
-  );
-  const index = path.join(mkdtempSync(path.join(tmpdir(), "compiler-replay-")), "index.json");
-  spawnSync(
-    process.execPath,
-    [path.join(ROOT, "tests/families/stalls.mjs"), ...work, "--index", index],
-    { encoding: "utf8" },
-  );
-  if (!existsSync(index) || JSON.parse(readFileSync(index, "utf8")).entries?.length === 0) {
-    process.stdout.write("no stalled source\n");
-    return 0;
-  }
-  const memory = options.memory ?? "12288";
-  for (const id of queue([
-    "submit",
+/** `rerun-stalls`' submission of the stall index `index`: the arguments after `sx-job submit`. */
+export function stallsSubmission(prefix, base, head, index, { owner, memory, host }) {
+  return [
     "--name",
     `${prefix}-rerun`,
     "--owner",
-    options.owner,
+    owner,
     "--campaign",
     `${prefix}-rerun`,
     "--commit",
@@ -398,12 +555,124 @@ function rerunStalls({ positional: [prefix, base, head], options }) {
     "--big",
     "--timeout",
     "3h",
+    ...(host === undefined ? [] : ["--host", host]),
     "--",
     "bash",
     "-c",
     `cd "$SX_TREE_head" && node tests/families/stalls.mjs rerun "$SX_IN/index.json" "$SX_TREE_base" "$SX_TREE_head" "$SX_OUT/rerun" --memory ${memory} > "$SX_OUT/rerun.log" 2>&1`,
+  ];
+}
+
+function rerunStalls({ positional: [prefix, base, head], options }) {
+  if (head === undefined || options.owner === undefined) throw new Usage(USAGE);
+  const results = options.results ?? path.join(homedir(), "jobs", "results", options.owner);
+  // (the standing attempts' records only: a replaced job's are never read)
+  const work = shardsRead(prefix, results, options.replace)
+    .areaShards.filter(({ read }) => read !== null)
+    .flatMap(({ name, read: { out } }) => {
+      const file = path.join(out, `${areaOf(name)}.work.jsonl`);
+      return existsSync(file) ? [file] : [];
+    });
+  const index = path.join(mkdtempSync(path.join(tmpdir(), "compiler-replay-")), "index.json");
+  if (work.length > 0) {
+    const run = spawnSync(
+      process.execPath,
+      [path.join(ROOT, "tests/families/stalls.mjs"), ...work, "--index", index],
+      { encoding: "utf8" },
+    );
+    // (a record stalls.mjs refuses is no index, never "no stalled source")
+    if (run.status !== 0 && run.status !== 1)
+      throw new Usage(
+        `stalls.mjs refused the work records: ${(run.stderr.trim() || run.stdout.trim()).split("\n").at(-1)}`,
+      );
+  }
+  if (!existsSync(index) || JSON.parse(readFileSync(index, "utf8")).entries?.length === 0) {
+    process.stdout.write("no stalled source\n");
+    return 0;
+  }
+  for (const id of queue([
+    "submit",
+    ...stallsSubmission(prefix, base, head, index, {
+      ...options,
+      memory: options.memory ?? "12288",
+    }),
   ]))
     process.stdout.write(`${id}\n`);
+  return 0;
+}
+
+/**
+ * `submit`'s submission of one shard (`<name>-<i>of<n>`, of `campaign`), the shard written in and its script opened with
+ * `: replaces <id>;`, so that the rerun's record states the job it replaces; `--host` pins it.
+ */
+export function shardSubmission(all, campaign, name, id, host) {
+  const [, area, i, n] = /^(.+)-(\d+)of(\d+)$/u.exec(name) ?? [];
+  const args = all.find(
+    (a) =>
+      a[a.indexOf("--campaign") + 1] === campaign &&
+      a[a.indexOf("--name") + 1] === `${area}-{i}of{n}`,
+  );
+  if (args === undefined || Number(n) !== SHARDS)
+    throw new Usage(`submit queues no shard ${name} in ${campaign}`);
+  const shard = args
+    .filter((_, k) => args[k] !== "--shards" && args[k - 1] !== "--shards")
+    .map((a) => a.replaceAll("{i}", i).replaceAll("{n}", n));
+  const end = shard.indexOf("--");
+  return [
+    ...shard.slice(0, end),
+    ...(host === undefined ? [] : ["--host", host]),
+    ...shard.slice(end, -1),
+    `: replaces ${id}; ${shard.at(-1)}`,
+  ];
+}
+
+function rerunShard({ positional: [prefix, givenBase, givenHead, id], options }) {
+  if (id === undefined || options.owner === undefined) throw new Usage(USAGE);
+  const results = options.results ?? path.join(homedir(), "jobs", "results", options.owner);
+  const job = ["areas", "set"]
+    .flatMap((kind) => jobsOf(results, `${prefix}-${kind}`).map((j) => ({ ...j, kind })))
+    .find((j) => j.id === id);
+  if (job === undefined) throw new Usage(`${id} is not a job of ${prefix}-areas or ${prefix}-set`);
+  // (each commit a full SHA, both compared and submitted, so the queue never reads a name again: the one this clone
+  // resolves the name to, else the job's recorded commit the name is a prefix of, else the name, which then differs)
+  const recorded = job.record.commits ?? {};
+  const fullSha = (ref, tree) => {
+    const run = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    if (run.status === 0) return run.stdout.trim();
+    return /^[0-9a-f]+$/u.test(ref) && recorded[tree]?.startsWith(ref) ? recorded[tree] : ref;
+  };
+  const [base, head] = [fullSha(givenBase, "base"), fullSha(givenHead, "head")];
+  const args = shardSubmission(
+    submissions(base, head, {
+      owner: options.owner,
+      prefix,
+      baseline: options.baseline,
+      baseSrc: options.baseline ? git("rev-parse", `${base}:src`) : null,
+    }),
+    `${prefix}-${job.kind}`,
+    job.name,
+    id,
+    options.host,
+  );
+  // (the job it replaces, itself perhaps a rerun, ran this same script on these trees: else the rerun is of another
+  // shard, trees or baseline)
+  const script = args.at(-1).replace(REPLACES, "");
+  const trees = { base, head };
+  const commits = Object.entries(recorded);
+  if (
+    scriptOf(job.record)?.replace(REPLACES, "") !== script ||
+    commits.length === 0 ||
+    !commits.every(([tree, sha]) => sha === trees[tree])
+  )
+    throw new Usage(
+      `${id} (${job.name}) ran another script or trees than submit's for this shard; check <base>, <head> and --baseline`,
+    );
+  const submit = ["submit", ...args, ...(options.dry ? ["--dry"] : [])];
+  if (options.dry) process.stdout.write(`${JSON.stringify(submit)}\n`);
+  else for (const rerun of queue(submit)) process.stdout.write(`${rerun}\n`);
   return 0;
 }
 
@@ -459,6 +728,8 @@ function aside({ positional: [prefix, base, head], options }) {
   const r = report(
     prefix,
     options.results ?? path.join(homedir(), "jobs", "results", options.owner),
+    undefined,
+    options.replace,
   );
   const rows = [
     ...r.differences
@@ -573,6 +844,7 @@ async function planChecksStep({ positional }) {
 const STEPS = {
   submit,
   collect,
+  "rerun-shard": rerunShard,
   "rerun-stalls": rerunStalls,
   aside,
   "aside-run": asideRun,

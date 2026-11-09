@@ -344,14 +344,29 @@ set and every area above, in 16 shards each. Each step's inputs, in order:
   - The areas are those `baselines.mjs` takes: the folders here that hold a generator, and the fixture folder
     `tools/corpus/fixture`, each passed by its folder. Copies runs at `--memory 6144`.
   - `--baseline` compares the areas with the base's stored runs (`--needs-baseline`). The set always runs two trees.
-- **`collect <prefix> --owner <owner> [--results <folder>] [--json <file>]`:** the campaigns' results.
+- **`collect <prefix> --owner <owner> [--results <folder>] [--json <file>] [--replace <job>=<job>]...`:** the
+  campaigns' results.
   - It prints each area's shards, sources, runs, differences and stalls, and the set's.
   - It prints each difference that stands: an area's by its first differing part, a set mode's by what differs. A
     difference in the route alone (the last part, as many parts on both trees) stands until `aside`'s rows agree.
   - It reads the stall verdicts from `stalls.mjs`, with `<prefix>-rerun`'s records.
-  - A shard whose job left no summary line is "not run", never equal.
-- **`rerun-stalls <prefix> <base> <head> --owner <owner> [--memory <MB>]`:** the areas' work records. It reruns their
-  stalled sources on both trees in one job (`<prefix>-rerun`), at 12,288 MB unless given.
+  - A shard is its job name, and one of its attempts is read: the one that left a summary line and whose queue record
+    (`meta.json`) shows the runner's own ending: exit 0 or 1, or 3 for an area job, with the queue's outcome for that
+    exit, an empty `oom`, no timeout and no lost test file. Every other attempt, one killed after its summary among
+    them, is listed with its host and outcome as replaced, and never read.
+  - A shard with no such attempt is "not run", never equal.
+  - Several such attempts are refused unless all but one are replaced, by a rerun's record (`rerun-shard`) or by
+    `--replace <failed>=<rerun>`. A replacement is refused across shards or campaigns, or by a rerun that cannot stand.
+- **`rerun-shard <prefix> <base> <head> <job> --owner <owner> [--baseline] [--host <host>] [--dry]`:** a failed or
+  killed job of `<prefix>-set` or `<prefix>-areas`. It submits that shard again into its campaign, `submit`'s own
+  submission with the shard written in. Its `bash -c` script opens with `: replaces <job>;`, so that the rerun's record
+  (`meta.json`'s `command`, kept verbatim) names the job it replaces; `collect` refuses a record naming a job outside
+  its shard. `<job>` may itself be a rerun. It is refused when `<job>` ran another script or trees. `<base>` and
+  `<head>` go to the queue as full SHAs: what this clone resolves each to, else the job's recorded commit it is a
+  hexadecimal prefix of. `--host` pins the worker.
+- **`rerun-stalls <prefix> <base> <head> --owner <owner> [--memory <MB>] [--host <host>]`:** the standing attempts'
+  work records. It reruns their stalled sources on both trees in one job (`<prefix>-rerun`), at 12,288 MB unless given.
+  A work record `stalls.mjs` refuses is exit 2, never "no stalled source".
 - **`aside <prefix> <base> <head> --owner <owner> --declare <file>`:** the route-only differences, the differing set
   sources, and a declaration file.
   - The file is a JSON list of `{ "pattern", "reason" }`, passed as an argument and never read from elsewhere.
@@ -364,7 +379,7 @@ Exit statuses:
 - 0: the step did what it says. For `collect`, every shard ran, and nothing differs, stalls or stays uncompared beyond
   route text that `aside` set aside.
 - 1: something differs, stalls or did not compare; each is listed.
-- 2: a usage error, or input it cannot read.
+- 2: a usage error, a refused replacement, or input it cannot read.
 - 3: for `collect`, a shard did not run.
 
 ## Stop runs
