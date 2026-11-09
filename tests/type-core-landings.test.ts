@@ -30,7 +30,10 @@ const GLOBALS = ["hostValue", "hostOther", "hostInit", "otherHost"];
 
 /** The landing families' module (`tests/families/copies/copy-projections/landing-chain-narrow-read-work.mjs`), read where the tests run. */
 async function families(): Promise<Record<string, (k: number) => string>> {
-  const file = resolve(process.cwd(), "tests/families/copies/copy-projections/landing-chain-narrow-read-work.mjs");
+  const file = resolve(
+    process.cwd(),
+    "tests/families/copies/copy-projections/landing-chain-narrow-read-work.mjs",
+  );
   // EVIDENCE: the module exports `shapes`, each a size to one source's text (the families' module contract).
   return (
     (await import(pathToFileURL(file).href)) as { shapes: Record<string, (k: number) => string> }

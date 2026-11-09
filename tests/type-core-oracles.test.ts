@@ -466,7 +466,10 @@ test("the oracle's questions cost per cell they return is flat on W19-record, an
   for (const cost of flat) assert.ok(cost < QUESTION_UNITS_PER_CELL, JSON.stringify(flat));
   for (const [module, shape] of [
     [gates, "W24-varied"],
-    ["tests/families/copies/copy-projections/layered-field-store-and-reader-matrix.mjs", "r3-root-copies"],
+    [
+      "tests/families/copies/copy-projections/layered-field-store-and-reader-matrix.mjs",
+      "r3-root-copies",
+    ],
     [gates, "W32-own-test"],
   ] as const) {
     const series = perCell(await family(module, shape, [16, 32, 64, 128]));
