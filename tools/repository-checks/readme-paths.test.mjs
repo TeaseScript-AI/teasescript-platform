@@ -67,7 +67,8 @@ test("a stale path fails, naming the README, the line and the token", () => {
 test("a true path passes, from the README's folder or the top folder, and so does a tracked folder", () => {
   const result = check(
     {
-      player: "`runtime/runtime-adapter.ts`, `tools/debug-export.mjs`, `runtime/` and `vue/src/`\n",
+      player:
+        "`runtime/runtime-adapter.ts`, `tools/debug-export.mjs`, `runtime/`, `vue/src/` and `../`\n",
       component: "`app/PlayerApp.vue` and `player/runtime/runtime-adapter.ts`\n",
     },
     FILES,
@@ -80,10 +81,14 @@ test("a span that is no path, a link's text, and a fenced block are not checked"
     {
       player: [
         "`restorePlayerRuntimeSessionAt`, `PlayerSession`, `askImage(...)`, `main.tease` and `claim`",
-        "`/player/`, `@vueuse/core` and `npm run dev:player -- --host 0.0.0.0`",
-        "[`DEBUGGER.md`](../docs/DEBUGGER.md#rewind)",
-        "```ts",
-        'import { x } from "./gone.ts";',
+        "`/player/`, `@vueuse/core` and `npm run ./gone.ts`",
+        "[`DEBUGGER.md`](../docs/DEBUGGER.md#rewind), [`absent.ts`][ref] and [`gone.md`][]",
+        "",
+        "[ref]: README.md",
+        "[`gone.md`]: README.md",
+        "",
+        "```md",
+        "`gone.ts`",
         "```",
         "",
       ].join("\n"),

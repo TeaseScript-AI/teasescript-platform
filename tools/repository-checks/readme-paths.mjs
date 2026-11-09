@@ -18,11 +18,11 @@ import remarkGfm from "remark-gfm";
 // `.json`, `.md` or `.css`. Its text, less one trailing `/`, must be a file Git tracks (`git ls-files --cached`) or a
 // folder holding one, read first from the README's folder and then from the repository's top folder.
 //
-// What is skipped, and so not checked: a code span that is a link's whole text (`doc-links.mjs` checks the link's
-// target); a span starting with `/` (a URL route, as `/player/`) or `@` (a package name, as `@vueuse/core`); a span
-// with whitespace (a command); every other span (an identifier, a type, a call, a script name such as `main.tease`);
-// fenced code blocks; and every other file. A path true from either of the two places passes, also when the README
-// means the other one.
+// What is skipped, and so not checked: a code span that is a link's whole text, inline or by reference (`doc-links.mjs`
+// checks the link's target); a span starting with `/` (a URL route, as `/player/`) or `@` (a package name, as
+// `@vueuse/core`); a span with whitespace (a command); every other span (an identifier, a type, a call, a script
+// name such as `main.tease`); fenced code blocks; and every other file. A path true from either of the two places
+// passes, also when the README means the other one.
 //
 // Exit status: 0 when every checked span names a tracked file or folder, 1 when one does not (each is printed as
 // `README:line: \`token\``), 2 when it cannot run.
@@ -46,7 +46,8 @@ function trackedPaths() {
   } catch (error) {
     throw new CannotRun(`readme-paths: cannot list the tracked files with Git: ${error.message}`);
   }
-  const paths = new Set();
+  // (the top folder holds every file: `.`, as a span such as `../` from `player/` reads)
+  const paths = new Set(["."]);
   for (const file of listed.split("\0").filter(Boolean)) {
     paths.add(file);
     for (let folder = posix.dirname(file); folder !== "."; folder = posix.dirname(folder))
@@ -65,7 +66,9 @@ function pathSpans(markdown) {
   const spans = [];
   const visit = (node, parent) => {
     if (node.type === "inlineCode") {
-      const linkText = parent?.type === "link" && parent.children.length === 1;
+      const linkText =
+        (parent?.type === "link" || parent?.type === "linkReference") &&
+        parent.children.length === 1;
       if (!linkText && isPathShaped(node.value))
         spans.push({ text: node.value, line: node.position.start.line });
       return;
