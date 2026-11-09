@@ -8,7 +8,7 @@ import {
 import type { ExportCaptureReply } from "../../../../engine-bridge/session-protocol.js";
 import type { PlayerBridge } from "../../../../runtime/player-bridge.js";
 import type { PlayerSession } from "../../../../runtime/runtime-view.js";
-import type { ActivationRun } from "./useActivationRun.js";
+import type { Origin } from "./useActivationRun.js";
 
 /*
  * A debug export's candidate (L5h.3b): captured in the host (`captureExport`), decided in the capture's reply hook
@@ -32,7 +32,11 @@ export function useExportCandidate(options: {
    * The activations' runs (`useActivationRun`): the export is of the live one, with the recording its failure
    * recording selects, and only while it lives.
    */
-  readonly activation: { current(): ActivationRun | null; admits(origin: ActivationRun): boolean };
+  readonly activation: {
+    current(): Origin;
+    admits(origin: Origin): boolean;
+    own(origin: Origin, cleanup: () => void): () => void;
+  };
   /** Whether a Player error stop is under way here, until the host acknowledged it. */
   readonly halting: Readonly<Ref<boolean>>;
   readonly build: DebugExportCandidate["build"];
@@ -44,28 +48,45 @@ export function useExportCandidate(options: {
 
   /**
    * Decides a capture in its reply's hook (`captureExport`, which matched a session's capture against the store's view):
-   * it is the candidate only while the dialog wants it, no stop is under way here, and it is of what shows: the shown
+   * it is the candidate only while the dialog wants it (`wanted`), no stop is under way here, and it is of what shows: the shown
    * lineage, or for no session, the same run and still no session, and of the activation it began in (`origin`), while
    * that lives. Events and transcript come from the store's view, marks and incident only from the capture. Otherwise
    * its ticket is released.
    */
   function deliver(
     host: PlayerBridge,
-    origin: ActivationRun | null,
+    origin: Origin,
     current: PlayerSession | null,
     reply: ExportCaptureReply,
     view: PlayerSession | null,
     details: ExportDetails,
-    live: () => boolean,
+    wanted: AbortSignal,
   ): Omit<DebugExportCandidate, "photos"> | typeof PENDING_CAPTURE | null {
     if (reply.kind === "pending") return PENDING_CAPTURE;
     if (reply.kind !== "captured") return null;
-    const release = () => void host.releaseRecording(reply.ticket).catch(() => {});
+    // The lease is the activation's from here until the dialog holds it: released once, at a refusal, a failed
+    // construction, the dialog's cancellation or the activation's retirement, whichever comes first. A retired
+    // activation's lease is released at once, inside `own`.
+    let released = false;
+    let unown = () => {};
+    const handOver = () => {
+      unown();
+      wanted.removeEventListener("abort", release);
+    };
+    const release = () => {
+      if (released) return;
+      released = true;
+      handOver();
+      void host.releaseRecording(reply.ticket).catch(() => {});
+    };
+    wanted.addEventListener("abort", release);
+    unown = options.activation.own(origin, release);
     const matches =
       current === null
-        ? session.value === null && reply.identity.run === (origin?.begin.run ?? null)
+        ? session.value === null &&
+          reply.identity.run === (origin.kind === "run" ? origin.begin.run : null)
         : view !== null && session.value?.lineage === current.lineage;
-    if (!live() || halting.value || !matches || !lives(origin)) {
+    if (wanted.aborted || halting.value || !matches || !lives(origin)) {
       release();
       return null;
     }
@@ -77,7 +98,7 @@ export function useExportCandidate(options: {
       release();
       throw error;
     }
-    return {
+    const candidate: Omit<DebugExportCandidate, "photos"> = {
       build: options.build,
       package: options.package,
       session:
@@ -97,41 +118,59 @@ export function useExportCandidate(options: {
       rewoundWhileDebugging: reply.marks?.rewoundWhileDebugging ?? null,
       ...shown,
     };
+    leases.set(candidate, handOver);
+    return candidate;
   }
+  /**
+   * The lease of each candidate under construction: handing the candidate over keeps its ticket from the retirement and
+   * the cancellation.
+   */
+  const leases = new WeakMap<object, () => void>();
 
-  /** Whether the activation `origin` still lives; without an activation, nothing retires. */
-  const lives = (origin: ActivationRun | null) =>
-    origin === null ? options.activation.current() === null : options.activation.admits(origin);
+  /** Whether `origin` still lives: an activation's run, or the initial record until the first activation. */
+  const lives = (origin: Origin) => options.activation.admits(origin);
 
-  /** Resolves once no Player error stop is under way here (`halting`). */
-  function stopShown(): Promise<void> {
-    if (!halting.value) return Promise.resolve();
+  /**
+   * Resolves once no Player error stop is under way here (`halting`), once `origin` retired, or once the dialog no
+   * longer wants the candidate (`wanted`): its watch stops then too. None is made for a retired `origin` or a cancelled
+   * candidate.
+   */
+  function stopShown(origin: Origin, wanted: AbortSignal): Promise<void> {
+    if (!halting.value || !lives(origin) || wanted.aborted) return Promise.resolve();
     return new Promise((resolve) => {
-      const stop = watch(halting, (now) => {
-        if (now) return;
+      let unown = () => {};
+      const settle = () => {
         stop();
+        unown();
+        wanted.removeEventListener("abort", settle);
         resolve();
+      };
+      const stop = watch(halting, (now) => {
+        if (!now) settle();
       });
+      wanted.addEventListener("abort", settle);
+      unown = options.activation.own(origin, settle);
     });
   }
 
   /**
    * Captures what a debug export can contain, frozen: in the host, the shown session's state, marks and failure, the
    * run's incident and the recording (the one up to a Player error, else the session's own); here, in the capture's
-   * reply, that publication's events and transcript, and what `details` reads of the Player's interface for it. `live`
-   * says whether the dialog still wants the candidate. `null` when the capture is refused or does not match what shows,
-   * or once the activation it began in retired: after every await it goes on only while that activation lives, and
-   * nothing then stays held. A candidate handed over before the retirement stays the dialog's.
+   * reply, that publication's events and transcript, and what `details` reads of the Player's interface for it.
+   * `wanted` aborts once the dialog no longer wants the candidate. `null` when the capture is refused or does not match
+   * what shows, once the dialog cancelled, or once the activation it began in retired: after every await it goes on
+   * only while that activation lives and the dialog wants it, and nothing then stays held. A candidate handed over
+   * before the retirement stays the dialog's.
    */
   async function debugExportCandidate(
     details: ExportDetails,
-    live: () => boolean,
+    wanted: AbortSignal,
   ): Promise<DebugExportCandidate | null> {
     // A Player error's capture under way settles first: the export then selects what it settled to. The export is of
     // the activation it began in, and asks nothing more once that retired.
     const origin = options.activation.current();
-    const failed = origin === null ? "current" : await origin.failure.selection();
-    if (!lives(origin)) return null;
+    // The initial record has no failure recording: its selection is the current recording at once, with no wait.
+    const failed = origin.kind === "run" ? await origin.failure.selection() : "current";
     const current = session.value;
     const host = current?.connection ?? options.bridge();
     if (host === null) return null;
@@ -142,22 +181,33 @@ export function useExportCandidate(options: {
         : failed.bridge === host
           ? { ticket: failed.ticket }
           : "none";
+    // Each capture is sent only while its activation lives and the dialog wants it, admitted right before it is sent.
     const capture = () =>
-      host.captureExport(current, recording, (reply, view) =>
-        deliver(host, origin, current, reply, view, details, live),
-      );
-    let frozen = await capture();
-    // A stop of the run was still committing: once it shows, the capture is tried once more, while its activation lives.
-    if (frozen === PENDING_CAPTURE && lives(origin)) {
-      await stopShown();
-      frozen = live() && lives(origin) ? await capture() : null;
+      lives(origin) && !wanted.aborted
+        ? host.captureExport(current, recording, (reply, view) =>
+            deliver(host, origin, current, reply, view, details, wanted),
+          )
+        : Promise.resolve(null);
+    let frozen: Awaited<ReturnType<typeof capture>> | null;
+    try {
+      frozen = await capture();
+      // A stop of the run was still committing: once it shows, the capture is tried once more, while its activation
+      // lives.
+      if (frozen === PENDING_CAPTURE) {
+        await stopShown(origin, wanted);
+        frozen = await capture();
+      }
+    } catch (error) {
+      // The capture of an activation that retired, or that the dialog cancelled, gives nothing, also when it failed.
+      if (!lives(origin) || wanted.aborted) return null;
+      throw error;
     }
     if (frozen === PENDING_CAPTURE || frozen === null) return null;
-    // Until the dialog holds the candidate, this owns its ticket: a construction that fails, or whose activation
-    // retired, releases it.
+    // Until the dialog holds the candidate, this owns its ticket: a construction that fails, is cancelled or whose
+    // activation retired releases it.
     const owned = frozen;
     const goesOn = () => {
-      if (lives(origin)) return true;
+      if (lives(origin) && !wanted.aborted) return true;
       owned.release();
       return false;
     };
@@ -180,14 +230,14 @@ export function useExportCandidate(options: {
       }
     } catch (error) {
       frozen.release();
+      // A photo read that failed after the activation retired or the dialog cancelled gives nothing, as any other end.
+      if (!goesOn()) return null;
       throw error;
     }
-    if (!live()) {
-      frozen.release();
-      return null;
-    }
-    // Once more at the handoff: the dialog takes only a live activation's candidate.
+    // Once more at the handoff: the dialog takes only a live activation's wanted candidate, and holds its lease from
+    // now on.
     if (!goesOn()) return null;
+    leases.get(frozen)?.();
     return { ...frozen, photos };
   }
 

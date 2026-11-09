@@ -6,10 +6,17 @@ import type { CapturedMediaRecord } from "../player/media/captured-media.js";
 import type { ExportCaptureReply } from "../player/engine-bridge/session-protocol.js";
 import type { PlayerBridge } from "../player/runtime/player-bridge.js";
 import type { PlayerSession } from "../player/runtime/runtime-view.js";
-import type { ActivationRun } from "../player/vue/src/session/activation/useActivationRun.js";
+import {
+  useActivationRun,
+  type InitialOrigin,
+  type RunOrigin,
+} from "../player/vue/src/session/activation/useActivationRun.js";
 import { useExportCandidate } from "../player/vue/src/session/activation/useExportCandidate.js";
 import { coverageGaps, product, type Coordinates } from "./helpers/family-coverage.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
+
+/** The Player's record before any activation. */
+const INITIAL: InitialOrigin = { kind: "initial" };
 
 /*
  * L5h.3b's export candidate owner (`session/activation/useExportCandidate.ts`) and the Stage adapter it reads through: until the
@@ -87,8 +94,12 @@ function ownerOver(readPhoto: (reference: string) => Promise<CapturedMediaRecord
   const owner = useExportCandidate({
     session: shallowRef(view),
     bridge: () => typed,
-    // No activation: the recording is the current one, and nothing retires the export.
-    activation: { current: () => null, admits: () => false },
+    // No activation: the initial record, whose recording is the current one, and nothing retires the export.
+    activation: {
+      current: () => INITIAL,
+      admits: (origin) => origin === INITIAL,
+      own: () => () => {},
+    },
     halting: ref(false),
     build: { commit: null, dirty: null, mode: "development", appVersion: "0" },
     package: { id: null, version: null },
@@ -110,12 +121,9 @@ const SHOWN = {
 test("a candidate whose construction fails releases its ticket, whether its details or its photo reads fail", async () => {
   const throwing = ownerOver(async () => null);
   await assert.rejects(
-    throwing.owner.debugExportCandidate(
-      () => {
-        throw new TypeError("The details could not be read.");
-      },
-      () => true,
-    ),
+    throwing.owner.debugExportCandidate(() => {
+      throw new TypeError("The details could not be read.");
+    }, new AbortController().signal),
     TypeError,
   );
   assert.deepEqual(throwing.released, ["r7"], "a details getter that throws");
@@ -123,17 +131,14 @@ test("a candidate whose construction fails releases its ticket, whether its deta
     throw new Error("The photo store failed.");
   });
   await assert.rejects(
-    unreadable.owner.debugExportCandidate(
-      () => SHOWN,
-      () => true,
-    ),
+    unreadable.owner.debugExportCandidate(() => SHOWN, new AbortController().signal),
   );
   assert.deepEqual(unreadable.released, ["r7"], "a photo read that rejects");
   // A construction that succeeds hands its ticket to the dialog: nothing is released here.
   const fine = ownerOver(async () => null);
   const candidate = await fine.owner.debugExportCandidate(
     () => SHOWN,
-    () => true,
+    new AbortController().signal,
   );
   assert.ok(candidate !== null);
   assert.deepEqual(fine.released, []);
@@ -170,11 +175,15 @@ test("the Stage adapter reports the described session's image, not the Player's 
  * retires goes on with nothing. Generated over how many photos it reads × where its activation retires: while the
  * capture's reply resolves, while the first or the second read waits, or after the dialog took it. Before the handoff
  * the candidate is `null`, its ticket goes, no read starts after the retirement, and the successor's shown session is
- * untouched; a candidate the dialog took stays the dialog's.
+ * untouched; a candidate the dialog took stays the dialog's. Session split S2 adds how the construction ends (the
+ * activation's retirement, or the dialog's cancellation) and how the read it came at settles: a read that fails after
+ * either end gives `null` too, not its failure.
  */
 const RETIREMENT_AXES = {
   photos: ["one", "two"],
   retirement: ["capture", "firstRead", "secondRead", "afterHandoff"],
+  end: ["retirement", "cancellation"],
+  read: ["resolves", "rejects"],
 } as const;
 type RetirementCase = {
   readonly [A in keyof typeof RETIREMENT_AXES]: (typeof RETIREMENT_AXES)[A][number];
@@ -187,9 +196,10 @@ function asRetirementCase(coordinates: Coordinates): RetirementCase {
 }
 
 function retirementInfeasible(c: RetirementCase): string | null {
-  return c.photos === "one" && c.retirement === "secondRead"
-    ? "one photo has no second read"
-    : null;
+  if (c.photos === "one" && c.retirement === "secondRead") return "one photo has no second read";
+  if (c.read === "rejects" && (c.retirement === "capture" || c.retirement === "afterHandoff"))
+    return "no read waits when the construction ends";
+  return null;
 }
 
 test("a candidate whose activation retires while it is built hands nothing over, wherever it waits", async () => {
@@ -201,14 +211,24 @@ test("a candidate whose activation retires while it is built hands nothing over,
     const c = asRetirementCase(coordinates);
     const references = [PHOTO, PHOTO.replace(/:1$/u, ":2")].slice(0, c.photos === "one" ? 1 : 2);
     // An activation without a Player error: its export selects the current recording.
-    const activation = () => ({ failure: { selection: async () => "current" as const } });
+    const activation = () => ({
+      kind: "run" as const,
+      failure: { selection: async () => "current" as const },
+    });
     // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads an activation's failure selection, and compares activations by identity.
-    const [origin, successor] = [activation(), activation()] as unknown as [
-      ActivationRun,
-      ActivationRun,
-    ];
-    let live: ActivationRun = origin;
-    const retire = () => void (live = successor);
+    const [origin, successor] = [activation(), activation()] as unknown as [RunOrigin, RunOrigin];
+    let live: RunOrigin = origin;
+    // What the live activation owns, released at its retirement (`useActivationRun`'s `own`).
+    const owned = new Set<() => void>();
+    const wanted = new AbortController();
+    // The construction ends: its activation retires, or its dialog no longer wants it.
+    const retire = () => {
+      if (c.end === "cancellation") return wanted.abort();
+      live = successor;
+      for (const cleanup of owned) cleanup();
+      owned.clear();
+    };
+    const ended = () => live !== origin || wanted.signal.aborted;
     let resolveCapture!: () => void;
     const captured = new Promise<void>((resolve) => (resolveCapture = resolve));
     // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads a session's `connection` and `lineage`, which this literal has.
@@ -237,22 +257,32 @@ test("a candidate whose activation retires while it is built hands nothing over,
     const owner = useExportCandidate({
       session: shown,
       bridge: () => typed,
-      activation: { current: () => live, admits: (each) => each === live },
+      activation: {
+        current: () => live,
+        admits: (each) => each === live,
+        own: (each, cleanup) => {
+          if (each !== live) {
+            cleanup();
+            return () => {};
+          }
+          owned.add(cleanup);
+          return () => void owned.delete(cleanup);
+        },
+      },
       halting: ref(false),
       build: { commit: null, dirty: null, mode: "development", appVersion: "0" },
       package: { id: null, version: null },
       readPhoto: async (reference) => {
-        reads.push({ reference, afterRetirement: live !== origin });
-        // The retirement comes while this read waits.
-        if (reads.length - 1 === waitAt) retire();
+        reads.push({ reference, afterRetirement: ended() });
+        // The construction ends while this read waits, which then settles as the case says.
+        const endsHere = reads.length - 1 === waitAt;
+        if (endsHere) retire();
         await Promise.resolve();
+        if (endsHere && c.read === "rejects") throw new Error("The photo store failed.");
         return record;
       },
     });
-    const pending = owner.debugExportCandidate(
-      () => SHOWN,
-      () => true,
-    );
+    const pending = owner.debugExportCandidate(() => SHOWN, wanted.signal);
     await Promise.resolve();
     if (c.retirement === "capture") retire();
     resolveCapture();
@@ -269,6 +299,7 @@ test("a candidate whose activation retires while it is built hands nothing over,
         shown: shown.value === view,
       },
       {
+        // A failed read after the end gives `null` (the await above would have thrown).
         candidate: handedOver ? "handed over" : null,
         released: handedOver ? [] : ["r7"],
         readsAfterRetirement: 0,
@@ -290,3 +321,105 @@ test("a candidate whose activation retires while it is built hands nothing over,
   }
   assert.deepEqual(coverageGaps(cases, observed, { tuples: true }), []);
 });
+
+/*
+ * Session split S2's resource owners (HEAD 0 §5), on the record owner itself: what an activation's export holds goes
+ * when the activation retires, without waiting for its work to come back. The first activation retires the initial
+ * record as any later one retires its predecessor.
+ */
+function recordOwner() {
+  const run = useActivationRun({ report: () => {} });
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: a begin reads only the host's next run, and a disposal asks it to retire the run.
+  const host = { nextRun: () => 1, retireRun: async () => {} } as unknown as PlayerBridge;
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner reads a session's `connection` and `lineage`, which this literal has.
+  const view = {
+    connection: null,
+    lineage: "l1",
+    events: [],
+    transcriptEntries: [],
+  } as unknown as PlayerSession;
+  return { run, begin: () => void run.begin(host), view };
+}
+
+for (const retiring of [
+  "the initial record",
+  "an activation's run",
+  "the dialog's cancellation",
+] as const)
+  test(`${retiring} ending the export releases its lease at once, while a photo read never returns`, async () => {
+    const { run, begin, view } = recordOwner();
+    if (retiring === "an activation's run") begin();
+    const wanted = new AbortController();
+    const { bridge, released } = fakeBridge(view);
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner calls only `captureExport`, `releaseRecording` and `exportPrepare` of a bridge, which this fake has.
+    const typed = bridge as unknown as PlayerBridge;
+    let reading = false;
+    const owner = useExportCandidate({
+      session: shallowRef(view),
+      bridge: () => typed,
+      activation: run,
+      halting: ref(false),
+      build: { commit: null, dirty: null, mode: "development", appVersion: "0" },
+      package: { id: null, version: null },
+      readPhoto: () => {
+        reading = true;
+        return new Promise(() => {});
+      },
+    });
+    let settled = false;
+    void owner.debugExportCandidate(() => SHOWN, wanted.signal).then(() => (settled = true));
+    for (let turn = 0; turn < 10 && !reading; turn += 1) await Promise.resolve();
+    assert.ok(reading, "the candidate waits for its photo");
+    assert.deepEqual(released, []);
+    if (retiring === "the dialog's cancellation") wanted.abort();
+    else begin();
+    assert.deepEqual(released, ["r7"], "the lease goes with the end, not with the read");
+    assert.equal(settled, false);
+  });
+
+for (const ending of ["the activation retires", "the dialog cancels it"] as const)
+  test(`an export waiting for its activation's stop to show settles when ${ending}, and asks nothing more`, async () => {
+    const { run, begin, view } = recordOwner();
+    begin();
+    const wanted = new AbortController();
+    const counts = { captures: 0 };
+    const bridge = {
+      // The stop is still committing: the capture is pending, as the host answers then.
+      captureExport: async <T>(
+        _session: PlayerSession | null,
+        _recording: unknown,
+        deliver: (reply: ExportCaptureReply, shown: PlayerSession | null) => T,
+      ) => {
+        counts.captures += 1;
+        return deliver({ kind: "pending" }, view);
+      },
+      releaseRecording: async () => {},
+      exportPrepare: async () => ({}),
+    };
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: the owner calls only `captureExport`, `releaseRecording` and `exportPrepare` of a bridge, which this fake has.
+    const typed = bridge as unknown as PlayerBridge;
+    const halting = ref(true);
+    const owner = useExportCandidate({
+      session: shallowRef(view),
+      bridge: () => typed,
+      activation: run,
+      halting,
+      build: { commit: null, dirty: null, mode: "development", appVersion: "0" },
+      package: { id: null, version: null },
+      readPhoto: async () => null,
+    });
+    const outcome: { value: string } = { value: "pending" };
+    void owner
+      .debugExportCandidate(() => SHOWN, wanted.signal)
+      .then((candidate) => (outcome.value = candidate === null ? "null" : "candidate"));
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    assert.deepEqual([outcome.value, counts.captures], ["pending", 1], "it waits for the stop");
+    if (ending === "the dialog cancels it") wanted.abort();
+    else begin();
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    assert.equal(outcome.value, "null", "the end settles its wait");
+    // Its watch went with it: the stop's end later asks for no capture.
+    halting.value = false;
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    assert.equal(counts.captures, 1);
+  });

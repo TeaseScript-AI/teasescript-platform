@@ -35,7 +35,8 @@ export interface RewindOwnerHost {
   readonly show: (next: PlayerSession, paused: boolean) => void;
   /** The restart gate (`rewind.beforeRestart()`), read at each call. */
   readonly beforeRestart: () => void | Promise<void>;
-  readonly reportHostError: (error: unknown) => void;
+  /** The page's error reporter, at the rewind owner's own events. */
+  readonly reportPageError: (error: unknown) => void;
 }
 
 /**
@@ -80,7 +81,7 @@ export function createRewindOwner(host: RewindOwnerHost) {
   };
   /** A rejected reply is a host failure, unless the connection ended or `quiet` says the work it served is gone. */
   const reportUnless = (quiet: () => boolean) => (error: unknown) => {
-    if (!quiet() && !endsQuietly(error)) host.reportHostError(error);
+    if (!quiet() && !endsQuietly(error)) host.reportPageError(error);
   };
   // A log is the events of a session the page holds: the shown one, the parked one, or a prepared candidate.
   const logOf = (key: string) => {
@@ -256,7 +257,7 @@ export function createRewindOwner(host: RewindOwnerHost) {
   function failed(intent: number, error: unknown) {
     const { actions } = dispatch({ kind: "openFailed", intent });
     if (actions.some((action) => action.kind === "reportFailure") && !endsQuietly(error))
-      host.reportHostError(error);
+      host.reportPageError(error);
   }
 
   function open(bridge: PlayerBridge, intent: number) {
@@ -325,14 +326,14 @@ export function createRewindOwner(host: RewindOwnerHost) {
     const settled = sent.then(
       ({ result }) => {
         if (result.kind === "refused") {
-          host.reportHostError(new Error(`The rewind history could not close: ${result.reason}`));
+          host.reportPageError(new Error(`The rewind history could not close: ${result.reason}`));
           dispatch({ kind: "closeSettled", ok: false });
         } else dispatch({ kind: "closeSettled", ok: true });
       },
       (error: unknown) => {
         // A lost connection takes its history with it; any other failure on a live one blocks every later open.
         if (endsQuietly(error)) return;
-        host.reportHostError(error);
+        host.reportPageError(error);
         dispatch({ kind: "closeSettled", ok: false });
       },
     );
@@ -363,7 +364,7 @@ export function createRewindOwner(host: RewindOwnerHost) {
         if (!actions.some((action) => action.kind === "reportFailure")) return;
         if (which === "step")
           problem.value = error instanceof Error ? error.message : String(error);
-        else host.reportHostError(error);
+        else host.reportPageError(error);
       },
     );
   }

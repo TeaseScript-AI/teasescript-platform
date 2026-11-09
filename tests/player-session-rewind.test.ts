@@ -124,7 +124,7 @@ interface RewindHost {
   } | null;
   debugExportCandidate(
     details: () => Record<string, never>,
-    live: () => boolean,
+    wanted: AbortSignal,
   ): Promise<{
     readonly session: {
       readonly snapshot: RuntimeSnapshot;
@@ -483,12 +483,8 @@ test("Back shows an earlier state paused, and Forward and Return restore the sta
   assert.deepEqual(storage.saved(), { k: 1, pick: "One" });
   // The restored state is a diagnostic fork, and its recording begins at it.
   assert.deepEqual(
-    (
-      await host.debugExportCandidate(
-        () => ({}),
-        () => true,
-      )
-    ).rewoundWhileDebugging,
+    (await host.debugExportCandidate(() => ({}), new AbortController().signal))
+      .rewoundWhileDebugging,
     { restoredSceneTimeMs: inspected!.state.observedSessionTimeMs, rewindCount: 1 },
   );
   assert.deepEqual(host.debugRecording()?.anchorSnapshot, playerRuntimeSnapshot(inspected!));
@@ -503,12 +499,8 @@ test("Back shows an earlier state paused, and Forward and Return restore the sta
   assert.equal(host.session.value, tip);
   assert.equal(host.rewind.inspecting.value, false);
   assert.equal(
-    (
-      await host.debugExportCandidate(
-        () => ({}),
-        () => true,
-      )
-    ).rewoundWhileDebugging,
+    (await host.debugExportCandidate(() => ({}), new AbortController().signal))
+      .rewoundWhileDebugging,
     null,
   );
   assert.deepEqual(storage.calls, ["write k", "write pick"]);
@@ -545,10 +537,7 @@ test("after an engine call throws, the export, Back, Forward, and Return work fr
   await assert.rejects(choose(context, host, "Long"), SCOPES_USED_UP);
   assert.equal(host.session.value, tip);
 
-  const candidate = await host.debugExportCandidate(
-    () => ({}),
-    () => true,
-  );
+  const candidate = await host.debugExportCandidate(() => ({}), new AbortController().signal);
   assert.deepEqual(candidate.session?.snapshot, shown);
   assert.deepEqual(
     candidate.recording?.operations.map((operation) => [operation.kind, operation.thrown]),
@@ -596,12 +585,8 @@ test("a different choice adopts the restored state: its saved data, then the new
   assert.equal(await rewind.returnToSession(), false);
   assert.equal(rewind.state.value.inspection, null);
   assert.deepEqual(
-    (
-      await host.debugExportCandidate(
-        () => ({}),
-        () => true,
-      )
-    ).rewoundWhileDebugging?.rewindCount,
+    (await host.debugExportCandidate(() => ({}), new AbortController().signal))
+      .rewoundWhileDebugging?.rewindCount,
     1,
   );
 
@@ -2431,10 +2416,7 @@ function prefixOf(
 
 test("an export while a rewind gate is pending takes the shown publication's marks", async (context) => {
   const marksOf = async (host: RewindHost) => {
-    const candidate = await host.debugExportCandidate(
-      () => ({}),
-      () => true,
-    );
+    const candidate = await host.debugExportCandidate(() => ({}), new AbortController().signal);
     assert.ok(candidate !== null, "the export is a candidate");
     return {
       rewound: candidate.rewoundWhileDebugging,
@@ -2504,8 +2486,8 @@ test("an export while a rewind gate is pending takes the shown publication's mar
  * A rewind keeps it, as it keeps the run; the next Start begins a run without one; a retired dialog gets no candidate.
  */
 test("a debug export's incident is the run's: kept through Back and Return, gone with the next Start", async (context) => {
-  const exported = async (host: RewindHost, live = () => true) => {
-    const candidate = await host.debugExportCandidate(() => ({}), live);
+  const exported = async (host: RewindHost, wanted = new AbortController().signal) => {
+    const candidate = await host.debugExportCandidate(() => ({}), wanted);
     // EVIDENCE: fixture: the composable returns `null` for a refused candidate; the local type does not name it.
     const nullable = candidate as typeof candidate | null;
     return nullable === null
@@ -2534,7 +2516,7 @@ test("a debug export's incident is the run's: kept through Back and Return, gone
   await settle(context);
   assert.deepEqual(await exported(host), { hostError: "TypeError", rewound: 0 }, "Return keeps it");
   // A dialog that no longer wants the candidate gets none (its ticket's release is the bridge's family's).
-  assert.equal(await exported(host, () => false), null);
+  assert.equal(await exported(host, AbortSignal.abort()), null);
   await start(context, host);
   assert.equal(host.hostError.value, null);
   assert.deepEqual(
@@ -2572,10 +2554,7 @@ test("a Player error whose recording capture failed exports no recording, also a
   assert.equal(await backTo(rewind, 0), true);
   host.reportHostError(new RangeError("A later failure."));
   await settle(context);
-  const candidate = await host.debugExportCandidate(
-    () => ({}),
-    () => true,
-  );
+  const candidate = await host.debugExportCandidate(() => ({}), new AbortController().signal);
   assert.equal(candidate.hostError, "TypeError");
   assert.equal(
     candidate.recording,
@@ -2614,10 +2593,7 @@ test("a Player error's captured recording stays the export's through Back and a 
   assert.equal(await backTo(rewind, 0), true);
   host.reportHostError(new RangeError("A later failure."));
   await settle(context);
-  const candidate = await host.debugExportCandidate(
-    () => ({}),
-    () => true,
-  );
+  const candidate = await host.debugExportCandidate(() => ({}), new AbortController().signal);
   assert.equal(candidate.hostError, "TypeError");
   assert.deepEqual(heldTickets(bridge), ["r1", "r2"]);
   candidate.release();
@@ -2636,10 +2612,7 @@ test("a Start that fails before it reaches the host commits its incident in its 
   const made = createHost(context, memoryStorage().provider);
   const { host } = made;
   const exported = async () => {
-    const candidate = await host.debugExportCandidate(
-      () => ({}),
-      () => true,
-    );
+    const candidate = await host.debugExportCandidate(() => ({}), new AbortController().signal);
     candidate.release();
     return candidate.hostError;
   };
@@ -2683,14 +2656,7 @@ test("a Start that fails before it reaches the host commits its incident in its 
 test("a debug export copies the shown publication's events and transcript, after Back and Return too", async (context) => {
   const { host, rewind } = createHost(context, memoryStorage().provider);
   const exportedPrefix = async () =>
-    prefixOf(
-      (
-        await host.debugExportCandidate(
-          () => ({}),
-          () => true,
-        )
-      ).session,
-    );
+    prefixOf((await host.debugExportCandidate(() => ({}), new AbortController().signal)).session);
   await start(context, host);
   await choose(context, host, "One");
   const live = prefixOf(shownView(host));
@@ -2844,10 +2810,7 @@ test("each activation's run reaches the host once, however the activation ends, 
         assert.notEqual(host.hostError.value, null, "the activation failed");
       // Each run's export shows its own error, and the successful run after it none.
       const exported = async () => {
-        const candidate = await host.debugExportCandidate(
-          () => ({}),
-          () => true,
-        );
+        const candidate = await host.debugExportCandidate(() => ({}), new AbortController().signal);
         candidate.release();
         return candidate.hostError;
       };
@@ -3217,7 +3180,7 @@ test("an activation's completions act only while it lives, whichever reply is in
         shownRun = runOfShown(player.host);
         const candidate = await player.host.debugExportCandidate(
           () => ({}),
-          () => true,
+          new AbortController().signal,
         );
         const during = heldTickets(bridge);
         candidate.release();
@@ -3325,10 +3288,7 @@ test("an export that waits for a failure capture while its activation retires gi
   host.reportHostError(new TypeError("A component failed."));
   await settle(context);
   const traffic = postsOf(context, bridge);
-  const pending = host.debugExportCandidate(
-    () => ({}),
-    () => true,
-  );
+  const pending = host.debugExportCandidate(() => ({}), new AbortController().signal);
   await settle(context);
   assert.equal(capture.held(), 1, "the export waits for the failure capture");
   await start(context, host);

@@ -44,7 +44,7 @@ interface StopHost {
   temporalCapture(): PlayerRuntimeSessionOptions;
   debugExportCandidate(
     details: () => { readonly player: object; readonly host: object },
-    live: () => boolean,
+    wanted: AbortSignal,
   ): Promise<{
     readonly session: { readonly transcriptEntries: readonly { readonly text: string }[] } | null;
   }>;
@@ -508,7 +508,7 @@ for (const kind of [
       assert.deepEqual(stopLine(bridge, player).export, shown.state.observedSessionTimeMs);
       const exported = await player.debugExportCandidate(
         () => ({ player: {}, host: {} }),
-        () => true,
+        new AbortController().signal,
       );
       assert.deepEqual(
         exported.session?.transcriptEntries.map((entry) => entry.text),

@@ -164,11 +164,13 @@ test("the page's diagnostic senders each check their activation's admission, and
       path: "useFailureRecording > stopped",
     },
   ]);
+  // The error stop's work reaches them only through its targets (`work/target.ts`).
+  const TARGET = "player/vue/src/session/activation/work/target.ts";
   assert.deepEqual(senders, [
-    `player/runtime/player-bridge.ts PlayerBridge > commitIncident <- ${ACTIVATION} > reportHostError > incident`,
-    `${OWNER} stopArguments <- ${ACTIVATION} > reportHostError > incident`,
-    `${OWNER} stopArguments <- ${ACTIVATION} > stopAt`,
-    `player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped <- ${ACTIVATION} > stopAt`,
+    `player/runtime/player-bridge.ts PlayerBridge > commitIncident <- ${TARGET} commitIncident`,
+    `${OWNER} stopArguments <- ${TARGET} commitIncident`,
+    `${OWNER} stopArguments <- ${TARGET} stopTarget > halt`,
+    `player/vue/src/session/activation/useFailureRecording.ts useFailureRecording > stopped <- ${TARGET} stopTarget > captureFailure`,
   ]);
   const admitting = new Set(
     callers([{ file: OWNER, path: "useActivationRun > admits" }]).map(
@@ -264,6 +266,13 @@ const SESSION_FILES: readonly string[] = [
 ];
 const ACTIVATION_FILES = [
   ...SESSION_FILES,
+  // The activation's work modules: activation work throughout, so every wait in them is in scope.
+  "player/vue/src/session/activation/work/adopt.ts",
+  "player/vue/src/session/activation/work/continue.ts",
+  "player/vue/src/session/activation/work/debugMode.ts",
+  "player/vue/src/session/activation/work/draw.ts",
+  "player/vue/src/session/activation/work/stop.ts",
+  "player/vue/src/session/activation/work/target.ts",
   "player/vue/src/session/activation/useExportCandidate.ts",
   "player/vue/src/session/activation/useFailureRecording.ts",
   "player/vue/src/session/activation/useActivationRun.ts",
@@ -283,7 +292,7 @@ const SESSION_ACTIVATION = [
   "startedSession",
   "prepareStart",
   "prepareRestore",
-  "reportHostError",
+  "reportActivationError",
   "stopAt",
 ];
 const READMITS = "re-admits before its next request or further work";
@@ -294,8 +303,10 @@ const SAVED_DATA =
 const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await origin.failure.selection":
     READMITS,
-  "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await capture": READMITS,
-  "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await stopShown": READMITS,
+  "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await capture":
+    "what follows acts only through a capture, which admits before it is sent, the stop's wait, which admits its own, or `goesOn`, which admits before the candidate goes on",
+  "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await stopShown":
+    "what follows is the capture again, which admits its activation and the dialog's wish before it is sent",
   "useExportCandidate.ts: useExportCandidate > debugExportCandidate: await options.readPhoto":
     READMITS,
   "useExportCandidate.ts: useExportCandidate > debugExportCandidate > read: await record.data.arrayBuffer":
@@ -319,14 +330,15 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "before the activation's record begins; the click's token decides",
   "useSessionActivation.ts: useSessionActivation > startFrom: then bridgeReady":
     "before the activation's record begins; the click's token decides",
-  "useSessionActivation.ts: useSessionActivation > startFrom: then begun": READMITS,
-  "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: await host.request":
-    READMITS,
-  "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: catch host.request":
-    "the trace restart's rejection, which reports with the Continue's own activation, admitted there (`reportHostError`)",
-  "useSessionActivation.ts: useSessionActivation > prepareRestore > begin: catch host.client.request":
+  "continue.ts: continueRestored: await restored.beginRecording": READMITS,
+  "continue.ts: continueRestored: await continued.resolveDrawNaturally": READMITS,
+  "continue.ts: continueRestored: await continued.setDebugMode": READMITS,
+  "continue.ts: continueRestored: await continued.continueWith": READMITS,
+  "continue.ts: continueRestored: catch restored.restartTrace":
+    "the trace restart's rejection, which reports with the Continue's own activation, admitted there (`reportActivationError`)",
+  "target.ts: sessionTarget > releaseRandom: catch host.client.request":
     "drops the random release's refusal; nothing follows",
-  "useSessionActivation.ts: useSessionActivation > reportHostError > incident: catch origin.bridge.commitIncident":
+  "target.ts: commitIncident: catch origin.bridge.commitIncident":
     "drops the incident's refusal; nothing follows",
   "useActivationRun.ts: useActivationRun > retire: catch ended.bridge.retireRun":
     "drops the retirement's refusal: the record retired already, and nothing follows",
@@ -336,24 +348,30 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "drops a release's refusal; nothing follows",
   "useFailureRecording.ts: useFailureRecording > settle: catch bridge.releaseRecording":
     "drops a release's refusal; nothing follows",
-  "useSessionActivation.ts: useSessionActivation > reportHostError: then starting": READMITS,
-  "useSessionActivation.ts: useSessionActivation > stopAt: then acknowledged": READMITS,
+  "stop.ts: stopLateStart: then starting":
+    "its session goes to `stopAt`, which admits the origin and the stop token before its halt, and only stops it otherwise; its failure ends the halting, then admits both before the incident",
+  "stop.ts: stopAt: then acknowledged": READMITS,
   // Reached from the activation bodies through the functions they call.
-  "useRandomControl.ts: useRandomControl > sendRandomRequest: then host.client.request": READMITS,
+  // Each entry's own reaction settles through the record's `settle`: its handlers act on the origin's behalf only while
+  // that lives, and their errors go to that origin's error stop.
+  "useSessionActivation.ts: useSessionActivation > startFrom: then begun":
+    "the begin's reaction settles through the record's `settle`, which admits the origin before either handler",
+  "adopt.ts: adopt: then target.adoptRandom":
+    "the adoption's reaction settles through the record's `settle`, which admits the origin before either handler",
   // The clock's section (#1983): its observation, then the caller's body, which re-admits first (checked below).
   "useRuntimeSceneClock.ts: useRuntimeSceneClock > section > bridgeOf(current).section:callback: await observeIn":
-    "the section's observation, before the caller's body: the activation work's body re-admits as it begins (`resolveRandomDraw`, checked below)",
+    "the section's observation, before the caller's body: the activation work's body re-admits as it begins (`resolveDraw`, checked below)",
   "useRuntimeSceneClock.ts: useRuntimeSceneClock > observeIn: await opened.send":
-    "the section's observation, which shows only its own session's publication (`owned`); the body that acts for an activation re-admits first (`resolveRandomDraw`)",
-  "useRandomControl.ts: useRandomControl > resolveRandomDraw > ownedSection:callback: await section.send":
-    READMITS,
-  "useRandomControl.ts: useRandomControl > resolveRandomDraw: catch ownedSection": READMITS,
+    "the section's observation, which shows only its own session's publication (`owned`); the body that acts for an activation re-admits first (`resolveDraw`)",
+  "draw.ts: resolveDrawFor > page.section:callback: await section.send": READMITS,
+  "draw.ts: resolveDrawFor: catch resolved":
+    "its failure goes only to the activation sink, which admits the origin itself",
   "useSessionActivation.ts: useSessionActivation > startFrom: finally settled":
     "clears the in-flight markers it set, only while they are still its own",
-  "useDebugModeAndTrace.ts: useDebugModeAndTrace > applyDebugMode: finally bridgeOf.request":
+  "debugMode.ts: completeDebugMode: finally target.setDebugModeShown":
     "clears the Debug mode asked, only while it is still this request's",
-  "useDebugModeAndTrace.ts: useDebugModeAndTrace > applyDebugMode: then bridgeOf.request.finally":
-    READMITS,
+  "debugMode.ts: completeDebugMode: then target.setDebugModeShown.finally":
+    "its success re-admits first; its failure goes only to the activation sink, which admits the origin itself",
   "useSessionMedia.ts: useSessionMedia > primeAudio: catch element.play":
     "drops a blocked play; nothing follows",
   "useKeptSession.ts: useKeptSession > settlePlanJson: catch bridgeNow.client.request":
@@ -380,9 +398,9 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useKeptSession.ts: useKeptSession > forgetKeptSession: then discardKeptSession": KEPT_SESSION,
 };
 /** Calls that re-admit an activation, and calls that request or act for one. */
-const ADMITS = /^(?:goesOn|lives|owned|activationRun\.admits)$/u;
+const ADMITS = /^(?:goesOn|lives|owned|work\.owned|page\.admits|activationRun\.admits)$/u;
 const ACTS =
-  /^(?:capture|options\.readPhoto|host\.request|host\.halt|stopAt|started|startedSession|reportHostError|origin\.bridge\.commitIncident|origin\.failure\.stopped|host\.captureExport|incident)$/u;
+  /^(?:capture|options\.readPhoto|host\.request|host\.halt|stopAt|started|startedSession|reportActivationError|origin\.bridge\.commitIncident|origin\.failure\.stopped|host\.captureExport|incident)$/u;
 
 /** Each wait of `file`'s functions within `scope`, with what follows it there. */
 function waitsOf(file: string, scope: (path: string) => boolean) {
@@ -586,5 +604,5 @@ test("every wait of the page's activation work re-admits its activation, or is l
       node.forEachChild((child) => visit(child, owner));
     });
   }
-  assert.deepEqual(bodies, ["resolveRandomDraw: true"], "each section body re-admits first");
+  assert.deepEqual(bodies, ["resolveDraw: true"], "each section body re-admits first");
 });

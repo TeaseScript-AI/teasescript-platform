@@ -5,7 +5,9 @@ import type { DebugView, DebugViewRequest } from "../../../debug/debug-view.js";
 import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../runtime/player-bridge.js";
 import type { PlayerSession } from "../../../runtime/runtime-view.js";
 import type { useRuntimeSceneClock } from "./useRuntimeSceneClock";
-import type { ActivationRun, useActivationRun } from "./activation/useActivationRun.js";
+import type { Origin, useActivationRun } from "./activation/useActivationRun.js";
+import { completeDebugMode } from "./activation/work/debugMode.js";
+import { sessionTarget } from "./activation/work/target.js";
 
 /*
  * Debug's two switches as the host holds them, moved from `usePlayerSession` unchanged: the value trace, with its
@@ -17,7 +19,10 @@ interface DebugModeAndTraceHost {
   /** The engine's host now, or `null` before it is ready. */
   readonly bridgeNow: () => PlayerBridge | null;
   readonly isDisposed: () => boolean;
-  readonly reportHostError: (error: unknown, origin?: ActivationRun | null) => void;
+  /** The activation error-stop sink, for an origin's failure. */
+  readonly reportActivationError: (origin: Origin, error: unknown) => void;
+  /** The page's error reporter, for the page-wide trace's failure. */
+  readonly reportPageError: (error: unknown) => void;
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly stopped: Readonly<Ref<boolean>>;
   readonly activationRun: ReturnType<typeof useActivationRun>;
@@ -39,7 +44,8 @@ interface DebugModeAndTraceHost {
 export function useDebugModeAndTrace({
   bridgeNow,
   isDisposed,
-  reportHostError,
+  reportActivationError,
+  reportPageError,
   session,
   stopped,
   activationRun,
@@ -86,7 +92,7 @@ export function useDebugModeAndTrace({
         if (toggle === tracingToggles && !isDisposed()) traceId.value = now;
       },
       (error: unknown) => {
-        if (!endsQuietly(error) && !isDisposed()) reportHostError(error);
+        if (!endsQuietly(error) && !isDisposed()) reportPageError(error);
       },
     );
   }
@@ -99,6 +105,9 @@ export function useDebugModeAndTrace({
   function debugView(request: DebugViewRequest): Promise<DebugView | null> {
     const current = session.value;
     if (current === null || !debugTracing.value) return Promise.resolve(null);
+    // Its failure stops the activation live as it is asked, and none that began since (Q1 B); its view stays the
+    // lineage's.
+    const origin = activationRun.current();
     return bridgeOf(current)
       .read(current, "debugView", { request })
       .then(
@@ -114,7 +123,7 @@ export function useDebugModeAndTrace({
             !stopped.value &&
             session.value?.lineage === current.lineage
           )
-            reportHostError(error);
+            reportActivationError(origin, error);
           return null;
         },
       );
@@ -133,15 +142,16 @@ export function useDebugModeAndTrace({
     clock().before("debugMode");
     debugMode = enabled;
     if (enabled && room().value === "normal" && hasNormalStorage()) void copyToDebugRoom();
-    else applyDebugMode();
+    else applyDebugMode(activationRun.current());
   }
   /**
    * Gives the running session the current Debug state. One that waits for Continue takes it at Continue, and a state
    * Debug's rewind shows for inspection once it is adopted or the session it left is back.
    */
-  function applyDebugMode() {
+  function applyDebugMode(origin: Origin) {
     const current = session.value;
     if (
+      !activationRun.admits(origin) ||
       current === null ||
       inspecting().value ||
       stopped.value ||
@@ -156,33 +166,23 @@ export function useDebugModeAndTrace({
     const on = debugMode;
     const asked = { lineage: current.lineage, on };
     debugModeAsked = asked;
-    // It acts for the activation that shows the session: a Continue keeps the lineage, so the lineage alone does not
-    // say that its activation still lives.
-    const origin = activationRun.current();
-    // In the host (`setDebugMode`); the session shows the change while it still owns the UI.
-    void bridgeOf(current)
-      .request<{ readonly kind: string }>(
-        current,
-        "setDebugMode",
-        { on },
-        { publish: (next) => void publishOwned(next) },
-      )
-      .finally(() => {
+    // It acts for `origin`, the activation that shows the session, which its caller captured at its synchronous entry:
+    // a Continue keeps the lineage, so the lineage alone does not say that its activation still lives.
+    // In the host (`setDebugMode`, `work/debugMode.ts`); the session shows the change while it still owns the UI and
+    // its activation lives.
+    completeDebugMode(sessionTarget(current, origin, activationRun), on, origin, {
+      admits: (each) => activationRun.admits(each),
+      publish: (next) => void publishOwned(next),
+      clearMarker: () => {
         if (debugModeAsked === asked) debugModeAsked = null;
-      })
-      .then(
-        (outcome) => {
-          if (origin !== null && !activationRun.admits(origin)) return;
-          if (outcome.kind === "set" && session.value?.lineage === current.lineage)
-            keepSessionLater();
-        },
-        (error: unknown) => {
-          if (endsQuietly(error)) return;
-          if (origin !== null && !activationRun.admits(origin)) return;
-          if (!isDisposed() && !stopped.value && session.value?.lineage === current.lineage)
-            reportHostError(error, origin ?? activationRun.current());
-        },
-      );
+      },
+      stillShown: () => session.value?.lineage === current.lineage,
+      keep: () => keepSessionLater(),
+      quiet: (error) => endsQuietly(error),
+      reportable: () =>
+        !isDisposed() && !stopped.value && session.value?.lineage === current.lineage,
+      report: (each, error) => reportActivationError(each, error),
+    });
   }
 
   /**

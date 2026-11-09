@@ -26,11 +26,11 @@ import {
   type PlayerNotices,
 } from "../../../presentation/notices.js";
 import { bridgeOf, endsQuietly, type SessionSection } from "../../../runtime/player-bridge.js";
+import type { Origin } from "./activation/useActivationRun.js";
 import { BridgeRequestError } from "../../../engine-bridge/client.js";
 import type { MediaReportOutcome } from "../../../../src/index.js";
 import { silence } from "../generatedAudio";
 import type { SectionWork, useRuntimeSceneClock } from "./useRuntimeSceneClock";
-import type { ActivationRun } from "./activation/useActivationRun.js";
 
 /*
  * The shown session's media on browser elements, moved from `usePlayerSession` unchanged: the audio device and its load
@@ -54,7 +54,10 @@ interface SessionMediaHost {
   readonly resolvePackageAsset: (path: string) => string | null;
   readonly resolveAsset: (path: string) => string | null;
   readonly isDisposed: () => boolean;
-  readonly reportHostError: (error: unknown, origin?: ActivationRun | null) => void;
+  /** The activation live now, which a load report's failure stops. */
+  readonly currentOrigin: () => Origin;
+  /** The activation error-stop sink. */
+  readonly reportActivationError: (origin: Origin, error: unknown) => void;
   readonly ownedSection: <T>(
     current: PlayerSession | null,
     work: SectionWork,
@@ -81,7 +84,8 @@ export function useSessionMedia({
   resolvePackageAsset,
   resolveAsset,
   isDisposed,
-  reportHostError,
+  currentOrigin,
+  reportActivationError,
   ownedSection,
   publishOwned,
   clock,
@@ -128,6 +132,8 @@ export function useSessionMedia({
   const loads = new MediaLoadQueue(
     async (reports, observe, acknowledge) => {
       const current = session.value;
+      // Its failure stops the activation live as it is sent, and none that began since (Q1 B).
+      const origin = currentOrigin();
       // Without a session, nothing takes them.
       if (current === null) return reports.forEach(([mediaId]) => acknowledge(mediaId));
       try {
@@ -152,7 +158,7 @@ export function useSessionMedia({
         if (endsQuietly(error) || (error instanceof BridgeRequestError && error.code === "basis"))
           return;
         if (!isDisposed() && !stopped.value && session.value?.lineage === current.lineage)
-          reportHostError(error);
+          reportActivationError(origin, error);
       }
     },
     () => (pendingLoadCount.value = loads.size),

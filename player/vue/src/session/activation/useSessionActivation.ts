@@ -11,7 +11,27 @@ import type { TemporalContext } from "../../../../../src/index.js";
 import type { Problem } from "../../start-and-end/ProblemCard.vue";
 import type { PlayerSessionOptions, PlayerSessionStart } from "../usePlayerSession.js";
 import type { useKeptSession } from "../persistence/useKeptSession.js";
-import { stopArguments, useActivationRun, type ActivationRun } from "./useActivationRun.js";
+import {
+  useActivationRun,
+  type Origin,
+  type ReplyHandlers,
+  type RunOrigin,
+} from "./useActivationRun.js";
+import { continueRestored } from "./work/continue.js";
+import { stopAt, stopLateStart, type StopPage } from "./work/stop.js";
+import {
+  commitIncident,
+  isSessionTarget,
+  sessionOf,
+  sessionTarget,
+  stoppedSession,
+  stopTarget,
+  type SessionTarget,
+} from "./work/target.js";
+
+/** The session a begin gave, as the scheduler installs it: a Continue's target unwrapped, a Start's session as it is. */
+const sessionOfBegun = (begun: PlayerSession | SessionTarget): PlayerSession =>
+  isSessionTarget(begun) ? sessionOf(begun) : begun;
 
 /*
  * The activation under way, moved from `usePlayerSession` unchanged: its preparation as Start or Continue, the click
@@ -19,12 +39,17 @@ import { stopArguments, useActivationRun, type ActivationRun } from "./useActiva
  */
 
 /** What Start and Continue record of the player's click: the zone and presentation, and the wall clock. */
-type TemporalCapture = { temporalContext: TemporalContext; wallClockMs: number };
+export type TemporalCapture = { temporalContext: TemporalContext; wallClockMs: number };
 
 type Activation = {
   readonly kind: "start" | "continue";
-  /** Begins the session; a Start or Continue over the bridge resolves once its first publication is applied. */
-  readonly begin: (origin: ActivationRun) => PlayerSession | Promise<PlayerSession>;
+  /**
+   * Begins the session; a Start or Continue over the bridge resolves once its first publication is applied. A Start
+   * gives the bridge's session, or its promise, unchanged; a Continue gives its work's target.
+   */
+  readonly begin: (
+    origin: RunOrigin,
+  ) => PlayerSession | SessionTarget | Promise<PlayerSession | SessionTarget>;
   /** The restored session Continue goes on with. */
   readonly restored?: PlayerSession;
   /** Why Start shows instead of Continue: the kept session is of a format this Player no longer reads. */
@@ -41,7 +66,8 @@ interface SessionActivationHost {
   readonly bridgeReady: Promise<PlayerBridge>;
   readonly requireBridge: () => PlayerBridge;
   readonly isDisposed: () => boolean;
-  readonly showSession: (next: PlayerSession) => void;
+  /** Shows `next` as the Player's, for `origin`, the activation that began it. */
+  readonly showSession: (next: PlayerSession, origin: Origin) => void;
   // The owners made after this one, as the activation reaches them: forwarders and getters.
   readonly camera: { open(capability: boolean): Promise<boolean>; release(): void };
   readonly captures: { reset(): void };
@@ -57,7 +83,7 @@ interface SessionActivationHost {
   readonly nextPreparation: () => number;
   readonly debugModeOn: () => boolean;
   readonly tracingIntent: () => TracingIntent | undefined;
-  readonly adoptRandom: (next: PlayerSession, origin?: ActivationRun | null) => void;
+  readonly adoptRandom: (next: PlayerSession, origin: Origin) => void;
   readonly startRandom: () => StartRandom | undefined;
   readonly random: { issuedRandom(): RandomIntent | undefined };
   readonly resolveTemporalContext: () => TemporalContext;
@@ -93,14 +119,17 @@ export function useSessionActivation({
   // Each activation's diagnostic run, the one owner of what its completions may do; with its recording up to a Player
   // error, captured in the host as the stop is sent and kept until the next Start, while Debug's rewind may begin the
   // recorder anew at a restored state.
-  const activationRun = useActivationRun();
+  const activationRun = useActivationRun({
+    report: (origin, error) => reportActivationError(origin, error),
+  });
   /**
    * The recording the host holds for diagnostics and tests: a Player error's, while its captured ticket is held, else
    * the recorder's current one. Not a debug export's selection (the failure recording's `selection()`), which waits for
    * a pending capture and selects none where it settled unavailable.
    */
   const heldDebugRecording = (): DebugRecording | null => {
-    const failed = activationRun.current()?.failure.ticket() ?? null;
+    const live = activationRun.current();
+    const failed = live.kind === "run" ? live.failure.ticket() : null;
     if (failed !== null) return heldRecording(failed.bridge, failed.ticket);
     return bridgeNow() === null ? null : heldRecording(bridgeNow()!);
   };
@@ -124,75 +153,97 @@ export function useSessionActivation({
    * not run, and its store applies the replies to what it ran until the host acknowledges the stop. The stopped session
    * is the shown one, else the one still beginning: a Continue's restored session at once, a Start's once its reply
    * names it. Its last publication then shows, and the stop renders after it; input stops at once (`stopped`). The error
-   * is `origin`'s, the live activation's by default: a deferred completion passes the activation it began in, and one
-   * of a retired activation does nothing (`useActivationRun`).
+   * is `origin`'s: a deferred completion passes the activation it began in, and one of a retired activation does
+   * nothing (`useActivationRun`). It is the activation's one error-stop sink; the page's own reporter is
+   * `reportPageError`.
    */
-  function reportHostError(error: unknown, origin: ActivationRun | null = activationRun.current()) {
-    if (origin !== null && !activationRun.admits(origin)) return;
-    const name = error instanceof Error ? error.name : "Error";
+  function reportActivationError(origin: Origin, error: unknown) {
+    if (!activationRun.admits(origin)) return;
     console.error("[player] host error", error);
     const restoring = continuing;
     const starting = sessionBeginning;
+    // A stop still waiting for the same Start keeps its error: the first error is the one the stop shows and commits.
+    const waiting =
+      lateStop !== null && lateStop.starting === starting && lateStop.stop === activationToken
+        ? lateStop
+        : null;
+    const name = waiting?.name ?? (error instanceof Error ? error.name : "Error");
     continuing = null;
     activationToken += 1;
     beginning.value = false;
     const stop = activationToken;
-    const target = session.value ?? restoring;
-    // A Continue still beginning beside a shown session runs nothing more either.
-    if (restoring !== null && restoring !== target) void bridgeOf(restoring).halt(restoring);
-    if (target !== null) return stopAt(target, name, stop, origin);
-    // Without a session to stop, the run's incident is committed by itself.
-    const incident = () => {
-      const args = stopArguments(origin, name, stop);
-      if (origin !== null && args !== null && activationRun.admits(origin))
-        void origin.bridge.commitIncident(args).catch(() => {});
-    };
-    if (starting === null) {
-      hostError.value = name;
-      incident();
+    const shown = session.value ?? restoring;
+    // A Continue still beginning beside a shown session runs nothing more either: plain-halted, resource-bound cleanup.
+    if (restoring !== null && restoring !== shown) void bridgeOf(restoring).halt(restoring);
+    if (shown !== null) {
+      stopAt(stopTarget(shown, origin, activationRun), name, stop, origin, stopPage);
       return;
     }
-    haltUntil(stop);
-    void starting.then(
-      (started) => {
-        // A retired activation's late session is only stopped, with no incident and no capture.
-        if (origin !== null && !activationRun.admits(origin)) {
-          endHalting(stop);
-          return void bridgeOf(started).halt(started);
-        }
-        stopAt(started, name, stop, origin);
+    // Without a session to stop, the run's incident is committed by itself.
+    if (starting === null) {
+      hostError.value = name;
+      commitIncident(origin, name, stop, activationRun);
+      return;
+    }
+    // The late Start's session has one cleanup owner: the stop that waits for it last.
+    lateStop = { starting, stop, name };
+    stopLateStart(starting, name, stop, origin, {
+      ...stopPage,
+      target: (begun) => stopTarget(sessionOfBegun(begun), origin, activationRun),
+      claimedLater: () =>
+        lateStop !== null &&
+        lateStop.starting === starting &&
+        lateStop.stop !== stop &&
+        lateStop.stop === activationToken,
+      haltObsolete: (begun) => {
+        const late = sessionOfBegun(begun);
+        void bridgeOf(late).halt(late);
       },
-      () => {
-        endHalting(stop);
-        if (stop !== activationToken || (origin !== null && !activationRun.admits(origin))) return;
+      incident: () => {
         hostError.value ??= name;
-        incident();
+        commitIncident(origin, name, stop, activationRun);
       },
-    );
+    });
   }
-  /**
-   * Stops at `target` in `origin`'s run: once its store froze at the host's acknowledgement, its last publication is the
-   * shown session, which the recording and export hold, and the stop renders. A later activation or unmount supersedes
-   * it; a retired `origin` stops nothing.
-   */
-  function stopAt(target: PlayerSession, name: string, stop: number, origin: ActivationRun | null) {
-    if (origin !== null && !activationRun.admits(origin)) return endHalting(stop);
-    const host = bridgeOf(target);
-    const acknowledged = host.halt(target, stopArguments(origin, name, stop));
-    origin?.failure.stopped(target);
-    const commit = () => {
-      const live = origin === null ? !isDisposed() : activationRun.admits(origin);
-      if (!live || stop !== activationToken) return endHalting(stop);
-      // The final publication shows, then the stop; the halt holds the session stopped until then, so nothing reacting
-      // to that publication (the stop's call view, also of an unchanged state) sees it running for a moment.
-      const final = host.latest(target);
+  /** The page operations of the error stop's work, each admitted where it acts (`work/stop.ts`). */
+  const stopPage: StopPage = {
+    admits: (origin) => activationRun.admits(origin),
+    isCurrent: (stop) => stop === activationToken,
+    haltUntil,
+    endHalting,
+    commit: (target, name) => {
+      const { final } = stoppedSession(target);
       if (final !== null) session.value = final;
       hostError.value ??= name;
-      endHalting(stop);
-    };
-    if (host.frozen(target)) return commit();
-    haltUntil(stop);
-    void acknowledged.then(commit);
+    },
+  };
+  /**
+   * The loss of the engine's connection, in its own turn: the Player's error stop at once, with what the host last
+   * published, and no halt asked of the dead connection, nor waited for. The activation under way and every stop still
+   * committing go (their tokens), and the record is revoked: no completion of anything begun before acts afterwards.
+   */
+  function lose(error: unknown) {
+    const name = error instanceof Error ? error.name : "Error";
+    console.error("[player] host error", error);
+    activationToken += 1;
+    continuing = null;
+    beginning.value = false;
+    const target = session.value;
+    if (target !== null) {
+      const final = bridgeOf(target).latest(target);
+      if (final !== null) session.value = final;
+    }
+    hostError.value ??= name;
+    halting.value = false;
+    activationRun.revoke();
+  }
+  /**
+   * The page's error reporter: an exception of the Player at a page owner's own event (its interface, the hosted
+   * script, Debug's rewind, the page-wide trace and random settings), reported for the activation live at that event.
+   * Activation work never takes it: it reports to its own origin (`reportActivationError`).
+   */
+  function reportPageError(error: unknown) {
+    reportActivationError(activationRun.current(), error);
   }
   const activation = shallowRef<Activation | null>(null);
   let activationToken = 0;
@@ -202,7 +253,13 @@ export function useSessionActivation({
   // obsolete one's requests run in the host before the replacement's, which claims the recorder and trace last.
   let begunInFlight: Promise<void> | null = null;
   // The session that Start or Continue is beginning, once the host names it; an error stop stops at it.
-  let sessionBeginning: Promise<PlayerSession> | null = null;
+  let sessionBeginning: Promise<PlayerSession | SessionTarget> | null = null;
+  /** The last error stop that waits for a Start still beginning (`stopLateStart`), with its stop token and error. */
+  let lateStop: {
+    readonly starting: Promise<PlayerSession | SessionTarget>;
+    readonly stop: number;
+    readonly name: string;
+  } | null = null;
   /**
    * A new activation, preparation or end replaces the one under way: a Continue still beginning is halted in the host,
    * so its queued requests, such as starting the recording of an obsolete session, are refused without effect.
@@ -230,7 +287,8 @@ export function useSessionActivation({
    */
   function beforeRewindRestart(): void | Promise<void> {
     // The recording up to a Player error is captured before the host begins the recorder anew.
-    return activationRun.current()?.failure.beforeRestart();
+    const live = activationRun.current();
+    return live.kind === "run" ? live.failure.beforeRestart() : undefined;
   }
   /**
    * Shows the explicit Start control for a new session; `create` runs only on activation, so no statement executes
@@ -322,66 +380,23 @@ export function useSessionActivation({
     camera.release();
     activation.value = {
       kind: "continue",
-      begin: async (origin) => {
-        const host = bridgeOf(restored);
+      begin: (origin) => {
         continuing = restored;
-        // A restored session runs without Debug's random control until its kept draw went on naturally, as before: one
-        // a Start or an adoption gave this Player's control first gives it up (`adoptRandom` below takes it again).
-        if (random.issuedRandom() !== undefined)
-          void host.client
-            .request("releaseRandom", { session: restored.id }, { after: restored.id })
-            .catch(() => {});
         // Only the activation that began it goes on after each reply: a replaced one touches no trace or recorder.
         const owner = activationToken;
-        const owned = () => {
-          if (isDisposed() || owner !== activationToken || !activationRun.admits(origin))
-            throw new Error("A replaced Continue goes no further.");
-        };
-        // Continue records the zone, presentation and clock of the click (#1886), before any reply or wait. A capture
-        // that throws fails the Continue where it failed before: after its recording began, so the failure's recording
-        // is the restored session's, not the previous one's.
-        let taken: ClickSample;
-        try {
-          taken = { capture: temporalCapture() };
-        } catch (error) {
-          taken = { error };
-        }
-        // The recording of a restored session starts from the state it continues, and so does a new epoch of the
-        // host's value trace, once the Continue owns the UI. The epoch's request is not awaited: the host runs it
-        // before what follows (a draw's resume, Debug mode, Continue).
-        await host.request(restored, "beginRecording", origin.begin);
-        owned();
-        const tracing = tracingIntent();
-        if (tracing?.on)
-          void host.request(restored, "restartTrace", { tracing }).catch((error: unknown) => {
-            if (!endsQuietly(error) && !isDisposed() && !stopped.value)
-              reportHostError(error, origin);
-          });
-        let continued: PlayerSession = host.latest(restored) ?? restored;
-        // A session kept while paused at a random draw goes on with its natural outcome first: until then, the engine
-        // takes no other input.
-        // It runs without Debug's random control until then, as before, and adopts it after (`adoptRandom` below).
-        const draw = continued.state.randomDraw;
-        if (draw !== null) {
-          await host.request(continued, "resolveDraw", {
-            drawId: draw.drawId,
-            outcome: "natural",
-            record: null,
-          });
-          owned();
-          continued = host.latest(continued) ?? continued;
-        }
-        // The script reads whether Debug is on now.
-        if (continued.state.debugMode !== debugModeOn()) {
-          await host.request(continued, "setDebugMode", { on: debugModeOn() });
-          owned();
-          continued = host.latest(continued) ?? continued;
-        }
-        adoptRandom(continued, origin);
-        if (!("capture" in taken)) throw taken.error;
-        await host.request(continued, "continue", { capture: taken.capture });
-        owned();
-        return host.latest(continued) ?? continued;
+        return continueRestored(sessionTarget(restored, origin, activationRun), origin, {
+          randomIssued: () => random.issuedRandom() !== undefined,
+          owned: () => {
+            if (isDisposed() || owner !== activationToken || !activationRun.admits(origin))
+              throw new Error("A replaced Continue goes no further.");
+          },
+          capture: () => temporalCapture(),
+          tracing: () => tracingIntent(),
+          debugModeOn: () => debugModeOn(),
+          adopt: (target, run) => adoptRandom(sessionOf(target), run),
+          quiet: (error) => endsQuietly(error) || isDisposed() || stopped.value,
+          report: (run, error) => reportActivationError(run, error),
+        });
       },
       restored,
     };
@@ -463,7 +478,7 @@ export function useSessionActivation({
   function startedSession(
     create: PlayerSessionStart,
     recording: { readonly debugMode: boolean },
-    origin: ActivationRun,
+    origin: RunOrigin,
   ): PlayerSession | Promise<PlayerSession> {
     const random = startRandom();
     const host = requireBridge();
@@ -501,29 +516,35 @@ export function useSessionActivation({
     hostError.value = null;
     // The activation's run begins before anything of it can fail, retiring the one before it.
     const origin = activationRun.begin(bridgeNow()!);
-    let begun: PlayerSession | Promise<PlayerSession>;
+    let begun: PlayerSession | SessionTarget | Promise<PlayerSession | SessionTarget>;
     // `begin` records the click's capture: it reads it before its first await, a Start in its factory or options.
     clicked = sample;
     try {
       begun = pending.begin(origin);
     } catch (error) {
-      reportHostError(error, origin);
+      reportActivationError(origin, error);
       return;
     } finally {
       clicked = null;
     }
-    if (!(begun instanceof Promise)) return started(pending, begun);
+    if (!(begun instanceof Promise)) return started(pending, sessionOfBegun(begun), origin);
     sessionBeginning = begun;
+    // Its terminal reaction, the begin's own: the session goes on only for its live activation, while that is still the
+    // one begun; an obsolete activation's failure stops nothing, and the session that replaced it goes on.
+    const handlers: ReplyHandlers<PlayerSession | SessionTarget> = {
+      done: (next) => {
+        if (!isDisposed() && token === activationToken)
+          started(pending, sessionOfBegun(next), origin);
+        return undefined;
+      },
+      failed: (error) => {
+        if (!isDisposed() && token === activationToken) reportActivationError(origin, error);
+        return undefined;
+      },
+    };
     const settled = begun.then(
-      (next) => {
-        if (!isDisposed() && token === activationToken && activationRun.admits(origin))
-          started(pending, next);
-      },
-      (error: unknown) => {
-        // An obsolete activation's failure stops nothing: the session that replaced it goes on.
-        if (!isDisposed() && token === activationToken && activationRun.admits(origin))
-          reportHostError(error, origin);
-      },
+      (next) => activationRun.settle(origin, { ok: true, value: next }, handlers),
+      (error: unknown) => activationRun.settle(origin, { ok: false, error }, handlers),
     );
     begunInFlight = settled;
     void settled.finally(() => {
@@ -532,9 +553,9 @@ export function useSessionActivation({
     });
     return settled;
   }
-  function started(pending: Activation, next: PlayerSession) {
+  function started(pending: Activation, next: PlayerSession, origin: RunOrigin) {
     if (continuing?.id === next.id) continuing = null;
-    showSession(next);
+    showSession(next, origin);
     // A new session replaces the one kept before.
     if (pending.kind === "start") {
       keptOwner().forgetKeptPoint();
@@ -547,7 +568,9 @@ export function useSessionActivation({
     heldDebugRecording,
     hostError,
     halting,
-    reportHostError,
+    reportActivationError,
+    reportPageError,
+    lose,
     activation,
     beginning,
     lastStart,

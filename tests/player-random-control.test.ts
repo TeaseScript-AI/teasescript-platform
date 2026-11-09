@@ -559,6 +559,12 @@ const COMPOSABLE_FILES = [
   "player/vue/src/session/persistence/useSavedDataTransfer.ts",
   "player/vue/src/session/persistence/useSessionTransfer.ts",
   "player/vue/src/session/activation/useSessionActivation.ts",
+  "player/vue/src/session/activation/work/adopt.ts",
+  "player/vue/src/session/activation/work/continue.ts",
+  "player/vue/src/session/activation/work/debugMode.ts",
+  "player/vue/src/session/activation/work/draw.ts",
+  "player/vue/src/session/activation/work/stop.ts",
+  "player/vue/src/session/activation/work/target.ts",
 ] as const;
 /** The text of the session composable's files, one after another. */
 function composableText(): string {
@@ -571,8 +577,10 @@ function composableText(): string {
 // `adoptRandom` gives a session a Player's control, and only at the invariant's points; a settings change never does
 // (orchestrator 2's ruling on P5's fourth occurrence). A sender in another module needs adding here.
 const RANDOM_SENDERS: readonly (readonly [string, string])[] = [
-  ['op: "randomControl" | "adoptRandom",', "the senders' type"],
-  ['"randomControl",', "not adopting: a settings change (`flushRandom`)"],
+  [
+    '.request("randomControl", { intent: lastRandom }',
+    "not adopting: a settings change (`flushRandom`)",
+  ],
   ['"randomControl",', "not adopting: the Player's teardown"],
   ['"adoptRandom",', "adopting: `adoptRandom`, the one adoption"],
   ['.request("releaseRandom",', "releasing: Continue before its kept draw went on"],
@@ -603,10 +611,14 @@ test("every random-op sender in the composable is classified as adopting or not"
     [
       // The activation owner's and the rewind owner's dependencies, which forward their adoption to the random control's.
       "adoptRandom: (next, origin) => adoptRandom(next, origin),",
-      "adoptRandom: (next) => adoptRandom(next),",
-      "if (!paused) adoptRandom(next);",
+      "adoptRandom: (next) => adoptRandom(next, activationRun.current()),",
+      "if (!paused) adoptRandom(next, origin);",
       "if (session.value !== null) adoptRandom(session.value);",
-      "adoptRandom(continued, origin);",
+      "adopt: (target, run) => adoptRandom(sessionOf(target), run),",
+      // The adoption's work and its target's operation (`work/`), which sends it.
+      "return target.adoptRandom(intent).then(",
+      "adoptRandom(intent: RandomIntent): Promise<BridgeResult>;",
+      "adoptRandom(intent) {",
     ],
   );
 });
