@@ -635,7 +635,7 @@ if (process.argv[2] === "--child") {
         }),
       ],
       {
-        // (`--expose-gc`: the oracle's memory room collects once where the heap in use passes its reserve, #1837)
+        // (`--expose-gc`: the oracle's memory room collects where the heap in use passes its reserve, #1837, #2002)
         execArgv: [`--max-old-space-size=${memory}`, "--expose-gc"],
         serialization: "advanced",
         stdio: ["ignore", "ignore", "pipe", "ipc"],
