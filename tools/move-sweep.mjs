@@ -136,7 +136,10 @@ function namesOf(bytes) {
 
 /** The renames of the change from `git merge-base base HEAD` to HEAD: each old path to its one new path. */
 export function derivedRenames(cwd, base) {
-  const mergeBase = gitBytes(cwd, ["merge-base", base, "HEAD"]).toString("utf8").trim();
+  const mergeBase = (
+    textOf(gitBytes(cwd, ["merge-base", base, "HEAD"])) ??
+    refuse("git merge-base printed bytes that are not UTF-8")
+  ).trim();
   const fields = namesOf(
     gitBytes(cwd, ["diff", "-z", "-M", "--name-status", "--no-ext-diff", mergeBase, "HEAD"]),
   );
@@ -215,7 +218,10 @@ function treeOf(cwd) {
   let at = 0;
   for (const entry of files) {
     const headerEnd = contents.indexOf(10, at);
-    const size = Number(contents.subarray(at, headerEnd).toString("latin1").split(" ")[2]);
+    const header =
+      textOf(contents.subarray(at, headerEnd)) ??
+      refuse("git cat-file printed a header that is not UTF-8");
+    const size = Number(header.split(" ")[2]);
     const body = contents.subarray(headerEnd + 1, headerEnd + 1 + size);
     at = headerEnd + 1 + size + 1;
     // Not UTF-8 (a binary, a fixture in another encoding): not read, as the Python did not, and listed, as it was not.
