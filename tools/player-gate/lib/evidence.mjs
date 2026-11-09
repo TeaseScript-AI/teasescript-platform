@@ -33,10 +33,10 @@ const PATH = Symbol("record path");
 export function strictRecord(value, path = "record") {
   if (value === null || typeof value !== "object" || value[RAW] !== undefined) return value;
   return new Proxy(value, {
-    get(target, key, receiver) {
+    get(target, key) {
       if (key === RAW) return target;
       if (key === PATH) return path;
-      const found = Reflect.get(target, key, receiver);
+      const found = target[key];
       if (typeof key === "symbol" || typeof found === "function") return found;
       const field = `${path}.${String(key)}`;
       if (found === undefined || found === null) throw new MissingEvidence(field);
