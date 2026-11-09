@@ -34,11 +34,11 @@ import { preparedPlan } from "./helpers/prepared-plan.js";
  *
  * The rest of the grammar is decided elsewhere, each where its seam is:
  * - the main side's copy of events and transcript, at the matched store view, through the real candidate, with the
- *   lifecycle's pending gates, Back and Return: `player-session-rewind.test.ts`;
+ *   lifecycle's pending gates, Back and Return: `player-rewind-activations.test.ts`;
  * - a capture refused by identity, as after a publication the page never received: `player-bridge-recording-ops`;
  * - an unavailable snapshot or end, and the first failure's recording beside a rewound state: the equivalence rows;
  * - Start, Continue, introduction and restore routes, and every publication, stop and binding route:
- *   `player-recording-routes.test.ts`, with Start's and Continue's runs in `player-session-rewind.test.ts`.
+ *   `player-recording-routes.test.ts`, with Start's and Continue's runs in `player-rewind-activations.test.ts`.
  */
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
