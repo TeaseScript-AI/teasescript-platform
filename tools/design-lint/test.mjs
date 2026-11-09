@@ -84,6 +84,11 @@ test("native and component bindings reject direct class fragments", async () => 
     ]) {
       await rejects(vue(`<${element} :class="${expression}" />`), "design/no-fragmented-classes");
     }
+    // A direct `v-bind` object's `class` is a class site too.
+    await rejects(
+      vue(`<${element} v-bind="{ class: \`bg-\${tone}\` }" />`),
+      "design/no-fragmented-classes",
+    );
   }
   await rejects(
     "import { cva } from 'class-variance-authority'; const style = cva(`bg-${tone}`);",
