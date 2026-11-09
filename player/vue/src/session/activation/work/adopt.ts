@@ -23,15 +23,15 @@ export interface AdoptPage {
   readonly report: (origin: Origin, error: unknown) => void;
 }
 
-/** Gives `target`'s session the control of `intent`, for `origin`. */
+/** Gives `target`'s session the control of `intent`, for `origin`: settled once its reply's reaction ran. */
 export function adopt(
   target: SessionTarget,
   intent: RandomIntent,
   origin: Origin,
   page: AdoptPage,
-): void {
-  if (!page.admits(origin)) return;
-  void page.reply(origin, target.adoptRandom(intent), {
+): Promise<void> {
+  if (!page.admits(origin)) return Promise.resolve();
+  return page.reply(origin, target.adoptRandom(intent), {
     done: (reply) => {
       page.adopted(reply);
       return undefined;

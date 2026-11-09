@@ -109,9 +109,7 @@
         "player/vue/src/shell/ToolPanelHeader.vue",
         "player/vue/src/components/ui/sidebar/SidebarProvider.vue"
       ],
-      "rules": {
-        "anti-slop/require-safety-comment-for-type-assertion": "off"
-      }
+      "rules": { "anti-slop/require-safety-comment-for-type-assertion": "off" }
     },
     {
       "files": [
@@ -141,6 +139,10 @@
     {
       "files": ["tests/player-session-rewind.test.ts"],
       "rules": { "typescript/no-floating-promises": "off" }
+    },
+    {
+      "files": ["player/vue/src/session/activation/work/**"],
+      "rules": { "typescript/no-floating-promises": ["error", { "ignoreVoid": false }] }
     }
   ]
 }

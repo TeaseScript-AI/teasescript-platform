@@ -119,7 +119,7 @@ export function useRandomControl({
     if (lastRandom === undefined || isDisposed()) return;
     // The adoption acts for the activation that shows `next`, and only while that lives: once it retired, its reply
     // writes nothing and its failure stops nothing (`work/adopt.ts`).
-    adopt(sessionTarget(next, origin, activationRun), lastRandom, origin, {
+    void adopt(sessionTarget(next, origin, activationRun), lastRandom, origin, {
       admits: (each) => activationRun.admits(each),
       reply: (each, pending, handlers) => activationRun.reply(each, pending, handlers),
       adopted: (reply) => {

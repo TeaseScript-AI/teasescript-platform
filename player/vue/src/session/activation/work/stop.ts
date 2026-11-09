@@ -44,7 +44,8 @@ export function stopAt(
   };
   if (target.frozen()) return commit();
   page.haltUntil(stop);
-  void acknowledged.then(commit);
+  // The halt resolves once the store froze; were it to reject, the store froze too (`PlayerBridge.halt`).
+  void acknowledged.then(commit, commit);
 }
 
 /**
