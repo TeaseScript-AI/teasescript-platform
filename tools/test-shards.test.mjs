@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
@@ -196,11 +196,14 @@ test("the filter's two shards run every compiled test file once between them, on
     "player/c.test.js",
   ];
   mkdirSync(join(cwd, "dist", "tests", "player"));
-  for (const name of names)
+  for (const name of names) {
+    // (a costly file's name is its path under dist/tests/, in a folder for most)
+    mkdirSync(dirname(join(cwd, "dist", "tests", name)), { recursive: true });
     writeFileSync(
       join(cwd, "dist", "tests", name),
       `import { test } from "node:test";\ntest(${JSON.stringify(`ran ${name}`)}, () => {});\n`,
     );
+  }
   const environment = { ...process.env };
   delete environment.NODE_TEST_CONTEXT;
   const run = (...args) =>
