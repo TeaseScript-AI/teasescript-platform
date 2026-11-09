@@ -26,6 +26,7 @@ import {
   chooseAt,
   heldInHost,
 } from "../helpers/player/rewind-host.js";
+import { untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * L5i.6: every lineage transfer of Debug's rewind (`transferLineages`), as the declared domain generates its obligations
@@ -205,7 +206,8 @@ for (const each of TRANSFERS)
       }
       const raw = expect.kind === "refused" ? rawTransfer(each, history, parked) : null;
       if (raw !== null) {
-        const reply = await bridge.client.request(raw.op, raw.args);
+        // The raw op as the test picks it, sent past the page.
+        const reply = await untypedClient(bridge.client).request(raw.op, raw.args);
         // EVIDENCE: validation: the history ops reply from the same build with a `HistoryOpResult`.
         assert.equal(
           (reply.result as { readonly kind: string }).kind,

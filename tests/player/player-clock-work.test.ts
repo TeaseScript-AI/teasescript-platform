@@ -5,7 +5,6 @@ import ts from "typescript";
 import { effectScope, ref, shallowRef, type Ref, type ShallowRef } from "vue";
 
 import { compilePlayerProject } from "../../player/runtime/compile-project.js";
-import type { BridgeClient } from "../../player/engine-bridge/client.js";
 import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
@@ -21,6 +20,7 @@ import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import type { ClockTicket } from "../../player/runtime/clock-ticket.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
+import { untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * L5i.5: session work that must follow the scene clock posts what it needs into the shown session's queue first
@@ -213,7 +213,8 @@ function track(context: TestContext, bridge: PlayerBridge) {
       error === null ? reply : Promise.reject(error),
     );
   };
-  const client: BridgeClient = bridge.client;
+  // The mocks forward each op as it is sent, whatever it is: the client as its transport carries requests.
+  const client = untypedClient(bridge.client);
   const request = client.request.bind(client);
   context.mock.method(
     client,

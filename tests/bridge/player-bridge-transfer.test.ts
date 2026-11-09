@@ -45,6 +45,7 @@ import {
 import { cloneGraphDifference } from "../helpers/clone-graph.js";
 import { inProcessBridge } from "../helpers/in-process-bridge.js";
 import { deliveredRun } from "../helpers/bridge/delivered-run.js";
+import { untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * The reading of an exported file or text in the engine host (`ops/transfer.ts`, L5h.2): the parse, the validation and
@@ -679,7 +680,8 @@ function malformedRows(): Row[] {
       op,
       outcome: "malformed",
       form: id,
-      run: (bridge: PlayerBridge) => answerOf(bridge.client.request(op, args)),
+      // Malformed on purpose: the host refuses them.
+      run: (bridge: PlayerBridge) => answerOf(untypedClient(bridge.client).request(op, args)),
       expected: MALFORMED(op),
     })),
   );

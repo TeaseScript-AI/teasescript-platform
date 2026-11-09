@@ -45,6 +45,7 @@ import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkp
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
 import { viewCalls, viewed, withoutViews } from "../helpers/debug-readers.js";
 import { inProcessBridge } from "../helpers/in-process-bridge.js";
+import { untypedBridge } from "../helpers/bridge/untyped.js";
 
 /*
  * L5c's bridge: the player's answers, the permanent buttons, and the storage write's acknowledgement and Debug's edit,
@@ -197,11 +198,8 @@ async function playTape(bridge: PlayerBridge, recording = false, calls = false) 
   for (const [name, step] of TAPE) {
     const sent = step(session);
     assert.ok(sent, name);
-    const outcome = await bridge.request<{ readonly kind: string } | null>(
-      session,
-      sent.op,
-      sent.args,
-    );
+    // The tape's step picks its op at run time.
+    const outcome = await untypedBridge(bridge).request(session, sent.op, sent.args);
     session = bridge.latest(session)!;
     steps.push({ name, op: sent.op, outcome, session: seen(session) });
   }
@@ -388,13 +386,14 @@ test("L5c's ops refuse malformed arguments, and a stale action, a released or a 
     ["applyStorageEdit", { key: "k" }],
   ] as const)
     await assert.rejects(
-      bridge.request(session, op, args),
+      // Malformed on purpose: the host refuses them.
+      untypedBridge(bridge).request(session, op, args),
       refused("arguments"),
       `${op} ${JSON.stringify(args)}`,
     );
   // An answer to another action than the presented one changes nothing.
   const before = bridge.latest(session)!;
-  const stale = await bridge.request<{ readonly kind: string }>(session, "submitComposer", {
+  const stale = await bridge.request(session, "submitComposer", {
     actionId: actionId + 1,
     text: "Ann",
     input: "enter",

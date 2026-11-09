@@ -31,6 +31,7 @@ import { loadPlayerModule } from "../helpers/player-modules.js";
 import type { ClockTicket } from "../../player/runtime/clock-ticket.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import type { InputSectionHost } from "../../player/vue/src/session/runtime-input.js";
+import { untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * The Player's input over the engine's bridge (L5c), through the production intents, the input chain
@@ -170,13 +171,15 @@ function track(context: TestContext, bridge: PlayerBridge) {
   const replied: string[] = [];
   let arrivals = 0;
   const hooks = new Map<string, () => void>();
-  const request = bridge.client.request.bind(bridge.client);
-  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) =>
+  // The mocks forward each op as it is sent, whatever it is: the client as its transport carries requests.
+  const client = untypedClient(bridge.client);
+  const request = client.request.bind(client);
+  context.mock.method(client, "request", (...args: Parameters<typeof request>) =>
     request(...args).finally(() => void (arrivals += 1)),
   );
-  const section = bridge.client.section.bind(bridge.client);
+  const section = client.section.bind(client);
   context.mock.method(
-    bridge.client,
+    client,
     "section",
     (session: string, ticket: ClockTicket, body: Parameters<typeof section>[2]) =>
       section(session, ticket, (send) =>

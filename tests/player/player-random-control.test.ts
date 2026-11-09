@@ -6,7 +6,6 @@ import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../../player/engine-bridge/client.js";
 import { heldRandom, introduceNow } from "../../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
-import type { ResolveDrawResult } from "../../player/engine-bridge/ops/random.js";
 import { HeldSession } from "../../player/engine-bridge/ops/session.js";
 import {
   alignRandom,
@@ -31,6 +30,7 @@ import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
 import { inProcessBridge } from "../helpers/in-process-bridge.js";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
+import { asMalformed } from "../helpers/bridge/untyped.js";
 
 /*
  * L5i.4: Debug's random control as the engine host's connection state. Its owner's sessions decide their draws from the
@@ -103,7 +103,7 @@ const resolve = (
   drawId: number,
   outcome: "natural" | "untried" | RandomOutcome,
   record: { readonly resetAt: number } | null = { resetAt: 0 },
-) => bridge.request<ResolveDrawResult>(session, "resolveDraw", { drawId, outcome, record });
+) => bridge.request(session, "resolveDraw", { drawId, outcome, record });
 
 const tried = (bridge: PlayerBridge, session: PlayerSession, site: string) =>
   bridge.read(session, "randomTried", { site });
@@ -396,13 +396,9 @@ test("a changed control never meets a catch-up's copy: an adoption keeps its cop
     // Adopted after the control changed: the copy ran without it, and the session's next draw pauses.
     const session = await bridge.start(token, START, false, { owner: 1 });
     await bridge.request(session, "beginCatchUp", { targetMs: 100 });
-    while ((await bridge.request<string>(session, "stepCatchUp", { budgetMs: 50 })) === "more");
+    while ((await bridge.request(session, "stepCatchUp", { budgetMs: 50 })) === "more");
     await control(bridge, intentOf(1, 1, []), session);
-    const adopted = await bridge.request<{ readonly adopted: boolean }>(
-      session,
-      "adoptCatchUp",
-      null,
-    );
+    const adopted = await bridge.request(session, "adoptCatchUp", null);
     assert.equal(adopted.adopted, true, `${name}: the adoption keeps the copy`);
     assert.ok(shown(bridge, session).state.observedSessionTimeMs >= 100, name);
     await bridge.request(session, "observeTime", { atMs: 1_000, media: [] });
@@ -414,9 +410,7 @@ test("a changed control never meets a catch-up's copy: an adoption keeps its cop
     await control(bridge, intentOf(1, 3, []), other);
     await bridge.request(other, "beginCatchUp", { targetMs: 1_000 });
     let step: string;
-    while (
-      (step = await bridge.request<string>(other, "stepCatchUp", { budgetMs: 50 })) === "more"
-    );
+    while ((step = await bridge.request(other, "stepCatchUp", { budgetMs: 50 })) === "more");
     if (step === "done") await bridge.request(other, "adoptCatchUp", null);
     else await bridge.request(other, "observeTime", { atMs: 1_000, media: [] });
     assert.notEqual(shown(bridge, other).state.randomDraw, null, `${name}: no draw ran without it`);
@@ -669,7 +663,8 @@ test("malformed random arguments are refused before anything runs", async () => 
     { ...intentOf(1, 2, []), more: 1 },
   ])
     await assert.rejects(
-      bridge.client.request("randomControl", { intent }),
+      // Malformed on purpose, as the rest below: the host refuses them.
+      bridge.client.request("randomControl", asMalformed({ intent })),
       refused,
       JSON.stringify(intent),
     );
@@ -680,14 +675,20 @@ test("malformed random arguments are refused before anything runs", async () => 
     { drawId, outcome: "natural", record: { resetAt: "0" } },
   ])
     await assert.rejects(
-      bridge.request(session, "resolveDraw", args),
+      bridge.request(session, "resolveDraw", asMalformed(args)),
       refused,
       JSON.stringify(args),
     );
-  await assert.rejects(bridge.client.request("randomTried", { session: session.id }), refused);
+  await assert.rejects(
+    bridge.client.request("randomTried", asMalformed({ session: session.id })),
+    refused,
+  );
   // A settings change names no session: only `adoptRandom` gives one control.
   await assert.rejects(
-    bridge.client.request("randomControl", { intent: intentOf(1, 3, []), session: session.id }),
+    bridge.client.request(
+      "randomControl",
+      asMalformed({ intent: intentOf(1, 3, []), session: session.id }),
+    ),
     refused,
   );
   for (const args of [
@@ -695,10 +696,14 @@ test("malformed random arguments are refused before anything runs", async () => 
     { intent: intentOf(1, 3, []) },
     { session: 1, intent: intentOf(1, 3, []) },
   ])
-    await assert.rejects(bridge.client.request("adoptRandom", args), refused, JSON.stringify(args));
+    await assert.rejects(
+      bridge.client.request("adoptRandom", asMalformed(args)),
+      refused,
+      JSON.stringify(args),
+    );
   for (const args of [{}, { session: 1 }, { session: session.id, more: 1 }])
     await assert.rejects(
-      bridge.client.request("releaseRandom", args),
+      bridge.client.request("releaseRandom", asMalformed(args)),
       refused,
       JSON.stringify(args),
     );

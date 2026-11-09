@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { effectScope, nextTick, watch, type Ref } from "vue";
 
-import type { BridgeResult, SectionSend } from "../../../player/engine-bridge/client.js";
+import type { BridgeResult, UntypedSend } from "../../../player/engine-bridge/client.js";
 import type { Publication } from "../../../player/engine-bridge/session-protocol.js";
 import type { PlayerBridge, PublishHook } from "../../../player/runtime/player-bridge.js";
 import {
@@ -51,6 +51,7 @@ import {
 } from "../live-host-effects.js";
 import { compareStructures, renderPath } from "../runtime-state-comparison.js";
 import type { ClockTicket } from "../../../player/runtime/clock-ticket.js";
+import { untypedClient } from "./untyped.js";
 
 /*
  * The shared replay harness (#1919; docs/TESTING.md "Replay through the bridge"): a complete, cursor-based trace of the
@@ -204,7 +205,8 @@ export interface RequestTracker {
 
 /** Logs and counts `bridge`'s requests, signals and section sends from now on. */
 export function trackRequests(bridge: Pick<PlayerBridge, "client">): RequestTracker {
-  const client = bridge.client;
+  // The wrappers forward each op as it is sent, whatever it is: the client as its transport carries requests.
+  const client = untypedClient(bridge.client);
   const { request, signal, section } = client;
   const log: LoggedRequest[] = [];
   let open = 0;
@@ -242,7 +244,7 @@ export function trackRequests(bridge: Pick<PlayerBridge, "client">): RequestTrac
   client.section = <T>(
     id: string,
     ticket: ClockTicket,
-    body: (send: SectionSend) => Promise<T>,
+    body: (send: UntypedSend) => Promise<T>,
   ): Promise<T> =>
     sectionOf<T>(id, ticket, (send) =>
       body((op, args, basis, onReply) =>

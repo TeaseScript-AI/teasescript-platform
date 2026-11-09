@@ -39,6 +39,7 @@ import { sessionTransferText } from "../../player/persistence/session-transfer.j
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
+import { untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * Who owns what the host allocates (#2006, `delivery.ts`): its capability allocations and their ancillary state, not
@@ -150,7 +151,8 @@ function assembled(): Connection {
     // As the in-process backend's: the client ends its port first, which closes the connection directly.
     terminate: () => closeConnection(context, sessions),
   };
-  const ops = playerBridgeOps(context);
+  // The host's table, each op of its own arguments (`BridgeOps`), as the host holds it: wrapped and indexed by name.
+  const ops: BridgeOps = playerBridgeOps(context);
   // Each op runs as it is, but for an armed injection into the outcome of its next request.
   const wrapped: BridgeOps = Object.fromEntries(
     Object.entries(ops).map(([name, op]) => [
@@ -193,8 +195,9 @@ function assembled(): Connection {
   const connection: Connection = {
     context,
     sessions,
+    // Any op the test names, as its transport carries it.
     request: (op, args, session) =>
-      client.request(op, args, session === undefined ? {} : { session }),
+      untypedClient(client).request(op, args, session === undefined ? {} : { session }),
     arm: (op, injection) => void (armed = { op, injection }),
     releaseHeld: () => releaseHeld(),
     lose: () => fail(new Error("injected: the Worker failed")),
@@ -560,7 +563,7 @@ test("closing twice, and closing with an undo that throws, leaves nothing; the c
 
 test("a committed slot's waiting task, run under another delivery that then fails, stays the slot's", async () => {
   const ops = playerOpsContext();
-  const run = playerBridgeOps(ops);
+  const run: BridgeOps = playerBridgeOps(ops);
   const sessions: HostSessions = {
     get: () => undefined,
     add: () => "none",

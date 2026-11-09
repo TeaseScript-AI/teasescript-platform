@@ -13,6 +13,7 @@ import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkp
 import { inProcessBridge } from "../helpers/in-process-bridge.js";
 import { runRetentionChild } from "../helpers/retention-witness.js";
 import { PROJECT } from "../helpers/bridge/source-ops-project.js";
+import { asMalformed } from "../helpers/bridge/untyped.js";
 
 /*
  * L5i.2: Debug's random-draw picker gets its code from the engine's Worker. `drawCode` makes the excerpt from the
@@ -75,8 +76,9 @@ async function tape(bridge: PlayerBridge) {
     { plan: source, path: "main.tease", site: { ...sites[0]!, line: 0 } },
     { plan: 1, path: "main.tease", site: sites[0]! },
   ])
+    // Malformed on purpose, as the rows below: the host refuses them.
     await assert.rejects(
-      bridge.client.request("drawCode", args),
+      bridge.client.request("drawCode", asMalformed(args)),
       (error: unknown) => error instanceof BridgeRequestError && error.code === "arguments",
     );
   for (const args of [
@@ -84,7 +86,7 @@ async function tape(bridge: PlayerBridge) {
     { texts: ["x"], first: 1.5 },
   ])
     await assert.rejects(
-      bridge.client.request("codeLines", args),
+      bridge.client.request("codeLines", asMalformed(args)),
       (error: unknown) => error instanceof BridgeRequestError && error.code === "arguments",
     );
   // After `teardown` the connection holds no plan, so no plan's code, not even one asked about before.
@@ -118,7 +120,7 @@ test("a published plan with no sources gives no code", async () => {
   const bridge = await inProcessBridge();
   const plan = await prepared(bridge, asPlanText(OTHER));
   const [site] = listRandomSites(compilePlayerProject(OTHER).plan!);
-  const reply = await bridge.client.request("drawCode", { plan, path: site!.path, site });
+  const reply = await bridge.client.request("drawCode", { plan, path: site!.path, site: site! });
   assert.equal(reply.result, null);
 });
 

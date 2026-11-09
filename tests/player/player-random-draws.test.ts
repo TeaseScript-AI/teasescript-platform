@@ -42,6 +42,7 @@ import { createSourceDebugSidecar } from "../../src/index.js";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
+import { untypedClient } from "../helpers/bridge/untyped.js";
 
 // The button press on a session the composable's host holds (`OnHost`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
@@ -967,8 +968,10 @@ test("the picker's sites and code come from the Worker, which compiled the sourc
   const token = (reply.result as { readonly plan: string }).plan;
   // Hold the replies to `drawCode` until the test releases them.
   const held: (() => void)[] = [];
-  const request = bridge.client.request;
-  bridge.client.request = (op, ...rest) => {
+  // The wrapper forwards each op as it is sent, whatever it is: the client as its transport carries requests.
+  const client = untypedClient(bridge.client);
+  const request = client.request;
+  client.request = (op, ...rest) => {
     const answer = request(op, ...rest);
     if (op !== "drawCode") return answer;
     return new Promise((resolve, reject) => held.push(() => void answer.then(resolve, reject)));
@@ -1013,8 +1016,10 @@ test("a site's earlier outcomes never show at another site's draw, even before i
   // Hold the replies to `codeLines` once the test asks.
   let holding = false;
   const held: (() => void)[] = [];
-  const request = bridge.client.request;
-  bridge.client.request = (op, ...rest) => {
+  // The wrapper forwards each op as it is sent, whatever it is: the client as its transport carries requests.
+  const client = untypedClient(bridge.client);
+  const request = client.request;
+  client.request = (op, ...rest) => {
     const answer = request(op, ...rest);
     if (op !== "codeLines" || !holding) return answer;
     return new Promise((resolve, reject) => held.push(() => void answer.then(resolve, reject)));

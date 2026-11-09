@@ -22,6 +22,8 @@ import { clockTicket } from "../helpers/clock-ticket.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { preparedPlan } from "../helpers/prepared-plan.js";
 import { deliveryOwner } from "../../player/engine-bridge/delivery.js";
+import type { UntypedBridge } from "../helpers/bridge/untyped.js";
+import { untypedBridge } from "../helpers/bridge/untyped.js";
 
 /*
  * At a Player error stop, what is shown is what the host ran, which its export and recording hold, and nothing shows
@@ -263,10 +265,12 @@ test("a Continue a Start replaced while its reply was in transit leaves the repl
 
 /** Calls `then` once `bridge` posts `op`, as the host runs it at once in-process; its reply then is in transit. */
 function onceAsked(bridge: PlayerBridge, op: string, then: () => void) {
-  const request = bridge.request.bind(bridge);
+  // The wrapper forwards each op as it is sent, whatever it is.
+  const untyped = untypedBridge(bridge);
+  const request = untyped.request.bind(bridge);
   let done = false;
-  bridge.request = <R>(...args: Parameters<PlayerBridge["request"]>) => {
-    const reply = request<R>(...args);
+  untyped.request = (...args: Parameters<UntypedBridge["request"]>) => {
+    const reply = request(...args);
     if (args[1] === op && !done) {
       done = true;
       then();

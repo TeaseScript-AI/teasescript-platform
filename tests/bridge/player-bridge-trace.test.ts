@@ -31,6 +31,7 @@ import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
 import { hatch, inProcessBridge } from "../helpers/in-process-bridge.js";
+import { asMalformed, untypedBridge } from "../helpers/bridge/untyped.js";
 
 /*
  * L5i.3: Debug's value trace is the host connection's state (`debugTracing`), the script's Debug mode an op
@@ -126,7 +127,7 @@ async function playTape(
   };
   await record("start");
   const send = async (op: string, args: Record<string, unknown>) => {
-    await bridge.request(session, op, args);
+    await untypedBridge(bridge).request(session, op, args);
     session = bridge.latest(session)!;
     await record(op);
   };
@@ -320,9 +321,7 @@ test("tracing off drops the trace, on makes a new one, and Debug mode is the scr
       (await bridge.client.request("debugTracing", { on: true, intent: 4 })).result,
       { traceId: 2 },
     );
-    const set = await bridge.request<{ readonly kind: string }>(session, "setDebugMode", {
-      on: true,
-    });
+    const set = await bridge.request(session, "setDebugMode", { on: true });
     session = bridge.latest(session)!;
     assert.equal(set.kind, "set", name);
     assert.equal(session.state.debugMode, true);
@@ -344,9 +343,16 @@ test("malformed trace arguments are refused before anything runs", async () => {
     { on: true, intent: 1.5 },
     { on: true, intent: 1, more: 1 },
   ])
-    await assert.rejects(bridge.client.request("debugTracing", args), refusedAs("arguments"));
+    // Malformed on purpose, as the rest below: the host refuses them.
+    await assert.rejects(
+      bridge.client.request("debugTracing", asMalformed(args)),
+      refusedAs("arguments"),
+    );
   for (const args of [null, {}, { on: "yes" }])
-    await assert.rejects(bridge.request(session, "setDebugMode", args), refusedAs("arguments"));
+    await assert.rejects(
+      bridge.request(session, "setDebugMode", asMalformed(args)),
+      refusedAs("arguments"),
+    );
   const good = everything(0, null);
   for (const request of [
     null,
@@ -362,12 +368,17 @@ test("malformed trace arguments are refused before anything runs", async () => {
   ])
     // Malformed on purpose, so past `read`'s types: the request `read` would post.
     await assert.rejects(
-      bridge.client.request("debugView", { request, session: session.id }, { after: session.id }),
+      bridge.client.request("debugView", asMalformed({ request, session: session.id }), {
+        after: session.id,
+      }),
       refusedAs("arguments"),
       JSON.stringify(request),
     );
   for (const args of [{ request: good }, { session: 1, request: good }])
-    await assert.rejects(bridge.client.request("debugView", args), refusedAs("arguments"));
+    await assert.rejects(
+      bridge.client.request("debugView", asMalformed(args)),
+      refusedAs("arguments"),
+    );
 });
 
 // The view is a read (`PlayerBridge.read`): after a Player error stop it shows the stop line, byte for byte as before

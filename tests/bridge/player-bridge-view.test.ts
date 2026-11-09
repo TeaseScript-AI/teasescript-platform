@@ -18,6 +18,7 @@ import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkp
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
 import { viewCalls, viewed } from "../helpers/debug-readers.js";
 import { hatch, inProcessBridge } from "../helpers/in-process-bridge.js";
+import { untypedBridge } from "../helpers/bridge/untyped.js";
 
 /*
  * L5f's projection (witness B-view): every publication carries the critical view, the state without its active calls;
@@ -330,7 +331,8 @@ test("every kind of call, timer and countdown Debug names comes through publicat
         if (result.countdown !== null) seen.countdowns.add(result.countdown.kind);
         const next = kind.next(session, step);
         if (next === null) break;
-        await bridge.request(session, next[0], next[1]);
+        // The kind's next op, picked at run time.
+        await untypedBridge(bridge).request(session, next[0], next[1]);
         session = bridge.latest(session)!;
       }
     }

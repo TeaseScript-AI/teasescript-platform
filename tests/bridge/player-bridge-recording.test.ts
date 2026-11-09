@@ -68,6 +68,7 @@ import { compareStructures, renderPath } from "../helpers/runtime-state-comparis
 import type * as RuntimeAdapter from "../../player/runtime/runtime-adapter.js";
 import type { RuntimeSnapshot } from "../../src/index.js";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
+import { asMalformed, untypedBridge, untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * L5g's B-record evidence: the recording of every engine call, made by the connection's recorder, is the same in-process
@@ -141,7 +142,8 @@ async function recordingOf(bridge: PlayerBridge, inProcess: boolean): Promise<Pl
   // EVIDENCE: validation: `recordingForTest` replies from the same build with `plainRecording`'s result.
   const remote = inProcess
     ? null
-    : ((await bridge.client.request("recordingForTest", null)).result as PlainRecording | null);
+    : ((await untypedClient(bridge.client).request("recordingForTest", null))
+        .result as PlainRecording | null);
   const recording = inProcess ? plainRecording(heldRecording(bridge)) : remote;
   assert.ok(recording !== null, "the connection records");
   return recording;
@@ -237,14 +239,18 @@ async function overBridge(bridge: PlayerBridge, inProcess: boolean) {
   const steps: unknown[] = [shownOf(session)];
   for (const [name, step] of TAPE) {
     const sent = step(session)!;
-    const result = await bridge.request(session, sent.op, sent.args);
+    const result = await untypedBridge(bridge).request(session, sent.op, sent.args);
     session = bridge.latest(session)!;
     steps.push({ name, result, ...shownOf(session) });
     if (name === "answer") {
       // Refused before the engine: malformed arguments and a stale basis. Neither is an engine call to record.
       const before = (await recordingOf(bridge, inProcess))?.operations.length;
       await assert.rejects(
-        bridge.request(session, "submitComposer", { actionId: 1, text: 1, input: null }),
+        bridge.request(
+          session,
+          "submitComposer",
+          asMalformed({ actionId: 1, text: 1, input: null }),
+        ),
         (error: unknown) => error instanceof BridgeRequestError && error.code === "arguments",
       );
       await assert.rejects(
@@ -365,7 +371,10 @@ async function aboutToThrow(bridge: PlayerBridge, inProcess: boolean): Promise<P
       (host) => restorePlayerRuntimeSessionAt(host.plan(token), snapshotJson, []),
       NO_MARKS,
     );
-  const reply = await bridge.client.request("restoreForTest", { plan: token, snapshotJson });
+  const reply = await untypedClient(bridge.client).request("restoreForTest", {
+    plan: token,
+    snapshotJson,
+  });
   // EVIDENCE: validation: the test op replies with the new session's introduction.
   return bridge.open(reply.session!, reply.view as Introduction);
 }
@@ -588,7 +597,12 @@ async function cutAndRecover(
       for (const step of STEPS) {
         const shown = bridge.latest(session)!;
         const { op, args } = step.request(shown);
-        await bridge.request(shown, op, args, host === null ? {} : { publish: host.show });
+        await untypedBridge(bridge).request(
+          shown,
+          op,
+          args,
+          host === null ? {} : { publish: host.show },
+        );
         if (host !== null) {
           await host.settle();
           effects.push(await host.effects());
@@ -623,7 +637,7 @@ async function bridgeRun(inProcess: boolean): Promise<JudgedRun> {
           NO_MARKS,
         )
       : await (async () => {
-          const reply = await bridge.client.request("restoreForTest", {
+          const reply = await untypedClient(bridge.client).request("restoreForTest", {
             plan: token,
             snapshotJson,
           });
@@ -632,7 +646,7 @@ async function bridgeRun(inProcess: boolean): Promise<JudgedRun> {
         })();
     await bridge.request(session, "beginRecording", null);
     const send = async (op: string, args: unknown) => {
-      await bridge.request(bridge.latest(session)!, op, args);
+      await untypedBridge(bridge).request(bridge.latest(session)!, op, args);
       session = bridge.latest(session)!;
     };
     await send("continue", { capture: { wallClockMs: 0, temporalContext: TEMPORAL } });

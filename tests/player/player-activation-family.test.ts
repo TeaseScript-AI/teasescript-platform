@@ -5,7 +5,7 @@ import { effectScope, nextTick, watch, type Ref } from "vue";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
 import type * as ClientModule from "../../player/engine-bridge/client.js";
-import type { BridgeResult, ReplyHook, SectionSend } from "../../player/engine-bridge/client.js";
+import type { BridgeResult, ReplyHook, UntypedSend } from "../../player/engine-bridge/client.js";
 import type { DebugViewRequest } from "../../player/debug/debug-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
@@ -20,6 +20,7 @@ import { coverageGaps, product, type Coordinates } from "../helpers/family-cover
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { preparedPlan } from "../helpers/prepared-plan.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
+import { untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * Session split S2's runtime family (HEAD 0 §7): an activation's completions act only while it lives. Each case is a
@@ -390,8 +391,10 @@ function wire(bridge: PlayerBridge) {
     each.reply = { answered, hook: deferred ? hook : undefined, open, fail };
     return outward;
   };
-  const request = bridge.client.request.bind(bridge.client);
-  bridge.client.request = (op, args, options) =>
+  // The wrappers forward each op as it is sent, whatever it is: the client as its transport carries requests.
+  const client = untypedClient(bridge.client);
+  const request = client.request.bind(client);
+  client.request = (op, args, options) =>
     hold(
       op,
       args,
@@ -402,13 +405,13 @@ function wire(bridge: PlayerBridge) {
       },
       options?.onReply,
     );
-  const signal = bridge.client.signal.bind(bridge.client);
-  bridge.client.signal = (op, args, session, onReply) =>
+  const signal = client.signal.bind(client);
+  client.signal = (op, args, session, onReply) =>
     hold(op, args, session, (hook) => signal(op, args, session, hook), onReply);
-  const section = bridge.client.section.bind(bridge.client);
-  bridge.client.section = (session, ticket, body) =>
+  const section = client.section.bind(client);
+  client.section = (session, ticket, body) =>
     section(session, ticket, (send) => {
-      const wrapped: SectionSend = (op, args, basis, onReply) =>
+      const wrapped: UntypedSend = (op, args, basis, onReply) =>
         hold(op, args, session, (hook) => send(op, args, basis, hook), onReply);
       return body(wrapped);
     });

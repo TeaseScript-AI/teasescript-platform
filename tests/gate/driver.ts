@@ -5,6 +5,7 @@ import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import { candidatesFor, type Candidate } from "./candidates.js";
 import { OUTCOMES, UnfamiliarResult } from "./outcomes.js";
 import { recordClient, type TapeEntry } from "./tape.js";
+import { untypedBridge, untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * The K/F tape driver (the L5 gate's tape plan §2): prepares a project, starts it as a hosted Player starts, then
@@ -90,7 +91,7 @@ export async function driveTape(
   };
   try {
     // EVIDENCE: validation: `prepare` replies from the same build with a `PrepareResult`.
-    const prepared = (await bridge.client.request("prepare", { source })).result as {
+    const prepared = (await untypedClient(bridge.client).request("prepare", { source })).result as {
       kind: string;
       plan?: string;
     };
@@ -116,7 +117,8 @@ export async function driveTape(
         tried.add(key(next));
         let result: unknown;
         try {
-          result = await bridge.request(latest, next.op, next.args);
+          // The candidate's op, picked at run time.
+          result = await untypedBridge(bridge).request(latest, next.op, next.args);
         } catch (error) {
           if (!(error instanceof BridgeRequestError)) throw error;
           // A refused request (a basis, an argument, a thrown op) is recorded and declined; a session it ended ends the tape.
