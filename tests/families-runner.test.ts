@@ -763,14 +763,18 @@ test("`baselines.mjs state` takes a tree's commit from its `.sha`, else from the
     // (the tree inside another checkout, whose HEAD is not the tree's commit)
     commit(directory);
 
-    // read only, no commit is needed; written, a tree with no commit is refused before its baseline is made
+    // read only, the commit is not read (a `.sha` that is no file is never opened); written, a tree with no commit is
+    // refused before its baseline is made
+    mkdirSync(join(tree, ".sha"));
     const read = state("--read-only");
     assert.notEqual(read.status, 2, read.stderr);
     assert.match(read.stdout, /"area":"area"[^\n]*"state":"absent"/u);
+    assert.equal(existsSync(root), false);
+    rmSync(join(tree, ".sha"), { recursive: true });
     const refused = state();
     assert.equal(refused.status, 2, refused.stderr);
     assert.match(refused.stderr, /has no \.sha and is no checkout's top/u);
-    assert.equal(existsSync(manifest), false);
+    assert.equal(existsSync(root), false);
 
     // the HEAD of the checkout the tree is the top of, then a `.sha` before it
     const head = commit(tree);
@@ -1305,7 +1309,7 @@ import fs, { writeFileSync as written, promises } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
-import { execSync, spawn } from "node:child_process";
+import { execSync, fork, spawn } from "node:child_process";
 import { outside, pathOf } from "./baselines.mjs";
 const { appendFileSync } = everything;
 const renamed = promisify(fs.rename);
@@ -1337,6 +1341,7 @@ export function climb(root) {
   eval("0");
   spawn("flock", [root, "-c", "true"]);
   spawn("bash", ["-c", 'touch "$0"', root], { stdio: "ignore" });
+  fork("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" });
   execSync("touch notes");
   return [rm, Worker];
 }
@@ -1398,6 +1403,8 @@ if (process.env.NEVER) nodeFs.writeFileSync(process.env.NEVER, "");
           "eval",
           "spawn",
           "spawn",
+          // (a HEAD read's arguments to another child process: `fork` runs a module named git)
+          "fork",
           "execSync",
           // (a creation that climbs out of its baseline)
           "rmSync",
