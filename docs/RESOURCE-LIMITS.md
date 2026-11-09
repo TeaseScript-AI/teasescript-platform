@@ -184,6 +184,59 @@ at the time of writing (2026-11-06) are #1832, #1845 (with #1846), the unsettled
 closed), #1838 and #1836, #1772, and #1781's conservative natural-outside declines (128 rows in 8 sources, as reported
 in PR #1781's work-stop set sweep).
 
+### Work accounting and growth gates
+
+The work ledger charges work that grows with the input. A bounded constant inside an already charged step takes no
+separate charge (#1398, 2026-11-01): sorting at most one item per kind is covered by the merge's charged input entries.
+Work repeated across input-sized sites still needs a charge at each site (#1710, 2026-11-04).
+
+The growth gate for the core's structural repairs (#1444, 2026-10-31) requires per-doubling growth at or under
+`main`'s at every measured doubling, totals at or under `main` at each family's largest measured size, `checks` at or
+under `main` at every size, and ledger attribution for any small-size excess. The scoped largest-size exception
+admits both trees linear, excess at most 10 % attributed to the ruled retention, per-doubling growth at or under
+`main`'s, and `checks` at or under `main` (#1547, 2026-11-01); a stricter precondition that the candidate cost no more
+than `main` before other measurements does not replace that gate.
+
+The structural gate's count term is read across the measured doublings (#1466, 2026-10-31). An exactly linear count
+with a fixed intercept passes when its ratio is within the charged total's fixed-cost slack at the later doublings;
+the smallest doubling's excess is the intercept. A site that fails at the largest doubling fails.
+
+A count equal to `main`'s minus a linear saving at every size passes a `main`-relative growth gate; report the common
+remainder as `main`'s work (#1444, 2026-10-31). More generally, a head at or under `main` at every measured size passes
+the growth clause when the saving comes from the ruled representation and its last slope is non-negative, whatever
+the saving's shape (#1466, 2026-11-01). The kit names this reading and reports the saving's sequence.
+
+For an excess whose slope per input size rises and converges, first make any bounded repair identified by the ledger,
+then measure one or two further doublings where cost allows (#1466, 2026-11-01). The later two slopes
+within 3 % slack pass the growth clause under the affine reading; the smaller sizes' deviation is the intercept.
+The largest-size clause still needs the scoped exception's conditions. If slopes still diverge at the extended
+sizes, repair the cost before READY. In PR #1546, this reading uses sizes 64, 128 and 256 for
+`nestedJoinDeepCopied`, with the full series and ledger reported in the gate job.
+
+Where `main` is cheaper because it drops an obligation that a correctness repair restores, its cost is not the
+reference for the largest-size total or `checks` on that family (#1491 and #1502, 2026-11-01). The repaired family's
+growth is linear, or of `main`'s order where `main` is superlinear, its work is bounded per read, and the ledger
+attributes the entire excess to the restored obligation. Every untouched family stays at or under `main` as a
+control. The PR names each repaired family with its ratio and attribution, and the kit flags this reading explicitly.
+
+Where the head charges inside the analysis work `main` does uncounted after it, compare the head's charged total
+against `main`'s charged total plus its uncounted work for the same obligations (#1526, 2026-11-02). Judge an
+output-bound term by the head's work per output node.
+
+A lazily activated index has one named largest-size exception (#1384, 2026-11-01): a run asked at exactly the
+activation count, whose walk costs less than the index, may pay at most one construction per run per pass above
+`main`. The excess is linear, grows at or under `main`'s rate, and is entirely construction in the ledger. The kit
+flags the reading by name, and the PR lists each such sibling with its excess. Amortised activation is a separate
+mechanism to propose if a real source shows this boundary cost matters; the measured bounded linear constant under
+4 % does not warrant it.
+
+For landing families whose output itself grows superlinearly, the scoped exception reads linear as linear in the
+output (#1428 and #1547, 2026-11-04): both trees' landing work is bounded by a constant multiple of the paths returned.
+The excess is attributed to named non-report work linear in input size and is at most 10 % of `main`'s landing work
+at the largest completed size; per-doubling growth is at or under `main`'s in every mode, and `checks` are at or under
+`main`. The excess lies within the attributed work; it need not equal it. A size where both runs stop establishes
+nothing about this gate.
+
 ### Accepted work products under the allowance
 
 These are not limits of their own: each shape below is a measured superlinear growth of the core's work that the Owner
