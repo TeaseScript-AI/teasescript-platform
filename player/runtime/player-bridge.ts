@@ -4,7 +4,7 @@ import {
   type BridgeClient,
   type BridgeResult,
   type ReplyHook,
-  type UntypedClient,
+  type SectionSend,
 } from "../engine-bridge/client.js";
 import type { OpArgs, OpResult, SessionOp } from "../engine-bridge/op-catalogue.js";
 import type { InterpreterEvent } from "../../src/runtime/events.js";
@@ -86,19 +86,6 @@ export interface ServiceSection {
 export interface SessionRequestOptions {
   readonly basis?: number;
   readonly publish?: PublishHook;
-}
-
-/**
- * A section's send as its transport carries it, any session op with any arguments (`UntypedClient`): for an
- * implementation of `SessionSection`, `ServiceSection` or `InputSection` that forwards its op and arguments, by an
- * assertion. A function property, so a typed section becomes one only by an assertion too.
- */
-export interface UntypedSessionSection {
-  readonly send: (
-    op: SessionOp,
-    args: unknown,
-    options?: SessionRequestOptions,
-  ) => Promise<OpResult<SessionOp>>;
 }
 
 /** A section of one session: requests that other requests of the session wait behind (`BridgeClient.section`). */
@@ -264,10 +251,11 @@ export class PlayerBridge {
     ...[args]: ReadOps[O]["args"] extends Record<string, never> ? [] : [ReadOps[O]["args"]]
   ): Promise<ReadOps[O]["result"]> {
     this.#own(session);
-    // EVIDENCE: invariant: `O`'s arguments, `args` with `session` inserted, which TypeScript does not pair with `O`.
-    const reply = await (this.#client as UntypedClient).request(
-      op,
-      { ...args, session: session.id },
+    const reply = await this.#client.request<ReadOp>(
+      // EVIDENCE: invariant: an op of `ReadOps`, sent with its own arguments below.
+      op as never,
+      // EVIDENCE: invariant: `O`'s arguments, `args` with `session` inserted, which TypeScript does not pair with `O`.
+      { ...args, session: session.id } as never,
       { after: session.id },
     );
     // EVIDENCE: validation: the result comes from the same build, whose `ReadOps` names this op's result.
@@ -390,7 +378,7 @@ export class PlayerBridge {
     args: unknown,
   ): Promise<{ readonly result: HistoryOpResult; readonly restored: PlayerSession | null }> {
     // EVIDENCE: invariant: the erased overload's body; the overload above pairs `op` with its arguments.
-    const reply = await (this.#client as UntypedClient).request(op, args);
+    const reply = await this.#client.request<HistoryStepOp>(op as never, args as never);
     // EVIDENCE: validation: the history ops reply from the same build with a `HistoryOpResult`.
     const result = reply.result as HistoryOpResult;
     if (result.kind === "done") this.#forget(result.released);
@@ -427,7 +415,7 @@ export class PlayerBridge {
       session.id,
       (onReply) =>
         // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- EVIDENCE: invariant: the erased overload's body; the overload above pairs `op` with its arguments.
-        (this.#client as UntypedClient).request(op, args, {
+        this.#client.request<SessionOp>(op as never, args as never, {
           session: session.id,
           basis: options.basis ?? this.latest(session)?.revision ?? session.revision,
           onReply,
@@ -481,8 +469,7 @@ export class PlayerBridge {
     body: (section: SessionSection) => Promise<T>,
   ): Promise<T> {
     this.#own(session);
-    // EVIDENCE: invariant: `SessionSection` pairs each op with its arguments, which the section forwards as they are.
-    return (this.#client as UntypedClient).section(session.id, ticket, (send) => {
+    return this.#client.section(session.id, ticket, (send: SectionSend) => {
       const shown = () => this.latest(session) ?? session;
       // EVIDENCE: invariant: the section's send forwards each op with the arguments `SessionSection` paired with it.
       return body({
@@ -490,9 +477,11 @@ export class PlayerBridge {
           this.#send(
             session.id,
             (onReply) =>
-              send(
-                op,
-                args,
+              send<SessionOp>(
+                // EVIDENCE: invariant: `SessionSection` pairs each op with its arguments, sent on as they are.
+                op as never,
+                // EVIDENCE: invariant: the arguments `SessionSection` paired with `op`.
+                args as never,
                 options.basis ?? this.latest(session)?.revision ?? session.revision,
                 onReply,
               ),

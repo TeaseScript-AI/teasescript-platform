@@ -123,37 +123,6 @@ export interface BridgeClient {
 }
 
 /**
- * The client as its transport carries requests: any op with any arguments, which the host checks, and a result of no
- * type. Only an implementation behind a typed sender uses it, by a commented assertion, where TypeScript cannot pair an
- * op held apart from its arguments (an erased overload's body, an op inserted with a field).
- */
-export interface UntypedClient {
-  // Function properties, not methods: compared strictly, a `BridgeClient` becomes one only by an assertion.
-  request: (op: string, args: unknown, options?: RequestOptions) => Promise<BridgeResult>;
-  section: <T>(
-    session: string,
-    ticket: ClockTicket,
-    body: (send: UntypedSend) => Promise<T>,
-  ) => Promise<T>;
-  signal: (
-    op: string,
-    args: unknown,
-    session: string,
-    onReply?: ReplyHook,
-  ) => Promise<BridgeResult>;
-  terminate: () => void;
-  onLoss: (listener: (error: BridgeLostError) => void) => void;
-}
-
-/** A section's send as its transport carries it (`UntypedClient`). */
-export type UntypedSend = (
-  op: string,
-  args: unknown,
-  basis: number | null,
-  onReply?: ReplyHook,
-) => Promise<BridgeResult>;
-
-/**
  * Connects to the Worker behind `port` once it is ready and of the same build. A Worker that fails before `ready`, or
  * says it is another build, is a startup failure; after `ready`, a reported failure or an unreadable message loses it.
  */
@@ -161,6 +130,30 @@ export async function connectBridge(port: ClientPort, build: BuildIdentity): Pro
   const { client, ready } = openBridge(port, build);
   await ready;
   return client;
+}
+
+/**
+ * The client as its transport carries requests, which `openBridge` implements: any op with any arguments, which the
+ * host checks, and a result of no type. Not exported: callers send through `BridgeClient`, whose sends the session-work
+ * census walks (`tools/session-work-census.mjs`).
+ */
+interface Transport {
+  request(op: string, args: unknown, options?: RequestOptions): Promise<BridgeResult>;
+  section<T>(
+    session: string,
+    ticket: ClockTicket,
+    body: (
+      send: (
+        op: string,
+        args: unknown,
+        basis: number | null,
+        onReply?: ReplyHook,
+      ) => Promise<BridgeResult>,
+    ) => Promise<T>,
+  ): Promise<T>;
+  signal(op: string, args: unknown, session: string, onReply?: ReplyHook): Promise<BridgeResult>;
+  terminate(): void;
+  onLoss(listener: (error: BridgeLostError) => void): void;
 }
 
 /**
@@ -297,7 +290,7 @@ export function openBridge(
       return before === undefined ? run() : before.then(run);
     }
 
-    const client: UntypedClient = {
+    const client: Transport = {
       request: (op, args, options = {}) => {
         const session = options.session ?? null;
         return exclusive(session ?? options.after ?? "", () =>

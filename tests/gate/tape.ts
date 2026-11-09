@@ -2,9 +2,9 @@ import {
   BridgeRequestError,
   type BridgeClient,
   type BridgeResult,
-  type UntypedClient,
 } from "../../player/engine-bridge/client.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
+import type { UntypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * A K/F tape: every request a client sent and the reply it received, in order, as plain JSON. It is recorded on the

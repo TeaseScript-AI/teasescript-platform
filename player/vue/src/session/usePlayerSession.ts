@@ -29,7 +29,6 @@ import {
   type PlayerBridge,
   type ServiceSection,
   type SessionSection,
-  type UntypedSessionSection,
 } from "../../../runtime/player-bridge.js";
 import type { SessionOp } from "../../../engine-bridge/op-catalogue.js";
 import { RETIRED, type InputSection, type InputSectionHost } from "./runtime-input";
@@ -563,7 +562,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           // What the services send shows as any work completing after a reply does.
           send: (op: SessionOp, args: unknown, basis: number) =>
             // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- EVIDENCE: invariant: the pairs `ServiceSection` made, sent on as they are.
-            (section as UntypedSessionSection).send(op, args, {
+            section.send<SessionOp>(op as never, args as never, {
               basis,
               publish: (next) => void publishOwned(next),
             }),
@@ -586,7 +585,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             if (!owned()) return RETIRED;
             try {
               // EVIDENCE: invariant: the pairs `InputSection` made, sent on as they are.
-              return await (section as UntypedSessionSection).send(op, args, {
+              return await section.send<SessionOp>(op as never, args as never, {
                 publish: (next) => void publishOwned(next),
               });
             } catch (error) {

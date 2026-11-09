@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { effectScope, nextTick, watch, type Ref } from "vue";
 
-import type { BridgeResult, UntypedSend } from "../../../player/engine-bridge/client.js";
+import type { BridgeResult } from "../../../player/engine-bridge/client.js";
+import type { UntypedSend } from "./untyped.js";
 import type { Publication } from "../../../player/engine-bridge/session-protocol.js";
 import type { PlayerBridge, PublishHook } from "../../../player/runtime/player-bridge.js";
 import {

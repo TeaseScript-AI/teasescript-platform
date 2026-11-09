@@ -1,8 +1,4 @@
-import type {
-  PlayerBridge,
-  ServiceSection,
-  UntypedSessionSection,
-} from "../../player/runtime/player-bridge.js";
+import type { PlayerBridge, ServiceSection } from "../../player/runtime/player-bridge.js";
 import type { SessionOp } from "../../player/engine-bridge/op-catalogue.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import { clockTicket } from "./clock-ticket.js";
@@ -40,7 +36,7 @@ export function serviceSection(
           send: (op: SessionOp, args: unknown, basis: number) => {
             onSend(op, args);
             // EVIDENCE: invariant: the pairs `ServiceSection` made, sent on as they are.
-            return (section as UntypedSessionSection).send(op, args, { basis, publish: show });
+            return section.send<SessionOp>(op as never, args as never, { basis, publish: show });
           },
         } as ServiceSection,
         section.session,

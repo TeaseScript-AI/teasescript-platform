@@ -26,7 +26,7 @@ import {
   KIND_OF_TYPE,
   type IntrinsicRead,
 } from "../helpers/clone-graph.js";
-import type { UntypedClient } from "../../player/engine-bridge/client.js";
+import type { UntypedClient } from "../helpers/bridge/untyped.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
 
 /*

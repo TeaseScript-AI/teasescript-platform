@@ -8,7 +8,6 @@ import {
   BridgeRequestError,
   BridgeStartupError,
   connectBridge,
-  type UntypedClient,
   type BridgeResult,
 } from "../../player/engine-bridge/client.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
@@ -18,6 +17,7 @@ import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import { listRandomSites, validateInstructionPlan } from "../../src/index.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
+import type { UntypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * The engine bridge over a real worker thread (a separate realm; messages are structured clones): the Worker's
