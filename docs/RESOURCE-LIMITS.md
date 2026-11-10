@@ -177,8 +177,9 @@ store check (a proved-open result, and a shape result not lost, need no further 
 obligation); (d) after a stop before admission settled, which decides nothing after the stop, the first owed obligation
 against `unknown`, a store's, a literal's or a typed call's mark, "a store whose check was left undecided at the budget"
 (`lostCheck`, #2080 part 2). (a) to (d), the reasons the gates and rule (R) decline with, carry
-`CandidateOutsideSlice.limit` (`LIMIT_REASONS`); a refusal the slice makes from a diagnostic only a stop produces, such
-as "this operand" from a stop's TSV043 warning, carries its coverage reason and not the marker (#2236). Production compiles with the legacy type checker until the switch, which none of these bounds or
+`CandidateOutsideSlice.limit` (`LIMIT_REASONS`); a refusal the slice makes from a diagnostic or a contract a stop
+shaped, such as "this operand" from a stop's TSV043 warning, carries its coverage reason and not the marker, since the
+route cannot tell it from the same refusal without a stop (#2236, in the list below). Production compiles with the legacy type checker until the switch, which none of these bounds or
 declines govern.
 
 The requirement is #1526's
@@ -198,9 +199,7 @@ because it is too large or too deeply nested", [ADR 0021](decisions/0021-static-
 re-assessment. Recorded for that re-assessment, open and not accepted design (the Owner, 2026-11-10): what a
 maker gets on such a decline; one code for (a) to (d), with the reason in its message; and a limit field in
 `src/diagnostic-codes.ts` naming the limit's ID in this document, carried by that code and by `TSV076`, so that a later
-report can read the group from the registry. Also open: whether a refusal the slice makes from a diagnostic or a
-contract only a stop produces ("this operand" from a stop's TSV043 warning; "a default whose collection the value it
-stands in for does not type") is a refusal a limit causes, and which others there are (#2236).
+report can read the group from the registry.
 
 The same list holds what the coordinator decided about the type core's behavior on this route, for the Owner to judge as
 a whole before the switch ([Proportional repair and owner escalation](DEVELOPMENT-WORKFLOW.md#proportional-repair-and-owner-escalation)).
@@ -230,6 +229,24 @@ changed warning or wording applies to the same change, the entry is its report:
   and not this entry. Measured: 4 settings on one source built for it, with equal outcomes over 678 host values; an
   attempt to make the two forms disagree reached no part-checked store in 6,040 stops (343 published settled stops, each
   checked whole).
+- **A refusal a stop causes can name a construct the slice does not cover (#2236).** Where a stop leaves a condition's
+  or a dict key's operand undecided, or a default's collection untyped, the candidate route refuses with the slice's
+  coverage reason ("this operand"; "a default whose collection the value it stands in for does not type"), without the
+  limit marker; by a reading of the route's 37 refusal paths (#2236), a check of a loop variable, a join of written
+  types no place admits and a missing field under an element could do so too, none shown. The route cannot tell these
+  from the same reasons a program outside the slice gets: a host value copied into a variable and used as a condition is
+  refused with "this operand" whether or not a stop falls. What the code holds is a sign that a limit may be the cause,
+  not that it is: the operator warning behind "this operand" is in `budget` context at every stop-only refusal measured
+  (184 of 184), and also when a stop falls in the program above, which the natural compile refuses as well. Publishing
+  instead was measured over the 196 such settings (#2116's 192 oracle settings and the stop corpus's 4) and not chosen:
+  4 of them publish a plan that passes a value the natural run rejects, #2183's defect, which this refusal covers there.
+  A maker would notice, for a script too large for its budget, a refusal naming a construct as not covered, where the
+  same script compiles when it fits; which code it carries is the open item above. Measured on main c42d6a6c5, for "this
+  operand": 184 stop-only refusals, all after admission settled, 180 on #2116's 15 sources (a type-test condition at
+  demand allowances 1–3, four modes) and 4 on #2080's 6,379 moved stops (a `get` default's key at demand 16). By that
+  reading, only its `boolean` and `key` rules reach it inside the slice at that commit; a slice step admitting their
+  syntax would open `shown`, C4's `operator` and `choice`. The default's refusal has no stop-only instance on those
+  sets: it is known from #2227's matrix cells, and its throw site keeps no record of the stop.
 
 How a repair of the type core's work is accepted against `main` (its growth gate) is a testing rule:
 [Scaling diagnostics](TESTING.md#scaling-diagnostics).

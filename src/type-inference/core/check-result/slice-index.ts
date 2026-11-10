@@ -473,7 +473,8 @@ export const UNDECIDED_AT_BUDGET = "a store whose check was left undecided at th
 /**
  * The reasons the stop's gates (`lostCheck`) and rule (R) (`OPEN_BY_STOP`) decline with (#2080, the owner's go,
  * 2026-11-10): tests count them by `limit`, which reads this list, so no site marks one without its reason. A refusal the
- * slice makes from a diagnostic only a stop produces carries its coverage reason and is not here (#2236).
+ * slice makes from a diagnostic or a contract a stop shaped carries its coverage reason and is not here: nothing at its
+ * site tells it from the same refusal without a stop (#2236).
  */
 export const LIMIT_REASONS: readonly string[] = [
   OPEN_BY_STOP,
