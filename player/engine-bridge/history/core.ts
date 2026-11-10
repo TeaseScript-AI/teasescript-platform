@@ -188,7 +188,7 @@ export type AdmissionDecision =
 
 /**
  * The newest action ID among `points`, or -1 for none. A fold, not a spread into `Math.max`: a spread passes each point
- * as an argument, and past the engine's argument limit (125,237 points on Node 26) it throws.
+ * as an argument, and past the engine's argument limit (about 125,000 points on Node 26, by the stack in use) it throws.
  */
 export function newestActionId(points: readonly Pick<HistoryPoint, "actionId">[]): number {
   return points.reduce((newest, point) => Math.max(newest, point.actionId), -1);

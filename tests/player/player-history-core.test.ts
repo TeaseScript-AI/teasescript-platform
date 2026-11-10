@@ -348,11 +348,11 @@ test("an adoption truncates the future by point ID and links later answers to th
 });
 
 // An adoption keeps the newest action ID of the points it keeps by this fold. A spread of that many points into
-// `Math.max` threw from 125,237 on Node 26 and left the history half-changed (#2297's review). The row holds the fold;
-// that `#adoptEnded` uses it is read at its call.
+// `Math.max` threw from about 125,000 on Node 26 (125,532 inside a test) and left the history half-changed (#2297's
+// review); the row takes twice that. It holds the fold; that `#adoptEnded` uses it is read at its call.
 test("the newest action ID of more kept points than an argument spread allows is their fold's", () => {
-  const points = Array.from({ length: 125_237 }, (_, actionId) => ({ actionId }));
-  assert.equal(newestActionId(points), 125_236);
+  const points = Array.from({ length: 250_000 }, (_, actionId) => ({ actionId }));
+  assert.equal(newestActionId(points), 249_999);
   assert.equal(newestActionId([]), -1);
 });
 
