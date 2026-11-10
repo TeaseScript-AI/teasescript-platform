@@ -1,4 +1,4 @@
-import type { FlowGraph, FlowNode } from "./flow-graph.js";
+import type { FlowGraph, FlowNode } from "../flow-graph.js";
 
 /*
  * The dominators of the coarse core's flow graph (§3.1): which node every run that reaches another passes first. The

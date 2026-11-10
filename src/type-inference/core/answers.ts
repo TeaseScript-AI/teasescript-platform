@@ -57,11 +57,11 @@ import {
   type Definition,
   type Key,
 } from "./definitions.js";
-import type { Dominators } from "./dominators.js";
+import type { Dominators } from "./flow-graph/dominators.js";
 import { ExactPath, withoutEmpty } from "./exact-path.js";
 import type { Callable, FlowGraph, FlowNode } from "./flow-graph.js";
-import { GuardIndex } from "./guards.js";
-import { HandlerIndex } from "./handlers.js";
+import { GuardIndex } from "./indexes/guards.js";
+import { HandlerIndex } from "./indexes/handlers.js";
 import {
   EMPTY,
   inItsOrder,
