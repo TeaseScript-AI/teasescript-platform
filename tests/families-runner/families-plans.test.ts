@@ -192,3 +192,51 @@ test("the plans comparison stalls a run past its unit limit, not a slow one, and
   );
   assert.equal(held.summary.runs, 16);
 });
+
+test("the plans comparison resumes a source by its name and key, so a recorded one does not stand for its namesake (#2254)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  for (const tree of ["base", "head"]) {
+    for (const [file, text] of Object.entries(MODULES)) {
+      mkdirSync(join(folder, tree, "dist", file, ".."), { recursive: true });
+      writeFileSync(join(folder, tree, "dist", file), text);
+    }
+    writeFileSync(join(folder, tree, "package.json"), '{ "type": "module" }\n');
+    mkdirSync(join(folder, tree, "tests", "families", "area"), { recursive: true });
+    cpSync(resolve("tests/families/sources.mjs"), join(folder, tree, "tests/families/sources.mjs"));
+    writeFileSync(
+      join(folder, tree, "tests/families/area/cases.mjs"),
+      `export const cases = ${JSON.stringify([
+        ["twin", "first"],
+        ["twin", "second"],
+      ])};\n`,
+    );
+  }
+  const out = join(folder, "area.jsonl");
+  const plans = () => {
+    const ran = spawnSync(
+      process.execPath,
+      [tool, join(folder, "base"), join(folder, "head"), "area", "--out", out],
+      { encoding: "utf8" },
+    );
+    assert.equal(ran.status, 0, ran.stderr);
+    const records = readFileSync(out, "utf8")
+      .trim()
+      .split("\n")
+      .map((line): Record<string, unknown> => JSON.parse(line));
+    return { records, resumed: JSON.parse(ran.stdout.trim()).resumed };
+  };
+  const [first, second] = plans().records;
+  assert.equal(first!.name, second!.name);
+  assert.notEqual(first!.key, second!.key);
+  // (the first recorded: the second still runs)
+  writeFileSync(out, `${JSON.stringify(first)}\n`);
+  const resumed = plans();
+  assert.equal(resumed.resumed, 1);
+  assert.deepEqual(resumed.records, [first, second]);
+  // (a record without a key, from before keys: its source runs again)
+  writeFileSync(out, `${JSON.stringify({ ...first, key: undefined })}\n`);
+  const keyless = plans();
+  assert.equal(keyless.resumed, 0);
+  assert.deepEqual(keyless.records.slice(1), [first, second]);
+});

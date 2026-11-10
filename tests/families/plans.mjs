@@ -179,13 +179,15 @@ if (isMainThread && process.argv[2] === "summary") {
     .map((_, index) => index)
     .filter((index) => (only === null ? index % shards === shard : only.has(sources[index].name)))
     .slice(0, limit);
-  // (a source already in --out is not run again, its record counted as it stands: a stall stays a stall)
+  // (a source already in --out is not run again, its record counted as it stands: a stall stays a stall; by its name and
+  // key, as two sources may share a name, #2254: a record without a key matches no source and its source runs again)
+  const placed = (unit) => JSON.stringify([unit.name, unit.key]);
   const done = new Map();
   if (out !== undefined && existsSync(out))
     for (const line of readFileSync(out, "utf8").split("\n"))
       if (line.startsWith("{")) {
         const record = JSON.parse(line);
-        done.set(record.name, record);
+        done.set(placed(record), record);
       }
   const summary = {
     set: path.basename(set),
@@ -222,9 +224,9 @@ if (isMainThread && process.argv[2] === "summary") {
     });
   for (const index of indices) {
     const source = sources[index];
-    if (done.has(source.name)) {
+    if (done.has(placed(source))) {
       summary.resumed += 1;
-      count(done.get(source.name));
+      count(done.get(placed(source)));
       continue;
     }
     worker ??= fresh();
@@ -272,7 +274,7 @@ if (isMainThread && process.argv[2] === "summary") {
     if (record.stalled !== undefined || record.uncharged !== undefined) {
       await worker.terminate().catch(() => {});
       worker = null;
-      const failed = { set: summary.set, name: source.name, ...record };
+      const failed = { set: summary.set, name: source.name, key: source.key, ...record };
       count(failed);
       write(failed);
       continue;
@@ -512,7 +514,14 @@ if (isMainThread && process.argv[2] === "summary") {
     : null;
   parentPort.on("message", (index) => {
     const unit = sources[index];
-    const record = { set: path.basename(set), name: unit.name, runs: 0, differing: 0, modes: [] };
+    const record = {
+      set: path.basename(set),
+      name: unit.name,
+      key: unit.key,
+      runs: 0,
+      differing: 0,
+      modes: [],
+    };
     for (let mode = 0; mode < 4; mode += 1) {
       const b = compile(base, unit, mode);
       const h = compile(head, unit, mode);
