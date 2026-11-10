@@ -8,7 +8,7 @@ import { withTestAllowance } from "../../src/type-inference/core/budget.js";
 import { analyzeTypes } from "../../src/type-inference/index.js";
 import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
 import { MODES, inMode, stopSet } from "../helpers/type-core-oracles.js";
-import type { WorkFamily } from "../helpers/type-core/type-core-families.js";
+import type { WorkFamily } from "../helpers/type-core/families/builders.js";
 import { steepCounters } from "../helpers/type-core/type-core-work.js";
 
 /** The parts of `stopSet`'s record the C10 stop rows read. */

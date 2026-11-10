@@ -2,7 +2,7 @@ import type { PlaceId } from "../../graph.js";
 import { joinParts, keep, keptParts, keptSteps } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
-import { marked } from "../guards.js";
+import { marked } from "../indexes/guards.js";
 import { makeItem, mergeItems, REASON, type Item } from "../items.js";
 import { selectsElement } from "../method-categories.js";
 import { positions } from "../positions.js";

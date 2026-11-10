@@ -22,7 +22,7 @@ import {
   type Rest,
 } from "../contract/key-ids.js";
 import { withoutEmpty } from "../exact-path.js";
-import { marked } from "../guards.js";
+import { marked } from "../indexes/guards.js";
 import { ingressLeaves, writerKey, type Item, type ItemTag } from "../items.js";
 import { addRest, aliasKeyAt, covers } from "./classes.js";
 import { hostRead, takeable, wholeOf } from "./eligibility.js";

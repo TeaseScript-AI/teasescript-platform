@@ -149,7 +149,7 @@ import {
 } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import type { ContextWord, IngressNode, Item, Writer } from "./items.js";
-import type { PlusIndex } from "./plus-index.js";
+import type { PlusIndex } from "./indexes/plus-index.js";
 import type { ValueConstraint } from "./program.js";
 import { everyRecordKept, type Work } from "./solver.js";
 import type { ReadRoute } from "./values.js";

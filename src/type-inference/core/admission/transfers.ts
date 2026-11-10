@@ -14,7 +14,7 @@ import { typeTags, writtenOf } from "../contract.js";
 import { keyPath, keyPlace, sortCost, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { ItemTag } from "../items.js";
-import { isPlusValue, plusRun } from "../plus-index.js";
+import { isPlusValue, plusRun } from "../indexes/plus-index.js";
 import { sharing } from "../sharing.js";
 import { deciding } from "./kinds.js";
 import { chooses, live, snapshotOf } from "./links.js";

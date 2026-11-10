@@ -10,12 +10,12 @@
     "text": "until #1597"
   },
   {
-    "file": "tests/helpers/type-core/type-core-families.ts",
+    "file": "tests/helpers/type-core/families/admission.ts",
     "form": "until #N",
     "text": "until #1417"
   },
   {
-    "file": "tests/helpers/type-core/type-core-families.ts",
+    "file": "tests/helpers/type-core/families/admission.ts",
     "form": "until #N",
     "text": "until #1417"
   },

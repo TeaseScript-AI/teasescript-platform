@@ -3,7 +3,7 @@ import { joinParts, joinSteps, keptText, pathText, splitPath } from "../budget.j
 import type { Contract } from "../contract.js";
 import { keptKey, keyBelow, keyOf, recordPath, sortCost, type Key } from "../definitions.js";
 import type { Callable } from "../flow-graph.js";
-import { marked } from "../guards.js";
+import { marked } from "../indexes/guards.js";
 import { REASON, type IngressNode, type Item } from "../items.js";
 import { stepName } from "../program.js";
 import { ABSENT } from "./kinds.js";

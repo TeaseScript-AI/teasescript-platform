@@ -1,6 +1,6 @@
-import { KeyTrie, keptPrefixes, sortCost, type DefinitionIndex, type Key } from "./definitions.js";
-import type { Callable, FlowNode } from "./flow-graph.js";
-import type { CoreProgram } from "./program.js";
+import { KeyTrie, keptPrefixes, sortCost, type DefinitionIndex, type Key } from "../definitions.js";
+import type { Callable, FlowNode } from "../flow-graph.js";
+import type { CoreProgram } from "../program.js";
 
 /*
  * The handler index of the coarse core (checkpoint 9, §6.4 H1–H9, F24, §8): which keys a timer, media or
