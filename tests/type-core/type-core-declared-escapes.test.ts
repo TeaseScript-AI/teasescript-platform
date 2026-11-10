@@ -38,9 +38,9 @@ import { hostValues } from "../helpers/type-core-stop-oracle.js";
 // Inside a window a stopped compile of either tree may differ from the other's in anything two stopped compiles of main
 // differ in between two allowances (ruling 18): a check's order and form, and whether the gate refuses the program. For
 // two pairs of first-asker sources (#2218's class) the second test holds the head to what holds there on both trees:
-// each tree publishes or refuses for its limit, a published plan passes nothing the natural run rejects, and where both
-// publish the runs agree in outcome, code and span. `FIRST_ASKER_MAIN` is main's side for it, recorded at 5a1461a1c
-// (`probe42.mjs`, `probe43.mjs`).
+// each tree publishes or refuses for its limit, and a published plan runs as the natural plan does, in outcome, code,
+// span and output, whether the other tree publishes or refuses. `FIRST_ASKER_MAIN` is main's side for it, recorded at
+// 5a1461a1c (`probe42.mjs`, `probe43.mjs`).
 
 /**
  * Codex round 7's reachable sources and Sol round 10's two-copy form (#2116): a place holding `count` settled whole
@@ -317,18 +317,21 @@ function serial(value: Json): SerializableRuntimeValue {
   );
 }
 
-/** A plan's runs over `FIRST_ASKER_HOSTS`, each as its outcome, code and span. */
+/** A plan's runs over `FIRST_ASKER_HOSTS`, each as its outcome, code and span, and what it said. */
 const firstAskerRuns = (plan: InstructionPlan): string[] =>
   FIRST_ASKER_HOSTS.map((hostValue) => {
     const globals = { hostValue: serial(hostValue), hostOther: false };
     const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals }));
     const failure = result.events.find((event) => event.kind === "runtimeFailure");
-    return failure?.kind === "runtimeFailure"
-      ? `${result.snapshot.status} ${failure.code} ${failure.span.start.offset}:${failure.span.end.offset}`
-      : result.snapshot.status;
+    const said = result.events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+    const ended =
+      failure?.kind === "runtimeFailure"
+        ? `${result.snapshot.status} ${failure.code} ${failure.span.start.offset}:${failure.span.end.offset}`
+        : result.snapshot.status;
+    return said.length === 0 ? ended : `${ended} said ${said.join("|")}`;
   });
 
-test("#2116's declared difference inside a window, first-asker sources: each tree publishes or refuses for its limit, and where both publish the runs agree in outcome, code and span and pass nothing the natural run rejects (rulings 18 and 19)", () => {
+test("#2116's declared difference inside a window, first-asker sources: each tree publishes or refuses for its limit, and a published plan runs as the natural plan does, in outcome, code, span and output (rulings 18 to 20)", () => {
   assert.deepEqual(Object.keys(FIRST_ASKER_MAIN).sort(), Object.keys(FIRST_ASKER_SOURCES).sort());
   for (const [label, source] of Object.entries(FIRST_ASKER_SOURCES)) {
     const files = [{ path: "main.tease", source }];
@@ -373,16 +376,24 @@ test("#2116's declared difference inside a window, first-asker sources: each tre
         continue;
       }
       const runs = firstAskerRuns(head);
-      // (a published plan passes nothing the natural run rejects)
+      // (a published plan passes nothing the natural run rejects, and fails where and as it fails: a check moved to a
+      // later instruction fails elsewhere, and a check that halts the script says less, which ruling 20 asks of it
+      // whether main publishes here or refuses)
       runs.forEach((ran, host) => {
-        if (naturalRuns[host]!.startsWith("failed"))
+        const natural = naturalRuns[host]!;
+        if (natural.startsWith("failed"))
           assert.ok(
             ran.startsWith("failed"),
             `${name}: host ${host} passes a value the natural run rejects`,
           );
+        assert.equal(ran, natural, `${name}: host ${host} runs other than the natural run`);
       });
       if (mainState === "published")
-        assert.equal(runs.join("; "), mainSide, `${name}: the runs' outcome, code and span`);
+        assert.equal(
+          runs.join("; "),
+          mainSide,
+          `${name}: the runs' outcome, code, span and output`,
+        );
     }
   }
 });

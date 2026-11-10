@@ -620,9 +620,9 @@ export const MAIN: Readonly<
 /**
  * Main's side of the first-asker sources, each in its held mode: the natural plan's runs and, at each allowance of its
  * window (298 to 303 in mode 2, 243 to 250 with `f1` last, in mode 3) where both trees settle, whether main publishes,
- * with its runs, or refuses, with its reason. Each run is its outcome, code and span (`status code start:end`), over
- * `FIRST_ASKER_HOSTS`. Recorded at 5a1461a1c by lane 2b's recorders (`probe42.mjs`, `probe43.mjs` in #2116's evidence);
- * it is re-recorded as the file header says. Every natural run of the first two fails (a value that fits meets TSR017:
+ * with its runs, or refuses, with its reason. Each run is its outcome, code and span (`status code start:end`), then
+ * what it said (`said …`), over `FIRST_ASKER_HOSTS`. Recorded at 5a1461a1c by lane 2b's recorders (`probe42.mjs`,
+ * `probe43.mjs` in #2116's evidence), with each run's output since ruling 20; it is re-recorded as the file header says. Every natural run of the first two fails (a value that fits meets TSR017:
  * `root` holds no `f1` at the last store), so only the `f1`-last pair can show a published plan passing what the natural
  * run rejects.
  */
@@ -693,42 +693,42 @@ export const FIRST_ASKER_MAIN: Readonly<
   "first-asker-field-9-f1-last": {
     mode: 3,
     natural:
-      "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      "halted said accepted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
     at: {
       244: [
         "published",
-        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+        "halted said accepted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
       ],
       245: [
         "published",
-        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+        "halted said accepted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
       ],
       246: [
         "published",
-        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+        "halted said accepted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
       ],
       247: [
         "published",
-        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+        "halted said accepted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
       ],
       248: [
         "published",
-        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+        "halted said accepted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
       ],
       249: [
         "published",
-        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+        "halted said accepted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
       ],
       250: [
         "published",
-        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+        "halted said accepted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
       ],
     },
   },
   "first-asker-field-9-f1-last-n-host": {
     mode: 3,
     natural:
-      "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; halted; halted; halted; halted; halted; halted; halted; halted; halted; failed TSR058 767:780; failed TSR058 767:780",
+      "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; halted said accepted; halted said accepted; halted said accepted; halted said accepted; halted said accepted; halted said accepted; halted said accepted; halted said accepted; halted said accepted; failed TSR058 767:780; failed TSR058 767:780",
     at: {
       244: [
         "refused",
@@ -756,7 +756,7 @@ export const FIRST_ASKER_MAIN: Readonly<
       ],
       250: [
         "published",
-        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; halted; halted; halted; halted; halted; halted; halted; halted; halted; failed TSR058 767:780; failed TSR058 767:780",
+        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; halted said accepted; halted said accepted; halted said accepted; halted said accepted; halted said accepted; halted said accepted; halted said accepted; halted said accepted; halted said accepted; failed TSR058 767:780; failed TSR058 767:780",
       ],
     },
   },
