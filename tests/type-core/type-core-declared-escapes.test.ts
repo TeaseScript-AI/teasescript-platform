@@ -25,22 +25,24 @@ import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { everyAnswer } from "../helpers/type-core-oracles.js";
 import { hostValues } from "../helpers/type-core-stop-oracle.js";
 
-// #2116's declared difference under #2080: the owner's decision (B), the O4 lead's rulings 6 to 10 on #2065's design
-// round. This file pins known escapes and declared differences, not accepted behaviour. At a forced demand allowance the
-// decision index's charges can move a stop. Inside each recorded window of a source and held mode, the head:
-// - stops unsettled in admission where main settles (`adverse`): #2080's fail-open path, a store's check lost;
-// - settles where main stops unsettled in admission (`favourable`): the check restored;
+// #2116's declared difference under #2080: the O4 lead's rulings 6 to 21 on #2065's design round. Decision (B) is moot,
+// #2080 part 2 (#2227) having landed first; the owner's answer on the one-sided refusal is pending. This file pins known
+// escapes and declared differences, not accepted behaviour. At a forced demand allowance the decision index's charges
+// can move a stop. Inside each recorded window of a source and held mode, the head:
+// - stops unsettled in admission where main settles (`adverse`), and refuses the program for its limit where main
+//   publishes (#2080 part 2);
+// - settles where main stops unsettled in admission (`favourable`), and publishes where main refuses for its limit;
 // - settles stopping every decision main stops and one more (`settled`): the plan and the runs raw-identical
 //   (`planDigest`, `runsDigest`), and an occurrence answer surer than main's only where it is the head's natural one.
-// At each window's edges outside it, the head's stop state, stopped decisions and plan are main's. #2080's unsettled side
-// closes the adverse windows; the settled class stays declared while the index is charged. The windows are measured over
-// every integer allowance on both trees (#2116's sweep); this file reads their edges.
+// At each window's edges outside it, the head's stop state, stopped decisions and plan or refusal are main's. The
+// settled class stays declared while the index is charged. The windows are measured over every integer allowance on
+// both trees (#2116's sweep); this file reads their edges.
 // Inside a window a stopped compile of either tree may differ from the other's in anything two stopped compiles of main
 // differ in between two allowances (ruling 18): a check's order and form, and whether the gate refuses the program. For
 // two pairs of first-asker sources (#2218's class) the second test holds the head to what holds there on both trees:
 // each tree publishes or refuses for its limit, and a published plan runs as the natural plan does, in outcome, code,
 // span and output, whether the other tree publishes or refuses. `FIRST_ASKER_MAIN` is main's side for it, recorded at
-// 5a1461a1c (`probe42.mjs`, `probe43.mjs`).
+// 8c8d25853 (`probe42.mjs`, `probe43.mjs`).
 
 /**
  * Codex round 7's reachable sources and Sol round 10's two-copy form (#2116): a place holding `count` settled whole
@@ -160,20 +162,35 @@ function noStronger(head: string, main: string): boolean {
   );
 }
 
-test("#2116's declared difference under #2080: at every recorded window's edges the head's stop moves only as declared, and outside them its stop state, stopped decisions and plan are main's (the owner's decision (B))", () => {
+test("#2116's declared difference under #2080: at every recorded window's edges the head's stop moves only as declared, and outside them its stop state, stopped decisions and plan or refusal are main's (ruling 21)", () => {
   assert.deepEqual(Object.keys(MAIN).sort(), Object.keys(SOURCES).sort());
   for (const [label, source] of Object.entries(SOURCES)) {
     const files = [{ path: "main.tease", source }];
     MAIN[label]!.forEach((main, mode) => {
       const held = HELD_MODES[mode]!;
-      const compiled = (demand: number | null) =>
-        held.run(() =>
-          demand === null
-            ? compileProjectWithBackend(files, { globals: GLOBALS }, CORE_BACKEND)
-            : withTestDemandAllowance(demand, () =>
-                compileProjectWithBackend(files, { globals: GLOBALS }, CORE_BACKEND),
-              ),
-        );
+      // (a plan, or `refused` where the compile is refused for its limit)
+      const compiled = (demand: number | null): InstructionPlan | "refused" => {
+        try {
+          const { plan } = held.run(() =>
+            demand === null
+              ? compileProjectWithBackend(files, { globals: GLOBALS }, CORE_BACKEND)
+              : withTestDemandAllowance(demand, () =>
+                  compileProjectWithBackend(files, { globals: GLOBALS }, CORE_BACKEND),
+                ),
+          );
+          assert.ok(plan !== null, `${label} ${held.name} at ${demand}: a plan`);
+          return plan;
+        } catch (error) {
+          if (!(error instanceof CandidateOutsideSlice)) throw error;
+          assert.ok(
+            error.limit,
+            `${label} ${held.name} at ${demand}: refused, not for its limit: ${error.what}`,
+          );
+          return "refused";
+        }
+      };
+      const digestOf = (plan: InstructionPlan | "refused") =>
+        plan === "refused" ? plan : planDigest(plan);
       const analysed = (demand: number | null) =>
         held.run(() =>
           demand === null
@@ -181,7 +198,7 @@ test("#2116's declared difference under #2080: at every recorded window's edges 
             : withTestDemandAllowance(demand, () => analyseCore(coreRequest(files, GLOBALS)!)),
         );
       assert.equal(
-        planDigest(compiled(null).plan),
+        digestOf(compiled(null)),
         main.natural,
         `${label} ${held.name}: the natural plan`,
       );
@@ -191,38 +208,38 @@ test("#2116's declared difference under #2080: at every recorded window's edges 
         main.naturalAnswers,
         `${label} ${held.name}: the natural answers`,
       );
-      for (const [
-        at,
-        [mainState, mainChecks, mainPlan, mainRuns, mainStops, mainAnswers],
-      ] of Object.entries(main.at)) {
+      for (const [at, [mainState, mainPlan, mainRuns, mainStops, mainAnswers]] of Object.entries(
+        main.at,
+      )) {
         const demand = Number(at);
         const name = `${label} ${held.name} at ${demand}`;
         const kind = main.windows.find(([, lo, hi]) => demand >= lo && demand < hi)?.[0] ?? "same";
         const answers = analysed(demand);
         const { budget } = answers;
-        const { plan } = compiled(demand);
+        const plan = compiled(demand);
         const state = budget.settled ? "settled" : budget.stoppedIn;
         const stops = stoppedDecisions(answers);
         if (kind === "same") {
           assert.deepEqual(
-            [state, planDigest(plan), textDigest(stops.join("\n"))],
+            [state, digestOf(plan), textDigest(stops.join("\n"))],
             [mainState, mainPlan, mainStops],
             name,
           );
         } else if (kind === "adverse") {
-          assert.equal(mainState, "settled", name);
-          assert.equal(state, "admission", name);
-          assert.ok(plan !== null, name);
-          assert.ok(
-            plan.instructions.filter((i) => "typeCheck" in i && i.typeCheck !== undefined).length <
-              mainChecks,
-            name,
+          assert.deepEqual(
+            [mainState, mainPlan === "refused", state, plan],
+            ["settled", false, "admission", "refused"],
+            `${name}: main settles and publishes, the head stops in admission and refuses for its limit`,
           );
         } else if (kind === "favourable") {
-          assert.deepEqual([mainState, state], ["admission", "settled"], name);
+          assert.deepEqual(
+            [mainState, mainPlan, state, plan === "refused"],
+            ["admission", "refused", "settled", false],
+            `${name}: main stops in admission and refuses for its limit, the head settles and publishes`,
+          );
         } else {
           assert.deepEqual([mainState, state], ["settled", "settled"], name);
-          assert.ok(plan !== null, name);
+          assert.ok(plan !== "refused", name);
           assert.deepEqual(
             [planDigest(plan), runsDigest(runsOf(files, plan))],
             [mainPlan, mainRuns],
@@ -302,12 +319,6 @@ const FIRST_ASKER_HOSTS: readonly Json[] = [
   "bad",
 ];
 
-/**
- * The reason a settled stop's compile is refused for, its limit (#2203's gate), by its text: main marks no refusal as a
- * limit's yet, and #2227 is the marker's issue.
- */
-const LIMIT = "a store whose check was lost at the budget";
-
 /** A host value as the runtime holds it. */
 function serial(value: Json): SerializableRuntimeValue {
   if (value === null || typeof value !== "object") return value;
@@ -350,7 +361,7 @@ test("#2116's declared difference inside a window, first-asker sources: each tre
         return plan;
       } catch (error) {
         if (!(error instanceof CandidateOutsideSlice)) throw error;
-        return error.message;
+        return error.limit ? "limit" : error.message;
       }
     };
     const natural = compiled(null);
@@ -370,9 +381,9 @@ test("#2116's declared difference inside a window, first-asker sources: each tre
       const head = compiled(demand);
       // (each tree publishes, or refuses for its limit)
       if (mainState === "refused")
-        assert.ok(mainSide.includes(LIMIT), `${name}: main refused for another reason`);
+        assert.equal(mainSide, "limit", `${name}: main refused for another reason`);
       if (typeof head === "string") {
-        assert.ok(head.includes(LIMIT), `${name}: the head refused for another reason`);
+        assert.equal(head, "limit", `${name}: the head refused for another reason`);
         continue;
       }
       const runs = firstAskerRuns(head);
