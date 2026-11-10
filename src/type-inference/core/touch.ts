@@ -297,15 +297,18 @@ export class Touches {
   /**
    * The ring mark (#1270; Astra's reviews B1 and B2), defined here once. A whole-copy ring's members share one trie, each
    * deciding by its own first store, so two elements copying different members may offend each other where their nodes
-   * are one node; a containment over such a node owes as the accepted design has it. A node is a *ring node* where a
-   * ring's trie stands at its own level: the trie itself (`ring`, a live group of two or more members), a node one of
-   * whose parts is a ring node (a copy's landed top, a merge), or a projection whose walk steps through a ring node
-   * (`sub`). A projection that steps only through nodes holding a ring at another path (a ring-free sibling of a ring) is
-   * no ring node. A node *holds* a ring where a ring node stands in it at any depth (`Touch.ring`). Both flags are set
-   * when a node is made: a ring marked later is seen only on its own node and on the projections taken of it after.
-   * This set holds the ring tries and the ring projections, both marked after they were made.
+   * are one node; a containment owes every meeting at and below such a node, as the accepted design has it, and only
+   * where it differs below a ring-free part of a node holding one (`#containedOwes`, #1338). A node is a *ring node*
+   * where a ring's trie stands at its own level: the trie itself (`ring`, a live group of two or more members), a node
+   * one of whose parts is a ring node (a copy's landed top, a merge), or a projection whose walk steps through a ring
+   * node (`sub`). A projection that steps only through nodes holding a ring at another path (a ring-free sibling of a
+   * ring) is no ring node. A node *holds* a ring where a ring node stands in it at any depth (`Touch.ring`). Both flags
+   * are set when a node is made: a ring marked later is seen only on its own node and on the projections taken of it
+   * after. This set holds the ring tries and the ring projections, both marked after they were made.
    */
   readonly #rings = new Set<number>();
+  /** Whether a children treap holds a node holding a ring (`#ringEntries`), as marked when first asked. */
+  readonly #ringBelow = new WeakMap<Branch, boolean>();
   readonly #summaries: Readonly<Record<TouchMode, Map<number, Summary>>> = {
     meet: new Map(),
     elements: new Map(),
@@ -1286,9 +1289,9 @@ export class Touches {
   }
 
   /**
-   * For `elements`, what a node holding a ring owes where it contains the other (or is merged with itself): its meetings
-   * found in making it where its contents hold two kinds or more, as an element standing in the other's stead may offend
-   * there (§2.2). Once per node.
+   * For `elements`, what a ring node owes where it contains the other, or a node holding a ring merged with itself: its
+   * meetings found in making it where its contents hold two kinds or more, as an element standing in the other's stead
+   * may offend there (§2.2). Once per node.
    */
   #metOwed(node: Touch): Found {
     const known = this.#metOwes.get(node.id);
@@ -1303,14 +1306,18 @@ export class Touches {
   }
 
   /**
-   * What a node containing another owes where a merge ends at it, no ring standing in it (§2.2 step 3, §2.4 (d)): its
-   * meetings found in making it, as the contained node's landed types may decide the place merging them; for `elements`
-   * only where its contents hold two kinds or more, as an element standing in the other's stead may offend there. Only
-   * where the two differ:
+   * What a node containing another owes where a merge ends at it, no ring node at its top (§2.2 step 3, §2.4 (d)):
+   * its meetings found in making it, as the contained node's landed types may decide the place merging them; for
+   * `elements` only where its contents hold two kinds or more, as an element standing in the other's stead may offend
+   * there. Only where the two differ:
    * below a path where they are one node, under the same payloads, nothing of the container's own stands, so it meets
    * the contained node there no more than a node merged with itself does (#1270: a shared node's meetings were owed again
    * by every place or literal holding it beside a small part of its own). The walk enters the children the two do not
    * share, found from the smaller of the meetings there and the two children maps' difference. Once per pair.
+   * Where the container holds a ring (`#rings`), the walk follows the nodes holding it: a ring node it reaches, or a
+   * node holding a ring that the two share, owes every meeting below it, as a ring node containing the other does
+   * (`merge`), so the walk also enters the shared children holding a ring (`#ringEntries`); a part holding no ring owes
+   * as a ring-free container does, so a ring beside many dormant meetings does not owe them again (#1338).
    */
   #containedOwes(outer: Touch, inner: Touch, mode: TouchMode): Found {
     const key = keptParts(this.host.work, mode, outer.id, inner.id);
@@ -1336,11 +1343,21 @@ export class Touches {
       readonly y: Touch | undefined;
       readonly met: Found;
       readonly path: readonly string[];
-    }[] = [{ x: outer, y: inner, met: outer.met, path: [] }];
+      // (whether the container holds a ring here: it and every node above on the way do)
+      readonly ringed: boolean;
+    }[] = [{ x: outer, y: inner, met: outer.met, path: [], ringed: this.#isRing(outer) }];
     while (stack.length > 0) {
-      const { x, y, met, path } = stack.pop()!;
+      const { x, y, met, path, ringed } = stack.pop()!;
       this.#charge();
-      if (met === NONE || x === y) continue;
+      if (met === NONE) continue;
+      if (ringed && (x === y || (x !== undefined && this.#isRingHere(x)))) {
+        // (a ring node, or a node holding a ring that both stand on: every meeting below is owed, the set the container
+        // owed whole before #1338; no source or construction measured there shows one of them deciding a record, so
+        // no test pins this case or the ring entries below)
+        oweAll(met, path);
+        continue;
+      }
+      if (x === y) continue;
       if (x === undefined || y === undefined || x.opaque !== y.opaque) {
         // (the contained node stands nowhere here, or a payload of the container's own stands here, which meets
         // everything below: every meeting below is owed)
@@ -1353,8 +1370,16 @@ export class Touches {
         this.#charge(),
       );
       const steps: string[] = [];
-      if (differs !== null) for (const [step] of differs) steps.push(step);
-      else {
+      if (differs !== null) {
+        for (const [step] of differs) steps.push(step);
+        if (ringed) {
+          // (the shared children holding a ring, which the difference passes)
+          const rings: [string, Touch][] = [];
+          this.#ringEntries(x.branches, rings);
+          const taken = new Set(steps);
+          for (const [step] of rings) if (!taken.has(step)) steps.push(step);
+        }
+      } else {
         const entries: [string, Found][] = [];
         this.#foundEntries(met.branches, entries);
         for (const [step] of entries) steps.push(step);
@@ -1363,15 +1388,40 @@ export class Touches {
         this.#charge(this.#depth(x.branches));
         const below = this.#foundGet(met.branches, step);
         if (below === undefined) continue;
+        const child = this.#get(x.branches, step);
         stack.push({
-          x: this.#get(x.branches, step),
+          x: child,
           y: this.#get(y.branches, step),
           met: below,
           path: keptSteps(this.host.work, path, [step]),
+          ringed: ringed && child !== undefined && this.#isRing(child),
         });
       }
     }
     this.#owes.set(key, out);
+    return out;
+  }
+
+  /** A children treap's entries whose nodes hold a ring, in their order; a treap node holding none is not entered. */
+  #ringEntries(branch: Branch | null, out: [string, Touch][]): void {
+    if (!this.#holdsRing(branch)) return;
+    this.#ringEntries(branch!.left, out);
+    if (this.#isRing(branch!.node)) out.push([branch!.key, branch!.node]);
+    this.#ringEntries(branch!.right, out);
+  }
+
+  /**
+   * Whether a children treap holds a node holding a ring: once per treap node, so a treap made from another by a few
+   * insertions (a store's own path) costs only those (`#ringBelow`).
+   */
+  #holdsRing(branch: Branch | null): boolean {
+    if (branch === null) return false;
+    const known = this.#ringBelow.get(branch);
+    if (known !== undefined) return known;
+    this.#charge();
+    const out =
+      this.#isRing(branch.node) || this.#holdsRing(branch.left) || this.#holdsRing(branch.right);
+    this.#ringBelow.set(branch, out);
     return out;
   }
 
@@ -1434,19 +1484,19 @@ export class Touches {
     };
     for (;;) {
       // (a node containing the other is their union; it owes the meetings found in making it where it differs from the
-      // other, whose landed types may decide where the two are merged; all of them where a ring stands in it; for
-      // `copies` nothing new, its meetings found where it was made: a store's own value, or its group's,
-      // `groupHeld` in `admission/held.ts`)
+      // other, whose landed types may decide where the two are merged; all of them where it is a ring node, and below
+      // the ring nodes and shared nodes holding a ring in it (`#containedOwes`); for `copies` nothing new, its meetings
+      // found where it was made: a store's own value, or its group's, `groupHeld` in `admission/held.ts`)
       const owes = (outer: Touch, inner: Touch): Found =>
         mode === "copies"
           ? NONE
           : outer === inner
             ? this.#selfOwes(outer, mode)
-            : !this.#isRing(outer)
-              ? this.#containedOwes(outer, inner, mode)
-              : mode === "elements"
+            : this.#isRingHere(outer)
+              ? mode === "elements"
                 ? this.#metOwed(outer)
-                : outer.met;
+                : outer.met
+              : this.#containedOwes(outer, inner, mode);
       if (this.#contains(x, y)) core = { node: x, found: owes(x, y) };
       else if (this.#contains(y, x)) core = { node: y, found: owes(y, x) };
       else core = this.#memo.get(key(x, y)) ?? null;
