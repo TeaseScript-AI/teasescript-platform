@@ -506,6 +506,12 @@ export interface Answers {
   /** Whether the receiving completion's own store checks (C1) owe a runtime check at a site, as unstopped. */
   completedCheck(site: SourceSite): boolean;
   /**
+   * Whether the receiving completion's own C1 ran at a place's path (`Consumers.completion.ran`, #2184): one of the
+   * decisions it checked, on the completion of the pass with `epoch`. False where none ran, it reached its allowance or
+   * left the slice, or the record is another pass's.
+   */
+  completionRan(id: PlaceId, path: readonly string[], epoch: number): boolean;
+  /**
    * The store warnings the receiving completion's own store checks (C1) made, the natural walk's obligations of its
    * decisions on the settled pass's inputs (#1682), in the published order (`bySite`, at the stores consumer's rank);
    * none where the completion lost a result, reached its allowance or left the slice. A store's part checks read them.
@@ -1627,6 +1633,19 @@ class CoreAnswers implements Answers {
     return this.#consumers.completedChecks.has(siteKey(site));
   }
 
+  public completionRan(id: PlaceId, path: readonly string[], epoch: number): boolean {
+    const ran = this.#consumers.completion?.ran ?? null;
+    if (ran === null || ran.epoch !== epoch) return false;
+    // (the checked decisions' paths read once for a completion's record, then by their text)
+    if (this.#ranOf !== ran) {
+      this.#ranOf = ran;
+      this.#ranKeys = new Set(
+        ran.checked.map((decision) => joinParts(decision.place, decision.path)),
+      );
+    }
+    return this.#ranKeys.has(joinParts(id, path));
+  }
+
   public completedWarnings(): readonly CompletedWarning[] {
     // (each the stores consumer's, ranked as the walk ranks it: `Consumers.check`)
     return bySite(this.#consumers.completedWarnings.map((item) => ({ item, rule: 1 })));
@@ -1687,6 +1706,9 @@ class CoreAnswers implements Answers {
 
   /** The completion's complete contracts by place and path (`received`), gathered on the first ask. */
   #received: Map<string, ContractResult> | null = null;
+  /** The completion record `completionRan` last read, and its checked decisions' paths by text. */
+  #ranOf: object | null = null;
+  #ranKeys: ReadonlySet<string> = new Set();
 
   public received(id: PlaceId, path: readonly string[]): ContractResult | null {
     if (this.#received === null) {
