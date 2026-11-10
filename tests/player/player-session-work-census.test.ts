@@ -1043,14 +1043,15 @@ test("the census fails a new caller of a forwarder, a new BridgeClient member, a
 
 const REWIND_OWNER = "player/vue/src/session/rewindOwner.ts";
 /**
- * The rewind owner's lifecycle state and retirement stamp, two `let` bindings of `createRewindOwner`, have closed
- * admission: each use, found by symbol (a shadowing binding of the same name is another symbol), is one admitted shape
- * or an escape. `state` is written once, in `dispatch`, with `advanceLifecycle`'s decision
- * (`player/debug/rewind-lifecycle.ts`); it is otherwise decided from and compared with the decision there, read by
- * property, or returned by the `state` getter. The stamp moves by `retirements++`, the first statement of the `retired`
- * and `lost` arrows of the one object literal the factory returns, found by node; a second return, a spread, a computed
- * name, a duplicate, or a `retired` or `lost` there that is not an arrow is an escape. Only `current()` reads the
- * stamp, to take and compare it.
+ * Who writes the rewind owner's lifecycle state and retirement stamp, two `let` bindings of `createRewindOwner`: each
+ * use, found by symbol (a shadowing binding of the same name is another symbol), is one admitted shape or an escape.
+ * `state` is assigned once, `state = outcome.state` in the body of the factory's one top-level `function dispatch`;
+ * the stamp moves by `retirements++`, the first statement of the `retired` and `lost` arrows of the one object literal
+ * the factory returns. Both are found by node: a missing, duplicate or other-kind `dispatch`, a second return, a
+ * spread, a computed name, a duplicate, or a `retired` or `lost` there that is not an arrow is an escape. A read is
+ * admitted by its shape wherever it stands: it cannot change a `let` binding, and neither value changes in place, the
+ * stamp being a number and `LifecycleState` `readonly` at every level (`player/debug/rewind-lifecycle.ts`); a cast that
+ * defeats `readonly` is outside this claim.
  */
 const OWNER_WRITES = ["retirements: lost", "retirements: retired", "state: dispatch"];
 
@@ -1119,6 +1120,16 @@ function ownerUses(overrides: Readonly<Record<string, string>> = {}): {
       else if (!ts.isFunctionLike(node) && !ts.isClassLike(node)) node.forEachChild(find);
     });
     const writers = new Map<ts.Node, string>();
+    // `state`'s writer, by node: the factory's one top-level declaration named `dispatch`, a function declaration.
+    const dispatches = factory.body!.statements.filter((each) =>
+      ts.isVariableStatement(each)
+        ? each.declarationList.declarations.some(({ name }) => text(name) === "dispatch")
+        : ts.isFunctionDeclaration(each) && each.name?.text === "dispatch",
+    );
+    const [dispatch] = dispatches.length === 1 ? dispatches.filter(ts.isFunctionDeclaration) : [];
+    if (dispatch === undefined)
+      for (const each of dispatches.length === 0 ? [factory.name!] : dispatches)
+        escape(`owner: one of ${dispatches.length} dispatch declarations`, each, each);
     const owner = returns.length === 1 ? returns[0]!.expression : undefined;
     if (returns.length > 1)
       for (const each of returns) escape(`owner: one of ${returns.length} returns`, each, each);
@@ -1161,7 +1172,6 @@ function ownerUses(overrides: Readonly<Record<string, string>> = {}): {
     // The admitted shape of a use, or `undefined`; a write's shape is its `OWNER_WRITES` entry.
     const admitted = (name: string, use: ts.Identifier): string | undefined => {
       const at = use.parent;
-      const within = enclosing(use);
       if (ts.isVariableDeclaration(at) && at.name === use)
         return name === "state" || (at.initializer && text(at.initializer) === "0")
           ? "declaration"
@@ -1173,38 +1183,27 @@ function ownerUses(overrides: Readonly<Record<string, string>> = {}): {
           at.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
           text(at.right) === "outcome.state" &&
           ts.isExpressionStatement(at.parent) &&
-          within === "dispatch"
+          ts.findAncestor(at, ts.isFunctionLike) === dispatch
         )
           return "state: dispatch";
-        // `LifecycleState`'s fields are `readonly`: the compiler refuses a write through one.
         if (ts.isPropertyAccessExpression(at) && at.expression === use) return "property read";
         if (
           ts.isCallExpression(at) &&
           at.arguments[0] === use &&
-          text(at.expression) === "advanceLifecycle" &&
-          within === "dispatch"
+          text(at.expression) === "advanceLifecycle"
         )
           return "decided from";
         if (
           ts.isBinaryExpression(at) &&
           at.right === use &&
           at.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken &&
-          text(at.left) === "outcome.state" &&
-          within === "dispatch"
+          text(at.left) === "outcome.state"
         )
           return "compared with the decision";
-        if (
-          ts.isReturnStatement(at) &&
-          ts.isGetAccessorDeclaration(at.parent.parent) &&
-          text(at.parent.parent.name) === "state" &&
-          at.parent.parent.body?.statements.length === 1
-        )
-          return "returned by the getter";
-        return undefined;
+        return ts.isReturnStatement(at) ? "returned" : undefined;
       }
       const writer = writers.get(use);
       if (writer !== undefined) return writer;
-      if (within !== "current") return undefined;
       if (
         ts.isShorthandPropertyAssignment(at) &&
         ts.isVariableDeclaration(at.parent.parent) &&
@@ -1282,6 +1281,7 @@ test("the rewind owner uses its lifecycle state and its stamp only in admitted s
   const lost = "    lost: (): LifecycleDisposition => {\n";
   const lostBody = `${lost}      retirements++;\n      return dispatch({ kind: "lost" }).actions;\n    },\n`;
   const ownerReturn = "  return {\n    view: computed(";
+  const dispatch = "  function dispatch(event: LifecycleEvent): LifecycleOutcome {\n";
   // Controls: each use outside an admitted shape fails, with its form and the function it is in.
   const controls = [
     [
@@ -1336,6 +1336,24 @@ test("the rewind owner uses its lifecycle state and its stamp only in admitted s
       "owner: lost, not an arrow `lost: lostImpl` in createRewindOwner",
     ],
     [replaced(lostBody, `${lostBody}    ...{},\n`), "owner: a spread `...{}` in createRewindOwner"],
+    // `state`'s writer is the factory's own `dispatch`: a decoy one elsewhere, or a second declaration, fails.
+    [
+      edited(
+        ["    state = outcome.state;\n", ""],
+        [
+          ownerReturn,
+          `  const unused = {\n    dispatch: (outcome: LifecycleOutcome) => {\n      state = outcome.state;\n    },\n  };\n  void unused;\n${ownerReturn}`,
+        ],
+      ),
+      "state `state = outcome.state` in dispatch",
+    ],
+    [
+      replaced(
+        dispatch,
+        `  function dispatch(event: LifecycleEvent): LifecycleOutcome;\n${dispatch}`,
+      ),
+      "owner: one of 2 dispatch declarations",
+    ],
   ] as const;
   for (const [patched, named] of controls)
     assert.throws(
