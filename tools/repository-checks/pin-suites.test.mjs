@@ -1,16 +1,88 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { ts } from "ts-morph";
 import { NOT_PINS, PIN_SUITES, builtOf, pinFormsOf, suitesFor, testFiles } from "./pin-suites.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 /** Each declared suite once, in the list's order. */
 const SUITES = [...new Set(PIN_SUITES.map((suite) => suite.file))];
 const WORK_B = "tests/type-core/type-core-work-b.test.ts";
+/** The folder whose families record `main`'s bounds (`WorkFamily.main`, `KnownProduct.measured`). */
+const FAMILIES = "tests/helpers/type-core/families/";
+
+/**
+ * The bounds a family module's `text` records, by line: each object literal's `main:` property whose value is an object
+ * literal and `measured:` property whose value is a number. Every other value of those two properties is an escape,
+ * named by its form, except a `measured` shorthand that an arrow returns as its object literal from its parameter's
+ * destructured `measured` (whose records the walk reads where they are written).
+ */
+function recordedBoundsOf(text) {
+  const source = ts.createSourceFile("family.ts", text, ts.ScriptTarget.Latest, true);
+  const lineOf = (node) => source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+  const recorded = [];
+  const escapes = [];
+  const forwarded = (property) => {
+    let arrow = property.parent;
+    while (arrow !== undefined && !ts.isFunctionLike(arrow)) arrow = arrow.parent;
+    return (
+      arrow !== undefined &&
+      ts.isArrowFunction(arrow) &&
+      ts.skipParentheses(arrow.body) === property.parent &&
+      arrow.parameters.some(
+        ({ name }) =>
+          ts.isObjectBindingPattern(name) &&
+          name.elements.some(
+            (element) =>
+              element.propertyName === undefined &&
+              element.initializer === undefined &&
+              element.dotDotDotToken === undefined &&
+              ts.isIdentifier(element.name) &&
+              element.name.text === "measured",
+          ),
+      )
+    );
+  };
+  const visit = (node) => {
+    if (
+      (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
+      ts.isObjectLiteralExpression(node.parent)
+    ) {
+      const computed = ts.isComputedPropertyName(node.name);
+      const name = computed ? node.name.expression : node.name;
+      const key = ts.isIdentifier(name) || ts.isStringLiteralLike(name) ? name.text : undefined;
+      if (key === "main" || key === "measured") {
+        const value = ts.isPropertyAssignment(node)
+          ? ts.skipParentheses(node.initializer)
+          : undefined;
+        if (computed) escapes.push({ line: lineOf(node), form: "computed name" });
+        else if (value === undefined) {
+          if (key !== "measured" || !forwarded(node))
+            escapes.push({ line: lineOf(node), form: "shorthand" });
+        } else if (
+          key === "main" ? ts.isObjectLiteralExpression(value) : ts.isNumericLiteral(value)
+        )
+          recorded.push(lineOf(node));
+        else escapes.push({ line: lineOf(node), form: ts.SyntaxKind[value.kind] });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return { recorded, escapes };
+}
 
 test("a core change lists every pinning suite; another change lists none, a suite's own change or its pins' file itself", () => {
   assert.deepEqual(
@@ -33,6 +105,16 @@ test("a core change lists every pinning suite; another change lists none, a suit
   assert.deepEqual(
     suitesFor(["tests/helpers/type-core/families/output-bound.ts"]).map((suite) => suite.file),
     [WORK_B],
+  );
+  assert.deepEqual(
+    suitesFor(["tests/helpers/type-core/families/admission-products.ts"]).map(
+      (suite) => suite.file,
+    ),
+    ["tests/type-core/type-core-work-a.test.ts", "tests/type-core/type-core-work-c.test.ts"],
+  );
+  assert.deepEqual(
+    suitesFor(["tests/helpers/type-core/families/property-names.ts"]).map((suite) => suite.file),
+    ["tests/type-core/type-core-work-c.test.ts"],
   );
   // (work-b's pins are in two files: either lists it, and both list it once, with each declaration's pins)
   assert.deepEqual(
@@ -83,6 +165,70 @@ test("the list is kept true: each file a pin form finds is declared, and each su
       pinFormsOf(readFileSync(join(ROOT, file), "utf8")).length > 0,
       `${file} holds no pin form: drop it from NOT_PINS`,
     );
+});
+
+test("every bound a family records is a line some declaration's pin finds in that file", () => {
+  const files = readdirSync(join(ROOT, FAMILIES), { recursive: true })
+    .filter((name) => name.endsWith(".ts"))
+    .map((name) => `${FAMILIES}${name}`);
+  assert.ok(files.includes(`${FAMILIES}w34-links.ts`), `${FAMILIES} is read`);
+  const failures = [];
+  const finding = new Set();
+  for (const file of files) {
+    const text = readFileSync(join(ROOT, file), "utf8");
+    const lines = text.split("\n");
+    const { recorded, escapes } = recordedBoundsOf(text);
+    for (const { line, form } of escapes)
+      failures.push(
+        `${file}:${line}: main or measured with a ${form} value, not a bound the net can read`,
+      );
+    for (const line of recorded) {
+      const declarations = PIN_SUITES.filter(
+        (suite) => suite.in === file && suite.pin.test(lines[line - 1]),
+      );
+      if (declarations.length === 0)
+        failures.push(
+          `${file}:${line} records a bound (${lines[line - 1].trim()}) no PIN_SUITES declaration with it as \`in\` finds (tools/repository-checks/pin-suites.mjs)`,
+        );
+      for (const suite of declarations) finding.add(suite);
+    }
+  }
+  assert.deepEqual(failures, []);
+  // (and each declaration of a family's file finds one of its recorded bounds)
+  assert.deepEqual(
+    PIN_SUITES.filter((suite) => suite.in?.startsWith(FAMILIES) && !finding.has(suite)).map(
+      (suite) => `${suite.file} (${suite.in}): its pin ${suite.pin} finds no recorded bound`,
+    ),
+    [],
+  );
+});
+
+test("a family's bounds are read from its syntax, and another value of main or measured is an escape", () => {
+  const text = [
+    "const a = { main: {",
+    "  16: [[1, 2, 3]],",
+    "} };",
+    "const b = { main: { total: 2.7, invSteps: 3.8 } };",
+    "const c = { measured: 3.37 };",
+    "const d = [{ n: 8, measured: 2.78 }].map(({ n, measured }) => ({ n, measured }));",
+    "// main: { total: 1 }, measured: 2",
+    "const e = main(`let r = {main: {f: 1}, measured: 2}`);",
+    'const f = { "measured": 3.1 };',
+    "const g = { measured: M, main: MAIN };",
+    "const h = { measured: 2 * x };",
+    "const i = (measured) => ({ measured });",
+    'const j = { ["measured"]: 3 };',
+  ].join("\n");
+  assert.deepEqual(recordedBoundsOf(text), {
+    recorded: [1, 4, 5, 6, 9],
+    escapes: [
+      { line: 10, form: "Identifier" },
+      { line: 10, form: "Identifier" },
+      { line: 11, form: "BinaryExpression" },
+      { line: 12, form: "shorthand" },
+      { line: 13, form: "computed name" },
+    ],
+  });
 });
 
 test("the three pin forms are found by their text, and a pin written another way is not", () => {

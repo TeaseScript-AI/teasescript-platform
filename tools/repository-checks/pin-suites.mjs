@@ -10,9 +10,10 @@ import { suiteTestFiles } from "../test-shards.mjs";
 // `PIN_SUITES` declares the suites, by hand: each one pins a whole-analysis count (a work total, a table of totals or
 // of `main`'s recorded work as bounds, a count of listed copy or construction sites) or a digest of what an analysis
 // publishes, so any change under `src/type-inference/core/` can move it, and the suite itself is listed when it or a
-// file holding its pins changes: a suite whose pins are in two files has a declaration for each, and is listed once. The changes are those since the merge-base of HEAD and `--base` (default
-// `origin/main`), committed or not, untracked files included, as `check-changed.mjs` reads them. A change to a test
-// helper lists only the suites whose pins it holds (`in`), not every suite that imports it.
+// file holding its pins changes: a suite whose pins are in two files has a declaration for each, and is listed once.
+// The changes are those since the merge-base of HEAD and `--base` (default `origin/main`), committed or not, untracked
+// files included, as `check-changed.mjs` reads them. A change to a test helper lists only the suites whose pins it holds
+// (`in`), not every suite that imports it.
 //
 // Without options it prints the pinning suites the changes reach, one `dist/tests/…` line each, or `none`; exit 0.
 // `--run` runs them through `tools/test-output-filter.mjs` (built tests are needed: `npm run build:typescript`); exit 1
@@ -23,7 +24,11 @@ import { suiteTestFiles } from "../test-shards.mjs";
 // four or more digits, a table of four or more such literals, and a `[count, "reason"]` record. A pin written another
 // way (`strictEqual`, `deepEqual` of a short tuple or an object, a total under four digits, a helper's table, a nested
 // table such as work-a's) is not found; that test is a net for a forgotten suite, and `NOT_PINS` declares the files it
-// finds that pin no work.
+// finds that pin no work. Under `tests/helpers/type-core/families/` it also requires every recorded bound to be a line
+// some declaration's `pin` finds in that file: a `main:` property whose value is an object literal (block or one line)
+// or a `measured:` property whose value is a number, read from the files' syntax, so a program's text or a comment is
+// not one. Any other value of those two properties fails, except `measured` passed on unchanged from a parameter's
+// destructured `measured`. A bound recorded under a third property name, or outside that folder, is not seen.
 
 /** The core, whose every file can move a pin. */
 const CORE = "src/type-inference/core/";
@@ -75,6 +80,12 @@ export const PIN_SUITES = [
     pin: /^\s*assert\.deepEqual\(measured, \[/u,
   },
   {
+    file: "tests/type-core/type-core-work-a.test.ts",
+    pins: "main's 64 → 128 growth step of the read chains and mixed-source adds, as gates",
+    pin: /\bmeasured: \d/u,
+    in: "tests/helpers/type-core/families/admission-products.ts",
+  },
+  {
     file: "tests/type-core/type-core-work-b.test.ts",
     pins: "main's work per family, as bounds",
     pin: /^\s*main: \{\s*$/u,
@@ -90,6 +101,18 @@ export const PIN_SUITES = [
     file: "tests/type-core/type-core-work-c.test.ts",
     pins: "main's work per shape, as bounds",
     pin: /^\s*(?:(?:shared|unshared): \{|setup: \[|"checks \d|\[\d{4,}(?:, \d{4,}){3}\])/u,
+  },
+  {
+    file: "tests/type-core/type-core-work-c.test.ts",
+    pins: "main's 64 → 128 growth step of admission's known products, as gates",
+    pin: /^\s*measured: \d/u,
+    in: "tests/helpers/type-core/families/admission-products.ts",
+  },
+  {
+    file: "tests/type-core/type-core-work-c.test.ts",
+    pins: "main's growth per doubling of the listing chains, as bounds",
+    pin: /^\s*main: \{ total: \d/u,
+    in: "tests/helpers/type-core/families/property-names.ts",
   },
   {
     file: "tests/type-core/type-core-contract.test.ts",
