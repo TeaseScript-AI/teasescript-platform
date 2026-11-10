@@ -56,7 +56,7 @@ function isViewRequest(value: unknown): value is DebugViewRequest {
 
 export function traceOps(context: PlayerOpsContext) {
   return {
-    // The Player's tracing intent through the connection's queue: on, as a new trace with no history, or off, dropping
+    // The Player's tracing intent, posted when the Player makes it: on, as a new trace with no history, or off, dropping
     // it with its history, unless a newer intent arrived first (`alignTrace`). A session takes the trace at its next
     // operation; the reply names the trace now (`traceId`), `null` without one.
     debugTracing: {

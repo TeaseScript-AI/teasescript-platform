@@ -29,6 +29,7 @@ import type { RuntimeDebugContext } from "../../../src/runtime/debug/debug-trace
 import { published } from "../debug-readers.js";
 import { loadPlayerModule } from "../player-modules.js";
 import { loadHostFacade, onHost } from "./host-sessions.js";
+import { interceptSends } from "../bridge/sends.js";
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import type * as ClientModule from "../../../player/engine-bridge/client.js";
 
@@ -488,18 +489,17 @@ export function holdRead(
   const arrived = new Promise<void>((resolve) => (reached = resolve));
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
-  const request = bridge.client.request.bind(bridge.client);
   let first = true;
-  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
-    if (args[0] !== op || !first) return request(...args);
+  interceptSends(context, bridge.client, (sent, _args, send) => {
+    if (sent !== op || !first) return send();
     first = false;
-    const settle = (answer: ReturnType<typeof request>) =>
+    const settle = (answer: ReturnType<typeof send>) =>
       rejects ? answer.then(() => Promise.reject(new Error("The read failed."))) : answer;
     if (hold === "request") {
       reached();
-      return gate.then(() => settle(request(...args)));
+      return gate.then(() => settle(send()));
     }
-    const answered = request(...args);
+    const answered = send();
     void answered.then(reached, reached);
     return gate.then(() => settle(answered));
   });

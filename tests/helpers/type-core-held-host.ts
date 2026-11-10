@@ -87,8 +87,8 @@ interface Holder {
 
 /**
  * The slice's refusal of an operand a stop left a warning at: a `get` default's key read, whose TSV043 warning in budget
- * context only a demand stop makes, refused by `outsideAnswers` (#2236; Codex r4 on #2227, `getDefault-1-say-plain` at
- * demand 19).
+ * context only a demand stop makes, refused by `outsideAnswers` with its coverage reason, without the limit marker
+ * (#2236; Codex r4 on #2227, `getDefault-1-say-plain` at demand 19).
  */
 const STOP_OPERAND = "this operand";
 

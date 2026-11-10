@@ -556,7 +556,7 @@ A module reproduces what its run passed to the compiler, at the run's arguments,
   experimental syntax), and with one whose origin meant a parse or name error;
 - without the data a driver read but its review did not write: the repository's type-core fixture
   (`tests/fixtures/type-core/cells.jsonl`, whose sources the recorded fixture runs share unchanged), its exported work
-  families (`tests/helpers/type-core/type-core-families.ts`), its paste family (`pasteCases` in `tests/helpers/type-core/type-core-paste.ts`),
+  families (`tests/helpers/type-core/families/`), its paste family (`pasteCases` in `tests/helpers/type-core/type-core-paste.ts`),
   the programs of its own test files (a review's gate runs of them, whose inputs those tests hold) and other runs' case
   files (the 3a budget check's), judged by where each input came from: a case file its own review wrote stays, and a
   program the driver derived from a fixture row or a paste case (a pasted fix) stays, even one equal to another row. The

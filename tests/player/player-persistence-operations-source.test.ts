@@ -347,6 +347,7 @@ const BRIDGE = {
 const CLIENT = {
   request: "host",
   section: "host",
+  post: "host",
   signal: "host",
   terminate: "refused",
   onLoss: "refused",

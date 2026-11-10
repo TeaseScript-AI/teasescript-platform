@@ -7,8 +7,8 @@ import {
 } from "../../../src/type-inference/core/definitions.js";
 import { ExactPath } from "../../../src/type-inference/core/exact-path.js";
 import type { FlowNode } from "../../../src/type-inference/core/flow-graph.js";
-import { GuardIndex } from "../../../src/type-inference/core/guards.js";
-import { HandlerIndex } from "../../../src/type-inference/core/handlers.js";
+import { GuardIndex } from "../../../src/type-inference/core/indexes/guards.js";
+import { HandlerIndex } from "../../../src/type-inference/core/indexes/handlers.js";
 import type { ContextWord, ItemTag } from "../../../src/type-inference/core/items.js";
 import {
   pathKey,

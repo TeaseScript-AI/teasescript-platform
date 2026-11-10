@@ -1044,7 +1044,10 @@ test("the activation family completed every feasible full tuple, and nothing els
  * The reaction ledger (HEAD 0 §4): each entry's settlement and effects, in order, against peers queued before and after
  * it (a microtask and a host reply). S2 changes no entry's reactions but the declared differences: the loss's stop
  * commits in the loss listener's own turn (it did a reaction after the lost signal's rejection), and Q1 B's same-lineage
- * reporters, whose plain order here is unchanged. With `ACTIVATION_LEDGER_OUT` set, the ledgers are written there as
+ * reporters, whose plain order here is unchanged. Since #2262 a request of no session posts when it is made, behind no
+ * earlier reply: the later peer's reply (`reply after`) comes before the effects of an entry's session work in `draw`,
+ * `export` and `mediaLoad`, an order the bridge does not promise; and a lost request rejects with no hop through the
+ * connection's queue, so `reply before lost` comes before the later microtask in `loss`. With `ACTIVATION_LEDGER_OUT` set, the ledgers are written there as
  * JSON, so that another head's run can be compared with this one's.
  */
 
@@ -1197,11 +1200,11 @@ const LEDGER: Readonly<Record<Entry, readonly string[]>> = {
     "microtask before",
     "microtask after",
     "reply before",
+    "reply after",
     "show waiting @0 [rolled]",
     "settled value",
-    "reply after",
   ],
-  export: ["microtask before", "microtask after", "reply before", "settled value", "reply after"],
+  export: ["microtask before", "microtask after", "reply before", "reply after", "settled value"],
   initialExport: [
     "microtask before",
     "microtask after",
@@ -1243,15 +1246,15 @@ const LEDGER: Readonly<Record<Entry, readonly string[]>> = {
     "microtask before",
     "microtask after",
     "reply before",
-    "show waiting @0 []",
     "reply after",
+    "show waiting @0 []",
     "show waiting @0 [rolled]",
   ],
   loss: [
     "error BridgeLostError",
     "microtask before",
-    "microtask after",
     "reply before lost",
+    "microtask after",
     "reply after lost",
   ],
 };
