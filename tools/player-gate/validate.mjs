@@ -63,14 +63,39 @@ function stateComplete(state, where) {
     throw new MissingEvidence(`${where}: a state with buttons, its controls' serial`);
 }
 
+/** The probe's lists whose records each ask for their frame when recorded (`probe.mjs` `frameAfter`). */
+const FRAMED = ["states", "changes", "rowChanges", "rows"];
+
 /**
- * One page's probe records as evidence: none dropped past the probe's limit (its lists would be cut short), its states
- * and its transactions complete.
+ * The frames of one page's records: `requestAnimationFrame` runs callbacks in the order they were requested, and the
+ * probe asks for each record's frame as it records it, so a record without its frame before a later record that has
+ * one is a frame lost, not one pending, and no evidence (Sol code r8, F7). Only the records after the last drawn one
+ * may still wait for theirs.
+ */
+function framesComplete(gate, page) {
+  const drawn = FRAMED.flatMap((list) =>
+    gate[list].filter((record) => nullable(record, "frame") !== null).map((record) => record.t),
+  );
+  if (drawn.length === 0) return;
+  const last = Math.max(...drawn);
+  for (const list of FRAMED)
+    gate[list].forEach((record, index) => {
+      if (nullable(record, "frame") === null && record.t < last)
+        throw new MissingEvidence(
+          `${page} page's ${list} ${index}: its frame, before a later record's`,
+        );
+    });
+}
+
+/**
+ * One page's probe records as evidence: none dropped past the probe's limit (its lists would be cut short), its states,
+ * frames and transactions complete.
  */
 function gateComplete(gate, page) {
   if (gate.dropped !== 0)
     throw new MissingEvidence(`${page} page: ${gate.dropped} probe records dropped`);
   gate.states.forEach((state, index) => stateComplete(state, `${page} page's state ${index}`));
+  framesComplete(gate, page);
   transactionsComplete(gate.transactions, `${page} page's`);
 }
 

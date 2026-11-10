@@ -386,6 +386,19 @@ const VARIANTS = {
     })(),
     failing: [],
   },
+  "a frame still pending after the last drawn record": {
+    row: (() => {
+      const base = clone(BASES["session chromium main"]);
+      base.result.probe.repeat.changes.push({ t: 2000 });
+      base.result.probe.repeat.states.push({
+        ...base.result.probe.repeat.states[2],
+        t: 2001,
+        frame: null,
+      });
+      return base;
+    })(),
+    failing: [],
+  },
   "a demo with an error: a measured failure": {
     row: row(
       "demo",
@@ -661,6 +674,15 @@ test("family (a): an optional leaf may be absent or null without a parse problem
       }
     }
 });
+
+/**
+ * `gate` with every frame from `t` on still pending: the probe has recorded those records, but no frame has run for
+ * them yet, which is a page's legitimate tail (`validate.mjs` `framesComplete`).
+ */
+function pendingFrom(gate, t) {
+  for (const list of ["states", "changes", "rowChanges", "rows"])
+    for (const record of gate[list]) if (record.t >= t) delete record.frame;
+}
 
 /**
  * Family (b): the order relations and evidence rules the validation checks, written here: each with the fixture it
@@ -939,7 +961,7 @@ const RELATIONS = [
   [
     "playable: Start enabled has no frame",
     "session chromium main",
-    (r) => (r.result.probe.cold.states[0].frame = null),
+    (r) => pendingFrom(r.result.probe.cold, 500),
     ["counts", "timing"],
     "cold playable: Start enabled has no frame",
   ],
@@ -947,7 +969,7 @@ const RELATIONS = [
     // Sol code r3's witness: A/A's own playable check, apart from the session's.
     "aa: Start enabled has no frame",
     "aa chromium full",
-    (r) => (r.result.probe.states[0].frame = null),
+    (r) => pendingFrom(r.result.probe, 500),
     ["timing"],
     "cold playable: Start enabled has no frame",
   ],
@@ -968,7 +990,7 @@ const RELATIONS = [
   [
     "playable: the first control has no frame",
     "session chromium main",
-    (r) => (r.result.probe.cold.states[1].frame = null),
+    (r) => pendingFrom(r.result.probe.cold, 700),
     ["counts", "timing"],
     "cold playable: the first control has no frame",
   ],
@@ -996,7 +1018,7 @@ const RELATIONS = [
   [
     "turn: no feedback frame",
     "session chromium main",
-    (r) => (r.result.probe.repeat.changes[0].frame = null),
+    (r) => pendingFrom(r.result.probe.repeat, 920),
     ["counts", "timing"],
     "turn 0: no feedback frame after the input",
   ],
@@ -1251,6 +1273,29 @@ const RELATIONS = [
       (r.result.probe.repeat.states[2] = { ...r.result.probe.repeat.states[2], control: null }),
     ["counts", "timing"],
     "the repeat page's state 2: a state with buttons, its controls' serial",
+  ],
+  // Sol code r8, F7: frames arrive in the order they were asked for, so a record without its frame before a later drawn
+  // one lost it; a settling candidate filtered out for it would report a later settlement.
+  [
+    "turn: a control state's frame lost before a later one (Sol code r8)",
+    "session chromium main",
+    (r) => (r.result.probe.repeat.states[2].frame = null),
+    ["counts", "timing"],
+    "the repeat page's states 2: its frame, before a later record's",
+  ],
+  [
+    "turn: a control state's frame deleted before a later one",
+    "session chromium main",
+    (r) => delete r.result.probe.repeat.states[2].frame,
+    ["counts", "timing"],
+    "the repeat page's states 2: its frame, before a later record's",
+  ],
+  [
+    "turn: a row update's frame lost before a later one (Sol code r8)",
+    "session chromium main",
+    (r) => Object.assign(r.result.probe.repeat.rowChanges[0], { t: 920, frame: null }),
+    ["counts", "timing"],
+    "the repeat page's rowChanges 0: its frame, before a later record's",
   ],
 ];
 
@@ -1773,6 +1818,16 @@ function absenceSites() {
  * permitted (Sol final r1, F1, and orchestrator 2's ruling).
  */
 const ABSENCE = {
+  'validate.mjs framesComplete nullable: gate[list].filter((record) => nullable(record, "frame") !== null).map((record) => record.t),':
+    { permitted: "the drawn records' times: an absent frame is the next site's to judge" },
+  'validate.mjs framesComplete nullable: if (nullable(record, "frame") === null && record.t < last)':
+    {
+      rows: [
+        "turn: a control state's frame lost before a later one (Sol code r8)",
+        "turn: a control state's frame deleted before a later one",
+        "turn: a row update's frame lost before a later one (Sol code r8)",
+      ],
+    },
   "validate.mjs validateSample read: const found = read(sample);": {
     permitted:
       "a field's reader (`NUMBERS`), no record read: an absent result fails a required field",
@@ -1787,8 +1842,12 @@ const ABSENCE = {
     rows: ["probe: a page's state with buttons without its controls' serial"],
   },
   'lib/measure.mjs turnSettlement read: read(state, "frame") !== null,': {
-    permitted:
-      "`requestAnimationFrame` callbacks run in the order they were requested, so a candidate without its frame beside a drawn later one cannot occur; one not yet drawn settles nothing",
+    // A frame lost before a later drawn record is refused first (`framesComplete`, F7); one still pending settles nothing.
+    rows: [
+      "turn: a control state's frame lost before a later one (Sol code r8)",
+      "turn: a control state's frame deleted before a later one",
+      "turn: a row update's frame lost before a later one (Sol code r8)",
+    ],
   },
   'lib/measure.mjs turnSettlement read: .map((state) => ({ by: "control", t: state.t, at: read(state, "frame") })),':
     { permitted: "the candidates were filtered to those holding the value just above" },
@@ -1802,8 +1861,12 @@ const ABSENCE = {
   'lib/measure.mjs turnSettlement read: const shown = row === undefined ? null : read(row, "shownFrame");':
     { permitted: "a row not yet shown before the input: its update settles nothing" },
   'lib/measure.mjs turnSettlement read: read(change, "frame") !== null': {
-    permitted:
-      "`requestAnimationFrame` callbacks run in the order they were requested, so a candidate without its frame beside a drawn later one cannot occur; one not yet drawn settles nothing",
+    // A frame lost before a later drawn record is refused first (`framesComplete`, F7); one still pending settles nothing.
+    rows: [
+      "turn: a control state's frame lost before a later one (Sol code r8)",
+      "turn: a control state's frame deleted before a later one",
+      "turn: a row update's frame lost before a later one (Sol code r8)",
+    ],
   },
   'lib/measure.mjs turnSettlement read: .map((change) => ({ by: "row update", t: change.t, at: read(change, "frame") })),':
     { permitted: "the candidates were filtered to those holding the value just above" },
