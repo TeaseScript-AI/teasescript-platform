@@ -48,7 +48,7 @@ test("over the matrix of destinations, value forms and stops, a stopped plan nev
           outcome.what,
           run.stop === "unsettled program stop",
           null,
-          / default$/u.test(run.cell.replace(/ \/ padded$/u, "")) ? [UNTYPED_DEFAULT] : [],
+          run.cell.replace(/ \/ padded$/u, "").endsWith(" default") ? [UNTYPED_DEFAULT] : [],
         ),
         null,
         where,
