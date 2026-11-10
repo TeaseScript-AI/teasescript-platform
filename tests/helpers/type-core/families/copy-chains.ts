@@ -1,3 +1,5 @@
+// The copy-chain families (`COPY_CHAIN_FAMILIES`, `COPY_CHAIN_SOURCES`), and beside them the index pay-rule probes
+// (`PAY_RULE_FAMILIES`, `DECISION_HOLDER_FAMILIES`).
 import { type WorkFamily, rows, lines, fields, main } from "./builders.js";
 
 /**
