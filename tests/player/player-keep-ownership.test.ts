@@ -1135,15 +1135,45 @@ async function ownershipRun(
     [],
     `the stale ${producer} made calls after the move`,
   );
-  // No page effect after the move but releasing its own importing mark, which shows what the mark held back.
+  // No page effect after the move but releasing its own importing mark, which shows what the mark held back, and the
+  // saved data's revision, which is no state of the page: it follows the store of the route shown
+  // (`persistence-ownership.ts`). The held call's completion moves it once where it changed that store, resolved, on the
+  // route the page still shows: after a re-prepare the same route; after a room change only on the captured route, whose
+  // switch waits for the call, so the route it leaves is still the one shown, while the plain route's switch does not
+  // wait and the call lands after it. The debug room's import of the script's own values bypasses the route shown. Nothing
+  // else of the stale operation moves it.
+  const landsOnShownRoute =
+    /^provider\.(write|replace|clear)$/.test(at.name) &&
+    heldCall.settled === "resolved" &&
+    variant.route !== "debug" &&
+    move !== "disposed" &&
+    (move !== "room" || (moveWaits && variant.route === "captured"));
+  let revisionMoves = 0;
   for (const change of log.changes.slice(changesAtMark).filter((made) => made.by === OPERATION)) {
-    const { importing: markFrom, activation: _from, ...restFrom } = change.from;
-    const { importing: markTo, activation: _to, ...restTo } = change.to;
+    const {
+      importing: markFrom,
+      activation: _from,
+      savedDataRevision: revisionFrom,
+      ...restFrom
+    } = change.from;
+    const {
+      importing: markTo,
+      activation: _to,
+      savedDataRevision: revisionTo,
+      ...restTo
+    } = change.to;
+    const moved = revisionTo - revisionFrom;
+    revisionMoves += moved;
     assert.ok(
-      markFrom && !markTo && JSON.stringify(restFrom) === JSON.stringify(restTo),
+      ((markFrom && !markTo) || moved === 1) && JSON.stringify(restFrom) === JSON.stringify(restTo),
       `the stale ${producer} changed the page: ${JSON.stringify(change)}`,
     );
   }
+  assert.equal(
+    revisionMoves,
+    landsOnShownRoute ? 1 : 0,
+    `the stale ${producer}'s moves of the saved data's revision`,
+  );
   // The page stays as the move left it, where the move did not wait for the operation.
   if (!moveWaits)
     assert.deepEqual(
@@ -1152,6 +1182,7 @@ async function ownershipRun(
         ...before,
         importing: false,
         activation: before.importing ? after.activation : before.activation,
+        savedDataRevision: before.savedDataRevision + revisionMoves,
       },
       `the page after the stale ${producer}`,
     );

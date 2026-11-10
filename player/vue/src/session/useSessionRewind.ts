@@ -51,8 +51,6 @@ interface SessionRewindHost {
   readonly beginning: () => Readonly<Ref<boolean>>;
   /** Debug storage edits under way, read when used. */
   readonly editsInFlight: () => Readonly<Ref<number>>;
-  /** The count of this Player's changes to the saved values, read when used. */
-  readonly savedDataRevision: () => Ref<number>;
 }
 
 export function useSessionRewind({
@@ -75,7 +73,6 @@ export function useSessionRewind({
   clearing,
   beginning,
   editsInFlight,
-  savedDataRevision,
 }: SessionRewindHost) {
   // Debug's rewind over the Player's lifetime, which outlives each Debug scope (DEBUGGER.md "Rewind"): one deciding
   // function (`player/debug/rewind-lifecycle.ts`) and the owner that applies what it decides.
@@ -240,7 +237,6 @@ export function useSessionRewind({
     }
     if (!written || !accepted) return false;
     notices().dismiss(playerNoticeKeys.rewindNotAdopted);
-    savedDataRevision().value++;
     clock().rebase();
     applyDebugMode();
     if (session.value !== null) adoptRandom(session.value);

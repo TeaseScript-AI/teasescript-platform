@@ -342,19 +342,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     capturedMediaPersistence,
     retireStaleOperations: () => retireStaleOperations(),
   });
-  const {
-    normalStorage,
-    room,
-    debugRoom,
-    operationStorage,
-    storageProvider,
-    switchStorage,
-    enterDebugRoom,
-    createDebugRoom,
-  } = route;
+  const { normalStorage, room, debugRoom, switchStorage, enterDebugRoom, createDebugRoom } = route;
+  // The saved values' entry points, and the note of a change that landed on the route shown (`handOverValues`).
+  const { storageProvider, operationStorage, whenLanded } = route.handOverValues();
   // The script's saved values: read, written, edited and cleared (`session/persistence/useSavedValues.ts`).
   const savedValues = useSavedValues({
-    storageProvider,
+    values: { storageProvider, whenLanded },
     capturedMedia,
     session,
     generation,
@@ -422,7 +415,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     clearing: () => clearing,
     beginning: () => beginning,
     editsInFlight: () => editsInFlight,
-    savedDataRevision: () => savedDataRevision,
   });
   const {
     rewindOwner,

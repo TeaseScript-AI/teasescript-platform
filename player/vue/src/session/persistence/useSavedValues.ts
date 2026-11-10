@@ -34,8 +34,14 @@ import type {
 
 /** What the saved values need from the Player's session composable. */
 interface SavedValuesHost {
-  /** The saved values in use, through the route (`useStorageRoute`). */
-  readonly storageProvider: ScriptStorageProvider | undefined;
+  /**
+   * What the route hands over once (`handOverValues`, `useStorageRoute.ts`): the page's own entry point to the saved
+   * values, and `whenLanded`, which takes the note of each change that landed on the route shown.
+   */
+  readonly values: {
+    readonly storageProvider: ScriptStorageProvider | undefined;
+    readonly whenLanded: (note: () => void) => void;
+  };
   readonly capturedMedia: CapturedMediaStore;
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly generation: Readonly<Ref<number>>;
@@ -56,7 +62,7 @@ interface SavedValuesHost {
 }
 
 export function useSavedValues({
-  storageProvider,
+  values: { storageProvider, whenLanded },
   capturedMedia,
   session,
   generation,
@@ -69,10 +75,19 @@ export function useSavedValues({
   activation,
   beginning,
 }: SavedValuesHost) {
-  // Every change this Player makes to the stored values goes through here, which keeps `storedEntries` equal to what the
-  // provider holds as far as this Player knows, such as for the debug room's offer to delete them; another tab's
-  // changes arrive with the next read. A failed change leaves them as they were; session-local values (`null`) stay
-  // session-local.
+  // This module's one job for the saved data's revision is to own it: it moves once for each change the route reports
+  // landed on the route shown (`whenLanded`, the route's one job), whether or not the work that issued the change still
+  // owns the page, and once for each fresh read (`applyScriptStorage`); a failed change, a change on a route no longer
+  // shown, and anything after the Player's unmount move nothing. Debug's Storage tab reads the saved values again at each
+  // move.
+  const savedDataRevision = ref(0);
+  whenLanded(() => {
+    if (!isDisposed()) savedDataRevision.value++;
+  });
+  // Every change the page itself makes to the stored values goes through here, which keeps `storedEntries` equal to what
+  // the provider holds as far as this Player knows, such as for the debug room's offer to delete them; a persistence
+  // operation's changes are read back at its commit (`applyScriptStorage`), and another tab's arrive with the next read.
+  // A failed change leaves them as they were; session-local values (`null`) stay session-local.
   const scriptStorage: ScriptStorageProvider | undefined = storageProvider && {
     scope: storageProvider.scope,
     load: () => storageProvider.load(),
@@ -99,8 +114,6 @@ export function useSavedValues({
   // The references in the stored values that the media store had stored when they were read: the stored files a Start
   // names, with those it holds since.
   let readStoredFiles: ReadonlySet<string> = new Set();
-  // Counts changes this Player made to the saved values: a stored save, a clear, an import, or a fresh read.
-  const savedDataRevision = ref(0);
   /**
    * Reads the stored values freshly; call it before the first `prepare`, so the start page knows them. Each Start reads
    * them again (`activate`).
@@ -271,7 +284,6 @@ export function useSavedValues({
       } catch {
         return failed("The change could not be saved in this browser. Nothing changed.");
       }
-      savedDataRevision.value++;
       // The edit is stored once. It reaches the session once no script write is pending there, also one that became
       // pending while the edit waited for its section or after it was posted (`storageWritePending`): then it waits
       // for that write and tries again.
@@ -339,7 +351,6 @@ export function useSavedValues({
     clearing.value = true;
     try {
       await scriptStorage.clear();
-      savedDataRevision.value++;
       // Debug's rewind could restore the saved data cleared now, so its history ends.
       retireRewind("clear");
       return true;
@@ -427,10 +438,7 @@ export function useSavedValues({
             if (pendingPlayerRuntimeStorageWrite(latest.state)?.actionId !== write!.actionId)
               return;
             if (!stored) notices().publish(playerNotices.storageWriteFailed());
-            else {
-              savedDataRevision.value++;
-              for (const stored of scriptWritesStored) stored.set(write!.key, write!.value);
-            }
+            else for (const stored of scriptWritesStored) stored.set(write!.key, write!.value);
             // The provider's write is made; the acknowledgement goes only to the session that still owns the UI, once.
             await inputSection("storageWriteDone", async (section) => {
               if (!section.owned() || generation.value !== sessionGeneration) return;

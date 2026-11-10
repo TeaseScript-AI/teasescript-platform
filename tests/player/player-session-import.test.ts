@@ -47,6 +47,7 @@ interface ImportHost {
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   readonly sessionInProgress: Readonly<Ref<boolean>>;
   readonly canImportSavedData: Readonly<Ref<boolean>>;
+  readonly savedDataRevision: Readonly<Ref<number>>;
   savedScripts(): Promise<readonly SavedScript[]>;
   reviewSavedDataImport(bundle: StorageBundle): Promise<ImportReview>;
   importSavedData(review: ImportReview, chosen: ReadonlySet<string>): Promise<void>;
@@ -279,11 +280,13 @@ test("a bundle imports each script into its own scope while a different script r
       [NEW, null, 4, 1, 0, false],
     ],
   );
+  const revision = host.savedDataRevision.value;
   await host.importSavedData(review, new Set([OTHER, NEW]));
 
-  // The shown script and its session are untouched.
+  // The shown script and its session are untouched, and Debug's Storage tab has nothing to read again.
   assert.equal(host.session.value?.state.status, "waiting");
   assert.deepEqual([...provider.entries], [["kept", 1]]);
+  assert.equal(host.savedDataRevision.value, revision, "the shown values' revision");
   // Each script holds the imported values, its photo stored in its own scope under a new reference.
   for (const scope of [OTHER, NEW]) {
     const saved = await values(other(scope));
