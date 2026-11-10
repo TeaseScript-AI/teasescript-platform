@@ -1,7 +1,7 @@
 // Whether the plan keeps an obligation's check at its store (#1526 decision 2): `keeps`, which the lost-check gate
 // (`runtime-plan.ts`) and the store contracts ask.
 import type { Expression } from "../../../ast.js";
-import { type TypeCheckPlan, type TypePlan } from "../../../plan/model.js";
+import { type PartCheckPlan, type TypeCheckPlan, type TypePlan } from "../../../plan/model.js";
 import type { RuntimeCheckSite, CoreRuntimeChecks } from "../../backend.js";
 import { type Answers } from "../answers.js";
 import { type ContractResult } from "../contract-descriptors.js";
@@ -32,13 +32,16 @@ export function keeps(
   core: CoreRuntimeChecks,
   warned: ReadonlySet<Store>,
 ): boolean {
-  // (#2080, NoCheck: a stopped mark whose completion result is complete, with no completed check at the stored value and
-  // no completion C1 warning at the store, owes no check there. Its one declared claim, #2184: the completion's C1 covers
-  // the natural C1's candidates and dependencies at the store. Whatever this cannot establish falls through: Required,
-  // kept only by a check that carries it, or Unresolved, a lost or absent result, declined)
+  // (#2080, NoCheck: a stopped mark whose completion result is complete, where the completion's own C1 ran at its path
+  // on this pass's completion and left no completed check at the stored value and no C1 warning at the store, owes no
+  // check there. What stays declared (#2184): that this completion pass, on the settled pass's A6 inputs, covers what
+  // the natural final pass checks there, and the decider's own level, which C1 passes over. Whatever this cannot
+  // establish falls through: Required, kept only by a check that carries it, or Unresolved, a lost or absent result,
+  // declined)
   if (
     obligation.slot.role === "stopped" &&
     result?.state === "complete" &&
+    answers.completionRan(obligation.place, obligation.path, obligation.epoch) &&
     !warned.has(store) &&
     !answers.completedCheck(
       index.site(unwrap(store.kind === "letStatement" ? store.initializer : store.value)),
@@ -87,7 +90,8 @@ export function keeps(
     return true;
   if (answers.completedCheck(index.site(value))) return false;
   // (the part checks at or below the obligation's path, at least one, each the contract's type there where it has one:
-  // a weaker one stands for nothing, #1645's whole object)
+  // a weaker one stands for nothing, #1645's whole object; and each level a part check passes over where it holds no
+  // object or collection is one the stored value itself builds as one, #2231: a part check skips a value that is not)
   const parts = (core.partChecks.get(store) ?? []).filter((part) => {
     const steps = part.path.map((step) => ("element" in step ? "[]" : step.property));
     return steps.length >= below.length && below.every((step, at) => steps[at] === step);
@@ -97,9 +101,38 @@ export function keeps(
     parts.every((part) => {
       const steps = part.path.map((step) => ("element" in step ? "[]" : step.property));
       const at = typeAt(contract.ref, steps.slice(below.length));
-      return at === null || JSON.stringify(part.type) === JSON.stringify(at);
+      return (
+        (at === null || JSON.stringify(part.type) === JSON.stringify(at)) &&
+        builtContainers(value, part.path)
+      );
     })
   );
+}
+
+/**
+ * Whether the stored expression itself builds every level a part check at `path` passes over (#2231): from the stored
+ * value to the part's parent, an object literal holding the next property, or a list literal each of whose elements
+ * does. A part check passes a value that is no object or collection at such a level, so a keep by part checks rests on
+ * the value's own source there, never on a kind the analysis reports for it.
+ */
+export function builtContainers(value: Expression, path: PartCheckPlan["path"]): boolean {
+  let nodes: readonly Expression[] = [value];
+  for (const step of path.slice(0, -1)) {
+    const next: Expression[] = [];
+    for (const node of nodes.map(unwrap)) {
+      if ("element" in step) {
+        if (node.kind !== "listLiteral") return false;
+        next.push(...node.elements);
+      } else {
+        if (node.kind !== "objectLiteral") return false;
+        const property = node.properties.find((each) => each.name.name === step.property);
+        if (property === undefined) return false;
+        next.push(property.value);
+      }
+    }
+    nodes = next;
+  }
+  return true;
 }
 
 /** The type a typed parse or load reads its value as (F18), `undefined` for any other value. */
