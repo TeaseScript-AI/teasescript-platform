@@ -300,14 +300,16 @@ export function literalElements(
     >();
     // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
     // number fits a written integer, a fraction does not), an earliest element's by their family; an element its written
-    // type decides (`laterKinds`) offends where none of that type's kinds fits, as the earliest's decides it (#1906)
+    // type decides (`laterKinds`) offends where none of that type's kinds fits, as the earliest's decides it, and a
+    // number it gives fits a written whole number, as in an inferred literal (ADR 0021 rule 1.3; #1906, F4 of #2267's
+    // final review)
     const offends = (at: string, tags: readonly ItemTag[], written = false): boolean => {
       const decided = first.get(at)!;
       const families = [...new Set(tags.map(family))];
       return (
         (written ? families.length > 0 : families.length === 1) &&
         (decided.written ? tags : families).every(
-          (tag) => !decided.tags.some((ref) => fits(tag, ref, decided.written)),
+          (tag) => !decided.tags.some((ref) => fits(tag, ref, decided.written && !written)),
         )
       );
     };
@@ -335,7 +337,7 @@ export function literalElements(
         layersAt(admission, of.value!, of.node, path, depths);
       const earliest = first.get(at)!;
       earliest.layers ??= layers(earliest.d);
-      // (#1790: the later element's kinds its own, as on main, with the null it may hold at the leaf by #1765's rule, read
+      // (#1790: the later element's compared kinds, with the null it may hold at the leaf by #1765's rule, read
       // by the same walk one depth more: a value at its own level as it is read at its node (a narrowed copy holds none,
       // a typed host value may), a copy below its own level by its term, an `otherwise`'s fallback only where its
       // operand may be null. Codex r1–r4, Astra r1 on #1819; the null decides nothing, #1753)

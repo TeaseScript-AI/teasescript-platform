@@ -535,6 +535,11 @@ test("a later element without a definite kind is compared by its decider's writt
     `${host("number")}let xs = [1, atom]\nexit\n`,
     `${host("integer")}let xs = [1, atom]\nexit\n`,
     `${host("integer | string")}let xs = [1, atom]\nexit\n`,
+    // (a number a written decider gives beside a written whole number, in either order and below the root: the literal's
+    // one element type is a number, ADR 0021 rule 1.3; F4 of #2267's final review)
+    ...orders(`let a: integer = 1\n${host("number")}`, "a", "atom"),
+    ...orders(`let a: integer = 1\n${host("number?")}`, "{v: a}", "{v: atom}"),
+    ...orders(`let a: integer = 1\n${host("number")}`, "[a]", "[atom]"),
     "let xs = [1, hostValue]\nexit\n",
     'let t: integer? = null\nlet root = {g: t}\nlet copy = root\nlet xs = [{g: "text"}, copy]\nexit\n',
   ];
