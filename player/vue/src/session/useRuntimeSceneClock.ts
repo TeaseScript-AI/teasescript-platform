@@ -433,15 +433,10 @@ export function useRuntimeSceneClock(
   return {
     timers,
     observe,
-    requestObservation,
     before,
     section,
     catchUp,
     rebase,
-    /** Where scene time stands for `current` now: what an observation of it reports. */
-    sceneTimeMs,
-    /** Drops a catch-up under way, before an observation that covers its time. */
-    cancel,
     /** The display estimate of scene time; it refreshes only while something presented needs it. */
     displayTimeMs: computed(() => displayTimeMs.value),
     refreshWhile,
