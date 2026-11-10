@@ -1082,8 +1082,8 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
   }
   // (compiled no-plan stops that still publish, settled, from the census of #2080 part 2: a store moved to a check against
   // `unknown` that every run fails, unwitnessed, and open with its checks dropped; two errors, each read at its own site;
-  // C5c's absent property read at the store, `s8b-r3-astra-cases.mjs/case/storenull`; and #2183's typed read, open as
-  // compiled, a witness until #2183 lands)
+  // C5c's absent property read at the store, `s8b-r3-astra-cases.mjs/case/storenull`; and the typed read #2183 names,
+  // open as compiled)
   const corpus = (
     source: string,
     mode: (typeof HELD_MODES)[number],
