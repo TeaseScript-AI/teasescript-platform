@@ -25,14 +25,15 @@ import { suiteTestFiles } from "../test-shards.mjs";
 // way (`strictEqual`, `deepEqual` of a short tuple or an object, a total under four digits, a helper's table, a nested
 // table such as work-a's) is not found; that test is a net for a forgotten suite, and `NOT_PINS` declares the files it
 // finds that pin no work. Under `tests/helpers/type-core/families/` it also requires every recorded bound to be a line
-// some declaration's `pin` finds in that file, and claims a position, not a meaning: neither `main` nor `measured`
-// occurs there outside the admitted syntactic positions. Every identifier, private name, string and template without
-// substitutions spelled so is classified by its role; admitted are `main: <object literal>` and `measured: <numeric
-// literal>` (the two records), a property signature, and the identifier `main` as a declared, imported or exported
-// binding or as a callee (the program builder). Any other occurrence fails, naming its file, line and role, and so
-// does every object spread and every computed name that is not a literal. Not claimed: a bound recorded under a third
-// property name, a bound outside that folder, and a bound changed at run time by code that names neither property (a
-// key built at run time, a write through an alias).
+// some declaration's `pin` finds in that file, and claims a position, not a meaning: in the code of that folder, neither
+// `main` nor `measured` occurs outside the admitted positions. Comments, JSDoc included, are not code and are not read:
+// they cannot record or change a bound. The code is every node `forEachChild` reaches from a file's source; every
+// identifier, private name, string and template without substitutions spelled so is classified by its role. Admitted
+// are `main: <object literal>` and `measured: <numeric literal>` (the two records), a property signature, and the
+// identifier `main` as a declared, imported or exported binding or as a callee (the program builder). Any other
+// occurrence fails, naming its file, line and role, and so does every object spread and every computed name that is
+// not a literal. Not claimed: a bound recorded under a third property name, a bound outside that folder, and a bound
+// changed at run time by code that names neither property (a key built at run time, a write through an alias).
 
 /** The core, whose every file can move a pin. */
 const CORE = "src/type-inference/core/";

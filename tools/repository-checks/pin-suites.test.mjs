@@ -75,8 +75,8 @@ const ADMITTED = [
 /**
  * The bounds a family module's `text` records, by line, and every occurrence of `main` or `measured` outside the
  * `ADMITTED` positions (`escapes`, each with its name and syntactic role). Every identifier, private name, string and
- * template without substitutions spelled so is classified, and so is every object spread and every computed name that
- * is not a literal: each is an escape.
+ * template without substitutions spelled so in the code (each node `forEachChild` reaches; comments are not read) is
+ * classified; every object spread and every computed name that is not a literal is an escape.
  */
 function recordedBoundsOf(text) {
   const source = ts.createSourceFile("family.ts", text, ts.ScriptTarget.Latest, true);
@@ -267,6 +267,11 @@ test("main and measured occur in a family only at an admitted position; any othe
     "const { measured: x } = p;",
     "class S { main = 1; #measured = 2 }",
     "const y = { main };",
+    "const measured = 1;",
+    'import { measured } from "./x.js";',
+    "measured();",
+    "f(main);",
+    "const x = main;",
   ].join("\n");
   assert.deepEqual(recordedBoundsOf(text), {
     recorded: [1, 4, 5, 6, 19],
@@ -300,6 +305,12 @@ test("main and measured occur in a family only at an admitted position; any othe
       { line: 29, form: "main: an identifier in PropertyDeclaration" },
       { line: 29, form: "measured: a private name in PropertyDeclaration" },
       { line: 30, form: "main: an identifier in ShorthandPropertyAssignment" },
+      // (the binding and callee positions are main's, by name and role: not measured's, not an argument or a value)
+      { line: 31, form: "measured: an identifier in VariableDeclaration" },
+      { line: 32, form: "measured: an identifier in ImportSpecifier" },
+      { line: 33, form: "measured: an identifier in CallExpression" },
+      { line: 34, form: "main: an identifier in CallExpression" },
+      { line: 35, form: "main: an identifier in VariableDeclaration" },
     ],
   });
 });
