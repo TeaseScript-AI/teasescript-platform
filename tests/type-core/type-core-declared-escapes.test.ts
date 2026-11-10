@@ -3,8 +3,13 @@ import test from "node:test";
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
 import { run } from "../../src/runtime/engine.js";
+import {
+  createSerializableList,
+  createSerializableObject,
+  type SerializableRuntimeValue,
+} from "../../src/runtime/values/serializable-values.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
 import type { Item } from "../../src/type-inference/core/items.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
@@ -39,6 +44,11 @@ import { hostValues } from "../helpers/type-core-stop-oracle.js";
 //   runs digests are raw, no longer with properties sorted and the named property masked (ruling 12 (5)). Every edge's
 //   stop state, `typeCheck` count, stopped decisions and answers, every window and the natural answers equal the record
 //   at efbd7fdee, made before #2203's gate.
+// Inside a window a stopped compile of either tree may differ from the other's in anything two stopped compiles of main
+// differ in between two allowances (ruling 18): a check's order and form, and whether the gate refuses the program. For
+// two first-asker sources (#2218's class) the second test holds the head to what holds there on both trees: each tree
+// publishes or refuses for its limit, and where both publish the runs agree in outcome, code and span and pass nothing
+// the natural run rejects. `FIRST_ASKER_MAIN` is main's side for it, recorded at 5a1461a1c (`probe42.mjs`).
 
 /**
  * Codex round 7's reachable sources and Sol round 10's two-copy form (#2116): a place holding `count` settled whole
@@ -854,5 +864,204 @@ test("#2116's declared difference under #2080: at every recorded window's edges 
         }
       }
     });
+  }
+});
+
+/**
+ * Sol re-check 3's first-asker source on #2116 (#2218's class) and a variant of it whose last store holds the host value
+ * one level down, which between them show inside a window what two stopped compiles of main show between two of its
+ * allowances: another order and form of a store's check, and a program refused on one tree and compiled on the other.
+ */
+const firstAsker = (last: string) =>
+  [
+    "let value:integer=1",
+    "let u={f1:{n:value}}",
+    'u={g:"s"}',
+    "let root={f0:{n:{a:value,b:value}}}",
+    ...Array.from({ length: 8 }, (_, i) => `root={f${i + 1}:{n:{a:value,b:value}}}`),
+    "if hostOther is integer {",
+    ...Array.from({ length: 18 }, (_, i) => `let r${i}=root.f${i % 9}.n.a`),
+    "root.f1={n:{a:hostValue,b:hostValue}}",
+    "}",
+    last,
+    'say "accepted"',
+    "exit",
+  ].join("\n");
+const FIRST_ASKER_SOURCES: Readonly<Record<string, string>> = {
+  "first-asker-field-9": firstAsker("root.f1={n:{b:hostValue,a:hostValue}}"),
+  "first-asker-field-9-n-host": firstAsker("root.f1={n:hostValue}"),
+};
+
+/** A host value as JSON writes it. */
+type Json = number | string | null | readonly Json[] | { readonly [name: string]: Json };
+
+/** The host values the first-asker sources run with: a non-object at each level of `root.f1`, and leaves that do not fit. */
+const FIRST_ASKER_HOSTS: readonly Json[] = [
+  1,
+  "s",
+  null,
+  [1],
+  {},
+  { n: 1 },
+  { n: null },
+  { n: [1] },
+  { n: {} },
+  { n: { a: "s", b: 1 } },
+  { n: { a: 1, b: "s" } },
+  { n: { a: 1, b: 1 } },
+  "bad",
+];
+
+/**
+ * The reason a settled stop's compile is refused for, its limit (#2203's gate), by its text: main marks no refusal as a
+ * limit's yet, and #2227 is the marker's issue.
+ */
+const LIMIT = "a store whose check was lost at the budget";
+
+/**
+ * Main's side of the first-asker sources, held mode 2: the natural plan's runs and, at each allowance from 298 to 303
+ * where both trees settle, whether main publishes, with its runs, or refuses, with its reason. Each run is its outcome,
+ * code and span (`status code start:end`), over `FIRST_ASKER_HOSTS`. Recorded at 5a1461a1c by lane 2b's recorder
+ * (`probe42.mjs` in #2116's evidence); it is re-recorded as the file header says.
+ */
+const FIRST_ASKER_MAIN: Readonly<
+  Record<
+    string,
+    {
+      readonly natural: string;
+      readonly at: Readonly<Record<number, readonly ["published" | "refused", string]>>;
+    }
+  >
+> = {
+  "first-asker-field-9": {
+    natural:
+      "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+    at: {
+      299: [
+        "published",
+        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      ],
+      300: [
+        "published",
+        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      ],
+      301: [
+        "published",
+        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      ],
+      302: [
+        "published",
+        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      ],
+      303: [
+        "published",
+        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      ],
+    },
+  },
+  "first-asker-field-9-n-host": {
+    natural:
+      "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780",
+    at: {
+      299: [
+        "published",
+        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780",
+      ],
+      300: [
+        "published",
+        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780",
+      ],
+      301: [
+        "published",
+        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780",
+      ],
+      302: [
+        "published",
+        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780",
+      ],
+      303: [
+        "published",
+        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780",
+      ],
+    },
+  },
+};
+
+/** A host value as the runtime holds it. */
+function serial(value: Json): SerializableRuntimeValue {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return createSerializableList(value.map(serial));
+  return createSerializableObject(
+    Object.entries(value).map(([name, field]) => ({ name, value: serial(field) })),
+  );
+}
+
+/** A plan's runs over `FIRST_ASKER_HOSTS`, each as its outcome, code and span. */
+const firstAskerRuns = (plan: InstructionPlan): string[] =>
+  FIRST_ASKER_HOSTS.map((hostValue) => {
+    const globals = { hostValue: serial(hostValue), hostOther: false };
+    const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals }));
+    const failure = result.events.find((event) => event.kind === "runtimeFailure");
+    return failure?.kind === "runtimeFailure"
+      ? `${result.snapshot.status} ${failure.code} ${failure.span.start.offset}:${failure.span.end.offset}`
+      : result.snapshot.status;
+  });
+
+test("#2116's declared difference inside a window, first-asker sources: each tree publishes or refuses for its limit, and where both publish the runs agree in outcome, code and span and pass nothing the natural run rejects (rulings 18 and 19)", () => {
+  assert.deepEqual(Object.keys(FIRST_ASKER_MAIN).sort(), Object.keys(FIRST_ASKER_SOURCES).sort());
+  const held = HELD_MODES[2]!;
+  for (const [label, source] of Object.entries(FIRST_ASKER_SOURCES)) {
+    const files = [{ path: "main.tease", source }];
+    const main = FIRST_ASKER_MAIN[label]!;
+    const compiled = (demand: number | null): InstructionPlan | string => {
+      try {
+        const { plan } = held.run(() =>
+          demand === null
+            ? compileProjectWithBackend(files, { globals: GLOBALS }, CORE_BACKEND)
+            : withTestDemandAllowance(demand, () =>
+                compileProjectWithBackend(files, { globals: GLOBALS }, CORE_BACKEND),
+              ),
+        );
+        assert.ok(plan !== null, `${label} at ${demand}: a plan`);
+        return plan;
+      } catch (error) {
+        if (!(error instanceof CandidateOutsideSlice)) throw error;
+        return error.message;
+      }
+    };
+    const natural = compiled(null);
+    assert.ok(typeof natural !== "string", `${label}: the natural compile publishes`);
+    const naturalRuns = firstAskerRuns(natural);
+    assert.equal(naturalRuns.join("; "), main.natural, `${label}: the natural runs`);
+    for (const [at, [mainState, mainSide]] of Object.entries(main.at)) {
+      const demand = Number(at);
+      const name = `${label} ${held.name} at ${demand}`;
+      assert.equal(
+        held.run(() =>
+          withTestDemandAllowance(demand, () => analyseCore(coreRequest(files, GLOBALS)!)),
+        ).budget.settled,
+        true,
+        `${name}: settled`,
+      );
+      const head = compiled(demand);
+      // (each tree publishes, or refuses for its limit)
+      if (mainState === "refused")
+        assert.ok(mainSide.includes(LIMIT), `${name}: main refused for another reason`);
+      if (typeof head === "string") {
+        assert.ok(head.includes(LIMIT), `${name}: the head refused for another reason`);
+        continue;
+      }
+      const runs = firstAskerRuns(head);
+      // (a published plan passes nothing the natural run rejects)
+      runs.forEach((ran, host) => {
+        if (naturalRuns[host]!.startsWith("failed"))
+          assert.ok(
+            ran.startsWith("failed"),
+            `${name}: host ${host} passes a value the natural run rejects`,
+          );
+      });
+      if (mainState === "published")
+        assert.equal(runs.join("; "), mainSide, `${name}: the runs' outcome, code and span`);
+    }
   }
 });
