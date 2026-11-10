@@ -4,7 +4,7 @@ import { watch, type Ref } from "vue";
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type { SerializableRuntimeValue } from "../../src/index.js";
-import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
+import { coverageGaps, type Coordinates } from "../helpers/family-coverage.js";
 import {
   ASKS,
   ASKS_OTHER,
@@ -148,8 +148,7 @@ async function adoption(context: TestContext, outcome: Outcome): Promise<RowReco
   if (outcome === "failed") storage.failNextReplace();
   const made = createHost(context, ordered(storage.provider), { lossy: outcome === "loss" });
   const { host, rewind } = made;
-  // EVIDENCE: fixture: the composable returns its revision and its fresh read; `RewindHost` does not name them.
-  const revisioned = host as unknown as Parameters<typeof storageTab>[1];
+  const revisioned = host;
   await start(context, host);
   await choose(context, host, "One");
   await choose(context, host, "Red");
@@ -185,8 +184,7 @@ async function adoption(context: TestContext, outcome: Outcome): Promise<RowReco
 async function scriptWrite(context: TestContext, outcome: Outcome): Promise<RowRecord> {
   const storage = memoryStorage();
   const { host } = createHost(context, ordered(storage.provider));
-  // EVIDENCE: fixture: as in `adoption`.
-  const revisioned = host as unknown as Parameters<typeof storageTab>[1];
+  const revisioned = host;
   await start(context, host);
   const tab = storageTab(context, revisioned);
   await tab.read();
@@ -262,14 +260,14 @@ async function importing(
   return { tab: tab.shown(), stored: store.saved(), moves: host.savedDataRevision.value - from };
 }
 
-const AXES = { member: Object.keys(MEMBERS), outcome: [...new Set(Object.values(MEMBERS).flat())] };
-const FEASIBLE = product(AXES).filter(({ member, outcome }) =>
-  (MEMBERS[member as Member] as readonly string[]).includes(outcome as string),
+// Each member with each of its outcomes, from the declaration above.
+const FEASIBLE: Coordinates[] = Object.entries(MEMBERS).flatMap(([member, outcomes]) =>
+  outcomes.map((outcome) => ({ member, outcome })),
 );
 
 const completed: Coordinates[] = [];
 for (const coordinates of FEASIBLE) {
-  // EVIDENCE: invariant: `product` gives the declared axes' values.
+  // EVIDENCE: invariant: `FEASIBLE` holds `MEMBERS`' keys and their own outcomes.
   const { member, outcome } = coordinates as { member: Member; outcome: Outcome };
   test(`the saved data's revision: ${member}, ${outcome}`, async (context) => {
     const record =

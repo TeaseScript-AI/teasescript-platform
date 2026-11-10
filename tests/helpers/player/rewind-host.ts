@@ -96,6 +96,11 @@ export interface RewindHost {
     expected: SerializableRuntimeValue | undefined;
   }): Promise<{ readonly kind: string }>;
   observe(): Promise<PlayerRuntimeSession | null>;
+  /** Moves once a change to the shown route's saved values landed, and at each fresh read (`useSavedValues.ts`). */
+  readonly savedDataRevision: Readonly<Ref<number>>;
+  readSavedData(): Promise<
+    readonly { readonly key: string; readonly value: SerializableRuntimeValue }[]
+  >;
   demandCallView(): { release(): void };
   debugRecording(): Promise<{
     readonly anchorSnapshot: RuntimeSnapshot;
