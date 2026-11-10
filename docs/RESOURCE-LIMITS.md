@@ -287,13 +287,15 @@ changed warning or wording applies to the same change, the entry is its report:
 - **(e) declines some defaults the natural plan does not check (#2183).** A settled stop leaves a fallback's requirement
   `unknown` wherever the receiving value's kinds were the stop's, also where the natural plan makes no `fallbackCheck`,
   so (e) refuses there too. A maker would notice, for a script too large for its budget, a refusal where the script that
-  fits compiles; no natural compile is refused (0 over 260,684 natural compiles of the corpus and the families, four
-  modes, 40 settled stops among them). Measured: over #2080's 6,379 moved stops, 24 published settled settings move from
-  equal plans (`closed`) to declined, 6 sources with an object-literal default in four modes. Over #2183's sweep (510
-  sources built for fallbacks, 21,410 settings, main c42d6a6c5), 1,471 published settled settings with no natural
-  `fallbackCheck` decline: 303 `closed`, the false declines; 1,152 `unwitnessed`; 16 `open`, #2245's witness, an escape
-  (e) stops. A literal default is not excepted: one that does not fit is a natural compile error, and at the stop the
-  receiver's requirement is gone.
+  fits compiles. None of the 260,684 sampled natural compiles (the corpus and the families, four modes, 40 settled stops
+  among them) is refused under (e). A read 1,030 wrappers deep that ends in a `get` default (20,514 bytes) is refused
+  naturally, at the read depth after admission settled, in all four modes; before (e) it published with `TSV076` and
+  ran an unchecked default (PR #2257's final review). Measured: over #2080's 6,379 moved stops, 24 published settled
+  settings move from equal plans (`closed`) to declined, 6 sources with an object-literal default in four modes. Over
+  #2183's sweep (510 sources built for fallbacks, 21,410 settings, main c42d6a6c5), 1,471 published settled settings
+  with no natural `fallbackCheck` decline: 303 `closed`, the false declines; 1,152 `unwitnessed`; 16 `open`, #2245's
+  witness, an escape (e) stops. A literal default is not excepted: one that does not fit is a natural compile error, and
+  at the stop the receiver's requirement is gone.
 
 How a repair of the type core's work is accepted against `main` (its growth gate) is a testing rule:
 [Scaling diagnostics](TESTING.md#scaling-diagnostics).
