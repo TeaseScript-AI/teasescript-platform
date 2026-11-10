@@ -68,6 +68,16 @@ export async function senderRows(
   // @ts-expect-error -- `release` is a request.
   await client.signal("release", null, "s1");
 
+  // `BridgeClient.post` sends the history controls alone (`HISTORY_CONTROL_OPS`).
+  const posted = client.post("historyTimeline", { history: 1 });
+  if (posted.posted) await posted.reply;
+  // @ts-expect-error -- `selectChoice` is an input, no history control.
+  client.post("selectChoice", { optionId: "o1" });
+  // @ts-expect-error -- `halt` is sent ahead of the queue (`signal`), not in arrival order.
+  client.post("halt", null);
+  // @ts-expect-error -- `historyTimeline` takes a history serial.
+  client.post("historyTimeline", { history: "1" });
+
   // A client section's send (`SectionSend`).
   const sent: TimeObservationOutcome = (await send("observeTime", observed, 0)).result;
   // @ts-expect-error -- no op of that name.

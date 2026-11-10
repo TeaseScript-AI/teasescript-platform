@@ -18,6 +18,7 @@ import {
   type LifecycleCase,
 } from "../helpers/player/rewind-lifecycle.js";
 import { hostTrace } from "../helpers/player/host-sessions.js";
+import { interceptSends } from "../helpers/bridge/sends.js";
 import {
   selectPlayerRuntimeChoice,
   playerRuntimeSnapshot,
@@ -115,14 +116,10 @@ async function handoffRow(
     const candidates: string[] = [];
     let captures = 0;
     const replaces = () => storage?.calls.filter((call) => call === "replace").length ?? 0;
-    const request = bridge.client.request.bind(bridge.client);
-    context.mock.method(bridge.client, "request", async (...args: Parameters<typeof request>) => {
-      if (args[0] === "captureStorage") captures += 1;
-      const reply = await request(...args);
-      if (
-        (args[0] === "rewindBack" || args[0] === "rewindForward") &&
-        typeof reply.session === "string"
-      )
+    interceptSends(context, bridge.client, async (op, _args, send) => {
+      if (op === "captureStorage") captures += 1;
+      const reply = await send();
+      if ((op === "rewindBack" || op === "rewindForward") && typeof reply.session === "string")
         candidates.push(reply.session);
       return reply;
     });
@@ -660,11 +657,9 @@ test("Sol r2 B3: a step whose restart gate rejects drops its candidate, and the 
   await choose(context, host, "One");
   const bridge = await host.bridge;
   const candidates: string[] = [];
-  const request = bridge.client.request.bind(bridge.client);
-  context.mock.method(bridge.client, "request", async (...args: Parameters<typeof request>) => {
-    const reply = await request(...args);
-    if (args[0] === "rewindBack" && typeof reply.session === "string")
-      candidates.push(reply.session);
+  interceptSends(context, bridge.client, async (op, _args, send) => {
+    const reply = await send();
+    if (op === "rewindBack" && typeof reply.session === "string") candidates.push(reply.session);
     return reply;
   });
   const original = host.rewind.beforeRestart.bind(host.rewind);
@@ -702,12 +697,9 @@ test("Sol r2 B5: a clear's close that fails on a live connection is reported, an
   assert.equal(host.session.value?.state.status, "halted");
   const bridge = await host.bridge;
   const sent: string[] = [];
-  const request = bridge.client.request.bind(bridge.client);
-  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
-    if (typeof args[0] === "string" && args[0].startsWith("history")) sent.push(args[0]);
-    return args[0] === "historyClose"
-      ? Promise.reject(new Error("A host failure."))
-      : request(...args);
+  interceptSends(context, bridge.client, (op, _args, send) => {
+    if (op.startsWith("history")) sent.push(op);
+    return op === "historyClose" ? Promise.reject(new Error("A host failure.")) : send();
   });
   const reported: unknown[] = [];
   reportsInto(context, reported);

@@ -3,6 +3,7 @@ import {
   BridgeRequestError,
   type BridgeClient,
   type BridgeResult,
+  type HistoryControlOp,
   type ReplyHook,
   type SectionSend,
 } from "../engine-bridge/client.js";
@@ -359,7 +360,7 @@ export class PlayerBridge {
    * sessions an earlier history released with its close are forgotten here.
    */
   async historyOpen(intent: number): Promise<HistoryOpened> {
-    const reply = await this.#client.request("historyOpen", { intent });
+    const reply = await this.#control("historyOpen", { intent });
     const opened = reply.result;
     if (opened.kind === "opened") this.#forget(opened.released);
     return opened;
@@ -367,7 +368,7 @@ export class PlayerBridge {
 
   /** The whole timeline of history `history` (`historyTimeline`), or `null` once it closed. */
   async historyTimeline(history: number): Promise<HistoryTimeline | null> {
-    const reply = await this.#client.request("historyTimeline", { history });
+    const reply = await this.#control("historyTimeline", { history });
     return reply.result;
   }
 
@@ -383,7 +384,7 @@ export class PlayerBridge {
     args: unknown,
   ): Promise<{ readonly result: HistoryOpResult; readonly restored: PlayerSession | null }> {
     // EVIDENCE: invariant: the erased overload's body; the overload above pairs `op` with its arguments.
-    const reply = await this.#client.request<HistoryStepOp>(op as never, args as never);
+    const reply = await this.#control<HistoryStepOp>(op as never, args as never);
     // EVIDENCE: validation: the history ops reply from the same build with a `HistoryOpResult`.
     const result = reply.result as HistoryOpResult;
     if (result.kind === "done") this.#forget(result.released);
@@ -393,6 +394,18 @@ export class PlayerBridge {
     // EVIDENCE: validation: a step that restored a session replies with its introduction.
     const introduction = reply.view as Introduction;
     return { result, restored: this.open(session, introduction) };
+  }
+
+  /**
+   * Posts history control `op` now (`BridgeClient.post`), in the turn its caller decided it: the host runs the history
+   * controls in the order the Player decided them, behind no unrelated request's reply. One that was not posted rejects
+   * with its reason.
+   */
+  #control<O extends HistoryControlOp>(
+    ...call: O extends unknown ? [op: O, args: OpArgs<O>] : never
+  ): Promise<BridgeResult<OpResult<O>>> {
+    const sent = this.#client.post(...call);
+    return sent.posted ? sent.reply : Promise.reject(sent.error);
   }
 
   /** Forgets the stores of the sessions `ids`, which the host released itself. */

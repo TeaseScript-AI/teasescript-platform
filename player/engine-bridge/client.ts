@@ -69,6 +69,30 @@ export type SectionSend = <O extends OpName>(
     : never
 ) => Promise<BridgeResult<OpResult<O>>>;
 
+/**
+ * Debug's rewind history controls (`ops/history.ts`), which `BridgeClient.post` sends: the only ops it sends. Each is
+ * posted when the Player's rewind lifecycle decides it (`rewindOwner.ts`), so the host runs them in that order.
+ */
+export const HISTORY_CONTROL_OPS = [
+  "historyOpen",
+  "historyClose",
+  "historyTimeline",
+  "rewindBack",
+  "rewindForward",
+  "rewindCommit",
+  "rewindDrop",
+  "rewindReturn",
+  "rewindAdopt",
+] as const satisfies readonly OpName[];
+
+/** A history control (`HISTORY_CONTROL_OPS`). */
+export type HistoryControlOp = (typeof HISTORY_CONTROL_OPS)[number];
+
+/** Whether `post` posted its request: then its reply, else why it did not, decided before `post` returns. */
+export type PostDisposition<R = unknown> =
+  | { readonly posted: true; readonly reply: Promise<BridgeResult<R>> }
+  | { readonly posted: false; readonly error: Error };
+
 /** A request's options (`BridgeClient.request`), its hook given its op's result. */
 export interface RequestOptions<R = unknown> {
   readonly session?: string | null;
@@ -106,6 +130,15 @@ export interface BridgeClient {
     ticket: ClockTicket,
     body: (send: SectionSend) => Promise<T>,
   ): Promise<T>;
+  /**
+   * Posts history control `op` now, of no session, behind no earlier request's reply: the host runs it after every
+   * request posted before it and before every request posted after it, in arrival order, as any request. Any op outside
+   * `HISTORY_CONTROL_OPS` is refused, as is a request on a lost client or with arguments that cannot cross; the
+   * disposition says so before `post` returns.
+   */
+  post<O extends HistoryControlOp>(
+    ...call: O extends unknown ? [op: O, args: OpArgs<O>] : never
+  ): PostDisposition<OpResult<O>>;
   /**
    * Sends one request at once, ahead of the requests waiting for its session, as `halt` must be: the host handles it on
    * receipt too.
@@ -245,6 +278,36 @@ export function openBridge(
       });
     }
 
+    const controls: ReadonlySet<string> = new Set(HISTORY_CONTROL_OPS);
+    /** `BridgeClient.post`: the request posted now, or why it was not. */
+    function post(op: string, args: unknown): PostDisposition {
+      if (!controls.has(op))
+        return { posted: false, error: new Error(`'${op}' is no history control.`) };
+      if (lost !== null) return { posted: false, error: lost };
+      const id = nextId++;
+      let entry!: { resolve: (result: BridgeResult) => void; reject: (error: Error) => void };
+      const reply = new Promise<BridgeResult>((resolve, reject) => (entry = { resolve, reject }));
+      pending.set(id, { ...entry, onReply: undefined });
+      try {
+        port.post(
+          encodeMessage({
+            v: BRIDGE_VERSION,
+            kind: "request",
+            id,
+            session: null,
+            basis: null,
+            op,
+            args,
+          }),
+        );
+      } catch (error) {
+        // Arguments that cannot cross never reach the Worker; the request is not posted, without effect.
+        pending.delete(id);
+        return { posted: false, error: error instanceof Error ? error : new Error(String(error)) };
+      }
+      return { posted: true, reply };
+    }
+
     /**
      * Runs `body` once every earlier holder of `key` is done, and holds `key` until `body` settles. With no holder,
      * `body` starts at once, so a request posts before `request` returns.
@@ -290,6 +353,7 @@ export function openBridge(
         exclusive(session, () =>
           body((op, args, basis, onReply) => send(op, args, session, basis, onReply)),
         ),
+      post,
       signal: (op: string, args: unknown, session: string, onReply?: ReplyHook) =>
         send(op, args, session, null, onReply),
       terminate: () => lose("The engine Worker was terminated.", true),
