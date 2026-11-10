@@ -1067,8 +1067,8 @@ for (const coordinates of FEASIBLE) {
 test("the rewind owner's lifetime family completed every feasible full tuple, and nothing else", () => {
   assert.deepEqual(coverageGaps(FEASIBLE, completed, { tuples: true }), []);
   // #2150 PR 2 took ten tuples out: an import's held renewal cannot fail as the one asked for (8), and the host refuses
-  // no disposal of its current Player (2).
-  assert.equal(FEASIBLE.length, 751);
+  // no disposal of its current Player (2). #2229 added 110: a problem at each end that ends its history.
+  assert.equal(FEASIBLE.length, 861);
 });
 
 test("#2232: a step committed before Debug off's reinstatement resolves true", async (context) => {
