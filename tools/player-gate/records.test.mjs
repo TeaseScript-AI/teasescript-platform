@@ -941,6 +941,14 @@ const RELATIONS = [
     "cold playable: Start enabled has no frame",
   ],
   [
+    // Sol code r3's witness: A/A's own playable check, apart from the session's.
+    "aa: Start enabled has no frame",
+    "aa chromium full",
+    (r) => (r.result.probe.states[0].frame = null),
+    ["timing"],
+    "cold playable: Start enabled has no frame",
+  ],
+  [
     "playable: no trusted input after Start",
     "session chromium main",
     (r) => r.result.probe.cold.inputs.forEach((input) => (input.trusted = false)),
@@ -1216,10 +1224,12 @@ test("every NULLABLE name is an optional leaf of some section, never of the head
  * The rule is "all occurrences equal the readable ones": every occurrence of `span`, `ok: false`, `problems.push` and
  * `throw` in a module's code (its comments and the text of its strings blanked) is one of the readable forms above, a
  * named import of `span`, a pass-through (`PASS_THROUGH`), `throw new Error(…)` (a defect of the kit or a live run's
- * failure, no evidence check) or a rethrow; any other occurrence fails, naming its file and line. Sites whose
- * messages share one pattern are one site. A message with little literal text (`WEAK`) is witnessed only by the rows
- * named for it. The limit: a check written in another form (a bare comparison that throws, a new module) is outside
- * the claim until its kind is added here.
+ * failure, no evidence check) or a rethrow; any other occurrence fails, naming its file and line. A site is its
+ * position: its file, its top-level declaration and its message. A message that several positions share, which no
+ * reason can tell apart, is witnessed per position (`SHARED`), by the rows that reach that position or the position
+ * whose check always precedes it. A message with little literal text (`WEAK`) is witnessed only by the rows named for
+ * it. The limit: a check written in another form (a bare comparison that throws, a new module) is outside the claim
+ * until its kind is added here.
  */
 const MODULES = ["validate.mjs", "lib/measure.mjs", "scenarios/keep.mjs", "scenarios/taps.mjs"];
 const PASS_THROUGH = new Set(["error.message", "...problems"]);
@@ -1362,23 +1372,34 @@ function checkSites() {
       m.index,
       m.index + m[0].length,
     ]);
+    // Each site's position: its file and its top-level declaration (the function or constant that holds it).
+    const declarations = [
+      ...code.matchAll(
+        /^(?:export\s+)?(?:async\s+)?(?:function\*?\s+([\w$]+)|(?:const|let)\s+([\w$]+))/gmu,
+      ),
+    ].map((m) => ({ index: m.index, name: m[1] ?? m[2] }));
+    const declarationOf = (index) =>
+      declarations.findLast((declaration) => declaration.index <= index)?.name ?? "(module)";
     const site = (kind, index, source) => {
       const pattern = messagePattern(source);
       if (pattern === null) {
         unreadable.push(`${file}:${lineOf(index)}: ${kind} with the message ${source.trim()}`);
         return;
       }
-      const regex = new RegExp(pattern.parts.map(escape).join(".+?"), "u");
-      const key = regex.source;
-      if (!sites.has(key))
-        sites.set(key, {
-          kind,
-          regex,
-          literal: pattern.parts.join("").length,
-          at: [],
-          text: pattern.text,
-        });
-      sites.get(key).at.push(`${file}:${lineOf(index)}`);
+      const position = `${file} ${declarationOf(index)}`;
+      const repeats = [...sites.values()].filter(
+        (other) => other.position === position && other.text === pattern.text,
+      ).length;
+      const key = `${position} ${pattern.text}${repeats > 0 ? ` #${repeats + 1}` : ""}`;
+      sites.set(key, {
+        key,
+        kind,
+        position,
+        regex: new RegExp(pattern.parts.map(escape).join(".+?"), "u"),
+        literal: pattern.parts.join("").length,
+        at: `${file}:${lineOf(index)}`,
+        text: pattern.text,
+      });
     };
     for (const m of code.matchAll(/\bspan\b/gu)) {
       if (imports.some(([from, to]) => m.index >= from && m.index < to)) continue;
@@ -1441,13 +1462,8 @@ function checkSites() {
  * loose pattern cannot be matched by another site's message.
  */
 const WEAK = {
-  "`${request.op}'s round trip`": [
-    "bridge: a request → its reply",
-    "instrumented: a post → its reply",
-  ],
   "`the sends ${index - 1} → ${index}`": ["taps: the sends in order"],
   '"the taps window"': ["taps: the window"],
-  "`cold playable: ${coldPlayable.reason}`": ["playable: Start enabled has no frame"],
   '`first save: ${save?.reason ?? "no playable cold page"}`': ["first save: no publish"],
   '"a turn"': ["session: no turn"],
   "`turn ${index}: ${turn.reason}`": ["session: a turn without its records"],
@@ -1455,6 +1471,29 @@ const WEAK = {
   "`${label}: ${found} is ${what}`": ["byte account: every request finished or failed"],
   '`the first save ${outcome ?? "never ended"}`': ["first save: not complete"],
   '"no input recorded"': ["turn: no input recorded"],
+};
+
+/**
+ * The positions that share a message, each with the rows that reach it (a scenario whose parts run that declaration)
+ * or the position whose check of the same records always precedes it.
+ */
+const SHARED = {
+  "validate.mjs bridgeTiming `${request.op}'s round trip`": {
+    rows: ["bridge: a request → its reply"],
+  },
+  // `rtt` reads the requests `bridgeTiming` has ordered.
+  "validate.mjs rtt `${op}'s round trip`": {
+    impliedBy: "validate.mjs bridgeTiming `${request.op}'s round trip`",
+  },
+  'lib/measure.mjs requestsOf `${nullable(post, "op")}\'s round trip`': {
+    rows: ["instrumented: a post → its reply"],
+  },
+  "validate.mjs sessionTiming `cold playable: ${coldPlayable.reason}`": {
+    rows: ["playable: Start enabled has no frame"],
+  },
+  "validate.mjs PARTS `cold playable: ${cold.reason}`": {
+    rows: ["aa: Start enabled has no frame"],
+  },
 };
 
 /**
@@ -1478,23 +1517,36 @@ test("every check site in the derivation modules is readable and has a row that 
   const { sites, unreadable } = checkSites();
   assert.deepEqual(unreadable, [], "occurrences that are no readable site");
   const rows = new Map(RELATIONS.map((row) => [row[0], row]));
+  const byKey = new Map(sites.map((site) => [site.key, site]));
+  const sharing = (site) => sites.filter((other) => other.regex.source === site.regex.source);
   const texts = new Set(sites.map((site) => site.text));
   for (const text of [...Object.keys(WEAK), ...Object.keys(IMPLIED), ...Object.values(IMPLIED)])
     assert.ok(texts.has(text), `no site ${text}`);
-  const witnessed = (site) =>
-    Object.hasOwn(WEAK, site.text)
-      ? WEAK[site.text].every((name) => rows.has(name) && site.regex.test(rows.get(name)[4]))
-      : site.literal >= 16 && RELATIONS.some((row) => site.regex.test(row[4]));
-  const missing = sites.filter(
-    (site) =>
-      !(Object.hasOwn(IMPLIED, site.text)
-        ? witnessed(sites.find((other) => other.text === IMPLIED[site.text]))
-        : witnessed(site)),
-  );
+  for (const [key, entry] of Object.entries(SHARED)) {
+    assert.ok(byKey.has(key), `no site ${key}`);
+    assert.ok(sharing(byKey.get(key)).length > 1, `${key} shares its message with no other site`);
+    if (entry.impliedBy !== undefined)
+      assert.ok(byKey.has(entry.impliedBy), `no site ${entry.impliedBy}`);
+  }
+  const named = (site, names) =>
+    names.length > 0 && names.every((name) => rows.has(name) && site.regex.test(rows.get(name)[4]));
+  const witnessed = (site) => {
+    if (sharing(site).length > 1) {
+      const entry = SHARED[site.key];
+      if (entry === undefined) return false;
+      return entry.impliedBy !== undefined
+        ? witnessed(byKey.get(entry.impliedBy))
+        : named(site, entry.rows);
+    }
+    if (Object.hasOwn(IMPLIED, site.text))
+      return witnessed(sites.find((other) => other.text === IMPLIED[site.text]));
+    if (Object.hasOwn(WEAK, site.text)) return named(site, WEAK[site.text]);
+    return site.literal >= 16 && RELATIONS.some((row) => site.regex.test(row[4]));
+  };
   assert.deepEqual(
-    missing.map((site) => `${site.at.join(", ")}: ${site.kind} ${site.text}`),
+    sites.filter((site) => !witnessed(site)).map((site) => `${site.at}: ${site.kind} ${site.key}`),
     [],
     "check sites without a row",
   );
-  assert.ok(sites.length > 40, `only ${sites.length} sites`);
+  assert.ok(sites.length > 50, `only ${sites.length} sites`);
 });
