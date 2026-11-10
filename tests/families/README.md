@@ -65,8 +65,8 @@ What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise;
 
 - **The evidence total** of a replay is `stalls.mjs`'s total over the shards' `--work` records. It names each area
   complete only with its shards `0/N` to `N-1/N` of one plan, shared out alike (all by index, or all by one costs file,
-  `--split`), counts a repeated place once and refuses a shard given
-  twice; a sum of the shards' own totals counts each repeat. Its growth lines are advisory.
+  `--split`), counts a repeated place once and refuses a shard given twice; a sum of the shards' own totals counts each
+  repeat. Its growth lines are advisory.
 - **A stored baseline's identity:** its MANIFEST (the `src/` tree, the oracle library, the lockfile, Node) and each
   area's PLAN (the limits above, the allowances, each generator's checks, each shard's places, each by its generator's
   id). The runner's own source, `--work` records and `--out` files are no part of it, nor are peaks, `nearCap`,
