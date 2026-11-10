@@ -5,6 +5,18 @@ are not in CI: before a type-core review round, the builder runs the affected ar
 and reports the counts (`docs/TESTING.md`, test admission). Each module under `tests/families/<area>/` reproduces the
 sources of one recorded evidence run (#1446), and `check.mjs` (in CI) checks that it does.
 
+Which tool answers which question:
+
+| Question | Tool |
+| --- | --- |
+| Does an area's analysis (its publication, its stops) differ between two trees? | `run.mjs`, `stalls.mjs` ([Running an area](#running-an-area)) |
+| Does a set's plan, diagnostics, charge trace or questions on the core's route differ between two trees? | `plans.mjs` ([Plans](#plans)) |
+| Where does the core's route differ from the current checker on one tree (the shadow gate)? | `shadow.mjs`, `shadow-classify.mjs` ([Shadow](#shadow)) |
+| Does a stop let a value through that the natural plan rejects? | `stop-runs.mjs` ([Stop runs](#stop-runs)) |
+| What do the checker, the core and the core's route each answer for a list of cases, plans and runs included? | `differential.mjs` ([Differential records](#differential-records)) |
+| A compiler pull request's whole replay of base against head | `tools/compiler-replay.mjs` |
+| Does a change outside the type core keep the current checker's output? | `tools/compiler-differential.mjs` |
+
 ## The runner's contract
 
 What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise; the sections below explain them.
@@ -425,6 +437,46 @@ row marked `missing`, an ambiguous item's `ambiguous` with the keys it matches.
 sx-job submit --commit t=<tree> --shards 8 --mem 6G --campaign <T> --in <items.jsonl> \
   -- bash -c 'node "$SX_TREE_t/tests/families/stop-runs.mjs" "$SX_TREE_t" "$SX_IN/<items.jsonl>" --shard {i}/{n} \
   --out "$SX_OUT"'
+```
+
+## Differential records
+
+`differential.mjs` (#2298) writes, for each case of a cases file on one built tree, one JSON line holding what the
+current checker (`compileProject`), the core (`analyseCore` with `checkedResult`, as the compiler reads it) and the
+core's route (`publishedRoute`) each answer, the core and the route in the four `HELD_MODES`. The same tree and cases
+give the same bytes. It judges nothing: a reader compares the records, and two trees' records are joined by case name.
+It has no unit limit and no process of its own per run, so it is for case lists; areas and the corpus at scale stay
+with `plans.mjs` and `shadow.mjs`.
+
+A case is one JSON line: `{name, source | files, globals?, runs?}` (`globals` `["hostValue"]` by default), or
+`{name, set, unit, key?, runs?}` for a unit of a set as `stop-runs.mjs` names one (`unitResolver`, `units.mjs`).
+`runs` is a list of the host globals' values, each run on every plan (`runGlobals`). A name twice, an unknown key, a
+malformed line or a set's unit missing or ambiguous refuses the whole file (exit 2) before any record is written.
+
+A record is `{name, case, checker, core, candidate}`:
+- `checker`, and each mode of `candidate` that is not refused: `diagnostics` (severity, code, path, one-based line and
+  column, offsets, message), `plan` (`null`, or its `hash`, the first 32 hex digits of the sha256 of `jsonText(plan)`, as
+  `plans.mjs` hashes a plan, and `checks`, `planCheckList` in `tests/helpers/plan-checks.ts`: each check's field, path,
+  line, offsets and, where it names them, type, place and part), and `runs` where the case names some and there is a
+  plan (`{globals, status, failure, said}`);
+- a refused mode of `candidate` is `{mode, outside}` with the refusal's text and no diagnostics;
+- `core` is `{unparsed: true}` where the files do not parse or resolve, else each mode's `outcome`, `diagnostics` (class,
+  kind, code, path, line, offsets, the site's text, `coreMessage`) and `checks` (`coreRecord`'s run-time checks: kind,
+  target, against, boundary, site);
+- `core` and `candidate` hold `modes`, always four, each with its `mode` name, and `agree`, whether they are equal but
+  for that name. A part that throws is `{threw: "<name>: <message>"}` in its place, and the run exits 1.
+
+`join --cases <cases.jsonl> --base <records>... [--head <records>...] --out <file>` checks every case recorded once on
+each side and no other record (else exit 1, nothing written) and writes them in the cases' order: the record, or
+`{name, base, head}`. A batch of an item pool is itself a cases file, so the queue sizes the jobs; the plan's check
+list comes from the tool's own build, so the tool's tree may be newer than the tree it reads:
+
+```sh
+sx-job submit --commit tool=<tool> --commit t=<tree> --items cases.jsonl --target 10m --mem 8G --campaign <T> \
+  -- bash -c 'node "$SX_TREE_tool/tests/families/differential.mjs" "$SX_TREE_t" "$SX_ITEMS" \
+  --out "$SX_OUT/records.jsonl" < /dev/null'
+node tests/families/differential.mjs join --cases cases.jsonl --base <base jobs' records.jsonl> \
+  --head <head jobs' records.jsonl> --out joined.jsonl
 ```
 
 ## Shadow

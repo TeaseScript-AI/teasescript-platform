@@ -7,7 +7,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { sourceKey } from "./sources.mjs";
 
-const distOf = (root) => (existsSync(path.join(root, "dist")) ? path.join(root, "dist") : root);
+/** A tree's built modules: its `dist`, or the tree itself where it is one. */
+export const distOf = (root) =>
+  existsSync(path.join(root, "dist")) ? path.join(root, "dist") : root;
 
 /** The set's sources, each `{ name, key, files, globals, single, held? }`, the same list in every worker. */
 export async function unitsOf(set, baseRoot, headRoot) {
@@ -63,7 +65,7 @@ async function listed(set, baseRoot, headRoot) {
 }
 
 /**
- * The unit an item names in the tree at `root` (`stop-runs.mjs`): `{ unit }` for `{files, globals}`, or for
+ * The unit an item names in the tree at `root` (`stop-runs.mjs`, `differential.mjs`): `{ unit }` for `{files, globals}`, or for
  * `{set, name, key?}` the set's unit of that name and key; `{ keys }` where the units it matches differ.
  */
 export function unitResolver(root) {
