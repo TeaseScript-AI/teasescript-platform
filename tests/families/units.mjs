@@ -61,3 +61,33 @@ async function listed(set, baseRoot, headRoot) {
       });
   return units;
 }
+
+/**
+ * The unit an item names in the tree at `root` (`stop-runs.mjs`): `{ unit }` for `{files, globals}`, or for
+ * `{set, name, key?}` the set's unit of that name and key; `{ keys }` where the units it matches differ.
+ */
+export function unitResolver(root) {
+  // (an area of the tree's tests/families by its name, as `plans.mjs` reads a set)
+  const setOf = (set) =>
+    ["corpus", "fixture", "held"].includes(set) || set.includes("/")
+      ? set
+      : path.join(root, "tests", "families", set);
+  const units = new Map();
+  // (the item's unit, or the keys of every unit it matches when they differ; units with one key are one unit)
+  const unitOf = async (item) => {
+    if (item.files !== undefined)
+      return { unit: { files: item.files, globals: item.globals, key: sourceKey(item) } };
+    if (!units.has(item.set)) {
+      const byName = new Map();
+      for (const unit of await unitsOf(setOf(item.set), root, root))
+        byName.set(unit.name, [...(byName.get(unit.name) ?? []), unit]);
+      units.set(item.set, byName);
+    }
+    const matched = (units.get(item.set).get(item.name) ?? []).filter(
+      (unit) => item.key === undefined || unit.key === item.key,
+    );
+    const keys = [...new Set(matched.map((unit) => unit.key))];
+    return keys.length > 1 ? { keys } : { unit: matched[0] };
+  };
+  return unitOf;
+}
