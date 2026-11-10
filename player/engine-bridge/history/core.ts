@@ -106,7 +106,7 @@ export type LineageTransition =
       readonly adoptionSucceeded?: boolean;
     };
 
-export type CloseReason = "debugOff" | "replacement" | "import" | "clear" | "disposal" | "loss";
+export type CloseReason = "debugOff" | "replacement" | "import" | "clear" | "disposal";
 
 const REFUSED = Object.freeze({ kind: "refused" } as const);
 /** Why a first Back is refused when the history cannot keep the state it would leave. */
@@ -146,7 +146,6 @@ export function transferLineages(
     case "close":
       switch (move.by) {
         case "disposal":
-        case "loss":
           return fates("released", "released");
         case "clear":
           return inspection === "not inspecting" ? UNCHANGED : REFUSED;
@@ -393,7 +392,7 @@ export class HistoryCore {
   #complete = true;
   #closed = false;
   // The lineage the history follows while it inspects nothing: its publications', then the one a Return or an
-  // adoption makes live. A disposal or a loss releases it with the rest.
+  // adoption makes live. A disposal releases it with the rest.
   #live: string | null = null;
   // The step prepared and not yet committed or dropped, at most one; tokens are never taken again.
   #pending: PendingStep | null = null;
@@ -468,11 +467,6 @@ export class HistoryCore {
   /** The state Forward restores, or `null`. */
   get forwardTarget(): HistoryPosition | null {
     return this.#inspecting?.forward.at(-1)?.position ?? null;
-  }
-
-  /** The marks of the lineage Back parked, while a restored state is inspected; else `null`. */
-  get parkedMarks(): HistoryMarks | null {
-    return this.#inspecting?.parked.marks ?? null;
   }
 
   /** The inspection state a transfer meets now. */

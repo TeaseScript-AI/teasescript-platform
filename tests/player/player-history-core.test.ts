@@ -355,7 +355,7 @@ test("a failed adoption leaves the restored state inspected", () => {
 });
 
 test("closing: Debug off reinstates the parked lineage; a replacement retires it; a clear while inspecting is refused", () => {
-  for (const by of ["debugOff", "replacement", "clear", "disposal", "loss"] as const) {
+  for (const by of ["debugOff", "replacement", "clear", "disposal"] as const) {
     const { history, points, parked } = stepping();
     stepTo(history, { move: "back", point: points[0]!.id, parked }, "r1");
     const outcome = advanceHistory(history, { kind: "close", by });
