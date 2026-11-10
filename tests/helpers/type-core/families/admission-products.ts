@@ -7,6 +7,7 @@ import {
   main,
   type KnownProduct,
 } from "./builders.js";
+import type { SourceFile } from "../../type-core-analysis.js";
 
 /**
  * A6's chain of k dependent rejections (Sol's twelve-step witness at size k): each copy reads its source after the
@@ -645,6 +646,20 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
   },
 ];
 
+/** k adds of `n` records of host data in turn, each field read: a mixed-add cycle's program. */
+function cycleOfSourcesAdds(n: number, k: number): readonly SourceFile[] {
+  return main(
+    lines(
+      "let raw = hostValue",
+      rows(n, (j) => `let s${j} = {${fields(k, () => `[${j}, raw][1]`)}}`),
+      "let xs = []",
+      rows(k, (i) => `xs.add(s${i % n})`),
+      rows(k, (i) => `repeat xs[0].f${i} {}`),
+      "exit",
+    ),
+  );
+}
+
 /**
  * Adds of several sources into one list strictly in turn (S6c's review r1, r2 B4): an add's certainty depends on the
  * state the adds before it leave, so each add of a mixed run is answered at each field read. Gated known limits at
@@ -695,25 +710,18 @@ export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
         ),
       ),
   },
-  ...[
+  {
+    name: "A5-cycle-of-8-sources-adds",
+    measures: "§3.3: k adds of 8 records of host data in turn, each field read",
     // 740,812 / 2,008,769 units at k = 64, 128 in both orders (2.7212)
-    { n: 8, measured: 2.78 },
+    measured: 2.78,
+    program: (k) => cycleOfSourcesAdds(8, k),
+  },
+  {
+    name: "A5-cycle-of-9-sources-adds",
+    measures: "§3.3: k adds of 9 records of host data in turn, each field read",
     // 798,340 / 2,124,045 units at k = 64, 128 (2.6700; reversed 2.6699)
-    { n: 9, measured: 2.73 },
-  ].map(({ n, measured }): KnownProduct => ({
-    name: `A5-cycle-of-${n}-sources-adds`,
-    measures: `§3.3: k adds of ${n} records of host data in turn, each field read`,
-    measured,
-    program: (k) =>
-      main(
-        lines(
-          "let raw = hostValue",
-          rows(n, (j) => `let s${j} = {${fields(k, () => `[${j}, raw][1]`)}}`),
-          "let xs = []",
-          rows(k, (i) => `xs.add(s${i % n})`),
-          rows(k, (i) => `repeat xs[0].f${i} {}`),
-          "exit",
-        ),
-      ),
-  })),
+    measured: 2.73,
+    program: (k) => cycleOfSourcesAdds(9, k),
+  },
 ];
