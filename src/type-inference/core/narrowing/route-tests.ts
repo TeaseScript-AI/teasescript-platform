@@ -405,9 +405,9 @@ export class RouteTests {
   }
 
   /**
-   * The arms a corridor passes through none of, in a program the default holds (#1938, the lead's R8 and R16): each live
-   * arm of a tested `if` and each tested `while`'s body that `#infeasible` does not answer `feasible` (A1, A2), and the
-   * body of each loop that neither a live header exit nor a skip edge leaves, whose only way out is a `break` (A3). One
+   * The arms a corridor passes through none of, in a program the default holds (#1938): each live
+   * arm of a tested `if` and each tested `while`'s body that `#infeasible` does not answer `feasible`, and the
+   * body of each loop that neither a live header exit nor a skip edge leaves, whose only way out is a `break`. One
    * walk of the program's statements, on the first query.
    */
   protected *feasibility(): Work<Feasibility> {

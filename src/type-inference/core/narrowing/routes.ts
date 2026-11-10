@@ -171,7 +171,7 @@ export class NarrowingRoutes extends RouteTests {
    * runs enter and loops they leave (`#open`), and only by a certificate its own value proves: a literal, a scalar copy
    * of one, an `otherwise` selected by its left side's own witness, a `load` whose literal default a run selects
    * (`#ownLoad`). Every other certificate there keeps the warning: a value read through items an infeasible arm may
-   * have merged (#1938, the lead's R8).
+   * have merged (#1938).
    */
   public *required(
     value: PlaceId,
@@ -409,7 +409,7 @@ export class NarrowingRoutes extends RouteTests {
     // a scalar copy whose source read has a certified witness
     const read = left.length === 0 ? this.#scalarRead(value) : null;
     if (read !== null) return { key: read.key, tag, node: read.node };
-    // (in a program the default holds, only a `load`'s literal default proves itself; #1938, the lead's R8)
+    // (in a program the default holds, only a `load`'s literal default proves itself, #1938)
     if (this.#feasible !== null) return left.length === 0 && this.#ownLoad(value, tag, others);
     // any other producer, a whole copy below the copied path among them, by what its value holds there on some run,
     // neither stopped nor read under a failed test: one answer per read, never a route per field of each copy (W34)
@@ -579,7 +579,7 @@ export class NarrowingRoutes extends RouteTests {
     const { program } = this.pass;
     const d = found.def;
     if (!program.live(d.node) || program.dom.edom(d.node) !== program.dom.edom(node)) return false;
-    // (A2: in a program the default holds, every arm of the writer's and the use's chains is one a run enters)
+    // (in a program the default holds, every arm of the writer's and the use's chains is one a run enters)
     if (this.#feasible !== null && (!this.#entered(found.chain) || !this.#entered(chain)))
       return false;
     const layer = this.#testLayer(key, tag);
@@ -720,7 +720,7 @@ export class NarrowingRoutes extends RouteTests {
   }
 
   /**
-   * In a program the default holds, the layer beneath every root kill layer (#1938, A1 and A3): the arms no run is
+   * In a program the default holds, the layer beneath every root kill layer (#1938): the arms no run is
    * proved to enter and the bodies of loops only a `break` leaves closed (`Feasibility.closed`), and every compound
    * statement whose live arms they and the shared layer close; built once per applicability.
    */
@@ -739,7 +739,7 @@ export class NarrowingRoutes extends RouteTests {
     return layer;
   }
 
-  /** Whether every arm of a chain, from its callable's body down, is one a run is proved to enter (A2). */
+  /** Whether every arm of a chain, from its callable's body down, is one a run is proved to enter. */
   #entered(chain: readonly Place[]): boolean {
     this.#work.charge("eventSteps");
     const unentered = this.#feasible!.unentered;
@@ -747,7 +747,7 @@ export class NarrowingRoutes extends RouteTests {
   }
 
   /**
-   * P4 (#1938, the lead's R8 and R16): a `load` whose default is a literal of the kind, in a program that saves under
+   * A certificate by a `load` (#1938): a `load` whose default is a literal of the kind, in a program that saves under
    * neither its key nor a computed key, selects that default on a run whose storage holds no value under the key (V30
    * §25: the default is "the value to use while the key holds none"; only `save` creates a stored value), whatever
    * the program's other values hold.
