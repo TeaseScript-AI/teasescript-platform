@@ -137,13 +137,22 @@ process. Recording a proposal preserves it without accepting, scheduling, or
 authorizing implementation and without turning it into production maintenance
 surface.
 
-DRY is subordinate to KISS and pragmatic YAGNI. Use one canonical
-implementation, rule, or explanation plus references only when that is clearer
-and simpler across the complete maintenance lifecycle. Use limited local
-repetition when that is the clearer KISS solution. Do not force DRY when it
-creates indirection, competing authority, duplicated moving facts, speculative
-abstraction, or unnecessary recurring context cost. For the
-documentation-specific application, follow
+DRY is subordinate to KISS and pragmatic YAGNI. Use:
+
+- one canonical implementation, rule, or explanation plus references when that
+  is clearer and simpler across the complete maintenance lifecycle, in
+  particular when every change to one copy would have to be made to the others;
+- limited local repetition when that is the clearer KISS solution, in particular
+  when the copies may change independently.
+
+A copy kept to check another (a test's independently derived expected value, an
+oracle) is not repetition under this rule; `TESTING.md` governs it. Do not:
+
+- force DRY when it creates indirection or speculative abstraction;
+- keep repetition when it creates competing authority or duplicated moving facts;
+- do either when it adds unnecessary recurring context cost.
+
+For the documentation-specific application, follow
 [`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md).
 
 ### Review finding classes

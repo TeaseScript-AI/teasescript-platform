@@ -72,7 +72,7 @@ outside the repository.
 Use the authority hierarchy in `README-FIRST.md` before treating a statement as
 a permanent requirement or blocker. KISS is primary. Pragmatic YAGNI applies
 KISS to future-facing complexity. DRY is subordinate to both: use one canonical
-source plus references only when that is the simpler complete solution, and
+source plus references when that is the simpler complete solution, and
 prefer limited local repetition when it is clearer without creating competing
 authority, duplicated moving facts, or unnecessary recurring context.
 

@@ -21,7 +21,9 @@ understand the change. Issues, tests, drafts, claims, and earlier reviews are co
 by themselves. Route unresolved owner decisions before depending on them.
 
 Choose the simplest complete solution for the current requirement and real boundaries. Apply KISS
-and pragmatic YAGNI. Apply DRY when removing duplication keeps or lowers total complexity. Less code
+and pragmatic YAGNI. Apply DRY when removing duplication keeps or lowers total complexity, in
+particular when every change to one copy would have to be made to the others; a copy kept to check
+another, such as an independently derived expected value or an oracle, is not duplication. Less code
 or documentation is beneficial when clarity, behavior, evidence, and maintenance remain at least as
 strong; prefer clear local repetition over abstraction or indirection that makes the whole result
 harder to understand or change.
@@ -42,8 +44,9 @@ Inspect proportionately for:
 - source-to-plan/state amplification, unnecessary temporary/frame growth, and large throwaway
   collections, strings, or copies created only to count, inspect, or immediately discard them;
 - setup or invariant work repeated at a lifecycle frequency when once per enclosing operation would
-  preserve the same behavior, and long-lived callbacks, subscriptions, or objects retaining large data
-  beyond its needed lifetime; check captured references and release paths;
+  preserve the same behavior;
+- long-lived callbacks, subscriptions, or objects that retain large data beyond its needed lifetime
+  (check captured references and release paths);
 - caller-specific expensive work in shared helpers that sibling callers do not need; keep it on the requiring
   ownership/lifecycle path; and
 - input-controlled recursion, dynamic argument spreading, large materialization/stringification,
