@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import test, { before, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import ts from "typescript";
 import { registerActivationWorkChecks } from "../helpers/player/activation-work-checks.js";
 
 /*
@@ -1038,6 +1039,116 @@ test("the census fails a new caller of a forwarder, a new BridgeClient member, a
     escape.escapes.some((each) => !followed(each) && !Object.hasOwn(ESCAPES, keyOf(each))),
     "a callback escape is unclassified",
   );
+});
+
+const REWIND_OWNER = "player/vue/src/session/rewindOwner.ts";
+/**
+ * The rewind owner's writes of its lifecycle state and its retirement stamp: inside `createRewindOwner`, the one write
+ * of `state`, in `dispatch`, which applies `advanceLifecycle`'s decision (`player/debug/rewind-lifecycle.ts`), and the
+ * stamp's two increments, at a retirement and at the loss. Both are plain `let` bindings, which nothing can alias or
+ * bind, so their writes are their assignments.
+ */
+const OWNER_WRITES = ["retirements: lost", "retirements: retired", "state: dispatch"];
+
+/** Every assignment, `++` or `--` inside `createRewindOwner` to a name of `OWNER_WRITES`, as `name: function`. */
+function ownerWrites(overrides: Readonly<Record<string, string>> = {}): string[] {
+  census.setOverrides(overrides);
+  try {
+    const { program, root } = census.program();
+    // EVIDENCE: validation: the census's program is the TypeScript program it builds (`createSessionWorkCensus`).
+    const file = (program as ts.Program).getSourceFile(resolve(root, REWIND_OWNER));
+    assert.ok(file, REWIND_OWNER);
+    const names = new Set(OWNER_WRITES.map((each) => each.split(":")[0]));
+    // The names an assignment's target writes, also through a destructuring pattern.
+    const targets = (node: ts.Expression): ts.Identifier[] => {
+      if (ts.isIdentifier(node)) return [node];
+      if (ts.isParenthesizedExpression(node)) return targets(node.expression);
+      if (ts.isArrayLiteralExpression(node))
+        return node.elements.flatMap((each) =>
+          targets(ts.isSpreadElement(each) ? each.expression : each),
+        );
+      if (ts.isObjectLiteralExpression(node))
+        return node.properties.flatMap((each) =>
+          ts.isShorthandPropertyAssignment(each)
+            ? [each.name]
+            : ts.isPropertyAssignment(each)
+              ? targets(each.initializer)
+              : ts.isSpreadAssignment(each)
+                ? targets(each.expression)
+                : [],
+        );
+      return [];
+    };
+    // The nearest named function a node is in: a declaration, or the variable or property that holds it.
+    const enclosing = (node: ts.Node): string => {
+      for (let at = node.parent; at !== undefined; at = at.parent) {
+        if (ts.isFunctionDeclaration(at) && at.name) return at.name.text;
+        if (ts.isMethodDeclaration(at) || ts.isGetAccessorDeclaration(at))
+          return at.name.getText(file);
+        const holder = at.parent;
+        if (
+          (ts.isArrowFunction(at) || ts.isFunctionExpression(at)) &&
+          (ts.isVariableDeclaration(holder) || ts.isPropertyAssignment(holder))
+        )
+          return holder.name.getText(file);
+      }
+      return "(module)";
+    };
+    const writes: string[] = [];
+    let factories = 0;
+    file.forEachChild(function visit(node): void {
+      if (ts.isFunctionDeclaration(node) && node.name?.text === "createRewindOwner") {
+        factories += 1;
+        node.body?.forEachChild(function write(each): void {
+          const assigned =
+            ts.isBinaryExpression(each) &&
+            each.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+            each.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+              ? targets(each.left)
+              : (ts.isPostfixUnaryExpression(each) || ts.isPrefixUnaryExpression(each)) &&
+                  (each.operator === ts.SyntaxKind.PlusPlusToken ||
+                    each.operator === ts.SyntaxKind.MinusMinusToken)
+                ? targets(each.operand)
+                : [];
+          for (const target of assigned)
+            if (names.has(target.text)) writes.push(`${target.text}: ${enclosing(each)}`);
+          each.forEachChild(write);
+        });
+      }
+      node.forEachChild(visit);
+    });
+    assert.equal(factories, 1, "one createRewindOwner");
+    return writes.sort();
+  } finally {
+    census.setOverrides({});
+  }
+}
+
+test("the rewind owner writes its lifecycle state only in dispatch, and its stamp only at a retirement and the loss", async () => {
+  const check = (overrides?: Readonly<Record<string, string>>) => {
+    const found = ownerWrites(overrides);
+    assert.deepEqual(found, OWNER_WRITES, `the owner's writes: ${found.join(", ")}`);
+  };
+  check();
+  // Controls: a second write of each fails, naming the function it is in.
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(resolve(process.cwd(), REWIND_OWNER), "utf8");
+  const controls = [
+    ["  function settle(went: boolean) {\n", "    state = INITIAL_LIFECYCLE;\n", "state: settle"],
+    [
+      "    debugOn: (): LifecycleDisposition => {\n",
+      "      retirements += 1;\n",
+      "retirements: debugOn",
+    ],
+  ] as const;
+  for (const [anchor, inserted, named] of controls) {
+    assert.equal(source.split(anchor).length, 2, `the control's anchor: ${anchor}`);
+    assert.throws(
+      () => check({ [REWIND_OWNER]: source.replace(anchor, `${anchor}${inserted}`) }),
+      (error: unknown) => error instanceof assert.AssertionError && error.message.includes(named),
+      named,
+    );
+  }
 });
 
 test("every host path that adopts an op's result is classified (item 15)", () => {

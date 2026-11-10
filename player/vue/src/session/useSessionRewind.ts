@@ -77,16 +77,10 @@ export function useSessionRewind({
   editsInFlight,
   savedDataRevision,
 }: SessionRewindHost) {
-  /**
-   * The rewind retirement stamp (`rewindRetirements`, below) the owner's reply guards read; declared first, as the owner
-   * is made before everything that reads it.
-   */
-  const rewindRetirements = ref(0);
   // Debug's rewind over the Player's lifetime, which outlives each Debug scope (DEBUGGER.md "Rewind"): one deciding
   // function (`player/debug/rewind-lifecycle.ts`) and the owner that applies what it decides.
   const rewindOwner = createRewindOwner({
     bridge: bridgeNow,
-    retirements: () => rewindRetirements.value,
     shown: () => session.value,
     ready: () => rewindReady.value,
     generation: () => generation.value,
@@ -101,12 +95,11 @@ export function useSessionRewind({
   // Whether it does is the rewind owner's lifecycle state, the one account of it; every show and end reports there.
   const inspecting = rewindOwner.inspecting;
   /**
-   * Debug's rewind history ends when what it could reinstate is gone: a clear, an import, or the lost host. This one
-   * stamp counts those retirements, and every guard of a rewind reply reads it; the reason goes to the rewind owner as
-   * plain data.
+   * Debug's rewind history ends when what it could reinstate is gone: a clear, an import, or the lost host. The reason
+   * goes to the rewind owner as plain data; the owner's retirement stamp, which every guard of a rewind reply reads,
+   * moves at each.
    */
   function retireRewind(by: "clear" | "import" | "loss") {
-    rewindRetirements.value++;
     if (by === "loss") rewindOwner.lost();
     else rewindOwner.retired(by);
   }

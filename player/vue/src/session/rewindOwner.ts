@@ -26,8 +26,6 @@ export interface RewindOwnerHost {
   /** Whether the session may be left for a restored state now. */
   readonly ready: () => boolean;
   readonly generation: () => number;
-  /** The Player's retirement stamp (`rewindRetirements`): it moves at every clear, import, or loss. */
-  readonly retirements: () => number;
   /** Takes the rewind's work for a step, so no input or adoption runs meanwhile; `null` when it may not begin. */
   readonly beginStep: () => (() => void) | null;
   /** Shows a session this rewind restored or reinstated, paused or running. */
@@ -49,6 +47,8 @@ export interface RewindOwnerHost {
  */
 export function createRewindOwner(host: RewindOwnerHost) {
   let state: LifecycleState = INITIAL_LIFECYCLE;
+  // The retirement stamp: it moves at every retirement (a clear, an import) and at the loss (`retired`, `lost`).
+  let retirements = 0;
   const view = shallowRef<DebugHistoryView | null>(null);
   // The view changes in place; this counts its changes for what presents it.
   const revision = ref(0);
@@ -59,7 +59,8 @@ export function createRewindOwner(host: RewindOwnerHost) {
   let parked: PlayerSession | null = null;
   let candidate: PlayerSession | null = null;
   const timelines = new Map<number, HistoryTimeline>();
-  // The session a Debug-off close reinstated, which the Player releases when it is disposed.
+  // The session the last Return or Debug-off close reinstated (`showParked`), which the Player's disposal releases
+  // while it shows.
   let reinstated: PlayerSession | null = null;
   // Every close in flight: an open waits for them, and a failed one blocks it.
   let closes: Promise<void> = Promise.resolve();
@@ -74,9 +75,8 @@ export function createRewindOwner(host: RewindOwnerHost) {
   const changed = () => revision.value++;
   /** A guard for a reply: the view it began with is still the one shown, and no retirement or loss came since. */
   const current = () => {
-    const at = { view: view.value, retirements: host.retirements() };
-    return () =>
-      view.value === at.view && host.retirements() === at.retirements && at.view !== null;
+    const at = { view: view.value, retirements };
+    return () => view.value === at.view && retirements === at.retirements && at.view !== null;
   };
   /** A rejected reply is a host failure, unless the connection ended or `quiet` says the work it served is gone. */
   const reportUnless = (quiet: () => boolean) => (error: unknown) => {
@@ -456,14 +456,19 @@ export function createRewindOwner(host: RewindOwnerHost) {
       // Without a connection there is no history; the inspection still ends (intent 0 opens nothing that is sent).
       return dispatch({ kind: "newSession", intent: bridge?.nextHistoryIntent() ?? 0 }).actions;
     },
+    /** A retirement and the loss each move the retirement stamp first, also without a connection. */
     retired: (by: "clear" | "import"): LifecycleDisposition => {
+      retirements++;
       const bridge = host.bridge();
       return bridge === null
         ? NOTHING
         : dispatch({ kind: "retired", by, intent: bridge.nextHistoryIntent() }).actions;
     },
-    lost: (): LifecycleDisposition => dispatch({ kind: "lost" }).actions,
-    /** The Player's disposal: the history closes as its disposal, and a session Debug off reinstated goes. */
+    lost: (): LifecycleDisposition => {
+      retirements++;
+      return dispatch({ kind: "lost" }).actions;
+    },
+    /** The Player's disposal: the history closes as its disposal, and a session Return or Debug off reinstated goes. */
     disposal: (): LifecycleDisposition => {
       const { actions } = dispatch({ kind: "disposal" });
       const left = reinstated;
