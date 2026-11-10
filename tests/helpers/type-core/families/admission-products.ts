@@ -16,8 +16,9 @@ import type { SourceFile } from "../../type-core-analysis.js";
  * (docs/specifications/type-inference-accepted-record/admission.md#r4-49, option A): its doubling at k = 64 → 128 as
  * measured, re-measured and proposed with its counts on a change to admission's passes, never retuned; its trigger, a
  * realistic script reaching the allowance through cascading rejections. Beside it, copies interleaved with conditional
- * stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form, and copies separated by calls
- * storing their source, accepted in it too.
+ * stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form, copies separated by calls
+ * storing their source, accepted in it too, and the dormant meetings a fitting ring makes owed again (#1338, the
+ * owner's decision of 2026-11-10, recorded in docs/RESOURCE-LIMITS.md).
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -39,6 +40,24 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
           "exit",
         ),
       ),
+  },
+  {
+    name: "A6-ring-dormant-meetings-list",
+    measures:
+      "#1338: k copies of a record holding a fitting ring in one property, each stored and listed beside the record",
+    // 663,718 / 2,340,824 units at k = 64, 128 in both orders (3.5867; sharing off 3.6106; 3.7754 at 128 → 256), the
+    // allowance reached at k = 482
+    measured: 3.59,
+    program: (k) => ringDormantMeetings(k, "list"),
+  },
+  {
+    name: "A6-ring-dormant-meetings-place",
+    measures:
+      "#1338: k copies of a record holding a fitting ring in one property, each stored and merged with the record",
+    // 414,257 / 1,371,798 units at k = 64, 128 in both orders (3.3649; sharing off 3.4078; 3.6369 at 128 → 256), the
+    // allowance reached at k = 653
+    measured: 3.37,
+    program: (k) => ringDormantMeetings(k, "place"),
   },
   {
     name: "A2-interleaved-conditional-copies",
@@ -645,6 +664,40 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
       ),
   },
 ];
+
+/**
+ * #1338's family: a record of k meeting properties beside a fitting whole-copy ring in `side`, copied k times, each copy
+ * storing one property and then listed (`elements`) or merged (`meet`) with the record. A containment whose node holds a
+ * ring owes all its meetings (#1311's conservative exception in `touch.ts`), so each copy owes and decides the k
+ * unrelated meetings again. This gate catches work per owed meeting growing with k; the exception's removal fails
+ * cells' B1 ring witness and its widening work-b's dormant-meetings gate; a widening that leaves those ring-free
+ * families linear fails none of the three.
+ */
+function ringDormantMeetings(k: number, form: "list" | "place"): readonly SourceFile[] {
+  return main(
+    lines(
+      "let ti: integer = 7",
+      "let r0 = {v: ti}",
+      "let r1 = {v: ti}",
+      "r0 = r1",
+      "r1 = r0",
+      `let exact = {side: r0, ${fields(k, () => "ti")}}`,
+      `let fraction = {side: r0, ${fields(k, () => "1.5")}}`,
+      "let container = fraction",
+      "container = exact",
+      rows(k, (i) =>
+        lines(
+          `let alias${i} = container`,
+          `alias${i}.f0 = ti`,
+          form === "list"
+            ? `let final${i} = [container, alias${i}]`
+            : lines(`let final${i} = container`, `final${i} = alias${i}`),
+        ),
+      ),
+      "exit",
+    ),
+  );
+}
 
 /** k adds of `n` records of host data in turn, each field read: a mixed-add cycle's program. */
 function cycleOfSourcesAdds(n: number, k: number): readonly SourceFile[] {
