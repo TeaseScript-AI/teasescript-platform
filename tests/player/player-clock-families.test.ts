@@ -320,7 +320,7 @@ test("the completion-chain family covers every feasible row and states why each 
  *   publishes nothing, while the next one's waits";
  * - an injected orphaned reply: this family's precondition;
  * - a publication stored only, after the parked release: P promises no recovery from it; one existing opportunity
- *   reaches the deadline (the test after this family);
+ *   reaches the deadline (the stored-only-publication witness in `player-clock-work.test.ts`);
  * - a missing event segment against no gap: the store refuses a publication whose events do not continue its cursor
  *   (`player-bridge-session.test.ts`, "a store applies publications by revision and requires their events to continue
  *   its cursor"). No recovery is claimed;
