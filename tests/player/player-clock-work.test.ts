@@ -1487,6 +1487,7 @@ for (const delayMs of [undefined, 0])
       clockTicket(),
       () => waiting,
     );
+    const before = player.posts.filter((post) => post.op === "observeTime").length;
     window.dispatchEvent(new Event("pagehide"));
     window.dispatchEvent(new Event("pagehide"));
     player.elapse(200);
@@ -1497,7 +1498,44 @@ for (const delayMs of [undefined, 0])
       if (delayMs === 0) context.mock.timers.tick(1);
       await settle();
     }
+    assert.equal(
+      player.posts.filter((post) => post.op === "observeTime").length - before,
+      1,
+      "the second barrier joins the first, still waiting for its turn",
+    );
+    assert.equal(
+      player.host.session.value?.state.foregroundAction?.kind,
+      "interaction",
+      "that one observation, read at its turn, covers the wait",
+    );
   });
+
+test("a failure before the clock's own observation reaches the host does not park its deadline", async (context) => {
+  const player = await mountClock(context, true);
+  const clone = globalThis.structuredClone;
+  let failed = 0;
+  context.mock.method(
+    globalThis,
+    "structuredClone",
+    (value: unknown, options?: StructuredSerializeOptions) => {
+      const observeTime =
+        typeof value === "object" &&
+        value !== null &&
+        "kind" in value &&
+        value.kind === "request" &&
+        "op" in value &&
+        value.op === "observeTime";
+      if (observeTime && failed === 0) {
+        failed += 1;
+        throw new Error("The request could not cross.");
+      }
+      return clone(value, options);
+    },
+  );
+  await player.advance(400);
+  assert.equal(failed, 1);
+  assert.equal(player.shown.value?.state.foregroundAction?.kind, "interaction");
+});
 
 test("with no deadline left, a release schedules nothing", async (context) => {
   const player = await mountClock(context, false);
@@ -1612,11 +1650,9 @@ const CHAIN_AXES = {
   media: ["on", "off"],
 } as const;
 const chainTerminal = (outcome: string) => ["disposal", "loss", "replacement"].includes(outcome);
-/** Whether the chain's second observation is the clock's own and fails with the session's basis unchanged. */
+/** Whether the chain's second observation is the clock's own and the host refuses its basis twice, unchanged. */
 const chainParks = (row: Readonly<Record<string, string>>) =>
-  !chainTerminal(row.first!) &&
-  row.first !== "retirement" &&
-  (row.second === "basis" || row.second === "recovery");
+  !chainTerminal(row.first!) && row.first !== "retirement" && row.second === "basis";
 function chainInfeasible(row: Readonly<Record<string, string>>): string | null {
   if (chainTerminal(row.first!))
     return row.second === "none"
@@ -1733,7 +1769,8 @@ for (const row of chainRows) {
       assert.equal(player.timeouts.armed, armed, "terminal chain arms nothing more");
     } else if (chainParks(row)) {
       // Written expectation: the second completion is the clock's own observation (unless a retirement queued an
-      // explicit one), and it failed on a basis no publication changed, so the clock waits for a publication.
+      // explicit one), and the host refused its basis twice with no publication since, so the clock waits for one.
+      // Any other failure of it (`recovery`) is recovered and the deadline observed, as below.
       assert.notEqual(kind, "interaction", "parked on the unchanged basis");
       const sent = player.attempts.length;
       await player.advance(100);

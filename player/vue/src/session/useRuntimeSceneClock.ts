@@ -102,12 +102,13 @@ export function useRuntimeSceneClock(
   let nextTask: MessagePort | null = null;
   let disposed = false;
   // The latest observation admitted (`observing`) and not yet settled: the session it observes, and whether its section
-  // has reached its turn. Its release, by itself alone, re-derives the wake (`observing`'s `finally`).
+  // has reached its turn. Its release, by itself alone, reconciles the wake (`observing`'s `finally`).
   let requested: { readonly id: string; phase: "waiting" | "sent" } | null = null;
   // A session the host refused as stopped or lost, which no automatic observation or wake asks for any more.
   let unavailable: string | null = null;
-  // The basis an automatic observation found at its turn and left unchanged: no automatic observation is sent from it
-  // again. A refused basis means a publication of the session is on its way, which changes the basis and lifts this.
+  // The basis on which the host refused an automatic observation twice, while the page's basis is still that one: no
+  // automatic observation is sent from it again. A changed publication clears it. A refusal of the basis means the host
+  // published newer than the page holds, which a reply on its way normally brings (#2263 is when none comes).
   let failedAutomaticBasis: { readonly id: string; readonly revision: number } | null = null;
 
   /**
@@ -224,7 +225,8 @@ export function useRuntimeSceneClock(
     if (paused.value) return shown;
     const admitted: NonNullable<typeof requested> = { id: shown.id, phase: "waiting" };
     requested = admitted;
-    let basisAtTurn: number | null = null;
+    // The basis the host refused twice, when it did.
+    let refusedBasis: number | null = null;
     try {
       cancel();
       const observation: Observation = { generation, session: shown };
@@ -234,7 +236,6 @@ export function useRuntimeSceneClock(
         outcome = await bridgeOf(shown).section(shown, mintClockTicket(), async (section) => {
           admitted.phase = "sent";
           if (disposed || paused.value || owned(shown) === null) return "skipped";
-          basisAtTurn = section.session.revision;
           // The time and media this observation covers are read as it is sent, at its turn: a slow reply delays the
           // observation, not the time it reports.
           const now = () => ({ atMs: sceneTimeMs(section.session), media: mediaReports() });
@@ -246,8 +247,9 @@ export function useRuntimeSceneClock(
             try {
               return await section.send("observeTime", now());
             } catch (again) {
-              if (refusalCode(again) === "basis") return null;
-              throw again;
+              if (refusalCode(again) !== "basis") throw again;
+              refusedBasis = section.session.revision;
+              return null;
             }
           }
         });
@@ -271,12 +273,13 @@ export function useRuntimeSceneClock(
       return whileLive(observation, () => publishLater(shown), owned(shown));
     } finally {
       // The release of the admitted observation, however it ended: unless a newer one was admitted since, the clock
-      // re-derives the wake from the session it shows now, so every opportunity it consumed has a successor (a
-      // publication, a wake, or the session's end) without anything remembering it.
+      // reconciles the wake with the session it shows now, without anything remembering what it consumed. What was due
+      // gets a wake, unless the session ended, holds, or its own observation was refused twice on the basis it still
+      // holds: that one waits for a changed publication.
       if (requested === admitted) {
         requested = null;
-        if (automatic && basisAtTurn !== null && basisOf(shown).revision === basisAtTurn)
-          failedAutomaticBasis = { id: shown.id, revision: basisAtTurn };
+        if (automatic && refusedBasis !== null && basisOf(shown).revision === refusedBasis)
+          failedAutomaticBasis = { id: shown.id, revision: refusedBasis };
         if (admitted.id === session.value?.id) scheduleWakeUp(session.value);
       }
     }
