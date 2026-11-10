@@ -126,9 +126,23 @@ function phaseFlagsAgree(sample, cached) {
   });
 }
 
+/**
+ * An instrumented port's log (`variants/instrumented-client.mjs`) as evidence: the bridge client posts only requests,
+ * each with its ID (`player/engine-bridge/client.ts`), so a post without one is a request lost from the count, not a
+ * message outside a request; only the Worker's `ready` reply has no ID (Sol code r6, F5).
+ */
+function postsComplete(log, page) {
+  log.forEach((entry, index) => {
+    if (entry.dir === "post" && nullable(entry, "id") === null)
+      throw new MissingEvidence(`the ${page} log's entry ${index}: a posted request's ID`);
+  });
+}
+
 /** The instrumented cohort's diagnostics, derived from the raw bridge logs and the injected Worker logs. */
 function diagnostics(result, cell, problems, { timing }) {
   const logs = result.diagnostics.bridgeLogs;
+  postsComplete(logs.cold, "cold");
+  postsComplete(logs.repeat, "repeat");
   const cold = requestsOf(logs.cold);
   const repeat = requestsOf(logs.repeat);
   if (!cold.some((request) => request.op === "start" && request.replyAt !== null))

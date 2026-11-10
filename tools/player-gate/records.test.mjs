@@ -185,6 +185,8 @@ function instrumentedResult() {
   const result = sessionResult({ backend: "worker" });
   delete result.bytes;
   const log = [
+    // The Worker's ready: a reply outside a request, the one message without an ID.
+    { dir: "reply", at: 515, id: null, op: null, kind: "ready", ok: null },
     { dir: "post", at: 520, postMs: 1, id: 1, op: "prepare", session: null, atMs: null },
     { dir: "reply", at: 530, id: 1, op: "prepare", kind: "reply", ok: true },
     { dir: "post", at: 540, postMs: 1, id: 2, op: "start", session: "s", atMs: 0 },
@@ -778,7 +780,7 @@ const RELATIONS = [
   [
     "instrumented: a post → its reply",
     "sessionInstrumented chromium worker",
-    (r) => (r.result.diagnostics.bridgeLogs.cold[1].at = 519),
+    (r) => (r.result.diagnostics.bridgeLogs.cold[2].at = 519),
     ["counts", "crossClock", "timing"],
     "prepare's round trip runs from 520 to 519",
   ],
@@ -1191,6 +1193,30 @@ const RELATIONS = [
     (r) => (r.result.probe.cold.longTasks = null),
     ["timing"],
     "first save: long tasks in that span (ms)",
+  ],
+  // Sol code r6, F5: the client posts only requests, so a post without its ID is a request lost from the count.
+  [
+    "instrumented: a posted operation without its request ID",
+    "sessionInstrumented chromium worker",
+    (r) =>
+      r.result.diagnostics.bridgeLogs.repeat.push({
+        dir: "post",
+        at: 906,
+        postMs: 1,
+        id: null,
+        op: "observeInput",
+        session: "s",
+        atMs: 21,
+      }),
+    ["counts", "crossClock", "timing"],
+    "a posted request's ID",
+  ],
+  [
+    "instrumented: a posted operation with its request ID deleted",
+    "sessionInstrumented chromium worker",
+    (r) => delete r.result.diagnostics.bridgeLogs.cold[1].id,
+    ["counts", "crossClock", "timing"],
+    "the cold log's entry 1: a posted request's ID",
   ],
 ];
 
@@ -1880,7 +1906,20 @@ const ABSENCE = {
   'lib/measure.mjs requestsOf nullable: .filter((entry) => entry.dir === "reply" && nullable(entry, "id") !== null)':
     { permitted: "a message outside a request (the Worker's ready) has no ID" },
   'lib/measure.mjs requestsOf nullable: .filter((entry) => entry.dir === "post" && nullable(entry, "id") !== null)':
-    { permitted: "a message outside a request (the Worker's ready) has no ID" },
+    {
+      // Every post is a request, and `postsComplete` refuses one without its ID before this filter runs (F5).
+      rows: [
+        "instrumented: a posted operation without its request ID",
+        "instrumented: a posted operation with its request ID deleted",
+      ],
+    },
+  'validate.mjs postsComplete nullable: if (entry.dir === "post" && nullable(entry, "id") === null)':
+    {
+      rows: [
+        "instrumented: a posted operation without its request ID",
+        "instrumented: a posted operation with its request ID deleted",
+      ],
+    },
   "lib/measure.mjs requestsOf ??: const reply = replies.get(post.id) ?? null;": {
     rows: ["instrumented: the start request's reply"],
   },
