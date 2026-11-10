@@ -559,6 +559,9 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
   // The reply hooks a request passes on: a debug export's capture releases its ticket from its hook.
   "player/engine-bridge/client.ts openBridge > Promise:callback > request > exclusive:callback {onReply}":
     "bridge plumbing",
+  // A request of no session passes its hook to the post it makes at once.
+  "player/engine-bridge/client.ts openBridge > Promise:callback > request {onReply}":
+    "bridge plumbing",
   "player/runtime/player-bridge.ts PlayerBridge > request > #send:callback {onReply}":
     "bridge plumbing",
   "player/encryption/lock-service.ts LockService > #present > wake {wake}": "own observation",
