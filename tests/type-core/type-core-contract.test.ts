@@ -42,10 +42,8 @@ import { coreRecord } from "../../src/type-inference/core/result.js";
 import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import type { Solver, Work } from "../../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
-import {
-  PAY_RULE_FAMILIES,
-  PROPERTY_STORE_FAMILIES,
-} from "../helpers/type-core/type-core-families.js";
+import { PAY_RULE_FAMILIES } from "../helpers/type-core/families/copy-chains.js";
+import { PROPERTY_STORE_FAMILIES } from "../helpers/type-core/families/candidates.js";
 import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
 import { DOUBLING } from "../helpers/type-core/type-core-work.js";
 import {

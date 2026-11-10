@@ -24,28 +24,33 @@ import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import type { PlaceId } from "../../src/type-inference/graph.js";
 import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
+import { ADMISSION_FAMILIES } from "../helpers/type-core/families/admission.js";
 import {
-  ADMISSION_FAMILIES,
   ADMISSION_SAME_SOURCES,
-  COPY_CHAIN_FAMILIES,
-  DIRECT_INGRESS_PROGRAMS,
-  HOT_CANDIDATE_FAMILIES,
-  LAYER_FAMILIES,
   MIXED_ADD_PRODUCTS,
-  NARROWING_FAMILIES,
-  ORACLE_PROGRAMS,
-  PROPERTY_STORE_FAMILIES,
   READ_CHAIN_PRODUCTS,
-  SEARCH_FAMILIES,
   VALUE_CLASS_SITES,
-  VALUE_SHARING_PROGRAMS,
-  W34_VARIANTS,
+} from "../helpers/type-core/families/admission-products.js";
+import { COPY_CHAIN_FAMILIES } from "../helpers/type-core/families/copy-chains.js";
+import {
+  DIRECT_INGRESS_PROGRAMS,
+  ORACLE_PROGRAMS,
+} from "../helpers/type-core/families/sharing-faults.js";
+import {
+  HOT_CANDIDATE_FAMILIES,
+  PROPERTY_STORE_FAMILIES,
+  WIDE_COPIES_READ_TWICE,
+} from "../helpers/type-core/families/candidates.js";
+import { LAYER_FAMILIES, SEARCH_FAMILIES } from "../helpers/type-core/families/property-names.js";
+import { NARROWING_FAMILIES } from "../helpers/type-core/families/narrowing.js";
+import { VALUE_SHARING_PROGRAMS } from "../helpers/type-core/families/value-sharing.js";
+import { W34_VARIANTS } from "../helpers/type-core/families/w34-links.js";
+import {
   W44_VARIANTS,
   W45_VARIANTS,
-  WIDE_COPIES_READ_TWICE,
   WORK_FAMILIES,
-  type WorkFamily,
-} from "../helpers/type-core/type-core-families.js";
+} from "../helpers/type-core/families/work-gates.js";
+import { type WorkFamily } from "../helpers/type-core/families/builders.js";
 import { readFixture } from "../helpers/type-core/type-core-fixture.js";
 import {
   askEveryRead,

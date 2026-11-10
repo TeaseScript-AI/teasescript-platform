@@ -7,7 +7,7 @@ import { withoutPositions } from "../../src/type-inference/core/positions.js";
 import { CoreProgram } from "../../src/type-inference/core/program.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { coreRequest } from "../helpers/type-core-analysis.js";
-import { COPY_CHAIN_DEPTH, COPY_CHAIN_SOURCES } from "../helpers/type-core/type-core-families.js";
+import { COPY_CHAIN_DEPTH, COPY_CHAIN_SOURCES } from "../helpers/type-core/families/copy-chains.js";
 import { inMode, MODES, orderedItems, publication } from "../helpers/type-core-oracles.js";
 
 /*

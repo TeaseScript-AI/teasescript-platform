@@ -78,7 +78,7 @@ export const PIN_SUITES = [
     file: "tests/type-core/type-core-work-b.test.ts",
     pins: "main's work per family, as bounds",
     pin: /^\s*main: \{\s*$/u,
-    in: "tests/helpers/type-core/type-core-families.ts",
+    in: "tests/helpers/type-core/families/output-bound.ts",
   },
   {
     file: "tests/type-core/type-core-work-c.test.ts",
