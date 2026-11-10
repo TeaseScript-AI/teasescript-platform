@@ -1043,42 +1043,46 @@ test("the census fails a new caller of a forwarder, a new BridgeClient member, a
 
 const REWIND_OWNER = "player/vue/src/session/rewindOwner.ts";
 /**
- * The rewind owner's writes of its lifecycle state and its retirement stamp: inside `createRewindOwner`, the one write
- * of `state`, in `dispatch`, which applies `advanceLifecycle`'s decision (`player/debug/rewind-lifecycle.ts`), and the
- * stamp's two increments, at a retirement and at the loss. Both are plain `let` bindings, which nothing can alias or
- * bind, so their writes are their assignments.
+ * The rewind owner's lifecycle state and retirement stamp, two `let` bindings of `createRewindOwner`, have closed
+ * admission: each use, found by symbol (a shadowing binding of the same name is another symbol), is one admitted shape
+ * or an escape. `state` is written once, in `dispatch`, with `advanceLifecycle`'s decision
+ * (`player/debug/rewind-lifecycle.ts`); it is otherwise decided from and compared with the decision there, read by
+ * property, or returned by the `state` getter. The stamp moves by `retirements++`, the first statement of `retired`
+ * and of `lost`; only `current()` reads it, to take and compare it.
  */
 const OWNER_WRITES = ["retirements: lost", "retirements: retired", "state: dispatch"];
 
-/** Every assignment, `++` or `--` inside `createRewindOwner` to a name of `OWNER_WRITES`, as `name: function`. */
-function ownerWrites(overrides: Readonly<Record<string, string>> = {}): string[] {
+/**
+ * The uses of the owner's two bindings that no admitted shape holds, as `name \`form\` in function:line`, and its
+ * admitted writes, as `name: function`.
+ */
+function ownerUses(overrides: Readonly<Record<string, string>> = {}): {
+  readonly escapes: string[];
+  readonly writes: string[];
+} {
   census.setOverrides(overrides);
   try {
     const { program, root } = census.program();
     // EVIDENCE: validation: the census's program is the TypeScript program it builds (`createSessionWorkCensus`).
-    const file = (program as ts.Program).getSourceFile(resolve(root, REWIND_OWNER));
+    const typed = program as ts.Program;
+    const file = typed.getSourceFile(resolve(root, REWIND_OWNER));
     assert.ok(file, REWIND_OWNER);
-    const names = new Set(OWNER_WRITES.map((each) => each.split(":")[0]));
-    // The names an assignment's target writes, also through a destructuring pattern.
-    const targets = (node: ts.Expression): ts.Identifier[] => {
-      if (ts.isIdentifier(node)) return [node];
-      if (ts.isParenthesizedExpression(node)) return targets(node.expression);
-      if (ts.isArrayLiteralExpression(node))
-        return node.elements.flatMap((each) =>
-          targets(ts.isSpreadElement(each) ? each.expression : each),
-        );
-      if (ts.isObjectLiteralExpression(node))
-        return node.properties.flatMap((each) =>
-          ts.isShorthandPropertyAssignment(each)
-            ? [each.name]
-            : ts.isPropertyAssignment(each)
-              ? targets(each.initializer)
-              : ts.isSpreadAssignment(each)
-                ? targets(each.expression)
-                : [],
-        );
-      return [];
-    };
+    const checker = typed.getTypeChecker();
+    const factories = file.statements.filter(
+      (each): each is ts.FunctionDeclaration =>
+        ts.isFunctionDeclaration(each) && each.name?.text === "createRewindOwner",
+    );
+    assert.equal(factories.length, 1, "one createRewindOwner");
+    const bindings = new Map<ts.Symbol, string>();
+    for (const statement of factories[0]!.body!.statements)
+      if (
+        ts.isVariableStatement(statement) &&
+        (statement.declarationList.flags & ts.NodeFlags.Let) !== 0
+      )
+        for (const { name } of statement.declarationList.declarations)
+          if (ts.isIdentifier(name) && (name.text === "state" || name.text === "retirements"))
+            bindings.set(checker.getSymbolAtLocation(name)!, name.text);
+    assert.deepEqual([...bindings.values()].sort(), ["retirements", "state"], "the two lets");
     // The nearest named function a node is in: a declaration, or the variable or property that holds it.
     const enclosing = (node: ts.Node): string => {
       for (let at = node.parent; at !== undefined; at = at.parent) {
@@ -1094,61 +1098,186 @@ function ownerWrites(overrides: Readonly<Record<string, string>> = {}): string[]
       }
       return "(module)";
     };
+    const text = (node: ts.Node) => node.getText(file);
+    // The admitted shape of a use, or `undefined`; a write's shape is its `OWNER_WRITES` entry.
+    const admitted = (name: string, use: ts.Identifier): string | undefined => {
+      const at = use.parent;
+      const within = enclosing(use);
+      if (ts.isVariableDeclaration(at) && at.name === use)
+        return name === "state" || (at.initializer && text(at.initializer) === "0")
+          ? "declaration"
+          : undefined;
+      if (name === "state") {
+        if (
+          ts.isBinaryExpression(at) &&
+          at.left === use &&
+          at.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          text(at.right) === "outcome.state" &&
+          ts.isExpressionStatement(at.parent) &&
+          within === "dispatch"
+        )
+          return "state: dispatch";
+        // `LifecycleState`'s fields are `readonly`: the compiler refuses a write through one.
+        if (ts.isPropertyAccessExpression(at) && at.expression === use) return "property read";
+        if (
+          ts.isCallExpression(at) &&
+          at.arguments[0] === use &&
+          text(at.expression) === "advanceLifecycle" &&
+          within === "dispatch"
+        )
+          return "decided from";
+        if (
+          ts.isBinaryExpression(at) &&
+          at.right === use &&
+          at.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken &&
+          text(at.left) === "outcome.state" &&
+          within === "dispatch"
+        )
+          return "compared with the decision";
+        if (
+          ts.isReturnStatement(at) &&
+          ts.isGetAccessorDeclaration(at.parent.parent) &&
+          text(at.parent.parent.name) === "state" &&
+          at.parent.parent.body?.statements.length === 1
+        )
+          return "returned by the getter";
+        return undefined;
+      }
+      const statement = at.parent;
+      const body = statement.parent;
+      if (
+        ts.isPostfixUnaryExpression(at) &&
+        at.operator === ts.SyntaxKind.PlusPlusToken &&
+        ts.isExpressionStatement(statement) &&
+        ts.isBlock(body) &&
+        body.statements[0] === statement &&
+        ts.isArrowFunction(body.parent) &&
+        ts.isPropertyAssignment(body.parent.parent) &&
+        ["retired", "lost"].includes(text(body.parent.parent.name))
+      )
+        return `retirements: ${text(body.parent.parent.name)}`;
+      if (within !== "current") return undefined;
+      if (
+        ts.isShorthandPropertyAssignment(at) &&
+        ts.isVariableDeclaration(at.parent.parent) &&
+        text(at.parent.parent.name) === "at"
+      )
+        return "taken";
+      if (
+        ts.isBinaryExpression(at) &&
+        at.left === use &&
+        at.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken &&
+        text(at.right) === "at.retirements"
+      )
+        return "compared";
+      return undefined;
+    };
+    // An escape's form: the operation it is in, above any literal, spread or parentheses that carry it.
+    const form = (use: ts.Node): string => {
+      let at = use;
+      while (
+        ts.isArrayLiteralExpression(at.parent) ||
+        ts.isObjectLiteralExpression(at.parent) ||
+        ts.isSpreadElement(at.parent) ||
+        ts.isSpreadAssignment(at.parent) ||
+        ts.isParenthesizedExpression(at.parent) ||
+        ts.isPropertyAssignment(at.parent) ||
+        ts.isShorthandPropertyAssignment(at.parent)
+      )
+        at = at.parent;
+      const shown = text(at.parent).replace(/\s+/g, " ");
+      return shown.length > 80 ? `${shown.slice(0, 79)}…` : shown;
+    };
+    const escapes: string[] = [];
     const writes: string[] = [];
-    let factories = 0;
     file.forEachChild(function visit(node): void {
-      if (ts.isFunctionDeclaration(node) && node.name?.text === "createRewindOwner") {
-        factories += 1;
-        node.body?.forEachChild(function write(each): void {
-          const assigned =
-            ts.isBinaryExpression(each) &&
-            each.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-            each.operatorToken.kind <= ts.SyntaxKind.LastAssignment
-              ? targets(each.left)
-              : (ts.isPostfixUnaryExpression(each) || ts.isPrefixUnaryExpression(each)) &&
-                  (each.operator === ts.SyntaxKind.PlusPlusToken ||
-                    each.operator === ts.SyntaxKind.MinusMinusToken)
-                ? targets(each.operand)
-                : [];
-          for (const target of assigned)
-            if (names.has(target.text)) writes.push(`${target.text}: ${enclosing(each)}`);
-          each.forEachChild(write);
-        });
+      if (ts.isIdentifier(node)) {
+        const symbol =
+          ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
+            ? checker.getShorthandAssignmentValueSymbol(node.parent)
+            : checker.getSymbolAtLocation(node);
+        const name = symbol && bindings.get(symbol);
+        if (name !== undefined) {
+          const shape = admitted(name, node);
+          if (shape === undefined) {
+            const line = file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1;
+            escapes.push(`${name} \`${form(node)}\` in ${enclosing(node)}:${line}`);
+          } else if (shape.includes(": ")) writes.push(shape);
+        }
       }
       node.forEachChild(visit);
     });
-    assert.equal(factories, 1, "one createRewindOwner");
-    return writes.sort();
+    return { escapes, writes: writes.sort() };
   } finally {
     census.setOverrides({});
   }
 }
 
-test("the rewind owner writes its lifecycle state only in dispatch, and its stamp only at a retirement and the loss", async () => {
+test("the rewind owner uses its lifecycle state and its stamp only in admitted shapes", async () => {
   const check = (overrides?: Readonly<Record<string, string>>) => {
-    const found = ownerWrites(overrides);
-    assert.deepEqual(found, OWNER_WRITES, `the owner's writes: ${found.join(", ")}`);
+    const { escapes, writes } = ownerUses(overrides);
+    assert.deepEqual(
+      { escapes, writes },
+      { escapes: [], writes: OWNER_WRITES },
+      `the owner's escapes: ${escapes.join("; ") || "none"}; its writes: ${writes.join(", ")}`,
+    );
   };
   check();
-  // Controls: a second write of each fails, naming the function it is in.
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(resolve(process.cwd(), REWIND_OWNER), "utf8");
+  const replaced = (from: string, to: string) => {
+    assert.equal(source.split(from).length, 2, `the control's anchor: ${from}`);
+    return source.replace(from, to);
+  };
+  const debugOn = "    debugOn: (): LifecycleDisposition => {\n";
+  const inDebugOn = (inserted: string) => replaced(debugOn, `${debugOn}      ${inserted}\n`);
+  const retired = '    retired: (by: "clear" | "import"): LifecycleDisposition => {\n';
+  const bridge = "      const bridge = host.bridge();\n";
+  const lost = "    lost: (): LifecycleDisposition => {\n";
+  // Controls: each use outside an admitted shape fails, with its form and the function it is in.
   const controls = [
-    ["  function settle(went: boolean) {\n", "    state = INITIAL_LIFECYCLE;\n", "state: settle"],
     [
-      "    debugOn: (): LifecycleDisposition => {\n",
-      "      retirements += 1;\n",
-      "retirements: debugOn",
+      replaced(
+        "  function settle(went: boolean) {\n",
+        "  function settle(went: boolean) {\n    state = INITIAL_LIFECYCLE;\n",
+      ),
+      "state `state = INITIAL_LIFECYCLE` in settle",
     ],
+    [inDebugOn("retirements += 1;"), "retirements `retirements += 1` in debugOn"],
+    [
+      inDebugOn("for (retirements of [retirements + 1]) {}"),
+      "retirements `for (retirements of [retirements + 1]) {}` in debugOn",
+    ],
+    [
+      replaced(`${lost}      retirements++;\n`, `${lost}      retirements = 0;\n`),
+      "retirements `retirements = 0` in lost",
+    ],
+    [
+      inDebugOn("[retirements] = [retirements];"),
+      "retirements `[retirements] = [retirements]` in debugOn",
+    ],
+    [inDebugOn("void retirements;"), "retirements `void retirements` in debugOn"],
+    [
+      replaced(
+        `${retired}      retirements++;\n${bridge}`,
+        `${retired}${bridge}      if (bridge === null) return NOTHING;\n      retirements++;\n`,
+      ),
+      "retirements `retirements++` in retired",
+    ],
+    [inDebugOn("void JSON.stringify(state);"), "state `JSON.stringify(state)` in debugOn"],
   ] as const;
-  for (const [anchor, inserted, named] of controls) {
-    assert.equal(source.split(anchor).length, 2, `the control's anchor: ${anchor}`);
+  for (const [patched, named] of controls)
     assert.throws(
-      () => check({ [REWIND_OWNER]: source.replace(anchor, `${anchor}${inserted}`) }),
+      () => check({ [REWIND_OWNER]: patched }),
       (error: unknown) => error instanceof assert.AssertionError && error.message.includes(named),
       named,
     );
-  }
+  // A binding of the same name in another closure is another symbol, written freely.
+  check({
+    [REWIND_OWNER]: inDebugOn(
+      "void ((retirements: number) => { retirements += 1; let state = retirements; state++; return state; });",
+    ),
+  });
 });
 
 test("every host path that adopts an op's result is classified (item 15)", () => {
