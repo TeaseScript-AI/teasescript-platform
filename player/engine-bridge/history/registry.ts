@@ -32,6 +32,18 @@ import type { DebugHistorySpill } from "./snapshots.js";
  *   next publication.
  */
 
+/**
+ * A close as the registry is asked for it. The registry adds the lineage the history follows (`bound`) and a pending
+ * step's candidate, which only it holds.
+ */
+type HistoryCloseRequest = Omit<
+  Extract<HistoryObservation, { readonly kind: "close" }>,
+  "bound" | "candidate"
+>;
+/** An observation as the registry takes it: a close as a request, every other kind as the core takes it. */
+type RegistryObservation =
+  Exclude<HistoryObservation, { readonly kind: "close" }> | HistoryCloseRequest;
+
 /** A held session as the history sees it: its lineage key, and its marks now. */
 export interface HistoryLineage {
   readonly historyKey: string;
@@ -40,7 +52,10 @@ export interface HistoryLineage {
 
 export interface Entry {
   readonly core: HistoryCore;
-  /** The lineage the history follows: its first publication's, then the one Return or an adoption makes live. */
+  /**
+   * The lineage the history follows, its one holder: its first publication's, then the one Return or an adoption makes
+   * live. Every close of its core is given it (`bound`).
+   */
   bound: string | null;
   /** The host session IDs of the lineages the history names. */
   readonly ids: Map<string, string>;
@@ -104,7 +119,8 @@ export class HistoryRegistry {
     this.#spill = spill;
     this.#budget = budget;
     this.entries = new OwnedMap(delivery, (entry) => {
-      if (!entry.core.closed) advanceHistory(entry.core, { kind: "close", by: "disposal" });
+      if (!entry.core.closed)
+        advanceHistory(entry.core, { kind: "close", by: "disposal", bound: entry.bound });
     });
     this.candidates = new OwnedMap(delivery, (candidate, history) => {
       if (this.entries.get(history)?.core.pendingStep === candidate.step)
@@ -139,7 +155,7 @@ export class HistoryRegistry {
   close(
     owner: number,
     history: number,
-    observation: Extract<HistoryObservation, { readonly kind: "close" }>,
+    observation: HistoryCloseRequest,
   ): { readonly outcome: HistoryOutcome; readonly applied: AppliedEffects } {
     const closed = this.advance(history, observation);
     if (closed.outcome.kind === "refused") this.failClose(owner);
@@ -307,16 +323,20 @@ export class HistoryRegistry {
    */
   advance(
     history: number,
-    observation: HistoryObservation,
+    observation: RegistryObservation,
   ): { readonly outcome: HistoryOutcome; readonly applied: AppliedEffects } {
     const entry = this.entries.get(history);
     if (entry === undefined)
       return { outcome: { kind: "refused", reason: "no such history" }, applied: NOTHING };
-    // A close takes the pending step's candidate with it.
+    // A close is given the lineage the history follows, and takes the pending step's candidate with it.
     const candidate = this.candidates.get(history);
-    const observed =
-      observation.kind === "close" && candidate !== undefined
-        ? { ...observation, candidate: candidate.key }
+    const observed: HistoryObservation =
+      observation.kind === "close"
+        ? {
+            ...observation,
+            bound: entry.bound,
+            ...(candidate === undefined ? {} : { candidate: candidate.key }),
+          }
         : observation;
     const outcome = advanceHistory(entry.core, observed);
     const applied = this.#applied(entry, outcome);
