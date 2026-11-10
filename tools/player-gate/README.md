@@ -29,7 +29,7 @@ says beside the label what that claims.
 - **Each scenario's parts** (`validate.mjs` `PARTS`) check their order relations and the evidence a trial needs before
   they derive. Examples: each reply after its request, a tap's handler after its event, a keep trial's hiding, a
   transaction's end with its outcome.
-- **Every check has a witness.** A kit test (`records.test.mjs`) reads every `span` call, `ok: false` return,
+- **Every check has a witness.** A kit test (`check-sites.test.mjs`) reads every `span` call, `ok: false` return,
   `problems.push` and evidence-error `throw` in the derivation modules. Each named check site needs a witness at that
   position or an explicit implication from an earlier check. An implied site has an ordering row instead of an
   independently killing one: the row breaks both checks and expects the earlier one's reason, so a reorder fails a
