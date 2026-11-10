@@ -18,6 +18,7 @@ import {
   narrower,
 } from "../../src/type-inference/core/check-result/kept-checks.js";
 import {
+  DEFAULT_LOST_AT_BUDGET,
   OutsideContract,
   SliceIndex,
   UNESTABLISHED_AT_BUDGET,
@@ -543,7 +544,13 @@ test("a decline the budget causes carries the limit marker, one the slice does n
   assert.ok(request !== null);
   const [statement] = request.files[0]!.program.statements;
   assert.ok(statement?.kind === "letStatement");
-  for (const what of [OPEN_BY_STOP, LOST, UNDECIDED, UNESTABLISHED_AT_BUDGET])
+  for (const what of [
+    OPEN_BY_STOP,
+    LOST,
+    UNDECIDED,
+    UNESTABLISHED_AT_BUDGET,
+    DEFAULT_LOST_AT_BUDGET,
+  ])
     assert.equal(new OutsideContract(statement.initializer, what).limit, true, what);
   assert.equal(new OutsideContract(statement.initializer, outside.what).limit, false, outside.what);
 });
@@ -677,4 +684,84 @@ test("a store's part checks keep a stopped mark only where the stored value's ow
     [store.typeCheck, store.partChecks?.map((part) => part.place)],
     [undefined, ["'b.f.n'"]],
   );
+});
+
+// #2183: after a settled stop, a fallback's obligation against `unknown` is the requirement
+// the stop lost, which no `fallbackCheck` carries, so the program declines at the default.
+const LOST_DEFAULT: readonly {
+  readonly name: string;
+  readonly source: string;
+  readonly demands: readonly number[];
+  readonly forbidden: Readonly<Record<string, SerializableRuntimeValue>>;
+  readonly at: string;
+}[] = [
+  {
+    name: "a get default",
+    source: `let xs: integer[] = [1]\nsay xs.get(4, default: hostValue)${END}`,
+    demands: [16],
+    forbidden: { hostValue: "bad", hostOther: 1 },
+    at: "hostValue)",
+  },
+  {
+    name: "an otherwise fallback",
+    source: `let xs: integer?[] = [hostValue]\nsay xs[0] otherwise hostOther${END}`,
+    demands: [16],
+    forbidden: { hostValue: null, hostOther: "bad" },
+    at: "hostOther\n",
+  },
+  {
+    // (#2245's witness: the stop also removes `let v`'s own check, which no obligation owes; the fallback's declines it)
+    name: "#2245's otherwise fallback into an inferred binding",
+    source: `let ws: integer?[] = [1]\nlet xs = ws\n${lines(8, () => "xs = ws")}\nxs = hostOther\nsay "BEFORE"\nlet v = xs[0] otherwise hostValue\nsay v${END}`,
+    demands: [1, 2, 3, 4],
+    forbidden: { hostValue: 2.5, hostOther: list([null]) },
+    at: "hostValue\nsay v",
+  },
+];
+
+test("after a settled stop a default whose requirement the stop lost declines at the default, where the natural plan rejects the value it would return (#2183)", () => {
+  for (const { name, source, demands, forbidden, at } of LOST_DEFAULT) {
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+    assert.ok(request !== null, name);
+    for (const mode of MODES) {
+      const natural = inMode(mode, () => compiled(source, null));
+      assert.ok(natural.plan !== null, name);
+      assert.equal(
+        said(runGlobals(natural.plan, forbidden)),
+        false,
+        `${name}: the natural plan rejects`,
+      );
+      for (const demand of demands) {
+        const where = `${name} at demand ${demand} (mode ${JSON.stringify(mode)})`;
+        const { budget, diagnostics } = inMode(mode, () =>
+          withTestDemandAllowance(demand, () => analyseCore(request)),
+        );
+        // (a settled stop that owes the fallback's obligation against `unknown`)
+        assert.ok(
+          budget.decisions.some((decision) => decision.stopped),
+          where,
+        );
+        assert.ok(budget.exhausted === null || budget.settled, where);
+        assert.ok(
+          [...diagnostics, ...budget.deferred].some(
+            (d) =>
+              d.class === "warning-runtime-check" &&
+              d.kind !== "budget" &&
+              d.rule.rule === "fallback" &&
+              d.obligation.against.join() === "unknown",
+          ),
+          where,
+        );
+        assert.throws(
+          () => inMode(mode, () => compiled(source, demand)),
+          (error) =>
+            error instanceof CandidateOutsideSlice &&
+            error.what === DEFAULT_LOST_AT_BUDGET &&
+            error.limit &&
+            error.site.start === source.indexOf(at),
+          where,
+        );
+      }
+    }
+  }
 });

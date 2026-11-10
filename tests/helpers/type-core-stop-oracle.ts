@@ -103,7 +103,8 @@ export const unsettledStop = (budget: Answers["budget"]): boolean =>
 /**
  * Why a compile's decline at a stop does not stand, or `null` where it does (#2080 part 2, Codex r1–r3): a decline a
  * limit causes, at the phase it belongs to ("a store whose check was left undecided at the budget" before admission
- * settled; the lost and unestablished checks only after it; an open typed default at any stop); or a construct outside
+ * settled; the lost and unestablished checks and a lost default, #2183, only after it; an open typed default at any stop);
+ * or a construct outside
  * the slice, with the reason the unstopped compile gives too (`natural`) or one the caller names as expected at its
  * stops (`expected`, none unless named). Any other decline would hide a wrong reason as no plan.
  */

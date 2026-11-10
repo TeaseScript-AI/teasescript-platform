@@ -469,6 +469,8 @@ export const UNESTABLISHED_AT_BUDGET =
 export const LOST_AT_BUDGET = "a store whose check was lost at the budget";
 /** After a stop before admission settled, an owed obligation against `unknown` (#2080). */
 export const UNDECIDED_AT_BUDGET = "a store whose check was left undecided at the budget";
+/** After a settled stop, a fallback's obligation against `unknown`: its check the plan cannot make (#2183). */
+export const DEFAULT_LOST_AT_BUDGET = "a default whose check was lost at the budget";
 
 /**
  * The reasons the stop's gates (`lostCheck`) and rule (R) (`OPEN_BY_STOP`) decline with (#2080, the owner's go,
@@ -481,6 +483,7 @@ export const LIMIT_REASONS: readonly string[] = [
   UNESTABLISHED_AT_BUDGET,
   LOST_AT_BUDGET,
   UNDECIDED_AT_BUDGET,
+  DEFAULT_LOST_AT_BUDGET,
 ];
 
 /**

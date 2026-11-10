@@ -1,5 +1,6 @@
 // The plan's runtime checks: the checks the warnings and the stop's deferred warnings owe at their stores
-// (`runtimeChecks`), the count the stop's warning names (`movedChecks`), and the lost-check gate (`lostCheck`).
+// (`runtimeChecks`), the count the stop's warning names (`movedChecks`), and the lost-check gate (`lostCheck`, with
+// `settledOwed`).
 import type {
   BinaryExpression,
   Expression,
@@ -25,6 +26,7 @@ import { type CoreAnalysisRequest, propertyName } from "../program.js";
 import { pathPhrase } from "../messages.js";
 import { type Obligation, type RequiredKind } from "../result.js";
 import {
+  DEFAULT_LOST_AT_BUDGET,
   LOST_AT_BUDGET,
   OutsideContract,
   SliceIndex,
@@ -385,6 +387,34 @@ export function lostCheck(
     throw new OutsideContract(
       store.kind === "letStatement" ? store.initializer : store.value,
       LOST_AT_BUDGET,
+    );
+  }
+  settledOwed(answers, index);
+}
+
+/**
+ * After a settled stop, an owed obligation against exactly `unknown` that is not a store's declines the program at its
+ * site (#2183): a fallback's (C10) is the requirement the stop lost, which no
+ * `fallbackCheck` can carry (`fallbackPlan`), so the default would run unchecked; any other rule's declines too, as an
+ * unestablished check. No set shows one (#2183's census, sweep and natural sets: `store` and `fallback` only). A store's
+ * is the registry's, which `keeps` decides. Not caught: a contract the stop left incomplete that a natural producer
+ * reads, where C10 owes nothing (#2183, measured 0, not shown impossible), and a store whose C1 the stop removed, where
+ * no obligation is owed (#2245).
+ */
+function settledOwed(answers: Answers, index: SliceIndex): void {
+  const { budget } = answers;
+  const stopped =
+    budget.exhausted !== null || budget.decisions.some((decision) => decision.stopped);
+  if (!stopped || (budget.exhausted !== null && !budget.settled)) return;
+  for (const diagnostic of [...answers.diagnostics, ...budget.deferred]) {
+    if (diagnostic.class !== "warning-runtime-check" || diagnostic.kind === "budget") continue;
+    if (leftOutWarning(diagnostic)) continue;
+    const { obligation } = diagnostic;
+    if (obligation.against.length !== 1 || obligation.against[0] !== "unknown") continue;
+    if (diagnostic.rule.rule === "store") continue;
+    throw new OutsideContract(
+      index.expressionAt(obligation.site),
+      diagnostic.rule.rule === "fallback" ? DEFAULT_LOST_AT_BUDGET : UNESTABLISHED_AT_BUDGET,
     );
   }
 }
