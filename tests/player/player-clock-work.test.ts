@@ -1121,7 +1121,6 @@ test("a deadline passed during a retired observation is observed after its succe
   const successor = player.host.observe().catch(() => null);
   player.gate.releaseFirst();
   await settle();
-  const from = player.posts.length;
   player.elapse(20);
   context.mock.timers.tick(20);
   await settle();
@@ -1459,6 +1458,7 @@ test("a joined barrier with no deadline left sends nothing more", async (context
   context.mock.timers.tick(1000);
   await settle();
   assert.equal(player.attempts.filter((op) => op === "observeTime").length, observed);
+  assert.equal(player.timeouts.armed, armed, "and arms nothing");
 });
 
 for (const delayMs of [undefined, 0])

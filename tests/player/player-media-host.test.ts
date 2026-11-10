@@ -359,45 +359,6 @@ for (const { settles, change, name } of REPLY_CASES)
     scope.stop();
   });
 
-for (const delay of [0, 50, 250])
-  test(`media sampling reports progress throughout, with loaded audio: ${delay} ms`, async (context) => {
-    const { elements, start, posted, queued, player } = await mount(context, delay);
-    await start('playAudio async "clock.mp3"\nwait 1.5 s\nshowButton "Done"\nexit');
-    for (let turn = 0; !elements.some((element) => element.src.endsWith("clock.mp3")); turn++) {
-      assert.ok(turn < 1000);
-      await later();
-    }
-    elements
-      .find((element) => element.src.endsWith("clock.mp3"))!
-      .dispatchEvent(new Event("loadedmetadata"));
-    await later(3000);
-    const observations = posted
-      .filter((post) => post.op === "observeTime")
-      .map((post) => {
-        const args = post.args as { atMs: number; media: unknown[] };
-        return {
-          wall: post.wall,
-          atMs: args.atMs,
-          media: args.media.length,
-          lag: post.wall - args.atMs,
-        };
-      });
-    const lags = observations.map((post) => post.lag);
-    const spread = Math.max(...lags) - Math.min(...lags);
-    const shown = player.session.value!;
-    const latest = (await player.bridge).latest(shown)!;
-    assert.ok(observations.length >= 5);
-    assert.equal(
-      shown.state.foregroundAction?.kind,
-      "interaction",
-      "shown session reaches the button under continuous sampling",
-    );
-    assert.ok(
-      observations.some((post) => post.media > 0),
-      "fake audio supplies reports",
-    );
-  });
-
 /** Lets the replies, publications and scheduling a mock-clock step caused run to their end. */
 async function drainTasks() {
   for (let n = 0; n < 30; n++) await new Promise<void>((resolve) => setImmediate(resolve));
@@ -435,7 +396,6 @@ for (const delay of [0, 50, 250])
     const audio = player.elements.find((a) => a.src.endsWith("clock.mp3"));
     assert.ok(audio, "audio created");
     audio.dispatchEvent(new Event("loadedmetadata"));
-    const loadedAt = now;
     let buttonAt: number | null = null;
     let waitDeadline: number | null = null;
     for (let n = 0; n < 3500; n++) {
