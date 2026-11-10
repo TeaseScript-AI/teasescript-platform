@@ -31,6 +31,7 @@ import { type ItemTag, REASON, type Item } from "../items.js";
 import { propertyName, propertyStep } from "../program.js";
 import { type RequiredKind } from "../result.js";
 import {
+  OPEN_BY_STOP,
   OutsideContract,
   SliceIndex,
   type Store,
@@ -123,6 +124,10 @@ export class Contracts {
     const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
     const required = place === null ? null : this.answers.requirement(place.id, place.path);
     this.destination(store);
+    const settled =
+      place === null || (whole && declaration.typeAnnotation !== null) || required !== null
+        ? null
+        : this.#descriptors.result(place.id, place.path, [value], () => outsideStructure(value));
     const result =
       whole && declaration.typeAnnotation !== null
         ? this.#descriptors.written(
@@ -136,18 +141,19 @@ export class Contracts {
               place!.id,
               place!.path,
             )
-          : place === null
+          : place === null || settled === null
             ? null
-            : this.#completed(
-                place.id,
-                place.path,
-                this.#descriptors.result(place.id, place.path, [value], () =>
-                  outsideStructure(value),
-                ),
-              );
+            : this.#completed(place.id, place.path, settled);
     if (result !== null) this.results.set(store, result);
-    const type = result === null ? null : checkedType(result);
-    if (type === null) return null;
+    const checked = result === null ? null : checkedType(result);
+    if (checked === null) return null;
+    // (where a stop left the settled pass's contract incomplete, the receiving completion's lists each object's
+    // properties as its listings found them: the check lists them by the store's own records, then as the program writes
+    // them (#2215). The settled pass's own lists them by the first asker's records: where another store asked first, with
+    // records that rank them otherwise, the two differ (#2218). The recorded result, which the lost-check gate reads,
+    // keeps the completion's order.)
+    const type =
+      settled !== null && result !== settled ? this.#inRecordOrder(checked, [value]) : checked;
     const name = [
       declaration.name.name,
       ...(whole ? [] : (place?.path ?? []).map(propertyName)),
@@ -187,6 +193,47 @@ export class Contracts {
   #completed(id: PlaceId, path: readonly string[], settled: ContractResult): ContractResult {
     if (settled.state === "complete" || leftOutCompletion()) return settled;
     return this.answers.received(id, path) ?? settled;
+  }
+
+  /**
+   * A completion's checked type with each object's properties by `fieldOrder` over the literal records below the store's
+   * value, level by level, as `ContractDescriptors` fills a decided object from its first asker's records (#2215). A
+   * contract lists properties only where it filled a decided object, so nothing more is asked.
+   */
+  #inRecordOrder(type: TypePlan, records: readonly Expression[]): TypePlan {
+    switch (type.kind) {
+      case "union":
+        return {
+          kind: "union",
+          members: type.members.map((member) => this.#inRecordOrder(member, records)),
+        };
+      case "list":
+      case "set":
+      case "dict":
+        return type.element === null
+          ? type
+          : {
+              kind: type.kind,
+              element: this.#inRecordOrder(
+                type.element,
+                recordsBelow(records, this.#literalOf).elements,
+              ),
+            };
+      case "object": {
+        const below = recordsBelow(records, this.#literalOf);
+        const byName = new Map(type.properties.map((property) => [property.name, property]));
+        const properties = fieldOrder(byName.keys(), below, this.index).map((name) => {
+          // EVIDENCE: `fieldOrder` returns `byName`'s own keys, in another order.
+          const property = byName.get(name)!;
+          return { name, type: this.#inRecordOrder(property.type, below.fields.get(name) ?? []) };
+        });
+        return type.keepExtra === true
+          ? { kind: "object", properties, keepExtra: true }
+          : { kind: "object", properties };
+      }
+      default:
+        return type;
+    }
   }
 
   /**
@@ -619,9 +666,6 @@ function defaultOf(call: CallExpression): Expression | null {
 
 /** The kinds whose levels below a typed call's answer its default answers (#1767). */
 const STRUCTURED: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "object", "unknown"]);
-
-/** The exclusion of a typed call's answer a stop left open (#1767). */
-const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
 
 /**
  * Whether a default reads anything but literal data at any level: a variable, a property or an element of one, any

@@ -7016,3 +7016,53 @@ export const PAY_RULE_FAMILIES: readonly PayRuleFamily[] = Object.entries(PAY_HO
         ),
     })),
 );
+
+/**
+ * #2065: the decision index's pay rule (`holdersOf`) over a family: k objects stored into one place in turn (`direct`)
+ * or k terminal places copied into it (`copy`), each decided below a property after the stores (`repeat`), by how the
+ * objects hold the decided property: one holder each, none, every one, or every other store a copy of a place of two
+ * stores (unproved); and how often, below the index's first bound, at it, and k times. The index is built only where
+ * its reads save what it costs, so each family's work grows with its source as `main`'s does or slower.
+ */
+const HOLDER_OBJECTS = {
+  holders: {
+    object: (i: number) => `{f${i}: {n: value}}`,
+    read: (j: number, k: number) => `f${j % k}.n`,
+  },
+  none: { object: (i: number) => `{f${i}: {n: value}}`, read: (j: number) => `m${j}.n` },
+  every: { object: (i: number) => `{p: {n: value}, q${i}: 1}`, read: (j: number) => `p.m${j}` },
+  unproved: {
+    object: (i: number) => (i % 2 === 0 ? "u" : `{f${i}: {n: value}}`),
+    read: (j: number, k: number) => `f${(2 * j + 1) % k}.n`,
+  },
+} as const;
+
+/** The decided reads of each family: below the index's first bound, at it, and k. */
+const HOLDER_READS = { below: () => 2, at: () => 6, past: (k: number) => k } as const;
+
+export const DECISION_HOLDER_FAMILIES: readonly WorkFamily[] = (
+  ["direct", "copy"] as const
+).flatMap((source) =>
+  Object.entries(HOLDER_OBJECTS).flatMap(([holding, { object, read }]) =>
+    Object.entries(HOLDER_READS).map(([reads, count]): WorkFamily => ({
+      name: `holders-${source}-${holding}-${reads}`,
+      measures: `#2065: k objects ${source === "direct" ? "stored into" : "copied into"} one place, ${holding} holding the decided property, decided ${reads} the index's bound`,
+      program: (k) =>
+        main(
+          lines(
+            "let value:integer = 1",
+            'let u = {f1: {n: value}}\nu = {g: "s"}',
+            ...(source === "direct"
+              ? [`let root = ${object(0)}`, rows(k - 1, (i) => `root = ${object(i + 1)}`)]
+              : [
+                  rows(k, (i) => `let root${i} = ${object(i)}`),
+                  "let a = root0",
+                  rows(k - 1, (i) => `a = root${i + 1}`),
+                ]),
+            rows(count(k), (j) => `repeat ${source === "direct" ? "root" : "a"}.${read(j, k)} {}`),
+            "exit",
+          ),
+        ),
+    })),
+  ),
+);

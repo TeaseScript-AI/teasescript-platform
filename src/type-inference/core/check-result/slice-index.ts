@@ -460,6 +460,28 @@ export function unwrap(expression: Expression): Expression {
   return current;
 }
 
+/** A typed parse's or load's default whose level a stop left unproven (#1767). */
+export const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
+/** After a settled stop, obligations the analysis cannot find (`lostCheck`). */
+export const UNESTABLISHED_AT_BUDGET =
+  "a store whose required checks could not be established at the budget";
+/** After a settled stop, a required check the published plan does not keep (`lostCheck`). */
+export const LOST_AT_BUDGET = "a store whose check was lost at the budget";
+/** After a stop before admission settled, an owed obligation against `unknown` (#2080). */
+export const UNDECIDED_AT_BUDGET = "a store whose check was left undecided at the budget";
+
+/**
+ * The reasons the stop's gates (`lostCheck`) and rule (R) (`OPEN_BY_STOP`) decline with (#2080, the owner's go,
+ * 2026-11-10): tests count them by `limit`, which reads this list, so no site marks one without its reason. A refusal the
+ * slice makes from a diagnostic only a stop produces carries its coverage reason and is not here (#2236).
+ */
+export const LIMIT_REASONS: readonly string[] = [
+  OPEN_BY_STOP,
+  UNESTABLISHED_AT_BUDGET,
+  LOST_AT_BUDGET,
+  UNDECIDED_AT_BUDGET,
+];
+
 /**
  * A contract the plan cannot carry exactly as the core decided it: one deeper than the slice follows (`SLICE_DEPTH`), a
  * record field that some records of a list lack, a typed parse or load into a copy of a written type, a typed parse's or
@@ -467,12 +489,15 @@ export function unwrap(expression: Expression): Expression {
  * less than the core decided.
  */
 export class OutsideContract extends Error {
+  /** Whether its reason is one the stop's gates or rule (R) decline with (`LIMIT_REASONS`). */
+  readonly limit: boolean;
   public constructor(
     readonly expression: Expression,
     readonly what: string,
   ) {
     super(`The slice does not follow ${what}.`);
     this.name = "OutsideContract";
+    this.limit = LIMIT_REASONS.includes(what);
   }
 }
 

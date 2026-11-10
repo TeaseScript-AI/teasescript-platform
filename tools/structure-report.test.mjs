@@ -342,6 +342,123 @@ test("--diff places a function by Git's lines, and keeps a name's leading U+FEFF
   }
 });
 
+test("a private method over 150 lines reports under its name, as a public one does", () => {
+  const method = (name) =>
+    longFunction(name, 160)
+      .replace(/^export function /u, "  ")
+      .replace(/\n/gu, "\n  ");
+  const core = `export class Core {\n${method("#advance")}\n${method("advance")}\n}\n`;
+  // a body line of each method
+  const { root, base } = history(
+    { "src/core.ts": core },
+    { "src/core.ts": core.replaceAll("const v5 = 5;", "const v5 = 55;") },
+  );
+  try {
+    assert.deepEqual(changeOf(root, base), [
+      "function over 150 lines that the change writes into: src/core.ts:2 #advance (160 lines)",
+      "function over 150 lines that the change writes into: src/core.ts:162 advance (160 lines)",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a function over 150 lines names its longest nested function, and an initialized one takes its variable's name", () => {
+  /** `count` statements named after `prefix`, at `indent`. */
+  const body = (prefix, count, indent) =>
+    Array.from({ length: count }, (_, i) => `${indent}const ${prefix}${i} = ${i};`);
+  /** A block of `count` lines: `head`, statements, then `tail` at `indent`. */
+  const block = (head, count, indent, tail = "}") => [
+    `${indent}${head}`,
+    ...body(`v${head.replace(/\W/gu, "")}`, count - 2, `${indent}  `),
+    `${indent}${tail}`,
+  ];
+  const text = [
+    // two nested functions, the longer an arrow initializing a variable that holds a function of its own
+    "export function outer() {",
+    ...block("function short() {", 5, "  "),
+    "  const helper = () => {",
+    ...block("function inner() {", 3, "    "),
+    ...body("helper", 15, "    "),
+    "  };",
+    ...body("outer", 133, "  "),
+    "}",
+    // none
+    ...block("export function plain() {", 160, ""),
+    // a nested class's members: a private method and a shorter public one
+    "export class Host {",
+    "  run() {",
+    "    class Inner {",
+    ...block("#step() {", 30, "      "),
+    ...block("go() {", 10, "      "),
+    "    }",
+    ...body("run", 116, "    "),
+    "  }",
+    "}",
+    // a tie: the first
+    "export function tied() {",
+    ...block("function first() {", 10, "  "),
+    ...block("function second() {", 10, "  "),
+    ...body("tied", 138, "  "),
+    "}",
+    // an anonymous callback, longer than a named function
+    "export function mapped() {",
+    ...block("[1].map(() => {", 25, "  ", "});"),
+    ...block("function named() {", 5, "  "),
+    ...body("mapped", 128, "  "),
+    "}",
+    // over 150 lines itself an arrow initializing a variable, holding one initializing a property
+    "export const arrowed = () => {",
+    "  const parts = {",
+    ...block("piece: () => {", 12, "    ", "},"),
+    "  };",
+    ...body("arrowed", 144, "  "),
+    "};",
+    "",
+  ].join("\n");
+  const at = (marker) => text.split("\n").findIndex((line) => line.includes(marker)) + 1;
+  const { root, base } = history(
+    { "src/parts.ts": text },
+    { "src/parts.ts": text.replace("const outer5 = 5;", "const outer5 = 55;") },
+  );
+  try {
+    const nested = (name, lines, marker) => ({ name, line: at(marker), lines });
+    const rows = [
+      ["outer", "function outer(", nested("helper", 20, "const helper")],
+      ["plain", "function plain(", undefined],
+      ["run", "run() {", nested("#step", 30, "#step()")],
+      ["tied", "function tied(", nested("first", 10, "function first")],
+      ["mapped", "function mapped(", nested("(anonymous)", 25, "[1].map")],
+      ["arrowed", "arrowed = () =>", nested("piece", 12, "piece:")],
+    ].map(([name, marker, longestNested]) => ({
+      file: "src/parts.ts",
+      name,
+      line: at(marker),
+      lines: 160,
+      ...(longestNested && { longestNested }),
+    }));
+    const json = join(root, "tree.json");
+    const out = execFileSync(process.execPath, [tool, "--json", json], {
+      cwd: root,
+      encoding: "utf8",
+    }).split("\n");
+    assert.deepEqual(JSON.parse(readFileSync(json, "utf8")).longFunctions, rows);
+    const from = out.indexOf("Functions over 150 lines: 6") + 1;
+    assert.deepEqual(
+      out.slice(from, from + rows.length),
+      rows.map(
+        ({ line, name, longestNested: n }) =>
+          `  160  src/parts.ts:${line} ${name}${n ? `, longest nested function: ${n.name} (${n.lines} lines, line ${n.line})` : ""}`,
+      ),
+    );
+    assert.deepEqual(changeOf(root, base), [
+      `function over 150 lines that the change writes into: src/parts.ts:1 outer (160 lines), longest nested function: helper (20 lines, line ${at("const helper")})`,
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a name that is not UTF-8 stops the report; a file whose hunks --numstat does not count is reported, and the report goes on", () => {
   const named = history(
     { "src/x.ts": "export const x = 1;\n" },
@@ -605,7 +722,11 @@ test(
       git("init", "-q");
       git("config", "user.email", "t@t");
       git("config", "user.name", "t");
-      const big = longFunction("big", 400);
+      // holding a 3-line function at lines 3-5
+      const big = longFunction("big", 400).replace(
+        "  const v1 = 1;\n  const v2 = 2;\n  const v3 = 3;",
+        "  function nested() {\n    return 1;\n  }",
+      );
       write(root, { "src/a.ts": `${big}\nexport const small = 1;\n` });
       git("add", "-A");
       git("commit", "-q", "-m", "base");
@@ -627,7 +748,7 @@ test(
       );
       assert.match(
         moved,
-        /suppressed \(moved\): function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\), 400 moved lines discounted/u,
+        /^ {2}suppressed \(moved\): function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\), 400 moved lines discounted, longest nested function: nested \(3 lines, line 3\)$/mu,
       );
       assert.doesNotMatch(moved, /^ {2}file gaining over 300 lines/mu);
       // one line edited inside the moved function still counts as written into it
@@ -637,7 +758,7 @@ test(
       const edited = report("--diff", base, "--moved");
       assert.match(
         edited,
-        /^ {2}function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\)$/mu,
+        /^ {2}function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\), longest nested function: nested \(3 lines, line 3\)$/mu,
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

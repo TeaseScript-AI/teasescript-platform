@@ -40,7 +40,14 @@ import {
   type DiagnosticRule,
   type Obligation,
 } from "../../src/type-inference/core/result.js";
-import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracle.js";
+import { LIMIT_REASONS } from "../../src/type-inference/core/check-result/slice-index.js";
+import {
+  stopDeclineProblem,
+  stopProblems,
+  unsettledStop,
+  type Globals,
+  type StopRun,
+} from "./type-core-stop-oracle.js";
 import { sampled } from "./sweep.js";
 
 /*
@@ -74,7 +81,16 @@ interface Holder {
   readonly integer: boolean;
   /** The value the read gives for the host data's, where it is another (a fallback's for `null`). */
   readonly gives?: (value: SerializableRuntimeValue) => SerializableRuntimeValue;
+  /** The slice's refusals its cases expect at a stop but not unstopped (`HeldCase.stopReasons`). */
+  readonly stopReasons?: readonly string[];
 }
+
+/**
+ * The slice's refusal of an operand a stop left a warning at: a `get` default's key read, whose TSV043 warning in budget
+ * context only a demand stop makes, refused by `outsideAnswers` (#2236; Codex r4 on #2227, `getDefault-1-say-plain` at
+ * demand 19).
+ */
+const STOP_OPERAND = "this operand";
 
 const nest = (
   depth: number,
@@ -136,6 +152,7 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
     ],
     read: `root${fields(depth - 1, "g")}.f`,
     integer: true,
+    stopReasons: [STOP_OPERAND],
   }),
   field: (depth) => ({
     lines: [
@@ -327,6 +344,7 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
     lines: ["let items = [1]"],
     read: nest(depth, "hostValue", (text) => `items.get(4, default: ${text})`),
     integer: true,
+    stopReasons: [STOP_OPERAND],
   }),
   // (the owner reviewer's `addAll` texts, #1445 review of 2026-10-30, at depth 1 alone: host data stored below the
   // source list's element, in a field, a deeper field, a nested list and an object copied into the list, and the
@@ -483,6 +501,8 @@ export interface HeldCase {
     readonly globals: Globals;
     readonly says: readonly string[] | null;
   }[];
+  /** The slice's refusals the case expects at a stop but not unstopped (`stopDeclineProblem`): none unless named. */
+  readonly stopReasons?: readonly string[];
 }
 
 /** A host object as the runtime takes it, its `n` the value. */
@@ -545,6 +565,7 @@ export function heldFamily(few = false): HeldCase[] {
             holderName === "member" ? hostObject : (value: SerializableRuntimeValue) => value;
           cases.push({
             name: `${holderName}-${depth}-${consumerName}-${variant}`,
+            ...(held.stopReasons === undefined ? {} : { stopReasons: held.stopReasons }),
             source: `${lines.join("\n")}\n`,
             slice,
             values: (consumerName === "say" ? SAID : VALUES).map((value) => {
@@ -613,11 +634,18 @@ export function phaseEnds(
   return ends;
 }
 
-/** The compiles the candidate route declined (outside the slice): no plan, each judged alone (Astra r1's B1 on #1597). */
-const declined = new WeakSet<object>();
+/**
+ * The compiles the candidate route declined (outside the slice), each with its reason: no plan, each judged alone (Astra
+ * r1's B1 on #1597).
+ */
+const declined = new WeakMap<object, string>();
 
 /** Whether a run's compile was declined by the candidate route. */
 const declinedRun = (run: StopRun): boolean => declined.has(run.result);
+
+/** The reason the candidate route declined a run's compile (`CandidateOutsideSlice.what`), or `null`. */
+export const declineOf = (run: Pick<StopRun, "result">): string | null =>
+  declined.get(run.result) ?? null;
 
 /**
  * A case's analysis and, in the slice, its compile, unstopped or at an allowance, in a mode, its `without` at the same
@@ -641,7 +669,7 @@ export function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?
     } catch (error) {
       if (!(error instanceof CandidateOutsideSlice)) throw error;
       const none = { diagnostics: [], plan: null };
-      declined.add(none);
+      declined.set(none, error.what);
       return none;
     }
   };
@@ -652,9 +680,32 @@ export function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?
     const result = compiled();
     return { result, ...recordingReads(() => ({ answers: analyseCore(request) })) };
   };
+  // (a decline stands only with a limit's reason at its stop's phase, or a slice reason the unstopped compile gives too,
+  // `stopDeclineProblem`: no run returns a decline whose reason nothing checked, #2080 part 2, Codex r1–r3)
+  const natural = (): string | null => {
+    try {
+      mode.run(() => compileSourceWithBackend(c.source, { globals: GLOBALS }, CORE_BACKEND));
+      return null;
+    } catch (error) {
+      if (!(error instanceof CandidateOutsideSlice)) throw error;
+      return error.what;
+    }
+  };
+  const checked = <T extends Pick<StopRun, "result" | "answers">>(run: T): T => {
+    const what = declined.get(run.result);
+    if (what === undefined) return run;
+    const problem = stopDeclineProblem(
+      what,
+      unsettledStop(run.answers.budget),
+      LIMIT_REASONS.includes(what) ? null : natural(),
+      c.stopReasons ?? [],
+    );
+    if (problem !== null) throw new Error(`${c.name}: ${problem}`);
+    return run;
+  };
   return {
-    ...allowed(demand === undefined ? both : recorded),
-    without: (omit) => allowed(() => withoutRecords(omit, both)),
+    ...checked(allowed(demand === undefined ? both : recorded)),
+    without: (omit) => checked(allowed(() => withoutRecords(omit, both))),
   };
 }
 
@@ -2299,6 +2350,7 @@ export function heldProblems(
   const rule =
     demand === undefined ? undefined : combinedStopRule(c, mode, unstopped, stopped.answers);
   const problems = ownership(unstopped.answers, stopped.answers, rule);
+  // (a decline it returns has a reason `heldRun` checked)
   if (!c.slice || declinedRun(stopped)) return problems;
   // (a stopped plan runs its fitting and forbidden values whatever the reference's compile did; the two compiles are
   // compared where both are had)
@@ -2360,6 +2412,7 @@ export function heldUnstopped(
   mode: HeldMode,
   demand?: number,
 ): { run: StopRun; problems: string[] } {
+  // (a decline it returns has a reason `heldRun` checked)
   const run = heldRun(c, mode, undefined, demand);
   return { run, problems: c.slice && !declinedRun(run) ? runProblems(c, run) : [] };
 }

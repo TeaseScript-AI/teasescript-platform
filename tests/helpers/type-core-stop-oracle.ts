@@ -10,6 +10,11 @@ import {
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
 import { withMessagesInWords } from "../../src/type-inference/core/check-result/check-result.js";
+import {
+  LIMIT_REASONS,
+  OPEN_BY_STOP,
+  UNDECIDED_AT_BUDGET,
+} from "../../src/type-inference/core/check-result/slice-index.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
 import { withoutRecords } from "../../src/type-inference/core/consumers/left-out.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
@@ -90,6 +95,31 @@ function spanOf(value: unknown): Span | null {
 
 /** The decline of a compile that would lose a check its store owes (#1526 decision 2, condition 1). */
 const LOST_CHECK = "a store whose check was lost at the budget";
+
+/** Whether an analysis stopped before admission settled, where the plain gate reads (#2080 part 2). */
+export const unsettledStop = (budget: Answers["budget"]): boolean =>
+  budget.exhausted !== null && !budget.settled;
+
+/**
+ * Why a compile's decline at a stop does not stand, or `null` where it does (#2080 part 2, Codex r1–r3): a decline a
+ * limit causes, at the phase it belongs to ("a store whose check was left undecided at the budget" before admission
+ * settled; the lost and unestablished checks only after it; an open typed default at any stop); or a construct outside
+ * the slice, with the reason the unstopped compile gives too (`natural`) or one the caller names as expected at its
+ * stops (`expected`, none unless named). Any other decline would hide a wrong reason as no plan.
+ */
+export function stopDeclineProblem(
+  what: string,
+  unsettled: boolean,
+  natural: string | null,
+  expected: readonly string[],
+): string | null {
+  if (!LIMIT_REASONS.includes(what))
+    return what === natural || expected.includes(what)
+      ? null
+      : `declined at a stop with "${what}", unstopped ${natural ?? "compiled"}`;
+  if (what === UNDECIDED_AT_BUDGET ? unsettled : what === OPEN_BY_STOP || !unsettled) return null;
+  return `declined with "${what}" ${unsettled ? "before" : "after"} admission settled`;
+}
 
 /**
  * What a record stands for in a plan, between the compile with it and the one without it (`rerun`): where they differ;
@@ -968,6 +998,8 @@ export interface StopRuns {
  * `StopRuns`. Both compiles and analyses are made here, each with its `without` for `stopProblems`; `planted` (for the
  * oracle's own tests) replaces the stopped plan before it runs. `stop` names the allowance `demand` sets on the stopped
  * side: a demand allowance, or (for the oracle's own tests) the work allowance, which stops before admission settles.
+ * `standIn` (for the oracle's own tests, where no stop of a unit publishes a plan, #2080 part 2) compiles the stopped
+ * plan from a sibling unit whose instructions have the unit's own spans, unstopped; the stopped analysis is the unit's.
  */
 export function stopRuns(
   files: readonly SourceFile[],
@@ -976,9 +1008,17 @@ export function stopRuns(
   demand: number,
   planted?: (plan: InstructionPlan) => InstructionPlan,
   stop: "demand" | "work" = "demand",
+  standIn?: { readonly files: readonly SourceFile[]; readonly globals: readonly string[] },
 ): StopRuns {
   const request = coreRequest(files, globals);
   if (request === null) throw new Error("The unit does not resolve.");
+  // (the sibling's compile, unstopped, in the run's mode)
+  const sibling: Compiled | null =
+    standIn === undefined
+      ? null
+      : run(() =>
+          compileProjectWithBackend(standIn.files, { globals: standIn.globals }, CORE_BACKEND),
+        );
   const runAt = (at: number | null): StopRun & { readonly declined: string | null } => {
     const allowed = <T>(make: () => T): T =>
       run(() =>
@@ -992,7 +1032,10 @@ export function stopRuns(
     const both = () => {
       let result: Compiled;
       try {
-        result = compileProjectWithBackend(files, { globals }, CORE_BACKEND);
+        result =
+          at !== null && sibling !== null
+            ? sibling
+            : compileProjectWithBackend(files, { globals }, CORE_BACKEND);
       } catch (error) {
         if (!(error instanceof CandidateOutsideSlice)) throw error;
         declined = error.what;
@@ -1005,6 +1048,17 @@ export function stopRuns(
   };
   const natural = runAt(null);
   const made = runAt(demand);
+  // (each side's decline carries its reason, `StopRunSide.declined`, which every test reading `declined` compares; a slice
+  // reason is carried and not required here, because the census reads thousands of items this oracle did not write,
+  // whose stop-only refusals no caller names; a limit's reason stands only at the phase it belongs to, #2080 part 2)
+  for (const [side, each] of [
+    ["natural", natural],
+    ["stopped", made],
+  ] as const) {
+    if (each.declined === null || !LIMIT_REASONS.includes(each.declined)) continue;
+    const problem = stopDeclineProblem(each.declined, unsettledStop(each.answers.budget), null, []);
+    if (problem !== null) throw new Error(`${side} run: ${problem}`);
+  }
   const stopped =
     planted === undefined || made.result.plan === null
       ? made

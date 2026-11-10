@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { TypeCheckResult } from "../../src/type-inference/backend.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../../src/type-inference/core/budget.js";
 import { analyzeTypes } from "../../src/type-inference/index.js";
 import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
@@ -102,17 +103,31 @@ test("a value that may be null, of unknown type or unread after a stop gets no w
       );
       assert.equal(core.ways.operands.size, 0, source);
     }
-  // (a stopped read proves nothing: at a small allowance the analysis stops before the left side's answer)
+  // (a stopped read proves nothing: at a small allowance the analysis stops before the left side's answer, which holds
+  // the stop's `unknown`, so no first link proves its left side and no warning is derived. The route declines there: the
+  // stop leaves the store's check and the fallback's undecided, and the plain gate declines, #2080 part 2)
   const stopped = "let n = 9\nsay n otherwise 2\nexit\n";
   const request = coreRequest([{ path: "main.tease", source: stopped }], GLOBALS);
   assert.ok(request !== null);
   for (const mode of MODES) {
-    const checked = withTestAllowance(1, () =>
-      inMode(mode, () => CORE_BACKEND.analyze(request).checked),
+    const answers: Answers = withTestAllowance(1, () => inMode(mode, () => analyseCore(request)));
+    assert.equal(answers.budget.settled, false);
+    const left = answers.graph.nodes.find(
+      (node) =>
+        node.expression?.kind === "identifier" &&
+        node.span?.start.offset === stopped.indexOf("n otherwise"),
     );
-    const codes = checked.diagnostics.flat().map((d) => d.code);
-    assert.ok(codes.includes("TSV076"), `stopped: ${codes.join(" ")}`);
-    assert.ok(!codes.includes("TSV062"), `stopped: ${codes.join(" ")}`);
+    assert.ok(left !== undefined);
+    assert.ok(
+      answers.at(left)!.items.some((item) => item.tag === "unknown" && item.reasons === 16),
+      `stopped: ${JSON.stringify(answers.at(left))}`,
+    );
+    assert.throws(
+      () => withTestAllowance(1, () => inMode(mode, () => CORE_BACKEND.analyze(request))),
+      (error) =>
+        error instanceof CandidateOutsideSlice &&
+        error.what === "a store whose check was left undecided at the budget",
+    );
   }
 });
 

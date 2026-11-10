@@ -47,7 +47,7 @@ import {
 import { nodeOf, SliceIndex } from "../../src/type-inference/core/check-result/slice-index.js";
 import { withConsumerOrder } from "../../src/type-inference/core/consumers.js";
 import { coreRecord } from "../../src/type-inference/core/result.js";
-import { CoreProgram } from "../../src/type-inference/core/program.js";
+import { CoreProgram, type CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
 import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { analyzeTypes } from "../../src/type-inference/index.js";
@@ -93,6 +93,9 @@ const OPTIONS = { globals: ["hostValue"] };
 function candidate(source: string): CompilationResult {
   return compileSourceWithBackend(source, OPTIONS, CORE_BACKEND);
 }
+
+/** The plain gate's decline (#2080 part 2): a stop before admission settled left a store's check undecided. */
+const UNDECIDED = "a store whose check was left undecided at the budget";
 
 /** The result of `compile`, or `null` for a program outside the candidate's slice. */
 function insideSlice<T>(compile: () => T): T | null {
@@ -3469,12 +3472,10 @@ test("the candidate's facts list every binding, read and value of the program wi
 });
 
 test("a program the work allowance stops, in its analysis or after it, compiles with the stop's warning and its checks (D4 a′)", () => {
-  const request = coreRequest([
-    {
-      path: "main.tease",
-      source: "let xs: integer?[] = [hostValue, null, 7]\nlet n = 1\nrepeat n {}\nexit\n",
-    },
-  ]);
+  // (its stores all written: a stop before admission settled leaves no store's check undecided, #2080 part 2)
+  const source =
+    "let xs: integer?[] = [hostValue, null, 7]\nlet n: integer = 1\nrepeat n {}\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }]);
   assert.ok(request !== null);
   const ends = new Set<string>();
   for (let allowance = 20; allowance <= 4_000; allowance += 20) {
@@ -3495,6 +3496,28 @@ test("a program the work allowance stops, in its analysis or after it, compiles 
     );
   }
   assert.deepEqual([...ends].sort(), ["analysed", "stopped"]);
+  // the same program with `n` inferred: a stop before admission settled leaves its store's check undecided, and the
+  // plain gate declines it there and nowhere else (#2080 part 2)
+  const inferredRequest = coreRequest([
+    { path: "main.tease", source: source.replace("n: integer", "n") },
+  ]);
+  assert.ok(inferredRequest !== null);
+  const inferred: CoreAnalysisRequest = inferredRequest;
+  let declined = 0;
+  for (let allowance = 20; allowance <= 4_000; allowance += 20) {
+    const { exhausted, settled } = withTestAllowance(allowance, () => analyseCore(inferred)).budget;
+    let what: string | null = null;
+    try {
+      withTestAllowance(allowance, () => CORE_BACKEND.analyze(inferred));
+    } catch (error) {
+      if (!(error instanceof CandidateOutsideSlice)) throw error;
+      what = error.what;
+    }
+    const unsettled = exhausted !== null && !settled;
+    assert.equal(what, unsettled ? UNDECIDED : null, String(allowance));
+    if (unsettled) declined += 1;
+  }
+  assert.ok(declined > 0, `${declined} declined`);
 });
 
 /** A type check result as JSON-safe data, its syntax keys by their spans. */
@@ -3596,10 +3619,27 @@ test("the route ends at the refusal its capture establishes, at the store whose 
       error.site.start === source.indexOf("a=b}") + 2,
   );
   // (no refusal at a work count: Sol's deep control, 169 syntax nodes, plans at about 1.4 million units, far past any
-  // proportional cap of its size, in every mode: in reverse order with its stop's warning)
+  // proportional cap of its size, in source order. In reverse order the work allowance stops it before admission
+  // settled: the plain gate declines its inferred copy `out`, #2080 part 2, a decline for size that rule 1.10's
+  // re-assessment decides; with `out` written it plans there with its stop's warning)
   const deep = `if hostValue is integer {}\nlet typed:integer${"[]".repeat(128)}=hostValue\nlet out=typed\n${"out=typed\n".repeat(8)}out=hostValue\nexit\n`;
+  const written = deep.replace("let out=", `let out:integer${"[]".repeat(128)}=`);
   for (const mode of MODES)
-    assert.notEqual(inMode(mode, () => candidate(deep)).plan, null, JSON.stringify(mode));
+    if (!mode.reversed)
+      assert.notEqual(inMode(mode, () => candidate(deep)).plan, null, JSON.stringify(mode));
+    else {
+      assert.throws(
+        () => inMode(mode, () => candidate(deep)),
+        (error) => error instanceof CandidateOutsideSlice && error.what === UNDECIDED,
+        JSON.stringify(mode),
+      );
+      const compiled = inMode(mode, () => candidate(written));
+      assert.notEqual(compiled.plan, null, JSON.stringify(mode));
+      assert.ok(
+        compiled.diagnostics.some((d) => d.code === "TSV076" && d.severity === "warning"),
+        JSON.stringify(mode),
+      );
+    }
 });
 
 test("the route rule's error stands where a run can bring the null unchecked, and a check the compiler cannot keep warns (AD-1, #1073 PR 4)", () => {
