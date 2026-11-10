@@ -72,6 +72,7 @@ import {
   declineOf,
   heldDemands,
   heldFamily,
+  stopDeclineProblem,
   heldProblems,
   heldRun,
   heldStops,
@@ -1961,16 +1962,22 @@ test("a store at a stopped decision's key keeps an obligation, whichever pass st
               demand === null ? make() : withTestDemandAllowance(demand, make);
             return work === null ? demanded() : withTestAllowance(work, demanded);
           });
-        // (#2080: a stop whose stopped mark's completion result was lost declines, no plan; its obligations stand)
+        // (#2080: a stop whose stopped mark's completion result was lost declines, no plan; its obligations stand. A
+        // decline stands only with a limit's reason at the phase it belongs to, `stopDeclineProblem`)
         const both = () => {
           let result: Pick<CompilationResult, "diagnostics" | "plan">;
+          let what: string | null = null;
           try {
             result = compileSourceWithBackend(source, options, CORE_BACKEND);
           } catch (error) {
             if (!(error instanceof CandidateOutsideSlice)) throw error;
             result = { diagnostics: [], plan: null };
+            what = error.what;
           }
-          return { result, answers: analyseCore(request) };
+          const answers = analyseCore(request);
+          const problem = what === null ? null : stopDeclineProblem(what, answers.budget, null);
+          if (problem !== null) throw new Error(`${source}: ${problem}`);
+          return { result, answers };
         };
         return { ...allowed(both), without: (omit) => allowed(() => withoutRecords(omit, both)) };
       };

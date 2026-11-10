@@ -13,7 +13,7 @@ import {
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
 import { coreRequest } from "../helpers/type-core-analysis.js";
-import { HELD_MODES, heldStops } from "../helpers/type-core-held-host.js";
+import { HELD_MODES, heldStops, stopDeclineProblem } from "../helpers/type-core-held-host.js";
 import { runGlobals } from "../helpers/type-core-route.js";
 import {
   DECLINES,
@@ -103,6 +103,8 @@ test("Codex r4's rows: a cap while the completion finds its obligations is gated
         plan = at(16, allowance, compiled(source)).plan;
       } catch (error) {
         if (!(error instanceof CandidateOutsideSlice)) throw error;
+        // (only a limit's reason at the phase it belongs to, #2080 part 2)
+        assert.equal(stopDeclineProblem(error.what, budget, null), null, `${source} @${allowance}`);
         declined += 1;
         continue;
       }
